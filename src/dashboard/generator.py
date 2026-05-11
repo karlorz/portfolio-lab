@@ -203,6 +203,15 @@ class DashboardGenerator:
         except Exception as e:
             pass  # Factor rotation not available
         
+        # Add volatility targeting if engine available
+        vol_targeting_signal = None
+        try:
+            from vol_targeting import VolatilityTargetingEngine
+            vol_engine = VolatilityTargetingEngine(db_path=DB_PATH)
+            vol_targeting_signal = vol_engine.evaluate(target_alloc)
+        except Exception as e:
+            pass  # Vol targeting not available
+        
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -214,6 +223,7 @@ class DashboardGenerator:
             "recent_orders": list(reversed(orders)),
             "ml_signals": self._generate_ml_signals(),
             "factor_rotation": factor_rotation_signal,
+            "volatility_targeting": vol_targeting_signal,
         }
         
         out_path = PUBLIC_DIR / "signals.json"
