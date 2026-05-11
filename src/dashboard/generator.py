@@ -185,23 +185,115 @@ class DashboardGenerator:
                         pass
         
         output = {
+            "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
+            "target_allocations": target_alloc,
+            "current_positions": positions,
+            "cash": round(cash, 2),
+            "total_value": round(total_value, 2),
             "latest_prices": latest,
-            "portfolio": {
-                "total_value": round(total_value, 2),
-                "cash": round(cash, 2),
-                "positions": positions
-            },
-            "target_allocation": target_alloc,
-            "recent_orders": orders,
-            "generated_at": datetime.now().isoformat()
+            "recent_orders": list(reversed(orders)),
+            "ml_signals": self._generate_ml_signals(),
         }
         
         out_path = PUBLIC_DIR / "signals.json"
         with open(out_path, 'w') as f:
-            json.dump(output, f)
+            json.dump(output, f, indent=2)
         
         return out_path
+    
+    def _generate_ml_signals(self) -> Dict:
+        """Generate ML-based signals from features data."""
+        signals = {
+            "available": False,
+            "timestamp": None,
+            "predictions": {},
+            "features": {},
+            "grid_search": {},
+        }
+        
+        # Check for features file
+        features_file = DATA_DIR / "features.jsonl"
+        if features_file.exists():
+            try:
+                # Get latest features for each symbol
+                latest_features = {}
+                with open(features_file, 'r') as f:
+                    for line in f:
+                        try:
+                            feat = json.loads(line)
+                            sym = feat.get("symbol")
+                            ts = feat.get("timestamp", "")
+                            if sym and (sym not in latest_features or ts > latest_features[sym].get("timestamp", "")):
+                                latest_features[sym] = feat
+                        except:
+                            continue
+                
+                if latest_features:
+                    signals["available"] = True
+                    signals["timestamp"] = datetime.now().isoformat()
+                    signals["features"] = {
+                        sym: {
+                            "vix_level": feat.get("vix_level"),
+                            "trend_direction": feat.get("trend_direction"),
+                            "price_vs_sma20": feat.get("price_vs_sma20"),
+                            "return_5d": feat.get("return_5d"),
+                            "spy_correlation": feat.get("spy_correlation_20d"),
+                        }
+                        for sym, feat in latest_features.items()
+                    }
+                    
+                    # Generate simple heuristic predictions
+                    for sym, feat in latest_features.items():
+                        vix = feat.get("vix_level", 20)
+                        trend = feat.get("trend_direction", 0)
+                        price_vs_sma = feat.get("price_vs_sma20", 0)
+                        
+                        # Simple regime probability
+                        if vix > 25:
+                            p_bear, p_neutral, p_bull = 0.5, 0.3, 0.2
+                        elif vix > 20:
+                            p_bear, p_neutral, p_bull = 0.3, 0.5, 0.2
+                        elif trend > 0 and price_vs_sma > 0:
+                            p_bear, p_neutral, p_bull = 0.1, 0.3, 0.6
+                        elif trend < 0:
+                            p_bear, p_neutral, p_bull = 0.4, 0.4, 0.2
+                        else:
+                            p_bear, p_neutral, p_bull = 0.2, 0.6, 0.2
+                        
+                        # Map to regime names
+                        probs = {"bear": p_bear, "neutral": p_neutral, "bull": p_bull}
+                        predicted = max(probs, key=probs.get)
+                        confidence = probs[predicted]
+                        
+                        signals["predictions"][sym] = {
+                            "predicted_regime": predicted,
+                            "confidence": round(confidence, 3),
+                            "probabilities": {k: round(v, 3) for k, v in probs.items()},
+                            "heuristic": True,  # Not ML-based yet
+                        }
+            except Exception as e:
+                signals["error"] = str(e)
+        
+        # Check for grid search results
+        grid_file = DATA_DIR / "grid_search_results.jsonl"
+        if grid_file.exists():
+            try:
+                with open(grid_file, 'r') as f:
+                    lines = f.readlines()
+                    if lines:
+                        latest = json.loads(lines[-1])
+                        signals["grid_search"] = {
+                            "available": True,
+                            "timestamp": latest.get("timestamp"),
+                            "top_allocation": latest.get("allocations"),
+                            "sharpe": latest.get("sharpe"),
+                            "volatility": latest.get("volatility"),
+                        }
+            except:
+                pass
+        
+        return signals
     
     def generate_stats_json(self) -> Path:
         """Generate performance statistics."""
