@@ -82,16 +82,50 @@ class DashboardGenerator:
         """Generate current signals and allocations."""
         cursor = self.conn.cursor()
         
-        # Current regime
+        # Get latest VIX level directly from prices table
         cursor.execute("""
-            SELECT regime, vix_level, detected_at FROM regime_log
+            SELECT close FROM prices 
+            WHERE symbol = '^VIX' 
+            ORDER BY date DESC LIMIT 1
+        """)
+        vix_row = cursor.fetchone()
+        vix_level = vix_row[0] if vix_row else None
+        
+        # Try to get trend signal from regime_log
+        cursor.execute("""
+            SELECT regime, detected_at FROM regime_log
             ORDER BY detected_at DESC LIMIT 1
         """)
-        row = cursor.fetchone()
-        current_regime = {
-            "regime": row[0] if row else "unknown",
-            "vix": row[1] if row else None,
-            "detected": row[2] if row else None
+        trend_row = cursor.fetchone()
+        trend_regime = trend_row[0] if trend_row else "normal"
+        trend_detected = trend_row[1] if trend_row else None
+        
+        # VIX-based regime detection
+        # >25: crisis, >20: vol_spike, <15: low_vol
+        if vix_level is not None:
+            if vix_level > 25:
+                vix_regime = "crisis"
+            elif vix_level > 20:
+                vix_regime = "vol_spike"
+            elif vix_level < 15:
+                vix_regime = "low_vol"
+            else:
+                vix_regime = "normal"
+            
+            # Composite: VIX overrides trend in extreme cases
+            if vix_regime in ["crisis", "vol_spike"]:
+                current_regime = vix_regime
+            elif vix_regime == "low_vol" and trend_regime != "crisis":
+                current_regime = "low_vol"
+            else:
+                current_regime = trend_regime
+        else:
+            current_regime = trend_regime
+        
+        regime_data = {
+            "regime": current_regime,
+            "vix": vix_level,
+            "detected": trend_detected
         }
         
         # Latest prices
@@ -130,7 +164,7 @@ class DashboardGenerator:
             "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},
             "low_vol": {"SPY": 0.55, "GLD": 0.30, "TLT": 0.15}
         }
-        target_alloc = regime_overrides.get(current_regime["regime"], base_alloc)
+        target_alloc = regime_overrides.get(current_regime, base_alloc)
         
         # Pending orders
         orders = []
@@ -151,7 +185,7 @@ class DashboardGenerator:
                         pass
         
         output = {
-            "regime": current_regime,
+            "regime": regime_data,
             "latest_prices": latest,
             "portfolio": {
                 "total_value": round(total_value, 2),

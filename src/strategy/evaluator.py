@@ -203,11 +203,56 @@ class Portfolio:
         return None
 
 def get_current_regime(conn: sqlite3.Connection) -> str:
-    """Get latest detected regime."""
+    """Get latest detected regime using VIX thresholds and trend analysis."""
     cursor = conn.cursor()
+    
+    # Try to get VIX level
+    cursor.execute("""
+        SELECT close FROM prices 
+        WHERE symbol = '^VIX' 
+        ORDER BY date DESC LIMIT 1
+    """)
+    vix_row = cursor.fetchone()
+    vix_level = vix_row[0] if vix_row else None
+    
+    # Try to get trend signal from regime_log (existing trend-based detection)
     cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 1")
+    trend_row = cursor.fetchone()
+    trend_regime = trend_row[0] if trend_row else "normal"
+    
+    # VIX-based regime detection
+    # >25: crisis, >20: vol_spike, <15: low_vol
+    if vix_level is not None:
+        if vix_level > 25:
+            vix_regime = "crisis"
+        elif vix_level > 20:
+            vix_regime = "vol_spike"
+        elif vix_level < 15:
+            vix_regime = "low_vol"
+        else:
+            vix_regime = "normal"
+        
+        # Composite: VIX overrides trend in extreme cases
+        # If VIX says crisis or vol_spike, trust it (market fear is immediate)
+        # If VIX says low_vol, confirm with trend (avoid false calm)
+        if vix_regime in ["crisis", "vol_spike"]:
+            return vix_regime
+        elif vix_regime == "low_vol" and trend_regime != "crisis":
+            return "low_vol"
+    
+    # Fallback to trend-based or default
+    return trend_regime if trend_row else "normal"
+
+def get_latest_vix(conn: sqlite3.Connection) -> Optional[float]:
+    """Get latest VIX level for display."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT close FROM prices 
+        WHERE symbol = '^VIX' 
+        ORDER BY date DESC LIMIT 1
+    """)
     row = cursor.fetchone()
-    return row[0] if row else "normal"
+    return row[0] if row else None
 
 def get_latest_prices(conn: sqlite3.Connection) -> Dict[str, float]:
     """Get latest prices for all symbols."""
@@ -254,8 +299,9 @@ def main():
     # Get current state
     prices = get_latest_prices(conn)
     regime = get_current_regime(conn)
+    vix = get_latest_vix(conn)
     
-    print(f"Mode: {mode}, Regime: {regime}")
+    print(f"Mode: {mode}, Regime: {regime}, VIX: {vix:.2f}" if vix else f"Mode: {mode}, Regime: {regime}")
     print(f"Portfolio value: ${portfolio.total_value(prices):,.2f}")
     
     # Check kill switches
