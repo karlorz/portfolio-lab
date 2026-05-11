@@ -23,12 +23,13 @@ const REBALANCE_THRESHOLD = 0.10; // 10% drift triggers rebalance
 
 export function RebalancePanel({ signals, onRebalanceRequest, readOnly = true }: RebalancePanelProps) {
   const allocationData = useMemo(() => {
-    if (!signals?.portfolio || !signals?.target_allocation) {
+    if (!signals?.current_positions || !signals?.target_allocations) {
       return [];
     }
 
-    const { positions, total_value } = signals.portfolio;
-    const targets = signals.target_allocation;
+    const positions = signals.current_positions;
+    const total_value = signals.total_value;
+    const targets = signals.target_allocations;
 
     // Build allocation rows
     const rows: AllocationRow[] = [];
@@ -165,7 +166,7 @@ export function RebalancePanel({ signals, onRebalanceRequest, readOnly = true }:
       {summary.totalBuyValue > 0 && !readOnly && (
         <div className="rebalance-estimate">
           <p>Estimated buy orders: {formatCurrency(summary.totalBuyValue)}</p>
-          <small>Cash available: {formatCurrency(signals?.portfolio?.cash || 0)}</small>
+          <small>Cash available: {formatCurrency(signals?.cash || 0)}</small>
         </div>
       )}
 

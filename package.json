@@ -10,6 +10,7 @@
     "backtest": "bun run src/backtest/cli.ts"
   },
   "dependencies": {
+    "lucide-react": "^1.14.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "recharts": "^3.8.1"

@@ -80,7 +80,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   }, [refreshInterval]);
 
   const portfolioValue = useMemo(() => {
-    return signals?.portfolio?.total_value || 100000;
+    return signals?.total_value || 100000;
   }, [signals]);
 
   const regimeColor = useMemo(() => {
@@ -205,8 +205,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               <div className="metric-card primary">
                 <label>Portfolio Value</label>
                 <span className="value-display">{formatCurrency(portfolioValue)}</span>
-                {signals?.portfolio?.cash && (
-                  <small>Cash: {formatCurrency(signals.portfolio.cash)}</small>
+                {signals?.cash && (
+                  <small>Cash: {formatCurrency(signals.cash)}</small>
                 )}
               </div>
 
@@ -223,7 +223,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               <div className="metric-card">
                 <label>Target Allocation</label>
                 <div className="alloc-preview">
-                  {signals?.target_allocation && Object.entries(signals.target_allocation)
+                  {signals?.target_allocations && Object.entries(signals.target_allocations)
                     .map(([sym, weight]) => (
                       <span key={sym} className="alloc-tag">
                         {sym}: {formatPct(weight as number)}
@@ -236,7 +236,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
             {/* Positions & Orders */}
             <div className="positions-orders-row">
-              {signals?.portfolio?.positions && signals.portfolio.positions.length > 0 && (
+              {signals?.current_positions && signals.current_positions.length > 0 && (
                 <div className="positions-section">
                   <h3>Current Positions</h3>
                   <table className="positions-table">
@@ -250,7 +250,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {signals.portfolio.positions.map((pos) => (
+                      {signals.current_positions.map((pos) => (
                         <tr key={pos.symbol}>
                           <td><strong>{pos.symbol}</strong></td>
                           <td>{pos.shares.toFixed(2)}</td>
