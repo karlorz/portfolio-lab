@@ -48,6 +48,10 @@ class FactorScore:
     regime_momentum: float = 0.0        # Context-dependent momentum
     factor_divergence: float = 0.0      # Correlation-adjusted score
     composite_ml_score: float = 0.0   # Nonlinear combined score
+    
+    # Time-Series Factor Momentum (v2.15 AQR)
+    tsfm_score: float = 0.0           # Position ∝ (1m return / vol), z-score capped
+    tsfm_allocation_scalar: float = 1.0  # Vol-adjusted position size (0-2x)
 
 
 class FactorMomentumEngine:
@@ -142,10 +146,12 @@ class FactorMomentumEngine:
         days_12m = min(252, len(closes) - 1)
         days_6m = min(126, len(closes) - 1)
         days_3m = min(63, len(closes) - 1)
+        days_1m = min(21, len(closes) - 1)  # For TSFM
         
         return_12m = (current_price / closes[-days_12m]) - 1 if days_12m > 0 else 0
         return_6m = (current_price / closes[-days_6m]) - 1 if days_6m > 0 else 0
         return_3m = (current_price / closes[-days_3m]) - 1 if days_3m > 0 else 0
+        return_1m = (current_price / closes[-days_1m]) - 1 if days_1m > 0 else 0  # TSFM input
         
         # Volatility (20-day)
         returns_daily = np.diff(closes[-self.vol_lookback-1:]) / closes[-self.vol_lookback-1:-1]
@@ -164,6 +170,11 @@ class FactorMomentumEngine:
             return_3m * 0.2
         ) * (0.15 / max(volatility, 0.10))  # Volatility adjustment
         
+        # Calculate TSFM (Time-Series Factor Momentum) score
+        # Position ∝ (1m return / volatility), z-score capped at ±2
+        tsfm_raw = return_1m / max(volatility, 0.05)  # Avoid div by zero
+        tsfm_score = np.clip(tsfm_raw, -2.0, 2.0)  # Cap z-score at ±2
+        
         return FactorScore(
             symbol=symbol,
             factor_name=self.FACTORS[symbol]["name"],
@@ -174,7 +185,13 @@ class FactorMomentumEngine:
             volatility=volatility,
             sharpe_12m=sharpe_12m,
             momentum_score=momentum_score,
-            rank=0  # Set later
+            rank=0,  # Set later
+            value_momentum_synergy=0.0,  # v2.9 ML feature placeholder
+            momentum_acceleration=return_1m - (return_3m / 3),  # 1m vs avg 3m
+            vol_adjusted_momentum=return_1m / max(volatility, 0.05),
+            regime_momentum=0.0,  # Set by evaluate_tsfm
+            factor_divergence=0.0,  # Set by evaluate_tsfm
+            composite_ml_score=float(tsfm_score)  # Use TSFM as base ML score
         )
     
     def evaluate(self) -> Dict:
