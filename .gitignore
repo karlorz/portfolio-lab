@@ -140,3 +140,4 @@ dist
 /public/data/
 dist/
 .env.local
+*.pyc

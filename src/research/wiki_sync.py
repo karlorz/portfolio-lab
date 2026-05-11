@@ -192,6 +192,9 @@ Based on recent regime patterns:
         timestamp = datetime.now().strftime("%Y-%m-%d")
         page_path = WIKI_DIR / "compound" / f"paper-trading-performance-{timestamp}.md"
         
+        # Build citation separately to avoid f-string brace conflicts
+        raw_citation = f"raw/market/{raw_path.name}"
+        
         content = f"""---
 type: query
 tags: [performance, paper-trading, portfolio-lab, metrics]
@@ -235,7 +238,7 @@ created: {timestamp}
 
 ## Sources
 
-- ^{[raw/market/{raw_path.name}]}
+- ^{[{raw_citation}]}
 - [[compound/grid-search-results]] — original backtest validation
 - [[compound/decision-framework]] — allocation rationale
 """
