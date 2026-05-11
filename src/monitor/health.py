@@ -27,7 +27,7 @@ class HealthMonitor:
         self.alerts = []
     
     def check_data_freshness(self) -> bool:
-        """Check if market data is fresh."""
+        """Check if market data is fresh, accounting for market calendar."""
         db_path = DATA_DIR / "market.db"
         if not db_path.exists():
             self.checks.append({"name": "database", "status": "missing", "ok": False})
@@ -42,13 +42,23 @@ class HealthMonitor:
         """)
         
         stale_symbols = []
+        calendar = MarketCalendar()
+        
         for row in cursor.fetchall():
             symbol, last_date, count = row
             if last_date:
                 last = datetime.strptime(last_date, "%Y-%m-%d")
-                days_stale = (datetime.now() - last).days
-                if days_stale > 2:
-                    stale_symbols.append(f"{symbol} ({days_stale}d)")
+                
+                # Use market calendar for stale detection
+                if not calendar.is_trading_day():
+                    # Market closed today - no expectation of new data
+                    continue
+                
+                trading_days_stale = calendar.trading_days_since(last)
+                
+                # Alert if more than 1 trading day stale
+                if trading_days_stale > 1:
+                    stale_symbols.append(f"{symbol} ({trading_days_stale} trading days)")
         
         conn.close()
         
