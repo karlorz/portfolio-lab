@@ -13,23 +13,24 @@ from enum import Enum
 try:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
-    from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+    from alpaca.trading.enums import OrderSide as AlpacaOrderSide, TimeInForce, OrderClass
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
     ALPACA_AVAILABLE = True
+    # Use SDK's enums
+    OrderSide = AlpacaOrderSide
+    OrderType = None  # SDK doesn't have this enum, we handle it differently
 except ImportError:
     ALPACA_AVAILABLE = False
-
-
-class OrderSide(Enum):
-    BUY = "buy"
-    SELL = "sell"
-
-
-class OrderType(Enum):
-    MARKET = "market"
-    LIMIT = "limit"
+    # Define our own enums when SDK not available
+    class OrderSide(Enum):
+        BUY = "buy"
+        SELL = "sell"
+    
+    class OrderType(Enum):
+        MARKET = "market"
+        LIMIT = "limit"
 
 
 @dataclass
@@ -126,6 +127,10 @@ class AlpacaClient:
     def is_available(self) -> bool:
         """Check if alpaca-py SDK is installed."""
         return ALPACA_AVAILABLE
+    
+    def is_ready(self) -> bool:
+        """Check if client is fully ready (SDK + configured)."""
+        return self.is_available() and self.is_configured()
     
     def _get_client(self):
         """Lazy initialization of trading client."""
