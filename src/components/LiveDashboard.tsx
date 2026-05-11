@@ -3,13 +3,14 @@ import { HealthPanel } from './HealthPanel';
 import { RegimeTimeline } from './RegimeTimeline';
 import { SPYComparisonChart } from './SPYComparisonChart';
 import { RebalancePanel } from './RebalancePanel';
-import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData } from '../types/live';
+import { UnderwaterChart, RollingMetricsChart, CrisisOverlay } from './AnalyticsCharts';
+import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData } from '../types/live';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance';
+type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -19,19 +20,21 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [expandedHealth, setExpandedHealth] = useState(false);
 
   const fetchData = async () => {
     try {
-      const [signalsRes, perfRes, alertsRes, statsRes, dashboardRes, healthRes] = await Promise.all([
+      const [signalsRes, perfRes, alertsRes, statsRes, dashboardRes, healthRes, analyticsRes] = await Promise.all([
         fetch('/data/signals.json'),
         fetch('/data/dashboard.json'),
         fetch('/data/alerts.json'),
         fetch('/data/stats.json'),
         fetch('/data/dashboard.json'),
-        fetch('/data/health.json')
+        fetch('/data/health.json'),
+        fetch('/data/analytics.json')
       ]);
 
       if (signalsRes.ok) {
@@ -58,6 +61,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
       if (healthRes.ok) {
         const h = await healthRes.json();
         setHealth(h);
+      }
+      if (analyticsRes.ok) {
+        const an = await analyticsRes.json();
+        setAnalytics(an);
       }
 
       setError(null);
@@ -105,7 +112,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'health', label: 'Health', badge: health?.system_status === 'critical' ? 1 : undefined },
     { id: 'history', label: 'History' },
     { id: 'performance', label: 'Performance' },
-    { id: 'rebalance', label: 'Rebalance' }
+    { id: 'rebalance', label: 'Rebalance' },
+    { id: 'analytics', label: 'Analytics' }
   ];
 
   return (
@@ -381,6 +389,73 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                 console.log('Manual rebalance requested');
               }}
             />
+          </div>
+        )}
+
+        {/* Analytics Tab */}
+        {activeTab === 'analytics' && (
+          <div className="tab-panel analytics-panel">
+            {analytics?.status === 'success' ? (
+              <>
+                {/* Underwater Chart - Drawdown */}
+                {analytics.drawdown?.series?.length > 0 && (
+                  <UnderwaterChart 
+                    series={analytics.drawdown.series}
+                    maxDrawdown={analytics.drawdown.max_drawdown}
+                  />
+                )}
+
+                {/* Rolling Metrics */}
+                {(analytics.rolling_metrics?.sharpe_63d?.length > 0 || 
+                  analytics.rolling_metrics?.sharpe_126d?.length > 0 ||
+                  analytics.rolling_metrics?.sharpe_252d?.length > 0) && (
+                  <RollingMetricsChart
+                    sharpe63d={analytics.rolling_metrics.sharpe_63d}
+                    sharpe126d={analytics.rolling_metrics.sharpe_126d}
+                    sharpe252d={analytics.rolling_metrics.sharpe_252d}
+                  />
+                )}
+
+                {/* Crisis Periods */}
+                {analytics.crisis_periods?.length > 0 && (
+                  <CrisisOverlay periods={analytics.crisis_periods} />
+                )}
+
+                {/* Data Summary */}
+                <div className="analytics-summary">
+                  <div className="analytics-card">
+                    <label>Data Points</label>
+                    <span>{analytics.data_points}</span>
+                  </div>
+                  <div className="analytics-card">
+                    <label>Date Range</label>
+                    <span>{analytics.date_range.start} to {analytics.date_range.end}</span>
+                  </div>
+                  <div className="analytics-card">
+                    <label>Max Drawdown</label>
+                    <span className={analytics.drawdown?.max_drawdown?.max_drawdown < -15 ? 'negative' : ''}>
+                      {analytics.drawdown?.max_drawdown?.max_drawdown?.toFixed(2)}%
+                    </span>
+                  </div>
+                  {analytics.drawdown?.max_drawdown?.recovery_date ? (
+                    <div className="analytics-card">
+                      <label>Recovered</label>
+                      <span className="positive">Yes</span>
+                    </div>
+                  ) : (
+                    <div className="analytics-card">
+                      <label>Underwater Days</label>
+                      <span className="warning">{analytics.drawdown?.max_drawdown?.underwater_days}</span>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="analytics-empty">
+                <p>{analytics?.message || 'Analytics data not available'}</p>
+                <small>Data points: {analytics?.data_points || 0}</small>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -555,6 +555,34 @@ class DashboardGenerator:
         
         return out_path
     
+    def generate_analytics_json(self) -> Path:
+        """Generate analytics data (drawdown, rolling metrics, benchmarks)."""
+        # Import analytics calculator
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        
+        try:
+            from analytics.calculator import AnalyticsCalculator
+            calc = AnalyticsCalculator(data_dir=str(DATA_DIR))
+            report = calc.generate_analytics_report()
+            
+            out_path = PUBLIC_DIR / "analytics.json"
+            with open(out_path, 'w') as f:
+                json.dump(report, f, indent=2, default=str)
+            
+            return out_path
+        except Exception as e:
+            # Fallback: empty analytics
+            report = {
+                "status": "error",
+                "message": str(e),
+                "generated_at": datetime.now().isoformat(),
+            }
+            out_path = PUBLIC_DIR / "analytics.json"
+            with open(out_path, 'w') as f:
+                json.dump(report, f, indent=2)
+            return out_path
+    
     def run(self):
         """Generate all dashboard files."""
         print(f"[{datetime.now()}] Generating dashboard data...")
@@ -564,7 +592,8 @@ class DashboardGenerator:
             self.generate_signals_json(),
             self.generate_stats_json(),
             self.generate_alerts_json(),
-            self.generate_health_json()
+            self.generate_health_json(),
+            self.generate_analytics_json(),  # NEW
         ]
         
         for p in paths:
