@@ -229,23 +229,33 @@ class DashboardGenerator:
                             spy_total_return = (spy_prices[-1] - spy_prices[0]) / spy_prices[0]
                             portfolio_total_return = (values[-1] - values[0]) / values[0]
                             
-                            # Correlation (30-day rolling)
+                            # Correlation and Beta (30-day rolling)
                             min_len = min(len(returns), len(spy_returns))
                             if min_len >= 20:
-                                corr = np.corrcoef(returns[-20:], spy_returns[-20:])[0,1] if min_len >= 20 else 0
-                                # Beta calculation
-                                spy_vol = np.std(spy_returns[-20:]) if len(spy_returns) >= 20 else 0.0001
-                                beta = np.cov(returns[-20:], spy_returns[-20:])[0,1] / (spy_vol ** 2) if spy_vol > 0 else 1
+                                returns_arr = np.array(returns[-20:])
+                                spy_returns_arr = np.array(spy_returns[-20:])
+                                
+                                # Check for variance before calculating correlation
+                                if np.std(returns_arr) > 0 and np.std(spy_returns_arr) > 0:
+                                    corr = np.corrcoef(returns_arr, spy_returns_arr)[0,1]
+                                    spy_vol = np.std(spy_returns_arr)
+                                    if spy_vol > 0:
+                                        beta = np.cov(returns_arr, spy_returns_arr)[0,1] / (spy_vol ** 2)
+                                    else:
+                                        beta = 1.0
+                                else:
+                                    corr = 0
+                                    beta = 1.0
                             else:
                                 corr = 0
-                                beta = 1
+                                beta = 1.0
                             
                             spy_comparison = {
                                 "portfolio_value": round(values[-1], 2),
                                 "spy_value": round(values[0] * (1 + spy_total_return), 2),
                                 "relative_return": round((portfolio_total_return - spy_total_return) * 100, 2),
-                                "correlation_30d": round(corr, 2),
-                                "beta": round(beta, 2),
+                                "correlation_30d": round(float(corr), 2),
+                                "beta": round(float(beta), 2),
                                 "outperformance": round((portfolio_total_return - spy_total_return) * 100, 2)
                             }
         

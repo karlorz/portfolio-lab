@@ -1,20 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HealthPanel } from './HealthPanel';
 import { RegimeTimeline } from './RegimeTimeline';
-import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData } from '../types/live';
+import { SPYComparisonChart } from './SPYComparisonChart';
+import { RebalancePanel } from './RebalancePanel';
+import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData } from '../types/live';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance';
+type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [signals, setSignals] = useState<SignalsData | null>(null);
   const [performance, setPerformance] = useState<PerformanceEntry[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [stats, setStats] = useState<Record<string, AssetStat>>({});
+  const [stats, setStats] = useState<StatsData | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
@@ -47,7 +49,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
       }
       if (statsRes.ok) {
         const st = await statsRes.json();
-        setStats(st.asset_stats || {});
+        setStats(st);
       }
       if (dashboardRes.ok) {
         const d = await dashboardRes.json();
@@ -102,7 +104,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'overview', label: 'Overview', badge: criticalAlerts.length || undefined },
     { id: 'health', label: 'Health', badge: health?.system_status === 'critical' ? 1 : undefined },
     { id: 'history', label: 'History' },
-    { id: 'performance', label: 'Performance' }
+    { id: 'performance', label: 'Performance' },
+    { id: 'rebalance', label: 'Rebalance' }
   ];
 
   return (
@@ -307,6 +310,9 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         {/* Performance Tab */}
         {activeTab === 'performance' && (
           <div className="tab-panel performance-panel">
+            {/* SPY Comparison Chart */}
+            <SPYComparisonChart stats={stats} performance={performance} />
+
             {/* Paper Portfolio Stats */}
             {performance.length > 0 && (
               <div className="performance-summary">
@@ -338,11 +344,11 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             )}
 
             {/* Asset Stats */}
-            {Object.keys(stats).length > 0 && (
+            {stats?.asset_stats && Object.keys(stats.asset_stats).length > 0 && (
               <div className="stats-section">
                 <h3>Market Overview (30d)</h3>
                 <div className="stats-grid">
-                  {Object.entries(stats).map(([sym, stat]) => (
+                  {Object.entries(stats.asset_stats).map(([sym, stat]) => (
                     <div key={sym} className="stat-card">
                       <h4>{sym}</h4>
                       <div className="stat-value">
@@ -360,6 +366,21 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Rebalance Tab */}
+        {activeTab === 'rebalance' && (
+          <div className="tab-panel rebalance-panel-container">
+            <RebalancePanel 
+              signals={signals}
+              readOnly={true}
+              onRebalanceRequest={() => {
+                // In paper mode, rebalancing is automatic via cron
+                // This would trigger manual rebalance in future live mode
+                console.log('Manual rebalance requested');
+              }}
+            />
           </div>
         )}
       </div>

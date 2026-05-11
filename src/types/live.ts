@@ -115,3 +115,23 @@ export interface AlertsData {
   count: number;
   generated_at: string;
 }
+
+export interface StatsData {
+  asset_stats: Record<string, AssetStat>;
+  paper_portfolio: {
+    sharpe: number;
+    total_return: number;
+    max_value: number;
+    min_value: number;
+    days_tracked: number;
+  } | null;
+  spy_comparison?: {
+    portfolio_value: number;
+    spy_value: number;
+    relative_return: number;
+    correlation_30d: number;
+    beta: number;
+    outperformance: number;
+  } | null;
+  generated_at: string;
+}

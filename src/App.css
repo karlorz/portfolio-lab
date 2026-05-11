@@ -890,13 +890,43 @@ footer code {
   color: #e2e8f0;
 }
 
-.regime-timeline .transition-item {
+.regime-timeline .transitions-list .transition-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 0;
   border-bottom: 1px solid #1e293b;
   font-size: 0.85rem;
+}
+
+.regime-timeline .transitions-list .transition-item:last-child {
+  border-bottom: none;
+}
+
+.regime-timeline .transitions-list .transition-item .date {
+  color: #64748b;
+  font-family: monospace;
+  font-size: 0.8rem;
+  min-width: 80px;
+}
+
+.regime-timeline .transitions-list .transition-item .arrow {
+  color: #94a3b8;
+}
+
+.regime-timeline .transitions-list .transition-item .regime-tag {
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #fff;
+}
+
+.regime-timeline .transitions-list .no-transitions {
+  color: #64748b;
+  font-style: italic;
+  font-size: 0.85rem;
+  margin: 10px 0;
 }
 
 .regime-timeline .transition-item:last-child {
@@ -992,4 +1022,318 @@ footer code {
   .freshness-grid {
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   }
+}
+
+/* ===== SPY Comparison Chart ===== */
+.spy-comparison-chart {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.spy-comparison-chart .comparison-header {
+  margin-bottom: 20px;
+}
+
+.spy-comparison-chart .comparison-header h3 {
+  margin: 0 0 15px 0;
+  font-size: 1.1rem;
+  color: #e2e8f0;
+}
+
+.spy-comparison-chart .comparison-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.spy-comparison-chart .comparison-metrics .metric {
+  background: #0f172a;
+  padding: 12px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.spy-comparison-chart .comparison-metrics .metric label {
+  display: block;
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.spy-comparison-chart .comparison-metrics .metric .value {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.spy-comparison-chart .comparison-metrics .metric.positive .value {
+  color: #10b981;
+}
+
+.spy-comparison-chart .comparison-metrics .metric.negative .value {
+  color: #ef4444;
+}
+
+.spy-comparison-chart .chart-container {
+  background: #0f172a;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+
+.spy-comparison-chart .comparison-legend {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.spy-comparison-chart .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.spy-comparison-chart .legend-line {
+  width: 20px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.spy-comparison-chart .legend-line.portfolio {
+  background: #3b82f6;
+}
+
+.spy-comparison-chart .legend-line.spy {
+  background: #64748b;
+  border: 1px dashed #64748b;
+  height: 1px;
+  border-top: 2px dashed #64748b;
+  background: transparent;
+}
+
+.spy-comparison-chart .legend-line.baseline {
+  background: #64748b;
+  height: 1px;
+}
+
+.spy-comparison-empty {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 40px;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.spy-comparison-empty p {
+  margin: 0 0 10px 0;
+  font-size: 1rem;
+}
+
+.spy-comparison-empty small {
+  color: #64748b;
+}
+
+/* ===== Rebalance Panel ===== */
+.rebalance-panel {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.rebalance-panel.empty {
+  text-align: center;
+  padding: 40px;
+  color: #94a3b8;
+}
+
+.rebalance-panel .rebalance-header {
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #334155;
+}
+
+.rebalance-panel .rebalance-header h3 {
+  margin: 0 0 15px 0;
+  font-size: 1.1rem;
+  color: #e2e8f0;
+}
+
+.rebalance-panel .rebalance-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.rebalance-panel .drift-indicator {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rebalance-panel .drift-indicator .drift-status {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.rebalance-panel .drift-indicator.ok .drift-status {
+  color: #10b981;
+}
+
+.rebalance-panel .drift-indicator.alert .drift-status {
+  color: #ef4444;
+}
+
+.rebalance-panel .drift-indicator .drift-detail {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.rebalance-panel .rebalance-btn {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.rebalance-panel .rebalance-btn:hover {
+  background: #2563eb;
+}
+
+.rebalance-panel .allocation-table-container {
+  overflow-x: auto;
+  margin-bottom: 15px;
+}
+
+.rebalance-panel .allocation-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.rebalance-panel .allocation-table th,
+.rebalance-panel .allocation-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #334155;
+}
+
+.rebalance-panel .allocation-table th {
+  color: #94a3b8;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.rebalance-panel .allocation-table td {
+  color: #e2e8f0;
+}
+
+.rebalance-panel .allocation-table tr.needs-rebalance {
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.rebalance-panel .allocation-table .overweight {
+  color: #ef4444;
+}
+
+.rebalance-panel .allocation-table .underweight {
+  color: #10b981;
+}
+
+.rebalance-panel .allocation-table .drift-pct {
+  display: block;
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.rebalance-panel .status-badge {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.rebalance-panel .status-badge.ok {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.rebalance-panel .status-badge.alert {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.rebalance-panel .action-buy,
+.rebalance-panel .action-sell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rebalance-panel .action-buy .action-label {
+  color: #10b981;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.rebalance-panel .action-sell .action-label {
+  color: #ef4444;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.rebalance-panel .action-buy small,
+.rebalance-panel .action-sell small {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.rebalance-panel .rebalance-estimate {
+  background: #0f172a;
+  padding: 15px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+}
+
+.rebalance-panel .rebalance-estimate p {
+  margin: 0 0 5px 0;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.rebalance-panel .rebalance-estimate small {
+  color: #64748b;
+}
+
+.rebalance-panel .readonly-notice {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  padding: 15px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.rebalance-panel .readonly-notice p {
+  margin: 0 0 5px 0;
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+.rebalance-panel .readonly-notice small {
+  color: #64748b;
 }
