@@ -194,6 +194,15 @@ class DashboardGenerator:
                     except:
                         pass
         
+        # Add factor rotation signals if engine available
+        factor_rotation_signal = None
+        try:
+            from factor_rotation import FactorMomentumEngine
+            factor_engine = FactorMomentumEngine(db_path=DB_PATH)
+            factor_rotation_signal = factor_engine.evaluate()
+        except Exception as e:
+            pass  # Factor rotation not available
+        
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -204,6 +213,7 @@ class DashboardGenerator:
             "latest_prices": latest,
             "recent_orders": list(reversed(orders)),
             "ml_signals": self._generate_ml_signals(),
+            "factor_rotation": factor_rotation_signal,
         }
         
         out_path = PUBLIC_DIR / "signals.json"
