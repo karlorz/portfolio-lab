@@ -99,6 +99,14 @@ export interface StatsData {
     min_value: number;
     days_tracked: number;
   } | null;
+  spy_comparison?: {
+    portfolio_value: number;
+    spy_value: number;
+    relative_return: number;
+    correlation_30d: number;
+    beta: number;
+    outperformance: number;  // cumulative
+  } | null;
   generated_at: string;
 }
 

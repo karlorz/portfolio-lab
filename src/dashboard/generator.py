@@ -191,9 +191,10 @@ class DashboardGenerator:
                     "current": prices[-1]
                 }
         
-        # Paper portfolio metrics
+        # Paper portfolio metrics with SPY comparison
         perf_log = DATA_DIR / "performance.jsonl"
         paper_metrics = {}
+        spy_comparison = None
         if perf_log.exists():
             with open(perf_log) as f:
                 lines = f.readlines()
@@ -210,10 +211,48 @@ class DashboardGenerator:
                             "min_value": round(min(values), 2),
                             "days_tracked": len(values)
                         }
+                        
+                        # Calculate SPY comparison if we have enough data
+                        cursor.execute("""
+                            SELECT date, close FROM prices 
+                            WHERE symbol = 'SPY' 
+                            AND date >= date('now', '-63 days')
+                            ORDER BY date
+                        """)
+                        spy_rows = cursor.fetchall()
+                        if len(spy_rows) >= 20 and len(values) >= 20:
+                            spy_prices = [r[1] for r in spy_rows[-len(values):]]
+                            spy_returns = [(spy_prices[i] - spy_prices[i-1]) / spy_prices[i-1] 
+                                          for i in range(1, len(spy_prices))]
+                            
+                            # Calculate metrics
+                            spy_total_return = (spy_prices[-1] - spy_prices[0]) / spy_prices[0]
+                            portfolio_total_return = (values[-1] - values[0]) / values[0]
+                            
+                            # Correlation (30-day rolling)
+                            min_len = min(len(returns), len(spy_returns))
+                            if min_len >= 20:
+                                corr = np.corrcoef(returns[-20:], spy_returns[-20:])[0,1] if min_len >= 20 else 0
+                                # Beta calculation
+                                spy_vol = np.std(spy_returns[-20:]) if len(spy_returns) >= 20 else 0.0001
+                                beta = np.cov(returns[-20:], spy_returns[-20:])[0,1] / (spy_vol ** 2) if spy_vol > 0 else 1
+                            else:
+                                corr = 0
+                                beta = 1
+                            
+                            spy_comparison = {
+                                "portfolio_value": round(values[-1], 2),
+                                "spy_value": round(values[0] * (1 + spy_total_return), 2),
+                                "relative_return": round((portfolio_total_return - spy_total_return) * 100, 2),
+                                "correlation_30d": round(corr, 2),
+                                "beta": round(beta, 2),
+                                "outperformance": round((portfolio_total_return - spy_total_return) * 100, 2)
+                            }
         
         output = {
             "asset_stats": stats,
             "paper_portfolio": paper_metrics,
+            "spy_comparison": spy_comparison,
             "generated_at": datetime.now().isoformat()
         }
         

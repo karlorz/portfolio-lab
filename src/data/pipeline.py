@@ -20,7 +20,7 @@ CACHE_DIR = DATA_DIR / "cache"
 DB_PATH = DATA_DIR / "market.db"
 SYMBOLS = {
     "core": ["SPY", "GLD", "TLT", "QQQ", "IEF"],
-    "risk_indicators": ["VIX", "DXY", "HYG", "LQD"],
+    "risk_indicators": ["^VIX", "DXY", "HYG", "LQD"],
     "alternatives": ["BTC-USD", "ETH-USD", "DBC"],
     "factors": ["MTUM", "VLUE", "USMV", "EFA", "VXUS"]
 }
