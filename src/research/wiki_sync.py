@@ -154,7 +154,18 @@ Based on recent regime patterns:
             return None
         
         total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else 0
-        sharpe = (sum(returns) / len(returns)) / (sum((r - sum(returns)/len(returns))**2 for r in returns) / len(returns))**0.5 * (252**0.5) if returns and len(returns) > 1 else 0
+        
+        # Sharpe ratio calculation with variance check to avoid division by zero
+        if returns and len(returns) > 1:
+            mean_return = sum(returns) / len(returns)
+            variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
+            if variance > 0:
+                std_dev = variance ** 0.5
+                sharpe = (mean_return / std_dev) * (252 ** 0.5)
+            else:
+                sharpe = 0  # All returns identical, undefined Sharpe
+        else:
+            sharpe = 0
         max_dd = 0
         peak = values[0]
         for v in values:
