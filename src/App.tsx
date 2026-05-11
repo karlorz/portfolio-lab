@@ -4,6 +4,7 @@ import type { BacktestResult, PerformanceMetrics, PriceData } from './backtest/e
 import { PortfolioSelector } from './components/PortfolioSelector';
 import { MetricsCards } from './components/MetricsCards';
 import { EquityCurve } from './components/EquityCurve';
+import { LiveDashboard } from './components/LiveDashboard';
 import './App.css';
 
 const RiskReturnChart = lazy(() => import('./components/RiskReturnChart').then(m => ({ default: m.RiskReturnChart })));
@@ -143,6 +144,8 @@ function App() {
         onToggle={handleToggle}
         colors={COLORS}
       />
+
+      <LiveDashboard refreshInterval={60} />
 
       {filteredResults.length > 0 && (
         <>

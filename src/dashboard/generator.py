@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+"""
+Portfolio-Lab Alpha: Dashboard Generator
+Creates static dashboard from SQLite data for Vite/React app consumption.
+"""
+
+import json
+import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional
+import numpy as np
+
+DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+PUBLIC_DIR = Path("~/projects/portfolio-lab/public/data").expanduser()
+DB_PATH = DATA_DIR / "market.db"
+
+class DashboardGenerator:
+    def __init__(self):
+        PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(DB_PATH)
+        self.conn.row_factory = sqlite3.Row
+    
+    def generate_performance_json(self) -> Path:
+        """Generate performance history for dashboard charts."""
+        cursor = self.conn.cursor()
+        
+        # Get portfolio history
+        cursor.execute("""
+            SELECT symbol, date, close FROM prices 
+            WHERE symbol IN ('SPY', 'GLD', 'TLT', 'QQQ')
+            AND date >= date('now', '-365 days')
+            ORDER BY date
+        """)
+        
+        prices = {}
+        for row in cursor.fetchall():
+            sym = row[0]
+            if sym not in prices:
+                prices[sym] = []
+            prices[sym].append({"d": row[1], "p": row[2]})
+        
+        # Get regime history
+        cursor.execute("""
+            SELECT date, regime, vix_level FROM regime_log
+            WHERE date >= date('now', '-90 days')
+            ORDER BY detected_at
+        """)
+        
+        regimes = [{"d": row[0], "r": row[1], "v": row[2]} for row in cursor.fetchall()]
+        
+        # Get paper portfolio performance (from JSONL log)
+        perf_log = DATA_DIR / "performance.jsonl"
+        paper_perf = []
+        if perf_log.exists():
+            with open(perf_log) as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        paper_perf.append({
+                            "t": entry.get("timestamp", "")[:10],
+                            "v": entry.get("total_value", 0),
+                            "r": entry.get("daily_return", 0)
+                        })
+                    except:
+                        pass
+        
+        output = {
+            "prices": prices,
+            "regimes": regimes,
+            "paper_portfolio": paper_perf,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        out_path = PUBLIC_DIR / "dashboard.json"
+        with open(out_path, 'w') as f:
+            json.dump(output, f)
+        
+        return out_path
+    
+    def generate_signals_json(self) -> Path:
+        """Generate current signals and allocations."""
+        cursor = self.conn.cursor()
+        
+        # Current regime
+        cursor.execute("""
+            SELECT regime, vix_level, detected_at FROM regime_log
+            ORDER BY detected_at DESC LIMIT 1
+        """)
+        row = cursor.fetchone()
+        current_regime = {
+            "regime": row[0] if row else "unknown",
+            "vix": row[1] if row else None,
+            "detected": row[2] if row else None
+        }
+        
+        # Latest prices
+        cursor.execute("""
+            SELECT symbol, close FROM prices 
+            WHERE (symbol, date) IN (
+                SELECT symbol, MAX(date) FROM prices GROUP BY symbol
+            )
+        """)
+        latest = {row[0]: row[1] for row in cursor.fetchall()}
+        
+        # Current paper portfolio state
+        portfolio_state = DATA_DIR / "portfolio_paper.json"
+        positions = []
+        if portfolio_state.exists():
+            with open(portfolio_state) as f:
+                state = json.load(f)
+                for sym, pos in state.get("positions", {}).items():
+                    positions.append({
+                        "symbol": sym,
+                        "shares": pos.get("shares", 0),
+                        "value": pos.get("value", 0),
+                        "weight": pos.get("weight", 0),
+                        "unrealized": pos.get("unrealized_pnl", 0)
+                    })
+                total_value = state.get("cash", 0) + sum(p["value"] for p in positions)
+                cash = state.get("cash", 0)
+        else:
+            total_value = 100000  # Initial
+            cash = 100000
+        
+        # Target allocation based on regime
+        base_alloc = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        regime_overrides = {
+            "crisis": {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30},
+            "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},
+            "low_vol": {"SPY": 0.55, "GLD": 0.30, "TLT": 0.15}
+        }
+        target_alloc = regime_overrides.get(current_regime["regime"], base_alloc)
+        
+        # Pending orders
+        orders = []
+        orders_log = DATA_DIR / "orders.jsonl"
+        if orders_log.exists():
+            with open(orders_log) as f:
+                lines = f.readlines()[-5:]  # Last 5 orders
+                for line in lines:
+                    try:
+                        order = json.loads(line)
+                        orders.append({
+                            "sym": order.get("symbol"),
+                            "side": order.get("side"),
+                            "shares": round(order.get("shares", 0), 2),
+                            "value": round(order.get("fill_value", 0), 2)
+                        })
+                    except:
+                        pass
+        
+        output = {
+            "regime": current_regime,
+            "latest_prices": latest,
+            "portfolio": {
+                "total_value": round(total_value, 2),
+                "cash": round(cash, 2),
+                "positions": positions
+            },
+            "target_allocation": target_alloc,
+            "recent_orders": orders,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        out_path = PUBLIC_DIR / "signals.json"
+        with open(out_path, 'w') as f:
+            json.dump(output, f)
+        
+        return out_path
+    
+    def generate_stats_json(self) -> Path:
+        """Generate performance statistics."""
+        cursor = self.conn.cursor()
+        
+        # Calculate 30-day returns for each asset
+        stats = {}
+        for symbol in ['SPY', 'GLD', 'TLT', 'QQQ', 'VIX']:
+            cursor.execute("""
+                SELECT close FROM prices 
+                WHERE symbol = ? AND date >= date('now', '-30 days')
+                ORDER BY date
+            """, (symbol,))
+            
+            prices = [row[0] for row in cursor.fetchall()]
+            if len(prices) >= 2:
+                returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+                stats[symbol] = {
+                    "30d_return": round((prices[-1] - prices[0]) / prices[0] * 100, 2),
+                    "volatility": round(np.std(returns) * np.sqrt(252) * 100, 2) if returns else 0,
+                    "current": prices[-1]
+                }
+        
+        # Paper portfolio metrics
+        perf_log = DATA_DIR / "performance.jsonl"
+        paper_metrics = {}
+        if perf_log.exists():
+            with open(perf_log) as f:
+                lines = f.readlines()
+                if len(lines) >= 20:
+                    recent = [json.loads(l) for l in lines[-63:]]  # Last 63 entries
+                    returns = [r.get("daily_return", 0) for r in recent if r.get("daily_return")]
+                    values = [r.get("total_value", 0) for r in recent]
+                    
+                    if returns and values:
+                        paper_metrics = {
+                            "sharpe": round(np.mean(returns) / np.std(returns) * np.sqrt(252), 2) if np.std(returns) > 0 else 0,
+                            "total_return": round((values[-1] - values[0]) / values[0] * 100, 2),
+                            "max_value": round(max(values), 2),
+                            "min_value": round(min(values), 2),
+                            "days_tracked": len(values)
+                        }
+        
+        output = {
+            "asset_stats": stats,
+            "paper_portfolio": paper_metrics,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        out_path = PUBLIC_DIR / "stats.json"
+        with open(out_path, 'w') as f:
+            json.dump(output, f)
+        
+        return out_path
+    
+    def generate_alerts_json(self) -> Path:
+        """Generate active alerts and notifications."""
+        alerts = []
+        
+        # Check for promotion trigger
+        promote_trigger = DATA_DIR / ".promote_to_live"
+        if promote_trigger.exists():
+            with open(promote_trigger) as f:
+                data = json.load(f)
+                alerts.append({
+                    "level": "success",
+                    "type": "graduation_candidate",
+                    "title": "Paper Trading Graduation Ready",
+                    "message": f"Sharpe: {data.get('metrics', {}).get('sharpe')}, ready for live approval",
+                    "timestamp": data.get("timestamp"),
+                    "requires_action": True
+                })
+        
+        # Check for kill switch
+        for mode in ["paper", "live"]:
+            kill_file = DATA_DIR / f".kill_switch_{mode}"
+            if kill_file.exists():
+                with open(kill_file) as f:
+                    data = json.load(f)
+                    alerts.append({
+                        "level": "error",
+                        "type": "kill_switch",
+                        "title": f"{mode.upper()} Kill Switch Triggered",
+                        "message": data.get("reason"),
+                        "timestamp": data.get("timestamp"),
+                        "requires_action": True
+                    })
+        
+        # Check for regime trigger
+        regime_file = DATA_DIR / ".regime_trigger"
+        if regime_file.exists():
+            with open(regime_file) as f:
+                data = json.load(f)
+                alerts.append({
+                    "level": "warning",
+                    "type": "regime_change",
+                    "title": f"Regime Change: {data.get('regime', 'unknown')}",
+                    "message": f"VIX: {data.get('vix', 'N/A')}",
+                    "timestamp": data.get("timestamp"),
+                    "requires_action": False
+                })
+        
+        # Check data quality
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT symbol, MAX(date) as last_date, COUNT(*) as count
+            FROM prices GROUP BY symbol
+        """)
+        for row in cursor.fetchall():
+            last_date = datetime.strptime(row[1], "%Y-%m-%d") if row[1] else None
+            if last_date and (datetime.now() - last_date).days > 2:
+                alerts.append({
+                    "level": "warning",
+                    "type": "stale_data",
+                    "title": f"Stale Data: {row[0]}",
+                    "message": f"Last update: {row[1]} ({(datetime.now() - last_date).days} days ago)",
+                    "requires_action": False
+                })
+        
+        output = {
+            "alerts": sorted(alerts, key=lambda x: x.get("timestamp", ""), reverse=True),
+            "count": len(alerts),
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        out_path = PUBLIC_DIR / "alerts.json"
+        with open(out_path, 'w') as f:
+            json.dump(output, f)
+        
+        return out_path
+    
+    def generate_health_json(self) -> Path:
+        """Generate system health status for dashboard."""
+        import subprocess
+        import os
+        
+        health_data = {
+            "cron_jobs": [],
+            "data_freshness": {},
+            "system_status": "healthy",
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        # Get cron job status from hermes CLI
+        try:
+            result = subprocess.run(
+                ['hermes', 'cron', 'list', '--json'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                import json as json_mod
+                jobs = json_mod.loads(result.stdout)
+                # Filter for portfolio-lab jobs only
+                for job in jobs:
+                    if job.get('name', '').startswith('portfolio-lab'):
+                        health_data["cron_jobs"].append({
+                            "id": job.get('job_id'),
+                            "name": job.get('name'),
+                            "schedule": job.get('schedule'),
+                            "last_run": job.get('last_run_at'),
+                            "next_run": job.get('next_run_at'),
+                            "status": job.get('last_status', 'unknown'),
+                            "state": job.get('state', 'unknown')
+                        })
+        except Exception as e:
+            health_data["system_status"] = "degraded"
+            health_data["error"] = f"Failed to get cron status: {str(e)}"
+        
+        # Get data freshness from SQLite
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT symbol, MAX(date) as last_date 
+            FROM prices 
+            GROUP BY symbol
+        """)
+        for row in cursor.fetchall():
+            sym, last_date = row
+            if last_date:
+                try:
+                    last_dt = datetime.strptime(last_date, "%Y-%m-%d")
+                    days_stale = (datetime.now() - last_dt).days
+                    health_data["data_freshness"][sym] = {
+                        "last_update": last_date,
+                        "days_stale": days_stale,
+                        "status": "fresh" if days_stale <= 1 else "stale" if days_stale <= 3 else "critical"
+                    }
+                except:
+                    pass
+        
+        # Overall system health
+        stale_count = sum(1 for d in health_data["data_freshness"].values() if d.get("status") != "fresh")
+        failed_jobs = sum(1 for j in health_data["cron_jobs"] if j.get("status") == "error")
+        
+        if failed_jobs > 0 or stale_count > 5:
+            health_data["system_status"] = "warning"
+        if failed_jobs > 2 or stale_count > 10:
+            health_data["system_status"] = "critical"
+        
+        out_path = PUBLIC_DIR / "health.json"
+        with open(out_path, 'w') as f:
+            json.dump(health_data, f, indent=2)
+        
+        return out_path
+    
+    def run(self):
+        """Generate all dashboard files."""
+        print(f"[{datetime.now()}] Generating dashboard data...")
+        
+        paths = [
+            self.generate_performance_json(),
+            self.generate_signals_json(),
+            self.generate_stats_json(),
+            self.generate_alerts_json(),
+            self.generate_health_json()
+        ]
+        
+        for p in paths:
+            print(f"  Generated: {p}")
+        
+        # Create index
+        index = {
+            "files": [str(p.name) for p in paths],
+            "generated_at": datetime.now().isoformat()
+        }
+        with open(PUBLIC_DIR / "index.json", 'w') as f:
+            json.dump(index, f)
+        
+        self.conn.close()
+        print(f"[{datetime.now()}] Dashboard generation complete")
+
+if __name__ == "__main__":
+    gen = DashboardGenerator()
+    gen.run()
