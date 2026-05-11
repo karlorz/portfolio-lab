@@ -7,6 +7,7 @@
 
 import { BacktestEngine } from './engine';
 import type { PortfolioConfig, PriceData, PerformanceMetrics } from './engine';
+import { batchCalculateDSR, flagOverfitConfigs, estimateIndependentTrials } from '../utils/dsr-calculator';
 
 interface GridResult {
   name: string;
@@ -20,6 +21,10 @@ interface GridResult {
   crisis2022: number;
   meetsTarget: boolean;
   sharpeRank: number;
+  returns: number[];
+  permutationPValue?: number;
+  dsr?: number;
+  isSignificant?: boolean;
 }
 
 function toBacktestData(prices: Record<string, Array<{ d: string; p: number }>>): PriceData[] {
@@ -214,12 +219,42 @@ async function main() {
       crisis2022,
       meetsTarget,
       sharpeRank: 0,
+      returns: result.returns,
     });
   }
 
   // Rank by Sharpe
   const sorted = [...results].sort((a, b) => b.metrics.sharpeRatio - a.metrics.sharpeRatio);
   sorted.forEach((r, i) => r.sharpeRank = i + 1);
+
+  // Calculate DSR for top 10 configurations
+  console.log('\n=== STATISTICAL VALIDATION (Deflated Sharpe Ratio) ===\n');
+  const top10 = sorted.slice(0, 10);
+  const totalTrials = results.length;
+  const effectiveTrials = estimateIndependentTrials(totalTrials, 0.7);
+
+  const dsrResults = batchCalculateDSR(
+    top10.map(r => ({
+      name: r.name,
+      sharpe: r.metrics.sharpeRatio,
+      returns: r.returns,
+    })),
+    effectiveTrials
+  );
+
+  console.log('| Portfolio | Sharpe | DSR | p-value | Significant |');
+  console.log('|-----------|--------|-----|---------|-------------|');
+  for (const r of dsrResults) {
+    const sig = r.isSignificant ? '✅' : '❌';
+    console.log(`| ${r.name} | ${r.sharpe.toFixed(2)} | ${r.dsr.toFixed(2)} | ${r.pValue.toFixed(3)} | ${sig} |`);
+  }
+
+  // Flag overfit configurations
+  const overfitAnalysis = flagOverfitConfigs(dsrResults, 0);
+  console.log(`\nOverfit Analysis: ${(overfitAnalysis.overfitRatio * 100).toFixed(0)}% of top 10 configs flagged as potentially overfit`);
+  if (overfitAnalysis.likelyOverfit.length > 0) {
+    console.log('Flagged:', overfitAnalysis.likelyOverfit.join(', '));
+  }
 
   // Print all results
   console.log('=== ALL CONFIGURATIONS ===\n');
