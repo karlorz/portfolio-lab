@@ -82,6 +82,16 @@ class DashboardGenerator:
         """Generate current signals and allocations."""
         cursor = self.conn.cursor()
         
+        # Import strategy engines
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'strategy'))
+        try:
+            from dual_momentum import DualMomentumEngine
+            from comparison import StrategyComparisonEngine
+            dual_momentum_available = True
+        except ImportError:
+            dual_momentum_available = False
+        
         # Get latest VIX level directly from prices table
         cursor.execute("""
             SELECT close FROM prices 
