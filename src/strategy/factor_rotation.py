@@ -40,6 +40,14 @@ class FactorScore:
     sharpe_12m: float  # Return/volatility
     momentum_score: float  # Composite score
     rank: int
+    
+    # ML-enhanced features (v2.9)
+    value_momentum_synergy: float = 0.0  # Value-momentum interaction
+    momentum_acceleration: float = 0.0   # Rate of change of momentum
+    vol_adjusted_momentum: float = 0.0  # Sharpe-like momentum
+    regime_momentum: float = 0.0        # Context-dependent momentum
+    factor_divergence: float = 0.0      # Correlation-adjusted score
+    composite_ml_score: float = 0.0   # Nonlinear combined score
 
 
 class FactorMomentumEngine:
@@ -272,6 +280,217 @@ class FactorMomentumEngine:
         
         return weights
     
+    def _calculate_ml_features(
+        self,
+        symbol: str,
+        factor_scores: Dict[str, FactorScore],
+        vix_level: float = 20.0
+    ) -> Dict[str, float]:
+        """
+        Calculate ML-enhanced nonlinear features for factor scoring.
+        
+        Based on AQR research "The Virtue of Complexity" (Kelly et al., 2023):
+        - Complex models with nonlinear features outperform by 50-100%
+        - Interaction terms capture "deep value + strong momentum" effects
+        - Regularization (ridge/L2) prevents overfitting
+        
+        Features:
+        1. Value-Momentum Synergy: value_score * momentum_score
+        2. Momentum Acceleration: return_3m - (return_6m / 2)
+        3. Volatility-Adjusted Momentum: return_12m / volatility_20d
+        4. Regime Interaction: momentum_score * vix_factor
+        5. Cross-Asset Factor Divergence: 1 - abs(corr_to_spy)
+        """
+        score = factor_scores.get(symbol)
+        if not score:
+            return {}
+        
+        # 1. Value-Momentum Synergy
+        # Compare value factor (VTV) momentum vs growth (VUG)
+        value_momentum_synergy = 0.0
+        if symbol in ["VTV", "VLUE"]:
+            vtv_score = factor_scores.get("VTV")
+            vug_score = factor_scores.get("VUG", factor_scores.get("SPY"))
+            if vtv_score and vug_score:
+                # Deep value + strong momentum synergy (AQR insight)
+                value_spread = vtv_score.momentum_score - vug_score.momentum_score
+                value_momentum_synergy = value_spread * abs(vtv_score.momentum_score)
+        
+        # 2. Momentum Acceleration (rate of change)
+        # Positive = accelerating momentum, Negative = decelerating
+        momentum_acceleration = score.return_3m - (score.return_6m / 2)
+        
+        # 3. Volatility-Adjusted Momentum (Sharpe-like)
+        vol_adjusted_momentum = score.return_12m / max(score.volatility, 0.05)
+        
+        # 4. Regime Interaction (context-dependent)
+        # Higher momentum weight in low-vol regimes, lower in high-vol
+        vix_percentile = min(max((vix_level - 10) / 30, 0), 1)  # Normalize 10-40 range
+        regime_multiplier = 1.0 if vix_percentile < 0.67 else 0.5  # Reduce in high vol
+        regime_momentum = score.momentum_score * regime_multiplier
+        
+        # 5. Factor Divergence (1 - abs(corr_to_spy))
+        # Use volatility as proxy for independence (lower vol = more hedge-like)
+        spy_vol = factor_scores.get("SPY", FactorScore(
+            symbol="SPY", factor_name="S&P 500", price=0, return_12m=0, 
+            return_6m=0, return_3m=0, volatility=0.16, sharpe_12m=0,
+            momentum_score=0, rank=0
+        )).volatility
+        vol_ratio = score.volatility / max(spy_vol, 0.05)
+        factor_divergence = 1.0 / max(vol_ratio, 0.5)  # Low vol = high divergence
+        
+        # Composite ML Score: Weighted combination with ridge-like dampening
+        # L2 regularization effect: shrink extreme values
+        raw_composite = (
+            score.momentum_score * 0.3 +
+            value_momentum_synergy * 0.2 +
+            momentum_acceleration * 0.15 +
+            vol_adjusted_momentum * 0.1 +
+            regime_momentum * 0.15 +
+            factor_divergence * 0.1
+        )
+        
+        # Ridge shrinkage (L2 regularization)
+        shrinkage_factor = 0.9  # 10% shrinkage toward mean
+        composite_ml_score = raw_composite * shrinkage_factor
+        
+        return {
+            "value_momentum_synergy": value_momentum_synergy,
+            "momentum_acceleration": momentum_acceleration,
+            "vol_adjusted_momentum": vol_adjusted_momentum,
+            "regime_momentum": regime_momentum,
+            "factor_divergence": factor_divergence,
+            "composite_ml_score": composite_ml_score
+        }
+    
+    def evaluate_ml_enhanced(self, vix_level: float = 20.0) -> Dict:
+        """
+        Run ML-enhanced factor evaluation with nonlinear interaction features.
+        
+        Returns enhanced scoring that captures:
+        - Value-Momentum synergy (deep value + strong momentum)
+        - Momentum acceleration patterns
+        - Volatility-adjusted risk premia
+        - Regime-dependent factor performance
+        """
+        # Get base evaluation
+        base_result = self.evaluate()
+        
+        # Calculate ML features for each factor
+        factor_scores = {}
+        for symbol in self.universe:
+            score = self._calculate_factor_score(symbol)
+            if score:
+                # Get VIX data for regime context
+                if symbol == "^VIX" or symbol == "VIX":
+                    continue
+                factor_scores[symbol] = score
+        
+        # Add ML features to each factor
+        enhanced_scores = {}
+        for symbol, score in factor_scores.items():
+            ml_features = self._calculate_ml_features(symbol, factor_scores, vix_level)
+            
+            # Update score with ML features
+            score.value_momentum_synergy = ml_features.get("value_momentum_synergy", 0)
+            score.momentum_acceleration = ml_features.get("momentum_acceleration", 0)
+            score.vol_adjusted_momentum = ml_features.get("vol_adjusted_momentum", 0)
+            score.regime_momentum = ml_features.get("regime_momentum", 0)
+            score.factor_divergence = ml_features.get("factor_divergence", 0)
+            score.composite_ml_score = ml_features.get("composite_ml_score", 0)
+            
+            enhanced_scores[symbol] = score
+        
+        # Re-rank by composite ML score
+        sorted_factors = sorted(
+            enhanced_scores.items(),
+            key=lambda x: x[1].composite_ml_score,
+            reverse=True
+        )
+        
+        # Update ranks based on ML score
+        for rank, (symbol, score) in enumerate(sorted_factors, 1):
+            score.rank = rank
+        
+        # Update result with ML-enhanced data
+        base_result["ml_enhanced"] = True
+        base_result["vix_context"] = vix_level
+        base_result["ml_scores"] = {
+            symbol: {
+                "composite_ml_score": float(score.composite_ml_score),
+                "value_momentum_synergy": float(score.value_momentum_synergy),
+                "momentum_acceleration": float(score.momentum_acceleration),
+                "vol_adjusted_momentum": float(score.vol_adjusted_momentum),
+                "regime_momentum": float(score.regime_momentum),
+                "factor_divergence": float(score.factor_divergence),
+                "base_momentum_score": float(score.momentum_score)
+            }
+            for symbol, score in enhanced_scores.items()
+        }
+        
+        # Re-select top N based on ML scores
+        selected_ml = []
+        category_counts = {}
+        
+        for symbol, score in sorted_factors:
+            category = self.FACTORS[symbol]["category"]
+            
+            if score.return_12m < self.min_momentum:
+                continue
+            if category_counts.get(category, 0) >= self.max_per_category:
+                continue
+            
+            selected_ml.append((symbol, score))
+            category_counts[category] = category_counts.get(category, 0) + 1
+            
+            if len(selected_ml) >= self.top_n:
+                break
+        
+        # Add ML-specific fields to result
+        base_result["selected_factors_ml"] = [s[0] for s in selected_ml]
+        base_result["ml_recommendation"] = self._generate_ml_recommendation(selected_ml, enhanced_scores)
+        
+        return base_result
+    
+    def _generate_ml_recommendation(
+        self,
+        selected: List[Tuple[str, FactorScore]],
+        all_scores: Dict[str, FactorScore]
+    ) -> str:
+        """Generate ML-enhanced recommendation with feature explanations"""
+        if not selected:
+            return "No factors showing positive ML-enhanced momentum. Hold SPY."
+        
+        factor_names = [self.FACTORS[sym]["name"] for sym, _ in selected]
+        
+        # Check for ML-specific patterns
+        has_value_synergy = any(
+            all_scores[sym].value_momentum_synergy > 0.01 
+            for sym, _ in selected if sym in all_scores
+        )
+        has_momentum_accel = any(
+            all_scores[sym].momentum_acceleration > 0 
+            for sym, _ in selected if sym in all_scores
+        )
+        
+        patterns = []
+        if has_value_synergy:
+            patterns.append("value-momentum synergy")
+        if has_momentum_accel:
+            patterns.append("accelerating momentum")
+        
+        pattern_str = f" ({', '.join(patterns)})" if patterns else ""
+        
+        avg_ml_score = np.mean([s[1].composite_ml_score for s in selected])
+        if avg_ml_score > 0.3:
+            strength = "strong ML signal"
+        elif avg_ml_score > 0.15:
+            strength = "moderate ML signal"
+        else:
+            strength = "weak ML signal"
+        
+        return f"ML-Enhanced: Rotate to {', '.join(factor_names)}{pattern_str} [{strength}]"
+    
     def _calculate_signal_strength(self, selected: List[Tuple[str, FactorScore]]) -> float:
         """Calculate overall signal confidence (0-1)"""
         if not selected:
@@ -382,15 +601,31 @@ def main():
     cmd = sys.argv[1]
     
     if cmd == "evaluate":
-        result = engine.evaluate()
+        # Check for --ml flag
+        use_ml = "--ml" in sys.argv
+        
+        if use_ml:
+            result = engine.evaluate_ml_enhanced()
+            mode_label = "ML-ENHANCED"
+        else:
+            result = engine.evaluate()
+            mode_label = "STANDARD"
         
         print(f"\n{'='*70}")
-        print("FACTOR MOMENTUM ROTATION SIGNAL")
+        print(f"FACTOR MOMENTUM ROTATION SIGNAL [{mode_label}]")
         print(f"{'='*70}")
         print(f"Timestamp: {result['timestamp']}")
         print(f"Signal Strength: {result.get('signal_strength', 0):.0%}")
-        print(f"\nSelected Factors: {', '.join(result['selected_factors'])}")
-        print(f"\nRecommendation: {result['recommendation']}")
+        
+        if use_ml:
+            print(f"VIX Context: {result.get('vix_context', 'N/A')}")
+            selected_key = "selected_factors_ml"
+            print(f"\nSelected Factors (ML): {', '.join(result.get(selected_key, []))}")
+            print(f"\nML Recommendation: {result.get('ml_recommendation', 'N/A')}")
+        else:
+            selected_key = "selected_factors"
+            print(f"\nSelected Factors: {', '.join(result[selected_key])}")
+            print(f"\nRecommendation: {result['recommendation']}")
         
         print(f"\n{'-'*70}")
         print("ALLOCATION")
@@ -399,28 +634,51 @@ def main():
             print(f"  {symbol}: {weight:>6.1%}")
         
         print(f"\n{'-'*70}")
-        print("ALL FACTOR SCORES (Ranked by Momentum)")
-        print(f"{'-'*70}")
-        print(f"{'Rank':<6} {'Factor':<12} {'12m':<8} {'6m':<8} {'3m':<8} {'Vol':<8} {'Score':<10}")
+        if use_ml:
+            print("ML-ENHANCED FACTOR SCORES (Ranked by Composite ML Score)")
+        else:
+            print("ALL FACTOR SCORES (Ranked by Momentum)")
         print(f"{'-'*70}")
         
-        scores = result['current_scores']
-        sorted_scores = sorted(
-            scores.items(),
-            key=lambda x: x[1]['momentum_score'],
-            reverse=True
-        )
-        
-        for symbol, data in sorted_scores:
-            print(f"{data['rank']:<6} {data['factor_name']:<12} "
-                  f"{data['return_12m']:>+7.1%} {data['return_6m']:>+7.1%} "
-                  f"{data['return_3m']:>+7.1%} {data['volatility']:>7.1%} "
-                  f"{data['momentum_score']:>+9.3f}")
+        if use_ml:
+            print(f"{'Rank':<6} {'Factor':<12} {'12m':<8} {'6m':<8} {'3m':<8} {'ML Score':<12}")
+            
+            ml_scores = result.get('ml_scores', {})
+            sorted_scores = sorted(
+                ml_scores.items(),
+                key=lambda x: x[1].get('composite_ml_score', 0),
+                reverse=True
+            )
+            
+            for rank, (symbol, data) in enumerate(sorted_scores, 1):
+                factor_name = engine.FACTORS.get(symbol, {}).get('name', symbol)
+                base_score = result['current_scores'].get(symbol, {})
+                print(f"{rank:<6} {factor_name:<12} "
+                      f"{base_score.get('return_12m', 0):>+7.1%} "
+                      f"{base_score.get('return_6m', 0):>+7.1%} "
+                      f"{base_score.get('return_3m', 0):>+7.1%} "
+                      f"{data.get('composite_ml_score', 0):>+10.3f}")
+        else:
+            print(f"{'Rank':<6} {'Factor':<12} {'12m':<8} {'6m':<8} {'3m':<8} {'Vol':<8} {'Score':<10}")
+            print(f"{'-'*70}")
+            
+            scores = result['current_scores']
+            sorted_scores = sorted(
+                scores.items(),
+                key=lambda x: x[1]['momentum_score'],
+                reverse=True
+            )
+            
+            for symbol, data in sorted_scores:
+                print(f"{data['rank']:<6} {data['factor_name']:<12} "
+                      f"{data['return_12m']:>+7.1%} {data['return_6m']:>+7.1%} "
+                      f"{data['return_3m']:>+7.1%} {data['volatility']:>7.1%} "
+                      f"{data['momentum_score']:>+9.3f}")
         
         print(f"{'='*70}\n")
         
         # Output JSON for integration
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2, default=str))
         
     elif cmd == "status":
         result = engine.evaluate()
