@@ -213,6 +213,51 @@ class HealthMonitor:
         
         return ok
     
+    def check_circuit_breaker(self) -> bool:
+        """Check drawdown circuit breaker status."""
+        try:
+            sys.path.insert(0, str(Path(__file__).parent.parent / "strategy"))
+            from circuit_breaker import DrawdownCircuitBreaker
+            
+            cb = DrawdownCircuitBreaker()
+            result = cb.check_and_update()
+            
+            status = result.get("status", "unknown")
+            drawdown = result.get("drawdown_pct", 0)
+            
+            # Determine severity
+            if status in ["black", "red"]:
+                severity = "critical"
+            elif status in ["orange"]:
+                severity = "warning"
+            elif status in ["yellow"]:
+                severity = "caution"
+            else:
+                severity = "ok"
+            
+            ok = severity == "ok"
+            
+            self.checks.append({
+                "name": "circuit_breaker",
+                "status": f"{status} ({drawdown}% dd)" if drawdown else status,
+                "ok": ok,
+                "severity": severity,
+                "drawdown": drawdown
+            })
+            
+            if not ok:
+                self.alerts.append(f"Circuit breaker {status}: {result.get('message', '')}")
+            
+            return ok
+            
+        except Exception as e:
+            self.checks.append({
+                "name": "circuit_breaker",
+                "status": f"error: {str(e)}",
+                "ok": True  # Don't fail health check for circuit breaker errors
+            })
+            return True
+    
     def check_wiki_sync(self) -> bool:
         """Check if wiki is being synced."""
         wiki_dir = Path("~/wiki/projects/portfolio-lab/compound").expanduser()
@@ -252,11 +297,13 @@ class HealthMonitor:
             self.check_portfolio_health(),
             self.check_graduation_candidate(),
             self.check_kill_switches(),
+            self.check_circuit_breaker(),
             self.check_wiki_sync()
         ]
         
         # Determine overall status
-        critical = any(not c.get("ok", True) for c in self.checks if c["name"] in ["kill_switches"])
+        critical = any(not c.get("ok", True) for c in self.checks 
+                      if c["name"] in ["kill_switches"])
         warnings = sum(1 for c in self.checks if not c.get("ok", True))
         
         if critical:
