@@ -380,6 +380,162 @@ class FactorMomentumEngine:
             "composite_ml_score": composite_ml_score
         }
     
+    def evaluate_tsfm(self, vix_level: float = 20.0) -> Dict:
+        """
+        v2.15 Time-Series Factor Momentum (TSFM) - AQR Implementation
+        
+        Position_{i,t} ∝ (Factor Return_{i, t-j to t} / σ_{i,t})
+        
+        - Uses 1-month formation period (asymmetric: 1m works best)
+        - Volatility-normalized positions
+        - Z-score capped at ±2 for position sizing
+        - Equal-weight across selected factors
+        
+        Reference: AQR "Factor Momentum Everywhere" (Gupta & Kelly)
+        AQR Helix Strategy 2025: +18.6% vs SG Trend Index ~2.5%
+        """
+        # Get base evaluation with TSFM scores
+        base_result = self.evaluate()
+        
+        # Get all factor scores with TSFM data
+        factor_scores = {}
+        for symbol in self.universe:
+            score = self._calculate_factor_score(symbol)
+            if score:
+                factor_scores[symbol] = score
+        
+        if not factor_scores:
+            base_result["tsfm"] = {"error": "Insufficient data"}
+            return base_result
+        
+        # Calculate factor divergence (correlation-adjusted independence)
+        # Higher divergence = more independent factor = better for TSFM
+        tsfm_scores = [s.tsfm_score for s in factor_scores.values()]
+        mean_tsfm = np.mean(tsfm_scores)
+        std_tsfm = np.std(tsfm_scores) if len(tsfm_scores) > 1 else 1.0
+        
+        for symbol, score in factor_scores.items():
+            # Factor divergence from mean TSFM score
+            if std_tsfm > 0:
+                score.factor_divergence = abs(score.tsfm_score - mean_tsfm) / std_tsfm
+            else:
+                score.factor_divergence = 0.0
+            
+            # Regime momentum adjustment based on VIX
+            if vix_level < 15:  # Low vol regime
+                score.regime_momentum = score.tsfm_score * 1.2  # Amplify in calm markets
+            elif vix_level > 30:  # High vol regime
+                score.regime_momentum = score.tsfm_score * 0.7  # Dampen in crisis
+            else:
+                score.regime_momentum = score.tsfm_score
+            
+            # Final TSFM allocation scalar: Position size based on z-score
+            # Scale 0-2x: negative scores reduce to 0, high scores boost to 2x
+            normalized = (score.tsfm_score + 2) / 2  # Map [-2, 2] to [0, 2]
+            score.tsfm_allocation_scalar = min(2.0, max(0.0, normalized))
+        
+        # Rank by TSFM score (time-series momentum)
+        sorted_factors = sorted(
+            factor_scores.items(),
+            key=lambda x: x[1].tsfm_score,
+            reverse=True
+        )
+        
+        # Update ranks
+        for rank, (symbol, score) in enumerate(sorted_factors, 1):
+            score.rank = rank
+        
+        # Select top N factors with positive TSFM (momentum)
+        selected_tsfm = []
+        category_counts = {}
+        
+        for symbol, score in sorted_factors:
+            category = self.FACTORS[symbol]["category"]
+            
+            # Require positive 1-month return for TSFM
+            if score.tsfm_score <= 0:
+                continue
+            
+            # Category diversity
+            if category_counts.get(category, 0) >= self.max_per_category:
+                continue
+            
+            selected_tsfm.append((symbol, score))
+            category_counts[category] = category_counts.get(category, 0) + 1
+            
+            if len(selected_tsfm) >= self.top_n:
+                break
+        
+        # Generate TSFM allocation with volatility scaling
+        tsfm_allocation = {}
+        if selected_tsfm:
+            # Base: inverse volatility weighting
+            inv_vols = {sym: 1 / max(s.volatility, 0.05) for sym, s in selected_tsfm}
+            total_inv_vol = sum(inv_vols.values())
+            
+            # Apply TSFM scalar for position sizing
+            base_weights = {sym: inv_vols[sym] / total_inv_vol for sym, _ in selected_tsfm}
+            
+            # Adjust by TSFM scalar and renormalize
+            weighted = {}
+            for sym, w in base_weights.items():
+                scalar = factor_scores[sym].tsfm_allocation_scalar
+                weighted[sym] = w * scalar
+            
+            total_weighted = sum(weighted.values())
+            if total_weighted > 0:
+                tsfm_allocation = {sym: weighted[sym] / total_weighted for sym in weighted}
+        
+        # Build TSFM result
+        tsfm_result = {
+            "tsfm": {
+                "enabled": True,
+                "vix_context": vix_level,
+                "formation_period": "1m",
+                "z_score_cap": 2.0,
+                "selected_factors_tsfm": [s[0] for s in selected_tsfm],
+                "allocation_tsfm": tsfm_allocation,
+                "signal_strength": len(selected_tsfm) / max(self.top_n, 1),
+                "tsfm_scores": {
+                    symbol: {
+                        "tsfm_score": float(score.tsfm_score),
+                        "tsfm_allocation_scalar": float(score.tsfm_allocation_scalar),
+                        "regime_momentum": float(score.regime_momentum),
+                        "factor_divergence": float(score.factor_divergence),
+                        "return_1m": float(score.vol_adjusted_momentum * score.volatility)  # Reverse calc
+                    }
+                    for symbol, score in factor_scores.items()
+                }
+            }
+        }
+        
+        # Merge with base result
+        result = {**base_result, **tsfm_result}
+        result["recommendation_tsfm"] = self._generate_tsfm_recommendation(
+            selected_tsfm, factor_scores, vix_level
+        )
+        
+        return result
+    
+    def _generate_tsfm_recommendation(
+        self,
+        selected: List[Tuple[str, FactorScore]],
+        all_scores: Dict[str, FactorScore],
+        vix_level: float
+    ) -> str:
+        """Generate TSFM-specific recommendation"""
+        if not selected:
+            return "TSFM: No factors showing positive 1-month momentum. Risk-off mode recommended."
+        
+        factor_names = [self.FACTORS[sym]["name"] for sym, _ in selected]
+        avg_scalar = np.mean([s.tsfm_allocation_scalar for _, s in selected])
+        
+        regime_desc = "low vol" if vix_level < 15 else "elevated vol" if vix_level > 25 else "normal vol"
+        
+        strength = "strong" if avg_scalar > 1.5 else "moderate" if avg_scalar > 1.0 else "weak"
+        
+        return f"TSFM [{strength}]: Overweight {', '.join(factor_names)} ({regime_desc}, scalar: {avg_scalar:.2f})"
+    
     def evaluate_ml_enhanced(self, vix_level: float = 20.0) -> Dict:
         """
         Run ML-enhanced factor evaluation with nonlinear interaction features.
@@ -618,10 +774,14 @@ def main():
     cmd = sys.argv[1]
     
     if cmd == "evaluate":
-        # Check for --ml flag
+        # Check for flags
         use_ml = "--ml" in sys.argv
+        use_tsfm = "--tsfm" in sys.argv
         
-        if use_ml:
+        if use_tsfm:
+            result = engine.evaluate_tsfm()
+            mode_label = "TSFM (v2.15)"
+        elif use_ml:
             result = engine.evaluate_ml_enhanced()
             mode_label = "ML-ENHANCED"
         else:
@@ -634,7 +794,15 @@ def main():
         print(f"Timestamp: {result['timestamp']}")
         print(f"Signal Strength: {result.get('signal_strength', 0):.0%}")
         
-        if use_ml:
+        if use_tsfm:
+            print(f"VIX Context: {result.get('tsfm', {}).get('vix_context', 'N/A')}")
+            selected_key = "tsfm"
+            selected_factors = result.get('tsfm', {}).get('selected_factors_tsfm', [])
+            print(f"\nSelected Factors (TSFM): {', '.join(selected_factors) if selected_factors else 'None'}")
+            print(f"\nTSFM Recommendation: {result.get('recommendation_tsfm', 'N/A')}")
+            print(f"\nFormation Period: {result.get('tsfm', {}).get('formation_period', 'N/A')}")
+            print(f"Z-Score Cap: {result.get('tsfm', {}).get('z_score_cap', 'N/A')}")
+        elif use_ml:
             print(f"VIX Context: {result.get('vix_context', 'N/A')}")
             selected_key = "selected_factors_ml"
             print(f"\nSelected Factors (ML): {', '.join(result.get(selected_key, []))}")
@@ -647,7 +815,14 @@ def main():
         print(f"\n{'-'*70}")
         print("ALLOCATION")
         print(f"{'-'*70}")
-        for symbol, weight in result['allocation'].items():
+        
+        # Show appropriate allocation based on mode
+        if use_tsfm:
+            allocation = result.get('tsfm', {}).get('allocation_tsfm', {})
+        else:
+            allocation = result['allocation']
+        
+        for symbol, weight in allocation.items():
             print(f"  {symbol}: {weight:>6.1%}")
         
         print(f"\n{'-'*70}")
