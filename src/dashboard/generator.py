@@ -317,7 +317,7 @@ class DashboardGenerator:
             hermes_state = Path.home() / ".hermes" / "cron" / "state.json"
             if hermes_state.exists():
                 with open(hermes_state) as f:
-                    state = json_mod.load(f)
+                    state = json.load(f)
                     for job_id, job in state.get("jobs", {}).items():
                         if job.get("name", "").startswith("portfolio-lab"):
                             health_data["cron_jobs"].append({
