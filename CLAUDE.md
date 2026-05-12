@@ -9,6 +9,10 @@
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
 - **Sharpe 0.79 champion validated with +1yr of new data (2005-2026)**
 - **10% drift-based rebalancing beats annual: Sharpe 0.83 vs 0.79**
+- **v2.52 TSMOM Overlay**: AQR-style time-series momentum (12m formation, 1m skip, vol-scaled)
+  - Sharpe 0.96 validated on 2006-2026 backtest (+0.17 vs baseline)
+  - 243 rebalances, 10bps cost, max DD -20.83%
+  - Signal integrator integration (5% weight)
 - **v2.51 AI Agent Controller**: MARL system with 5 specialized agents (3,558 lines PyTorch)
   - Analyst Agent: fundamental/value analysis
   - Sentiment Agent: news/social signals with contrarian detection

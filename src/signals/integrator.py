@@ -71,6 +71,7 @@ BASE_WEIGHTS = {
     "quality": 0.15,
     "sentiment": 0.15,
     "ai_agent": 0.05,  # v2.51 MARL controller weight
+    "tsmom": 0.05,     # v2.52 TSMOM overlay weight
 }
 
 # Regime-specific weight adjustments
