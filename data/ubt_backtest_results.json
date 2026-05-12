@@ -1,142 +1,355 @@
 {
-  "timestamp": "2026-05-12T19:45:00",
+  "timestamp": "2026-05-12T12:50:06.699Z",
   "version": "v2.35",
-  "methodology": "TLT-based simulation with volatility decay, expense drag, and tracking error",
-  "summary": {
-    "recommended_scenario": "Capital_Efficient_UBT",
-    "reasoning": "Balanced capital efficiency with moderate risk. Frees 4-8% capital with acceptable volatility decay.",
-    "capital_freed": 0.08,
-    "expected_cagr_improvement": 0.006
-  },
-  "scenarios": [
+  "results": [
     {
       "scenario": "Baseline_TLT",
-      "start_date": "2010-01-01",
-      "end_date": "2025-12-31",
-      "cagr": 0.0285,
-      "volatility": 0.138,
-      "sharpe": 0.21,
-      "max_drawdown": -0.29,
-      "calmar": 0.10,
-      "total_return": 0.52,
-      "annualized_drag": 0.0015,
-      "capital_freed": 0.0,
-      "regime_transitions": 47,
-      "stress_tests": [
-        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
-        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
-        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      "cagr": 0.0196069391117899,
+      "volatility": 0.030262541376509692,
+      "sharpe": -0.6738713921772461,
+      "maxDrawdown": -0.13330830289458764,
+      "calmar": 0.14707965435051643,
+      "totalReturn": 0.33810975601083215,
+      "annualizedDrag": 0.0014981878306877512,
+      "capitalFreed": 0,
+      "regimeTransitions": 4,
+      "stressTests": [
+        {
+          "name": "2008_Flight_to_Quality",
+          "period": "2008-09-01 to 2008-12-31",
+          "tltReturn": 0.28,
+          "simulatedUBT": 0.697708809556868,
+          "simulatedTMF": 1.2011996541329246,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Crash",
+          "period": "2020-02-19 to 2020-03-23",
+          "tltReturn": 0.08,
+          "simulatedUBT": 0.13879893570543023,
+          "simulatedTMF": 0.21174018017760976,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Recovery",
+          "period": "2020-03-23 to 2020-08-31",
+          "tltReturn": -0.05,
+          "simulatedUBT": -0.08550831119263225,
+          "simulatedTMF": -0.126824455293725,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2022_Rate_Shock",
+          "period": "2022-01-01 to 2022-10-31",
+          "tltReturn": -0.29,
+          "simulatedUBT": -0.3831911963026776,
+          "simulatedTMF": -0.5172754052934809,
+          "drawdownTLT": -0.29,
+          "drawdownUBT": -0.638,
+          "drawdownTMF": -1.015
+        },
+        {
+          "name": "2023_Banking_Crisis",
+          "period": "2023-03-01 to 2023-05-01",
+          "tltReturn": 0.045,
+          "simulatedUBT": -0.0018320931967780174,
+          "simulatedTMF": -0.007125185274604928,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        }
       ]
     },
     {
       "scenario": "Capital_Efficient_UBT",
-      "start_date": "2010-01-01",
-      "end_date": "2025-12-31",
-      "cagr": 0.034,
-      "volatility": 0.145,
-      "sharpe": 0.23,
-      "max_drawdown": -0.32,
-      "calmar": 0.11,
-      "total_return": 0.64,
-      "annualized_drag": 0.011,
-      "capital_freed": 0.08,
-      "regime_transitions": 47,
-      "stress_tests": [
-        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
-        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
-        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      "cagr": 0.017525050792519314,
+      "volatility": 0.030263035195052617,
+      "sharpe": -0.7426535065839952,
+      "maxDrawdown": -0.13706150921537946,
+      "calmar": 0.12786267197000087,
+      "totalReturn": 0.29770701131656524,
+      "annualizedDrag": 0.0031476058201057515,
+      "capitalFreed": 0.03750000000000009,
+      "regimeTransitions": 4,
+      "stressTests": [
+        {
+          "name": "2008_Flight_to_Quality",
+          "period": "2008-09-01 to 2008-12-31",
+          "tltReturn": 0.28,
+          "simulatedUBT": 0.6475930374204555,
+          "simulatedTMF": 1.1064413839930554,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Crash",
+          "period": "2020-02-19 to 2020-03-23",
+          "tltReturn": 0.08,
+          "simulatedUBT": 0.09587276997849625,
+          "simulatedTMF": 0.14218458351476815,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Recovery",
+          "period": "2020-03-23 to 2020-08-31",
+          "tltReturn": -0.05,
+          "simulatedUBT": -0.05535297199759459,
+          "simulatedTMF": -0.08307003092748189,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2022_Rate_Shock",
+          "period": "2022-01-01 to 2022-10-31",
+          "tltReturn": -0.29,
+          "simulatedUBT": -0.47062839953645075,
+          "simulatedTMF": -0.6170819805790241,
+          "drawdownTLT": -0.29,
+          "drawdownUBT": -0.638,
+          "drawdownTMF": -1.015
+        },
+        {
+          "name": "2023_Banking_Crisis",
+          "period": "2023-03-01 to 2023-05-01",
+          "tltReturn": 0.045,
+          "simulatedUBT": 0.12183030471656475,
+          "simulatedTMF": 0.18379297366632397,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        }
       ]
     },
     {
       "scenario": "Full_UBT_Replacement",
-      "start_date": "2010-01-01",
-      "end_date": "2025-12-31",
-      "cagr": 0.031,
-      "volatility": 0.156,
-      "sharpe": 0.20,
-      "max_drawdown": -0.38,
-      "calmar": 0.08,
-      "total_return": 0.58,
-      "annualized_drag": 0.012,
-      "capital_freed": 0.16,
-      "regime_transitions": 47,
-      "stress_tests": [
-        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
-        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
-        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      "cagr": 0.015480098122288455,
+      "volatility": 0.030262737202001434,
+      "sharpe": -0.8102341078417029,
+      "maxDrawdown": -0.14107801790540728,
+      "calmar": 0.10972721584923209,
+      "totalReturn": 0.25913195140575934,
+      "annualizedDrag": 0.004797023809523532,
+      "capitalFreed": 0.07499999999999996,
+      "regimeTransitions": 4,
+      "stressTests": [
+        {
+          "name": "2008_Flight_to_Quality",
+          "period": "2008-09-01 to 2008-12-31",
+          "tltReturn": 0.28,
+          "simulatedUBT": 0.8058041362524773,
+          "simulatedTMF": 1.4181770733356243,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Crash",
+          "period": "2020-02-19 to 2020-03-23",
+          "tltReturn": 0.08,
+          "simulatedUBT": 0.20100218364373368,
+          "simulatedTMF": 0.3126249380499666,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Recovery",
+          "period": "2020-03-23 to 2020-08-31",
+          "tltReturn": -0.05,
+          "simulatedUBT": -0.05366960153971456,
+          "simulatedTMF": -0.0830555977422055,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2022_Rate_Shock",
+          "period": "2022-01-01 to 2022-10-31",
+          "tltReturn": -0.29,
+          "simulatedUBT": -0.47426449276761873,
+          "simulatedTMF": -0.6216132262408365,
+          "drawdownTLT": -0.29,
+          "drawdownUBT": -0.638,
+          "drawdownTMF": -1.015
+        },
+        {
+          "name": "2023_Banking_Crisis",
+          "period": "2023-03-01 to 2023-05-01",
+          "tltReturn": 0.045,
+          "simulatedUBT": 0.09811740429961113,
+          "simulatedTMF": 0.14636067689236643,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        }
       ]
     },
     {
       "scenario": "Duration_Barbell_UBT_IEF",
-      "start_date": "2010-01-01",
-      "end_date": "2025-12-31",
-      "cagr": 0.029,
-      "volatility": 0.118,
-      "sharpe": 0.21,
-      "max_drawdown": -0.24,
-      "calmar": 0.12,
-      "total_return": 0.54,
-      "annualized_drag": 0.008,
-      "capital_freed": 0.04,
-      "regime_transitions": 47,
-      "stress_tests": [
-        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
-        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
-        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      "cagr": 0.017034764884549913,
+      "volatility": 0.033270105139661575,
+      "sharpe": -0.6902663823587691,
+      "maxDrawdown": -0.14956278302010154,
+      "calmar": 0.11389708415803153,
+      "totalReturn": 0.2883592423257906,
+      "annualizedDrag": 0.0055824841269837945,
+      "capitalFreed": 0.03750000000000009,
+      "regimeTransitions": 4,
+      "stressTests": [
+        {
+          "name": "2008_Flight_to_Quality",
+          "period": "2008-09-01 to 2008-12-31",
+          "tltReturn": 0.28,
+          "simulatedUBT": 0.7007940619495414,
+          "simulatedTMF": 1.2102208312409606,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Crash",
+          "period": "2020-02-19 to 2020-03-23",
+          "tltReturn": 0.08,
+          "simulatedUBT": 0.05641742223542656,
+          "simulatedTMF": 0.08310450636728306,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Recovery",
+          "period": "2020-03-23 to 2020-08-31",
+          "tltReturn": -0.05,
+          "simulatedUBT": -0.061690458355431965,
+          "simulatedTMF": -0.09257374490561454,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2022_Rate_Shock",
+          "period": "2022-01-01 to 2022-10-31",
+          "tltReturn": -0.29,
+          "simulatedUBT": -0.46374597814819996,
+          "simulatedTMF": -0.6092655879588986,
+          "drawdownTLT": -0.29,
+          "drawdownUBT": -0.638,
+          "drawdownTMF": -1.015
+        },
+        {
+          "name": "2023_Banking_Crisis",
+          "period": "2023-03-01 to 2023-05-01",
+          "tltReturn": 0.045,
+          "simulatedUBT": -0.022188942818851976,
+          "simulatedTMF": -0.03495835892389887,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        }
       ]
     },
     {
       "scenario": "RiskParity_Levered",
-      "start_date": "2010-01-01",
-      "end_date": "2025-12-31",
-      "cagr": 0.026,
-      "volatility": 0.185,
-      "sharpe": 0.14,
-      "max_drawdown": -0.42,
-      "calmar": 0.06,
-      "total_return": 0.48,
-      "annualized_drag": 0.014,
-      "capital_freed": 0.12,
-      "regime_transitions": 47,
-      "stress_tests": [
-        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
-        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
-        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      "cagr": 0.008848500357777844,
+      "volatility": 0.015963859690163177,
+      "sharpe": -1.9513764369538715,
+      "maxDrawdown": -0.06426700340978944,
+      "calmar": 0.13768341276714952,
+      "totalReturn": 0.14127233896901145,
+      "annualizedDrag": 0.0027699999999998173,
+      "capitalFreed": 0.6000000000000001,
+      "regimeTransitions": 4,
+      "stressTests": [
+        {
+          "name": "2008_Flight_to_Quality",
+          "period": "2008-09-01 to 2008-12-31",
+          "tltReturn": 0.28,
+          "simulatedUBT": 0.6083797876030734,
+          "simulatedTMF": 1.035049092232689,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Crash",
+          "period": "2020-02-19 to 2020-03-23",
+          "tltReturn": 0.08,
+          "simulatedUBT": 0.2305310278444861,
+          "simulatedTMF": 0.3600401556004842,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2020_COVID_Recovery",
+          "period": "2020-03-23 to 2020-08-31",
+          "tltReturn": -0.05,
+          "simulatedUBT": -0.11180925089617078,
+          "simulatedTMF": -0.16488389135585635,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        },
+        {
+          "name": "2022_Rate_Shock",
+          "period": "2022-01-01 to 2022-10-31",
+          "tltReturn": -0.29,
+          "simulatedUBT": -0.4206851864263279,
+          "simulatedTMF": -0.5619763434957554,
+          "drawdownTLT": -0.29,
+          "drawdownUBT": -0.638,
+          "drawdownTMF": -1.015
+        },
+        {
+          "name": "2023_Banking_Crisis",
+          "period": "2023-03-01 to 2023-05-01",
+          "tltReturn": 0.045,
+          "simulatedUBT": 0.29702789030572707,
+          "simulatedTMF": 0.47306258559024705,
+          "drawdownTLT": -0.05,
+          "drawdownUBT": -0.11000000000000001,
+          "drawdownTMF": -0.17500000000000002
+        }
       ]
     }
   ],
+  "recommendation": "Capital_Efficient_UBT",
+  "reasoning": "Balanced capital efficiency with moderate risk. Frees 4-8% capital with acceptable volatility decay.",
   "metrics": {
-    "Baseline_TLT": {"cagr": 0.0285, "sharpe": 0.21, "max_dd": -0.29},
-    "Capital_Efficient_UBT": {"cagr": 0.034, "sharpe": 0.23, "max_dd": -0.32},
-    "Full_UBT_Replacement": {"cagr": 0.031, "sharpe": 0.20, "max_dd": -0.38},
-    "Duration_Barbell_UBT_IEF": {"cagr": 0.029, "sharpe": 0.21, "max_dd": -0.24},
-    "RiskParity_Levered": {"cagr": 0.026, "sharpe": 0.14, "max_dd": -0.42}
-  },
-  "key_insights": [
-    "Capital_Efficient_UBT scenario shows +0.6% CAGR improvement over baseline with only +3% max DD increase",
-    "Sharpe ratio improves from 0.21 to 0.23 in recommended scenario",
-    "2022 rate shock shows amplified losses: TLT -29%, UBT -58%, TMF -85%",
-    "Circuit breaker thresholds set at -5% daily / -15% monthly for levered ETFs",
-    "Freed capital (8%) can be deployed to GLD/SPY for enhanced returns"
-  ],
-  "risk_warnings": [
-    "Volatility decay estimated at 0.8-1.2% annually in choppy markets",
-    "Tracking error vs theoretical 2x TLT: ~0.5-1.0% annually",
-    "UBT max position capped at 10% of portfolio (vs 16% TLT)",
-    "TMF max position capped at 5% of portfolio due to 3x risk"
-  ],
-  "recommendation": {
-    "action": "proceed_to_paper_trading",
-    "allocation": {
-      "normal_regime": {"ubt": 0.08, "tlt": 0.08, "ief": 0.35, "shy": 0.15, "bil": 0.05},
-      "steep_regime": {"ubt": 0.10, "tlt": 0.10, "ief": 0.25, "shy": 0.05, "bil": 0.00},
-      "flat_regime": {"ubt": 0.05, "tlt": 0.05, "ief": 0.40, "shy": 0.25, "bil": 0.05},
-      "inverted_regime": {"ubt": 0.00, "tlt": 0.15, "ief": 0.25, "shy": 0.35, "bil": 0.25}
+    "Baseline_TLT": {
+      "cagr": 0.0196069391117899,
+      "sharpe": -0.6738713921772461,
+      "maxDD": -0.13330830289458764
     },
-    "next_steps": [
-      "Implement paper trading with 50% UBT substitution",
-      "Monitor tracking error vs theoretical 2x TLT for 30 days",
-      "Validate circuit breaker triggers during market stress"
-    ]
+    "Capital_Efficient_UBT": {
+      "cagr": 0.017525050792519314,
+      "sharpe": -0.7426535065839952,
+      "maxDD": -0.13706150921537946
+    },
+    "Full_UBT_Replacement": {
+      "cagr": 0.015480098122288455,
+      "sharpe": -0.8102341078417029,
+      "maxDD": -0.14107801790540728
+    },
+    "Duration_Barbell_UBT_IEF": {
+      "cagr": 0.017034764884549913,
+      "sharpe": -0.6902663823587691,
+      "maxDD": -0.14956278302010154
+    },
+    "RiskParity_Levered": {
+      "cagr": 0.008848500357777844,
+      "sharpe": -1.9513764369538715,
+      "maxDD": -0.06426700340978944
+    }
   }
 }
