@@ -135,8 +135,17 @@ class ConvexityHarvestStrategy:
         else:
             self.consecutive_backwardation_days = 0
         
-        # Trigger 4: Emergency circuit breaker (simulated - in production, check actual circuit breaker state)
-        # This would integrate with the circuit_breaker.py module
+        # Trigger 4: Circuit breaker integration
+        # Check if portfolio circuit breaker is triggered
+        try:
+            from circuit_breaker import DrawdownCircuitBreaker
+            cb = DrawdownCircuitBreaker()
+            cb_status = cb.get_status()
+            if cb_status.get("status") in ["red", "black"]:
+                return True, f"Circuit breaker triggered ({cb_status['status']})"
+        except Exception:
+            # If circuit breaker check fails, continue without it
+            pass
         
         return False, None
     
