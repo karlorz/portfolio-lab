@@ -731,36 +731,29 @@ class DashboardGenerator:
     def _generate_sector_momentum_signals(self) -> Optional[Dict]:
         """Generate sector rotation momentum signals from historical data."""
         try:
-            import subprocess
-            import os
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent.parent / 'strategy'))
             
-            # Use deno/bun to run TypeScript sector momentum calculator
-            # First, check if sector data exists in historical.json
-            sector_symbols = ['XLK', 'XLV', 'XLF', 'XLY', 'XLI', 'XLE', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC']
+            from sector_momentum_calc import generate_sector_signals
             
-            # Check if we have sector data available
             historical_path = PUBLIC_DIR.parent / "data" / "historical.json"
-            if not historical_path.exists():
-                return None
             
-            # For now, return a simplified mock signal showing sectors would be evaluated
-            # Full implementation requires running TypeScript code or converting to Python
-            return {
-                "timestamp": datetime.now().isoformat(),
-                "status": "pending_data",
-                "note": "Sector rotation momentum requires sector ETF data in historical.json",
-                "symbols_needed": sector_symbols,
-                "methodology": "12-month momentum lookback, top 3 sectors, quarterly rebalancing",
-                "overlay_pct": 0.25,
-                "top_sectors": [],  # Would be populated when data available
-                "allocation": {
-                    "spy_core": 0.345,  # 75% of 46% equity
-                    "spy_total": 0.46,
-                    "sector_overlay": 0.115,  # 25% of 46%
-                    "sectors": []
-                }
-            }
+            # Get current VIX level for threshold checking
+            vix = 0
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT close FROM prices WHERE symbol = '^VIX' ORDER BY date DESC LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    vix = row[0]
+            except:
+                pass
+            
+            signals = generate_sector_signals(historical_path, vix=vix)
+            return signals
+            
         except Exception as e:
+            print(f"Warning: Failed to generate sector momentum signals: {e}")
             return None
     
     def generate_analytics_json(self) -> Path:
