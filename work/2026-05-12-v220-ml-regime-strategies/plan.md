@@ -3,13 +3,16 @@
 ## Research Source
 `/root/projects/portfolio-lab/work/2026-05-12-v220-ml-regime-strategies/compound-synthesis.md`
 
-## Phase 1: Wasserstein HMM Regime Detector (IN PROGRESS)
+## Phase 1: Wasserstein HMM Regime Detector (COMPLETED)
 - [x] Create `src/strategy/regime_hmm.py` with GaussianHMM base
 - [x] Implement Wasserstein distance template tracking
 - [x] Add feature extraction (VIX, 2s10s, momentum)
 - [x] Build regime classifier with 2-4 states
-- [ ] CLI interface: status, history, predict
-- [ ] Test on historical data
+- [x] CLI interface: status, history, predict
+- [x] Test on historical data
+
+**Status**: COMPLETE - CLI working with live market data
+**Location**: `src/strategy/regime_hmm.py` (23KB)
 
 ## Phase 2: CTA Trend Overlay (EXISTING - v2.10)
 **Note:** CTA overlay already exists at `src/strategy/cta_overlay.py` (v2.10)
