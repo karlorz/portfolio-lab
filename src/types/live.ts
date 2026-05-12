@@ -7,6 +7,19 @@ export interface SignalsData {
     vix: number | null;
     detected: string | null;
   };
+  yield_curve?: {
+    spread2s10s: number | null;
+    dgs2: number | null;
+    dgs10: number | null;
+    duration_regime: 'steep' | 'normal' | 'flat' | 'inverted' | null;
+    spread_history?: number[];
+  };
+  duration_allocation?: {
+    tlt: number;
+    ief: number;
+    shy: number;
+    bil: number;
+  };
   latest_prices: Record<string, number>;
   current_positions: Array<{
     symbol: string;

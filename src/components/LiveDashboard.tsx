@@ -4,6 +4,8 @@ import { RegimeTimeline } from './RegimeTimeline';
 import { SPYComparisonChart } from './SPYComparisonChart';
 import { RebalancePanel } from './RebalancePanel';
 import { UnderwaterChart, RollingMetricsChart, CrisisOverlay } from './AnalyticsCharts';
+import { YieldCurveIndicator } from './YieldCurveIndicator';
+import { BondAllocationPanel } from './BondAllocationPanel';
 import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData } from '../types/live';
 
 interface LiveDashboardProps {
@@ -293,6 +295,23 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                   </table>
                 </div>
               )}
+            </div>
+
+            {/* Yield Curve & Bond Allocation */}
+            <div className="yield-bond-row">
+              <YieldCurveIndicator 
+                spread2s10s={signals?.yield_curve?.spread2s10s ?? null}
+                regime={signals?.yield_curve?.duration_regime ?? null}
+                spreadHistory={signals?.yield_curve?.spread_history}
+                lastUpdate={lastUpdate}
+              />
+              <BondAllocationPanel 
+                currentAllocation={signals?.duration_allocation ?? null}
+                targetAllocation={signals?.duration_allocation ?? null}
+                regime={signals?.yield_curve?.duration_regime ?? null}
+                portfolioValue={portfolioValue}
+                bondSlicePct={0.16}
+              />
             </div>
           </div>
         )}

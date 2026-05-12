@@ -1006,8 +1006,20 @@ footer code {
   margin-top: 20px;
 }
 
+/* ===== Yield Curve & Bond Allocation Layout ===== */
+.yield-bond-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 20px;
+  margin-top: 20px;
+}
+
 @media (max-width: 900px) {
   .positions-orders-row {
+    grid-template-columns: 1fr;
+  }
+
+  .yield-bond-row {
     grid-template-columns: 1fr;
   }
   
