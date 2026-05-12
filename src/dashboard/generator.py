@@ -212,6 +212,9 @@ class DashboardGenerator:
         except Exception as e:
             pass  # Vol targeting not available
         
+        # Add yield curve data from yields.json
+        yield_curve_data = self._get_yield_curve_data()
+        
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -224,6 +227,8 @@ class DashboardGenerator:
             "ml_signals": self._generate_ml_signals(),
             "factor_rotation": factor_rotation_signal,
             "volatility_targeting": vol_targeting_signal,
+            "yield_curve": yield_curve_data.get("yield_curve"),
+            "duration_allocation": yield_curve_data.get("duration_allocation"),
         }
         
         out_path = PUBLIC_DIR / "signals.json"
@@ -324,6 +329,67 @@ class DashboardGenerator:
                 pass
         
         return signals
+    
+    def _get_yield_curve_data(self) -> Dict:
+        """Get yield curve data from yields.json and calculate duration allocation."""
+        result = {
+            "yield_curve": None,
+            "duration_allocation": None
+        }
+        
+        yields_file = Path("/root/projects/portfolio-lab/public/data/yields.json")
+        if not yields_file.exists():
+            return result
+        
+        try:
+            with open(yields_file, 'r') as f:
+                yields = json.load(f)
+            
+            if not yields or len(yields) == 0:
+                return result
+            
+            # Get latest yield entry
+            latest = yields[-1]
+            
+            # Calculate regime based on 2s10s spread
+            spread = latest.get("spread2s10s", 0)
+            if spread > 100:
+                regime = "steep"
+            elif spread > 50:
+                regime = "normal"
+            elif spread > 0:
+                regime = "flat"
+            else:
+                regime = "inverted"
+            
+            # Get last 30 days of spread history for sparkline
+            spread_history = []
+            for entry in yields[-30:]:
+                if entry.get("spread2s10s") is not None:
+                    spread_history.append(entry["spread2s10s"])
+            
+            result["yield_curve"] = {
+                "spread2s10s": spread,
+                "dgs2": latest.get("dgs2"),
+                "dgs10": latest.get("dgs10"),
+                "duration_regime": regime,
+                "spread_history": spread_history
+            }
+            
+            # Calculate duration allocation based on regime
+            regime_allocations = {
+                "steep": {"tlt": 0.70, "ief": 0.25, "shy": 0.05, "bil": 0.00},
+                "normal": {"tlt": 0.50, "ief": 0.35, "shy": 0.15, "bil": 0.00},
+                "flat": {"tlt": 0.30, "ief": 0.40, "shy": 0.25, "bil": 0.05},
+                "inverted": {"tlt": 0.15, "ief": 0.25, "shy": 0.35, "bil": 0.25}
+            }
+            
+            result["duration_allocation"] = regime_allocations.get(regime, regime_allocations["normal"])
+            
+        except Exception as e:
+            print(f"Warning: Failed to load yield curve data: {e}")
+        
+        return result
     
     def generate_stats_json(self) -> Path:
         """Generate performance statistics."""
