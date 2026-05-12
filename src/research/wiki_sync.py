@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 WIKI_DIR = Path("~/wiki/projects/portfolio-lab").expanduser()
-RAW_DIR = WIKI_DIR / "raw" / "market"
+RAW_DIR = Path("~/projects/portfolio-lab/raw").expanduser() / "market"
 DB_PATH = DATA_DIR / "market.db"
 
 class WikiSync:
