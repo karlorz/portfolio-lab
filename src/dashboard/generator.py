@@ -235,6 +235,29 @@ class DashboardGenerator:
             # Convexity harvest / vol parity not available yet
             pass
         
+        # Add LLM sentiment signals (v2.30 Phase 5)
+        sentiment_signal = None
+        try:
+            from strategy.regime_sentiment import RegimeSentimentPipeline
+            
+            sentiment_pipeline = RegimeSentimentPipeline()
+            # Get current technical regime for combination
+            tech_regime = trend_regime if trend_regime else "neutral"
+            tech_confidence = 0.6  # Default confidence
+            
+            # Get combined sentiment signal (mock mode if no API keys)
+            sentiment_signal = sentiment_pipeline.get_combined_signal(
+                technical_regime=tech_regime,
+                technical_confidence=tech_confidence,
+                news_texts=[],  # Empty for mock mode
+                earnings_texts=[],
+                macro_texts=[],
+            )
+            sentiment_signal = sentiment_signal.to_dict()
+        except Exception as e:
+            # LLM sentiment not available yet
+            pass
+        
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -250,7 +273,8 @@ class DashboardGenerator:
             "yield_curve": yield_curve_data.get("yield_curve"),
             "duration_allocation": yield_curve_data.get("duration_allocation"),
             "convexity_harvest": convexity_signal,
-            "volatility_parity": vol_parity_signal
+            "volatility_parity": vol_parity_signal,
+            "llm_sentiment": sentiment_signal
         }
         
         out_path = PUBLIC_DIR / "signals.json"
