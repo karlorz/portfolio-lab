@@ -1,0 +1,12 @@
+{
+  "name": "edgar_fetcher",
+  "description": "SEC EDGAR Data Fetcher - v2.60 Alternative Data Infrastructure",
+  "version": "2.60.0",
+  "dependencies": [],
+  "entry": "src/data/edgar_fetcher.ts",
+  "data_output": "data/edgar/",
+  "rate_limit": "10 requests/second",
+  "cache_enabled": true,
+  "supported_forms": ["8-K", "10-Q", "10-K", "DEF 14A", "SC 13D"],
+  "test_tickers": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "UNH"]
+}
