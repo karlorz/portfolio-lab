@@ -26,6 +26,7 @@ sys.path.insert(0, str(project_root))
 
 from src.strategy.regime_hmm import WassersteinHMMDetector, RegimeState
 from src.strategy.cta_overlay import CTATrendEngine
+from src.signals.vix_ensemble_adapter import VIXEnsembleAdapter
 
 
 @dataclass
@@ -51,6 +52,7 @@ class EnsembleRegime:
     cta_prob: float
     tsfm_prob: float
     duration_prob: float
+    vix_insurance_prob: float  # New: VIX insurance signal probability
     
     # Weighted combination
     ensemble_probs: Dict[str, float]
@@ -62,6 +64,14 @@ class EnsembleRegime:
     # Action recommendation
     action: str  # 'full_shift', 'partial_shift', 'hold', 'alert'
     position_scaling: float  # 0-1 position sizing factor
+    
+    # VIX insurance overlay status
+    insurance_active: bool = False
+    insurance_alerts: List[str] = None
+    
+    def __post_init__(self):
+        if self.insurance_alerts is None:
+            self.insurance_alerts = []
 
 
 class RegimeSignalAdapter:
@@ -93,6 +103,12 @@ class RegimeSignalAdapter:
             'normal': 'neutral',
             'flat': 'neutral',
             'inverted': 'bear'
+        },
+        'vix_insurance': {
+            'risk_off': 'bear',
+            'risk_on': 'bull',
+            'neutral': 'neutral',
+            'hedge_active': 'neutral'  # Defensive but not bearish
         }
     }
     
@@ -169,6 +185,56 @@ class RegimeSignalAdapter:
             timestamp=duration_data.get('timestamp', datetime.now().isoformat()),
             raw_data=duration_data
         )
+    
+    @classmethod
+    def from_vix_insurance(cls, vix_signal: Dict[str, Any]) -> RegimeSignal:
+        """Convert VIX insurance signal to RegimeSignal"""
+        is_active = vix_signal.get('insurance_active', False)
+        risk_adjustment = vix_signal.get('risk_score_adjustment', 0.0)
+        
+        # Determine regime based on insurance status
+        if not is_active:
+            regime = 'neutral'
+            prob = 0.5
+        elif risk_adjustment > 0.05:
+            regime = 'risk_off'  # Defensive posture
+            prob = 0.5 + risk_adjustment
+        elif risk_adjustment < -0.02:
+            regime = 'risk_on'  # Profit taking opportunity
+            prob = 0.5 - risk_adjustment
+        else:
+            regime = 'hedge_active'
+            prob = 0.6
+        
+        unified_regime = cls.REGIME_MAP['vix_insurance'].get(regime, 'neutral')
+        
+        # Confidence based on position size and budget health
+        metadata = vix_signal.get('metadata', {})
+        position_pct = metadata.get('position_size_pct', 0)
+        budget_pct = metadata.get('budget_used_pct', 0)
+        
+        # Higher confidence with larger positions and healthy budgets
+        if position_pct > 0.005 and budget_pct < 0.8:
+            confidence = 0.7
+        elif position_pct > 0:
+            confidence = 0.5
+        else:
+            confidence = 0.3
+        
+        return RegimeSignal(
+            source='vix_insurance',
+            regime=unified_regime,
+            probability=prob,
+            confidence=confidence,
+            timestamp=vix_signal.get('timestamp', datetime.now().isoformat()),
+            raw_data={
+                'insurance_active': is_active,
+                'risk_adjustment': risk_adjustment,
+                'cash_buffer_pct': vix_signal.get('cash_buffer_pct', 0),
+                'alerts': vix_signal.get('alerts', []),
+                'next_action': vix_signal.get('next_action', 'none')
+            }
+        )
 
 
 class EnsembleVotingEngine:
@@ -181,10 +247,11 @@ class EnsembleVotingEngine:
     
     # Default signal weights
     DEFAULT_WEIGHTS = {
-        'hmm': 0.40,
-        'cta': 0.25,
-        'tsfm': 0.20,
-        'duration': 0.15
+        'hmm': 0.38,        # Reduced from 0.40 to accommodate VIX signal
+        'cta': 0.24,        # Reduced from 0.25
+        'tsfm': 0.19,       # Reduced from 0.20
+        'duration': 0.14,   # Reduced from 0.15
+        'vix_insurance': 0.05  # New: VIX insurance overlay signal
     }
     
     # Confidence thresholds
@@ -235,6 +302,15 @@ class EnsembleVotingEngine:
                 signals.append(RegimeSignalAdapter.from_duration(duration_data))
         except Exception as e:
             print(f"Duration signal error: {e}")
+        
+        # VIX Insurance Signal (if available)
+        try:
+            vix_adapter = VIXEnsembleAdapter()
+            vix_signal = vix_adapter.get_ensemble_signal()
+            if vix_signal:
+                signals.append(RegimeSignalAdapter.from_vix_insurance(vix_signal))
+        except Exception as e:
+            print(f"VIX insurance signal error: {e}")
         
         return signals
     
@@ -415,6 +491,15 @@ class EnsembleVotingEngine:
         for sig in signals:
             individual_probs[f"{sig.source}_prob"] = sig.probability
         
+        # Extract VIX insurance data if available
+        insurance_active = False
+        insurance_alerts = []
+        for sig in signals:
+            if sig.source == 'vix_insurance':
+                insurance_active = sig.raw_data.get('insurance_active', False)
+                insurance_alerts = [a.get('type', 'unknown') for a in sig.raw_data.get('alerts', [])]
+                break
+        
         return EnsembleRegime(
             timestamp=datetime.now().isoformat(),
             regime=final_regime,
@@ -423,11 +508,14 @@ class EnsembleVotingEngine:
             cta_prob=individual_probs.get('cta_prob', 0),
             tsfm_prob=individual_probs.get('tsfm_prob', 0),
             duration_prob=individual_probs.get('duration_prob', 0),
+            vix_insurance_prob=individual_probs.get('vix_insurance_prob', 0),
             ensemble_probs={k: round(v, 4) for k, v in ensemble_probs.items()},
             agreement_score=round(agreement_score, 4),
             disagreement_sources=disagreeing,
             action=action,
-            position_scaling=round(position_scaling, 4)
+            position_scaling=round(position_scaling, 4),
+            insurance_active=insurance_active,
+            insurance_alerts=insurance_alerts
         )
     
     def get_signal_breakdown(self, signals: List[RegimeSignal]) -> Dict[str, Any]:
@@ -473,6 +561,7 @@ class EnsembleVoterCLI:
                     'cta': result.cta_prob,
                     'tsfm': result.tsfm_prob,
                     'duration': result.duration_prob,
+                    'vix_insurance': result.vix_insurance_prob,
                     'ensemble': result.ensemble_probs
                 },
                 'disagreement': {
@@ -482,6 +571,10 @@ class EnsembleVoterCLI:
                 'recommendation': {
                     'action': result.action,
                     'position_scaling': result.position_scaling
+                },
+                'insurance_overlay': {
+                    'active': result.insurance_active,
+                    'alerts': result.insurance_alerts
                 }
             }
             print(json.dumps(output, indent=2))
