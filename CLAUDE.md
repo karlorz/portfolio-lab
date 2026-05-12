@@ -9,6 +9,11 @@
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
 - **Sharpe 0.79 champion validated with +1yr of new data (2005-2026)**
 - **10% drift-based rebalancing beats annual: Sharpe 0.83 vs 0.79**
+- **v2.53 HMM-LSTM Regime Detector**: 5-state market classification (bull/bear/neutral/high_vol/crisis)
+  - GaussianHMM trained on 26,225 samples (SPY/GLD/TLT/QQQ/IEF)
+  - 4D features: momentum, volatility, trend strength, VIX proxy
+  - Regime-based allocation shifts, transition matrix learned
+  - CLI: train, detect, portfolio commands
 - **v2.52 TSMOM Overlay**: AQR-style time-series momentum (12m formation, 1m skip, vol-scaled)
   - Sharpe 0.96 validated on 2006-2026 backtest (+0.17 vs baseline)
   - 243 rebalances, 10bps cost, max DD -20.83%
