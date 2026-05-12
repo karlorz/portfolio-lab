@@ -551,18 +551,25 @@ def cmd_optimize(args):
     print(f"Method: {result['method']}")
     
     if result['success']:
-        print(f"Expected Return: {result['expected_return']*100:.2f}%")
-        print(f"Volatility: {result['volatility']*100:.2f}%")
-        print(f"Sharpe Ratio: {result['sharpe_ratio']:.3f}")
-        
-        if 'vs_classical_sharpe' in result:
-            improvement = result['sharpe_improvement']
-            print(f"vs Classical: {result['vs_classical_sharpe']:.3f} ({improvement:+.3f})")
-        
-        print(f"\n📈 Allocation:")
-        for i, (sym, w) in enumerate(zip(universe.symbols, result['weights'])):
-            if w > 0.01:  # Only show positions > 1%
-                print(f"  {sym}: {w*100:.1f}%")
+        if 'expected_return' in result:
+            print(f"Expected Return: {result['expected_return']*100:.2f}%")
+            print(f"Volatility: {result['volatility']*100:.2f}%")
+            print(f"Sharpe Ratio: {result['sharpe_ratio']:.3f}")
+            
+            if 'vs_classical_sharpe' in result:
+                improvement = result['sharpe_improvement']
+                print(f"vs Classical: {result['vs_classical_sharpe']:.3f} ({improvement:+.3f})")
+            
+            print(f"\n📈 Allocation:")
+            for i, (sym, w) in enumerate(zip(universe.symbols, result['weights'])):
+                if w > 0.01:  # Only show positions > 1%
+                    print(f"  {sym}: {w*100:.1f}%")
+        elif 'result' in result:
+            # Fallback result
+            fb = result['result']
+            print(f"Expected Return: {fb.get('expected_return', 0)*100:.2f}%")
+            print(f"Volatility: {fb.get('volatility', 0)*100:.2f}%")
+            print(f"Sharpe Ratio: {fb.get('sharpe_ratio', 0):.3f}")
         
         print(f"\n⏱️  Performance")
         print(f"{'-'*60}")
