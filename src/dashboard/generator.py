@@ -258,6 +258,27 @@ class DashboardGenerator:
             # LLM sentiment not available yet
             pass
         
+        # Add ensemble voting signals (v2.20 Phase 3)
+        ensemble_signal = None
+        try:
+            from strategy.ensemble_voter import EnsembleVotingEngine
+            
+            ensemble_engine = EnsembleVotingEngine()
+            ensemble_result = ensemble_engine.evaluate()
+            if ensemble_result:
+                ensemble_signal = {
+                    "regime": ensemble_result.regime,
+                    "confidence": ensemble_result.confidence,
+                    "agreement_score": ensemble_result.agreement_score,
+                    "probabilities": ensemble_result.ensemble_probs,
+                    "action": ensemble_result.action,
+                    "position_scaling": ensemble_result.position_scaling,
+                    "disagreement_sources": ensemble_result.disagreement_sources
+                }
+        except Exception as e:
+            # Ensemble voting not available yet
+            pass
+        
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -274,7 +295,8 @@ class DashboardGenerator:
             "duration_allocation": yield_curve_data.get("duration_allocation"),
             "convexity_harvest": convexity_signal,
             "volatility_parity": vol_parity_signal,
-            "llm_sentiment": sentiment_signal
+            "llm_sentiment": sentiment_signal,
+            "ensemble_voting": ensemble_signal
         }
         
         out_path = PUBLIC_DIR / "signals.json"

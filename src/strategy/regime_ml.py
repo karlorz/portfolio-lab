@@ -25,6 +25,9 @@ from src.research.regime_classifier import RegimeClassifier, Regime
 from src.research.features import FeaturePipeline, Features
 from src.strategy.factor_rotation import FactorMomentumEngine, FactorScore
 
+# Phase 3C: Ensemble voting integration
+from src.strategy.ensemble_voter import EnsembleVotingEngine, EnsembleRegime
+
 
 class VolatilityRegime(Enum):
     """Volatility regime classification"""
@@ -528,6 +531,9 @@ class RegimeConditionalEngine:
         self.previous_regime: Optional[RegimeState] = None
         self.previous_allocation: Optional[Dict[str, float]] = None
         
+        # Phase 3C: Ensemble voting engine (v2.20)
+        self.ensemble_voter = EnsembleVotingEngine()
+        
     def evaluate(self) -> Dict[str, Any]:
         """
         Run full regime-conditional factor evaluation.
@@ -611,6 +617,23 @@ class RegimeConditionalEngine:
                     "from_regime_label": transition_info.from_regime.regime_label,
                     "to_regime_label": transition_info.to_regime.regime_label
                 }
+            
+            # Phase 3C: Add ensemble voting results
+            try:
+                ensemble_result = self.ensemble_voter.evaluate()
+                if ensemble_result:
+                    result["ensemble_voting"] = {
+                        "regime": ensemble_result.regime,
+                        "confidence": ensemble_result.confidence,
+                        "agreement_score": ensemble_result.agreement_score,
+                        "probabilities": ensemble_result.ensemble_probs,
+                        "action": ensemble_result.action,
+                        "position_scaling": ensemble_result.position_scaling,
+                        "disagreement_sources": ensemble_result.disagreement_sources
+                    }
+            except Exception as e:
+                # Ensemble voting may not be fully available
+                result["ensemble_voting"] = {"error": str(e)}
             
             return result
         else:
