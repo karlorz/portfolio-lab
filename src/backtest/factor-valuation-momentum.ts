@@ -148,7 +148,7 @@ function calculateHistoricalSpreadStats(
 function identifyRegime(spyPrices: PricePoint[], currentDate: string): string {
   // Simple regime detection based on SPY 6mo and 12mo returns
   // Convert to array if needed (JSON structure may vary)
-  const prices = Array.isArray(spyPrices) ? spyPrices : Object.values(spyPrices);
+  const prices: PricePoint[] = Array.isArray(spyPrices) ? spyPrices : Object.values(spyPrices);
   const currentIdx = prices.findIndex(p => p.d === currentDate);
   if (currentIdx === -1 || currentIdx < 252) return 'unknown';
   
