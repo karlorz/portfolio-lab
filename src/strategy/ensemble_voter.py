@@ -27,6 +27,7 @@ sys.path.insert(0, str(project_root))
 from src.strategy.regime_hmm import WassersteinHMMDetector, RegimeState
 from src.strategy.cta_overlay import CTATrendEngine
 from src.signals.vix_ensemble_adapter import VIXEnsembleAdapter
+from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
 
 
 @dataclass
@@ -52,7 +53,8 @@ class EnsembleRegime:
     cta_prob: float
     tsfm_prob: float
     duration_prob: float
-    vix_insurance_prob: float  # New: VIX insurance signal probability
+    vix_insurance_prob: float  # VIX insurance signal probability
+    vpin_prob: float           # VPIN flow toxicity signal probability
     
     # Weighted combination
     ensemble_probs: Dict[str, float]
@@ -109,6 +111,12 @@ class RegimeSignalAdapter:
             'risk_on': 'bull',
             'neutral': 'neutral',
             'hedge_active': 'neutral'  # Defensive but not bearish
+        },
+        'vpin': {
+            'high': 'bear',      # High toxicity = risk-off
+            'elevated': 'bear',
+            'normal': 'neutral',
+            'low': 'bull'        # Low toxicity = risk-on
         }
     }
     
@@ -235,6 +243,32 @@ class RegimeSignalAdapter:
                 'next_action': vix_signal.get('next_action', 'none')
             }
         )
+    
+    @classmethod
+    def from_vpin(cls, vpin_signal: Dict[str, Any]) -> RegimeSignal:
+        """Convert VPIN signal to RegimeSignal"""
+        regime = vpin_signal.get('regime', 'normal')
+        prob = vpin_signal.get('confidence', 0.5)
+        
+        unified_regime = cls.REGIME_MAP['vpin'].get(regime, 'neutral')
+        
+        # Confidence based on z-score magnitude
+        z_score = abs(vpin_signal.get('raw_data', {}).get('z_score', 0))
+        if z_score > 2.0:
+            confidence = 0.8
+        elif z_score > 1.0:
+            confidence = 0.6
+        else:
+            confidence = 0.4
+        
+        return RegimeSignal(
+            source='vpin',
+            regime=unified_regime,
+            probability=prob,
+            confidence=confidence,
+            timestamp=vpin_signal.get('timestamp', datetime.now().isoformat()),
+            raw_data=vpin_signal.get('raw_data', {})
+        )
 
 
 class EnsembleVotingEngine:
@@ -247,11 +281,12 @@ class EnsembleVotingEngine:
     
     # Default signal weights
     DEFAULT_WEIGHTS = {
-        'hmm': 0.38,        # Reduced from 0.40 to accommodate VIX signal
-        'cta': 0.24,        # Reduced from 0.25
-        'tsfm': 0.19,       # Reduced from 0.20
-        'duration': 0.14,   # Reduced from 0.15
-        'vix_insurance': 0.05  # New: VIX insurance overlay signal
+        'hmm': 0.35,        # Reduced to accommodate VPIN signal
+        'cta': 0.22,        
+        'tsfm': 0.17,       
+        'duration': 0.13,   
+        'vix_insurance': 0.05,
+        'vpin': 0.03        # New: VPIN flow toxicity signal (BVC prototype)
     }
     
     # Confidence thresholds
@@ -311,6 +346,16 @@ class EnsembleVotingEngine:
                 signals.append(RegimeSignalAdapter.from_vix_insurance(vix_signal))
         except Exception as e:
             print(f"VIX insurance signal error: {e}")
+        
+        # VPIN Flow Toxicity Signal (BVC prototype)
+        try:
+            vpin_engine = VPINEngine()
+            vpin_adapter = VPINSignalAdapter(vpin_engine)
+            vpin_signal = vpin_adapter.to_ensemble_signal('SPY')
+            if vpin_signal:
+                signals.append(RegimeSignalAdapter.from_vpin(vpin_signal))
+        except Exception as e:
+            print(f"VPIN signal error: {e}")
         
         return signals
     
