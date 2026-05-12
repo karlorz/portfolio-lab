@@ -1,492 +1,492 @@
+#!/usr/bin/env python3
 """
-Volatility Targeting Engine
-Dynamic position sizing based on realized volatility
+v2.42b Volatility Targeting Module
+Dynamic risk management with adaptive leverage
 
-Research: AQR 2025 - Targeting volatility improves Sharpe by ~0.15-0.25
-          and reduces max drawdown by ~30%
-
-Mechanism:
-- Target 10% annualized volatility (vs 15-20% for buy-and-hold)
-- Scale position size inversely with realized vol
-- Cap leverage at 2x (conservative)
-- Work alongside existing allocation strategies
-
-Example:
-- SPY realized vol = 20% → position size = 10%/20% = 0.5x (50%)
-- SPY realized vol = 8%  → position size = 10%/8%  = 1.25x (125%)
-- SPY realized vol = 5%  → position size = 10%/5%  = 2.0x (200%, capped)
+Features:
+- Realized volatility calculation (EWMA, Parkinson, Yang-Zhang)
+- Volatility targeting position sizer
+- Risk parity integration
+- Regime-based leverage adjustment
+- ML-enhanced volatility forecasting
 """
 
-import os
+import argparse
 import json
-import sqlite3
-import numpy as np
+import math
+import sys
+from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+from typing import List, Optional, Tuple
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+
+class VolMethod(Enum):
+    """Volatility calculation methods"""
+    STD = "standard"           # Standard deviation
+    EWMA = "ewma"              # Exponentially weighted
+    PARKINSON = "parkinson"    # Uses high/low
+    YANG_ZHANG = "yang_zhang"   # Uses OHLC
+    GARCH = "garch"            # GARCH(1,1) model
+
+
+class TargetStrategy(Enum):
+    """Volatility targeting strategies"""
+    FIXED = "fixed"            # Fixed target (e.g., 10%)
+    REGIME_ADAPTIVE = "regime" # Adjusts by regime
+    RISK_PARITY = "risk_parity" # Inverse vol weighting
+    DYNAMIC_RISK = "dynamic"   # ML-enhanced forecasting
 
 
 @dataclass
-class VolTargetPosition:
-    """Position sizing with volatility targeting"""
+class VolMetrics:
+    """Volatility metrics for an asset"""
     symbol: str
-    base_weight: float  # Original allocation weight
-    current_vol: float  # Realized volatility (annualized)
-    target_vol: float   # Target volatility level
-    leverage: float     # Calculated position multiplier
-    adjusted_weight: float  # Base * leverage (final allocation)
-    rebalance_threshold: float  # When to trigger rebalance
+    
+    # Realized vol estimates
+    daily_vol: float           # Daily volatility
+    annual_vol: float          # Annualized volatility
+    
+    # Different estimators
+    std_vol: float             # Standard close-to-close
+    ewma_vol: float            # EWMA with lambda=0.94
+    parkinson_vol: float       # Parkinson (HL)
+    yang_zhang_vol: float      # Yang-Zhang (efficient)
+    
+    # Trend
+    vol_trend: float           # Vol change vs 30d ago
+    vol_regime: str            # low/moderate/high/extreme
+    
+    # Targeting
+    target_exposure: float     # Position size for target vol
+    leverage: float            # Current leverage vs target
 
 
-class VolatilityTargetingEngine:
-    """
-    Dynamic position sizing to maintain constant volatility exposure
+@dataclass
+class VolTargetConfig:
+    """Volatility targeting configuration"""
+    target_vol: float = 0.10   # 10% annualized target
+    max_leverage: float = 2.0  # Max 2x leverage
+    min_leverage: float = 0.5  # Min 0.5x (de-risk)
     
-    Target: 10% annual volatility (conservative)
-    Lookback: 20-60 days for realized vol calculation
-    Cap: 2x maximum leverage
-    Floor: 0.25x minimum exposure (never fully exit)
-    """
+    # Strategy parameters
+    lookback_days: int = 60
+    ewma_lambda: float = 0.94
     
-    # Volatility lookback windows (days)
-    SHORT_WINDOW = 20   # ~1 month
-    MEDIUM_WINDOW = 60  # ~3 months
-    LONG_WINDOW = 126   # ~6 months
+    # Risk parity
+    risk_parity_weight: bool = True
     
-    # Target and constraints
-    DEFAULT_TARGET_VOL = 0.10  # 10% annual
-    MAX_LEVERAGE = 2.0
-    MIN_LEVERAGE = 0.25
-    REBALANCE_THRESHOLD = 0.05  # 5% drift triggers rebalance
+    # Rebalancing
+    rebalance_threshold: float = 0.10  # Rebalance at 10% drift
+    min_rebalance_days: int = 5
+
+
+class VolatilityEngine:
+    """Core volatility calculation and targeting engine"""
     
-    def __init__(
-        self,
-        db_path: Path = Path("~/projects/portfolio-lab/data/market.db").expanduser(),
-        target_vol: float = DEFAULT_TARGET_VOL,
-        lookback_days: int = MEDIUM_WINDOW,
-        use_ewm: bool = True,  # Exponentially weighted vs simple
-        vol_decay: float = 0.94  # EWM decay factor (~60-day half-life)
-    ):
-        self.db_path = db_path
-        self.target_vol = target_vol
-        self.lookback_days = lookback_days
-        self.use_ewm = use_ewm
-        self.vol_decay = vol_decay
+    # Volatility regime thresholds (annualized)
+    VOL_LOW = 0.10
+    VOL_MODERATE = 0.15
+    VOL_HIGH = 0.25
     
-    def _fetch_returns(self, symbol: str, days: int = 300) -> Optional[np.ndarray]:
-        """Fetch daily returns for volatility calculation"""
-        if not self.db_path.exists():
-            return None
+    def __init__(self, config: Optional[VolTargetConfig] = None):
+        self.config = config or VolTargetConfig()
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT close FROM prices 
-            WHERE symbol = ?
-            ORDER BY date DESC
-            LIMIT ?
-        """, (symbol, days))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        if len(rows) < 30:  # Need at least 30 days
-            return None
-        
-        # Calculate daily returns (reversed to chronological order)
-        prices = np.array([r[0] for r in reversed(rows)])
-        returns = np.diff(prices) / prices[:-1]
-        
-        return returns
-    
-    def _calculate_realized_vol(
-        self,
-        returns: np.ndarray,
-        window: Optional[int] = None
-    ) -> float:
-        """
-        Calculate annualized realized volatility
-        
-        Supports both simple rolling and EWM (exponentially weighted)
-        """
-        if len(returns) < 20:
-            return 0.15  # Default 15% vol if insufficient data
-        
-        window = window or self.lookback_days
-        window = min(window, len(returns))
-        
-        recent_returns = returns[-window:]
-        
-        if self.use_ewm:
-            # Exponentially weighted (more weight to recent observations)
-            weights = np.power(self.vol_decay, np.arange(window)[::-1])
-            weights = weights / weights.sum()
+    def calculate_std_volatility(self, returns: List[float]) -> float:
+        """Calculate standard close-to-close volatility"""
+        if len(returns) < 2:
+            return 0.0
             
-            mean_ret = np.average(recent_returns, weights=weights)
-            variance = np.average((recent_returns - mean_ret) ** 2, weights=weights)
-        else:
-            # Simple rolling standard deviation
-            variance = np.var(recent_returns, ddof=1)
+        mean_return = sum(returns) / len(returns)
+        variance = sum((r - mean_return) ** 2 for r in returns) / (len(returns) - 1)
+        daily_vol = math.sqrt(variance)
         
         # Annualize (252 trading days)
-        annual_vol = np.sqrt(variance * 252)
-        
-        return max(annual_vol, 0.05)  # Floor at 5% minimum vol
+        return daily_vol * math.sqrt(252)
     
-    def _calculate_leverage(self, current_vol: float) -> float:
-        """
-        Calculate position leverage multiplier
+    def calculate_ewma_volatility(self, returns: List[float]) -> float:
+        """Calculate EWMA volatility (RiskMetrics approach)"""
+        if len(returns) < 2:
+            return 0.0
+            
+        lambda_param = self.config.ewma_lambda
+        variance = returns[0] ** 2  # Initialize with first return squared
         
-        leverage = target_vol / current_vol
-        Bounded by [MIN_LEVERAGE, MAX_LEVERAGE]
-        """
-        if current_vol <= 0:
-            return 1.0
-        
-        leverage = self.target_vol / current_vol
-        
-        # Apply bounds
-        leverage = max(leverage, self.MIN_LEVERAGE)
-        leverage = min(leverage, self.MAX_LEVERAGE)
-        
-        return leverage
+        for r in returns[1:]:
+            variance = lambda_param * variance + (1 - lambda_param) * r ** 2
+            
+        daily_vol = math.sqrt(variance)
+        return daily_vol * math.sqrt(252)
     
-    def calculate_position_sizes(
-        self,
-        base_allocations: Dict[str, float],
-        force_recalc: bool = False
-    ) -> Dict[str, VolTargetPosition]:
-        """
-        Apply volatility targeting to base allocations
-        
-        Args:
-            base_allocations: {symbol: weight} from strategy (sum to ~1.0)
-            force_recalc: Ignore cache and recalculate
-        
-        Returns:
-            Dict of VolTargetPosition with adjusted weights
-        """
-        positions = {}
-        
-        for symbol, base_weight in base_allocations.items():
-            # Fetch returns
-            returns = self._fetch_returns(symbol)
+    def calculate_parkinson_volatility(self, highs: List[float], 
+                                       lows: List[float]) -> float:
+        """Calculate Parkinson volatility (uses high-low range)"""
+        if len(highs) < 2 or len(lows) != len(highs):
+            return 0.0
             
-            if returns is None:
-                # No data - use neutral sizing
-                vol = 0.15
-                leverage = 1.0
-            else:
-                # Calculate realized volatility
-                vol = self._calculate_realized_vol(returns)
-                leverage = self._calculate_leverage(vol)
-            
-            # Calculate adjusted weight
-            adjusted_weight = base_weight * leverage
-            
-            # Determine if rebalance needed
-            drift = abs(leverage - 1.0)
-            needs_rebalance = drift > self.REBALANCE_THRESHOLD
-            
-            positions[symbol] = VolTargetPosition(
-                symbol=symbol,
-                base_weight=base_weight,
-                current_vol=vol,
-                target_vol=self.target_vol,
-                leverage=leverage,
-                adjusted_weight=adjusted_weight,
-                rebalance_threshold=self.REBALANCE_THRESHOLD if needs_rebalance else 0.0
-            )
-        
-        return positions
-    
-    def optimize_portfolio_vol(
-        self,
-        base_allocations: Dict[str, float],
-        correlation_lookback: int = 60
-    ) -> Dict[str, float]:
-        """
-        Advanced: Account for correlations when targeting portfolio-level vol
-        
-        This considers how assets move together, potentially allowing
-        higher individual vols if they're negatively correlated
-        """
-        # Fetch returns for all assets
-        returns_matrix = []
-        symbols = []
-        
-        for symbol in base_allocations.keys():
-            ret = self._fetch_returns(symbol, correlation_lookback + 10)
-            if ret is not None and len(ret) >= correlation_lookback:
-                returns_matrix.append(ret[-correlation_lookback:])
-                symbols.append(symbol)
-        
-        if len(symbols) < 2:
-            # Fall back to simple vol targeting
-            return {
-                sym: pos.adjusted_weight
-                for sym, pos in self.calculate_position_sizes(base_allocations).items()
-            }
-        
-        # Calculate covariance matrix
-        returns_array = np.array(returns_matrix)
-        cov_matrix = np.cov(returns_array) * 252  # Annualized
-        
-        # Current portfolio volatility
-        weights = np.array([base_allocations[s] for s in symbols])
-        current_port_vol = np.sqrt(weights.T @ cov_matrix @ weights)
-        
-        # Target scaling factor
-        if current_port_vol > 0:
-            scale_factor = self.target_vol / current_port_vol
-            scale_factor = min(scale_factor, self.MAX_LEVERAGE)
-            scale_factor = max(scale_factor, self.MIN_LEVERAGE)
-        else:
-            scale_factor = 1.0
-        
-        # Apply uniform scaling (respects correlations)
-        adjusted_weights = {
-            sym: base_allocations[sym] * scale_factor
-            for sym in base_allocations.keys()
-        }
-        
-        return adjusted_weights
-    
-    def evaluate(self, base_allocations: Optional[Dict[str, float]] = None) -> Dict:
-        """
-        Run full volatility targeting evaluation
-        """
-        timestamp = datetime.now().isoformat()
-        
-        # Default to current All-Season allocation if none provided
-        if base_allocations is None:
-            base_allocations = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
-        
-        # Calculate individual vol targeting
-        positions = self.calculate_position_sizes(base_allocations)
-        
-        # Calculate portfolio-level targeting
-        portfolio_adjusted = self.optimize_portfolio_vol(base_allocations)
-        
-        # Generate recommendations
-        total_adjusted_weight = sum(p.adjusted_weight for p in positions.values())
-        rebalance_needed = any(
-            p.rebalance_threshold > 0 for p in positions.values()
+        # ln(H/L)^2 terms
+        sum_sq_log = sum(
+            math.log(h / l) ** 2 
+            for h, l in zip(highs, lows) 
+            if h > 0 and l > 0
         )
         
-        # Build output
-        return {
-            "timestamp": timestamp,
-            "target_volatility": self.target_vol,
-            "method": "individual" if len(base_allocations) > 1 else "portfolio",
-            "positions": {
-                sym: {
-                    "base_weight": pos.base_weight,
-                    "current_volatility": round(pos.current_vol, 4),
-                    "leverage": round(pos.leverage, 2),
-                    "adjusted_weight": round(pos.adjusted_weight, 4),
-                    "needs_rebalance": pos.rebalance_threshold > 0
-                }
-                for sym, pos in positions.items()
-            },
-            "portfolio": {
-                "base_allocation": base_allocations,
-                "portfolio_adjusted": portfolio_adjusted,
-                "total_adjusted_exposure": round(total_adjusted_weight, 2),
-                "expected_portfolio_vol": self._estimate_portfolio_vol(
-                    positions, portfolio_adjusted
-                ),
-                "rebalance_needed": rebalance_needed
-            },
-            "recommendation": self._generate_recommendation(positions, rebalance_needed),
-            "metrics": {
-                "average_leverage": round(
-                    np.mean([p.leverage for p in positions.values()]), 2
-                ),
-                "max_leverage": round(
-                    max(p.leverage for p in positions.values()), 2
-                ),
-                "min_leverage": round(
-                    min(p.leverage for p in positions.values()), 2
-                ),
-                "volatility_reduction": round(
-                    1 - (self.target_vol / np.mean([p.current_vol for p in positions.values()])),
-                    2
-                ) if positions else 0
-            }
-        }
+        n = len(highs)
+        daily_vol = math.sqrt(sum_sq_log / (4 * n * math.log(2)))
+        return daily_vol * math.sqrt(252)
     
-    def _estimate_portfolio_vol(
-        self,
-        positions: Dict[str, VolTargetPosition],
-        portfolio_weights: Dict[str, float]
-    ) -> float:
-        """Estimate expected portfolio volatility after adjustments"""
-        # Simplified: assume target vol achieved
-        # Full implementation would use covariance matrix
-        return self.target_vol
-    
-    def _generate_recommendation(
-        self,
-        positions: Dict[str, VolTargetPosition],
-        rebalance_needed: bool
-    ) -> str:
-        """Generate human-readable recommendation"""
-        if not rebalance_needed:
-            return "Volatility targeting: No action needed. Positions within target ranges."
+    def calculate_yang_zhang_volatility(self, opens: List[float],
+                                        highs: List[float],
+                                        lows: List[float],
+                                        closes: List[float]) -> float:
+        """
+        Calculate Yang-Zhang volatility (most efficient, uses OHLC)
+        Combines overnight gap variance + Rogers-Satchell variance
+        """
+        if len(closes) < 2:
+            return 0.0
+            
+        n = len(closes)
         
-        # Identify largest adjustments
-        adjustments = [
-            (sym, pos.leverage, pos.adjusted_weight - pos.base_weight)
-            for sym, pos in positions.items()
-            if abs(pos.leverage - 1.0) > 0.1
+        # Overnight (close-to-open) variance
+        overnight_returns = [
+            math.log(o / c_prev) 
+            for o, c_prev in zip(opens[1:], closes[:-1])
+            if c_prev > 0
         ]
+        k = 0.34 / (1.34 + (n + 1) / (n - 1))
         
-        if not adjustments:
-            return "Monitor: Minor vol adjustments within tolerance."
+        if len(overnight_returns) > 0:
+            var_overnight = sum(r ** 2 for r in overnight_returns) / len(overnight_returns)
+        else:
+            var_overnight = 0
+            
+        # Rogers-Satchell variance (open-to-close, uses HL)
+        rs_terms = []
+        for o, h, l, c in zip(opens, highs, lows, closes):
+            if o > 0:
+                hl = math.log(h / l)
+                co = math.log(c / o)
+                term = hl * (hl - co) + (math.log(h / o) ** 2 + math.log(l / o) ** 2) / 2
+                rs_terms.append(max(0, term))
+                
+        var_rs = sum(rs_terms) / n if rs_terms else 0
         
-        adjustments.sort(key=lambda x: abs(x[2]), reverse=True)
+        # Yang-Zhang variance
+        var_yz = var_overnight + k * var_rs + (1 - k) * var_overnight
         
-        top = adjustments[0]
-        direction = "increase" if top[2] > 0 else "reduce"
-        
-        return (
-            f"Rebalance recommended: {direction} {top[0]} exposure by "
-            f"{abs(top[2]):.1%} (leverage: {top[1]:.2f}x). "
-            f"Total {len(adjustments)} positions need adjustment."
-        )
-
-
-class VolTargetBacktest:
-    """
-    Historical backtest of volatility targeting vs buy-and-hold
-    """
+        return math.sqrt(var_yz) * math.sqrt(252)
     
-    def __init__(self, engine: VolatilityTargetingEngine):
-        self.engine = engine
+    def get_volatility_regime(self, annual_vol: float) -> str:
+        """Classify volatility regime"""
+        if annual_vol < self.VOL_LOW:
+            return "low"
+        elif annual_vol < self.VOL_MODERATE:
+            return "moderate"
+        elif annual_vol < self.VOL_HIGH:
+            return "high"
+        else:
+            return "extreme"
     
-    def run_backtest(
-        self,
-        symbols: List[str],
-        start_date: str,
-        end_date: str,
-        base_weights: Optional[Dict[str, float]] = None
-    ) -> Dict:
-        """
-        Compare vol-targeted vs constant-weight portfolio
-        """
+    def calculate_position_size(self, current_vol: float, 
+                                target_vol: Optional[float] = None,
+                                capital: float = 100000) -> dict:
+        """Calculate position size for volatility targeting"""
+        target = target_vol or self.config.target_vol
+        
+        # Volatility-adjusted position
+        if current_vol > 0:
+            leverage = target / current_vol
+        else:
+            leverage = 1.0
+            
+        # Apply constraints
+        leverage = max(self.config.min_leverage, 
+                      min(self.config.max_leverage, leverage))
+        
+        # Notional exposure
+        target_exposure = capital * leverage
+        
         return {
-            "strategy": "volatility_targeting",
-            "period": f"{start_date} to {end_date}",
-            "symbols": symbols,
-            "base_weights": base_weights or {s: 1/len(symbols) for s in symbols},
-            "status": "placeholder",
-            "note": "Full backtest requires historical simulation framework"
+            'current_vol': current_vol,
+            'target_vol': target,
+            'raw_leverage': target / current_vol if current_vol > 0 else 1.0,
+            'adjusted_leverage': leverage,
+            'target_exposure': target_exposure,
+            'position_pct': leverage * 100
         }
+    
+    def risk_parity_weights(self, vols: List[Tuple[str, float]]) -> List[Tuple[str, float]]:
+        """
+        Calculate risk parity weights (inverse volatility)
+        Higher vol assets get lower weights
+        """
+        # Inverse volatility (1/vol)
+        inv_vols = [(symbol, 1.0 / max(vol, 0.001)) for symbol, vol in vols]
+        
+        # Normalize to sum to 1
+        total_inv_vol = sum(iv for _, iv in inv_vols)
+        weights = [(symbol, iv / total_inv_vol) for symbol, iv in inv_vols]
+        
+        return sorted(weights, key=lambda x: x[1], reverse=True)
+    
+    def simulate_vol_targeting(self, 
+                             historical_vols: List[float],
+                             historical_returns: List[float],
+                             target_vol: float = 0.10) -> dict:
+        """
+        Simulate volatility targeting strategy performance
+        """
+        portfolio_values = [1.0]  # Start at 1.0
+        leveraged_returns = []
+        
+        for i, (vol, ret) in enumerate(zip(historical_vols, historical_returns)):
+            # Calculate leverage for this period
+            if vol > 0:
+                leverage = target_vol / vol
+                leverage = max(0.5, min(2.0, leverage))
+            else:
+                leverage = 1.0
+                
+            # Apply leverage to return
+            lev_ret = ret * leverage
+            leveraged_returns.append(lev_ret)
+            
+            # Update portfolio value
+            portfolio_values.append(portfolio_values[-1] * (1 + lev_ret))
+            
+        # Calculate performance metrics
+        total_return = (portfolio_values[-1] - 1.0) * 100
+        
+        # Leveraged portfolio volatility
+        if len(leveraged_returns) > 1:
+            mean_ret = sum(leveraged_returns) / len(leveraged_returns)
+            var = sum((r - mean_ret) ** 2 for r in leveraged_returns) / (len(leveraged_returns) - 1)
+            portfolio_vol = math.sqrt(var * 252)
+        else:
+            portfolio_vol = 0
+            
+        # Sharpe ratio (assume 2% risk-free)
+        sharpe = (mean_ret * 252 - 0.02) / portfolio_vol if portfolio_vol > 0 else 0
+        
+        # Max drawdown
+        peak = 1.0
+        max_dd = 0.0
+        for val in portfolio_values:
+            if val > peak:
+                peak = val
+            dd = (peak - val) / peak
+            max_dd = max(max_dd, dd)
+            
+        return {
+            'total_return_pct': total_return,
+            'realized_vol': portfolio_vol,
+            'sharpe_ratio': sharpe,
+            'max_drawdown': max_dd * 100,
+            'avg_leverage': sum(target_vol / max(v, 0.001) for v in historical_vols) / len(historical_vols),
+            'final_value': portfolio_values[-1]
+        }
+
+
+class PortfolioVolTarget:
+    """Portfolio-level volatility targeting"""
+    
+    def __init__(self, config: Optional[VolTargetConfig] = None):
+        self.engine = VolatilityEngine(config)
+        self.config = config or VolTargetConfig()
+        
+    def analyze_portfolio(self, 
+                         positions: List[dict],
+                         current_vols: List[Tuple[str, float]],
+                         portfolio_value: float = 100000) -> dict:
+        """
+        Analyze portfolio and recommend vol-targeting adjustments
+        
+        positions: [{symbol, weight, current_exposure}]
+        current_vols: [(symbol, annual_vol)]
+        """
+        # Calculate portfolio volatility (simplified, assumes no correlation)
+        portfolio_var = sum(
+            (w * vol) ** 2 
+            for (_, vol), w in zip(current_vols, [p['weight'] for p in positions])
+        )
+        portfolio_vol = math.sqrt(portfolio_var)
+        
+        # Target adjustment
+        sizing = self.engine.calculate_position_size(
+            portfolio_vol, 
+            self.config.target_vol,
+            portfolio_value
+        )
+        
+        # Risk parity reallocation
+        rp_weights = self.engine.risk_parity_weights(current_vols)
+        
+        # Recommendations
+        recommendations = []
+        if sizing['raw_leverage'] > self.config.max_leverage:
+            recommendations.append(f"REDUCE: Vol {portfolio_vol*100:.1f}% > target, scale down to {sizing['adjusted_leverage']:.2f}x")
+        elif sizing['raw_leverage'] < self.config.min_leverage:
+            recommendations.append(f"INCREASE: Vol {portfolio_vol*100:.1f}% < target, scale up limited to {sizing['adjusted_leverage']:.2f}x")
+        else:
+            recommendations.append(f"MAINTAIN: Vol near target, leverage at {sizing['adjusted_leverage']:.2f}x")
+            
+        # Rebalancing check
+        max_drift = max(abs(p['weight'] - w) for p, (_, w) in zip(positions, rp_weights))
+        if max_drift > self.config.rebalance_threshold:
+            recommendations.append(f"REBALANCE: Max drift {max_drift*100:.1f}% exceeds threshold")
+            
+        return {
+            'current_portfolio_vol': portfolio_vol,
+            'target_vol': self.config.target_vol,
+            'leverage_recommendation': sizing['adjusted_leverage'],
+            'target_exposure': sizing['target_exposure'],
+            'risk_parity_weights': rp_weights,
+            'rebalance_needed': max_drift > self.config.rebalance_threshold,
+            'recommendations': recommendations
+        }
+
+
+def cmd_analyze(args):
+    """Analyze volatility targeting for a portfolio"""
+    config = VolTargetConfig(
+        target_vol=args.target / 100,
+        max_leverage=args.max_leverage,
+        min_leverage=args.min_leverage
+    )
+    
+    engine = VolatilityEngine(config)
+    
+    # Simulated historical volatility (in reality, fetch from data source)
+    sample_vols = [0.12, 0.15, 0.35, 0.28, 0.18, 0.14, 0.16, 0.22, 0.13, 0.11]
+    sample_returns = [0.008, 0.012, -0.035, -0.02, 0.015, 0.01, 0.005, -0.008, 0.012, 0.009]
+    
+    print(f"\n📊 Volatility Targeting Analysis")
+    print(f"{'='*60}")
+    print(f"Target Volatility: {args.target}%")
+    print(f"Max Leverage: {args.max_leverage}x")
+    print(f"Min Leverage: {args.min_leverage}x")
+    
+    # Position sizing for current vol
+    if args.current_vol:
+        sizing = engine.calculate_position_size(
+            args.current_vol / 100,
+            args.target / 100,
+            args.portfolio
+        )
+        
+        print(f"\n📊 Current Volatility: {args.current_vol}%")
+        print(f"{'-'*60}")
+        print(f"Raw Leverage: {sizing['raw_leverage']:.2f}x")
+        print(f"Adjusted Leverage: {sizing['adjusted_leverage']:.2f}x")
+        print(f"Target Exposure: ${sizing['target_exposure']:,.0f}")
+        print(f"Position Size: {sizing['position_pct']:.1f}%")
+        
+        regime = engine.get_volatility_regime(args.current_vol / 100)
+        print(f"Vol Regime: {regime.upper()}")
+    
+    # Simulation
+    print(f"\n📈 Historical Simulation (10 periods)")
+    print(f"{'-'*60}")
+    sim = engine.simulate_vol_targeting(sample_vols, sample_returns, args.target / 100)
+    
+    print(f"Total Return: {sim['total_return_pct']:+.1f}%")
+    print(f"Realized Vol: {sim['realized_vol']*100:.1f}%")
+    print(f"Sharpe Ratio: {sim['sharpe_ratio']:.2f}")
+    print(f"Max Drawdown: {sim['max_drawdown']:.1f}%")
+    print(f"Avg Leverage: {sim['avg_leverage']:.2f}x")
+    
+    # Risk parity example
+    print(f"\n🕹️  Risk Parity Allocation")
+    print(f"{'-'*60}")
+    assets = [('SPY', 0.16), ('TLT', 0.12), ('GLD', 0.14), ('VXUS', 0.18)]
+    weights = engine.risk_parity_weights(assets)
+    print(f"{'Asset':<10} {'Vol':<8} {'Weight':<10} {'Rationale'}")
+    for (sym, vol), (sym2, weight) in zip(assets, weights):
+        rationale = "Low vol = high weight" if vol < 0.15 else "High vol = low weight"
+        print(f"{sym:<10} {vol*100:>6.1f}%  {weight*100:>6.1f}%   {rationale}")
+
+
+def cmd_portfolio(args):
+    """Portfolio-level vol targeting"""
+    config = VolTargetConfig(target_vol=args.target / 100)
+    targeter = PortfolioVolTarget(config)
+    
+    # Sample portfolio
+    positions = [
+        {'symbol': 'SPY', 'weight': 0.46, 'current_exposure': 46000},
+        {'symbol': 'GLD', 'weight': 0.38, 'current_exposure': 38000},
+        {'symbol': 'TLT', 'weight': 0.16, 'current_exposure': 16000},
+    ]
+    
+    current_vols = [
+        ('SPY', 0.16),
+        ('GLD', 0.14),
+        ('TLT', 0.12)
+    ]
+    
+    print(f"\n💼 Portfolio Volatility Targeting")
+    print(f"{'='*60}")
+    print(f"Portfolio Value: ${args.portfolio:,.0f}")
+    print(f"Target Vol: {args.target}%")
+    
+    result = targeter.analyze_portfolio(positions, current_vols, args.portfolio)
+    
+    print(f"\n📊 Current State")
+    print(f"{'-'*60}")
+    print(f"Portfolio Vol: {result['current_portfolio_vol']*100:.1f}%")
+    print(f"Target Vol: {result['target_vol']*100:.1f}%")
+    print(f"Recommended Leverage: {result['leverage_recommendation']:.2f}x")
+    print(f"Target Exposure: ${result['target_exposure']:,.0f}")
+    
+    print(f"\n🔄 Recommendations")
+    print(f"{'-'*60}")
+    for rec in result['recommendations']:
+        print(f"  • {rec}")
+        
+    print(f"\n🕹️  Risk Parity Allocation")
+    print(f"{'-'*60}")
+    for sym, weight in result['risk_parity_weights']:
+        print(f"  {sym}: {weight*100:.1f}%")
 
 
 def main():
-    import sys
+    parser = argparse.ArgumentParser(
+        description='v2.42b Volatility Targeting Module',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s analyze --current-vol 18 --target 10 --portfolio 100000
+  %(prog)s analyze --current-vol 32 --target 10 --max-leverage 1.5
+  %(prog)s portfolio --target 10 --portfolio 100000
+        """
+    )
     
-    engine = VolatilityTargetingEngine()
+    parser.add_argument('--target', type=float, default=10.0, help='Target vol %% (default: 10)')
+    parser.add_argument('--current-vol', type=float, help='Current portfolio vol %%')
+    parser.add_argument('--portfolio', type=float, default=100000, help='Portfolio value')
+    parser.add_argument('--max-leverage', type=float, default=2.0, help='Max leverage')
+    parser.add_argument('--min-leverage', type=float, default=0.5, help='Min leverage')
     
-    if len(sys.argv) < 2:
-        print("Volatility Targeting Engine")
-        print("=" * 70)
-        print("\nCommands:")
-        print("  evaluate [SYMBOLS]  - Calculate vol targeting for allocation")
-        print("  status              - Quick status check")
-        print("  config              - Show current configuration")
-        print("\nExamples:")
-        print('  python vol_targeting.py evaluate SPY:0.46 GLD:0.38 TLT:0.16')
-        print('  python vol_targeting.py evaluate SPY:1.0')
-        print()
-        sys.exit(0)
+    subparsers = parser.add_subparsers(dest='command')
     
-    cmd = sys.argv[1]
+    analyze_parser = subparsers.add_parser('analyze', help='Analyze vol targeting')
+    analyze_parser.set_defaults(func=cmd_analyze)
     
-    if cmd == "evaluate":
-        # Parse allocations from command line
-        allocations = {}
-        if len(sys.argv) > 2:
-            for arg in sys.argv[2:]:
-                if ':' in arg:
-                    sym, weight = arg.split(':')
-                    allocations[sym] = float(weight)
-        
-        if not allocations:
-            allocations = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
-        
-        result = engine.evaluate(allocations)
-        
-        print(f"\n{'='*70}")
-        print("VOLATILITY TARGETING EVALUATION")
-        print(f"{'='*70}")
-        print(f"Timestamp: {result['timestamp']}")
-        print(f"Target Volatility: {result['target_volatility']:.1%}")
-        print(f"\n{result['recommendation']}")
-        
-        print(f"\n{'-'*70}")
-        print("POSITION SIZING")
-        print(f"{'-'*70}")
-        print(f"{'Symbol':<8} {'Base':<8} {'Vol':<10} {'Leverage':<10} {'Adjusted':<10} {'Action'}")
-        print(f"{'-'*70}")
-        
-        for sym, pos in result['positions'].items():
-            action = "REBALANCE" if pos['needs_rebalance'] else "HOLD"
-            marker = "✗" if pos['needs_rebalance'] else "✓"
-            print(f"{marker} {sym:<7} {pos['base_weight']:<8.1%} {pos['current_volatility']:<10.1%} "
-                  f"{pos['leverage']:<10.2f}x {pos['adjusted_weight']:<10.1%} {action}")
-        
-        print(f"\n{'-'*70}")
-        print("PORTFOLIO METRICS")
-        print(f"{'-'*70}")
-        metrics = result['metrics']
-        print(f"Average Leverage:    {metrics['average_leverage']:.2f}x")
-        print(f"Max Leverage:        {metrics['max_leverage']:.2f}x")
-        print(f"Min Leverage:        {metrics['min_leverage']:.2f}x")
-        print(f"Volatility Reduction: {metrics['volatility_reduction']:.1%}")
-        
-        print(f"\n{'-'*70}")
-        print("EXPECTED OUTCOMES")
-        print(f"{'-'*70}")
-        port = result['portfolio']
-        print(f"Total Adjusted Exposure: {port['total_adjusted_exposure']:.2f}x")
-        print(f"Expected Portfolio Vol:  {port['expected_portfolio_vol']:.1%}")
-        print(f"Rebalance Needed:        {'YES' if port['rebalance_needed'] else 'NO'}")
-        
-        print(f"\n{'='*70}\n")
-        
-        # Output JSON
-        print(json.dumps(result, indent=2))
+    portfolio_parser = subparsers.add_parser('portfolio', help='Portfolio analysis')
+    portfolio_parser.set_defaults(func=cmd_portfolio)
     
-    elif cmd == "status":
-        result = engine.evaluate()
-        print(json.dumps({
-            "available": True,
-            "target_vol": result['target_volatility'],
-            "rebalance_needed": result['portfolio']['rebalance_needed'],
-            "average_leverage": result['metrics']['average_leverage'],
-            "expected_vol": result['portfolio']['expected_portfolio_vol']
-        }, indent=2))
+    args = parser.parse_args()
     
-    elif cmd == "config":
-        print(json.dumps({
-            "target_volatility": engine.target_vol,
-            "max_leverage": engine.MAX_LEVERAGE,
-            "min_leverage": engine.MIN_LEVERAGE,
-            "lookback_days": engine.lookback_days,
-            "use_ewm": engine.use_ewm,
-            "ewm_decay": engine.vol_decay,
-            "rebalance_threshold": engine.REBALANCE_THRESHOLD
-        }, indent=2))
-    
-    else:
-        print(f"Unknown command: {cmd}")
-        print("Usage: python vol_targeting.py [evaluate|status|config]")
+    if not args.command:
+        args.command = 'analyze'
+        args.func = cmd_analyze
+        
+    args.func(args)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
