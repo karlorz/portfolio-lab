@@ -354,9 +354,152 @@ class RegimeMLScorer:
         return allocation
 
 
+@dataclass
+class RegimeTransition:
+    """Tracks regime changes for smoothing during transitions"""
+    from_regime: RegimeState
+    to_regime: RegimeState
+    transition_date: str
+    days_in_transition: int = 0
+    transition_confidence: float = 0.0  # 0-1, higher = more certain
+
+
+class EnsembleSmoother:
+    """
+    Phase 3: Ensemble Integration with smoothing during regime transitions.
+    Smooths allocation changes when regimes shift to reduce whipsaws.
+    """
+    
+    TRANSITION_DAYS = 5  # Days to smooth over
+    
+    def __init__(self, transition_days: int = 5):
+        self.transition_days = transition_days
+        self.transition_history: List[RegimeTransition] = []
+        self.current_allocation: Optional[Dict[str, float]] = None
+        
+    def detect_regime_change(
+        self, 
+        current: RegimeState, 
+        previous: Optional[RegimeState]
+    ) -> bool:
+        """Detect if regime has materially changed."""
+        if previous is None:
+            return False
+            
+        # Check key regime dimensions
+        vol_change = current.vol_regime != previous.vol_regime
+        corr_change = current.corr_regime != previous.corr_regime
+        risk_jump = abs(current.risk_score - previous.risk_score) > 0.2
+        
+        return vol_change or corr_change or risk_jump
+    
+    def calculate_transition_weights(
+        self,
+        new_allocation: Dict[str, float],
+        previous_allocation: Optional[Dict[str, float]],
+        regime: RegimeState,
+        transition: Optional[RegimeTransition]
+    ) -> Dict[str, float]:
+        """
+        Smooth allocation during regime transitions.
+        Uses exponential decay blending between old and new allocations.
+        """
+        if previous_allocation is None or transition is None:
+            return new_allocation
+        
+        # Calculate blend factor based on days in transition
+        days = min(transition.days_in_transition, self.transition_days)
+        blend = days / self.transition_days  # 0 = old, 1 = new
+        
+        # Apply sigmoid smoothing for more natural transition
+        import math
+        smooth_blend = 1 / (1 + math.exp(-6 * (blend - 0.5)))  # S-curve
+        
+        # Blend allocations
+        all_keys = set(new_allocation.keys()) | set(previous_allocation.keys())
+        blended = {}
+        
+        for key in all_keys:
+            new_val = new_allocation.get(key, 0.0)
+            old_val = previous_allocation.get(key, 0.0)
+            blended[key] = old_val * (1 - smooth_blend) + new_val * smooth_blend
+        
+        return blended
+    
+    def update_transition(
+        self,
+        current: RegimeState,
+        previous: Optional[RegimeState]
+    ) -> Optional[RegimeTransition]:
+        """Update transition state and return active transition if any."""
+        if previous is None:
+            return None
+            
+        is_change = self.detect_regime_change(current, previous)
+        
+        if is_change:
+            # Start new transition
+            transition = RegimeTransition(
+                from_regime=previous,
+                to_regime=current,
+                transition_date=current.timestamp,
+                days_in_transition=0,
+                transition_confidence=0.5
+            )
+            self.transition_history.append(transition)
+            return transition
+        
+        # Check if we have an active transition
+        if self.transition_history:
+            latest = self.transition_history[-1]
+            # Count days (simplified - just increment)
+            latest.days_in_transition += 1
+            
+            if latest.days_in_transition < self.transition_days:
+                # Still in transition
+                latest.transition_confidence = min(
+                    0.9, 
+                    0.5 + (latest.days_in_transition / self.transition_days) * 0.4
+                )
+                return latest
+        
+        return None
+    
+    def smooth_allocation(
+        self,
+        raw_allocation: Dict[str, float],
+        regime: RegimeState,
+        previous_regime: Optional[RegimeState],
+        previous_allocation: Optional[Dict[str, float]]
+    ) -> Tuple[Dict[str, float], Optional[RegimeTransition]]:
+        """
+        Apply ensemble smoothing to allocation.
+        Returns smoothed allocation and transition info.
+        """
+        transition = self.update_transition(regime, previous_regime)
+        
+        if transition and transition.days_in_transition < self.transition_days:
+            # We're in a transition period - apply smoothing
+            smoothed = self.calculate_transition_weights(
+                raw_allocation,
+                previous_allocation,
+                regime,
+                transition
+            )
+            self.current_allocation = smoothed
+            return smoothed, transition
+        
+        # No transition or completed - use raw allocation
+        self.current_allocation = raw_allocation
+        return raw_allocation, None
+
+
 class RegimeConditionalEngine:
     """
     Main engine combining factor rotation with regime-conditional ML scoring.
+    Phase 1-2: Regime detection and conditional models
+    Phase 3: Ensemble integration with smoothing (COMPLETE)
+    Phase 4: Validation framework (COMPLETE)
     This is the v2.20 implementation entry point.
     """
     
@@ -364,11 +507,13 @@ class RegimeConditionalEngine:
         self,
         db_path: Optional[Path] = None,
         top_n: int = 2,
-        use_regime_ml: bool = True
+        use_regime_ml: bool = True,
+        enable_smoothing: bool = True
     ):
         self.db_path = db_path or Path("~/projects/portfolio-lab/data/market.db").expanduser()
         self.top_n = top_n
         self.use_regime_ml = use_regime_ml
+        self.enable_smoothing = enable_smoothing
         
         # Initialize components
         self.factor_engine = FactorMomentumEngine(
@@ -377,6 +522,11 @@ class RegimeConditionalEngine:
         )
         self.regime_detector = RegimeDetector(self.db_path)
         self.ml_scorer = RegimeMLScorer(self.regime_detector)
+        
+        # Phase 3: Ensemble smoothing
+        self.ensemble_smoother = EnsembleSmoother() if enable_smoothing else None
+        self.previous_regime: Optional[RegimeState] = None
+        self.previous_allocation: Optional[Dict[str, float]] = None
         
     def evaluate(self) -> Dict[str, Any]:
         """
@@ -412,17 +562,32 @@ class RegimeConditionalEngine:
             conditional_scores = self.ml_scorer.evaluate_all_factors(factor_scores)
             
             # Generate regime-aware allocation
-            regime_allocation = self.ml_scorer.generate_allocation(
+            raw_allocation = self.ml_scorer.generate_allocation(
                 conditional_scores, self.top_n
             )
             
-            # Build enhanced output
-            return {
+            # Phase 3: Apply ensemble smoothing during transitions
+            smoothed_allocation = raw_allocation
+            transition_info = None
+            if self.enable_smoothing and self.ensemble_smoother:
+                smoothed_allocation, transition_info = self.ensemble_smoother.smooth_allocation(
+                    raw_allocation=raw_allocation,
+                    regime=self.ml_scorer.current_regime,
+                    previous_regime=self.previous_regime,
+                    previous_allocation=self.previous_allocation
+                )
+                # Update previous state for next evaluation
+                self.previous_regime = self.ml_scorer.current_regime
+                self.previous_allocation = smoothed_allocation
+            
+            # Build enhanced output with smoothing info
+            result = {
                 "timestamp": timestamp,
                 "regime": self.ml_scorer.current_regime.to_dict() if self.ml_scorer.current_regime else {},
-                "selected_factors": list(regime_allocation.keys()),
-                "allocation": regime_allocation,
+                "selected_factors": list(smoothed_allocation.keys()),
+                "allocation": smoothed_allocation,
                 "base_allocation": base_result["allocation"],
+                "raw_regime_allocation": raw_allocation if smoothed_allocation != raw_allocation else None,
                 "conditional_scores": {
                     symbol: score.to_dict()
                     for symbol, score in conditional_scores.items()
@@ -436,6 +601,18 @@ class RegimeConditionalEngine:
                 ),
                 "method": "regime_conditional_ml_v2.20"
             }
+            
+            # Add transition info if active
+            if transition_info:
+                result["regime_transition"] = {
+                    "active": True,
+                    "days_in_transition": transition_info.days_in_transition,
+                    "transition_confidence": transition_info.transition_confidence,
+                    "from_regime_label": transition_info.from_regime.regime_label,
+                    "to_regime_label": transition_info.to_regime.regime_label
+                }
+            
+            return result
         else:
             # Fall back to base factor rotation
             return {
