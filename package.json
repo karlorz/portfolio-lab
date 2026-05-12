@@ -1,26 +1,27 @@
 {
   "name": "portfolio-lab",
-  "version": "1.0.0",
+  "private": true,
+  "version": "2.51.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "bunx --bun vite",
+    "build": "bunx --bun vite build",
     "preview": "vite preview",
-    "fetch-data": "bun run src/data/fetcher.ts",
-    "backtest": "bun run src/backtest/cli.ts"
+    "fetch-data": "bun run scripts/fetch-data.ts",
+    "backtest": "python3 -m src.backtest.engine",
+    "agent-train": "python3 -m src.agents.marl_trainer",
+    "agent-infer": "python3 -m src.agents.ai_controller"
   },
   "dependencies": {
-    "lucide-react": "^1.14.0",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "recharts": "^3.8.1"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.12.0",
+    "lucide-react": "^0.344.0"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.13",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
-    "typescript": "^5.9.3",
-    "vite": "^8.0.11"
+    "@types/react": "^18.2.56",
+    "@types/react-dom": "^18.2.19",
+    "typescript": "^5.2.2",
+    "vite": "^5.1.4"
   }
 }

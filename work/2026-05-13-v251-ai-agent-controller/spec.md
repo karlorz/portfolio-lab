@@ -1,41 +1,70 @@
----
-skill_compatibility: 2
-version: "2.0"
-kind: feature
-slug: v251-ai-agent-controller
-status: in-progress
-progress: 0
-started: 2026-05-13
-references: ["38fe7bcfaacc"]
----
+# AI Agent Controller v2.51 - Work Item
 
-# v2.51 AI Agent Controller (MARL)
+**Status:** In Progress  
+**Created:** 2026-05-13 09:00 UTC  
+**Assigned:** Auto (system)  
+**Priority:** Critical  
+**Component:** AI Engine v2.51  
 
-## Goal
-Multi-agent reinforcement learning controller for autonomous portfolio management with LLM+RL hybrid intelligence.
+## Objective
+Implement Multi-Agent Reinforcement Learning (MARL) portfolio controller with 5 specialized agents coordinated via LangGraph-style agent graph. Integrate with v2.24 signal integrator.
 
-## Research Insights (Session 38fe7bcfaacc)
-- MARL outperforms single-agent RL by 15-20% in returns
-- Hybrid LLM+RL adds reasoning over unstructured data
-- Framework: FinRL-inspired architecture
-- Key algorithms: PPO, SAC, DDPG for continuous actions
-- State: prices, indicators, sentiment, current weights
-- Reward: Δ(portfolio value) - λ × risk - costs
+## Research Basis
+Based on multi-agent RL for portfolio management literature:
+- 5 specialized agents: Analyst, Sentiment, Risk, Execution, Controller
+- State aggregation with agent-specific observation spaces
+- PPO-based training with centralized critic, decentralized actors
+- LangGraph-inspired directed graph for agent communication
 
-## Agent Architecture
-1. **Analyst Agent** - Fundamental/technical analysis
-2. **Sentiment Agent** - LLM-processed news/social
-3. **Risk Agent** - Volatility/regime monitoring
-4. **Execution Agent** - Trade sizing/timing
+## Requirements
 
-## Implementation
-- LangGraph-style agent coordination
-- Hermes cron integration for continuous operation
-- Paper trading → live graduation gates
+### Agent Architecture
+1. **Analyst Agent** (value/fundamental)
+   - Obs: earnings estimates, ratios, growth signals
+   - Action: value score [0,1], conviction [-1,1]
+   
+2. **Sentiment Agent** (news/social)
+   - Obs: sentiment features, volume, anomalies
+   - Action: sentiment score [0,1], direction [-1,1]
+   
+3. **Risk Agent** (volatility/drawdown)
+   - Obs: VaR, CVaR, max drawdown, tail risk
+   - Action: risk budget [0.5,1.5], hedging level [0,1]
+   
+4. **Execution Agent** (timing/routing)
+   - Obs: spread, volume profile, market impact
+   - Action: urgency [0,1], slice size [0.1,0.5]
+   
+5. **Controller Agent** (orchestration)
+   - Obs: all agent outputs, portfolio state
+   - Action: agent weights, final allocation
 
-## Files
-- `src/agents/controller.py`
-- `src/agents/analyst.py`
-- `src/agents/sentiment.py`
-- `src/agents/risk.py`
-- `src/agents/executor.py`
+### Integration Points
+- Consume signals from v2.24 signal_integrator.py
+- Output allocations to execution layer
+- Support both live trading and backtest modes
+
+## Implementation Tasks
+1. [ ] Create agent network architectures (PyTorch)
+2. [ ] Build agent graph communication layer
+3. [ ] Implement centralized critic with value decomposition
+4. [ ] Add training loop with PPO/MAPPO
+5. [ ] Integrate with signal integrator
+6. [ ] Create agent state persistence
+7. [ ] Add explainability (agent contribution tracking)
+
+## Success Metrics
+- Sharpe >= 0.85 (vs 0.79 champion baseline)
+- Agent consensus accuracy >70%
+- Inference latency <50ms
+- Training convergence <500 episodes
+
+## Files to Create
+- src/agents/analyst_agent.py
+- src/agents/sentiment_agent.py  
+- src/agents/risk_agent.py
+- src/agents/execution_agent.py
+- src/agents/controller_agent.py
+- src/agents/agent_graph.py
+- src/agents/marl_trainer.py
+- src/agents/ai_controller.py (main entry)
