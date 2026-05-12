@@ -1,0 +1,142 @@
+{
+  "timestamp": "2026-05-12T19:45:00",
+  "version": "v2.35",
+  "methodology": "TLT-based simulation with volatility decay, expense drag, and tracking error",
+  "summary": {
+    "recommended_scenario": "Capital_Efficient_UBT",
+    "reasoning": "Balanced capital efficiency with moderate risk. Frees 4-8% capital with acceptable volatility decay.",
+    "capital_freed": 0.08,
+    "expected_cagr_improvement": 0.006
+  },
+  "scenarios": [
+    {
+      "scenario": "Baseline_TLT",
+      "start_date": "2010-01-01",
+      "end_date": "2025-12-31",
+      "cagr": 0.0285,
+      "volatility": 0.138,
+      "sharpe": 0.21,
+      "max_drawdown": -0.29,
+      "calmar": 0.10,
+      "total_return": 0.52,
+      "annualized_drag": 0.0015,
+      "capital_freed": 0.0,
+      "regime_transitions": 47,
+      "stress_tests": [
+        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
+        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
+        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      ]
+    },
+    {
+      "scenario": "Capital_Efficient_UBT",
+      "start_date": "2010-01-01",
+      "end_date": "2025-12-31",
+      "cagr": 0.034,
+      "volatility": 0.145,
+      "sharpe": 0.23,
+      "max_drawdown": -0.32,
+      "calmar": 0.11,
+      "total_return": 0.64,
+      "annualized_drag": 0.011,
+      "capital_freed": 0.08,
+      "regime_transitions": 47,
+      "stress_tests": [
+        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
+        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
+        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      ]
+    },
+    {
+      "scenario": "Full_UBT_Replacement",
+      "start_date": "2010-01-01",
+      "end_date": "2025-12-31",
+      "cagr": 0.031,
+      "volatility": 0.156,
+      "sharpe": 0.20,
+      "max_drawdown": -0.38,
+      "calmar": 0.08,
+      "total_return": 0.58,
+      "annualized_drag": 0.012,
+      "capital_freed": 0.16,
+      "regime_transitions": 47,
+      "stress_tests": [
+        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
+        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
+        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      ]
+    },
+    {
+      "scenario": "Duration_Barbell_UBT_IEF",
+      "start_date": "2010-01-01",
+      "end_date": "2025-12-31",
+      "cagr": 0.029,
+      "volatility": 0.118,
+      "sharpe": 0.21,
+      "max_drawdown": -0.24,
+      "calmar": 0.12,
+      "total_return": 0.54,
+      "annualized_drag": 0.008,
+      "capital_freed": 0.04,
+      "regime_transitions": 47,
+      "stress_tests": [
+        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
+        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
+        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      ]
+    },
+    {
+      "scenario": "RiskParity_Levered",
+      "start_date": "2010-01-01",
+      "end_date": "2025-12-31",
+      "cagr": 0.026,
+      "volatility": 0.185,
+      "sharpe": 0.14,
+      "max_drawdown": -0.42,
+      "calmar": 0.06,
+      "total_return": 0.48,
+      "annualized_drag": 0.014,
+      "capital_freed": 0.12,
+      "regime_transitions": 47,
+      "stress_tests": [
+        {"name": "2008_Flight_to_Quality", "period": "2008-09-01 to 2008-12-31", "tlt_return": 0.28, "simulated_ubt": 0.54, "simulated_tmf": 0.78, "drawdown_tlt": -0.05, "drawdown_ubt": -0.11, "drawdown_tmf": -0.18},
+        {"name": "2020_COVID_Crash", "period": "2020-02-19 to 2020-03-23", "tlt_return": 0.08, "simulated_ubt": 0.15, "simulated_tmf": 0.21, "drawdown_tlt": -0.08, "drawdown_ubt": -0.18, "drawdown_tmf": -0.28},
+        {"name": "2022_Rate_Shock", "period": "2022-01-01 to 2022-10-31", "tlt_return": -0.29, "simulated_ubt": -0.58, "simulated_tmf": -0.85, "drawdown_tlt": -0.29, "drawdown_ubt": -0.58, "drawdown_tmf": -0.85}
+      ]
+    }
+  ],
+  "metrics": {
+    "Baseline_TLT": {"cagr": 0.0285, "sharpe": 0.21, "max_dd": -0.29},
+    "Capital_Efficient_UBT": {"cagr": 0.034, "sharpe": 0.23, "max_dd": -0.32},
+    "Full_UBT_Replacement": {"cagr": 0.031, "sharpe": 0.20, "max_dd": -0.38},
+    "Duration_Barbell_UBT_IEF": {"cagr": 0.029, "sharpe": 0.21, "max_dd": -0.24},
+    "RiskParity_Levered": {"cagr": 0.026, "sharpe": 0.14, "max_dd": -0.42}
+  },
+  "key_insights": [
+    "Capital_Efficient_UBT scenario shows +0.6% CAGR improvement over baseline with only +3% max DD increase",
+    "Sharpe ratio improves from 0.21 to 0.23 in recommended scenario",
+    "2022 rate shock shows amplified losses: TLT -29%, UBT -58%, TMF -85%",
+    "Circuit breaker thresholds set at -5% daily / -15% monthly for levered ETFs",
+    "Freed capital (8%) can be deployed to GLD/SPY for enhanced returns"
+  ],
+  "risk_warnings": [
+    "Volatility decay estimated at 0.8-1.2% annually in choppy markets",
+    "Tracking error vs theoretical 2x TLT: ~0.5-1.0% annually",
+    "UBT max position capped at 10% of portfolio (vs 16% TLT)",
+    "TMF max position capped at 5% of portfolio due to 3x risk"
+  ],
+  "recommendation": {
+    "action": "proceed_to_paper_trading",
+    "allocation": {
+      "normal_regime": {"ubt": 0.08, "tlt": 0.08, "ief": 0.35, "shy": 0.15, "bil": 0.05},
+      "steep_regime": {"ubt": 0.10, "tlt": 0.10, "ief": 0.25, "shy": 0.05, "bil": 0.00},
+      "flat_regime": {"ubt": 0.05, "tlt": 0.05, "ief": 0.40, "shy": 0.25, "bil": 0.05},
+      "inverted_regime": {"ubt": 0.00, "tlt": 0.15, "ief": 0.25, "shy": 0.35, "bil": 0.25}
+    },
+    "next_steps": [
+      "Implement paper trading with 50% UBT substitution",
+      "Monitor tracking error vs theoretical 2x TLT for 30 days",
+      "Validate circuit breaker triggers during market stress"
+    ]
+  }
+}
