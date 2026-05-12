@@ -41,8 +41,14 @@ const SECTOR_ETFS = [
   'XLC',   // Communication Services
 ];
 
+// Leveraged Treasury ETFs (v2.35 Capital Efficiency)
+const LEVERAGED_TREASURY_ETFS = [
+  'UBT',   // ProShares Ultra 20+ Year Treasury (2x TLT)
+  'TMF',   // Direxion Daily 20+ Year Treasury Bull 3X (3x TLT)
+];
+
 // Combined symbol list for backward compatibility
-const SYMBOLS = [...CORE_SYMBOLS, ...SECTOR_ETFS];
+const SYMBOLS = [...CORE_SYMBOLS, ...SECTOR_ETFS, ...LEVERAGED_TREASURY_ETFS];
 const FRED_SERIES = {
   dgs2: 'DGS2',
   dgs10: 'DGS10',
