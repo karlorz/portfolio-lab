@@ -1,0 +1,50 @@
+{
+  "version": "v2.60",
+  "description": "Ensemble voter weights with Alternative Data integration",
+  "updated": "2026-05-13T02:52:59Z",
+  "weights": {
+    "hmm_regime": {
+      "weight": 0.35,
+      "description": "Wasserstein HMM regime detector",
+      "enabled": true
+    },
+    "cta_trend": {
+      "weight": 0.22,
+      "description": "CTA trend-following overlay",
+      "enabled": true
+    },
+    "duration_yield": {
+      "weight": 0.13,
+      "description": "Duration/yield curve signals",
+      "enabled": true
+    },
+    "sector_momentum": {
+      "weight": 0.10,
+      "description": "Sector rotation momentum",
+      "enabled": true
+    },
+    "alternative_data": {
+      "weight": 0.10,
+      "description": "NLP/Alternative data signals (v2.60)",
+      "enabled": true
+    },
+    "cash_reserve": {
+      "weight": 0.10,
+      "description": "Cash/baseline reserve",
+      "enabled": true
+    }
+  },
+  "signal_thresholds": {
+    "min_confidence": 0.30,
+    "max_signal_age_hours": 24,
+    "regime_flip_threshold": 0.65
+  },
+  "alternative_data_config": {
+    "earnings_weight": 0.40,
+    "news_weight": 0.30,
+    "jobs_weight": 0.20,
+    "social_weight": 0.10,
+    "min_component_confidence": 0.25,
+    "signal_validity_hours": 24
+  }
+}
