@@ -25,7 +25,7 @@ export async function fetchYahooData(symbol: string, start: string, end: string)
 }
 
 // Fetch all symbols for backtest
-const SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', 'MTUM', 'VLUE', 'USMV'];
+const SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', 'MTUM', 'VLUE', 'USMV', 'QUAL', 'IJR'];
 
 export async function fetchAllSymbols() {
   const allData: Record<string, Array<{date: string, price: number}>> = {};
