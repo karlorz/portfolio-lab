@@ -33,6 +33,9 @@ class DrawdownCircuitBreaker:
     - 15%: Caution (25% position reduction)
     - 20%: Critical (50% position reduction)  
     - 25%: Emergency (close all positions)
+    
+    Also supports leveraged ETF (UBT/TMF) specific thresholds as part of
+    v2.35 Capital Efficiency implementation.
     """
     
     THRESHOLDS = {
@@ -49,6 +52,25 @@ class DrawdownCircuitBreaker:
         "orange": 0.75,  # Reduce to 75% of normal size
         "red": 0.50,     # Reduce to 50% of normal size
         "black": 0.0,    # Close all positions
+    }
+    
+    # v2.35: Leveraged ETF specific thresholds
+    # Based on 2x/3x leverage of underlying TLT (which has ~14% volatility)
+    LEVERED_ETF_THRESHOLDS = {
+        "UBT": {  # 2x TLT
+            "daily_loss": 0.05,      # -5% daily (2x normal TLT move)
+            "weekly_loss": 0.12,     # -12% weekly
+            "monthly_loss": 0.15,    # -15% monthly = ~100bps rate rise
+            "volatility_spike": 0.35,  # 30-day vol exceeds 35%
+            "max_position_pct": 0.10,  # Max 10% portfolio (vs 16% TLT)
+        },
+        "TMF": {  # 3x TLT
+            "daily_loss": 0.075,     # -7.5% daily (3x normal TLT move)
+            "weekly_loss": 0.18,     # -18% weekly
+            "monthly_loss": 0.225,   # -22.5% monthly
+            "volatility_spike": 0.50,  # 30-day vol exceeds 50%
+            "max_position_pct": 0.05,  # Max 5% portfolio (high risk)
+        }
     }
     
     def __init__(self, lookback_days: int = 252):
