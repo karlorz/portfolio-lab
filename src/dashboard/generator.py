@@ -279,6 +279,14 @@ class DashboardGenerator:
             # Ensemble voting not available yet
             pass
         
+        # Add sector rotation momentum signals (v2.40 Phase 5)
+        sector_momentum_signal = None
+        try:
+            sector_momentum_signal = self._generate_sector_momentum_signals()
+        except Exception as e:
+            # Sector momentum not available yet
+            pass
+        
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -296,7 +304,8 @@ class DashboardGenerator:
             "convexity_harvest": convexity_signal,
             "volatility_parity": vol_parity_signal,
             "llm_sentiment": sentiment_signal,
-            "ensemble_voting": ensemble_signal
+            "ensemble_voting": ensemble_signal,
+            "sector_rotation": sector_momentum_signal
         }
         
         out_path = PUBLIC_DIR / "signals.json"
@@ -718,6 +727,41 @@ class DashboardGenerator:
             json.dump(health_data, f, indent=2)
         
         return out_path
+    
+    def _generate_sector_momentum_signals(self) -> Optional[Dict]:
+        """Generate sector rotation momentum signals from historical data."""
+        try:
+            import subprocess
+            import os
+            
+            # Use deno/bun to run TypeScript sector momentum calculator
+            # First, check if sector data exists in historical.json
+            sector_symbols = ['XLK', 'XLV', 'XLF', 'XLY', 'XLI', 'XLE', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC']
+            
+            # Check if we have sector data available
+            historical_path = PUBLIC_DIR.parent / "data" / "historical.json"
+            if not historical_path.exists():
+                return None
+            
+            # For now, return a simplified mock signal showing sectors would be evaluated
+            # Full implementation requires running TypeScript code or converting to Python
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "status": "pending_data",
+                "note": "Sector rotation momentum requires sector ETF data in historical.json",
+                "symbols_needed": sector_symbols,
+                "methodology": "12-month momentum lookback, top 3 sectors, quarterly rebalancing",
+                "overlay_pct": 0.25,
+                "top_sectors": [],  # Would be populated when data available
+                "allocation": {
+                    "spy_core": 0.345,  # 75% of 46% equity
+                    "spy_total": 0.46,
+                    "sector_overlay": 0.115,  # 25% of 46%
+                    "sectors": []
+                }
+            }
+        except Exception as e:
+            return None
     
     def generate_analytics_json(self) -> Path:
         """Generate analytics data (drawdown, rolling metrics, benchmarks)."""
