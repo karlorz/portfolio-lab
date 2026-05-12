@@ -65,11 +65,12 @@ DB_PATH = DATA_DIR / "signals.db"
 
 # Base signal weights (adjusted dynamically by regime)
 BASE_WEIGHTS = {
-    "momentum": 0.30,
+    "momentum": 0.25,
     "value": 0.20,
     "macro": 0.20,
     "quality": 0.15,
     "sentiment": 0.15,
+    "ai_agent": 0.05,  # v2.51 MARL controller weight
 }
 
 # Regime-specific weight adjustments

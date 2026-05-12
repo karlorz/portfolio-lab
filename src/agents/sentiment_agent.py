@@ -146,6 +146,10 @@ class SentimentAgent(BaseAgent):
             'contrarian_trigger',  # Contrarian opportunity
         ]
     
+    def build_network(self) -> nn.ModuleDict:
+        """Build network (already done in __init__)."""
+        return nn.ModuleDict({'main': self.network})
+    
     def extract_features(self, obs: AgentObservation) -> torch.Tensor:
         """Extract sentiment features from observation."""
         features = []

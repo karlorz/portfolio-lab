@@ -206,7 +206,8 @@ class ControllerAgent(BaseAgent):
     ):
         # obs_dim = price history + 4 agents * 3 outputs + portfolio state
         n_agent_outputs = 4 * 3  # 4 agents, 3 outputs each
-        portfolio_state = n_assets * 2 + 3  # weights + values + metrics
+        # Portfolio state: weights (n) + deviations (n) + value (1) + consensus (3)
+        portfolio_state = n_assets * 2 + 1 + 3
         obs_dim = self.PRICE_HISTORY_LEN + n_agent_outputs + portfolio_state
         
         super().__init__(
@@ -222,7 +223,6 @@ class ControllerAgent(BaseAgent):
         self.network = ControllerNetwork(
             obs_dim, 4, n_assets, hidden_dim
         ).to(device)
-        
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=2e-4)
         
         # Consensus tracking
@@ -234,6 +234,10 @@ class ControllerAgent(BaseAgent):
         # Current allocation
         self.current_allocation = self.DEFAULT_ALLOCATION.copy()
         self.target_allocation = self.DEFAULT_ALLOCATION.copy()
+    
+    def build_network(self) -> nn.ModuleDict:
+        """Build network (already done in __init__)."""
+        return nn.ModuleDict({'main': self.network})
     
     def process_messages(self, messages: List[AgentMessage]):
         """Process incoming agent messages."""

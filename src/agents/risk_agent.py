@@ -139,6 +139,7 @@ class RiskAgent(BaseAgent):
         self.network = RiskNetwork(obs_dim, action_dim, hidden_dim).to(device)
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=2e-4)
         
+        # Feature metadata
         self.feature_names = [
             'var_95',              # 95% VaR
             'var_99',              # 99% VaR
@@ -158,6 +159,10 @@ class RiskAgent(BaseAgent):
         
         # Track portfolio highs for drawdown
         self.portfolio_high: Optional[float] = None
+    
+    def build_network(self) -> nn.ModuleDict:
+        """Build network (already done in __init__)."""
+        return nn.ModuleDict({'main': self.network})
     
     def calculate_var(self, returns: np.ndarray, alpha: float = 0.05) -> float:
         """Calculate Value at Risk."""

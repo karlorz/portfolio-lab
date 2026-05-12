@@ -143,6 +143,7 @@ class ExecutionAgent(BaseAgent):
         self.network = ExecutionNetwork(obs_dim, action_dim, hidden_dim).to(device)
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=3e-4)
         
+        # Feature metadata
         self.feature_names = [
             'spread_proxy',        # Bid-ask spread proxy
             'volume_proxy',        # Volume trend
@@ -157,6 +158,10 @@ class ExecutionAgent(BaseAgent):
             'confidence_external', # External signal confidence
             'regime_volatility',  # Vol regime indicator
         ]
+    
+    def build_network(self) -> nn.ModuleDict:
+        """Build network (already done in __init__)."""
+        return nn.ModuleDict({'main': self.network})
     
     def extract_features(self, obs: AgentObservation) -> torch.Tensor:
         """Extract execution features from observation."""
