@@ -3,7 +3,7 @@
  * v2.40 - Sector Rotation Momentum Infrastructure
  */
 
-import { SectorMomentum } from './sector_momentum';
+import { SectorMomentum } from '../strategy/sector_momentum';
 
 /**
  * Sector overlay configuration interface
