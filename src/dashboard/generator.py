@@ -215,6 +215,26 @@ class DashboardGenerator:
         # Add yield curve data from yields.json
         yield_curve_data = self._get_yield_curve_data()
         
+        # Add volatility parity / convexity harvest signals
+        convexity_signal = None
+        vol_parity_signal = None
+        try:
+            from strategy.convexity_harvest import ConvexityHarvestStrategy
+            from strategy.vol_parity_allocator import VolatilityParityAllocator
+            
+            # Get convexity harvest signal
+            convexity_engine = ConvexityHarvestStrategy()
+            convexity_signal = convexity_engine.get_current_signal()
+            
+            # Get volatility parity allocation  
+            vol_allocator = VolatilityParityAllocator(vix_strategy=convexity_engine)
+            vol_parity_data = vol_allocator.get_current_allocation()
+            if vol_parity_data:
+                vol_parity_signal = vol_parity_data.get('allocation')
+        except Exception as e:
+            # Convexity harvest / vol parity not available yet
+            pass
+        
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -229,6 +249,8 @@ class DashboardGenerator:
             "volatility_targeting": vol_targeting_signal,
             "yield_curve": yield_curve_data.get("yield_curve"),
             "duration_allocation": yield_curve_data.get("duration_allocation"),
+            "convexity_harvest": convexity_signal,
+            "volatility_parity": vol_parity_signal
         }
         
         out_path = PUBLIC_DIR / "signals.json"
