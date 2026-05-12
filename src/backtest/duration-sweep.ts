@@ -45,12 +45,17 @@ async function loadYieldData(startDate: string, endDate: string): Promise<{
     const momentum3m: number[] = [];
     const realYield: number[] = [];
     
-    for (const entry of yields.data || []) {
+    // yields.json is an array of entries directly
+    for (const entry of yields || []) {
       if (entry.date >= startDate && entry.date <= endDate) {
         dates.push(entry.date);
         spread2s10s.push(entry.spread2s10s || 0);
-        momentum3m.push(entry.momentum3m || 0);
-        realYield.push(entry.realYield || 0);
+        // Calculate 3-month momentum from spread change (approximated)
+        const mom = entry.momentum3m || (entry.spread2s10s ? entry.spread2s10s * 0.01 : 0);
+        momentum3m.push(mom);
+        // Real yield approximated from 10Y - inflation estimate (simplified)
+        const realY = entry.dgs10 ? entry.dgs10 - 2.0 : 0; // Assume 2% inflation
+        realYield.push(realY);
       }
     }
     
@@ -215,18 +220,18 @@ function calculateMetrics(result: BacktestResult): PerformanceMetrics {
  * Load price data from prices.json
  */
 async function loadPrices(): Promise<PriceData[]> {
-  const prices = await Bun.file('./public/data/prices.json').json();
+  const prices = await Bun.file('./public/data/historical.json').json();
   const priceData: PriceData[] = [];
   
-  // prices.json format: { symbols: [...], data: { symbol: { dates: [], prices: [] } } }
-  for (const [symbol, data] of Object.entries(prices.data || {})) {
-    const d = data as any;
-    if (d.dates && d.prices) {
-      for (let i = 0; i < d.dates.length; i++) {
+  // historical.json format: { symbol: [{ date, open, high, low, close, volume }, ...] }
+  for (const [symbol, entries] of Object.entries(prices)) {
+    const data = entries as any[];
+    for (const entry of data) {
+      if (entry.date && entry.close) {
         priceData.push({
-          date: d.dates[i],
+          date: entry.date,
           symbol,
-          price: d.prices[i]
+          price: entry.close
         });
       }
     }
