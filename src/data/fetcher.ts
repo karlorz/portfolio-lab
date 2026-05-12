@@ -23,7 +23,26 @@ export interface TreasuryYield {
   spread10s30s: number; // 10s30s spread (basis points)
 }
 
-const SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', 'MTUM', 'VLUE', 'USMV'];
+// Core portfolio symbols
+const CORE_SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', 'MTUM', 'VLUE', 'USMV'];
+
+// Sector ETF symbols (v2.40 - Sector Rotation Momentum)
+const SECTOR_ETFS = [
+  'XLK',   // Technology
+  'XLV',   // Healthcare  
+  'XLF',   // Financials
+  'XLY',   // Consumer Discretionary
+  'XLI',   // Industrials
+  'XLE',   // Energy
+  'XLP',   // Consumer Staples
+  'XLU',   // Utilities
+  'XLB',   // Materials
+  'XLRE',  // Real Estate
+  'XLC',   // Communication Services
+];
+
+// Combined symbol list for backward compatibility
+const SYMBOLS = [...CORE_SYMBOLS, ...SECTOR_ETFS];
 const FRED_SERIES = {
   dgs2: 'DGS2',
   dgs10: 'DGS10',
@@ -266,6 +285,32 @@ export async function fetchYieldCurveData(
   console.log(`✓ Yield curve data: ${yields.length} days`);
   return yields.sort((a, b) => a.date.localeCompare(b.date));
 }
+
+/**
+ * Fetch only sector ETF data for sector rotation strategies
+ * v2.40 - Sector Rotation Momentum Infrastructure
+ */
+export async function fetchSectorData(
+  startDate: string = '2005-01-01',
+  endDate: string = new Date().toISOString().split('T')[0]
+): Promise<{ [symbol: string]: HistoricalPrice[] }> {
+  console.log(`Fetching sector ETF data for ${SECTOR_ETFS.length} symbols...`);
+  return fetchAllData(SECTOR_ETFS, startDate, endDate);
+}
+
+/**
+ * Fetch core portfolio data without sectors
+ */
+export async function fetchCoreData(
+  startDate: string = '2005-01-01',
+  endDate: string = new Date().toISOString().split('T')[0]
+): Promise<{ [symbol: string]: HistoricalPrice[] }> {
+  console.log(`Fetching core portfolio data for ${CORE_SYMBOLS.length} symbols...`);
+  return fetchAllData(CORE_SYMBOLS, startDate, endDate);
+}
+
+// Export symbol lists for strategy modules
+export { CORE_SYMBOLS, SECTOR_ETFS, SYMBOLS };
 
 // CLI usage
 if (import.meta.main) {
