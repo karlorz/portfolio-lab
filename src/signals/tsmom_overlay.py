@@ -181,13 +181,18 @@ class TSMOMOverlay:
                     data = json.load(f)
                 
                 if ticker in data:
-                    df = pd.DataFrame({
-                        'date': pd.to_datetime(data[ticker]['dates']),
-                        'close': data[ticker]['prices']
-                    })
-                    df.set_index('date', inplace=True)
-                    self.price_cache[ticker] = df
-                    return df
+                    ticker_data = data[ticker]
+                    # Format: [{'d': '2005-01-03', 'p': 81.38}, ...]
+                    if isinstance(ticker_data, list) and len(ticker_data) > 0:
+                        dates = [item['d'] for item in ticker_data]
+                        prices = [item['p'] for item in ticker_data]
+                        df = pd.DataFrame({
+                            'date': pd.to_datetime(dates),
+                            'close': prices
+                        })
+                        df.set_index('date', inplace=True)
+                        self.price_cache[ticker] = df
+                        return df
             except Exception as e:
                 print(f"Error loading prices for {ticker}: {e}")
         
