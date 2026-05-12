@@ -287,6 +287,49 @@ class DashboardGenerator:
             # Sector momentum not available yet
             pass
         
+        # Add alternative data signals (v2.60 Phase 3)
+        alternative_data_signal = None
+        try:
+            alt_data_file = DATA_DIR / "signals" / "alternative_data_latest.json"
+            if alt_data_file.exists():
+                with open(alt_data_file) as f:
+                    alt_data_raw = json.load(f)
+                    alternative_data_signal = {
+                        "regime": alt_data_raw.get("regime"),
+                        "probability": alt_data_raw.get("probability"),
+                        "confidence": alt_data_raw.get("confidence"),
+                        "timestamp": alt_data_raw.get("timestamp"),
+                        "components": {
+                            "earnings": {
+                                "score": alt_data_raw.get("raw_data", {}).get("earnings_sentiment"),
+                                "confidence": alt_data_raw.get("raw_data", {}).get("earnings_confidence"),
+                                "weight": alt_data_raw.get("raw_data", {}).get("weights", {}).get("earnings")
+                            },
+                            "news": {
+                                "score": alt_data_raw.get("raw_data", {}).get("news_sentiment"),
+                                "confidence": alt_data_raw.get("raw_data", {}).get("news_confidence"),
+                                "weight": alt_data_raw.get("raw_data", {}).get("weights", {}).get("news")
+                            },
+                            "jobs": {
+                                "score": alt_data_raw.get("raw_data", {}).get("jobs_signal"),
+                                "confidence": alt_data_raw.get("raw_data", {}).get("jobs_confidence"),
+                                "weight": alt_data_raw.get("raw_data", {}).get("weights", {}).get("jobs")
+                            },
+                            "social": {
+                                "score": alt_data_raw.get("raw_data", {}).get("social_sentiment"),
+                                "confidence": alt_data_raw.get("raw_data", {}).get("social_confidence"),
+                                "weight": alt_data_raw.get("raw_data", {}).get("weights", {}).get("social")
+                            }
+                        },
+                        "composite_score": alt_data_raw.get("raw_data", {}).get("composite_score"),
+                        "z_score": alt_data_raw.get("raw_data", {}).get("z_score"),
+                        "sources_count": alt_data_raw.get("raw_data", {}).get("sources_count"),
+                        "data_freshness_hours": alt_data_raw.get("raw_data", {}).get("data_freshness_hours")
+                    }
+        except Exception as e:
+            # Alternative data signal not available yet
+            pass
+        
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -305,7 +348,8 @@ class DashboardGenerator:
             "volatility_parity": vol_parity_signal,
             "llm_sentiment": sentiment_signal,
             "ensemble_voting": ensemble_signal,
-            "sector_rotation": sector_momentum_signal
+            "sector_rotation": sector_momentum_signal,
+            "alternative_data": alternative_data_signal
         }
         
         out_path = PUBLIC_DIR / "signals.json"
