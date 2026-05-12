@@ -9,6 +9,14 @@
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
 - **Sharpe 0.79 champion validated with +1yr of new data (2005-2026)**
 - **10% drift-based rebalancing beats annual: Sharpe 0.83 vs 0.79**
+- **v2.51 AI Agent Controller**: MARL system with 5 specialized agents (3,558 lines PyTorch)
+  - Analyst Agent: fundamental/value analysis
+  - Sentiment Agent: news/social signals with contrarian detection
+  - Risk Agent: VaR/CVaR monitoring with drawdown alerts
+  - Execution Agent: order timing with market impact modeling
+  - Controller Agent: orchestration with centralized critic
+  - Inference latency: 4.7ms (target: <50ms) ✓
+  - Integrates with v2.24 signal integrator (5% weight in composite)
 
 ## Strategies Implemented (16 portfolios)
 - SPY (S&P 500) — benchmark
@@ -59,6 +67,23 @@
 - `factor-tilt.ts` — MTUM/VLUE/USMV factor tilt analysis (2013-2026)
 - `commodities-sweep.ts` — DBC as partial GLD replacement sweep
 - `tactical-rebalance.ts` — drift-based vs calendar rebalancing analysis
+
+## AI Agents (src/agents/ v2.51)
+- `analyst_agent.py` — Fundamental/value analysis with PPO policy (321 lines)
+- `sentiment_agent.py` — News/social sentiment with contrarian detection (332 lines)
+- `risk_agent.py` — VaR/CVaR monitoring with drawdown alerts (412 lines)
+- `execution_agent.py` — Order timing with market impact modeling (379 lines)
+- `controller_agent.py` — Master orchestration with centralized critic (458 lines)
+- `agent_graph.py` — LangGraph-style communication topology (394 lines)
+- `marl_trainer.py` — MAPPO training with GAE and value decomposition (543 lines)
+- `ai_controller.py` — Main entry point with signal integrator bridge (469 lines)
+
+CLI Usage:
+```bash
+python -m src.agents.ai_controller --mode status
+python -m src.agents.ai_controller --mode infer --portfolio 46/38/16
+python -m src.agents.ai_controller --mode train --episodes 500
+```
 
 ## Wiki Compound Pages (11 total)
 - grid-search-results
