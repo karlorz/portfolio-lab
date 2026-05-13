@@ -12,9 +12,11 @@ from .smart_rebalancer import (
     UrgencyLevel,
     CostBudgetTracker,
 )
+from .integration import SmartRebalanceGate
 
 __all__ = [
     'SmartRebalancingController',
+    'SmartRebalanceGate',
     'PortfolioSnapshot',
     'MarketConditions',
     'RebalanceDecision',

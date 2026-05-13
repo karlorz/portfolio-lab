@@ -61,6 +61,7 @@ export interface SignalsData {
       volatility: number | null;
     };
   };
+  smart_rebalance?: SmartRebalanceData;
 }
 
 export interface Position {
@@ -231,4 +232,34 @@ export interface AlertsData {
   alerts: Alert[];
   count: number;
   generated_at: string;
+}
+
+// Smart Rebalance Types (v2.90)
+export interface SmartRebalanceData {
+  should_execute: boolean;
+  decision: string;
+  urgency: 'low' | 'moderate' | 'high' | 'emergency';
+  max_drift: number;
+  estimated_cost_bps: number;
+  reason: string;
+  drift_details: Record<string, number>;
+  vpin: number;
+  in_optimal_window: boolean;
+  ytd_cost_bps: number;
+  remaining_budget_pct: number;
+  status: {
+    ytd_cost_bps: number;
+    ytd_cost_pct: number;
+    remaining_budget_pct: number;
+    is_over_budget: boolean;
+    is_warning: boolean;
+    last_rebalance: string | null;
+    deferred_until: string | null;
+    config: {
+      drift_threshold: number;
+      vpin_threshold: number;
+      optimal_window: string;
+      annual_cost_limit: string;
+    };
+  };
 }

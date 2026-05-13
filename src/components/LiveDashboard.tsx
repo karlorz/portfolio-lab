@@ -3,6 +3,7 @@ import { HealthPanel } from './HealthPanel';
 import { RegimeTimeline } from './RegimeTimeline';
 import { SPYComparisonChart } from './SPYComparisonChart';
 import { RebalancePanel } from './RebalancePanel';
+import { SmartRebalancePanel } from './SmartRebalancePanel';
 import { UnderwaterChart, RollingMetricsChart, CrisisOverlay } from './AnalyticsCharts';
 import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
@@ -399,7 +400,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         {/* Rebalance Tab */}
         {activeTab === 'rebalance' && (
           <div className="tab-panel rebalance-panel-container">
-            <RebalancePanel 
+            <SmartRebalancePanel data={signals?.smart_rebalance} />
+            <RebalancePanel
               signals={signals}
               readOnly={true}
               onRebalanceRequest={() => {

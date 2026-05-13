@@ -287,6 +287,57 @@ class DashboardGenerator:
             # Sector momentum not available yet
             pass
         
+        # Add smart rebalancing status (v2.90)
+        smart_rebalance_data = None
+        try:
+            import importlib
+            rebalancing_pkg = importlib.import_module('src.rebalancing')
+            SmartRebalanceGate = rebalancing_pkg.SmartRebalanceGate
+
+            gate = SmartRebalanceGate()
+            # Build current holdings from positions
+            holdings = {p['symbol']: p['value'] for p in positions} if positions else {}
+            if holdings and total_value > 0:
+                gate_result = gate.evaluate(
+                    current_holdings=holdings,
+                    target_allocations=target_alloc,
+                    total_value=total_value,
+                )
+                smart_rebalance_data = {
+                    'should_execute': gate_result.should_execute,
+                    'decision': gate_result.decision,
+                    'urgency': gate_result.urgency,
+                    'max_drift': gate_result.max_drift,
+                    'estimated_cost_bps': gate_result.estimated_cost_bps,
+                    'reason': gate_result.reason,
+                    'drift_details': gate_result.metadata.get('drift_details', {}),
+                    'vpin': gate_result.metadata.get('vpin', 0.30),
+                    'in_optimal_window': gate_result.metadata.get('in_optimal_window', False),
+                    'ytd_cost_bps': gate_result.metadata.get('ytd_cost_bps', 0),
+                    'remaining_budget_pct': gate_result.metadata.get('remaining_budget_pct', 100),
+                    'status': gate.get_status(),
+                }
+            else:
+                # No positions — use gate status only
+                smart_rebalance_data = {
+                    'should_execute': False,
+                    'decision': 'no_positions',
+                    'urgency': 'low',
+                    'max_drift': 0,
+                    'estimated_cost_bps': 0,
+                    'reason': 'no_positions',
+                    'drift_details': {},
+                    'vpin': 0.30,
+                    'in_optimal_window': False,
+                    'ytd_cost_bps': 0,
+                    'remaining_budget_pct': 100,
+                    'status': gate.get_status(),
+                }
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            pass
+
         # Add alternative data signals (v2.60 Phase 3)
         alternative_data_signal = None
         try:
@@ -349,7 +400,8 @@ class DashboardGenerator:
             "llm_sentiment": sentiment_signal,
             "ensemble_voting": ensemble_signal,
             "sector_rotation": sector_momentum_signal,
-            "alternative_data": alternative_data_signal
+            "alternative_data": alternative_data_signal,
+            "smart_rebalance": smart_rebalance_data
         }
         
         out_path = PUBLIC_DIR / "signals.json"
