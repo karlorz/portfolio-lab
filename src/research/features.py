@@ -169,7 +169,7 @@ class FeaturePipeline:
         
         try:
             return np.corrcoef(returns1, returns2)[0, 1]
-        except:
+        except (ValueError, TypeError):
             return 0.0
     
     def generate_features(
@@ -407,7 +407,7 @@ class FeatureStore:
                     record = json.loads(line)
                     if record.get("symbol") == symbol and record.get("timestamp", "") > cutoff:
                         features.append(record)
-                except:
+                except (json.JSONDecodeError, OSError):
                     continue
         
         return features

@@ -234,7 +234,7 @@ class LiquidityChecker:
                                     "amount": parts[4],
                                     "reason": parts[6].strip()
                                 })
-                        except:
+                        except (ValueError, IndexError):
                             continue
         except Exception as e:
             print(f"Error reading log: {e}")

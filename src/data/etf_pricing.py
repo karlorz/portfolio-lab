@@ -271,7 +271,7 @@ class ETFPricingEngine:
             try:
                 with open(ETF_HISTORY_PATH, 'r') as f:
                     history = json.load(f)
-            except:
+            except (json.JSONDecodeError, OSError):
                 history = []
         
         # Add new entries

@@ -77,9 +77,9 @@ class MacroFeatureEngineer:
                                 'series': col_name,
                                 'value': float(obs['value'])
                             })
-                        except:
+                        except (ValueError, TypeError):
                             pass
-            
+
             if not records:
                 return self._generate_synthetic_macro_data()
             
@@ -113,7 +113,7 @@ class MacroFeatureEngineer:
                         'vix_1m': values.get('vix_1m', values.get('vix', 20)),
                         'vix_3m': values.get('vix_3m', values.get('vix', 20) * 0.95),
                     })
-                except:
+                except (ValueError, TypeError, KeyError):
                     pass
             
             df = pd.DataFrame(records).set_index('date').sort_index()

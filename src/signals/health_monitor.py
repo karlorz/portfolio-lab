@@ -396,7 +396,7 @@ class SignalHealthMonitor:
                 return 0.0
             
             return num / (den_p * den_a)
-        except:
+        except Exception:
             return None
     
     def calculate_win_rate(
@@ -804,7 +804,7 @@ class SignalHealthMonitor:
             try:
                 with open(HEALTH_LOG_PATH, 'r') as f:
                     history = json.load(f)
-            except:
+            except (json.JSONDecodeError, OSError):
                 history = []
         
         # Append new report
@@ -843,7 +843,7 @@ class SignalHealthMonitor:
                         h['source_scores'] = {source: h.get('scores', {}).get(source)}
                 
                 return filtered
-            except:
+            except Exception:
                 return []
         return []
 

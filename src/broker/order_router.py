@@ -145,7 +145,7 @@ class OrderRouter:
             try:
                 account = self.client.get_account()
                 total_value = account.get("equity", 0)
-            except:
+            except Exception:
                 total_value = sum(p.get("market_value", 0) for p in positions.values())
         
         if not total_value or total_value < 100:
@@ -238,7 +238,7 @@ class OrderRouter:
                             "message": "Kill switch is enabled - execution blocked",
                             "timestamp": datetime.now().isoformat(),
                         }
-                except:
+                except (OSError, json.JSONDecodeError):
                     pass
         
         executed = []

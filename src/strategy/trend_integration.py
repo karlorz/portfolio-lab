@@ -755,7 +755,7 @@ class TrendReplicationStrategy:
             
             if row:
                 return float(row[0])
-        except:
+        except (sqlite3.Error, ValueError, TypeError):
             pass
         
         return None

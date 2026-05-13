@@ -139,7 +139,7 @@ Based on recent regime patterns:
             for line in f:
                 try:
                     entries.append(json.loads(line))
-                except:
+                except (json.JSONDecodeError, OSError):
                     pass
         
         if len(entries) < 10:
@@ -259,7 +259,7 @@ created: {timestamp}
             for line in f:
                 try:
                     orders.append(json.loads(line))
-                except:
+                except (json.JSONDecodeError, OSError):
                     pass
         
         if not orders:

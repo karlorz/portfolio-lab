@@ -35,7 +35,7 @@ class MarketCalendar:
         if self._has_mcal:
             try:
                 self.nyse = mcal.get_calendar('NYSE')
-            except:
+            except Exception:
                 self.nyse = None
                 self._has_mcal = False
         else:

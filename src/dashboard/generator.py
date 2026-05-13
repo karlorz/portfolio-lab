@@ -62,9 +62,9 @@ class DashboardGenerator:
                             "v": entry.get("total_value", 0),
                             "r": entry.get("daily_return", 0)
                         })
-                    except:
+                    except Exception:
                         pass
-        
+
         output = {
             "prices": prices,
             "regimes": regimes,
@@ -191,9 +191,9 @@ class DashboardGenerator:
                             "shares": round(order.get("shares", 0), 2),
                             "value": round(order.get("fill_value", 0), 2)
                         })
-                    except:
+                    except Exception:
                         pass
-        
+
         # Add factor rotation signals if engine available
         factor_rotation_signal = None
         try:
@@ -488,9 +488,9 @@ class DashboardGenerator:
                             ts = feat.get("timestamp", "")
                             if sym and (sym not in latest_features or ts > latest_features[sym].get("timestamp", "")):
                                 latest_features[sym] = feat
-                        except:
+                        except Exception:
                             continue
-                
+
                 if latest_features:
                     signals["available"] = True
                     signals["timestamp"] = datetime.now().isoformat()
@@ -552,9 +552,9 @@ class DashboardGenerator:
                             "sharpe": latest.get("sharpe"),
                             "volatility": latest.get("volatility"),
                         }
-            except:
+            except Exception:
                 pass
-        
+
         return signals
     
     def _get_yield_curve_data(self) -> Dict:
@@ -860,9 +860,9 @@ class DashboardGenerator:
                         "days_stale": days_stale,
                         "status": "fresh" if days_stale <= 1 else "stale" if days_stale <= 3 else "critical"
                     }
-                except:
+                except Exception:
                     pass
-        
+
         # Overall system health
         stale_count = sum(1 for d in health_data["data_freshness"].values() if d.get("status") != "fresh")
         failed_jobs = sum(1 for j in health_data["cron_jobs"] if j.get("status") == "error")
@@ -896,9 +896,9 @@ class DashboardGenerator:
                 row = cursor.fetchone()
                 if row:
                     vix = row[0]
-            except:
+            except Exception:
                 pass
-            
+
             signals = generate_sector_signals(historical_path, vix=vix)
             return signals
             

@@ -414,7 +414,7 @@ def main():
                 for line in f:
                     try:
                         features_list.append(json.loads(line))
-                    except:
+                    except (json.JSONDecodeError, OSError):
                         continue
             
             print(f"Training on {len(features_list)} samples...")

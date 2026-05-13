@@ -100,7 +100,7 @@ class AnalyticsCalculator:
             for line in f:
                 try:
                     data.append(json.loads(line))
-                except:
+                except (json.JSONDecodeError, OSError):
                     continue
         return data
     

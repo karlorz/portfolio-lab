@@ -638,7 +638,7 @@ class MultiSpeedBacktester:
                 if not period_df.empty:
                     crisis_return = period_df['value'].iloc[-1] / period_df['value'].iloc[0] - 1
                     crisis_returns[crisis] = crisis_return
-            except:
+            except (KeyError, IndexError, TypeError):
                 crisis_returns[crisis] = None
         
         # Baseline comparison (static allocation)
