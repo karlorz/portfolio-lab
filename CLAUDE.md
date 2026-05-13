@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **1702 passing** — 2 pre-existing failures (test_generator, test_vpin_rebalancer)
+- **1740 passing** — 2 pre-existing failures (test_generator, test_vpin_rebalancer)
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -169,6 +169,7 @@
 - `test_vix_options_chain.py` — 33 tests: VIX option dataclass, options chain, delta approximation, insurance candidate selection, historical context
 - `test_vol_targeting.py` — 50 tests: VolMethod/TargetStrategy enums, VolTargetConfig, VolatilityEngine (std/EWMA/Parkinson/Yang-Zhang volatility, regime classification, position sizing, risk parity weights, simulation), PortfolioVolTarget
 - `test_network_momentum_leadlag.py` — 62 tests: constants, data classes, DTW distance, Lévy area signatures, adjacency matrix learning, lead-lag matrix, window/ensemble signals, portfolio recommendation, backtest
+- `test_regime_ml_validation.py` — 50 tests: ValidationResult dataclass, portfolio returns, synthetic results, metric calculation, backtest orchestration, validate_all, CLI
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
