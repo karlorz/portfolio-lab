@@ -43,7 +43,7 @@ from src.signals.yield_curve_regime import (
 
 @pytest.fixture
 def classifier():
-    """Create fresh classifier with mocked state."""
+    """Create fresh classifier with mocked state and empty spread history."""
     with patch('src.signals.yield_curve_regime.YieldCurveRegimeClassifier._load_state') as mock_load:
         mock_load.return_value = {
             "current_regime": YieldCurveRegime.UNKNOWN,
@@ -53,7 +53,10 @@ def classifier():
             "pending_since": None,
         }
         with patch.object(YieldCurveRegimeClassifier, '_save_state'):
-            yield YieldCurveRegimeClassifier()
+            with patch.object(YieldCurveRegimeClassifier, '_load_spread_history'):
+                classifier = YieldCurveRegimeClassifier()
+                classifier.spread_history = []  # Ensure clean history
+                yield classifier
 
 
 @pytest.fixture
