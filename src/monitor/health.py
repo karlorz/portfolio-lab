@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.market_calendar import MarketCalendar, get_stale_status
+from utils.market_calendar import MarketCalendar, format_stale_status, is_weekend_stale
 
 DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 LOG_DIR = DATA_DIR

@@ -1,206 +1,167 @@
-"""
-Market calendar utilities for portfolio-lab.
-Handles NYSE trading days, market hours, and stale data detection.
-"""
+"""Market calendar utilities for trading day calculations.
 
+Falls back to manual calendar if pandas_market_calendars not available.
+"""
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional
 
+# Try to import pandas_market_calendars, but provide fallback
 try:
     import pandas_market_calendars as mcal
-    HAS_MARKET_CAL = True
+    HAS_MCAL = True
 except ImportError:
-    HAS_MARKET_CAL = False
+    HAS_MCAL = False
+
+# US Market holidays 2024-2026 (simplified)
+US_HOLIDAYS = {
+    # 2024
+    "2024-01-01", "2024-01-15", "2024-02-19", "2024-03-29", "2024-05-27",
+    "2024-06-19", "2024-07-04", "2024-09-02", "2024-11-28", "2024-12-25",
+    "2024-12-31",  # Early close
+    # 2025
+    "2025-01-01", "2025-01-09", "2025-02-17", "2025-04-18", "2025-05-26",
+    "2025-06-19", "2025-07-04", "2025-09-01", "2025-11-27", "2025-12-25",
+    # 2026
+    "2026-01-01", "2026-01-01",
+}
+
 
 class MarketCalendar:
-    """NYSE market calendar wrapper."""
+    """NYSE market calendar for trading day calculations."""
     
     def __init__(self):
-        if HAS_MARKET_CAL:
-            self.nyse = mcal.get_calendar('NYSE')
+        self._cache = {}
+        self._has_mcal = HAS_MCAL
+        if self._has_mcal:
+            try:
+                self.nyse = mcal.get_calendar('NYSE')
+            except:
+                self.nyse = None
+                self._has_mcal = False
         else:
             self.nyse = None
     
-    def is_trading_day(self, date: Optional[datetime] = None) -> bool:
-        """Check if date is a NYSE trading day."""
-        if date is None:
-            date = datetime.now()
+    def is_trading_day(self, date: datetime) -> bool:
+        """Check if date is a trading day."""
+        date_key = date.strftime('%Y-%m-%d')
+        if date_key in self._cache:
+            return self._cache[date_key]
         
-        if not HAS_MARKET_CAL:
-            # Fallback: weekdays only, no holidays
-            return date.weekday() < 5  # Monday=0, Friday=4
-        
-        try:
-            schedule = self.nyse.schedule(start_date=date.strftime('%Y-%m-%d'), 
-                                          end_date=date.strftime('%Y-%m-%d'))
-            return len(schedule) > 0
-        except:
-            return date.weekday() < 5
-    
-    def is_market_open(self, dt: Optional[datetime] = None, tz='America/New_York') -> bool:
-        """Check if market is currently open (9:30 AM - 4:00 PM ET)."""
-        if dt is None:
-            dt = datetime.now()
-        
-        if not self.is_trading_day(dt):
+        # Weekend check
+        if date.weekday() >= 5:  # Saturday=5, Sunday=6
+            self._cache[date_key] = False
             return False
         
-        # Simple hour check (9:30-16:00 ET)
-        # For proper timezone handling, use pytz or zoneinfo
+        # Holiday check
+        if date_key in US_HOLIDAYS:
+            self._cache[date_key] = False
+            return False
+        
+        result = True
+        self._cache[date_key] = result
+        return result
+    
+    def trading_days_since(self, last_date: datetime, today: datetime = None) -> int:
+        """Count trading days between last_date and today."""
+        today = today or datetime.now()
+        delta = (today.date() - last_date.date()).days
+        
+        count = 0
+        for i in range(1, delta + 1):
+            check_date = last_date + timedelta(days=i)
+            if self.is_trading_day(check_date):
+                count += 1
+        
+        # If today is trading day but market hasn't closed, don't count today
+        if self.is_trading_day(today) and not self._is_market_closed(today):
+            count = max(0, count - 1)
+        
+        return count
+    
+    def _is_market_closed(self, dt: datetime) -> bool:
+        """Check if market is closed at given datetime."""
+        # Simplified check: market hours 9:30-16:00 ET
         hour = dt.hour
         minute = dt.minute
-        
-        # 9:30 = 9.5 hours, 16:00 = 16 hours
-        market_time = hour + minute / 60
-        return 9.5 <= market_time < 16.0
+        current_time = hour * 100 + minute
+        return current_time < 930 or current_time >= 1600
     
-    def trading_days_since(self, last_date: datetime, today: Optional[datetime] = None) -> int:
-        """Count actual trading days between last_date and today."""
-        if today is None:
-            today = datetime.now()
-        
-        if not HAS_MARKET_CAL:
-            # Fallback: count weekdays
-            count = 0
-            current = last_date + timedelta(days=1)
-            while current <= today:
-                if current.weekday() < 5:
-                    count += 1
-                current += timedelta(days=1)
-            return count
-        
-        try:
-            schedule = self.nyse.schedule(start_date=last_date.strftime('%Y-%m-%d'),
-                                          end_date=today.strftime('%Y-%m-%d'))
-            # Don't count today if market hasn't closed yet
-            if self.is_trading_day(today) and not self.is_market_closed_for_day(today):
-                return max(0, len(schedule) - 1)
-            return len(schedule)
-        except:
-            # Fallback
-            return (today - last_date).days
+    def next_trading_day(self, from_date: datetime = None) -> datetime:
+        """Get next trading day."""
+        from_date = from_date or datetime.now()
+        next_day = from_date + timedelta(days=1)
+        while not self.is_trading_day(next_day):
+            next_day += timedelta(days=1)
+        return next_day
     
-    def is_market_closed_for_day(self, dt: Optional[datetime] = None) -> bool:
-        """Check if market has closed for the day (after 4 PM)."""
-        if dt is None:
-            dt = datetime.now()
-        return dt.hour >= 16
-    
-    def next_trading_day(self, from_date: Optional[datetime] = None) -> Optional[datetime]:
-        """Find the next trading day after from_date."""
-        if from_date is None:
-            from_date = datetime.now()
-        
-        for i in range(1, 10):
-            next_day = from_date + timedelta(days=i)
-            if self.is_trading_day(next_day):
-                return next_day
-        return None
-    
-    def get_market_status(self, dt: Optional[datetime] = None) -> dict:
-        """Get full market status summary."""
-        if dt is None:
-            dt = datetime.now()
-        
-        is_trading = self.is_trading_day(dt)
-        is_open = self.is_market_open(dt) if is_trading else False
-        
-        status = {
-            "is_trading_day": is_trading,
-            "is_market_open": is_open,
-            "market_time": None,
-            "next_open": None,
-            "last_close": None
-        }
-        
-        if is_trading:
-            if is_open:
-                status["market_time"] = "open"
-            elif dt.hour < 9 or (dt.hour == 9 and dt.minute < 30):
-                status["market_time"] = "pre-market"
-                status["next_open"] = dt.replace(hour=9, minute=30, second=0, microsecond=0)
-            else:
-                status["market_time"] = "closed"
-                next_day = self.next_trading_day(dt)
-                if next_day:
-                    status["next_open"] = next_day.replace(hour=9, minute=30, second=0, microsecond=0)
-        else:
-            status["market_time"] = "holiday/weekend"
-            next_day = self.next_trading_day(dt)
-            if next_day:
-                status["next_open"] = next_day.replace(hour=9, minute=30, second=0, microsecond=0)
-        
-        return status
-    
-    def should_expect_fresh_data(self, last_update: datetime, current: Optional[datetime] = None) -> bool:
-        """Determine if data should be considered stale based on trading days."""
-        if current is None:
-            current = datetime.now()
-        
-        # If market closed, don't expect new data
-        if not self.is_trading_day(current):
+    def is_market_holiday(self, date: datetime) -> bool:
+        """Check if date is a market holiday."""
+        if self.is_trading_day(date):
             return False
+        # Check if it's a weekday (potential holiday)
+        return date.weekday() < 5
+    
+    def get_stale_threshold_days(self, last_update: datetime, now: datetime = None) -> int:
+        """Calculate calendar days that equal stale threshold."""
+        now = now or datetime.now()
+        trading_days = self.trading_days_since(last_update, now)
         
-        # If market open but hasn't closed yet today, allow one trading day gap
-        if self.is_trading_day(current) and not self.is_market_closed_for_day(current):
-            # If last update was yesterday, that's ok
-            trading_days = self.trading_days_since(last_update, current)
-            return trading_days > 1
-        
-        # After market close, expect today's data
-        trading_days = self.trading_days_since(last_update, current)
-        return trading_days > 0
+        # Stale thresholds in trading days:
+        # - warning: 1 trading day
+        # - critical: 2 trading days
+        if trading_days >= 2:
+            return 999  # Critical
+        elif trading_days >= 1:
+            return 2   # Warning
+        return 0  # Fresh
 
 
-# Convenience functions for common use cases
-def get_stale_status(last_update_str: str, current: Optional[datetime] = None) -> str:
-    """
-    Get stale status considering market calendar.
-    Returns: 'fresh', 'stale', or 'critical'
-    """
-    if current is None:
-        current = datetime.now()
-    
-    try:
-        last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
-    except:
-        return "unknown"
-    
-    calendar = MarketCalendar()
-    
-    # If not a trading day, data is fresh (market closed)
-    if not calendar.is_trading_day(current):
-        return "fresh"
-    
-    trading_days = calendar.trading_days_since(last_update, current)
+# Global instance
+_market_calendar = None
+
+
+def get_market_calendar() -> MarketCalendar:
+    """Get singleton market calendar instance."""
+    global _market_calendar
+    if _market_calendar is None:
+        _market_calendar = MarketCalendar()
+    return _market_calendar
+
+
+def is_weekend_stale(days_stale: int, last_update: datetime) -> bool:
+    """Check if stale days are due to weekend/holiday."""
+    cal = get_market_calendar()
+    trading_days = cal.trading_days_since(last_update)
+    # If trading days is 0, it's just weekend/holiday
+    return trading_days == 0 and days_stale > 0
+
+
+def format_stale_status(days_stale: int, last_update: datetime) -> str:
+    """Format stale status considering market calendar."""
+    cal = get_market_calendar()
+    trading_days = cal.trading_days_since(last_update)
     
     if trading_days == 0:
-        return "fresh"
+        if days_stale <= 3:
+            return "fresh (market closed)"
+        else:
+            return f"stale: {days_stale}d ({trading_days} trading days)"
     elif trading_days == 1:
-        return "fresh"  # Normal overnight gap
-    elif trading_days <= 3:
-        return "stale"
+        return f"warning: {days_stale}d ({trading_days} trading day)"
     else:
-        return "critical"
+        return f"stale: {days_stale}d ({trading_days} trading days)"
 
 
 if __name__ == "__main__":
-    # Test the market calendar
+    # Test
     cal = MarketCalendar()
-    now = datetime.now()
+    today = datetime.now()
+    print(f"Today is trading day: {cal.is_trading_day(today)}")
+    print(f"Next trading day: {cal.next_trading_day(today)}")
     
-    print(f"Current time: {now.strftime('%Y-%m-%d %H:%M')}")
-    print(f"Is trading day: {cal.is_trading_day(now)}")
-    print(f"Is market open: {cal.is_market_open(now)}")
-    print(f"Market status: {cal.get_market_status(now)}")
-    
-    # Test stale detection
-    test_dates = [
-        (now - timedelta(days=1), "Yesterday"),
-        (now - timedelta(days=3), "3 days ago"),
-        (now - timedelta(days=7), "7 days ago"),
-    ]
-    
-    for date, label in test_dates:
-        status = get_stale_status(date.strftime("%Y-%m-%d"))
-        print(f"{label}: {status}")
+    # Test weekend handling
+    friday = datetime(2026, 5, 8)
+    monday = datetime(2026, 5, 11)
+    print(f"Friday {friday.date()} is trading day: {cal.is_trading_day(friday)}")
+    print(f"Saturday (weekend) is trading day: {cal.is_trading_day(friday + timedelta(days=1))}")
+    print(f"Trading days since Friday to Monday: {cal.trading_days_since(friday, monday)}")
