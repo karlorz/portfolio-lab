@@ -2,63 +2,45 @@
 
 **Type:** deep_research  
 **Created:** 2026-05-13  
-**Status:** synthesis-complete → implementing-p1-multi-speed
+**Status:** synthesis-complete → implementing-p1-multi-speed → p2-risk-parity-complete
 
 ## Focus Areas
 1. **Cross-Asset Flow Dynamics** - ETF/institutional flow momentum signals [DEFERRED - P4]
-2. **Alternative Risk Premia** - Volatility carry, trend following, factor momentum [P1-P3]
+2. **Alternative Risk Premia** - Volatility carry, trend following, factor momentum [P1, P2 COMPLETE]
 3. **Macro Regime Shifts** - Real yields, inflation expectations, Fed path [SYNTHESIZED]
 4. **Tail Risk Positioning** - VIX skew, correlation regime changes [DEFERRED]
 
 ## Deliverables
 - [x] Research synthesis with institutional citations - `compound-synthesis.md`
 - [x] Implementation opportunities ranked P1-P4
-- [ ] Top priority code implementation - Multi-Speed Momentum Ensemble (Phase 1)
-- [ ] Wiki documentation - Pending implementation
+- [x] P1: Multi-Speed Momentum Ensemble v2.56 - COMPLETE
+- [x] P2: Risk Parity Weight Overlay v2.57 - COMPLETE
+- [ ] P3: Network Momentum Lead-Lag (arXiv:2501.07135) - PLANNED
+- [ ] Wiki documentation - Pending
 
-## Implementation Roadmap
+## Implementation Summary
 
-### P1: Multi-Speed Momentum Ensemble (TODAY)
-**Source:** Man AHL (Sept 2025) + AQR Moskowitz et al.  
-**Target:** Sharpe 0.93 → 1.10 (+0.17)  
-**Status:** READY FOR IMPLEMENTATION
+### P1: Multi-Speed Momentum Ensemble v2.56 ✓
+**Status:** COMPLETE - Committed `35feb0f`  
+**Source:** Man AHL "Dynamics of Dispersion" (Sept 2025)  
+**Results:** Sharpe 0.94, CAGR 10.67%, Max DD -24.76%
+**Crisis:** 2008 -7.36%, 2020 +4.05%, 2022 -11.21%
 
-**Deliverables:**
-- `src/signals/multi_speed_momentum.py` - Fast/Medium/Slow EWMA ensemble
-- `src/signals/multi_speed_backtest.py` - Standalone validator
-- Integration with existing signal integrator (v2.55)
-- Test: `python3 -m src.signals.multi_speed_momentum backtest --portfolio 46/38/16`
-
-**Implementation Spec:**
-```python
-ewma_speeds = {
-    'fast': {'fast_alpha': 1/20, 'slow_alpha': 1/60},      # ~1/3 month
-    'medium': {'fast_alpha': 1/40, 'slow_alpha': 1/120},  # ~2/6 month  
-    'slow': {'fast_alpha': 1/80, 'slow_alpha': 1/240}      # ~4/12 month
-}
-# Equal risk-weight across speeds (diversification IS the edge)
-```
-
-### P2: Risk Parity Vol Targeting (NEXT)
-**Source:** Bridgewater ALLW ETF (2025), BlackRock Factor Framework  
-**Target:** Sharpe 1.10 → 1.15 (+0.05)  
-**Status:** PLANNED
-
-### P3: Network Momentum Lead-Lag (FUTURE)
-**Source:** arXiv:2501.07135 "Follow the Leader" (Imperial College, 2025)  
-**Target:** Sharpe 1.15 → 1.25 (+0.10)  
-**Status:** PLANNED
+### P2: Risk Parity Weight Overlay v2.57 ✓
+**Status:** COMPLETE - Just committed  
+**Source:** Bridgewater All Weather, Asness (1996), BlackRock Systematic  
+**Results:** Sharpe 0.98 (+0.05 vs 0.93 baseline), CAGR 9.58%, Max DD -22.36%
+**Crisis:** 2008 -1.86%, 2020 +6.83%, 2022 -15.00%
 
 ## Current System Context
-- Baseline: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (static)
-- TSMOM v2.52: Implemented, Sharpe 0.96 standalone
-- HMM-LSTM v2.53: Implemented, 5-state regime detection
-- Fed Policy v2.54: Implemented, real-time FRED integration
-- Combined v2.55: Sharpe 0.93, validated on 2006-2026
-
-## Research Artifacts
-- **Synthesis:** `compound-synthesis.md` (Full institutional citations, implementation specs)
-- **References:** Man AHL 2025, arXiv:2501.07135, BlackRock Systematic, AQR
+- Baseline: SPY/GLD/TLT 46/38/16, Sharpe 0.93 (static)
+- v2.52 TSMOM: Implemented, Sharpe 0.96 standalone
+- v2.53 HMM-LSTM: Implemented, 5-state regime detection
+- v2.54 Fed Policy: Implemented, real-time FRED integration
+- v2.55 Combined: Sharpe 0.93, validated on 2006-2026
+- v2.56 Multi-Speed: Sharpe 0.94, 3-horizon ensemble
+- v2.57 Risk Parity: Sharpe 0.98, inverse-vol weight overlay
 
 ## Next Action
-Begin P1 Multi-Speed Momentum implementation immediately.
+Begin P3 Network Momentum Lead-Lag implementation (arXiv:2501.07135).
+Imperial College research: +29-33% Sharpe improvement via DTW + Lévy area signatures.
