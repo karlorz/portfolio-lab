@@ -12,7 +12,7 @@ import os
 # Add parent to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from execution.rebalance_scheduler import (
+from src.execution.rebalance_scheduler import (
     RebalanceScheduler,
     ScheduledOrder,
     SchedulerConfig,
@@ -20,7 +20,7 @@ from execution.rebalance_scheduler import (
     ExecutionWindow,
     BatchRebalancer
 )
-from execution.intraday_cost_model import IntradayExecutionCostModel
+from src.execution.intraday_cost_model import IntradayExecutionCostModel
 
 
 class TestSchedulerConfig(unittest.TestCase):
