@@ -13,7 +13,7 @@ interface YieldCurveData {
   dgs2: number;
   dgs10: number;
   duration_regime: 'inverted' | 'flat' | 'steep' | 'normal';
-  spread_history: number[];
+  spread_history?: number[];
 }
 
 interface DurationOverlayProps {
