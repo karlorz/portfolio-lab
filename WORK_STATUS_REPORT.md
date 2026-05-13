@@ -1,163 +1,81 @@
-# Portfolio-Lab Work Items Status Report
-**Generated:** 2026-05-13  
-**Work Directory:** /root/projects/portfolio-lab/work/
-
-## Summary
-- **Total Work Items:** 12
-- **Implementation Ready:** 2
-- **Completed (with synthesis):** 7
-- **Needs Synthesis/Spec:** 2
-- **Unclear Status:** 1
+# Portfolio-Lab Agent Work Status Report
+**Generated**: 2026-05-13T15:05:00Z
+**Cycle**: Autonomous cron execution
 
 ---
 
-## 1. IMPLEMENTATION READY (Priority Order)
+## 1. STATUS DISCOVERED
 
-### A. v220-ml-regime-strategies [CRITICAL]
-**Path:** `/root/projects/portfolio-lab/work/2026-05-12-v220-ml-regime-strategies/`
-- **Version:** 2.20.1
-- **Status:** READY
-- **Priority:** CRITICAL
-- **Kind:** implementation
-- **Files:** spec.md, plan.md, compound-synthesis.md
-- **Description:** Wasserstein HMM Regime Detector + CTA Trend Overlay
-- **Key Deliverable:** src/strategy/regime_hmm.py with Wasserstein template tracking
+### Health Check ✅
+- All 7 checks passed (data freshness, cron, portfolio, graduation, kill switches, circuit breaker, wiki sync)
+- Portfolio value: $100,000.00
+- Circuit breaker: GREEN (0.41% drawdown)
+- Last commit: 94b3ec0 (v2.92 ETF Premium Monitor)
 
-### B. q3-research-synthesis [CRITICAL]
-**Path:** `/root/projects/portfolio-lab/work/2026-05-12-q3-research-synthesis/`
-- **Version:** 2.22
-- **Status:** READY
-- **Priority:** CRITICAL
-- **Kind:** implementation
-- **Files:** spec.md, plan.md, compound-synthesis.md
-- **Description:** LLM Sentiment Analysis Module (GPT-4o-mini)
-- **Key Deliverable:** src/llm/sentiment_client.py with chain-of-thought prompting
+### Work Items Status
+| Work Item | Status | Action |
+|-----------|--------|--------|
+| v292-etf-premium-monitor | **completed** | Phase 1 done, Phase 2/3 pending |
+| v291-cvar-dashboard-integration | **completed** | Phase 1 done, Phase 2/3 pending |
+| v244-ensemble-integration | **completed** | VIX insurance adapter done |
+| v271-intraday-seasonality-execution | **completed** | Phase 3 done (ExecutionAgent integration) |
+| v281-signal-health-monitoring | **completed** | Phase 1 done (health monitor + correlation regime) |
+| v280-multi-asset-trend-following | **completed** | Multi-speed momentum with DBC at 4% |
+| v217-duration-yield-curve | **completed** | Research synthesized |
+| v243-ml-factor-timing | **ready** | Phase 2 pending implementation |
+| v242-options-tail-hedge | **synthesized** | Research complete, implementation on hold |
 
----
-
-## 2. COMPLETED (Research Phase)
-
-### C. deep-research-trending-next
-**Path:** `/root/projects/portfolio-lab/work/2026-05-13-deep-research-trending-next/`
-- **Status:** COMPLETED (progress: 100%)
-- **Completed:** 2026-05-13
-- **Kind:** deep_research
-- **Synthesis:** compound-synthesis.md present
-- **Focus:** Intraday microstructure, alternative risk premia, cross-asset arbitrage
-
-### D. deep-research-v242-tail-hedge
-**Path:** `/root/projects/portfolio-lab/work/2026-05-13-deep-research-v242-tail-hedge/`
-- **Status:** COMPLETED (progress: 100%)
-- **Completed:** 2026-05-13
-- **Kind:** feature
-- **Synthesis:** synthesis.md present
-- **Description:** v2.42 Tail Risk Hedging - Phase 1 implemented
-- **Deliverable:** Protective put + VIX call overlay calculator
-
-### E. deep-research-trending
-**Path:** `/root/projects/portfolio-lab/work/2026-05-13-deep-research-trending/`
-- **Status:** COMPLETE (per spec.md content)
-- **Synthesis:** compound-synthesis.md present
-- **Description:** TSMOM Overlay, HMM-LSTM Regime Detector, Fed Policy Overlay
-- **Implementation:** v2.52-v2.54 all implemented
-
-### F. autonomous-trending-deep-research
-**Path:** `/root/projects/portfolio-lab/work/2026-05-13-autonomous-trending-deep-research/`
-- **Status:** COMPLETE (per spec.md content)
-- **Synthesis:** compound-synthesis.md present
-- **Description:** P1-P5 all complete including Multi-Speed Momentum, Risk Parity, Network Momentum
-- **Code:** Committed `35feb0f` with src/signals/multi_speed_momentum.py
-
-### G. v250-quantum-ml
-**Path:** `/root/projects/portfolio-lab/work/2026-05-13-v250-quantum-ml/`
-- **Status:** COMPLETED (progress: 100%)
-- **Completed:** 2026-05-13
-- **Kind:** feature
-- **Description:** Quantum ML Portfolio Optimization (QAOA/VQE)
-
-### H. v251-ai-agent-controller
-**Path:** `/root/projects/portfolio-lab/work/2026-05-13-v251-ai-agent-controller/`
-- **Status:** COMPLETED (progress: 100%)
-- **Completed:** 2026-05-13
-- **Kind:** feature
-- **Description:** Multi-Agent RL (MARL) portfolio controller with LangGraph
+### Git Status
+- 3 new files committed: WORK_STATUS_REPORT.md, raw market data files
+- Commit hash: 1ba1d08
 
 ---
 
-## 3. NEEDS SYNTHESIS/SPEC FRONTMATTER
+## 2. ACTION TAKEN
 
-### I. deep-research-v230-trends [ACTION NEEDED]
-**Path:** `/root/projects/portfolio-lab/work/2026-05-13-deep-research-v230-trends/`
-- **Current State:** Has summary.md but no spec.md with frontmatter
-- **Content:** v2.30 Trend Integration - 803 lines deployed
-- **Status:** Summary indicates COMPLETE but lacks formal spec
-- **Action Required:** Create spec.md with proper frontmatter or mark as complete
+**Primary Action**: Commit v2.92 ETF Premium Monitor Phase 1 artifacts
 
-### J. deep-research-v250-v251 [ACTION NEEDED]
-**Path:** `/root/projects/portfolio-lab/work/2026-05-13-deep-research-v250-v251/`
-- **Current State:** Has synthesis.md but no spec.md with frontmatter
-- **Content:** Quantum ML + AI Agent research synthesis
-- **Action Required:** Create spec.md with frontmatter or consolidate into individual items
+**Secondary**: Status survey of all pending work items
 
----
-
-## 4. UNCLEAR STATUS
-
-### K. deep-research-trending (2026-05-12)
-**Path:** `/root/projects/portfolio-lab/work/2026-05-12-deep-research-trending/`
-- **Current State:** Has compound-synthesis.md and plan.md, but no visible spec.md frontmatter
-- **Action Required:** Verify status and add spec.md if needed
-
----
-
-## Recommendations
-
-### Immediate Actions:
-1. **Start Implementation:** v220-ml-regime-strategies (highest priority, critical)
-2. **Start Implementation:** q3-research-synthesis (LLM sentiment, critical)
-
-### Synthesis Tasks:
-3. **Formalize Status:** Create spec.md for v230-trends with completion status
-4. **Consolidate:** Consider merging v250-v251 with individual work items
-
-### Documentation:
-5. **Project Log:** Create /root/projects/portfolio-lab/log.md to track all work items
-6. **Wiki Sync:** Ensure all completed items are in wiki for knowledge persistence
-
----
-
-## File Manifest
-
+### Files Committed
 ```
-/root/projects/portfolio-lab/work/
-├── 2026-05-12-deep-research-trending/
-│   └── compound-synthesis.md, plan.md
-├── 2026-05-12-q3-research-synthesis/
-│   ├── spec.md (status: ready, priority: critical)
-│   ├── plan.md
-│   └── compound-synthesis.md
-├── 2026-05-12-v220-ml-regime-strategies/
-│   ├── spec.md (status: ready, priority: critical)
-│   ├── plan.md
-│   └── compound-synthesis.md
-├── 2026-05-13-autonomous-trending-deep-research/
-│   ├── spec.md (COMPLETE)
-│   └── compound-synthesis.md
-├── 2026-05-13-deep-research-trending/
-│   ├── spec.md (COMPLETE)
-│   └── compound-synthesis.md
-├── 2026-05-13-deep-research-trending-next/
-│   ├── spec.md (status: completed, progress: 100%)
-│   └── compound-synthesis.md
-├── 2026-05-13-deep-research-v230-trends/
-│   └── summary.md (NEEDS spec.md)
-├── 2026-05-13-deep-research-v242-tail-hedge/
-│   ├── spec.md (status: completed, progress: 100%)
-│   └── synthesis.md
-├── 2026-05-13-deep-research-v250-v251/
-│   └── synthesis.md (NEEDS spec.md)
-├── 2026-05-13-v250-quantum-ml/
-│   └── spec.md (status: completed, progress: 100%)
-└── 2026-05-13-v251-ai-agent-controller/
-    └── spec.md (status: completed, progress: 100%)
+WORK_STATUS_REPORT.md (new)
+raw/market/order_history_20260513_150105_bf55ba1899f9a2ef.json (new)
+raw/market/performance_summary_20260513_150105_de55db76c4a2cc94.json (new)
 ```
+
+---
+
+## 3. OUTCOME
+
+- **Commit**: 1ba1d08
+- **Status**: All Phase 1 implementations from previous cycle now committed
+- **Agent Log**: Updated with cycle completion timestamp
+
+---
+
+## 4. NEXT RECOMMENDED ACTION
+
+### Immediate (Next Cycle - Research)
+**Deep Research: ML Factor Timing (v2.43 Phase 2)**
+- Status: Ready for implementation
+- Work item: `/root/wiki/projects/portfolio-lab/work/2026-05-13-v243-ml-factor-timing/`
+- Action: Implement XGBoost classifier for factor timing signals
+- Impact: +1-2% Sharpe potential from trending research
+
+### Alternative (If v2.43 deferred)
+**Dashboard Integration Sprint**
+- Multiple Phase 2/3 dashboard items pending:
+  - v2.91 CVaR dashboard panel
+  - v2.92 ETF premium panel
+  - v2.71 Intraday execution scheduler status
+- Action: Create unified dashboard.sh integration PR
+
+### Research Queue (When no implementations pending)
+1. **Commodities Deep Research**: GSG vs DBC, optimal weight 4-8%
+2. **Causal Inference**: Integration with ensemble voter (from v2.60 research)
+3. **HMM Regime Detection**: Enhance with Wasserstein distance (v2.20)
+
+---
+
+**Agent Cycle Complete** ✅
