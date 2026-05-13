@@ -53,10 +53,12 @@ def _init_db(db_path):
     return conn
 
 
-def _insert_prices(conn, symbol, n_days=300, base_price=100.0, drift=0.0004):
+def _insert_prices(conn, symbol, n_days=300, base_price=100.0, drift=0.0004, seed=None):
     """Insert synthetic price data."""
     import random
-    random.seed(hash(symbol) % 2**31)
+    if seed is None:
+        seed = hash(symbol) % 2**31
+    random.seed(seed)
     d = datetime(2025, 1, 2)
     price = base_price
     rows = []
@@ -198,8 +200,19 @@ class TestDualMomentumEngine:
     def test_calculate_momentum_score_below_sma(self, tmp_path):
         engine = _make_engine(tmp_path)
         conn = _init_db(engine.db_path)
-        # Strong downtrend → price below SMA
-        _insert_prices(conn, 'SPY', n_days=300, base_price=800.0, drift=-0.002)
+        # Create a linear downtrend: price drops every day
+        from datetime import datetime, timedelta
+        d = datetime(2025, 1, 2)
+        price = 800.0
+        rows = []
+        for i in range(300):
+            while d.weekday() >= 5:
+                d += timedelta(days=1)
+            price = 800.0 - i * 1.5  # Linear decline
+            rows.append((d.strftime('%Y-%m-%d'), 'SPY', round(price, 2), 1000000))
+            d += timedelta(days=1)
+        conn.executemany("INSERT INTO prices VALUES (?, ?, ?, ?)", rows)
+        conn.commit()
         conn.close()
         score = engine._calculate_momentum_score('SPY')
         assert score is not None
@@ -284,8 +297,21 @@ class TestDualMomentumEngine:
     def test_evaluate_risk_off_when_all_below_sma(self, tmp_path):
         engine = _make_engine(tmp_path)
         conn = _init_db(engine.db_path)
+        # Create linear downtrend for all assets
+        from datetime import datetime, timedelta
         for sym in engine.universe:
-            _insert_prices(conn, sym, n_days=300, base_price=800.0, drift=-0.002)
+            d = datetime(2025, 1, 2)
+            price = 800.0
+            rows = []
+            for i in range(300):
+                while d.weekday() >= 5:
+                    d += timedelta(days=1)
+                price = 800.0 - i * 1.5
+                rows.append((d.strftime('%Y-%m-%d'), sym, round(price, 2), 1000000))
+                d += timedelta(days=1)
+            conn.executemany("INSERT INTO prices VALUES (?, ?, ?, ?)", rows)
+            d = datetime(2025, 1, 2)  # Reset date for next symbol
+        conn.commit()
         conn.close()
         signal = engine.evaluate()
         assert signal.risk_off is True
