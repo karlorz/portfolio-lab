@@ -14,6 +14,12 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 # Mock heavy external dependencies before import
+# Save originals so we can restore after import (prevents test pollution)
+_orig_modules = {
+    k: sys.modules.get(k) for k in
+    ('src.signals.tsmom_overlay', 'src.agents.risk_agent_hmm', 'src.signals.fed_policy_overlay')
+}
+
 mock_tsmom = MagicMock()
 mock_tsmom.DEFAULT_BASE_ALLOCATION = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
 mock_hmm = MagicMock()
@@ -28,6 +34,13 @@ from src.backtest.combined_strategy import (
     DailyPosition, BacktestResult, CombinedStrategyBacktester,
     TRANSACTION_COST, REBALANCE_FREQ, MIN_HISTORY_DAYS,
 )
+
+# Restore original modules to prevent polluting other test files
+for _k, _v in _orig_modules.items():
+    if _v is None:
+        sys.modules.pop(_k, None)
+    else:
+        sys.modules[_k] = _v
 
 
 # ---------------------------------------------------------------------------
