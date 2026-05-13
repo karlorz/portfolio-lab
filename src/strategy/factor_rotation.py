@@ -21,6 +21,7 @@ import os
 import json
 import sqlite3
 import numpy as np
+import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, NamedTuple
 from dataclasses import dataclass
@@ -741,14 +742,136 @@ class FactorRotationBacktest:
         rebalance_frequency: str = "monthly"
     ) -> Dict:
         """
-        Run historical backtest of factor rotation strategy
+        Run historical backtest of factor rotation strategy.
+        Uses monthly rebalancing with momentum-based factor selection.
         """
+        if not self.db_path.exists():
+            return {"error": "No market data available", "status": "failed"}
+
+        conn = sqlite3.connect(self.db_path)
+
+        # Get all available trading dates in range
+        dates = pd.read_sql(
+            "SELECT DISTINCT date FROM prices WHERE date BETWEEN ? AND ? ORDER BY date",
+            conn, params=(start_date, end_date)
+        )['date'].tolist()
+
+        if len(dates) < 252:
+            conn.close()
+            return {"error": f"Insufficient data: {len(dates)} days (need 252+)", "status": "failed"}
+
+        # Get prices for all factor symbols
+        symbols = list(self.FACTORS.keys())
+        price_data = {}
+        for sym in symbols:
+            rows = pd.read_sql(
+                "SELECT date, close FROM prices WHERE symbol = ? AND date BETWEEN ? AND ? ORDER BY date",
+                conn, params=(sym, start_date, end_date)
+            )
+            if not rows.empty:
+                price_data[sym] = rows.set_index('date')['close']
+
+        # Get SPY for benchmark
+        spy_prices = pd.read_sql(
+            "SELECT date, close FROM prices WHERE symbol = 'SPY' AND date BETWEEN ? AND ? ORDER BY date",
+            conn, params=(start_date, end_date)
+        )
+        conn.close()
+
+        if spy_prices.empty:
+            return {"error": "No SPY benchmark data", "status": "failed"}
+
+        spy_series = spy_prices.set_index('date')['close']
+
+        # Determine rebalance dates (monthly)
+        rebalance_dates = []
+        prev_month = None
+        for d in dates:
+            month = d[:7]  # YYYY-MM
+            if month != prev_month:
+                rebalance_dates.append(d)
+                prev_month = month
+
+        # Simulate portfolio
+        portfolio_value = 100000.0
+        spy_value = 100000.0
+        values = [portfolio_value]
+        spy_values = [spy_value]
+        current_weights = {}
+        trade_count = 0
+
+        for i, date in enumerate(dates):
+            if i == 0:
+                continue
+
+            # Calculate daily return from current weights
+            daily_return = 0.0
+            for sym, weight in current_weights.items():
+                if sym in price_data and date in price_data[sym].index:
+                    prev_date = dates[i - 1]
+                    if prev_date in price_data[sym].index:
+                        prev_p = price_data[sym][prev_date]
+                        cur_p = price_data[sym][date]
+                        if prev_p > 0:
+                            daily_return += weight * (cur_p - prev_p) / prev_p
+
+            portfolio_value *= (1 + daily_return)
+            values.append(portfolio_value)
+
+            # SPY benchmark
+            if date in spy_series.index and dates[i - 1] in spy_series.index:
+                spy_ret = (spy_series[date] - spy_series[dates[i - 1]]) / spy_series[dates[i - 1]]
+                spy_value *= (1 + spy_ret)
+            spy_values.append(spy_value)
+
+            # Rebalance
+            if date in rebalance_dates:
+                # Temporarily set universe to available symbols for this date
+                available = [s for s in symbols if s in price_data and date in price_data[s].index]
+                if available:
+                    old_universe = self.universe
+                    self.universe = available
+                    result = self.evaluate()
+                    self.universe = old_universe
+
+                    new_weights = result.get('allocation', {})
+                    if new_weights:
+                        current_weights = new_weights
+                        trade_count += 1
+
+        # Compute metrics
+        years = len(dates) / 252
+        final_value = values[-1]
+        cagr = (final_value / 100000.0) ** (1 / years) - 1 if years > 0 else 0
+
+        # Daily returns for Sharpe
+        daily_returns = np.diff(values) / values[:-1]
+        vol = float(np.std(daily_returns) * np.sqrt(252))
+        sharpe = (cagr - 0.04) / vol if vol > 0 else 0
+
+        # Max drawdown
+        peak = np.maximum.accumulate(values)
+        drawdowns = (np.array(values) - peak) / peak
+        max_dd = float(np.min(drawdowns))
+
+        # SPY benchmark
+        spy_cagr = (spy_values[-1] / 100000.0) ** (1 / years) - 1 if years > 0 else 0
+
         return {
             "strategy": "factor_momentum_rotation",
             "period": f"{start_date} to {end_date}",
             "rebalance_frequency": rebalance_frequency,
-            "status": "placeholder",
-            "note": "Full backtest requires historical simulation framework"
+            "initial_capital": 100000.0,
+            "final_value": round(final_value, 2),
+            "cagr": round(cagr, 4),
+            "volatility": round(vol, 4),
+            "sharpe_ratio": round(sharpe, 3),
+            "max_drawdown": round(max_dd, 4),
+            "spy_cagr": round(spy_cagr, 4),
+            "excess_return": round(cagr - spy_cagr, 4),
+            "trade_count": trade_count,
+            "trading_days": len(dates),
+            "status": "completed"
         }
 
 

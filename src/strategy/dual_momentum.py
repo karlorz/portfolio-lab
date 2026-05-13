@@ -15,6 +15,7 @@ import os
 import json
 import sqlite3
 import numpy as np
+import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -325,32 +326,148 @@ class DualMomentumBacktest:
     Backtesting engine for dual momentum strategy
     Allows comparison against buy-and-hold and static allocation
     """
-    
+
     def __init__(self, engine: DualMomentumEngine):
         self.engine = engine
-    
+
     def run_backtest(
         self,
         start_date: str,
         end_date: str,
         initial_capital: float = 100000,
-        rebalance_frequency: str = "monthly"  # monthly, quarterly, or threshold
+        rebalance_frequency: str = "monthly"
     ) -> Dict:
         """
-        Run historical backtest of dual momentum strategy
-        
-        Note: This requires sufficient historical data in the database
+        Run historical backtest of dual momentum strategy.
+        Monthly rebalancing with absolute + relative momentum selection.
         """
-        # Placeholder - full implementation would iterate through dates
-        # and simulate portfolio evolution
-        
+        if not self.engine.db_path.exists():
+            return {"error": "No market data available", "status": "failed"}
+
+        conn = sqlite3.connect(self.engine.db_path)
+
+        # Get all available trading dates in range
+        dates = pd.read_sql(
+            "SELECT DISTINCT date FROM prices WHERE date BETWEEN ? AND ? ORDER BY date",
+            conn, params=(start_date, end_date)
+        )['date'].tolist()
+
+        if len(dates) < 252:
+            conn.close()
+            return {"error": f"Insufficient data: {len(dates)} days (need 252+)", "status": "failed"}
+
+        # Get prices for universe symbols
+        symbols = self.engine.universe
+        price_data = {}
+        for sym in symbols:
+            rows = pd.read_sql(
+                "SELECT date, close FROM prices WHERE symbol = ? AND date BETWEEN ? AND ? ORDER BY date",
+                conn, params=(sym, start_date, end_date)
+            )
+            if not rows.empty:
+                price_data[sym] = rows.set_index('date')['close']
+
+        # Get SPY for benchmark
+        spy_prices = pd.read_sql(
+            "SELECT date, close FROM prices WHERE symbol = 'SPY' AND date BETWEEN ? AND ? ORDER BY date",
+            conn, params=(start_date, end_date)
+        )
+        conn.close()
+
+        if spy_prices.empty:
+            return {"error": "No SPY benchmark data", "status": "failed"}
+
+        spy_series = spy_prices.set_index('date')['close']
+
+        # Determine rebalance dates (monthly)
+        rebalance_dates = []
+        prev_month = None
+        for d in dates:
+            month = d[:7]
+            if month != prev_month:
+                rebalance_dates.append(d)
+                prev_month = month
+
+        # Simulate portfolio
+        portfolio_value = initial_capital
+        spy_value = initial_capital
+        values = [portfolio_value]
+        spy_values = [spy_value]
+        current_weights = self.engine.base_allocation.copy()
+        trade_count = 0
+        risk_off_count = 0
+
+        for i, date in enumerate(dates):
+            if i == 0:
+                continue
+
+            # Calculate daily return from current weights
+            daily_return = 0.0
+            for sym, weight in current_weights.items():
+                if sym in price_data and date in price_data[sym].index:
+                    prev_date = dates[i - 1]
+                    if prev_date in price_data[sym].index:
+                        prev_p = price_data[sym][prev_date]
+                        cur_p = price_data[sym][date]
+                        if prev_p > 0:
+                            daily_return += weight * (cur_p - prev_p) / prev_p
+
+            portfolio_value *= (1 + daily_return)
+            values.append(portfolio_value)
+
+            # SPY benchmark
+            if date in spy_series.index and dates[i - 1] in spy_series.index:
+                spy_ret = (spy_series[date] - spy_series[dates[i - 1]]) / spy_series[dates[i - 1]]
+                spy_value *= (1 + spy_ret)
+            spy_values.append(spy_value)
+
+            # Rebalance
+            if date in rebalance_dates:
+                available = [s for s in symbols if s in price_data and date in price_data[s].index]
+                if available:
+                    old_universe = self.engine.universe
+                    self.engine.universe = available
+                    signal = self.engine.evaluate()
+                    self.engine.universe = old_universe
+
+                    new_weights = signal.adjusted_allocation
+                    if new_weights:
+                        current_weights = new_weights
+                        trade_count += 1
+                        if signal.risk_off:
+                            risk_off_count += 1
+
+        # Compute metrics
+        years = len(dates) / 252
+        final_value = values[-1]
+        cagr = (final_value / initial_capital) ** (1 / years) - 1 if years > 0 else 0
+
+        daily_returns = np.diff(values) / values[:-1]
+        vol = float(np.std(daily_returns) * np.sqrt(252))
+        sharpe = (cagr - 0.04) / vol if vol > 0 else 0
+
+        peak = np.maximum.accumulate(values)
+        drawdowns = (np.array(values) - peak) / peak
+        max_dd = float(np.min(drawdowns))
+
+        spy_cagr = (spy_values[-1] / initial_capital) ** (1 / years) - 1 if years > 0 else 0
+
         return {
             "strategy": "dual_momentum",
             "period": f"{start_date} to {end_date}",
             "initial_capital": initial_capital,
+            "final_value": round(final_value, 2),
+            "cagr": round(cagr, 4),
+            "volatility": round(vol, 4),
+            "sharpe_ratio": round(sharpe, 3),
+            "max_drawdown": round(max_dd, 4),
+            "spy_cagr": round(spy_cagr, 4),
+            "excess_return": round(cagr - spy_cagr, 4),
+            "trade_count": trade_count,
+            "risk_off_months": risk_off_count,
+            "trading_days": len(dates),
             "rebalance_frequency": rebalance_frequency,
-            "status": "placeholder",
-            "note": "Full backtest requires historical simulation framework"
+            "status": "completed"
         }
 
 
