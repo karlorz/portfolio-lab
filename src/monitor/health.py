@@ -259,6 +259,74 @@ class HealthMonitor:
             })
             return True
     
+    def check_cvar_metrics(self) -> bool:
+        """Check CVaR tail risk metrics from risk_metrics.json."""
+        risk_file = DATA_DIR / "risk_metrics.json"
+        if not risk_file.exists():
+            self.checks.append({
+                "name": "cvar_metrics",
+                "status": "not_initialized",
+                "ok": True
+            })
+            return True
+        
+        try:
+            with open(risk_file) as f:
+                metrics = json.load(f)
+            
+            cvar_95 = metrics.get("cvar_95_daily")
+            var_95 = metrics.get("var_95_daily")
+            cvar_ratio = metrics.get("cvar_ratio")
+            tail_severity = metrics.get("tail_severity", "unknown")
+            
+            # Validate metrics
+            issues = []
+            if cvar_95 is not None and var_95 is not None:
+                # CVaR should always be worse (more negative) than VaR
+                if cvar_95 > var_95:
+                    issues.append(f"cvar_inversion ({cvar_95:.2f} > {var_95:.2f})")
+            
+            if cvar_ratio is not None:
+                if cvar_ratio < 1.0 or cvar_ratio > 3.0:
+                    issues.append(f"ratio_out_of_range ({cvar_ratio:.2f})")
+                
+                # Alert on elevated tail risk
+                if cvar_ratio > 1.8:
+                    self.alerts.append(f"Severe tail risk detected: CVaR ratio {cvar_ratio:.2f}x (reduce equity 10-15%)")
+                elif cvar_ratio > 1.5:
+                    issues.append(f"elevated_tail ({cvar_ratio:.2f}x)")
+            
+            ok = len(issues) == 0
+            
+            self.checks.append({
+                "name": "cvar_metrics",
+                "status": f"{tail_severity} ({cvar_ratio:.2f}x)" if cvar_ratio else "unknown",
+                "ok": ok,
+                "cvar_95": cvar_95,
+                "var_95": var_95,
+                "cvar_ratio": cvar_ratio,
+                "tail_severity": tail_severity,
+                "details": {
+                    "interpretation": "CVaR captures avg loss in worst 5% of outcomes",
+                    "severity_normal": "CVaR 1.3-1.5x: Normal tail risk",
+                    "severity_elevated": "CVaR 1.5-1.8x: Monitor closely",
+                    "severity_severe": "CVaR >1.8x: Reduce equity 10-15%, add hedge"
+                }
+            })
+            
+            if not ok and not any(a.startswith("Severe tail risk") for a in self.alerts):
+                self.alerts.append(f"CVaR metrics elevated: {', '.join(issues)}")
+            
+            return ok
+            
+        except Exception as e:
+            self.checks.append({
+                "name": "cvar_metrics",
+                "status": f"error: {str(e)}",
+                "ok": True  # Don't fail health check for CVaR errors
+            })
+            return True
+    
     def check_wiki_sync(self) -> bool:
         """Check if wiki is being synced."""
         wiki_dir = Path("~/wiki/projects/portfolio-lab/compound").expanduser()
@@ -299,6 +367,7 @@ class HealthMonitor:
             self.check_graduation_candidate(),
             self.check_kill_switches(),
             self.check_circuit_breaker(),
+            self.check_cvar_metrics(),
             self.check_wiki_sync()
         ]
         

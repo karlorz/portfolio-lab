@@ -77,6 +77,17 @@
 
 ## Recent Implementation Updates (2026-05-13)
 
+### v2.80 Phase 2 Multi-Asset Trend Following (DBC) - REJECTED
+- **CLI**: Added 4-part `--portfolio SPY/GLD/TLT/DBC` support to `src/signals/multi_speed_momentum.py`
+- **Backtest 2008-2026** (monthly rebalance, multi-speed momentum overlay):
+  - 3-asset 46/38/16: CAGR 10.26%, Sharpe **0.904**, MaxDD -24.8%
+  - 4-asset 46/34/16/4 (DBC funded by GLD): CAGR 9.52%, Sharpe **0.847**, MaxDD -27.0%
+  - **Sharpe delta: -0.057** — DBC at 4% degrades risk-adjusted return
+- **Crisis breakdown**: DBC hurts 2008 (-2.4pp) and 2020 (-1.0pp), helps 2022 (+1.9pp). Net negative.
+- **Decision**: Reject Phase 2 at 4% weight. Phase 3 (synthetic short) deferred.
+- **Follow-ups**: DBC weight sweep (2/3/5/6%), regime-gated DBC, or fund from SPY/TLT instead of GLD.
+- **Spec**: `wiki/projects/portfolio-lab/work/2026-05-13-v280-multi-asset-trend-following/spec.md`
+
 ### v2.71 Intraday Seasonality Execution - COMPLETED
 - **Phase 1**: Intraday cost model with symbol-specific profiles
 - **Phase 2**: Rebalance scheduler with optimal window (11:00-14:00 ET) selection
