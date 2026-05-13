@@ -65,13 +65,15 @@ DB_PATH = DATA_DIR / "signals.db"
 
 # Base signal weights (adjusted dynamically by regime)
 BASE_WEIGHTS = {
-    "momentum": 0.25,
-    "value": 0.20,
-    "macro": 0.20,
-    "quality": 0.15,
-    "sentiment": 0.15,
-    "ai_agent": 0.05,  # v2.51 MARL controller weight
-    "tsmom": 0.05,     # v2.52 TSMOM overlay weight
+    "momentum": 0.20,
+    "value": 0.15,
+    "macro": 0.15,
+    "quality": 0.10,
+    "sentiment": 0.10,
+    "ai_agent": 0.05,   # v2.51 MARL controller weight
+    "tsmom": 0.10,      # v2.52 TSMOM overlay weight
+    "fed_policy": 0.10, # v2.54 Fed policy overlay weight
+    "hmm_regime": 0.05, # v2.53 HMM regime weight
 }
 
 # Regime-specific weight adjustments

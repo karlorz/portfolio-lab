@@ -9,6 +9,10 @@
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
 - **Sharpe 0.79 champion validated with +1yr of new data (2005-2026)**
 - **10% drift-based rebalancing beats annual: Sharpe 0.83 vs 0.79**
+- **v2.54 Fed Policy Overlay**: Real-time FRED integration for rate/inflation regime detection
+  - Current regime: EASING (Fed 3.64%, real rate -0.31%, 10Y-2Y +0.47)
+  - Allocation: SPY+2.6%, GLD+3%, TLT-5.5% from base 46/38/16
+  - Signal integrator weight: 10% (regime-based tactical shifts)
 - **v2.53 HMM-LSTM Regime Detector**: 5-state market classification (bull/bear/neutral/high_vol/crisis)
   - GaussianHMM trained on 26,225 samples (SPY/GLD/TLT/QQQ/IEF)
   - 4D features: momentum, volatility, trend strength, VIX proxy
