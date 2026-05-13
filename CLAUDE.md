@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **1027/1027 passing** — all tests green
+- **1263/1263 passing** — all tests green
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -153,6 +153,13 @@
 - `test_risk_agent_hmm.py` — 26 tests: HMM regime detection, feature extraction, allocation shifts, save/load
 - `test_combined_strategy.py` — 25 tests: signal combination, Fed regime, baseline backtest, crisis returns
 - `test_tail_hedge.py` — 49 tests: put/VIX hedge calculation, hybrid optimization, regime detection, analytics
+- `test_esg_integration.py` — 38 tests: WACI, ESG scoring, climate scenarios, tilt optimization, carbon pairs
+- `test_ensemble_voter.py` — 29 tests: regime detection, signal weighting, vote consensus, allocation recommendation
+- `test_ensemble_backtest.py` — 22 tests: returns calculation, max drawdown, crisis alpha, allocation deltas, price fetching, target validation
+- `test_fed_policy_overlay.py` — 35 tests: FRED series, CPI YoY, real rate, regime classification, allocation shifts, overlay recommendation
+- `test_vix_position_manager.py` — 39 tests: position lifecycle, mark-to-market, roll detection, budget tracking, performance stats
+- `test_combined_orchestrator.py` — 27 tests: signal weights, conflict detection, resolution strategies, recommendation generation
+- `test_tail_hedge_calculator.py` — 46 tests: VIX percentile, put/VIX premium estimation, protective put analysis, VIX overlay, full recommendation
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
