@@ -165,5 +165,39 @@ class TestLoadSignals:
             assert signals == []
 
 
+class TestFetchPrice:
+    """Test price fetching from market.db."""
+
+    def _make_db(self, tmpdir, symbol="SPY", price=500.0):
+        db_path = os.path.join(tmpdir, "market.db")
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE prices (symbol TEXT, date TEXT, close REAL,
+            PRIMARY KEY (symbol, date))
+        """)
+        conn.execute("INSERT INTO prices VALUES (?, '2026-05-13', ?)", (symbol, price))
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_fetches_existing_price(self):
+        with tempfile.TemporaryDirectory() as d:
+            db_path = self._make_db(d, "SPY", 530.0)
+            router = OrderRouter(data_dir=d, db_path=db_path, paper=True)
+            assert router._fetch_price("SPY") == 530.0
+
+    def test_returns_zero_missing_symbol(self):
+        with tempfile.TemporaryDirectory() as d:
+            db_path = self._make_db(d, "SPY", 530.0)
+            router = OrderRouter(data_dir=d, db_path=db_path, paper=True)
+            assert router._fetch_price("GLD") == 0.0
+
+    def test_returns_zero_missing_db(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, db_path="/nonexistent/market.db", paper=True)
+            assert router._fetch_price("SPY") == 0.0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
