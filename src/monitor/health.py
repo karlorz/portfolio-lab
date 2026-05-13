@@ -50,7 +50,8 @@ class HealthMonitor:
                 last = datetime.strptime(last_date, "%Y-%m-%d")
                 
                 # Use market calendar for stale detection
-                if not calendar.is_trading_day():
+                today = datetime.now()
+                if not calendar.is_trading_day(today):
                     # Market closed today - no expectation of new data
                     continue
                 
