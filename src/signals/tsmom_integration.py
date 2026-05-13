@@ -78,6 +78,9 @@ class TSMOMSignalAdapter:
             }
         )
     
+    # Alias for SignalSource interface compatibility
+    generate_signal = get_signal
+    
     def get_portfolio_signals(
         self,
         tickers: List[str]
