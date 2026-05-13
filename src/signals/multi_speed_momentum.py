@@ -456,22 +456,24 @@ class MultiSpeedMomentum:
             tier_contributions=tier_contributions,
             overall_confidence=overall_confidence
         )
-    
-    def get_ensemble_signal(self, ticker: str, prices_df: Optional[pd.DataFrame] = None) -> Optional[float]:
-        """Get current ensemble signal value for a ticker (-1 to +1)."""
-        prices_df = prices_df or self._load_prices()
-        
-        if ticker not in prices_df.columns:
+
+    def get_signal_for_ticker(self, ticker: str, date_str: Optional[str] = None) -> Optional[float]:
+        """Get ensemble signal value for a ticker (-1 to +1) for external integration."""
+        try:
+            prices_df = self._load_prices()
+            
+            if ticker not in prices_df.columns:
+                return None
+            
+            base_weight = 0.33
+            signal = self.compute_ensemble_signal(ticker, base_weight, prices_df)
+            
+            if signal:
+                raw_signal = signal.adjustment / self.max_deviation if self.max_deviation else 0
+                return float(np.clip(raw_signal, -1, 1))
+            return 0.0
+        except Exception as e:
             return None
-        
-        base_weight = 0.33  # Equal weight placeholder
-        signal = self.compute_ensemble_signal(ticker, base_weight, prices_df)
-        
-        if signal:
-            # Return normalized signal -1 to +1 based on adjustment and signal direction
-            raw_signal = signal.adjustment / self.max_deviation if self.max_deviation else 0
-            return np.clip(raw_signal, -1, 1)
-        return 0.0
 
     def save_to_db(self, portfolio: MultiSpeedPortfolio):
         """Save ensemble recommendation to signals database."""

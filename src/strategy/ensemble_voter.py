@@ -297,24 +297,27 @@ class EnsembleVoter:
             msm = MultiSpeedMomentum()
             
             # Get ensemble signals for each asset
+            msm_signals = {}
             for ticker in ['SPY', 'TLT', 'GLD']:
                 try:
-                    sig = msm.compute_multi_speed_signal(ticker, date)
-                    # Store primary signal
-                    if SignalSource.MULTI_SPEED_MOM not in readings:
-                        readings[SignalSource.MULTI_SPEED_MOM] = SignalReading(
-                            source=SignalSource.MULTI_SPEED_MOM,
-                            timestamp=sig.timestamp,
-                            value=sig.ensemble_signal,
-                            confidence=sig.confidence,
-                            weight=0.0,  # Set by regime
-                            regime_fit="normal",
-                            asset_signals={},
-                            explanation=f"{ticker}: {sig.ensemble_signal:+.3f} confidence={sig.confidence:.2%}"
-                        )
-                    readings[SignalSource.MULTI_SPEED_MOM].asset_signals[ticker] = sig.ensemble_signal
+                    sig = msm.get_signal_for_ticker(ticker, date)
+                    if sig is not None:
+                        msm_signals[ticker] = sig
                 except Exception as e:
                     pass
+            
+            if msm_signals:
+                avg_signal = sum(msm_signals.values()) / len(msm_signals)
+                readings[SignalSource.MULTI_SPEED_MOM] = SignalReading(
+                    source=SignalSource.MULTI_SPEED_MOM,
+                    timestamp=str(datetime.now()),
+                    value=avg_signal,
+                    confidence=0.7,
+                    weight=0.0,
+                    regime_fit="all",
+                    asset_signals=msm_signals,
+                    explanation=f"Multi-speed momentum: avg_signal={avg_signal:.3f}, assets={list(msm_signals.keys())}"
+                )
         except ImportError:
             pass
         
