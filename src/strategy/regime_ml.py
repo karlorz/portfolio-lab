@@ -26,7 +26,7 @@ from src.research.features import FeaturePipeline, Features
 from src.strategy.factor_rotation import FactorMomentumEngine, FactorScore
 
 # Phase 3C: Ensemble voting integration
-from src.strategy.ensemble_voter import EnsembleVotingEngine, EnsembleRegime
+from src.strategy.ensemble_voter import EnsembleVoter, Regime as EnsembleRegime
 
 
 class VolatilityRegime(Enum):
@@ -532,7 +532,7 @@ class RegimeConditionalEngine:
         self.previous_allocation: Optional[Dict[str, float]] = None
         
         # Phase 3C: Ensemble voting engine (v2.20)
-        self.ensemble_voter = EnsembleVotingEngine()
+        self.ensemble_voter = EnsembleVoter()
         
     def evaluate(self) -> Dict[str, Any]:
         """
