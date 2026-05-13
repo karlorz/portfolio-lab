@@ -30,6 +30,149 @@ DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 DB_PATH = DATA_DIR / "signals.db"
 
 
+def backfill_from_signal_history(
+    start_date: str = "2024-01-01"
+) -> int:
+    """
+    Backfill signal predictions from signal_history table into signal_health.db.
+    
+    This populates the signal_predictions table needed for health tracking.
+    """
+    print("\n" + "=" * 60)
+    print("SIGNAL HEALTH BACKFILL FROM signal_history")
+    print("=" * 60)
+    
+    # Connect to signals.db (source) and market.db (destination)
+    signals_conn = sqlite3.connect(DB_PATH)
+    signals_cursor = signals_conn.cursor()
+    
+    health_db_path = DATA_DIR / "market.db"
+    health_conn = sqlite3.connect(health_db_path)
+    health_cursor = health_conn.cursor()
+    
+    # Ensure signal_predictions table exists
+    health_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS signal_predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            source TEXT NOT NULL,
+            signal_value REAL,
+            confidence REAL,
+            predicted_direction INTEGER,
+            metadata TEXT,
+            actual_direction INTEGER,
+            accuracy_calculated INTEGER DEFAULT 0
+        )
+    """)
+    health_cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_source_timestamp 
+        ON signal_predictions(source, timestamp)
+    """)
+    
+    # Check available sources in signal_history
+    signals_cursor.execute("SELECT DISTINCT source_name FROM signal_history")
+    sources = [row[0] for row in signals_cursor.fetchall()]
+    print(f"\nFound {len(sources)} sources in signal_history:")
+    for s in sources:
+        signals_cursor.execute("SELECT COUNT(*) FROM signal_history WHERE source_name = ?", (s,))
+        count = signals_cursor.fetchone()[0]
+        print(f"  - {s}: {count} records")
+    
+    # Get all signals from signal_history
+    signals_cursor.execute("""
+        SELECT ticker, timestamp, source_type, source_name, signal, confidence, metadata
+        FROM signal_history
+        WHERE timestamp >= date(?)
+        ORDER BY timestamp
+    """, (start_date,))
+    
+    rows = signals_cursor.fetchall()
+    print(f"\nProcessing {len(rows)} signal records...")
+    
+    count = 0
+    inserted = 0
+    
+    for row in rows:
+        ticker, timestamp, source_type, source_name, signal_val, confidence, metadata = row
+        
+        # Map source_name to SignalSource
+        source_map = {
+            'technical': 'cta',
+            'fed_economic': 'macro_momentum',
+            'hmm': 'hmm',
+            'sentiment': 'sentiment',
+            'alt_data': 'alt_data',
+            'tail_hedge': 'tail_hedge',
+            'vix': 'vix',
+            'duration': 'duration'
+        }
+        source = source_map.get(source_name, source_name)
+        
+        # Determine predicted direction
+        if signal_val > 0.2:
+            predicted = 1
+        elif signal_val < -0.2:
+            predicted = -1
+        else:
+            predicted = 0
+        
+        # Try to get actual direction from next day's price
+        health_cursor.execute("""
+            SELECT close FROM prices 
+            WHERE symbol = ? AND date > date(?)
+            ORDER BY date LIMIT 1
+        """, (ticker, timestamp[:10]))
+        
+        actual_direction = None
+        result = health_cursor.fetchone()
+        if result:
+            # We have a next-day price, but we need the return
+            # Get current day price too
+            health_cursor.execute("""
+                SELECT close FROM prices 
+                WHERE symbol = ? AND date <= date(?)
+                ORDER BY date DESC LIMIT 1
+            """, (ticker, timestamp[:10]))
+            curr_result = health_cursor.fetchone()
+            if curr_result and result:
+                curr_price, next_price = curr_result[0], result[0]
+                if curr_price > 0:
+                    ret = (next_price - curr_price) / curr_price
+                    actual_direction = 1 if ret > 0 else (-1 if ret < 0 else 0)
+        
+        # Insert prediction
+        try:
+            health_cursor.execute("""
+                INSERT OR IGNORE INTO signal_predictions 
+                (timestamp, source, signal_value, confidence, predicted_direction, metadata, actual_direction, accuracy_calculated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                timestamp,
+                source,
+                signal_val,
+                confidence,
+                predicted,
+                metadata,
+                actual_direction,
+                1 if actual_direction is not None else 0
+            ))
+            if health_cursor.rowcount > 0:
+                inserted += 1
+        except sqlite3.Error as e:
+            pass  # Skip duplicates or errors
+        
+        count += 1
+        if count % 100 == 0:
+            print(f"  Processed {count} records, inserted {inserted}...")
+    
+    health_conn.commit()
+    signals_conn.close()
+    health_conn.close()
+    
+    print(f"\n✅ Backfill complete: {inserted} predictions inserted")
+    return inserted
+
+
 def backfill_historical_health():
     """
     Backfill health scores from existing signal_history data.
@@ -40,6 +183,9 @@ def backfill_historical_health():
     print("\n" + "=" * 60)
     print("SIGNAL HEALTH BACKFILL (v2.81 Phase 2)")
     print("=" * 60)
+    
+    # First, populate signal_predictions from signal_history
+    backfill_from_signal_history()
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()

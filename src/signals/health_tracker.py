@@ -34,7 +34,8 @@ STATE_PATH = DATA_DIR / ".signal_health_state.json"
 class SignalSource(Enum):
     """Signal sources tracked for health monitoring."""
     HMM = "hmm"  # HMM-LSTM Regime Detector
-    CTA = "cta"  # CTA Trend Overlay
+    CTA = "cta"  # CTA Trend Overlay (technical signals)
+    MACRO_MOMENTUM = "macro_momentum"  # Macro/economic signals
     ALT_DATA = "alt_data"  # Alternative Data NLP
     FED_POLICY = "fed_policy"  # Fed Policy Overlay
     SENTIMENT = "sentiment"  # LLM Sentiment
