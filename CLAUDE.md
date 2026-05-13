@@ -120,9 +120,9 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **124/124 passing** — all tests green
+- **127/127 passing** — all tests green
 - `test_integrator.py` — 10 tests: data structures, signal normalization
-- `test_order_router.py` — 11 tests: signal-to-order conversion, kill switch, dry-run, retry logic
+- `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
 - `test_signal_execution_bridge.py` — 21 tests: urgency classification, allocation deltas, order generation
 - `test_liquidity_checks.py` — 18 tests: premium thresholds, trade eligibility, force override
