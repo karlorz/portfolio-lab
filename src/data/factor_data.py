@@ -350,15 +350,55 @@ class FactorDataManager:
             logger.warning(f"Failed to update metadata: {e}")
 
 
-def fetch_factor_prices_from_yahoo(symbol: str, days: int = 252) -> List[Dict]:
-    """Fetch price data from Yahoo Finance (placeholder for integration).
+def fetch_factor_prices_from_pipeline(symbol: str, prices_data: Optional[Dict] = None) -> List[Dict]:
+    """Fetch price data from existing prices.json pipeline.
     
-    In production, this would use the existing data pipeline or
-    call the Yahoo Finance API directly.
+    Integrates with the existing Yahoo Finance data pipeline to populate
+    factor ETF historical data from public/data/prices.json.
     """
-    # Placeholder - actual implementation would integrate with existing pipeline
+    import json
+    from pathlib import Path
+    
+    # Load from existing pipeline data
+    prices_path = Path(__file__).parent.parent.parent / "public" / "data" / "prices.json"
+    
+    if prices_data is None:
+        if not prices_path.exists():
+            logger.warning(f"Prices file not found: {prices_path}")
+            return []
+        with open(prices_path, 'r') as f:
+            prices_data = json.load(f)
+    
+    if symbol not in prices_data:
+        logger.warning(f"No data for {symbol} in prices.json")
+        return []
+    
+    # Convert compact format {d, p} to OHLCV format
+    records = []
+    for entry in prices_data[symbol]:
+        date_str = entry['d']
+        close_price = entry['p']
+        
+        records.append({
+            'date': date_str,
+            'open': close_price,  # Use close as proxy for OHLC
+            'high': close_price,
+            'low': close_price,
+            'close': close_price,
+            'volume': 0  # Not available in compact format
+        })
+    
+    logger.info(f"Loaded {len(records)} records for {symbol} from pipeline")
+    return records
+
+
+def fetch_factor_prices_from_yahoo(symbol: str, days: int = 252) -> List[Dict]:
+    """Fetch price data from Yahoo Finance (deprecated - use pipeline).
+    
+    Kept for backward compatibility. New code should use fetch_factor_prices_from_pipeline().
+    """
     logger.info(f"Fetching {days} days of data for {symbol} from Yahoo Finance")
-    return []
+    return fetch_factor_prices_from_pipeline(symbol)
 
 
 def main():

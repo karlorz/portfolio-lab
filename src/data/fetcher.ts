@@ -24,7 +24,7 @@ export interface TreasuryYield {
 }
 
 // Core portfolio symbols
-const CORE_SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', 'MTUM', 'VLUE', 'USMV'];
+const CORE_SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', 'MTUM', 'VLUE', 'USMV', 'QUAL'];
 
 // Sector ETF symbols (v2.40 - Sector Rotation Momentum)
 const SECTOR_ETFS = [
