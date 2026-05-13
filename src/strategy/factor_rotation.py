@@ -745,10 +745,10 @@ class FactorRotationBacktest:
         Run historical backtest of factor rotation strategy.
         Uses monthly rebalancing with momentum-based factor selection.
         """
-        if not self.db_path.exists():
+        if not self.engine.db_path.exists():
             return {"error": "No market data available", "status": "failed"}
 
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.engine.db_path)
 
         # Get all available trading dates in range
         dates = pd.read_sql(
@@ -761,7 +761,7 @@ class FactorRotationBacktest:
             return {"error": f"Insufficient data: {len(dates)} days (need 252+)", "status": "failed"}
 
         # Get prices for all factor symbols
-        symbols = list(self.FACTORS.keys())
+        symbols = list(self.engine.FACTORS.keys())
         price_data = {}
         for sym in symbols:
             rows = pd.read_sql(
@@ -829,10 +829,10 @@ class FactorRotationBacktest:
                 # Temporarily set universe to available symbols for this date
                 available = [s for s in symbols if s in price_data and date in price_data[s].index]
                 if available:
-                    old_universe = self.universe
-                    self.universe = available
-                    result = self.evaluate()
-                    self.universe = old_universe
+                    old_universe = self.engine.universe
+                    self.engine.universe = available
+                    result = self.engine.evaluate()
+                    self.engine.universe = old_universe
 
                     new_weights = result.get('allocation', {})
                     if new_weights:

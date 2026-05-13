@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **201/201 passing** — all tests green
+- **228/228 passing** — all tests green
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -131,6 +131,7 @@
 - `test_sentiment_client.py` — 30 tests: LLM sentiment client, cost tracking, retry logic, JSON parsing
 - `test_tips_monitor.py` — 11 tests: TIPS yield tracking, signal generation, regime classification, allocation guidance
 - `test_alternative_data.py` — 22 tests: data classes, database init, satellite/credit card/supply chain adapters, composite signals, earnings predictions, agreement detection
+- `test_factor_rotation.py` — 27 tests: factor scoring, momentum evaluation, allocation weighting, signal strength, category diversity, recommendation, backtest
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
