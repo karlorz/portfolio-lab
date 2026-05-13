@@ -120,8 +120,8 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **127/127 passing** — all tests green
-- `test_integrator.py` — 10 tests: data structures, signal normalization
+- **162/162 passing** — all tests green
+- `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
 - `test_signal_execution_bridge.py` — 21 tests: urgency classification, allocation deltas, order generation
@@ -129,6 +129,7 @@
 - `test_rebalance_scheduler.py` — 14 tests: order scheduling, urgency windows, batch rebalancing
 - `test_vpin_rebalancer.py` — 13 tests: BVC calculator, VPIN engine, smart rebalancer integration
 - `test_sentiment_client.py` — 30 tests: LLM sentiment client, cost tracking, retry logic, JSON parsing
+- `test_tips_monitor.py` — 11 tests: TIPS yield tracking, signal generation, regime classification, allocation guidance
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
