@@ -4,6 +4,7 @@ Supports fractional shares, paper trading without KYC, and WebSocket streaming.
 """
 import os
 import json
+import sqlite3
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass, asdict
@@ -123,6 +124,23 @@ class AlpacaClient:
     def is_configured(self) -> bool:
         """Check if API credentials are available."""
         return bool(self.api_key and self.api_secret)
+
+    def _fetch_price(self, symbol: str, db_path: str = "data/market.db") -> float:
+        """Fetch latest price from market.db. Returns 0 if unavailable."""
+        try:
+            if not os.path.exists(db_path):
+                return 0.0
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+                (symbol,)
+            )
+            row = cursor.fetchone()
+            conn.close()
+            return float(row[0]) if row else 0.0
+        except Exception:
+            return 0.0
     
     def is_available(self) -> bool:
         """Check if alpaca-py SDK is installed."""
@@ -409,8 +427,9 @@ class PaperTradingManager:
                     # New position
                     if target_value < 10:
                         continue
-                    # Need to get current price - use $100 estimate or fetch
-                    estimated_price = 100.0  # Placeholder - should fetch real price
+                    estimated_price = self._fetch_price(symbol)
+                    if estimated_price <= 0:
+                        continue  # Skip if no price available
                     qty = target_value / estimated_price
                     side = OrderSide.BUY
                 

@@ -64,6 +64,23 @@ class OrderRouter:
     def is_ready(self) -> bool:
         """Check if router can operate."""
         return self.client.is_ready()
+
+    def _fetch_price(self, symbol: str) -> float:
+        """Fetch latest price from market.db. Returns 0 if unavailable."""
+        try:
+            if not os.path.exists(self.db_path):
+                return 0.0
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+                (symbol,)
+            )
+            row = cursor.fetchone()
+            conn.close()
+            return float(row[0]) if row else 0.0
+        except Exception:
+            return 0.0
     
     def load_signals(self) -> List[Signal]:
         """Load signals from signals.json."""
@@ -150,12 +167,13 @@ class OrderRouter:
             if abs(delta) < self.min_order_value:
                 continue
             
-            # Estimate quantity (will use current price or $100 placeholder)
+            # Estimate quantity using current price
             if current_value > 0 and current_qty > 0:
                 price = current_value / current_qty
             else:
-                # Would need to fetch current price
-                price = 100.0  # Placeholder
+                price = self._fetch_price(signal.symbol)
+                if price <= 0:
+                    continue  # Skip if no price available
             
             qty = abs(delta) / price
             side = OrderSide.BUY if delta > 0 else OrderSide.SELL
