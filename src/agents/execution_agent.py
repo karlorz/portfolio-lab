@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Portfolio-Lab v2.51: Execution Agent
+Portfolio-Lab v2.71: Execution Agent with Intraday Seasonality Scheduling
 
 Trade execution optimization agent. Determines optimal order timing,
 sizing, and routing to minimize market impact and maximize fill quality.
+
+Features v2.71 additions:
+- RebalanceScheduler integration for optimal time-of-day execution
+- Intraday cost model for empirical execution cost estimation
+- Scheduled vs immediate execution decisions
 
 Observations:
 - Bid-ask spread and depth
@@ -17,16 +22,28 @@ Actions:
 - slice_size [0.1, 0.5]: order slice as fraction of target
 - execution_style [0, 1]: VWAP (0) vs aggressive (1)
 - confidence [0, 1]: certainty in execution plan
+- scheduled_time: optional delay for optimal execution window
 """
 
 import numpy as np
 import torch
 import torch.nn as nn
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
+from datetime import datetime, time
 from enum import Enum
+import sys
+from pathlib import Path
 
 from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
+
+# v2.71: Import scheduler components
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent / 'execution'))
+    from rebalance_scheduler import RebalanceScheduler, OrderUrgency, ScheduledOrder
+    from intraday_cost_model import IntradayExecutionCostModel
+    SCHEDULER_AVAILABLE = True
+except ImportError:
+    SCHEDULER_AVAILABLE = False
 
 
 class ExecutionStyle(Enum):
@@ -117,6 +134,9 @@ class ExecutionAgent(BaseAgent):
     In live trading, integrates with broker APIs for
     smart order routing. In backtest, simulates realistic
     execution with market impact models.
+    
+    v2.71: Added RebalanceScheduler integration for intraday
+    seasonality-aware execution timing.
     """
     
     PRICE_HISTORY_LEN = 30  # Execution needs recent history
@@ -126,7 +146,8 @@ class ExecutionAgent(BaseAgent):
         self,
         agent_id: str = "execution",
         hidden_dim: int = 128,
-        device: str = "cpu"
+        device: str = "cpu",
+        use_scheduler: bool = True
     ):
         obs_dim = self.PRICE_HISTORY_LEN + self.N_EXEC_FEATURES
         action_dim = 4
@@ -142,6 +163,21 @@ class ExecutionAgent(BaseAgent):
         
         self.network = ExecutionNetwork(obs_dim, action_dim, hidden_dim).to(device)
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=3e-4)
+        
+        # v2.71: Initialize scheduler components
+        self.use_scheduler = use_scheduler and SCHEDULER_AVAILABLE
+        self.scheduler = None
+        self.cost_model = None
+        self.pending_orders: List[ScheduledOrder] = []
+        
+        if self.use_scheduler:
+            try:
+                self.cost_model = IntradayExecutionCostModel()
+                self.scheduler = RebalanceScheduler(self.cost_model)
+                print(f"[ExecutionAgent] RebalanceScheduler initialized")
+            except Exception as e:
+                print(f"[ExecutionAgent] Scheduler init failed: {e}")
+                self.use_scheduler = False
         
         # Feature metadata
         self.feature_names = [
@@ -244,7 +280,7 @@ class ExecutionAgent(BaseAgent):
     
     def act(self, obs: AgentObservation, deterministic: bool = False,
             required_urgency: Optional[float] = None) -> AgentAction:
-        """Generate execution action."""
+        """Generate execution action with optional scheduling."""
         self.last_observation = obs
         
         features = self.extract_features(obs)
@@ -275,6 +311,14 @@ class ExecutionAgent(BaseAgent):
             urgency = torch.clamp(urgency + noise, 0, 1)
             confidence = torch.clamp(confidence + torch.randn_like(confidence) * 0.05, 0, 1)
         
+        # v2.71: Check for scheduled execution opportunity
+        scheduled_time = None
+        cost_improvement = 0.0
+        if self.use_scheduler and self.scheduler:
+            scheduled_time, cost_improvement = self._check_scheduling(
+                float(urgency.squeeze()), obs.symbol if hasattr(obs, 'symbol') else 'SPY'
+            )
+        
         action = AgentAction(
             agent_id=self.agent_id,
             action_type="execution_plan",
@@ -286,7 +330,11 @@ class ExecutionAgent(BaseAgent):
                 'execution_style': exec_style.name,
                 'style_value': style_value,
                 'spread_proxy': float(features[self.PRICE_HISTORY_LEN]),
-                'liquidity_score': float(features[self.PRICE_HISTORY_LEN + 5])
+                'liquidity_score': float(features[self.PRICE_HISTORY_LEN + 5]),
+                # v2.71 additions
+                'scheduled_time': scheduled_time.isoformat() if scheduled_time else None,
+                'cost_improvement_bps': cost_improvement,
+                'scheduler_active': self.use_scheduler
             }
         )
         
@@ -303,7 +351,11 @@ class ExecutionAgent(BaseAgent):
                 'execution_style': exec_style.name,
                 'style_value': style_value,
                 'confidence': float(confidence.squeeze()),
-                'liquidity': float(features[self.PRICE_HISTORY_LEN + 5])
+                'liquidity': float(features[self.PRICE_HISTORY_LEN + 5]),
+                # v2.71 additions
+                'scheduled_time': scheduled_time.isoformat() if scheduled_time else None,
+                'cost_improvement_bps': cost_improvement,
+                'scheduler_active': self.use_scheduler
             },
             priority=1
         )
@@ -376,4 +428,66 @@ class ExecutionAgent(BaseAgent):
             'entropy': float(entropy),
             'mean_urgency': float(torch.mean(urgency)),
             'mean_slice': float(torch.mean(0.1 + slice_frac * 0.4))
+        }
+    
+    # v2.71: Scheduling methods for intraday seasonality optimization
+    def _check_scheduling(
+        self, 
+        urgency: float, 
+        symbol: str = 'SPY'
+    ) -> tuple:
+        """
+        Check if execution should be scheduled for a better time window.
+        
+        Returns:
+            (scheduled_time, cost_improvement_bps): Tuple of optimal execution time
+                and expected cost improvement, or (None, 0.0) for immediate execution
+        """
+        if not self.use_scheduler or not self.scheduler:
+            return None, 0.0
+        
+        # Map urgency float to OrderUrgency enum
+        if urgency > 0.75:
+            return None, 0.0  # URGENT - execute immediately
+        elif urgency > 0.5:
+            order_urgency = OrderUrgency.HIGH
+        elif urgency > 0.25:
+            order_urgency = OrderUrgency.NORMAL
+        else:
+            order_urgency = OrderUrgency.LOW
+        
+        try:
+            scheduled = self.scheduler.schedule_rebalance(
+                symbol=symbol,
+                urgency=order_urgency,
+                created_at=datetime.now()
+            )
+            
+            if scheduled.scheduled_time and scheduled.estimated_cost_bps:
+                # Calculate improvement from immediate execution
+                immediate_cost = self.cost_model.get_immediate_cost_estimate(symbol)
+                improvement = immediate_cost - scheduled.estimated_cost_bps
+                return scheduled.scheduled_time, max(0.0, improvement)
+            
+        except Exception as e:
+            print(f"[ExecutionAgent] Scheduling error: {e}")
+        
+        return None, 0.0
+    
+    def get_scheduler_status(self) -> Dict[str, Any]:
+        """Get current scheduler status for dashboard integration."""
+        if not self.use_scheduler or not self.scheduler:
+            return {
+                'active': False,
+                'pending_orders': 0,
+                'next_execution': None
+            }
+        
+        return {
+            'active': True,
+            'pending_orders': len(self.pending_orders),
+            'next_execution': self.scheduler.get_next_execution_time().isoformat() 
+                if hasattr(self.scheduler, 'get_next_execution_time') else None,
+            'optimal_window': '11:00-14:00 ET',
+            'scheduler_available': SCHEDULER_AVAILABLE
         }
