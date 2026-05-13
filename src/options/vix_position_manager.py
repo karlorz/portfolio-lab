@@ -1,623 +1,602 @@
 """
-VIX Position Manager
-Tracks and manages VIX call spread positions for insurance overlay.
-
-Part of v2.44: VIX Call Spread Insurance Overlay - Phase 3
+VIX Insurance Position Manager - Phase 3 Implementation
+Tracks open positions, calculates P&L, and manages rolls/exits.
 """
 
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, List, Dict, Tuple
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class PositionStatus(Enum):
+    """Status of insurance position."""
     OPEN = "open"
-    CLOSED = "closed"
+    CLOSED_PROFIT = "closed_profit"
+    CLOSED_EXPIRE = "closed_expired"
+    CLOSED_STOP = "closed_stop"
     ROLL_PENDING = "roll_pending"
-    EXPIRED = "expired"
 
 
 @dataclass
-class VIXPosition:
-    """Represents a VIX call position"""
-    position_id: str
-    status: PositionStatus
+class VIXInsurancePosition:
+    """Record of a VIX call position."""
+    id: Optional[int]
+    status: str
     
-    # Entry details
-    entry_date: datetime
-    entry_vix: float
-    contracts: int
+    # Entry
+    entry_date: str
+    entry_vix_spot: float
     strike: float
-    expiration: datetime
-    entry_premium: float
+    expiration_date: str
+    contracts: int
+    premium_paid_per_contract: float
     total_cost: float
+    delta_at_entry: float
+    days_to_expiration_at_entry: int
     
-    # Current state
-    current_vix: float
-    current_value: float
-    unrealized_pnl: float
+    # Current / Exit
+    current_mark_price: Optional[float]
+    current_value: Optional[float]
+    unrealized_pnl: Optional[float]
+    unrealized_pnl_percent: Optional[float]
     
-    # Exit details (if closed)
-    exit_date: Optional[datetime] = None
-    exit_premium: Optional[float] = None
-    exit_reason: Optional[str] = None
-    realized_pnl: Optional[float] = None
+    exit_date: Optional[str]
+    exit_vix_spot: Optional[float]
+    exit_price: Optional[float]
+    realized_pnl: Optional[float]
+    realized_pnl_percent: Optional[float]
+    exit_reason: Optional[str]
     
-    # Metadata
-    days_held: int = 0
-    days_to_expiry: int = 0
+    # Tracking
+    days_held: int
+    roll_count: int
+    budget_impact: float
     
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for JSON serialization"""
-        data = asdict(self)
-        data['status'] = self.status.value
-        data['entry_date'] = self.entry_date.isoformat()
-        data['expiration'] = self.expiration.isoformat()
-        data['exit_date'] = self.exit_date.isoformat() if self.exit_date else None
-        return data
-    
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'VIXPosition':
-        """Create from dictionary"""
-        return cls(
-            position_id=data['position_id'],
-            status=PositionStatus(data['status']),
-            entry_date=datetime.fromisoformat(data['entry_date']),
-            entry_vix=data['entry_vix'],
-            contracts=data['contracts'],
-            strike=data['strike'],
-            expiration=datetime.fromisoformat(data['expiration']),
-            entry_premium=data['entry_premium'],
-            total_cost=data['total_cost'],
-            current_vix=data.get('current_vix', data['entry_vix']),
-            current_value=data.get('current_value', 0.0),
-            unrealized_pnl=data.get('unrealized_pnl', 0.0),
-            exit_date=datetime.fromisoformat(data['exit_date']) if data.get('exit_date') else None,
-            exit_premium=data.get('exit_premium'),
-            exit_reason=data.get('exit_reason'),
-            realized_pnl=data.get('realized_pnl'),
-            days_held=data.get('days_held', 0),
-            days_to_expiry=data.get('days_to_expiry', 0)
-        )
-
-
-@dataclass
-class PositionSummary:
-    """Summary of all VIX insurance positions"""
-    timestamp: datetime
-    
-    # Active positions
-    active_positions: List[VIXPosition]
-    total_active_contracts: int
-    total_active_notional: float
-    total_active_cost: float
-    total_unrealized_pnl: float
-    
-    # Closed positions (YTD)
-    closed_positions_count: int
-    total_realized_pnl: float
-    win_count: int
-    loss_count: int
-    win_rate: float
-    
-    # Cost tracking
-    total_premiums_paid: float
-    total_payouts_received: float
-    net_insurance_cost: float
-    
-    # Budget
-    annual_budget: float
-    budget_used: float
-    budget_remaining: float
-    
-    def to_dict(self) -> Dict:
-        """Convert to dictionary"""
-        return {
-            'timestamp': self.timestamp.isoformat(),
-            'active_positions': [p.to_dict() for p in self.active_positions],
-            'total_active_contracts': self.total_active_contracts,
-            'total_active_notional': self.total_active_notional,
-            'total_active_cost': self.total_active_cost,
-            'total_unrealized_pnl': self.total_unrealized_pnl,
-            'closed_positions_count': self.closed_positions_count,
-            'total_realized_pnl': self.total_realized_pnl,
-            'win_count': self.win_count,
-            'loss_count': self.loss_count,
-            'win_rate': self.win_rate,
-            'total_premiums_paid': self.total_premiums_paid,
-            'total_payouts_received': self.total_payouts_received,
-            'net_insurance_cost': self.net_insurance_cost,
-            'annual_budget': self.annual_budget,
-            'budget_used': self.budget_used,
-            'budget_remaining': self.budget_remaining
-        }
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 class VIXPositionManager:
     """
-    Manages VIX call spread positions for insurance overlay.
+    VIX Call Spread Insurance Position Manager
     
-    Responsibilities:
-    - Track open positions
-    - Calculate mark-to-market P&L
-    - Manage rolls and exits
-    - Track budget and costs
-    - Generate position summary for dashboard
+    Tracks open positions, calculates P&L, schedules rolls,
+    and manages insurance budget across positions.
     """
     
-    # Strategy parameters (match signal generator)
-    MAX_ALLOCATION_PCT = 0.01  # 1% max allocation
-    VIX_MULTIPLIER = 100  # VIX options multiplier
-    ANNUAL_BUDGET_PCT = 0.008  # 0.8% annual budget
+    DB_PATH = Path("/root/projects/portfolio-lab/data/vix_options.db")
+    POSITIONS_PATH = Path("/root/projects/portfolio-lab/data/positions/vix_insurance.json")
     
-    def __init__(self, portfolio_value: float = 100000, 
-                 data_dir: str = "data/options"):
-        self.portfolio_value = portfolio_value
-        self.data_dir = Path(data_dir)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Files
-        self.positions_file = self.data_dir / "vix_positions.json"
-        self.history_file = self.data_dir / "vix_position_history.json"
-        self.summary_file = self.data_dir / "vix_position_summary.json"
-        
-        # Annual budget
-        self.annual_budget = portfolio_value * self.ANNUAL_BUDGET_PCT
-        
-        logger.info(f"VIX Position Manager initialized: portfolio=${portfolio_value:,.0f}, "
-                   f"budget=${self.annual_budget:,.0f}")
+    # Roll parameters
+    ROLL_DAYS_BEFORE_EXPIRY = 5
     
-    def load_positions(self) -> List[VIXPosition]:
-        """Load all positions from file"""
-        if not self.positions_file.exists():
-            return []
-        
-        with open(self.positions_file, 'r') as f:
-            data = json.load(f)
-        
-        return [VIXPosition.from_dict(p) if isinstance(p, dict) else p for p in data]
+    def __init__(self, annual_budget: float = 1000):
+        self.annual_budget = annual_budget
+        self._init_db()
+        self.POSITIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     
-    def save_positions(self, positions: List[VIXPosition]):
-        """Save positions to file"""
-        with open(self.positions_file, 'w') as f:
-            json.dump([p.to_dict() for p in positions], f, indent=2, default=str)
-    
-    def load_history(self) -> List[Dict]:
-        """Load position history (closed positions)"""
-        if not self.history_file.exists():
-            return []
+    def _init_db(self):
+        """Initialize positions table if not exists."""
+        conn = sqlite3.connect(self.DB_PATH)
+        cursor = conn.cursor()
         
-        with open(self.history_file, 'r') as f:
-            return json.load(f)
-    
-    def save_to_history(self, position: VIXPosition):
-        """Add closed position to history"""
-        history = self.load_history()
-        history.append(position.to_dict())
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS vix_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT NOT NULL DEFAULT 'open',
+                
+                entry_date TEXT NOT NULL,
+                entry_vix_spot REAL NOT NULL,
+                strike REAL NOT NULL,
+                expiration_date TEXT NOT NULL,
+                contracts INTEGER NOT NULL,
+                premium_paid_per_contract REAL NOT NULL,
+                total_cost REAL NOT NULL,
+                delta_at_entry REAL,
+                days_to_expiration_at_entry INTEGER,
+                
+                current_mark_price REAL,
+                current_value REAL,
+                unrealized_pnl REAL,
+                unrealized_pnl_percent REAL,
+                
+                exit_date TEXT,
+                exit_vix_spot REAL,
+                exit_price REAL,
+                realized_pnl REAL,
+                realized_pnl_percent REAL,
+                exit_reason TEXT,
+                
+                days_held INTEGER DEFAULT 0,
+                roll_count INTEGER DEFAULT 0,
+                budget_impact REAL NOT NULL,
+                
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         
-        # Keep last 100 positions
-        if len(history) > 100:
-            history = history[-100:]
+        # Position history log
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS position_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                position_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                vix_spot REAL,
+                mark_price REAL,
+                pnl_realized REAL,
+                notes TEXT,
+                FOREIGN KEY (position_id) REFERENCES vix_positions(id)
+            )
+        """)
         
-        with open(self.history_file, 'w') as f:
-            json.dump(history, f, indent=2, default=str)
+        conn.commit()
+        conn.close()
     
-    def open_position(self, contracts: int, strike: float, 
-                    expiration: datetime, premium: float,
-                    current_vix: float) -> VIXPosition:
+    def open_position(self, signal: Dict) -> Optional[int]:
         """
-        Open a new VIX call position.
+        Record a new position opening.
         
         Args:
-            contracts: Number of contracts
-            strike: Strike price
-            expiration: Expiration date
-            premium: Premium per contract
-            current_vix: Current VIX spot price
-        
-        Returns:
-            VIXPosition object
-        """
-        position_id = f"VIX_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        total_cost = contracts * premium * self.VIX_MULTIPLIER
-        
-        position = VIXPosition(
-            position_id=position_id,
-            status=PositionStatus.OPEN,
-            entry_date=datetime.now(),
-            entry_vix=current_vix,
-            contracts=contracts,
-            strike=strike,
-            expiration=expiration,
-            entry_premium=premium,
-            total_cost=total_cost,
-            current_vix=current_vix,
-            current_value=total_cost,  # Initially mark at cost
-            unrealized_pnl=0.0,
-            days_held=0,
-            days_to_expiry=(expiration - datetime.now()).days
-        )
-        
-        # Load existing positions
-        positions = self.load_positions()
-        
-        # Check if we already have an active position (shouldn't happen)
-        active = [p for p in positions if p.status == PositionStatus.OPEN]
-        if active:
-            logger.warning(f"Already have {len(active)} active positions. Consider rolling instead.")
-        
-        positions.append(position)
-        self.save_positions(positions)
-        
-        logger.info(f"Opened VIX position: {position_id}, {contracts} contracts @ {strike}, "
-                   f"premium=${premium:.2f}, total_cost=${total_cost:.2f}")
-        
-        return position
-    
-    def close_position(self, position_id: str, exit_premium: float,
-                      reason: str) -> Optional[VIXPosition]:
-        """
-        Close a VIX call position.
-        
-        Args:
-            position_id: Position ID to close
-            exit_premium: Premium received (sale price)
-            reason: Reason for closing
-        
-        Returns:
-            Updated VIXPosition or None if not found
-        """
-        positions = self.load_positions()
-        
-        for i, pos in enumerate(positions):
-            if pos.position_id == position_id and pos.status == PositionStatus.OPEN:
-                # Calculate P&L
-                exit_value = pos.contracts * exit_premium * self.VIX_MULTIPLIER
-                realized_pnl = exit_value - pos.total_cost
-                
-                # Update position
-                pos.status = PositionStatus.CLOSED
-                pos.exit_date = datetime.now()
-                pos.exit_premium = exit_premium
-                pos.exit_reason = reason
-                pos.realized_pnl = realized_pnl
-                pos.current_value = exit_value
-                pos.days_held = (pos.exit_date - pos.entry_date).days
-                
-                # Save to history
-                self.save_to_history(pos)
-                
-                # Remove from active positions
-                positions.pop(i)
-                self.save_positions(positions)
-                
-                logger.info(f"Closed VIX position: {position_id}, exit_premium=${exit_premium:.2f}, "
-                           f"P&L=${realized_pnl:.2f}, reason={reason}")
-                
-                return pos
-        
-        logger.warning(f"Position {position_id} not found or already closed")
-        return None
-    
-    def mark_to_market(self, position_id: str, current_vix: float,
-                       current_premium: float) -> Optional[VIXPosition]:
-        """
-        Mark position to market with current option premium.
-        
-        Args:
-            position_id: Position ID
-            current_vix: Current VIX spot
-            current_premium: Current option premium per contract
-        
-        Returns:
-            Updated position or None
-        """
-        positions = self.load_positions()
-        
-        for pos in positions:
-            if pos.position_id == position_id and pos.status == PositionStatus.OPEN:
-                pos.current_vix = current_vix
-                pos.current_value = pos.contracts * current_premium * self.VIX_MULTIPLIER
-                pos.unrealized_pnl = pos.current_value - pos.total_cost
-                pos.days_held = (datetime.now() - pos.entry_date).days
-                pos.days_to_expiry = (pos.expiration - datetime.now()).days
-                
-                self.save_positions(positions)
-                return pos
-        
-        return None
-    
-    def mark_all_to_market(self, vix: float, 
-                           premium_func=None) -> List[VIXPosition]:
-        """
-        Mark all active positions to market.
-        
-        Args:
-            vix: Current VIX spot price
-            premium_func: Optional function(strike, days_to_expiry) -> premium
-        
-        Returns:
-            List of updated positions
-        """
-        positions = self.load_positions()
-        active = [p for p in positions if p.status == PositionStatus.OPEN]
-        
-        updated = []
-        for pos in active:
-            if premium_func:
-                days_to_exp = (pos.expiration - datetime.now()).days
-                current_premium = premium_func(pos.strike, days_to_exp)
-            else:
-                # Simple intrinsic value approximation
-                # Real implementation would use Black-Scholes or market data
-                intrinsic = max(0, vix - pos.strike)
-                time_value = max(0, pos.entry_premium * 0.3)  # Simplified
-                current_premium = intrinsic + time_value
+            signal: Output from VIXInsuranceSignalGenerator
             
-            updated_pos = self.mark_to_market(pos.position_id, vix, current_premium)
-            if updated_pos:
-                updated.append(updated_pos)
-        
-        return updated
-    
-    def check_roll_needed(self) -> List[VIXPosition]:
-        """
-        Check which positions need to be rolled (30 DTE threshold).
-        
         Returns:
-            List of positions needing roll
+            position_id if successful
         """
-        positions = self.load_positions()
-        active = [p for p in positions if p.status == PositionStatus.OPEN]
+        if signal.get('allocation_dollars', 0) <= 0:
+            logger.warning("No allocation for new position")
+            return None
         
-        to_roll = []
-        for pos in active:
-            days_to_expiry = (pos.expiration - datetime.now()).days
-            if days_to_expiry <= 30:
-                pos.status = PositionStatus.ROLL_PENDING
-                to_roll.append(pos)
+        premium = signal.get('premium_cost', 0)
+        if premium <= 0:
+            logger.error("Invalid premium cost")
+            return None
         
-        if to_roll:
-            self.save_positions(positions)
+        # Calculate contracts
+        allocation = signal['allocation_dollars']
+        contracts = int(allocation / premium)
         
-        return to_roll
+        if contracts < 1:
+            logger.warning(f"Allocation ${allocation:,.0f} insufficient for premium ${premium:,.0f}")
+            return None
+        
+        total_cost = contracts * premium
+        
+        conn = sqlite3.connect(self.DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO vix_positions 
+            (status, entry_date, entry_vix_spot, strike, expiration_date,
+             contracts, premium_paid_per_contract, total_cost, delta_at_entry,
+             days_to_expiration_at_entry, budget_impact)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            PositionStatus.OPEN.value,
+            signal['timestamp'],
+            signal['vix_spot'],
+            signal['selected_strike'],
+            signal['selected_expiration'],
+            contracts,
+            premium,
+            total_cost,
+            signal.get('delta'),
+            signal.get('days_to_expiration'),
+            total_cost
+        ))
+        
+        position_id = cursor.lastrowid
+        
+        # Log the event
+        cursor.execute("""
+            INSERT INTO position_history 
+            (position_id, event_type, event_date, vix_spot, notes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            position_id,
+            'OPEN',
+            signal['timestamp'],
+            signal['vix_spot'],
+            f"Opened {contracts} contracts at strike {signal['selected_strike']}"
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Opened position {position_id}: {contracts} contracts @ ${signal['selected_strike']:.1f}")
+        return position_id
     
-    def execute_roll(self, old_position_id: str, new_contracts: int,
-                    new_strike: float, new_expiration: datetime,
-                    new_premium: float, current_vix: float) -> Tuple[VIXPosition, VIXPosition]:
+    def get_open_positions(self) -> List[Dict]:
+        """Get all currently open positions."""
+        conn = sqlite3.connect(self.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT * FROM vix_positions 
+            WHERE status = 'open'
+            ORDER BY entry_date DESC
+        """)
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    
+    def mark_to_market(self, position_id: int, current_vix: float, 
+                      option_chain: List[Dict]) -> Dict:
         """
-        Execute a roll: close old position, open new one.
+        Calculate current position value based on option chain.
         
         Args:
-            old_position_id: Position to roll
-            new_contracts: Contracts for new position
-            new_strike: New strike price
-            new_expiration: New expiration
-            new_premium: Premium for new position
-            current_vix: Current VIX spot
-        
+            position_id: Position to mark
+            current_vix: Current VIX spot price
+            option_chain: Current options chain with pricing
+            
         Returns:
-            Tuple of (closed_position, new_position)
+            Updated position data
         """
-        # Mark old position to market first
-        positions = self.load_positions()
-        old_pos = None
-        for p in positions:
-            if p.position_id == old_position_id:
-                old_pos = p
+        conn = sqlite3.connect(self.DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM vix_positions WHERE id = ?", (position_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return {}
+        
+        position = {
+            'id': row[0],
+            'strike': row[4],
+            'expiration_date': row[5],
+            'contracts': row[6],
+            'premium_paid': row[7],
+            'total_cost': row[8],
+            'days_held': row[21]
+        }
+        
+        # Find matching option in chain
+        current_price = None
+        for opt in option_chain:
+            if (abs(opt['strike'] - position['strike']) < 0.5 and 
+                opt['expiration_date'] == position['expiration_date']):
+                current_price = opt.get('mid_price') or ((opt.get('bid', 0) + opt.get('ask', 0)) / 2)
                 break
         
-        if not old_pos:
-            raise ValueError(f"Position {old_position_id} not found")
+        if not current_price:
+            # Estimate based on intrinsic value + time value
+            intrinsic = max(0, current_vix - position['strike'])
+            # Simple time decay estimate
+            days_to_exp = self._days_to_expiration(position['expiration_date'])
+            if days_to_exp > 0:
+                time_value = max(0, position['premium_paid'] * (days_to_exp / 60)) * 0.5
+            else:
+                time_value = 0
+            current_price = intrinsic + time_value
         
-        # Estimate exit premium (simplified - in reality use market data)
-        intrinsic = max(0, current_vix - old_pos.strike)
-        time_value = old_pos.entry_premium * 0.2  # Decayed time value
-        exit_premium = intrinsic + time_value
+        current_value = current_price * position['contracts'] * 100
+        unrealized_pnl = current_value - position['total_cost']
+        unrealized_pnl_pct = (unrealized_pnl / position['total_cost']) * 100 if position['total_cost'] > 0 else 0
         
-        # Close old position
-        closed = self.close_position(old_position_id, exit_premium, "roll")
+        # Update position
+        cursor.execute("""
+            UPDATE vix_positions 
+            SET current_mark_price = ?,
+                current_value = ?,
+                unrealized_pnl = ?,
+                unrealized_pnl_percent = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (current_price, current_value, unrealized_pnl, unrealized_pnl_pct, position_id))
         
-        # Open new position
-        new_pos = self.open_position(new_contracts, new_strike, new_expiration,
-                                     new_premium, current_vix)
-        
-        logger.info(f"Rolled position {old_position_id} -> {new_pos.position_id}")
-        
-        return closed, new_pos
-    
-    def get_position_summary(self) -> PositionSummary:
-        """
-        Generate comprehensive position summary.
-        
-        Returns:
-            PositionSummary with all metrics
-        """
-        positions = self.load_positions()
-        history = self.load_history()
-        
-        # Active positions
-        active = [p for p in positions if p.status == PositionStatus.OPEN]
-        
-        total_contracts = sum(p.contracts for p in active)
-        total_notional = sum(p.contracts * p.strike * self.VIX_MULTIPLIER 
-                           for p in active)
-        total_cost = sum(p.total_cost for p in active)
-        total_unrealized = sum(p.unrealized_pnl for p in active)
-        
-        # Closed positions
-        closed_count = len(history)
-        total_realized = sum(h.get('realized_pnl', 0) for h in history)
-        wins = sum(1 for h in history if h.get('realized_pnl', 0) > 0)
-        losses = closed_count - wins
-        win_rate = wins / closed_count if closed_count > 0 else 0.0
-        
-        # Cost tracking
-        total_premiums = sum(h.get('total_cost', 0) for h in history) + total_cost
-        total_payouts = sum(h.get('current_value', 0) for h in history 
-                          if h.get('status') == PositionStatus.CLOSED.value)
-        net_cost = total_premiums - total_payouts
-        
-        # Budget
-        budget_used = net_cost
-        budget_remaining = self.annual_budget - budget_used
-        
-        return PositionSummary(
-            timestamp=datetime.now(),
-            active_positions=active,
-            total_active_contracts=total_contracts,
-            total_active_notional=total_notional,
-            total_active_cost=total_cost,
-            total_unrealized_pnl=total_unrealized,
-            closed_positions_count=closed_count,
-            total_realized_pnl=total_realized,
-            win_count=wins,
-            loss_count=losses,
-            win_rate=win_rate,
-            total_premiums_paid=total_premiums,
-            total_payouts_received=total_payouts,
-            net_insurance_cost=net_cost,
-            annual_budget=self.annual_budget,
-            budget_used=budget_used,
-            budget_remaining=budget_remaining
-        )
-    
-    def save_summary(self):
-        """Save current position summary to file"""
-        summary = self.get_position_summary()
-        
-        with open(self.summary_file, 'w') as f:
-            json.dump(summary.to_dict(), f, indent=2, default=str)
-        
-        return summary
-    
-    def get_dashboard_data(self) -> Dict:
-        """
-        Get simplified data for dashboard display.
-        
-        Returns:
-            Dictionary with key metrics
-        """
-        summary = self.get_position_summary()
-        
-        # Simplified view
-        active_pos = summary.active_positions[0] if summary.active_positions else None
+        conn.commit()
+        conn.close()
         
         return {
-            'insurance_active': len(summary.active_positions) > 0,
-            'position_count': len(summary.active_positions),
-            'contracts': summary.total_active_contracts,
-            'strike': active_pos.strike if active_pos else None,
-            'expiration': active_pos.expiration.isoformat() if active_pos else None,
-            'days_to_expiry': active_pos.days_to_expiry if active_pos else None,
-            'entry_vix': active_pos.entry_vix if active_pos else None,
-            'current_vix': active_pos.current_vix if active_pos else None,
-            'unrealized_pnl': summary.total_unrealized_pnl,
-            'realized_pnl_ytd': summary.total_realized_pnl,
-            'total_cost': summary.total_active_cost,
-            'net_cost_ytd': summary.net_insurance_cost,
-            'annual_budget': summary.annual_budget,
-            'budget_used_pct': (summary.budget_used / summary.annual_budget * 100) 
-                            if summary.annual_budget > 0 else 0,
-            'win_rate': summary.win_rate,
-            'roll_needed': any(p.days_to_expiry <= 30 for p in summary.active_positions)
+            'position_id': position_id,
+            'mark_price': current_price,
+            'current_value': current_value,
+            'unrealized_pnl': unrealized_pnl,
+            'unrealized_pnl_percent': unrealized_pnl_pct,
+            'days_held': position['days_held']
         }
+    
+    def check_roll_needed(self, position_id: int) -> Tuple[bool, str]:
+        """
+        Check if position needs to be rolled.
+        
+        Returns:
+            (needs_roll, reason)
+        """
+        conn = sqlite3.connect(self.DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT expiration_date, days_to_expiration_at_entry, days_held
+            FROM vix_positions 
+            WHERE id = ? AND status = 'open'
+        """, (position_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return False, "No open position"
+        
+        exp_date = datetime.strptime(row[0], '%Y-%m-%d').date()
+        days_to_exp = (exp_date - datetime.now().date()).days
+        
+        if days_to_exp <= self.ROLL_DAYS_BEFORE_EXPIRY:
+            return True, f"Expiration in {days_to_exp} days (threshold: {self.ROLL_DAYS_BEFORE_EXPIRY})"
+        
+        return False, f"{days_to_exp} days to expiration"
+    
+    def close_position(self, position_id: int, exit_price: float, 
+                      current_vix: float, reason: str) -> Dict:
+        """
+        Close a position and record P&L.
+        
+        Args:
+            position_id: Position to close
+            exit_price: Price per contract received
+            current_vix: Current VIX spot
+            reason: Exit reason (profit_take, expire, stop, roll)
+            
+        Returns:
+            Close summary
+        """
+        conn = sqlite3.connect(self.DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT contracts, total_cost, entry_date, entry_vix_spot
+            FROM vix_positions 
+            WHERE id = ? AND status = 'open'
+        """, (position_id,))
+        
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return {'error': 'Position not found or already closed'}
+        
+        contracts, total_cost, entry_date, entry_vix = row
+        
+        # Calculate P&L
+        exit_value = exit_price * contracts * 100
+        realized_pnl = exit_value - total_cost
+        realized_pnl_pct = (realized_pnl / total_cost) * 100 if total_cost > 0 else 0
+        
+        days_held = (datetime.now().date() - datetime.strptime(entry_date[:10], '%Y-%m-%d').date()).days
+        
+        # Determine status
+        if realized_pnl > 0:
+            status = PositionStatus.CLOSED_PROFIT.value
+        elif reason == 'expire':
+            status = PositionStatus.CLOSED_EXPIRE.value
+        else:
+            status = PositionStatus.CLOSED_STOP.value
+        
+        # Update position
+        cursor.execute("""
+            UPDATE vix_positions 
+            SET status = ?,
+                exit_date = ?,
+                exit_vix_spot = ?,
+                exit_price = ?,
+                realized_pnl = ?,
+                realized_pnl_percent = ?,
+                exit_reason = ?,
+                days_held = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (status, datetime.now().isoformat(), current_vix, exit_price,
+              realized_pnl, realized_pnl_pct, reason, days_held, position_id))
+        
+        # Log event
+        cursor.execute("""
+            INSERT INTO position_history 
+            (position_id, event_type, event_date, vix_spot, mark_price, pnl_realized, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (position_id, 'CLOSE', datetime.now().isoformat(), current_vix,
+              exit_price, realized_pnl, f"Closed: {reason}"))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Closed position {position_id}: P&L ${realized_pnl:,.0f} ({realized_pnl_pct:+.1f}%) - {reason}")
+        
+        return {
+            'position_id': position_id,
+            'exit_price': exit_price,
+            'exit_value': exit_value,
+            'realized_pnl': realized_pnl,
+            'realized_pnl_percent': realized_pnl_pct,
+            'days_held': days_held,
+            'status': status
+        }
+    
+    def get_budget_status(self) -> Dict:
+        """Get current budget status for insurance program."""
+        conn = sqlite3.connect(self.DB_PATH)
+        cursor = conn.cursor()
+        
+        # Total spent this year
+        current_year = datetime.now().year
+        cursor.execute("""
+            SELECT SUM(total_cost) FROM vix_positions 
+            WHERE strftime('%Y', entry_date) = ?
+        """, (str(current_year),))
+        
+        spent = cursor.fetchone()[0] or 0
+        
+        # Realized P&L from closed positions
+        cursor.execute("""
+            SELECT SUM(realized_pnl) FROM vix_positions 
+            WHERE strftime('%Y', entry_date) = ? AND status != 'open'
+        """, (str(current_year),))
+        
+        realized = cursor.fetchone()[0] or 0
+        
+        # Open position value
+        cursor.execute("""
+            SELECT SUM(current_value) FROM vix_positions 
+            WHERE status = 'open'
+        """)
+        
+        open_value = cursor.fetchone()[0] or 0
+        
+        conn.close()
+        
+        net_cost = spent + realized  # realized is negative for losses
+        remaining = self.annual_budget - spent
+        
+        return {
+            'annual_budget': self.annual_budget,
+            'spent_ytd': spent,
+            'realized_pnl_ytd': realized,
+            'net_insurance_cost': net_cost,
+            'remaining_budget': remaining,
+            'open_positions_value': open_value,
+            'budget_utilization_percent': (spent / self.annual_budget * 100) if self.annual_budget > 0 else 0
+        }
+    
+    def get_performance_stats(self) -> Dict:
+        """Get historical performance statistics."""
+        conn = sqlite3.connect(self.DB_PATH)
+        cursor = conn.cursor()
+        
+        # All closed positions
+        cursor.execute("""
+            SELECT * FROM vix_positions 
+            WHERE status != 'open'
+            ORDER BY entry_date DESC
+        """)
+        
+        closed = cursor.fetchall()
+        
+        if not closed:
+            conn.close()
+            return {'message': 'No closed positions yet'}
+        
+        wins = sum(1 for c in closed if c[19] and c[19] > 0)  # realized_pnl > 0
+        losses = len(closed) - wins
+        
+        total_pnl = sum(c[19] or 0 for c in closed)
+        avg_win = sum(c[19] for c in closed if c[19] and c[19] > 0) / wins if wins > 0 else 0
+        avg_loss = sum(c[19] for c in closed if c[19] and c[19] < 0) / losses if losses > 0 else 0
+        
+        conn.close()
+        
+        return {
+            'total_trades': len(closed),
+            'winning_trades': wins,
+            'losing_trades': losses,
+            'win_rate': wins / len(closed) * 100,
+            'total_pnl': total_pnl,
+            'avg_win': avg_win,
+            'avg_loss': avg_loss,
+            'profit_factor': abs(avg_win * wins / (avg_loss * losses)) if losses > 0 and avg_loss != 0 else float('inf')
+        }
+    
+    def _days_to_expiration(self, expiration_date: str) -> int:
+        """Calculate days to expiration."""
+        exp = datetime.strptime(expiration_date, '%Y-%m-%d').date()
+        return (exp - datetime.now().date()).days
+    
+    def export_positions(self):
+        """Export all positions to JSON for dashboard."""
+        conn = sqlite3.connect(self.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM vix_positions ORDER BY entry_date DESC")
+        positions = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        output = {
+            'timestamp': datetime.now().isoformat(),
+            'open_positions': [p for p in positions if p['status'] == 'open'],
+            'closed_positions': [p for p in positions if p['status'] != 'open'],
+            'budget_status': self.get_budget_status(),
+            'performance_stats': self.get_performance_stats()
+        }
+        
+        with open(self.POSITIONS_PATH, 'w') as f:
+            json.dump(output, f, indent=2, default=str)
+        
+        logger.info(f"Exported positions to {self.POSITIONS_PATH}")
+        return output
 
 
 def main():
-    """CLI entry point for testing"""
+    """CLI entry point."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='VIX Position Manager')
-    parser.add_argument('--portfolio', type=float, default=100000,
-                       help='Portfolio value (default: 100000)')
-    parser.add_argument('--action', choices=['summary', 'test'],
-                       default='summary', help='Action to perform')
+    parser = argparse.ArgumentParser(description='VIX Insurance Position Manager')
+    parser.add_argument('--status', action='store_true', help='Show position status')
+    parser.add_argument('--budget', action='store_true', help='Show budget status')
+    parser.add_argument('--performance', action='store_true', help='Show performance stats')
+    parser.add_argument('--export', action='store_true', help='Export positions to JSON')
     
     args = parser.parse_args()
     
-    manager = VIXPositionManager(portfolio_value=args.portfolio)
+    manager = VIXPositionManager(annual_budget=1000)
     
-    if args.action == 'summary':
-        summary = manager.get_position_summary()
-        
-        print(f"\n{'='*60}")
-        print("VIX INSURANCE POSITION SUMMARY")
-        print(f"{'='*60}\n")
-        
-        print(f"Active Positions: {len(summary.active_positions)}")
-        if summary.active_positions:
-            for pos in summary.active_positions:
-                print(f"  - {pos.position_id}: {pos.contracts} contracts @ {pos.strike}, "
-                      f"P&L: ${pos.unrealized_pnl:,.2f}")
-        
-        print(f"\nTotal Contracts: {summary.total_active_contracts}")
-        print(f"Total Notional: ${summary.total_active_notional:,.2f}")
-        print(f"Total Cost: ${summary.total_active_cost:,.2f}")
-        print(f"Unrealized P&L: ${summary.total_unrealized_pnl:,.2f}")
-        
-        print(f"\nClosed Positions (YTD): {summary.closed_positions_count}")
-        print(f"Realized P&L: ${summary.total_realized_pnl:,.2f}")
-        print(f"Win Rate: {summary.win_rate*100:.1f}%")
-        
-        print(f"\nBudget:")
-        print(f"  Annual: ${summary.annual_budget:,.2f}")
-        print(f"  Used: ${summary.budget_used:,.2f}")
-        print(f"  Remaining: ${summary.budget_remaining:,.2f}")
-        
-        print(f"\nNet Insurance Cost YTD: ${summary.net_insurance_cost:,.2f}")
-        
-        # Dashboard data
-        print(f"\n{'='*60}")
-        print("DASHBOARD DATA")
-        print(f"{'='*60}")
-        import json
-        print(json.dumps(manager.get_dashboard_data(), indent=2))
-        
-    elif args.action == 'test':
-        print("Running test scenario...")
-        
-        # Simulate opening a position
-        from datetime import timedelta
-        exp = datetime.now() + timedelta(days=60)
-        pos = manager.open_position(
-            contracts=10,
-            strike=22.0,
-            expiration=exp,
-            premium=1.0,
-            current_vix=18.0
-        )
-        
-        print(f"Opened: {pos.position_id}")
-        
-        # Mark to market (VIX spike scenario)
-        manager.mark_to_market(pos.position_id, 25.0, 3.5)
-        
-        # Get updated position
-        positions = manager.load_positions()
-        updated = [p for p in positions if p.position_id == pos.position_id][0]
-        
-        print(f"After VIX spike to 25:")
-        print(f"  Current value: ${updated.current_value:,.2f}")
-        print(f"  Unrealized P&L: ${updated.unrealized_pnl:,.2f}")
-        
-        # Close position
-        closed = manager.close_position(pos.position_id, 3.5, "profit_taking")
-        print(f"Closed with P&L: ${closed.realized_pnl:,.2f}")
-        
-        # Final summary
-        summary = manager.get_position_summary()
-        print(f"\nFinal win rate: {summary.win_rate*100:.0f}%")
-        print(f"Net cost: ${summary.net_insurance_cost:,.2f}")
+    if args.status:
+        positions = manager.get_open_positions()
+        print("\n=== Open VIX Insurance Positions ===\n")
+        if not positions:
+            print("No open positions")
+        for p in positions:
+            pnl_str = ""
+            if p.get('unrealized_pnl') is not None:
+                pnl_str = f" | Unrealized: ${p['unrealized_pnl']:,.0f} ({p['unrealized_pnl_percent']:+.1f}%)"
+            print(f"ID {p['id']}: {p['contracts']} contracts @ ${p['strike']:.1f} strike")
+            print(f"  Entry: {p['entry_date'][:10]} at VIX={p['entry_vix_spot']:.1f}")
+            print(f"  Expires: {p['expiration_date']} ({p['days_to_expiration_at_entry'] - p['days_held']}d remaining)")
+            print(f"  Cost: ${p['total_cost']:,.0f}{pnl_str}")
+            print()
+    
+    elif args.budget:
+        budget = manager.get_budget_status()
+        print("\n=== VIX Insurance Budget Status ===\n")
+        print(f"Annual Budget: ${budget['annual_budget']:,.0f}")
+        print(f"Spent YTD: ${budget['spent_ytd']:,.0f} ({budget['budget_utilization_percent']:.1f}%)")
+        print(f"Realized P&L: ${budget['realized_pnl_ytd']:,.0f}")
+        print(f"Net Insurance Cost: ${budget['net_insurance_cost']:,.0f}")
+        print(f"Remaining Budget: ${budget['remaining_budget']:,.0f}")
+        print(f"Open Positions Value: ${budget['open_positions_value']:,.0f}")
+    
+    elif args.performance:
+        stats = manager.get_performance_stats()
+        print("\n=== VIX Insurance Performance ===\n")
+        if 'message' in stats:
+            print(stats['message'])
+        else:
+            print(f"Total Trades: {stats['total_trades']}")
+            print(f"Wins: {stats['winning_trades']} | Losses: {stats['losing_trades']}")
+            print(f"Win Rate: {stats['win_rate']:.1f}%")
+            print(f"Total P&L: ${stats['total_pnl']:,.0f}")
+            print(f"Avg Win: ${stats['avg_win']:,.0f} | Avg Loss: ${stats['avg_loss']:,.0f}")
+            print(f"Profit Factor: {stats['profit_factor']:.2f}")
+    
+    elif args.export:
+        manager.export_positions()
+        print(f"Exported to {manager.POSITIONS_PATH}")
+    
+    else:
+        parser.print_help()
 
 
 if __name__ == '__main__':
