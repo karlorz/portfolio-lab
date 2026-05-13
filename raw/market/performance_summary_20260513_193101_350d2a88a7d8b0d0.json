@@ -1,0 +1,18 @@
+---
+type: raw
+source_type: market_data
+sha256: 350d2a88a7d8b0d0
+created: 2026-05-13T19:31:01.498533
+---
+
+{
+  "performance_summary": {
+    "total_return": -0.003258572995984695,
+    "sharpe": -0.7054214873754097,
+    "max_drawdown": 0.010333923257666779,
+    "days_tracked": 63,
+    "start_value": 99985.90923691199,
+    "current_value": 99660.09785309361
+  },
+  "raw_entries_count": 128
+}

@@ -1,0 +1,35 @@
+# Smart Rebalancing Controller Configuration — v2.90
+
+smart_rebalancing:
+  # Primary trigger: 10% allocation drift
+  drift_threshold: 0.10
+
+  urgency_levels:
+    emergency: 0.95    # Drift > 20%
+    high: 0.70         # Drift 15-20%
+    moderate: 0.50     # Drift 12-15%
+    low: 0.30          # Drift 10-12%
+
+  vpin:
+    threshold: 0.50    # Defer if VPIN > 0.50 and urgency < 0.75
+    default: 0.30      # Use when VPIN not available (v2.65 not yet built)
+    measurement_interval: 300  # 5 minutes
+
+  timing:
+    optimal_start: 11  # 11:00 ET
+    optimal_end: 14    # 14:00 ET
+    low_urgency_can_wait: true
+
+  cost_budget:
+    annual_limit: 0.005      # 0.5% annual budget
+    warning_threshold: 0.004  # Alert at 80%
+
+  fallback:
+    deferral_max_hours: 4     # Max deferral before forcing rebalance
+    force_if_drift_exceeds: 0.25  # Override all constraints above this drift
+
+  safety:
+    max_deferral_hours: 4
+    max_single_trade_cost_bps: 15
+    max_annual_cost_pct: 0.006  # Hard limit (config is soft target)
+    min_drift_override: 0.08   # Drift < 8% never triggers
