@@ -119,6 +119,16 @@
 - Urgency mapping: >0.75 = immediate, <0.25 = wait for optimal window
 - Dashboard status integration
 
+## Test Coverage (tests/)
+- **102/110 passing** (8 pre-existing failures in test_sentiment_client.py — missing openai/anthropic packages)
+- `test_integrator.py` — 10 tests: data structures, signal normalization
+- `test_order_router.py` — 11 tests: signal-to-order conversion, kill switch, dry-run, retry logic
+- `test_position_sync.py` — 7 tests: drift calculation, edge cases
+- `test_signal_execution_bridge.py` — 21 tests: urgency classification, allocation deltas, order generation
+- `test_liquidity_checks.py` — 18 tests: premium thresholds, trade eligibility, force override
+- `test_vpin_rebalancer.py` — 13 tests: BVC calculator, VPIN engine, smart rebalancer integration
+- `test_sentiment_client.py` — 27 tests (19 pass): LLM sentiment client, requires openai/anthropic
+
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
 - `rolling-window.ts` — 9 sub-period Sharpe validation
