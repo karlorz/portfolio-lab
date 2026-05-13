@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **2444 passing** — 1 pre-existing failure (test_vpin_rebalancer)
+- **2472 passing** — 1 pre-existing failure (test_vpin_rebalancer)
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -194,6 +194,7 @@
 - `test_market_calendar.py` — 35 tests: US holidays, trading day detection, weekend/holiday handling, market hours, stale threshold, formatting
 - `test_defi_dashboard.py` — 16 tests: DeFiDashboard init, recommendation logic, display_status, alerts, TVL, thresholds, CLI
 - `test_etf_premium_display.py` — 26 tests: load_etf_pricing, status colors, format_premium_display, compact summary, health check export, CLI
+- `test_factor_timing_backtest.py` — 28 tests: build_targets, get_feature_columns, compute_metrics, walk_forward_backtest
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
