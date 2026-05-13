@@ -1,7 +1,7 @@
 """
 Portfolio-Lab v2.58: Ensemble Signal Voter
 
-Multi-source signal aggregation with regime-dependent weighting.
+Multi-source signal aggregation with regime-dependent weighting and health-adjusted weighting.
 Implements soft voting with confidence-based consensus for portfolio decisions.
 
 Sources:
@@ -17,6 +17,11 @@ Voting Strategy:
 - Normal regime: TSFM 40%, MultiSpeed 25%, CTA 20%, Macro 10%, Duration 5%
 - High vol regime: HMM 35%, CTA 30%, MultiSpeed 20%, Macro 10%, Circuit 5%
 - Crisis regime: Circuit 35%, CTA 35%, HMM 20%, Macro 10%
+
+Health-Adjusted Weighting (v3.12):
+- Signals with health < 0.5 get weight reduced by 50%
+- Signals with health >= 0.7 get full weight
+- Health scores calculated from 90-day rolling accuracy
 
 Consensus threshold: 2/3 weighted signals agree for action
 
@@ -37,9 +42,12 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from enum import Enum
 import sys
+import logging
 
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
+
+logger = logging.getLogger(__name__)
 
 
 class Regime(Enum):
@@ -405,6 +413,34 @@ class EnsembleVoter:
         
         # Get weights for regime
         weights = REGIME_WEIGHTS[regime]
+        
+        # Apply health-adjusted weighting (v3.12)
+        # Reduce weight for signals with poor health scores
+        try:
+            from src.signals.health_tracker import SignalHealthTracker
+            health_tracker = SignalHealthTracker()
+            health_scores = health_tracker.calculate_all_health_scores()
+            
+            if health_scores:
+                adjusted_weights = {}
+                for source_enum, base_weight in weights.items():
+                    source_str = source_enum.value
+                    if source_str in health_scores:
+                        health = health_scores[source_str]
+                        # Health multiplier: min 0.2, full weight at health >= 0.7
+                        multiplier = max(0.2, min(1.0, health.health_score))
+                        adjusted_weights[source_enum] = base_weight * multiplier
+                        if health.health_score < 0.5:
+                            logger.info(f"Health-adjusted {source_str}: weight {base_weight:.2%} → {adjusted_weights[source_enum]:.2%} (health={health.health_score:.2f})")
+                    else:
+                        adjusted_weights[source_enum] = base_weight  # No health data, use full weight
+                
+                # Normalize to sum to 1.0
+                total = sum(adjusted_weights.values())
+                if total > 0:
+                    weights = {k: v / total for k, v in adjusted_weights.items()}
+        except Exception as e:
+            logger.warning(f"Could not apply health-adjusted weights: {e}")
         
         # Apply weights to readings
         weighted_signals = []
