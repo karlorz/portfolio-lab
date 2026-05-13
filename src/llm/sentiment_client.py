@@ -30,6 +30,17 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Optional
 
+# Top-level imports for patching support (guarded for environments without SDKs)
+try:
+    import openai
+except ImportError:
+    openai = None  # type: ignore
+
+try:
+    import anthropic
+except ImportError:
+    anthropic = None  # type: ignore
+
 COST_DIR = Path("~/projects/portfolio-lab/data/llm_costs").expanduser()
 
 # ---------------------------------------------------------------------------
@@ -247,7 +258,6 @@ class LLMClient(ABC):
                 )
 
             except (Exception,) as e:
-                import openai, anthropic
                 if isinstance(e, (openai.AuthenticationError, anthropic.AuthenticationError)):
                     raise
                 if isinstance(e, (openai.RateLimitError, anthropic.RateLimitError,
@@ -293,10 +303,9 @@ class OpenAIGPT4oMiniClient(LLMClient):
     """
 
     def __init__(self, api_key: Optional[str] = None, max_retries: int = 3):
-        import openai as _openai
         super().__init__(model="gpt-4o-mini", max_retries=max_retries)
-        self._openai = _openai
-        self.client = _openai.OpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY"))
+        self._openai = openai
+        self.client = openai.OpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY"))
 
     def _call_api(self, text: str, system_prompt: str, max_tokens: int, temperature: float):
         response = self.client.chat.completions.create(
@@ -331,10 +340,9 @@ class ClaudeSonnetClient(LLMClient):
     """
 
     def __init__(self, api_key: Optional[str] = None, max_retries: int = 3):
-        import anthropic as _anthropic
         super().__init__(model="claude-sonnet-4-5-20250929", max_retries=max_retries)
-        self._anthropic = _anthropic
-        self.client = _anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
+        self._anthropic = anthropic
+        self.client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
 
     def _call_api(self, text: str, system_prompt: str, max_tokens: int, temperature: float):
         response = self.client.messages.create(
