@@ -440,12 +440,40 @@ class VPINSignalAdapter:
 
 def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
     """
-    Load historical 1-minute bars from data source
-    Placeholder - integrate with actual data pipeline
+    Load historical OHLCV bars from market.db.
+    Falls back to close price for missing OHLC values.
+    Uses daily bars — sufficient for portfolio-level VPIN estimation.
     """
-    # This would connect to your existing data pipeline
-    # For now, return empty DataFrame as placeholder
-    return pd.DataFrame()
+    db_path = Path("~/projects/portfolio-lab/data/market.db").expanduser()
+    if not db_path.exists():
+        return pd.DataFrame()
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        df = pd.read_sql_query(
+            "SELECT date, open, high, low, close, volume FROM prices "
+            "WHERE symbol = ? ORDER BY date DESC LIMIT ?",
+            conn, params=(symbol, days),
+        )
+        if df.empty:
+            return pd.DataFrame()
+
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.set_index('date').sort_index()
+
+        # OHLC may be NULL — fill with close price
+        for col in ['open', 'high', 'low']:
+            df[col] = df[col].fillna(df['close'])
+
+        # Drop rows where close is still null
+        df = df.dropna(subset=['close', 'volume'])
+        df['volume'] = df['volume'].fillna(0)
+
+        return df[['open', 'high', 'low', 'close', 'volume']]
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        conn.close()
 
 
 def backtest_vpin(symbols: List[str], days: int = 30) -> Dict[str, Any]:

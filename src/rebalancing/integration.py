@@ -33,6 +33,13 @@ from .smart_rebalancer import (
     UrgencyLevel,
 )
 
+# VPIN integration (v2.65)
+try:
+    from src.signals.vpin_bvc import VPINEngine, load_historical_bars
+    _VPIN_AVAILABLE = True
+except ImportError:
+    _VPIN_AVAILABLE = False
+
 
 @dataclass
 class RebalanceGateResult:
@@ -56,10 +63,37 @@ class SmartRebalanceGate:
     def __init__(self, config_path: Optional[str] = None):
         self.controller = SmartRebalancingController(config_path)
         self._vpin_cache: Dict[str, float] = {}
+        self._vpin_engine = VPINEngine(symbols=['SPY', 'GLD', 'TLT']) if _VPIN_AVAILABLE else None
 
     def update_vpin(self, vpin: float):
         """Update current VPIN reading (from v2.65 or synthetic)."""
         self._vpin_cache['current'] = vpin
+
+    def _compute_vpin(self, symbol: str = 'SPY') -> float:
+        """Compute VPIN from recent market data via VPINEngine."""
+        if not _VPIN_AVAILABLE or self._vpin_engine is None:
+            return 0.30
+
+        try:
+            df = load_historical_bars(symbol, days=60)
+            if df.empty:
+                return 0.30
+
+            for idx, row in df.iterrows():
+                self._vpin_engine.process_bar(
+                    symbol=symbol,
+                    timestamp=idx if isinstance(idx, datetime) else datetime.now(),
+                    o=row.get('open', 0),
+                    h=row.get('high', 0),
+                    l=row.get('low', 0),
+                    c=row.get('close', 0),
+                    v=row.get('volume', 0),
+                )
+
+            vpin = self._vpin_engine.calculate_vpin(symbol)
+            return vpin if vpin is not None else 0.30
+        except Exception:
+            return 0.30
 
     def evaluate(
         self,
@@ -93,9 +127,11 @@ class SmartRebalanceGate:
             timestamp=now,
         )
 
-        # Get VPIN
+        # Get VPIN — compute from market data if not provided
         if vpin is None:
-            vpin = self._vpin_cache.get('current', 0.30)
+            vpin = self._vpin_cache.get('current')
+            if vpin is None:
+                vpin = self._compute_vpin()
 
         # Create market conditions
         market = MarketConditions(vpin=vpin, timestamp=now)
