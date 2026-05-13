@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **2472 passing** — 1 pre-existing failure (test_vpin_rebalancer)
+- **1647 passing** — 1 pre-existing failure (test_vpin_rebalancer)
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -163,24 +163,25 @@
 - `test_alt_data_walkforward_stress.py` — 52 tests: constants, data classes, compute_metrics, build_daily_returns, walk_forward_test, stress_test, data loaders
 - `test_dual_momentum.py` — 32 tests: momentum scoring, absolute/relative momentum filtering, allocation generation, rebalance recommendations, backtest
 - `test_duration_allocation.py` — 63 tests: leveraged ETF configs, regime classification, base/leveraged allocation, capital freed, expense drag, duration exposure, risk scoring, recommendations
-- `test_marl_trainer.py` — 36 tests: Transition/RolloutBuffer, discounted returns, GAE, MarketEnvironment simulation, trainer lifecycle, save/load
-- `test_alpaca.py` — 33 tests: OrderRequest/Order/Position data classes, AlpacaClient status/price fetch, PaperTradingManager sync/rebalance, check_alpaca_status
-- `test_rebalancing_backtest.py` — 25 tests: data classes, VPIN simulation, price index, strategy result computation, calendar/drift strategy execution
-- `test_vix_options_chain.py` — 33 tests: VIX option dataclass, options chain, delta approximation, insurance candidate selection, historical context
-- `test_vol_targeting.py` — 50 tests: VolMethod/TargetStrategy enums, VolTargetConfig, VolatilityEngine (std/EWMA/Parkinson/Yang-Zhang volatility, regime classification, position sizing, risk parity weights, simulation), PortfolioVolTarget
-- `test_network_momentum_leadlag.py` — 62 tests: constants, data classes, DTW distance, Lévy area signatures, adjacency matrix learning, lead-lag matrix, window/ensemble signals, portfolio recommendation, backtest
-- `test_regime_ml_validation.py` — 50 tests: ValidationResult dataclass, portfolio returns, synthetic results, metric calculation, backtest orchestration, validate_all, CLI
-- `test_cta_overlay.py` — 59 tests: TrendSignal/CTAPosition dataclasses, SMA, volatility, trend detection, ensemble scoring, vol-targeting, analyze_symbol, evaluate, crisis alpha
-- `test_defi_yield_fetcher.py` — 37 tests: YieldData/YieldSpread dataclasses, database storage, spread calculation, signal thresholds, alerts, status/history, async update, CLI
-- `test_smart_rebalancer.py` — 45 tests: enums, CostBudgetTracker, drift calculation, urgency, cost estimation, optimal window, decision engine, status
-- `test_cta_backtest.py` — 33 tests: BacktestResult, returns/drawdown math, acceptance criteria validation, crisis alpha, backtest integration, CLI
-- `test_regime_sentiment.py` — 53 tests: RegimeSentiment enum, CombinedRegimeSignal, score mapping, weight adjustment, regime classification, circuit breaker, position scaling, allocation tilts, allocation weights
-- `test_risk_parity_weight_overlay.py` — 25 tests: constants, RPWeightOverlay dataclass, realized vol, RP overlay calculation, price loading, CLI
 - `test_evaluator.py` — 31 tests: constants, Position/Portfolio, state persistence, total value, weights, order generation, order execution, risk limits, performance, graduation
 - `test_inflation_risk_parity.py` — 26 tests: dataclasses, asset constants, volatility, inverse-vol weights, regime tilt (4 regimes + confidence scaling), CLI
 - `test_vol_parity_allocator.py` — 22 tests: dataclass, constants, core allocation by VIX regime, VIX allocation sizing, vol contribution
 - `test_notifier.py` — 29 tests: Alert dataclass, fingerprinting, rate limiting, deduplication, state persistence, log management, notify routing, severity helpers
 - `test_multi_strategy_adapters.py` — 17 tests: MultiSpeed/RiskParity/NetworkMomentum adapters, signal generation, portfolio signals, get_all_strategy_signals
+- `test_vix_insurance_signal.py` — 29 tests: InsuranceSignal enum, VIXInsuranceSignal dataclass, allocation logic, regime classification, signal generation, export, CLI
+- `test_health_backfill.py` — 12 tests: health score calculation, status classification, weight multiplier, integration verification, CLI
+- `test_macro_features.py` — 26 tests: synthetic macro/VIX data, feature engineering (yield curve, VIX, regimes, momentum), save/load, CLI
+- `test_cvar_metrics.py` — 32 tests: CVaRMetrics dataclass, VaR/CVaR calculation, tail severity, volatility, metric computation, history save/load, CLI
+- `test_sector_momentum_calc.py` — 30 tests: sector momentum calculation, dual momentum, all-momentum ranking, regime adjustment, allocation generation, signal generation
+- `test_vix_ensemble_adapter.py` — 24 tests: VIXEnsembleStatus dataclass, constants, defensive bias, status flags, next action logic, ensemble signal, save/load
+- `test_factor_timing_pipeline.py` — 21 tests: factor feature engineering (lags, rolling stats, correlations, dispersion), build dataset, save/load, summary, CLI
+- `test_factor_data_fetcher.py` — 24 tests: constants, synthetic factor data, factor statistics, load/cache, fetch fallback, CLI
+- `test_mock_quality_scores.py` — 24 tests: ETF characteristics, quality score calculation, deterministic noise, CLI
+- `test_tsmom_integration.py` — 16 tests: confidence calculation, signal generation, portfolio signals, allocation deltas, convenience function
+- `test_market_calendar.py` — 35 tests: US holidays, trading day detection, weekend/holiday handling, market hours, stale threshold, formatting
+- `test_defi_dashboard.py` — 16 tests: DeFiDashboard init, recommendation logic, display_status, alerts, TVL, thresholds, CLI
+- `test_etf_premium_display.py` — 26 tests: ETF premium dashboard, status colors, format_premium_display, compact summary, health check export, CLI
+- `test_stacking_trainer.py` — 17 tests: XGBoost meta-learner, time-series CV, model persistence, feature importance, synthetic data
 - `test_vix_insurance_signal.py` — 29 tests: InsuranceSignal enum, VIXInsuranceSignal dataclass, allocation logic, regime classification, signal generation, export, CLI
 - `test_health_backfill.py` — 12 tests: health score calculation, status classification, weight multiplier, integration verification, CLI
 - `test_macro_features.py` — 26 tests: synthetic macro/VIX data, feature engineering (yield curve, VIX, regimes, momentum), save/load, CLI
