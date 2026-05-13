@@ -1,0 +1,145 @@
+---
+# Factor Rotation Configuration (v3.00 Phase 1)
+# Quality-Momentum Overlay Infrastructure
+
+version: "3.00"
+created: "2026-05-14"
+phase: 1
+
+# Factor ETF Universe
+etfs:
+  MTUM:
+    symbol: MTUM
+    factor: momentum
+    description: "iShares MSCI USA Momentum Factor ETF"
+    expense_ratio: 0.0015
+    aum_billions: 18.5
+    benchmark: "MSCI USA Momentum Index"
+    
+  QUAL:
+    symbol: QUAL
+    factor: quality
+    description: "iShares MSCI USA Quality Factor ETF"
+    expense_ratio: 0.0015
+    aum_billions: 19.2
+    benchmark: "MSCI USA Quality Index"
+    
+  USMV:
+    symbol: USMV
+    factor: low_volatility
+    description: "iShares MSCI USA Minimum Volatility Factor ETF"
+    expense_ratio: 0.0015
+    aum_billions: 34.8
+    benchmark: "MSCI USA Minimum Volatility Index"
+    
+  VLUE:
+    symbol: VLUE
+    factor: value
+    description: "iShares MSCI USA Value Factor ETF"
+    expense_ratio: 0.0015
+    aum_billions: 11.3
+    benchmark: "MSCI USA Value Index"
+
+# Quality Score Weights (Asness QMJ methodology adapted)
+quality_weights:
+  roe: 0.30              # Return on equity - profitability measure
+  debt_equity: 0.25      # Debt to equity - safety measure  
+  earnings_stability: 0.25  # Earnings variance - stability measure
+  profitability: 0.20    # Gross margin stability - efficiency measure
+
+# Data Pipeline Settings
+data:
+  source: "yahoo_finance"  # Existing pipeline integration
+  frequency: "daily"
+  history_days: 252        # 1 year minimum for momentum calc
+  update_time: "06:00"     # Pre-market data refresh
+  
+  # Fundamental data (for quality scores)
+  fundamentals:
+    source: "alpha_vantage"  # Free tier: 5 calls/min, 500/day
+    update_frequency: "monthly"
+    cache_duration_days: 30
+
+# Storage
+database:
+  path: "data/factors/factor_data.db"
+  backup_frequency: "weekly"
+  retention_days: 1095     # 3 years of history
+
+# Metadata
+metadata:
+  path: "data/factors/factor_metadata.json"
+  auto_update: true
+
+# Performance Calculation
+returns:
+  periods:
+    - 1d   # Daily
+    - 21d  # 1 month
+    - 63d  # 3 months  
+    - 126d # 6 months (primary ranking period)
+    - 252d # 1 year
+  
+  volatility:
+    window: 20  # 20-day rolling
+    annualize: true
+
+# Signal Generation (Phase 2)
+signal:
+  # Regime-based factor weights (will be implemented in Phase 2)
+  default_weights:
+    bull_market:
+      momentum: 0.60
+      quality: 0.25
+      low_vol: 0.10
+      value: 0.05
+      
+    bear_market:
+      momentum: 0.10
+      quality: 0.40
+      low_vol: 0.40
+      value: 0.10
+      
+    neutral:
+      momentum: 0.35
+      quality: 0.35
+      low_vol: 0.20
+      value: 0.10
+      
+    high_volatility:
+      momentum: 0.15
+      quality: 0.30
+      low_vol: 0.45
+      value: 0.10
+      
+    crisis:
+      momentum: 0.05
+      quality: 0.35
+      low_vol: 0.50
+      value: 0.10
+
+  # Quality score thresholds
+  quality:
+    high_threshold: 0.70    # Top quartile
+    low_threshold: 0.40     # Bottom quartile
+
+# Integration (Phase 3)
+integration:
+  ensemble_weight: 0.05     # 5% weight in composite signal
+  max_equity_shift: 0.15   # Max ±15% from base 46% equity
+  min_holding_days: 10     # Reduce whipsaw
+  quality_floor: 0.20      # Never below 20% quality allocation
+
+# Monitoring
+health:
+  correlation_window: 30
+  health_score_threshold:
+    warning: 0.5
+    critical: 0.3
+
+# Success Criteria (for testing/validation)
+success_criteria:
+  min_sharpe_improvement: 0.05
+  max_drawdown_reduction_pp: 2.0
+  max_annual_turnover: 0.20
+  min_quality_correlation: 0.10
