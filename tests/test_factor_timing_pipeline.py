@@ -244,12 +244,12 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Synthetic" in captured.out or "built" in captured.out.lower()
 
-    def test_main_no_dataset(self, tmp_path, capsys):
+    def test_main_stats_no_dataset(self, tmp_path, capsys):
         from src.features.factor_timing_pipeline import main
         pipeline = MagicMock()
-        pipeline.load_dataset.return_value = None
+        pipeline.get_feature_summary.return_value = {'error': 'No feature dataset found'}
         with patch("src.features.factor_timing_pipeline.FactorTimingPipeline", return_value=pipeline):
-            with patch("sys.argv", ["pipeline.py", "current"]):
+            with patch("sys.argv", ["pipeline.py", "stats"]):
                 main()
         captured = capsys.readouterr()
-        assert "No feature" in captured.out
+        assert "error" in captured.out.lower()
