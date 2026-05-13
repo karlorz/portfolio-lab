@@ -6,7 +6,7 @@ portfolio tracking accuracy.
 
 Integrates:
 - v2.24 Drift-based rebalancing (±10% threshold)
-- v2.65 VPIN microstructure (stub until implemented)
+- v2.65 VPIN microstructure timing
 - v2.71 Intraday seasonality execution
 
 Target: 40%+ cost reduction vs calendar rebalancing.
