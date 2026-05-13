@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **1488 passing** — 10 pre-existing failures in test_yield_curve_regime.py (DB table missing in test env)
+- **1640 passing** — 2 pre-existing failures (test_generator, test_vpin_rebalancer)
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -163,7 +163,11 @@
 - `test_alt_data_walkforward_stress.py` — 52 tests: constants, data classes, compute_metrics, build_daily_returns, walk_forward_test, stress_test, data loaders
 - `test_dual_momentum.py` — 32 tests: momentum scoring, absolute/relative momentum filtering, allocation generation, rebalance recommendations, backtest
 - `test_duration_allocation.py` — 63 tests: leveraged ETF configs, regime classification, base/leveraged allocation, capital freed, expense drag, duration exposure, risk scoring, recommendations
+- `test_marl_trainer.py` — 36 tests: Transition/RolloutBuffer, discounted returns, GAE, MarketEnvironment simulation, trainer lifecycle, save/load
+- `test_alpaca.py` — 33 tests: OrderRequest/Order/Position data classes, AlpacaClient status/price fetch, PaperTradingManager sync/rebalance, check_alpaca_status
+- `test_rebalancing_backtest.py` — 25 tests: data classes, VPIN simulation, price index, strategy result computation, calendar/drift strategy execution
 - `test_vix_options_chain.py` — 33 tests: VIX option dataclass, options chain, delta approximation, insurance candidate selection, historical context
+- `test_vol_targeting.py` — 50 tests: VolMethod/TargetStrategy enums, VolTargetConfig, VolatilityEngine (std/EWMA/Parkinson/Yang-Zhang volatility, regime classification, position sizing, risk parity weights, simulation), PortfolioVolTarget
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
