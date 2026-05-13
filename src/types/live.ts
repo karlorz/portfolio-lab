@@ -62,6 +62,7 @@ export interface SignalsData {
     };
   };
   smart_rebalance?: SmartRebalanceData;
+  broker?: BrokerData;
 }
 
 export interface Position {
@@ -232,6 +233,36 @@ export interface AlertsData {
   alerts: Alert[];
   count: number;
   generated_at: string;
+}
+
+// Broker Integration Types (v2.3 Phase 4)
+export interface BrokerData {
+  connected: boolean;
+  positions: Array<{
+    symbol: string;
+    qty: number;
+    market_value: number;
+    unrealized_pl: number;
+    side: string;
+  }>;
+  drift: Array<{
+    symbol: string;
+    broker_qty: number;
+    local_qty: number;
+    drift_pct: number;
+  }>;
+  recent_orders: Array<{
+    symbol: string;
+    side: string;
+    qty: number;
+    status: string;
+    order_id?: string;
+    timestamp: string;
+    dry_run: boolean;
+    attempts?: number;
+  }>;
+  last_sync: string | null;
+  kill_switch: boolean;
 }
 
 // Smart Rebalance Types (v2.90)

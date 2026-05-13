@@ -1639,3 +1639,130 @@ footer code {
   font-family: monospace;
   font-size: 0.6rem;
 }
+
+/* Broker Panel (v2.3 Phase 4) */
+.broker-panel {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.broker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.broker-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #e2e8f0;
+}
+
+.broker-status-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.broker-status {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.broker-status.connected {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.broker-status.disconnected {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.broker-kill-switch {
+  background: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.broker-sync-info {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-bottom: 12px;
+}
+
+.broker-positions,
+.broker-drift,
+.broker-orders {
+  margin-bottom: 12px;
+}
+
+.broker-positions h4,
+.broker-drift h4,
+.broker-orders h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.broker-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.broker-table th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #2a2a4a;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.broker-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #1e1e3a;
+  color: #e2e8f0;
+}
+
+.broker-table .positive { color: #10b981; }
+.broker-table .negative { color: #ef4444; }
+.broker-table .warning { color: #f59e0b; }
+
+.order-status {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+
+.order-status.submitted { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+.order-status.dry_run { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+.order-status.failed { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+.broker-empty {
+  text-align: center;
+  padding: 16px;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.broker-empty small {
+  display: block;
+  margin-top: 4px;
+  color: #475569;
+}

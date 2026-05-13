@@ -5,6 +5,7 @@ import os
 import sys
 import json
 import sqlite3
+import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass
@@ -249,16 +250,29 @@ class OrderRouter:
                 order_dict["status"] = "dry_run"
                 executed.append(order_dict)
             else:
-                try:
-                    result = self.client.submit_order(order_req)
-                    order_dict["status"] = "submitted"
-                    order_dict["order_id"] = result.id
-                    order_dict["broker_status"] = result.status
-                    executed.append(order_dict)
-                except Exception as e:
-                    order_dict["status"] = "failed"
-                    order_dict["error"] = str(e)
-                    failed.append(order_dict)
+                # Rate limiting: respect 200 req/min (300ms between orders)
+                time.sleep(0.3)
+
+                # Retry with exponential backoff (3 attempts)
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        result = self.client.submit_order(order_req)
+                        order_dict["status"] = "submitted"
+                        order_dict["order_id"] = result.id
+                        order_dict["broker_status"] = result.status
+                        order_dict["attempts"] = attempt + 1
+                        executed.append(order_dict)
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            wait = 2 ** attempt  # 1s, 2s backoff
+                            time.sleep(wait)
+                            continue
+                        order_dict["status"] = "failed"
+                        order_dict["error"] = str(e)
+                        order_dict["attempts"] = max_retries
+                        failed.append(order_dict)
         
         # Log all orders
         os.makedirs(self.data_dir, exist_ok=True)

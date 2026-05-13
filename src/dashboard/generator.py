@@ -381,6 +381,9 @@ class DashboardGenerator:
             # Alternative data signal not available yet
             pass
         
+        # Load broker data (Phase 4: live trading prep)
+        broker_data = self._load_broker_data()
+
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -401,7 +404,8 @@ class DashboardGenerator:
             "ensemble_voting": ensemble_signal,
             "sector_rotation": sector_momentum_signal,
             "alternative_data": alternative_data_signal,
-            "smart_rebalance": smart_rebalance_data
+            "smart_rebalance": smart_rebalance_data,
+            "broker": broker_data,
         }
         
         out_path = PUBLIC_DIR / "signals.json"
@@ -409,7 +413,57 @@ class DashboardGenerator:
             json.dump(output, f, indent=2)
         
         return out_path
-    
+
+    def _load_broker_data(self) -> Dict:
+        """Load broker position sync and order data for dashboard."""
+        broker = {
+            "connected": False,
+            "positions": [],
+            "drift": [],
+            "recent_orders": [],
+            "last_sync": None,
+            "kill_switch": False,
+        }
+
+        # Check position sync log
+        sync_log = DATA_DIR / "position_sync.jsonl"
+        if sync_log.exists():
+            try:
+                lines = sync_log.read_text().strip().split("\n")
+                if lines:
+                    last = json.loads(lines[-1])
+                    broker["connected"] = True
+                    broker["last_sync"] = last.get("timestamp")
+                    broker["positions"] = last.get("broker_positions", [])
+                    broker["drift"] = last.get("drift", [])
+            except Exception:
+                pass
+
+        # Check broker orders log
+        orders_log = DATA_DIR / "broker_orders.jsonl"
+        if orders_log.exists():
+            try:
+                lines = orders_log.read_text().strip().split("\n")
+                recent = []
+                for line in lines[-10:]:
+                    if line.strip():
+                        recent.append(json.loads(line))
+                broker["recent_orders"] = list(reversed(recent))
+            except Exception:
+                pass
+
+        # Check kill switch
+        kill_file = DATA_DIR / "kill_switch.json"
+        if kill_file.exists():
+            try:
+                with open(kill_file) as f:
+                    ks = json.load(f)
+                broker["kill_switch"] = ks.get("enabled", False)
+            except Exception:
+                pass
+
+        return broker
+
     def _generate_ml_signals(self) -> Dict:
         """Generate ML-based signals from features data."""
         signals = {
