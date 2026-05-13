@@ -67,10 +67,11 @@ except ImportError:
 
 # Signal source weights
 SIGNAL_WEIGHTS = {
-    'tsmom': 0.35,
+    'tsmom': 0.30,
     'hmm_regime': 0.25,
     'fed_policy': 0.25,
     'ai_agent': 0.10,
+    'duration_overlay': 0.05,  # v3.11 Yield curve regime duration shifts
     'base': 0.05,
 }
 
@@ -283,6 +284,49 @@ class CombinedSignalOrchestrator:
             regime=None,
             notes='Technical indicators'
         )
+        
+        # Duration Overlay (v3.11) - Yield Curve Regime Based Duration Shifts
+        try:
+            from src.strategy.duration_overlay import DurationOverlay
+            duration_overlay = DurationOverlay(
+                base_spy=self.base_allocation.get('SPY', 0.46),
+                base_gld=self.base_allocation.get('GLD', 0.38),
+                base_bond_total=self.base_allocation.get('TLT', 0.16) + self.base_allocation.get('IEF', 0.0) + self.base_allocation.get('SHY', 0.0)
+            )
+            duration_rec = duration_overlay.get_recommendation()
+            
+            # Calculate deltas from static allocation for TLT
+            static_tlt = duration_overlay.base_bond_total * 1.0  # Default all in TLT
+            current_tlt = duration_rec.duration_breakdown.get('TLT', static_tlt)
+            
+            # Create deltas dict aligned with base allocation keys
+            duration_deltas = {t: 0.0 for t in self.base_allocation}
+            duration_deltas['TLT'] = current_tlt - static_tlt
+            # Note: IEF/SHY are sub-allocations within bond bucket - not direct deltas
+            
+            signals['duration_overlay'] = SignalSource(
+                source='duration_overlay',
+                deltas=duration_deltas,
+                confidence=float(0.75 if duration_rec.confidence == 'high' else (0.60 if duration_rec.confidence == 'medium' else 0.45)),
+                regime=duration_rec.current_regime,
+                notes=f"Duration: {duration_rec.effective_duration:.1f}yr, Regime: {duration_rec.current_regime}, Shift pending: {duration_rec.shift_pending}"
+            )
+        except ImportError:
+            signals['duration_overlay'] = SignalSource(
+                source='duration_overlay',
+                deltas={t: 0.0 for t in self.base_allocation},
+                confidence=0.0,
+                regime='unavailable',
+                notes='Duration overlay module not available'
+            )
+        except Exception as e:
+            signals['duration_overlay'] = SignalSource(
+                source='duration_overlay',
+                deltas={t: 0.0 for t in self.base_allocation},
+                confidence=0.0,
+                regime='error',
+                notes=f'Duration overlay error: {str(e)}'
+            )
         
         return signals
     
