@@ -1,0 +1,77 @@
+# Scheduler Configuration for Intraday Execution Optimization
+# v2.71 - Rebalance Scheduler Settings
+
+# Execution Window Definitions (ET)
+optimal_window:
+  description: "Tightest spreads, lowest toxicity - primary execution window"
+  start_hour: 11
+  start_minute: 0
+  end_hour: 14
+  end_minute: 0
+  spread_multiplier: 1.0
+
+acceptable_windows:
+  - description: "Morning normalization - spreads narrowing"
+    start_hour: 10
+    start_minute: 0
+    end_hour: 11
+    end_minute: 0
+    spread_multiplier: 1.2
+  
+  - description: "Afternoon positioning - pre-close activity"
+    start_hour: 14
+    start_minute: 0
+    end_hour: 15
+    end_minute: 30
+    spread_multiplier: 1.2
+
+avoid_windows:
+  - description: "Opening - overnight information digestion, high volatility"
+    start_hour: 9
+    start_minute: 30
+    end_hour: 10
+    end_minute: 0
+    spread_multiplier: 3.0
+  
+  - description: "Close - MOC/IOC flow, elevated spreads"
+    start_hour: 15
+    start_minute: 30
+    end_hour: 16
+    end_minute: 0
+    spread_multiplier: 2.5
+
+# Urgency-Based Delay Tolerances
+urgency_delays:
+  low_minutes: 240      # 4 hours - can wait for optimal window
+  normal_minutes: 120   # 2 hours - standard scheduling
+  high_minutes: 30      # 30 minutes - minimal delay
+  urgent_minutes: 0     # Immediate - bypass scheduling
+
+# Cost Improvement Threshold (bps)
+# Only delay if estimated cost savings exceeds this threshold
+cost_threshold_bps: 2.0
+
+# Market Hours (ET)
+market_open: "09:30"
+market_close: "16:00"
+
+# Special Considerations
+special_rules:
+  # London close creates volatility in GLD
+  gld_avoid:
+    - "11:00-11:30"  # London close at 11:00 ET
+  
+  # Treasury auction impact
+  ief_tlt_note: "Check Treasury futures volatility 8:30-9:30"
+  
+  # International ETFs best during European overlap
+  efa_vxus_preferred: "09:30-11:30"  # European market overlap
+
+# Fallback Settings
+fallback:
+  # If scheduler fails, default to immediate execution
+  default_to_immediate: true
+  # Log all scheduling decisions
+  log_decisions: true
+  # Alert if order delayed >30 minutes beyond scheduled
+  delay_alert_threshold_minutes: 30
