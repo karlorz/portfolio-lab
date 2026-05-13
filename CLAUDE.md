@@ -77,6 +77,26 @@
 
 ## Recent Implementation Updates (2026-05-13)
 
+### v2.65 VPIN Microstructure Signal - COMPLETED
+- **Engine**: `src/signals/vpin_bvc.py` (564 lines) — BVC volume clock, VPIN toxicity scoring
+- **Data**: Fetches real OHLCV from Yahoo Finance v8 API (market.db fallback for close-only)
+- **Integration**: SmartRebalanceGate auto-computes VPIN from 60-day history
+- **Behavior**: VPIN >0.5 triggers `defer_toxicity` — delays rebalances during informed trading
+- **Current**: SPY VPIN = 0.57 (moderate-high toxicity)
+
+### v2.3 Live Trading Prep - COMPLETED (All Phases)
+- **Phase 1**: `src/broker/position_sync.py` — hourly broker↔local reconciliation
+- **Phase 2**: `src/broker/order_router.py` — signal→order conversion with dry-run mode
+- **Phase 3**: Exponential backoff retry (3 attempts), 300ms rate limiting, kill switch
+- **Phase 4**: `BrokerPanel.tsx` — dashboard component showing broker positions, drift, orders
+- **Commit**: `df8e606`
+
+### v2.90 Smart Rebalancing - COMPLETED
+- **Drift triggers**: Per-asset drift thresholds with urgency levels
+- **VPIN timing**: Defers execution when microstructure toxicity is high
+- **Cost budget**: 50bps annual limit with YTD tracking
+- **Dashboard**: SmartRebalancePanel with drift bars, VPIN indicator, cost gauge
+
 ### v2.80 Phase 2 Multi-Asset Trend Following (DBC) - REJECTED
 - **CLI**: Added 4-part `--portfolio SPY/GLD/TLT/DBC` support to `src/signals/multi_speed_momentum.py`
 - **Backtest 2008-2026** (monthly rebalance, multi-speed momentum overlay):
