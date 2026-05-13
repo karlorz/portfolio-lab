@@ -181,7 +181,7 @@ def calculate_real_rate(nominal_df: pd.DataFrame, inflation_df: pd.DataFrame,
     )
     
     # Forward fill inflation to match nominal frequency (daily vs monthly)
-    merged['inflation'] = merged['inflation'].fillna(method='ffill')
+    merged['inflation'] = merged['inflation'].ffill()
     
     # Calculate real rate
     merged['real_rate'] = merged['nominal'] - merged['inflation']
