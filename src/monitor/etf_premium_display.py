@@ -1,200 +1,163 @@
 #!/usr/bin/env python3
 """
-ETF Premium Display for Dashboard (v2.92)
+Portfolio-Lab v2.92: ETF Premium Dashboard Display
 
-Dashboard integration module for ETF premium monitoring.
-Generates formatted output for health.py dashboard display.
+Integrates ETF premium data into the main dashboard display.
+Part of v2.92 ETF Premium Monitor feature.
 
-Author: Autonomous Agent
-Version: v2.92
+Usage:
+    python -m src.monitor.etf_premium_display [--export]
 """
 
 import json
-import logging
-from datetime import datetime
+import argparse
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
+from datetime import datetime, timedelta
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
-class ETFPremiumDisplay:
-    """Generate dashboard-compatible ETF premium display"""
-    
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = Path(data_dir)
-        self.data_file = self.data_dir / "etf_pricing.json"
-    
-    def load_pricing_data(self) -> Optional[dict]:
-        """Load pricing data from JSON file"""
-        if not self.data_file.exists():
-            return None
-        
-        try:
-            with open(self.data_file) as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to load pricing data: {e}")
-            return None
-    
-    def format_premium_badge(self, premium_pct: float, alert_level: str) -> str:
-        """Generate ANSI-colored badge for premium status"""
-        # ANSI color codes
-        GREEN = "\033[32m"
-        YELLOW = "\033[33m"
-        RED = "\033[31m"
-        BOLD = "\033[1m"
-        RESET = "\033[0m"
-        
-        symbol = "✓" if abs(premium_pct) < 0.0015 else "⚠" if abs(premium_pct) < 0.0025 else "✗"
-        
-        if alert_level == "critical":
-            return f"{RED}{BOLD}{symbol} {premium_pct:+.4%}{RESET}"
-        elif alert_level == "warning":
-            return f"{YELLOW}{BOLD}{symbol} {premium_pct:+.4%}{RESET}"
-        elif alert_level == "elevated":
-            return f"{YELLOW}{symbol} {premium_pct:+.4%}{RESET}"
-        else:
-            return f"{GREEN}{symbol} {premium_pct:+.4%}{RESET}"
-    
-    def generate_dashboard_section(self) -> str:
-        """Generate formatted dashboard section for ETF premiums"""
-        data = self.load_pricing_data()
-        
-        if not data:
-            return "\n[ETF Premium Monitor: No data available]\n"
-        
-        lines = []
-        lines.append("\n" + "=" * 60)
-        lines.append("ETF PREMIUM/DISCOUNT MONITOR v2.92")
-        lines.append("=" * 60)
-        
-        # Parse timestamp
-        ts = data.get("timestamp", "Unknown")
-        if isinstance(ts, str):
-            try:
-                dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                ts_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-            except:
-                ts_str = ts
-        else:
-            ts_str = str(ts)
-        
-        lines.append(f"Last Update: {ts_str}")
-        lines.append("-" * 60)
-        
-        # Portfolio ETFs (core holdings)
-        portfolio_etfs = ["SPY", "GLD", "TLT", "IEF", "EFA", "VXUS", "QQQ", "DBC"]
-        
-        lines.append("\nCore Portfolio ETFs:")
-        lines.append(f"{'Symbol':<8} {'Market':>10} {'Est NAV':>10} {'Premium':>12} {'Alert':>10}")
-        lines.append("-" * 60)
-        
-        pricing = data.get("pricing", {})
-        for symbol in portfolio_etfs:
-            if symbol in pricing:
-                p = pricing[symbol]
-                market = p.get("market_price", 0)
-                nav = p.get("nav", 0)
-                premium = p.get("premium_pct", 0)
-                alert = p.get("alert_level", "unknown")
-                
-                market_str = f"${market:.2f}" if market else "N/A"
-                nav_str = f"${nav:.2f}" if nav else "N/A"
-                premium_str = f"{premium:+.4%}" if premium else "N/A"
-                
-                lines.append(f"{symbol:<8} {market_str:>10} {nav_str:>10} {premium_str:>12} {alert:>10}")
-        
-        # Alerts section
-        alerts = data.get("alerts", [])
-        if alerts:
-            lines.append("\n⚠ Active Alerts:")
-            for alert in alerts:
-                sym = alert.get("symbol", "?")
-                level = alert.get("level", "unknown")
-                pct = alert.get("premium_pct", 0)
-                lines.append(f"  {sym}: {level.upper()} - Premium {pct:+.4%}")
-        
-        # Blocking summary
-        critical_count = sum(1 for a in alerts if a.get("level") == "critical")
-        if critical_count > 0:
-            lines.append(f"\n{BOLD}{RED}🔒 TRADING BLOCKED for {critical_count} ETF(s){RESET}")
-        
-        lines.append("\n" + "=" * 60)
-        
-        return "\n".join(lines)
-    
-    def get_status_summary(self) -> dict:
-        """Get machine-readable status summary"""
-        data = self.load_pricing_data()
-        
-        if not data:
-            return {
-                "available": False,
-                "reason": "No pricing data available",
-            }
-        
-        pricing = data.get("pricing", {})
-        alerts = data.get("alerts", [])
-        
-        portfolio_etfs = ["SPY", "GLD", "TLT", "IEF", "EFA", "VXUS", "QQQ", "DBC"]
-        
-        # Check which portfolio ETFs have critical alerts
-        blocked_symbols = []
-        warning_symbols = []
-        
-        for alert in alerts:
-            sym = alert.get("symbol")
-            level = alert.get("level")
-            if sym in portfolio_etfs:
-                if level == "critical":
-                    blocked_symbols.append(sym)
-                elif level in ["warning", "elevated"]:
-                    warning_symbols.append(sym)
-        
-        return {
-            "available": True,
-            "timestamp": data.get("timestamp"),
-            "total_etfs": len(pricing),
-            "critical_alerts": sum(1 for a in alerts if a.get("level") == "critical"),
-            "warning_alerts": sum(1 for a in alerts if a.get("level") in ["warning", "elevated"]),
-            "blocked_symbols": blocked_symbols,
-            "warning_symbols": warning_symbols,
-            "can_trade": len(blocked_symbols) == 0,
-        }
+DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+ETF_PRICING_PATH = DATA_DIR / "etf_pricing.json"
 
 
-# ANSI codes for use in module
-BOLD = "\033[1m"
-RED = "\033[31m"
-YELLOW = "\033[33m"
-GREEN = "\033[32m"
-RESET = "\033[0m"
+def load_etf_pricing() -> Optional[Dict]:
+    """Load current ETF pricing data."""
+    if not ETF_PRICING_PATH.exists():
+        return None
+    
+    try:
+        with open(ETF_PRICING_PATH, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading ETF pricing: {e}")
+        return None
+
+
+def get_status_color(status: str) -> str:
+    """Get ANSI color for status."""
+    colors = {
+        "normal": "\033[32m",      # Green
+        "warning": "\033[33m",      # Yellow
+        "critical": "\033[31m",      # Red
+    }
+    return colors.get(status, "")
+
+
+def reset_color() -> str:
+    return "\033[0m"
+
+
+def format_premium_display(pricing_data: Dict) -> str:
+    """Format ETF pricing for dashboard display."""
+    if not pricing_data:
+        return "  ETF Premium: Data unavailable\n"
+    
+    lines = []
+    lines.append("╔══════════════════════════════════════════════════════════════════╗")
+    lines.append("║  ETF PREMIUM/DISCOUNT MONITOR (v2.92)                             ║")
+    lines.append("╠══════════════════════════════════════════════════════════════════╣")
+    
+    # Portfolio metrics
+    portfolio = pricing_data.get("portfolio_metrics", {})
+    overall_status = portfolio.get("overall_status", "unknown")
+    weighted_premium = portfolio.get("weighted_premium_pct", 0)
+    
+    color = get_status_color(overall_status)
+    reset = reset_color()
+    
+    lines.append(f"║  Portfolio Status: {color}{overall_status.upper()}{reset}" + " " * (42 - len(overall_status)) + "║")
+    lines.append(f"║  Weighted Premium: {weighted_premium:+.3f}%" + " " * 38 + "║")
+    
+    # Warnings and criticals
+    warnings = portfolio.get("warning_symbols", [])
+    criticals = portfolio.get("critical_symbols", [])
+    
+    if warnings:
+        warn_str = ", ".join(warnings)
+        lines.append(f"║  Warnings: {warn_str}" + " " * (51 - len(warn_str)) + "║")
+    if criticals:
+        crit_str = ", ".join(criticals)
+        lines.append(f"║  Critical: {color}{crit_str}{reset}" + " " * (51 - len(crit_str)) + "║")
+    
+    lines.append("╠══════════════════════════════════════════════════════════════════╣")
+    
+    # Individual ETF details
+    etfs = pricing_data.get("etfs", {})
+    for symbol, data in sorted(etfs.items()):
+        status = data.get("alert_status", "normal")
+        status_short = status[:4].upper()
+        premium = data.get("premium_pct", 0)
+        market = data.get("market_price", 0)
+        nav = data.get("nav", 0)
+        
+        color = get_status_color(status)
+        lines.append(f"║  {symbol:4} | ${market:>7.2f} | NAV ${nav:>7.2f} | {color}{premium:>+7.3f}%{reset} [{status_short}]        ║")
+    
+    lines.append("╚══════════════════════════════════════════════════════════════════╝")
+    
+    return "\n".join(lines)
+
+
+def get_compact_summary(pricing_data: Dict) -> str:
+    """Get compact one-line summary for health checks."""
+    if not pricing_data:
+        return "ETF Premium: unavailable"
+    
+    portfolio = pricing_data.get("portfolio_metrics", {})
+    overall_status = portfolio.get("overall_status", "unknown")
+    weighted_premium = portfolio.get("weighted_premium_pct", 0)
+    
+    criticals = portfolio.get("critical_symbols", [])
+    warnings = portfolio.get("warning_symbols", [])
+    
+    status_str = f"{overall_status.upper()} ({weighted_premium:+.2f}%)"
+    
+    if criticals:
+        status_str += f" CRITICAL:{','.join(criticals)}"
+    elif warnings:
+        status_str += f" WARN:{','.join(warnings)}"
+    
+    return f"ETF Premium: {status_str}"
+
+
+def export_for_health_check():
+    """Export compact summary for health.py integration."""
+    pricing_data = load_etf_pricing()
+    if pricing_data:
+        summary = get_compact_summary(pricing_data)
+        print(summary)
+        return True
+    print("ETF Premium: data unavailable")
+    return False
 
 
 def main():
-    """CLI entry point"""
-    import sys
+    parser = argparse.ArgumentParser(description="ETF Premium Dashboard Display v2.92")
+    parser.add_argument("--compact", action="store_true", help="Export compact summary for health checks")
+    parser.add_argument("--refresh", action="store_true", help="Refresh data from etf_pricing.py")
+    args = parser.parse_args()
     
-    display = ETFPremiumDisplay()
+    if args.refresh:
+        # Trigger data refresh
+        import subprocess
+        result = subprocess.run(
+            ["python", "-m", "src.data.etf_pricing", "--fetch", "--export"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            print(f"Error refreshing data: {result.stderr}")
     
-    if len(sys.argv) > 1 and sys.argv[1] == "json":
-        # Output JSON for programmatic use
-        summary = display.get_status_summary()
-        print(json.dumps(summary, indent=2))
+    if args.compact:
+        export_for_health_check()
+        return
     
-    elif len(sys.argv) > 1 and sys.argv[1] == "status":
-        # Machine-readable status
-        summary = display.get_status_summary()
-        if summary.get("available"):
-            print(f"available|{summary['timestamp']}|{summary['critical_alerts']}|{summary['warning_alerts']}")
-        else:
-            print("unavailable|no data")
-    
+    # Full display
+    pricing_data = load_etf_pricing()
+    if pricing_data:
+        print(format_premium_display(pricing_data))
     else:
-        # Full dashboard display
-        print(display.generate_dashboard_section())
+        print("No ETF pricing data available.")
+        print("Run: python -m src.data.etf_pricing --fetch --export")
 
 
 if __name__ == "__main__":
