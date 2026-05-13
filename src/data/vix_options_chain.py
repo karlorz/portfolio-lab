@@ -489,9 +489,9 @@ class VIXDataPipeline:
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT * FROM insurance_candidates 
+            SELECT * FROM insurance_candidates
             WHERE timestamp = (SELECT MAX(timestamp) FROM insurance_candidates)
-            ORDER BY delta_distance ASC
+            ORDER BY ABS(delta - 0.30) ASC
         """)
         
         rows = cursor.fetchall()
