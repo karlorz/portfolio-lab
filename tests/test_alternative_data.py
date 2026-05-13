@@ -184,7 +184,7 @@ class TestSupplyChainAdapter:
             init_database()
             adapter = SupplyChainAdapter()
             adapter.db_path = tmp_path / "alt.db"
-            signal = adapter.calculate_signal("SPY", days=30)
+            signal = adapter.calculate_signal("AAPL", days=30)
 
         assert isinstance(signal, AlternativeDataSignal)
         assert signal.source == "supply_chain"
