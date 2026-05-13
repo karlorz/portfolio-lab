@@ -75,6 +75,19 @@
 | SPY | 99% | 95% | 89% | 4.5% |
 | 60/40 | 100% | 96% | 88% | 5.0% |
 
+## Recent Implementation Updates (2026-05-13)
+
+### v2.71 Intraday Seasonality Execution - COMPLETED
+- **Phase 1**: Intraday cost model with symbol-specific profiles
+- **Phase 2**: Rebalance scheduler with optimal window (11:00-14:00 ET) selection
+- **Phase 3**: ExecutionAgent integration with urgency-based scheduling
+- **Commit**: `6f0620d`
+
+**Features**:
+- Cost reduction: 5-15 bps per rebalancing trade
+- Urgency mapping: >0.75 = immediate, <0.25 = wait for optimal window
+- Dashboard status integration
+
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
 - `rolling-window.ts` — 9 sub-period Sharpe validation
