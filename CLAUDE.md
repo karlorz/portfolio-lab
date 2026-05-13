@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **1836 passing** — 2 pre-existing failures (test_generator, test_vpin_rebalancer)
+- **1881 passing** — 2 pre-existing failures (test_generator, test_vpin_rebalancer)
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -172,6 +172,7 @@
 - `test_regime_ml_validation.py` — 50 tests: ValidationResult dataclass, portfolio returns, synthetic results, metric calculation, backtest orchestration, validate_all, CLI
 - `test_cta_overlay.py` — 59 tests: TrendSignal/CTAPosition dataclasses, SMA, volatility, trend detection, ensemble scoring, vol-targeting, analyze_symbol, evaluate, crisis alpha
 - `test_defi_yield_fetcher.py` — 37 tests: YieldData/YieldSpread dataclasses, database storage, spread calculation, signal thresholds, alerts, status/history, async update, CLI
+- `test_smart_rebalancer.py` — 45 tests: enums, CostBudgetTracker, drift calculation, urgency, cost estimation, optimal window, decision engine, status
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
