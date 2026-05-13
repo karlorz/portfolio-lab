@@ -1,0 +1,79 @@
+# DeFi Yield Monitoring Thresholds
+# Monitoring infrastructure for future opportunistic allocation
+
+thresholds:
+  # Yield spread thresholds (vs 3M Treasury)
+  spread:
+    allocate: 0.02  # 2% - Consider active allocation research
+    consider: 0.01  # 1% - Begin monitoring closely
+    monitor: 0.00    # 0% - Standard monitoring
+  
+  # Correlation thresholds (BTC/ETH-SPY)
+  correlation:
+    low: 0.25        # Correlation < 0.25: diversification benefit possible
+    moderate: 0.50   # Correlation 0.25-0.50: marginal benefit
+    high: 0.75       # Correlation > 0.75: no diversification benefit
+  
+  # TVL thresholds for protocol health
+  tvl:
+    decline_warning: -0.20  # 20% decline: investigate
+    decline_critical: -0.40  # 40% decline: potential liquidity issue
+    minimum_usd: 100000000  # $100M minimum TVL for consideration
+  
+  # Scale requirements
+  scale:
+    minimum_portfolio_usd: 500000  # $500K: minimum for allocation consideration
+    optimal_portfolio_usd: 1000000  # $1M: optimal for risk-adjusted contribution
+
+protocols:
+  lido:
+    name: "Lido"
+    asset: "stETH"
+    type: "liquid_staking"
+    apis:
+      primary: "https://stake.lido.fi/api/sma-steth-apr"
+      fallback: "https://api.llama.fi/protocol/lido"
+    update_frequency_minutes: 60
+    
+  jito:
+    name: "Jito"
+    asset: "JitoSOL"
+    type: "liquid_staking"
+    apis:
+      primary: "https://kobe.mainnet.jito.network/api/v1/stake_pools"
+      fallback: "https://api.llama.fi/protocol/jito"
+    update_frequency_minutes: 60
+    
+  aave:
+    name: "Aave"
+    asset: "USDC"
+    type: "money_market"
+    apis:
+      primary: "https://aave-api-v2.aave.com/data/markets-data"
+      fallback: "https://api.llama.fi/protocol/aave"
+    update_frequency_minutes: 60
+
+alerts:
+  # When to generate research work items
+  auto_research_triggers:
+    spread_sustained_days: 30  # Spread > 2% for 30 days
+    correlation_drop_days: 180  # Correlation < 0.25 for 6 months
+    portfolio_scale_threshold: 500000  # Portfolio reaches $500K
+  
+  # Notification channels (to be configured)
+  channels:
+    - log  # Always log to data/defi_monitor.json
+    # - slack  # Configure webhook in secrets
+    # - email  # Configure SMTP in secrets
+
+notes: |
+  DeFi allocation NOT currently justified for $100K portfolio per research:
+  - Risk-adjusted yields inferior to covered call alternatives
+  - High correlation to SPY (0.75-0.92) during crisis periods
+  - Implementation complexity exceeds benefit at current scale
+  
+  Monitoring enables rapid deployment when conditions change:
+  - DeFi yields exceed Treasuries by >2% sustained
+  - Portfolio reaches $500K+ scale
+  - Correlation drops below 0.25 for extended period
+  - Regulatory clarity improves
