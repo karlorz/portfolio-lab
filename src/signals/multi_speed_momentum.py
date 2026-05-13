@@ -688,6 +688,28 @@ class MultiSpeedBacktester:
         }
 
 
+def _parse_portfolio_arg(portfolio: str) -> Dict[str, float]:
+    """Parse --portfolio CLI string into base allocation dict.
+
+    Accepts 3-part (SPY/GLD/TLT) or 4-part (SPY/GLD/TLT/DBC) formats.
+    Numeric values may be percentages (e.g. 46) or fractions (e.g. 0.46).
+    """
+    keys_3 = ('SPY', 'GLD', 'TLT')
+    keys_4 = ('SPY', 'GLD', 'TLT', 'DBC')
+    parts = portfolio.split('/')
+    if len(parts) not in (3, 4):
+        raise ValueError(
+            f"--portfolio must have 3 or 4 slash-separated values, got {len(parts)}: {portfolio!r}"
+        )
+    keys = keys_3 if len(parts) == 3 else keys_4
+    alloc: Dict[str, float] = {}
+    for key, raw in zip(keys, parts):
+        v = float(raw)
+        alloc[key] = v / 100 if v > 1 else v
+    alloc['CASH'] = 0.0
+    return alloc
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Multi-Speed Momentum Ensemble v2.56'
@@ -704,16 +726,16 @@ def main():
     # Backtest command
     backtest_parser = subparsers.add_parser('backtest', help='Run historical backtest')
     backtest_parser.add_argument('--portfolio', default='46/38/16',
-                               help='Base allocation as SPY/GLD/TLT percentages')
+                               help='Base allocation as SPY/GLD/TLT or SPY/GLD/TLT/DBC percentages')
     backtest_parser.add_argument('--start', help='Start date (YYYY-MM-DD)')
     backtest_parser.add_argument('--end', help='End date (YYYY-MM-DD)')
     backtest_parser.add_argument('--freq', type=int, default=21, help='Rebalance frequency (days)')
     backtest_parser.add_argument('--output', help='Output JSON file')
-    
+
     # Live command
     live_parser = subparsers.add_parser('live', help='Get current recommendation')
     live_parser.add_argument('--portfolio', default='46/38/16',
-                            help='Base allocation as SPY/GLD/TLT percentages')
+                            help='Base allocation as SPY/GLD/TLT or SPY/GLD/TLT/DBC percentages')
     live_parser.add_argument('--output', help='Output JSON file')
     live_parser.add_argument('--save-db', action='store_true', help='Save to database')
     
@@ -742,14 +764,8 @@ def main():
             print(json.dumps({'error': f'Could not compute signal for {args.ticker}'}))
     
     elif args.command == 'backtest':
-        parts = args.portfolio.split('/')
-        base_alloc = {
-            'SPY': float(parts[0]) / 100 if float(parts[0]) > 1 else float(parts[0]),
-            'GLD': float(parts[1]) / 100 if float(parts[1]) > 1 else float(parts[1]),
-            'TLT': float(parts[2]) / 100 if float(parts[2]) > 1 else float(parts[2]),
-        }
-        base_alloc['CASH'] = 0.0
-        
+        base_alloc = _parse_portfolio_arg(args.portfolio)
+
         backtester = MultiSpeedBacktester(
             base_allocation=base_alloc,
             start_date=args.start,
@@ -761,16 +777,10 @@ def main():
         if args.output:
             with open(args.output, 'w') as f:
                 json.dump(result, f, indent=2)
-    
+
     elif args.command == 'live':
-        parts = args.portfolio.split('/')
-        base_alloc = {
-            'SPY': float(parts[0]) / 100 if float(parts[0]) > 1 else float(parts[0]),
-            'GLD': float(parts[1]) / 100 if float(parts[1]) > 1 else float(parts[1]),
-            'TLT': float(parts[2]) / 100 if float(parts[2]) > 1 else float(parts[2]),
-        }
-        base_alloc['CASH'] = 0.0
-        
+        base_alloc = _parse_portfolio_arg(args.portfolio)
+
         multi_speed = MultiSpeedMomentum()
         result = multi_speed.get_current_recommendation(base_alloc)
         
