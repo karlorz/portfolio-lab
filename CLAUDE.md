@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **2352 passing** — 1 pre-existing failure (test_vpin_rebalancer)
+- **2367 passing** — 1 pre-existing failure (test_vpin_rebalancer)
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -190,6 +190,7 @@
 - `test_factor_timing_pipeline.py` — 21 tests: factor feature engineering (lags, rolling stats, correlations, dispersion), build dataset, save/load, summary, CLI
 - `test_factor_data_fetcher.py` — 24 tests: constants, synthetic factor data, factor statistics, load/cache, fetch fallback, CLI
 - `test_mock_quality_scores.py` — 24 tests: ETF characteristics, quality score calculation, deterministic noise, CLI
+- `test_tsmom_integration.py` — 16 tests: confidence calculation, signal generation, portfolio signals, allocation deltas, convenience function
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
