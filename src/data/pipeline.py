@@ -86,18 +86,31 @@ async def fetch_yahoo(symbol: str, session: aiohttp.ClientSession) -> List[Dict]
             
             result = data.get("chart", {}).get("result", [{}])[0]
             timestamps = result.get("timestamp", [])
-            prices = result.get("indicators", {}).get("adjclose", [{}])[0].get("adjclose", [])
-            volumes = result.get("indicators", {}).get("quote", [{}])[0].get("volume", [])
-            
+            adjclose = result.get("indicators", {}).get("adjclose", [{}])[0].get("adjclose", [])
+            quote = result.get("indicators", {}).get("quote", [{}])[0]
+            opens = quote.get("open", [])
+            highs = quote.get("high", [])
+            lows = quote.get("low", [])
+            closes = quote.get("close", [])
+            volumes = quote.get("volume", [])
+
             records = []
             for i, ts in enumerate(timestamps):
-                if i < len(prices) and prices[i] is not None:
-                    dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
-                    records.append({
-                        "date": dt,
-                        "close": prices[i],
-                        "volume": volumes[i] if i < len(volumes) and volumes[i] else 0
-                    })
+                # Use adjclose if available, fall back to close
+                close = (adjclose[i] if i < len(adjclose) and adjclose[i] is not None
+                         else closes[i] if i < len(closes) and closes[i] is not None
+                         else None)
+                if close is None:
+                    continue
+                dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+                records.append({
+                    "date": dt,
+                    "open": opens[i] if i < len(opens) and opens[i] is not None else close,
+                    "high": highs[i] if i < len(highs) and highs[i] is not None else close,
+                    "low": lows[i] if i < len(lows) and lows[i] is not None else close,
+                    "close": close,
+                    "volume": volumes[i] if i < len(volumes) and volumes[i] else 0
+                })
             return records
     except Exception as e:
         print(f"Error fetching {symbol}: {e}")
@@ -196,9 +209,9 @@ async def main():
                 
                 for r in records:
                     cursor.execute("""
-                        INSERT OR REPLACE INTO prices (symbol, date, close, volume, updated_at)
-                        VALUES (?, ?, ?, ?, datetime('now'))
-                    """, (symbol, r["date"], r["close"], r["volume"]))
+                        INSERT OR REPLACE INTO prices (symbol, date, open, high, low, close, volume, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    """, (symbol, r["date"], r.get("open"), r.get("high"), r.get("low"), r["close"], r["volume"]))
                 
                 print(f"  {symbol}: {len(records)} records")
                 await asyncio.sleep(0.5)  # Rate limit
