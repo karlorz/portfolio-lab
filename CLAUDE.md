@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **228/228 passing** — all tests green
+- **253/253 passing** — all tests green
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -129,6 +129,10 @@
 - `test_rebalance_scheduler.py` — 14 tests: order scheduling, urgency windows, batch rebalancing
 - `test_vpin_rebalancer.py` — 13 tests: BVC calculator, VPIN engine, smart rebalancer integration
 - `test_sentiment_client.py` — 30 tests: LLM sentiment client, cost tracking, retry logic, JSON parsing
+- `test_alternative_data.py` — 22 tests: satellite/credit card/supply chain adapters, composite signals, earnings predictions
+- `test_factor_rotation.py` — 27 tests: factor scoring, allocation, signal strength, recommendations, backtest
+- `test_health_monitor.py` — 25 tests: health scoring, weight adjustment, volatility regime detection, health reports
+- `test_tips_monitor.py` — 11 tests: TIPS monitoring, inflation regime classification, allocation guidance
 - `test_tips_monitor.py` — 11 tests: TIPS yield tracking, signal generation, regime classification, allocation guidance
 - `test_alternative_data.py` — 22 tests: data classes, database init, satellite/credit card/supply chain adapters, composite signals, earnings predictions, agreement detection
 - `test_factor_rotation.py` — 27 tests: factor scoring, momentum evaluation, allocation weighting, signal strength, category diversity, recommendation, backtest
