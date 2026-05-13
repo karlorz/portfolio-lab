@@ -572,8 +572,6 @@ class TestCLI:
     @patch("src.strategy.regime_ml_validation.RegimeMLValidator")
     @patch("sys.argv", ["regime_ml_validation.py", "--backtest", "--start", "2020-01-01", "--end", "2020-12-31"])
     def test_backtest_command(self, mock_validator_cls, capsys):
-        """The --backtest branch hits a known scoping bug (json import inside if block).
-        Verify it raises UnboundLocalError until the source is fixed."""
         mock_v = MagicMock()
         mock_v.run_backtest.return_value = (
             _make_validation_result(strategy="baseline"),
@@ -581,8 +579,8 @@ class TestCLI:
         )
         mock_validator_cls.return_value = mock_v
         from src.strategy.regime_ml_validation import main
-        with pytest.raises(UnboundLocalError):
-            main()
+        result = main()
+        assert result == 0
 
     @patch("src.strategy.regime_ml_validation.RegimeMLValidator")
     @patch("sys.argv", ["regime_ml_validation.py", "--run"])

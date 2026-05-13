@@ -445,23 +445,23 @@ class RegimeMLValidator:
 def main():
     """CLI for validation framework."""
     import argparse
-    
+    import json
+
     parser = argparse.ArgumentParser(description="Regime-Conditional ML Validation")
     parser.add_argument("--run", action="store_true", help="Run full validation suite")
     parser.add_argument("--backtest", action="store_true", help="Run single backtest")
     parser.add_argument("--start", type=str, default="2020-01-01", help="Backtest start")
     parser.add_argument("--end", type=str, default="2025-12-31", help="Backtest end")
     parser.add_argument("--output", type=str, help="Output JSON file")
-    
+
     args = parser.parse_args()
-    
+
     validator = RegimeMLValidator()
-    
+
     if args.run:
         results = validator.validate_all()
-        
+
         if args.output:
-            import json
             def convert_numpy(obj):
                 if isinstance(obj, np.integer):
                     return int(obj)
