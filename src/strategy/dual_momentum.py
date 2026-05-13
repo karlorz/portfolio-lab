@@ -547,8 +547,13 @@ def main():
         print(json.dumps(output, indent=2))
         
     elif cmd == "backtest":
-        # Placeholder for backtest
-        print("Backtest mode - requires historical data simulation")
+        if len(sys.argv) < 4:
+            print("Usage: dual_momentum.py backtest <start_date> <end_date>")
+            print("Example: dual_momentum.py backtest 2015-01-01 2025-12-31")
+            sys.exit(1)
+        backtest = DualMomentumBacktest(engine)
+        result = backtest.run_backtest(sys.argv[2], sys.argv[3])
+        print(json.dumps(result, indent=2))
         
     elif cmd == "status":
         # Quick status check

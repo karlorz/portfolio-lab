@@ -25,6 +25,7 @@ Integration:
 import numpy as np
 import torch
 import json
+import sqlite3
 import argparse
 import sys
 from pathlib import Path
@@ -159,7 +160,29 @@ class AIController:
         self.current_allocation = create_default_portfolio()
         self.last_action: Optional[Dict] = None
         self.action_history: List[Dict] = []
-    
+        self.db_path = Path("~/projects/portfolio-lab/data/market.db").expanduser()
+
+    def _fetch_price_history(self, symbol: str, days: int = 60) -> np.ndarray:
+        """Fetch recent close prices from market.db. Falls back to ones if unavailable."""
+        try:
+            if not self.db_path.exists():
+                return np.ones(days)
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT ?",
+                (symbol, days)
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            if rows and len(rows) >= days // 2:
+                prices = np.array([r[0] for r in reversed(rows)], dtype=np.float64)
+                if prices[-1] > 0:
+                    return prices
+            return np.ones(days)
+        except Exception:
+            return np.ones(days)
+
     def build_observation_from_integrator(
         self,
         ticker: str = "SPY",
@@ -174,8 +197,8 @@ class AIController:
             signal = self.signal_integrator.get_composite_signal(ticker)
             
             # Extract features from signal
-            # This is simplified - production would use actual price series
-            price_history = np.ones(60)  # Placeholder
+            # Fetch real price history from market.db
+            price_history = self._fetch_price_history(ticker, 60)
             
             # Build observation
             obs = AgentObservation(
