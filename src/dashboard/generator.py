@@ -15,6 +15,10 @@ DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 PUBLIC_DIR = Path("~/projects/portfolio-lab/public/data").expanduser()
 DB_PATH = DATA_DIR / "market.db"
 
+# Add src to path for importing signal health tracker
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 class DashboardGenerator:
     def __init__(self):
         PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -806,6 +810,7 @@ class DashboardGenerator:
             "cron_jobs": [],
             "data_freshness": {},
             "system_status": "healthy",
+            "signal_health": {},
             "generated_at": datetime.now().isoformat()
         }
         
@@ -862,6 +867,24 @@ class DashboardGenerator:
                     }
                 except Exception:
                     pass
+
+        # Get signal health from SignalHealthTracker
+        try:
+            from signals.health_tracker import SignalHealthTracker
+            tracker = SignalHealthTracker()
+            signal_health_report = tracker.get_health_report()
+            health_data["signal_health"] = {
+                "timestamp": signal_health_report.get("timestamp"),
+                "summary": signal_health_report.get("summary", {}),
+                "scores": signal_health_report.get("scores", {}),
+                "alerts": signal_health_report.get("alerts", []),
+                "overall_health": signal_health_report.get("overall_health", "unknown")
+            }
+        except Exception as e:
+            health_data["signal_health"] = {
+                "error": f"Failed to get signal health: {str(e)}",
+                "status": "unavailable"
+            }
 
         # Overall system health
         stale_count = sum(1 for d in health_data["data_freshness"].values() if d.get("status") != "fresh")
