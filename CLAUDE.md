@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **414/414 passing** — all tests green
+- **692/692 passing** — all tests green
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -137,9 +137,12 @@
 - `test_network_momentum.py` — 32 tests: network momentum lead-lag, DTW distance, Levy area, ensemble signals
 - `test_generator.py` — 35 tests: dashboard generator, VIX regime detection, health status, alerts, broker data
 - `test_fed_analyzer.py` — 44 tests: FOMC parser, hawk-dove scoring, stance classification, uncertainty detection
-- `test_tips_monitor.py` — 11 tests: TIPS yield tracking, signal generation, regime classification, allocation guidance
-- `test_alternative_data.py` — 22 tests: data classes, database init, satellite/credit card/supply chain adapters, composite signals, earnings predictions, agreement detection
-- `test_factor_rotation.py` — 27 tests: factor scoring, momentum evaluation, allocation weighting, signal strength, category diversity, recommendation, backtest
+- `test_earnings_analyzer.py` — 45 tests: transcript parsing, sentiment analysis, tone shifts, guidance clarity
+- `test_correlation_regime_detector.py` — 51 tests: regime classification, Ledoit-Wolf shrinkage, hierarchical clustering, risk parity
+- `test_tsmom_overlay.py` — 46 tests: AQR time-series momentum, formation returns, volatility scaling, portfolio construction
+- `test_macro_momentum.py` — 36 tests: macro signal themes, regime classification, allocation shifts, FRED data
+- `test_risk_parity_overlay.py` — 34 tests: volatility targeting, risk parity allocation, leverage, regime detection
+- `test_regime_hmm.py` — 30 tests: Wasserstein HMM, template matching, rule-based fallback, state persistence
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
