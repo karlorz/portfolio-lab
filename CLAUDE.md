@@ -9,12 +9,13 @@
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
 - **Sharpe 0.79 champion validated with +1yr of new data (2005-2026)**
 - **10% drift-based rebalancing beats annual: Sharpe 0.83 vs 0.79**
-- **v2.55 Combined Signal Orchestrator**: Multi-source signal aggregation
-  - Weights: TSMOM 35%, HMM Regime 25%, Fed Policy 25%, AI Agent 10%, Base 5%
-  - Conflict resolution: split_difference, hmm_neutral_reduction, consensus_boost
-  - Current: Minor adjustments (+0.02% SPY, -0.18% GLD, +0.16% TLT) due to TLT conflict
-  - TSMOM bullish TLT (+10%) vs Fed bearish TLT (-5%) → conservative resolution
-- **v2.54 Fed Policy Overlay**: Real-time FRED integration for rate/inflation regime detection
+- **v2.55 Combined Signal Orchestrator + Backtest**: Multi-source aggregation with historical validation
+  - **Key Finding**: TSMOM alone (Sharpe 0.96) outperforms combined overlay (0.93)
+  - Signal conflicts and transaction costs erode alpha
+  - Combined results 2006-2026: CAGR 10.71%, Sharpe 0.93 vs baseline 0.93, Max DD -25.7%
+  - Crisis: 2008 -9.36%, 2020 +3.08%, 2022 -12.67%
+  - Recommendation: Use TSMOM overlay standalone rather than combined signals
+- **v2.54 Fed Policy Overlay**: Real-time FRED integration
   - Current regime: EASING (Fed 3.64%, real rate -0.31%, 10Y-2Y +0.47)
   - Allocation: SPY+2.6%, GLD+3%, TLT-5.5% from base 46/38/16
   - Signal integrator weight: 10% (regime-based tactical shifts)
