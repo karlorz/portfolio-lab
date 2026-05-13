@@ -56,6 +56,9 @@ sys.path.insert(0, str(project_root))
 # Existing module imports
 from src.data.alternative_data import AlternativeDataClient, AlternativeDataSignal
 
+# New strategy adapters (v2.52-v2.58) - lazy import to avoid circular dependency
+# These are imported in SignalIntegrator.__init__()
+
 # ---------------------------------------------------------------------------
 # Constants and Configuration
 # ---------------------------------------------------------------------------
@@ -65,24 +68,39 @@ DB_PATH = DATA_DIR / "signals.db"
 
 # Base signal weights (adjusted dynamically by regime)
 BASE_WEIGHTS = {
-    "momentum": 0.20,
-    "value": 0.15,
-    "macro": 0.15,
-    "quality": 0.10,
-    "sentiment": 0.10,
-    "ai_agent": 0.05,   # v2.51 MARL controller weight
-    "tsmom": 0.10,      # v2.52 TSMOM overlay weight
-    "fed_policy": 0.10, # v2.54 Fed policy overlay weight
-    "hmm_regime": 0.05, # v2.53 HMM regime weight
+    "momentum": 0.15,
+    "value": 0.10,
+    "macro": 0.10,
+    "quality": 0.08,
+    "sentiment": 0.08,
+    "ai_agent": 0.04,        # v2.51 MARL controller weight
+    "tsmom": 0.08,           # v2.52 TSMOM overlay weight
+    "fed_policy": 0.08,      # v2.54 Fed policy overlay weight
+    "hmm_regime": 0.04,      # v2.53 HMM regime weight
+    "multi_speed": 0.10,    # v2.56 Multi-Speed Momentum ensemble
+    "risk_parity": 0.08,     # v2.57 Risk Parity weight overlay
+    "network_momentum": 0.07, # v2.58 Network Momentum lead-lag
 }
 
 # Regime-specific weight adjustments
 REGIME_WEIGHTS = {
-    "bull": {"momentum": 0.40, "value": 0.15, "macro": 0.15, "quality": 0.15, "sentiment": 0.15},
-    "bear": {"momentum": 0.20, "value": 0.25, "macro": 0.30, "quality": 0.15, "sentiment": 0.10},
-    "neutral": {"momentum": 0.25, "value": 0.25, "macro": 0.20, "quality": 0.15, "sentiment": 0.15},
-    "crisis": {"momentum": 0.10, "value": 0.20, "macro": 0.35, "quality": 0.20, "sentiment": 0.15},
-    "high_vol": {"momentum": 0.15, "value": 0.20, "macro": 0.25, "quality": 0.25, "sentiment": 0.15},
+    "bull": {
+        "momentum": 0.30, "multi_speed": 0.25, "network_momentum": 0.15,
+        "tsmom": 0.12, "value": 0.08, "macro": 0.05, "quality": 0.05
+    },
+    "bear": {
+        "risk_parity": 0.20, "macro": 0.20, "tsmom": 0.15, "hmm_regime": 0.15,
+        "value": 0.15, "multi_speed": 0.08, "sentiment": 0.05, "quality": 0.02
+    },
+    "neutral": BASE_WEIGHTS,
+    "crisis": {
+        "risk_parity": 0.25, "macro": 0.20, "hmm_regime": 0.15, "tsmom": 0.10,
+        "value": 0.15, "quality": 0.10, "sentiment": 0.05
+    },
+    "high_vol": {
+        "risk_parity": 0.20, "tsmom": 0.15, "hmm_regime": 0.15, "multi_speed": 0.15,
+        "macro": 0.15, "quality": 0.15, "value": 0.05
+    },
 }
 
 # Minimum signal sources required for valid composite
@@ -852,11 +870,23 @@ class SignalIntegrator:
     """
     
     def __init__(self):
+        # Lazy imports to avoid circular dependency
+        from src.signals.tsmom_integration import TSMOMSignalAdapter
+        from src.signals.multi_strategy_adapters import (
+            MultiSpeedSignalAdapter,
+            RiskParitySignalAdapter,
+            NetworkMomentumSignalAdapter
+        )
+        
         self.sources: Dict[str, SignalSource] = {
             "technical": TechnicalSignal(),
             "macro": MacroSignal(),
             "alternative_data": AlternativeDataSignalAdapter(),
             "llm_sentiment": LLMSentimentSignalAdapter(),
+            "tsmom": TSMOMSignalAdapter(),
+            "multi_speed": MultiSpeedSignalAdapter(),
+            "risk_parity": RiskParitySignalAdapter(),
+            "network_momentum": NetworkMomentumSignalAdapter(),
         }
         
         self.db_path = DB_PATH
