@@ -1,700 +1,640 @@
 """
-Ensemble Voting Regime Detector (v220 Phase 3)
+Portfolio-Lab v2.58: Ensemble Signal Voter
 
-Combines multiple regime detection signals into unified probabilistic classification:
-- Wasserstein HMM (40%): Hidden Markov Model with template tracking
-- CTA Trend Overlay (25%): Multi-timeframe trend detection  
-- TSFM Regime (20%): Time-series factor model
-- Duration/Yield Curve (15%): Curve-based recession signals
+Multi-source signal aggregation with regime-dependent weighting.
+Implements soft voting with confidence-based consensus for portfolio decisions.
 
-Expected improvement: +10pp regime accuracy, +0.06 Sharpe, -50% whipsaw
+Sources:
+- TSFM Factor Momentum (v2.15) - Factor-based momentum signals
+- HMM Regime Detector (v2.20.1) - Latent state classification
+- CTA Trend Overlay (v2.10+) - Multi-timeframe trend following
+- Macro Momentum (v2.57) - Business cycle / monetary policy
+- Multi-Speed Momentum (v2.56) - Speed-diversified trends
+- Duration/Yield Curve (v2.17-2.18) - Rate regime detection
+- Circuit Breaker (v2.14) - Risk limits and controls
+
+Voting Strategy:
+- Normal regime: TSFM 40%, MultiSpeed 25%, CTA 20%, Macro 10%, Duration 5%
+- High vol regime: HMM 35%, CTA 30%, MultiSpeed 20%, Macro 10%, Circuit 5%
+- Crisis regime: Circuit 35%, CTA 35%, HMM 20%, Macro 10%
+
+Consensus threshold: 2/3 weighted signals agree for action
+
+Usage:
+    python -m src.strategy.ensemble_voter vote
+    python -m src.strategy.ensemble_voter recommend --portfolio 46/38/16
+    python -m src.strategy.ensemble_voter explain
 """
 
 import os
 import json
 import sqlite3
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, asdict
+import pandas as pd
 from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple, NamedTuple
+from dataclasses import dataclass, asdict
 from pathlib import Path
+from enum import Enum
 import sys
 
-# Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.strategy.regime_hmm import WassersteinHMMDetector, RegimeState
-from src.strategy.cta_overlay import CTATrendEngine
-from src.signals.vix_ensemble_adapter import VIXEnsembleAdapter
-from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
+
+class Regime(Enum):
+    """Market regime classifications."""
+    NORMAL = "normal"
+    HIGH_VOL = "high_vol"  
+    CRISIS = "crisis"
+    RECOVERY = "recovery"
+
+
+class SignalSource(Enum):
+    """Available signal sources."""
+    TSFM_MOMENTUM = "tsfm_momentum"           # v2.15 Factor momentum
+    HMM_REGIME = "hmm_regime"                 # v2.20.1 Wasserstein HMM
+    CTA_TREND = "cta_trend"                   # v2.10+ CTA overlay
+    MACRO_MOMENTUM = "macro_momentum"         # v2.57 Macro signals
+    MULTI_SPEED_MOM = "multi_speed_momentum"  # v2.56 Multi-speed
+    DURATION_REGIME = "duration_regime"       # v2.17-2.18 Yield curve
+    CIRCUIT_BREAKER = "circuit_breaker"     # v2.14 Risk controls
 
 
 @dataclass
-class RegimeSignal:
-    """Normalized regime signal from any source"""
-    source: str  # 'hmm', 'cta', 'tsfm', 'duration'
-    regime: str  # 'bull', 'bear', 'neutral', 'crisis'
-    probability: float  # Confidence in regime classification
-    confidence: float  # Signal confidence (0-1)
+class SignalReading:
+    """Single signal source reading."""
+    source: SignalSource
     timestamp: str
-    raw_data: Dict[str, Any]  # Source-specific data
+    
+    # Signal value: -1 (strong short) to +1 (strong long)
+    value: float
+    
+    # Metadata
+    confidence: float  # 0-1
+    weight: float    # Dynamic regime weight
+    regime_fit: str  # Which regime this signal works best in
+    
+    # Asset-specific signals (optional)
+    asset_signals: Optional[Dict[str, float]] = None
+    
+    # Reasoning
+    explanation: str = ""
 
 
 @dataclass
-class EnsembleRegime:
-    """Final ensemble regime classification"""
+class EnsembleVote:
+    """Aggregated ensemble decision."""
     timestamp: str
-    regime: str  # 'bull', 'bear', 'neutral', 'crisis'
-    confidence: float  # Ensemble confidence score
+    regime: Regime
+    regime_confidence: float
     
-    # Individual signal probabilities
-    hmm_prob: float
-    cta_prob: float
-    tsfm_prob: float
-    duration_prob: float
-    vix_insurance_prob: float  # VIX insurance signal probability
-    vpin_prob: float           # VPIN flow toxicity signal probability
+    # Consensus metrics
+    num_sources: int
+    weighted_consensus: float  # -1 to +1
+    agreement_ratio: float     # % of signals agreeing with consensus
     
-    # Weighted combination
-    ensemble_probs: Dict[str, float]
+    # Per-asset recommendations
+    equity_bias: float      # SPY direction
+    duration_bias: float    # TLT direction
+    gold_bias: float        # GLD direction
     
-    # Signal agreement metrics
-    agreement_score: float  # How much signals agree
-    disagreement_sources: List[str]  # Which signals differ from majority
+    # Final recommendation
+    action: str            # "increase_equity", "decrease_equity", "neutral", "risk_off"
+    confidence: float      # 0-1
+    reasoning: str
     
-    # Action recommendation
-    action: str  # 'full_shift', 'partial_shift', 'hold', 'alert'
-    position_scaling: float  # 0-1 position sizing factor
-    
-    # VIX insurance overlay status
-    insurance_active: bool = False
-    insurance_alerts: List[str] = None
-    
-    def __post_init__(self):
-        if self.insurance_alerts is None:
-            self.insurance_alerts = []
+    # Source breakdown
+    source_votes: List[SignalReading]
 
 
-class RegimeSignalAdapter:
-    """Adapts various signal sources to unified RegimeSignal format"""
-    
-    # Map source-specific regimes to unified regime space
-    REGIME_MAP = {
-        'hmm': {
-            'bull': 'bull',
-            'bear': 'bear',
-            'neutral': 'neutral',
-            'crisis': 'crisis'
-        },
-        'cta': {
-            'uptrend': 'bull',
-            'downtrend': 'bear',
-            'ranging': 'neutral',
-            'chop': 'neutral'
-        },
-        'tsfm': {
-            'expansion': 'bull',
-            'contraction': 'bear',
-            'stress': 'crisis',
-            'recovery': 'bull',
-            'normal': 'neutral'
-        },
-        'duration': {
-            'steep': 'bull',
-            'normal': 'neutral',
-            'flat': 'neutral',
-            'inverted': 'bear'
-        },
-        'vix_insurance': {
-            'risk_off': 'bear',
-            'risk_on': 'bull',
-            'neutral': 'neutral',
-            'hedge_active': 'neutral'  # Defensive but not bearish
-        },
-        'vpin': {
-            'high': 'bear',      # High toxicity = risk-off
-            'elevated': 'bear',
-            'normal': 'neutral',
-            'low': 'bull'        # Low toxicity = risk-on
-        }
+# Regime-dependent weights
+REGIME_WEIGHTS = {
+    Regime.NORMAL: {
+        SignalSource.TSFM_MOMENTUM: 0.40,
+        SignalSource.MULTI_SPEED_MOM: 0.25,
+        SignalSource.CTA_TREND: 0.20,
+        SignalSource.MACRO_MOMENTUM: 0.10,
+        SignalSource.DURATION_REGIME: 0.05,
+        SignalSource.HMM_REGIME: 0.0,       # Minimal in normal
+        SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
+    },
+    Regime.HIGH_VOL: {
+        SignalSource.HMM_REGIME: 0.35,
+        SignalSource.CTA_TREND: 0.30,
+        SignalSource.MULTI_SPEED_MOM: 0.20,
+        SignalSource.MACRO_MOMENTUM: 0.10,
+        SignalSource.CIRCUIT_BREAKER: 0.05,
+        SignalSource.TSFM_MOMENTUM: 0.0,
+        SignalSource.DURATION_REGIME: 0.0,
+    },
+    Regime.CRISIS: {
+        SignalSource.CIRCUIT_BREAKER: 0.35,
+        SignalSource.CTA_TREND: 0.35,
+        SignalSource.HMM_REGIME: 0.20,
+        SignalSource.MACRO_MOMENTUM: 0.10,
+        SignalSource.MULTI_SPEED_MOM: 0.0,  # Too slow in crisis
+        SignalSource.TSFM_MOMENTUM: 0.0,
+        SignalSource.DURATION_REGIME: 0.0,
+    },
+    Regime.RECOVERY: {
+        SignalSource.MULTI_SPEED_MOM: 0.30,  # Speed diversity key
+        SignalSource.HMM_REGIME: 0.25,
+        SignalSource.CTA_TREND: 0.20,
+        SignalSource.TSFM_MOMENTUM: 0.15,
+        SignalSource.MACRO_MOMENTUM: 0.10,
+        SignalSource.DURATION_REGIME: 0.0,
+        SignalSource.CIRCUIT_BREAKER: 0.0,
     }
-    
-    @classmethod
-    def from_hmm(cls, regime_state: RegimeState) -> RegimeSignal:
-        """Convert HMM RegimeState to RegimeSignal"""
-        return RegimeSignal(
-            source='hmm',
-            regime=regime_state.regime_label,
-            probability=regime_state.probability,
-            confidence=regime_state.template_confidence,
-            timestamp=regime_state.timestamp,
-            raw_data={
-                'regime_id': regime_state.regime_id,
-                'template_distance': regime_state.template_distance,
-                'vix_level': regime_state.vix_level,
-                'momentum_20d': regime_state.momentum_20d
-            }
-        )
-    
-    @classmethod
-    def from_cta(cls, cta_result: Dict[str, Any]) -> RegimeSignal:
-        """Convert CTA trend result to RegimeSignal"""
-        # Determine regime from trend score
-        avg_trend = cta_result.get('summary', {}).get('avg_trend_score', 0)
-        avg_strength = cta_result.get('summary', {}).get('avg_trend_strength', 0)
-        
-        if avg_trend > 0.3:
-            regime = 'uptrend'
-            prob = 0.5 + avg_strength * 0.5
-        elif avg_trend < -0.3:
-            regime = 'downtrend'
-            prob = 0.5 + avg_strength * 0.5
-        else:
-            regime = 'ranging'
-            prob = 0.6 + avg_strength * 0.2
-        
-        unified_regime = cls.REGIME_MAP['cta'].get(regime, 'neutral')
-        
-        return RegimeSignal(
-            source='cta',
-            regime=unified_regime,
-            probability=prob,
-            confidence=avg_strength,
-            timestamp=cta_result.get('timestamp', datetime.now().isoformat()),
-            raw_data=cta_result
-        )
-    
-    @classmethod
-    def from_duration(cls, duration_data: Dict[str, Any]) -> RegimeSignal:
-        """Convert duration/yield curve data to RegimeSignal"""
-        # Use curve regime if available
-        curve_regime = duration_data.get('curve_regime', 'normal')
-        recession_prob = duration_data.get('recession_probability', 0)
-        
-        unified_regime = cls.REGIME_MAP['duration'].get(curve_regime, 'neutral')
-        
-        # Higher confidence with stronger signals
-        if recession_prob > 0.7:
-            confidence = 0.8
-            prob = recession_prob
-        elif recession_prob < 0.3:
-            confidence = 0.7
-            prob = 1 - recession_prob
-        else:
-            confidence = 0.5
-            prob = 0.5
-        
-        return RegimeSignal(
-            source='duration',
-            regime=unified_regime,
-            probability=prob,
-            confidence=confidence,
-            timestamp=duration_data.get('timestamp', datetime.now().isoformat()),
-            raw_data=duration_data
-        )
-    
-    @classmethod
-    def from_vix_insurance(cls, vix_signal: Dict[str, Any]) -> RegimeSignal:
-        """Convert VIX insurance signal to RegimeSignal"""
-        is_active = vix_signal.get('insurance_active', False)
-        risk_adjustment = vix_signal.get('risk_score_adjustment', 0.0)
-        
-        # Determine regime based on insurance status
-        if not is_active:
-            regime = 'neutral'
-            prob = 0.5
-        elif risk_adjustment > 0.05:
-            regime = 'risk_off'  # Defensive posture
-            prob = 0.5 + risk_adjustment
-        elif risk_adjustment < -0.02:
-            regime = 'risk_on'  # Profit taking opportunity
-            prob = 0.5 - risk_adjustment
-        else:
-            regime = 'hedge_active'
-            prob = 0.6
-        
-        unified_regime = cls.REGIME_MAP['vix_insurance'].get(regime, 'neutral')
-        
-        # Confidence based on position size and budget health
-        metadata = vix_signal.get('metadata', {})
-        position_pct = metadata.get('position_size_pct', 0)
-        budget_pct = metadata.get('budget_used_pct', 0)
-        
-        # Higher confidence with larger positions and healthy budgets
-        if position_pct > 0.005 and budget_pct < 0.8:
-            confidence = 0.7
-        elif position_pct > 0:
-            confidence = 0.5
-        else:
-            confidence = 0.3
-        
-        return RegimeSignal(
-            source='vix_insurance',
-            regime=unified_regime,
-            probability=prob,
-            confidence=confidence,
-            timestamp=vix_signal.get('timestamp', datetime.now().isoformat()),
-            raw_data={
-                'insurance_active': is_active,
-                'risk_adjustment': risk_adjustment,
-                'cash_buffer_pct': vix_signal.get('cash_buffer_pct', 0),
-                'alerts': vix_signal.get('alerts', []),
-                'next_action': vix_signal.get('next_action', 'none')
-            }
-        )
-    
-    @classmethod
-    def from_vpin(cls, vpin_signal: Dict[str, Any]) -> RegimeSignal:
-        """Convert VPIN signal to RegimeSignal"""
-        regime = vpin_signal.get('regime', 'normal')
-        prob = vpin_signal.get('confidence', 0.5)
-        
-        unified_regime = cls.REGIME_MAP['vpin'].get(regime, 'neutral')
-        
-        # Confidence based on z-score magnitude
-        z_score = abs(vpin_signal.get('raw_data', {}).get('z_score', 0))
-        if z_score > 2.0:
-            confidence = 0.8
-        elif z_score > 1.0:
-            confidence = 0.6
-        else:
-            confidence = 0.4
-        
-        return RegimeSignal(
-            source='vpin',
-            regime=unified_regime,
-            probability=prob,
-            confidence=confidence,
-            timestamp=vpin_signal.get('timestamp', datetime.now().isoformat()),
-            raw_data=vpin_signal.get('raw_data', {})
-        )
+}
 
 
-class EnsembleVotingEngine:
+class EnsembleVoter:
     """
-    Ensemble voting system combining multiple regime signals.
+    Multi-source signal ensemble with regime-adaptive weighting.
     
-    Implements both hard voting (majority vote) and soft voting (weighted 
-    probability combination) with confidence scoring and action recommendations.
+    Collects signals from all strategy modules, applies regime-dependent
+    weighting, and produces consensus recommendations.
     """
     
-    # Default signal weights
-    DEFAULT_WEIGHTS = {
-        'hmm': 0.35,        # Reduced to accommodate VPIN signal
-        'cta': 0.22,        
-        'tsfm': 0.17,       
-        'duration': 0.13,   
-        'vix_insurance': 0.05,
-        'vpin': 0.03        # New: VPIN flow toxicity signal (BVC prototype)
-    }
+    def __init__(
+        self,
+        data_path: Optional[Path] = None,
+        regime_detector: Optional[str] = None
+    ):
+        self.data_path = data_path or Path("~/projects/portfolio-lab/data").expanduser()
+        self.db_path = self.data_path / "ensemble_signals.db"
+        self._init_db()
+        
+        # Current readings cache
+        self.current_readings: Dict[SignalSource, SignalReading] = {}
+        self.current_regime: Regime = Regime.NORMAL
+        self.current_regime_confidence: float = 0.5
     
-    # Confidence thresholds
-    CONFIDENCE_THRESHOLDS = {
-        'high': 0.70,
-        'medium': 0.50,
-        'low': 0.30
-    }
+    def _init_db(self):
+        """Initialize signal history database."""
+        self.data_path.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ensemble_votes (
+                    timestamp TEXT PRIMARY KEY,
+                    regime TEXT,
+                    regime_confidence REAL,
+                    num_sources INTEGER,
+                    consensus REAL,
+                    agreement_ratio REAL,
+                    equity_bias REAL,
+                    duration_bias REAL,
+                    gold_bias REAL,
+                    action TEXT,
+                    confidence REAL,
+                    reasoning TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS source_readings (
+                    id INTEGER PRIMARY KEY,
+                    timestamp TEXT,
+                    source TEXT,
+                    value REAL,
+                    confidence REAL,
+                    weight REAL,
+                    regime_fit TEXT,
+                    explanation TEXT
+                )
+            """)
     
-    # Action mapping based on confidence
-    ACTION_MAP = {
-        'high': ('full_shift', 1.0),
-        'medium': ('partial_shift', 0.5),
-        'low': ('hold', 0.25),
-        'very_low': ('alert', 0.0)
-    }
+    def detect_regime(self, price_data: Optional[pd.DataFrame] = None) -> Tuple[Regime, float]:
+        """
+        Detect current market regime from available data.
+        
+        Uses simple heuristics (can be enhanced with HMM later):
+        - Crisis: VIX > 30 or max drawdown > 10% over 20 days
+        - High vol: VIX > 20 or vol of vol elevated
+        - Recovery: Recent drawdown followed by positive momentum
+        - Normal: Otherwise
+        """
+        if price_data is None:
+            price_data = self._load_price_data()
+        
+        if price_data is None or price_data.empty:
+            return Regime.NORMAL, 0.5
+        
+        # Compute key indicators
+        spy = price_data.get('SPY', price_data.iloc[:, 0])
+        returns = spy.pct_change().dropna()
+        
+        if len(returns) < 20:
+            return Regime.NORMAL, 0.5
+        
+        # 20-day realized vol (annualized)
+        vol_20d = returns.tail(20).std() * np.sqrt(252)
+        
+        # Drawdown
+        cum_returns = (1 + returns).cumprod()
+        running_max = cum_returns.expanding().max()
+        drawdown = (cum_returns / running_max - 1).iloc[-1]
+        
+        # 20-day momentum
+        mom_20d = returns.tail(20).sum()
+        
+        # Regime detection
+        if vol_20d > 0.30 or drawdown < -0.10:
+            regime = Regime.CRISIS
+            confidence = min(abs(drawdown) * 5, 0.9) if drawdown < -0.05 else 0.5
+        elif vol_20d > 0.20 or (drawdown < -0.05 and mom_20d < 0):
+            regime = Regime.HIGH_VOL
+            confidence = min(vol_20d * 3, 0.8)
+        elif drawdown < -0.03 and mom_20d > 0.02:
+            regime = Regime.RECOVERY
+            confidence = min(mom_20d * 20, 0.7)
+        else:
+            regime = Regime.NORMAL
+            confidence = max(0.5, 1.0 - vol_20d * 2)
+        
+        return regime, confidence
     
-    def __init__(self, weights: Optional[Dict[str, float]] = None):
-        self.weights = weights or self.DEFAULT_WEIGHTS
-        self.hmm_detector = WassersteinHMMDetector()
-        self.cta_engine = CTATrendEngine()
-    
-    def collect_signals(self) -> List[RegimeSignal]:
-        """Collect signals from all available sources"""
-        signals = []
+    def _load_price_data(self) -> Optional[pd.DataFrame]:
+        """Load price data from JSON."""
+        prices_path = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
         
-        # HMM Signal
-        try:
-            self.hmm_detector.load_state()
-            hmm_state = self.hmm_detector.detect_current_regime()
-            if hmm_state:
-                signals.append(RegimeSignalAdapter.from_hmm(hmm_state))
-        except Exception as e:
-            print(f"HMM signal error: {e}")
-        
-        # CTA Signal
-        try:
-            cta_result = self.cta_engine.evaluate()
-            if cta_result:
-                signals.append(RegimeSignalAdapter.from_cta(cta_result))
-        except Exception as e:
-            print(f"CTA signal error: {e}")
-        
-        # Duration Signal (from yields data if available)
-        try:
-            duration_data = self._load_duration_data()
-            if duration_data:
-                signals.append(RegimeSignalAdapter.from_duration(duration_data))
-        except Exception as e:
-            print(f"Duration signal error: {e}")
-        
-        # VIX Insurance Signal (if available)
-        try:
-            vix_adapter = VIXEnsembleAdapter()
-            vix_signal = vix_adapter.get_ensemble_signal()
-            if vix_signal:
-                signals.append(RegimeSignalAdapter.from_vix_insurance(vix_signal))
-        except Exception as e:
-            print(f"VIX insurance signal error: {e}")
-        
-        # VPIN Flow Toxicity Signal (BVC prototype)
-        try:
-            vpin_engine = VPINEngine()
-            vpin_adapter = VPINSignalAdapter(vpin_engine)
-            vpin_signal = vpin_adapter.to_ensemble_signal('SPY')
-            if vpin_signal:
-                signals.append(RegimeSignalAdapter.from_vpin(vpin_signal))
-        except Exception as e:
-            print(f"VPIN signal error: {e}")
-        
-        return signals
-    
-    def _load_duration_data(self) -> Optional[Dict[str, Any]]:
-        """Load duration/yield curve data from data files"""
-        yields_path = project_root / 'data' / 'yields.json'
-        if not yields_path.exists():
+        if not prices_path.exists():
             return None
         
-        try:
-            with open(yields_path, 'r') as f:
-                data = json.load(f)
-            
-            if 'records' in data and len(data['records']) > 0:
-                latest = data['records'][-1]
-                
-                # Calculate recession probability from spread
-                ten_year = latest.get('10_year', 0)
-                two_year = latest.get('2_year', 0)
-                spread = ten_year - two_year if ten_year and two_year else 0
-                
-                recession_prob = 0.5
-                if spread < -0.5:
-                    recession_prob = 0.8
-                elif spread < 0:
-                    recession_prob = 0.6
-                elif spread > 1.5:
-                    recession_prob = 0.1
-                
-                # Determine curve regime
-                if spread < -0.25:
-                    curve_regime = 'inverted'
-                elif spread > 1.0:
-                    curve_regime = 'steep'
-                elif spread < 0.5:
-                    curve_regime = 'flat'
-                else:
-                    curve_regime = 'normal'
-                
-                return {
-                    'timestamp': latest.get('date', datetime.now().isoformat()),
-                    'curve_regime': curve_regime,
-                    'recession_probability': recession_prob,
-                    'spread': spread,
-                    '10_year': ten_year,
-                    '2_year': two_year
-                }
-        except Exception as e:
-            print(f"Error loading duration data: {e}")
+        with open(prices_path) as f:
+            data = json.load(f)
+        
+        frames = []
+        for symbol, pdata in data.items():
+            if isinstance(pdata, list) and len(pdata) > 0 and 'd' in pdata[0]:
+                df = pd.DataFrame(pdata)
+                df['date'] = pd.to_datetime(df['d'])
+                df.set_index('date', inplace=True)
+                df.rename(columns={'p': symbol}, inplace=True)
+                frames.append(df[[symbol]])
+        
+        if frames:
+            df = pd.concat(frames, axis=1)
+            df.sort_index(inplace=True)
+            return df
         
         return None
     
-    def hard_voting(self, signals: List[RegimeSignal]) -> Tuple[str, float, List[str]]:
+    def collect_signals(self, date: Optional[str] = None) -> Dict[SignalSource, SignalReading]:
         """
-        Hard voting: each signal votes for a regime, majority wins.
+        Collect signals from all available sources.
         
-        Returns:
-            (winning_regime, agreement_score, disagreeing_sources)
+        This aggregates:
+        - Multi-speed momentum (primary trend signal)
+        - Macro momentum (regime context)
+        - CTA trend overlay (crisis alpha)
         """
-        if not signals:
-            return 'neutral', 0.0, []
+        readings = {}
         
-        # Count votes weighted by confidence
-        regime_votes = {}
-        for sig in signals:
-            weight = self.weights.get(sig.source, 0.25)
-            vote_weight = weight * sig.confidence
-            regime_votes[sig.regime] = regime_votes.get(sig.regime, 0) + vote_weight
+        # 1. Multi-Speed Momentum (v2.56)
+        try:
+            from src.signals.multi_speed_momentum import MultiSpeedMomentum
+            msm = MultiSpeedMomentum()
+            
+            # Get ensemble signals for each asset
+            for ticker in ['SPY', 'TLT', 'GLD']:
+                try:
+                    sig = msm.compute_multi_speed_signal(ticker, date)
+                    # Store primary signal
+                    if SignalSource.MULTI_SPEED_MOM not in readings:
+                        readings[SignalSource.MULTI_SPEED_MOM] = SignalReading(
+                            source=SignalSource.MULTI_SPEED_MOM,
+                            timestamp=sig.timestamp,
+                            value=sig.ensemble_signal,
+                            confidence=sig.confidence,
+                            weight=0.0,  # Set by regime
+                            regime_fit="normal",
+                            asset_signals={},
+                            explanation=f"{ticker}: {sig.ensemble_signal:+.3f} confidence={sig.confidence:.2%}"
+                        )
+                    readings[SignalSource.MULTI_SPEED_MOM].asset_signals[ticker] = sig.ensemble_signal
+                except Exception as e:
+                    pass
+        except ImportError:
+            pass
         
-        # Find winner
-        if not regime_votes:
-            return 'neutral', 0.0, []
+        # 2. Macro Momentum (v2.57)
+        try:
+            from src.signals.macro_momentum import MacroMomentumEngine
+            engine = MacroMomentumEngine()
+            reading = engine.compute_reading(date)
+            
+            # Aggregate macro signal from biases
+            macro_value = (reading.equity_bias + reading.duration_bias + reading.gold_bias) / 3
+            
+            readings[SignalSource.MACRO_MOMENTUM] = SignalReading(
+                source=SignalSource.MACRO_MOMENTUM,
+                timestamp=reading.timestamp,
+                value=macro_value,
+                confidence=0.6,
+                weight=0.0,
+                regime_fit=reading.regime_classification,
+                asset_signals={
+                    'SPY': reading.equity_bias,
+                    'TLT': reading.duration_bias,
+                    'GLD': reading.gold_bias
+                },
+                explanation=f"Regime: {reading.regime_classification}, Aggregate: {reading.aggregate_score:+.3f}"
+            )
+        except ImportError as e:
+            pass
         
-        winning_regime = max(regime_votes, key=regime_votes.get)
-        total_votes = sum(regime_votes.values())
-        winning_votes = regime_votes[winning_regime]
+        # 3. CTA Trend (if available)
+        # Placeholder - would load from existing CTA module
         
-        # Agreement score
-        agreement_score = winning_votes / total_votes if total_votes > 0 else 0
+        self.current_readings = readings
+        return readings
+    
+    def compute_vote(
+        self,
+        readings: Optional[Dict[SignalSource, SignalReading]] = None,
+        regime: Optional[Regime] = None,
+        regime_confidence: Optional[float] = None
+    ) -> EnsembleVote:
+        """
+        Compute ensemble vote with regime-dependent weighting.
+        """
+        if readings is None:
+            readings = self.current_readings or self.collect_signals()
         
-        # Find disagreeing sources
-        disagreeing = [
-            sig.source for sig in signals 
-            if sig.regime != winning_regime
+        if regime is None:
+            regime, regime_confidence = self.detect_regime()
+        
+        if regime_confidence is None:
+            regime_confidence = 0.5
+        
+        self.current_regime = regime
+        self.current_regime_confidence = regime_confidence
+        
+        # Get weights for regime
+        weights = REGIME_WEIGHTS[regime]
+        
+        # Apply weights to readings
+        weighted_signals = []
+        for source, reading in readings.items():
+            if source in weights:
+                reading.weight = weights[source]
+                weighted_signals.append(reading)
+        
+        if not weighted_signals:
+            return EnsembleVote(
+                timestamp=str(datetime.now()),
+                regime=regime,
+                regime_confidence=regime_confidence,
+                num_sources=0,
+                weighted_consensus=0.0,
+                agreement_ratio=0.0,
+                equity_bias=0.0,
+                duration_bias=0.0,
+                gold_bias=0.0,
+                action="neutral",
+                confidence=0.0,
+                reasoning="No signals available",
+                source_votes=[]
+            )
+        
+        # Compute consensus - handle NaN values
+        valid_signals = [
+            (r.value, r.weight) 
+            for r in weighted_signals 
+            if not np.isnan(r.value)
         ]
         
-        return winning_regime, agreement_score, disagreeing
-    
-    def soft_voting(self, signals: List[RegimeSignal]) -> Tuple[Dict[str, float], float]:
-        """
-        Soft voting: weighted probability combination.
+        if valid_signals:
+            total_weight = sum(w for _, w in valid_signals)
+            if total_weight == 0:
+                total_weight = 1.0
+            weighted_consensus = sum(v * w for v, w in valid_signals) / total_weight
+        else:
+            weighted_consensus = 0.0
+            total_weight = 1.0
         
-        Returns:
-            (regime_probabilities, confidence_score)
-        """
-        regimes = ['bull', 'bear', 'neutral', 'crisis']
-        ensemble_probs = {r: 0.0 for r in regimes}
+        # Agreement ratio: % of weighted signals agreeing with consensus
+        agreement = sum(
+            r.weight for r in weighted_signals
+            if np.sign(r.value) == np.sign(weighted_consensus) or abs(r.value) < 0.1
+        ) / total_weight
         
-        # Build probability distribution for each signal
-        for sig in signals:
-            weight = self.weights.get(sig.source, 0.25)
+        # Asset-specific consensus
+        assets = ['SPY', 'TLT', 'GLD']
+        asset_biases = {}
+        
+        for asset in assets:
+            asset_signals = [
+                (r.asset_signals.get(asset, 0), r.weight)
+                for r in weighted_signals
+                if r.asset_signals and asset in r.asset_signals and not np.isnan(r.asset_signals.get(asset, np.nan))
+            ]
             
-            # Create probability distribution centered on signal's regime
-            for regime in regimes:
-                if regime == sig.regime:
-                    prob = sig.probability
-                else:
-                    # Remaining probability spread equally
-                    prob = (1 - sig.probability) / (len(regimes) - 1)
-                
-                ensemble_probs[regime] += weight * prob * sig.confidence
+            if asset_signals:
+                total_w = sum(w for _, w in asset_signals) or 1.0
+                asset_biases[asset] = sum(v * w for v, w in asset_signals) / total_w
+            else:
+                asset_biases[asset] = weighted_consensus  # Fallback
         
-        # Normalize
-        total = sum(ensemble_probs.values())
-        if total > 0:
-            ensemble_probs = {k: v/total for k, v in ensemble_probs.items()}
+        # Determine action
+        equity_bias = asset_biases.get('SPY', weighted_consensus)
+        duration_bias = asset_biases.get('TLT', 0)
+        gold_bias = asset_biases.get('GLD', 0)
         
-        # Confidence as difference between top two
-        sorted_probs = sorted(ensemble_probs.values(), reverse=True)
-        confidence = sorted_probs[0] - sorted_probs[1] if len(sorted_probs) > 1 else 0
-        
-        return ensemble_probs, confidence
-    
-    def get_action_recommendation(self, confidence: float, signals: List[RegimeSignal]) -> Tuple[str, float]:
-        """
-        Get action recommendation based on confidence and signal characteristics.
-        
-        Returns:
-            (action, position_scaling)
-        """
-        # Check for VIX override (disagreement resolution)
-        vix_override = False
-        for sig in signals:
-            if sig.source == 'hmm' and sig.raw_data.get('vix_level', 0) > 25:
-                vix_override = True
-                break
-        
-        if vix_override and confidence < 0.6:
-            # High VIX with low confidence = stay cautious
-            return 'hold', 0.5
-        
-        # Standard confidence-based action
-        if confidence > self.CONFIDENCE_THRESHOLDS['high']:
-            return self.ACTION_MAP['high']
-        elif confidence > self.CONFIDENCE_THRESHOLDS['medium']:
-            return self.ACTION_MAP['medium']
-        elif confidence > self.CONFIDENCE_THRESHOLDS['low']:
-            return self.ACTION_MAP['low']
+        if regime == Regime.CRISIS:
+            action = "risk_off"
+            action_confidence = regime_confidence
+        elif equity_bias > 0.3 and agreement > 0.6:
+            action = "increase_equity"
+            action_confidence = agreement * abs(equity_bias)
+        elif equity_bias < -0.3 and agreement > 0.6:
+            action = "decrease_equity"
+            action_confidence = agreement * abs(equity_bias)
         else:
-            return self.ACTION_MAP['very_low']
-    
-    def evaluate(self) -> Optional[EnsembleRegime]:
-        """
-        Run ensemble evaluation and return unified regime classification.
-        """
-        signals = self.collect_signals()
+            action = "neutral"
+            action_confidence = 0.5
         
-        if len(signals) < 2:
-            print(f"Warning: Only {len(signals)} signals available, need at least 2")
+        # Build reasoning
+        reasons = [
+            f"Regime: {regime.value} (confidence: {regime_confidence:.1%})",
+            f"Sources: {len(weighted_signals)}, Consensus: {weighted_consensus:+.3f}",
+            f"Agreement: {agreement:.1%}",
+            f"Equity bias: {equity_bias:+.3f}, Duration: {duration_bias:+.3f}, Gold: {gold_bias:+.3f}"
+        ]
         
-        # Hard voting
-        hard_regime, agreement_score, disagreeing = self.hard_voting(signals)
+        for r in weighted_signals[:3]:
+            reasons.append(f"  {r.source.value}: {r.value:+.3f} (w={r.weight:.2f}, conf={r.confidence:.1%})")
         
-        # Soft voting
-        ensemble_probs, soft_confidence = self.soft_voting(signals)
-        
-        # Use soft voting result (more nuanced)
-        final_regime = max(ensemble_probs, key=ensemble_probs.get)
-        
-        # Combine confidence metrics
-        confidence = 0.6 * soft_confidence + 0.4 * agreement_score
-        
-        # Get action recommendation
-        action, position_scaling = self.get_action_recommendation(confidence, signals)
-        
-        # Individual signal probabilities for output
-        individual_probs = {}
-        for sig in signals:
-            individual_probs[f"{sig.source}_prob"] = sig.probability
-        
-        # Extract VIX insurance data if available
-        insurance_active = False
-        insurance_alerts = []
-        for sig in signals:
-            if sig.source == 'vix_insurance':
-                insurance_active = sig.raw_data.get('insurance_active', False)
-                insurance_alerts = [a.get('type', 'unknown') for a in sig.raw_data.get('alerts', [])]
-                break
-        
-        return EnsembleRegime(
-            timestamp=datetime.now().isoformat(),
-            regime=final_regime,
-            confidence=round(confidence, 4),
-            hmm_prob=individual_probs.get('hmm_prob', 0),
-            cta_prob=individual_probs.get('cta_prob', 0),
-            tsfm_prob=individual_probs.get('tsfm_prob', 0),
-            duration_prob=individual_probs.get('duration_prob', 0),
-            vix_insurance_prob=individual_probs.get('vix_insurance_prob', 0),
-            ensemble_probs={k: round(v, 4) for k, v in ensemble_probs.items()},
-            agreement_score=round(agreement_score, 4),
-            disagreement_sources=disagreeing,
+        vote = EnsembleVote(
+            timestamp=str(datetime.now()),
+            regime=regime,
+            regime_confidence=regime_confidence,
+            num_sources=len(weighted_signals),
+            weighted_consensus=weighted_consensus,
+            agreement_ratio=agreement,
+            equity_bias=equity_bias,
+            duration_bias=duration_bias,
+            gold_bias=gold_bias,
             action=action,
-            position_scaling=round(position_scaling, 4),
-            insurance_active=insurance_active,
-            insurance_alerts=insurance_alerts
+            confidence=action_confidence,
+            reasoning="\n".join(reasons),
+            source_votes=weighted_signals
         )
+        
+        # Save to DB
+        self._save_vote(vote)
+        
+        return vote
     
-    def get_signal_breakdown(self, signals: List[RegimeSignal]) -> Dict[str, Any]:
-        """Get detailed breakdown of all signals"""
-        breakdown = {
-            'total_signals': len(signals),
-            'signals': []
+    def _save_vote(self, vote: EnsembleVote):
+        """Save vote to database."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO ensemble_votes
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                vote.timestamp,
+                vote.regime.value,
+                vote.regime_confidence,
+                vote.num_sources,
+                vote.weighted_consensus,
+                vote.agreement_ratio,
+                vote.equity_bias,
+                vote.duration_bias,
+                vote.gold_bias,
+                vote.action,
+                vote.confidence,
+                vote.reasoning
+            ))
+    
+    def recommend_allocation(
+        self,
+        base_allocation: Dict[str, float] = None,
+        vote: Optional[EnsembleVote] = None,
+        max_shift: float = 0.10
+    ) -> Dict[str, Dict]:
+        """
+        Generate allocation recommendation based on ensemble vote.
+        
+        Returns shifts from base allocation for each asset.
+        """
+        if base_allocation is None:
+            base_allocation = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
+        
+        if vote is None:
+            vote = self.compute_vote()
+        
+        # Apply shifts based on biases
+        shifts = {
+            'SPY': np.clip(vote.equity_bias * max_shift, -max_shift, max_shift),
+            'TLT': np.clip(vote.duration_bias * max_shift, -max_shift, max_shift),
+            'GLD': np.clip(vote.gold_bias * max_shift, -max_shift, max_shift),
         }
         
-        for sig in signals:
-            breakdown['signals'].append({
-                'source': sig.source,
-                'regime': sig.regime,
-                'probability': round(sig.probability, 4),
-                'confidence': round(sig.confidence, 4),
-                'weight': self.weights.get(sig.source, 0.25),
-                'raw_data': sig.raw_data
-            })
+        # Risk-off override
+        if vote.regime == Regime.CRISIS:
+            shifts['SPY'] = -max_shift * 0.5  # Reduce equity
+            shifts['GLD'] = max_shift * 0.3   # Increase gold
+            shifts['TLT'] = max_shift * 0.2   # Increase bonds
         
-        return breakdown
-
-
-class EnsembleVoterCLI:
-    """Command-line interface for ensemble voting system"""
-    
-    def __init__(self):
-        self.engine = EnsembleVotingEngine()
-    
-    def status(self):
-        """Show current ensemble regime status"""
-        result = self.engine.evaluate()
+        result = {}
+        total_shift = 0
         
-        if result:
-            output = {
-                'timestamp': result.timestamp,
-                'ensemble_regime': {
-                    'regime': result.regime,
-                    'confidence': result.confidence,
-                    'agreement_score': result.agreement_score
-                },
-                'probabilities': {
-                    'hmm': result.hmm_prob,
-                    'cta': result.cta_prob,
-                    'tsfm': result.tsfm_prob,
-                    'duration': result.duration_prob,
-                    'vix_insurance': result.vix_insurance_prob,
-                    'ensemble': result.ensemble_probs
-                },
-                'disagreement': {
-                    'disagreeing_sources': result.disagreement_sources,
-                    'count': len(result.disagreement_sources)
-                },
-                'recommendation': {
-                    'action': result.action,
-                    'position_scaling': result.position_scaling
-                },
-                'insurance_overlay': {
-                    'active': result.insurance_active,
-                    'alerts': result.insurance_alerts
-                }
+        for asset, base in base_allocation.items():
+            shift = shifts.get(asset, 0)
+            new_alloc = base + shift
+            
+            result[asset] = {
+                'base': base,
+                'shift': shift,
+                'new': np.clip(new_alloc, 0.05, 0.95),  # Bounds
+                'bias': shifts.get(asset, 0),
             }
-            print(json.dumps(output, indent=2))
-        else:
-            print(json.dumps({'error': 'Failed to evaluate ensemble'}))
-    
-    def signals(self):
-        """Show all collected signals with breakdown"""
-        signals = self.engine.collect_signals()
-        breakdown = self.engine.get_signal_breakdown(signals)
-        print(json.dumps(breakdown, indent=2))
-    
-    def weights(self, new_weights: Optional[str] = None):
-        """Show or update signal weights"""
-        if new_weights:
-            try:
-                weights = json.loads(new_weights)
-                self.engine.weights = weights
-                print(json.dumps({
-                    'status': 'updated',
-                    'weights': weights
-                }, indent=2))
-            except Exception as e:
-                print(json.dumps({'error': f'Invalid weights: {e}'}))
-        else:
-            print(json.dumps({
-                'current_weights': self.engine.weights,
-                'default_weights': self.engine.DEFAULT_WEIGHTS
-            }, indent=2))
-    
-    def compare(self):
-        """Compare hard voting vs soft voting results"""
-        signals = self.engine.collect_signals()
+            total_shift += shift
         
-        hard_regime, agreement, _ = self.engine.hard_voting(signals)
-        soft_probs, soft_conf = self.engine.soft_voting(signals)
-        soft_regime = max(soft_probs, key=soft_probs.get)
+        # Normalize to sum to 1
+        total = sum(r['new'] for r in result.values())
+        for asset in result:
+            result[asset]['new'] /= total
+            result[asset]['normalized_shift'] = result[asset]['new'] - result[asset]['base']
         
-        output = {
-            'signals_collected': len(signals),
-            'hard_voting': {
-                'regime': hard_regime,
-                'agreement_score': round(agreement, 4)
-            },
-            'soft_voting': {
-                'regime': soft_regime,
-                'confidence': round(soft_conf, 4),
-                'probabilities': {k: round(v, 4) for k, v in soft_probs.items()}
-            },
-            'consensus': hard_regime == soft_regime
+        return {
+            'assets': result,
+            'regime': vote.regime.value,
+            'confidence': vote.confidence,
+            'action': vote.action,
+            'consensus': vote.weighted_consensus,
+            'timestamp': vote.timestamp
         }
-        print(json.dumps(output, indent=2))
 
 
 def main():
-    """Main CLI entry point"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Ensemble Voting Regime Detector')
-    parser.add_argument('command', choices=['status', 'signals', 'weights', 'compare'],
-                       help='Command to execute')
-    parser.add_argument('--weights', type=str, help='JSON weights for update')
+    parser = argparse.ArgumentParser(description='Ensemble Signal Voter')
+    subparsers = parser.add_subparsers(dest='command')
+    
+    # Vote command
+    vote_parser = subparsers.add_parser('vote', help='Compute ensemble vote')
+    vote_parser.add_argument('--date', help='Date for signal (default: latest)')
+    
+    # Recommend command
+    rec_parser = subparsers.add_parser('recommend', help='Generate allocation recommendation')
+    rec_parser.add_argument('--portfolio', default='46/38/16', help='Base allocation SPY/GLD/TLT')
+    rec_parser.add_argument('--max-shift', type=float, default=0.10, help='Max allocation shift')
+    
+    # Explain command
+    exp_parser = subparsers.add_parser('explain', help='Explain current vote reasoning')
     
     args = parser.parse_args()
     
-    cli = EnsembleVoterCLI()
+    voter = EnsembleVoter()
     
-    if args.command == 'status':
-        cli.status()
-    elif args.command == 'signals':
-        cli.signals()
-    elif args.command == 'weights':
-        cli.weights(args.weights)
-    elif args.command == 'compare':
-        cli.compare()
+    if args.command == 'vote':
+        readings = voter.collect_signals(args.date)
+        vote = voter.compute_vote(readings)
+        
+        print("\n=== Ensemble Vote ===")
+        print(f"Timestamp: {vote.timestamp}")
+        print(f"Regime: {vote.regime.value.upper()} (confidence: {vote.regime_confidence:.1%})")
+        print(f"\nSources: {vote.num_sources}")
+        print(f"Consensus: {vote.weighted_consensus:+.3f}")
+        print(f"Agreement: {vote.agreement_ratio:.1%}")
+        print(f"\nAsset Biases:")
+        print(f"  Equity (SPY):   {vote.equity_bias:+.3f}")
+        print(f"  Duration (TLT): {vote.duration_bias:+.3f}")
+        print(f"  Gold (GLD):     {vote.gold_bias:+.3f}")
+        print(f"\nRecommended Action: {vote.action.upper()}")
+        print(f"Confidence: {vote.confidence:.1%}")
+    
+    elif args.command == 'recommend':
+        weights = [float(w) / 100 for w in args.portfolio.split('/')]
+        base = {'SPY': weights[0], 'GLD': weights[1], 'TLT': weights[2]}
+        
+        vote = voter.compute_vote()
+        rec = voter.recommend_allocation(base, vote, args.max_shift)
+        
+        print(f"\n=== Allocation Recommendation ===")
+        print(f"Base: {args.portfolio}")
+        print(f"Regime: {rec['regime'].upper()} (confidence: {rec['confidence']:.1%})")
+        print(f"Consensus: {rec['consensus']:+.3f}")
+        print(f"\nRecommended Allocation:")
+        
+        for asset, data in rec['assets'].items():
+            print(f"  {asset}: {data['base']:.1%} → {data['new']:.1%} (shift: {data['normalized_shift']:+.1%})")
+    
+    elif args.command == 'explain':
+        vote = voter.compute_vote()
+        
+        print("\n=== Ensemble Vote Explanation ===")
+        print(vote.reasoning)
+        print(f"\nActive Sources ({len(vote.source_votes)}):")
+        for src in vote.source_votes:
+            print(f"  {src.source.value:25} | value: {src.value:+.3f} | weight: {src.weight:.2f} | conf: {src.confidence:.1%}")
+    
+    else:
+        parser.print_help()
 
 
 if __name__ == '__main__':
