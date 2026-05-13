@@ -8,6 +8,7 @@ import { BrokerPanel } from './BrokerPanel';
 import { UnderwaterChart, RollingMetricsChart, CrisisOverlay } from './AnalyticsCharts';
 import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
+import DurationOverlayPanel from './DurationOverlayPanel';
 import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData } from '../types/live';
 
 interface LiveDashboardProps {
@@ -315,6 +316,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                 bondSlicePct={0.16}
               />
             </div>
+
+            {/* Duration Overlay Panel */}
+            <DurationOverlayPanel 
+              yieldCurve={signals?.yield_curve ?? null}
+              durationAllocation={signals?.duration_allocation ?? null}
+            />
           </div>
         )}
 

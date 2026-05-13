@@ -1766,3 +1766,167 @@ footer code {
   margin-top: 4px;
   color: #475569;
 }
+
+/* Duration Overlay Panel */
+.duration-overlay-panel {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.duration-overlay-panel .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #334155;
+}
+
+.duration-overlay-panel h3 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 1.1rem;
+}
+
+.regime-badge {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: white;
+}
+
+.yield-curve-section {
+  margin-bottom: 20px;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.metric-label {
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.metric-value {
+  font-weight: 600;
+  font-family: monospace;
+  font-size: 1rem;
+}
+
+.metric-value.positive {
+  color: #10b981;
+}
+
+.metric-value.negative {
+  color: #ef4444;
+}
+
+.sparkline-container {
+  margin: 12px 0;
+  padding: 8px;
+  background: #0f172a;
+  border-radius: 6px;
+}
+
+.sparkline {
+  width: 100%;
+  display: block;
+}
+
+.regime-description {
+  color: #64748b;
+  font-size: 0.8rem;
+  margin: 8px 0 0 0;
+  font-style: italic;
+}
+
+.duration-breakdown h4 {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.allocation-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.allocation-item {
+  display: grid;
+  grid-template-columns: 90px 1fr 50px;
+  align-items: center;
+  gap: 12px;
+}
+
+.allocation-label {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.bar-container {
+  height: 12px;
+  background: #334155;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.bar {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+
+.allocation-value {
+  color: #e2e8f0;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-align: right;
+  font-family: monospace;
+}
+
+.effective-duration {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding: 12px;
+  background: #0f172a;
+  border-radius: 6px;
+}
+
+.duration-label {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.duration-value {
+  color: #3b82f6;
+  font-weight: 600;
+  font-size: 1rem;
+  font-family: monospace;
+}
+
+.overlay-note {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #334155;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.loading-text {
+  color: #64748b;
+  font-style: italic;
+}
