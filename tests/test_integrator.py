@@ -41,15 +41,13 @@ class TestDataStructures:
             ticker="SPY",
             composite_score=0.3,
             composite_confidence=0.7,
-            regime="normal",
-            contributing_sources=[
-                {"source": "technical", "signal": 0.5, "weight": 0.3},
-            ],
+            detected_regime="normal",
             primary_drivers=["momentum"],
         )
         d = c.to_dict()
         assert d["ticker"] == "SPY"
         assert d["composite_score"] == 0.3
+        assert d["detected_regime"] == "normal"
 
     def test_allocation_delta_to_dict(self):
         a = AllocationDelta(
@@ -75,7 +73,7 @@ class TestDataStructures:
             regime="normal",
         )
         d = p.to_dict()
-        assert d["sentiment"] == "bullish"
+        assert d["composite_sentiment"] == "bullish"
         assert d["regime"] == "normal"
 
 
