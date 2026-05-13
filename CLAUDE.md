@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **2283 passing** — 1 pre-existing failure (test_vpin_rebalancer)
+- **2304 passing** — 1 pre-existing failure (test_vpin_rebalancer)
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -187,6 +187,7 @@
 - `test_cvar_metrics.py` — 32 tests: CVaRMetrics dataclass, VaR/CVaR calculation, tail severity, volatility, metric computation, history save/load, CLI
 - `test_sector_momentum_calc.py` — 30 tests: constants, momentum calculation, dual momentum, all-momentum ranking, regime adjustment, allocation generation, signal generation
 - `test_vix_ensemble_adapter.py` — 24 tests: VIXEnsembleStatus dataclass, constants, defensive bias, status flags, next action logic, ensemble signal, save/load
+- `test_factor_timing_pipeline.py` — 21 tests: factor feature engineering (lags, rolling stats, correlations, dispersion), build dataset, save/load, summary, CLI
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
