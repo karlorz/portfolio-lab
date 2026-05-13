@@ -3,8 +3,9 @@ skill_compatibility: 2
 version: "2.0"
 kind: feature
 slug: v250-quantum-ml
-status: in-progress
-progress: 0
+status: completed
+progress: 100
+completed: 2026-05-13
 started: 2026-05-13
 references: ["df31233fa23a"]
 ---
