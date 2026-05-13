@@ -1,0 +1,81 @@
+---
+# TIPS (Treasury Inflation-Protected Securities) Monitor Configuration
+# Version: v2.35 Phase 1
+# Research: compound/inflation-hedging-beyond-duration-2026
+
+# FRED API Configuration
+fred:
+  # Get API key from: https://fred.stlouisfed.org/docs/api/api_key.html
+  # Or set FRED_API_KEY environment variable
+  api_key: null  # Set via env var FRED_API_KEY or override in api_keys.yaml
+  series:
+    breakeven_5y: T5YIE      # 5-Year Breakeven Inflation Rate
+    breakeven_10y: T10YIE    # 10-Year Breakeven Inflation Rate
+    breakeven_5y_forward: T5YIFR  # 5-Year Forward Inflation Expectation
+    breakeven_20y: T20YIEM   # 20-Year Breakeven Inflation Rate
+
+# TIPS ETFs tracked
+etfs:
+  tips:
+    SCHP:
+      duration: short
+      term: 1-5Y
+      expense_ratio: 0.04
+    TIP:
+      duration: intermediate
+      term: 5-10Y
+      expense_ratio: 0.19
+    LTPZ:
+      duration: long
+      term: 15Y+
+      expense_ratio: 0.20
+    STIP:
+      duration: ultra-short
+      term: 0-5Y
+      expense_ratio: 0.03
+  nominal:
+    SHY:
+      duration: short
+      term: 1-3Y
+    IEF:
+      duration: intermediate
+      term: 7-10Y
+    TLT:
+      duration: long
+      term: 20Y+
+
+# Signal thresholds (breakeven inflation %)
+thresholds:
+  breakeven_low: 1.5        # Favor nominals (inflation undervalued)
+  breakeven_target: 2.0     # Neutral zone
+  breakeven_high: 2.5       # Favor TIPS (inflation risk rising)
+  breakeven_extreme: 3.0    # Max TIPS allocation
+  real_yield_negative: -0.5 # Concern threshold
+
+# Allocation guidance (% shift from baseline)
+allocation:
+  regime_shifts:
+    DISINFLATION: 0          # Base allocation
+    LOW_INFLATION: 1         # +1% TIPS
+    TARGET_INFLATION: 3      # +3% TIPS
+    MODERATE_INFLATION: 5    # +5% TIPS
+    HIGH_INFLATION: 7        # +7% TIPS
+    EXTREME_INFLATION: 10    # +10% TIPS (max)
+
+# Data retention
+retention:
+  yield_history_days: 365
+  signal_history_days: 90
+  breakeven_history_days: 180
+
+# Update schedule
+schedule:
+  fetch_interval_hours: 6
+  signal_calculation: daily
+  ensemble_integration: true
+
+# Integration settings
+ensemble:
+  weight: 0.05              # 5% weight in composite signal
+  min_confidence: 0.6       # Minimum confidence for signal inclusion
+  max_allocation_shift: 7   # Maximum ±7% from baseline

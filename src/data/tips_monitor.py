@@ -349,7 +349,7 @@ class TIPSMonitor:
     def generate_signal(self, tips_data: Dict[str, TIPSData]) -> Dict:
         """
         Generate TIPS allocation signal based on breakeven rates.
-        
+
         Signal logic (from research synthesis):
         - Breakeven < 1.5%: Favor nominals (inflation undervalued)
         - Breakeven 1.5-2.0%: Neutral, slight TIPS preference
@@ -359,39 +359,11 @@ class TIPSMonitor:
         # Use intermediate TIPS as reference
         tip_data = tips_data.get('TIP', list(tips_data.values())[0])
         breakeven = tip_data.breakeven_rate * 100  # Convert to percentage
-        
+
         # Determine regime
-        if breakeven < 1.5:
-            regime = 'DISINFLATION'
-            signal = 'MIN_TIPS'
-            confidence = 0.6
-            rationale = f"Breakeven {breakeven:.2f}% below 1.5% - favor nominal Treasuries"
-        elif breakeven < 2.0:
-            regime = 'LOW_STABLE'
-            signal = 'NEUTRAL'
-            confidence = 0.5
-            rationale = f"Breakeven {breakeven:.2f}% in target range - neutral allocation"
-        elif breakeven < 2.5:
-            regime = 'ELEVATED'
-            signal = 'MODERATE_TIPS'
-            confidence = 0.7
-            rationale = f"Breakeven {breakeven:.2f}% elevated - increase TIPS allocation"
-        elif breakeven < 3.0:
-            regime = 'HIGH_INFLATION'
-            signal = 'HIGH_TIPS'
-            confidence = 0.8
-            rationale = f"Breakeven {breakeven:.2f}% high - significant TIPS overweight"
-        else:
-            regime = 'EXTREME_INFLATION'
-            signal = 'MAX_TIPS'
-            confidence = 0.9
-            rationale = f"Breakeven {breakeven:.2f}% extreme - maximize TIPS, minimize nominal duration"
-        
-        # Calculate real yield spread
-        real_yield = tip_data.real_yield
-        if real_yield < -0.5:
-            rationale += " | Negative real yield - TIPS expensive but still protective"
-        
+        regime = self._classify_regime(breakeven)
+        signal, confidence, rationale = self._get_allocation_shift(regime, breakeven, tip_data, tips_data)
+
         return {
             'timestamp': datetime.now().isoformat(),
             'current_regime': regime,
@@ -403,6 +375,39 @@ class TIPSMonitor:
             'confidence': confidence,
             'rationale': rationale
         }
+
+    def _classify_regime(self, breakeven: float) -> str:
+        """Classify inflation regime from breakeven rate (percentage)."""
+        if breakeven < 1.5:
+            return 'DISINFLATION'
+        elif breakeven < 2.0:
+            return 'LOW_STABLE'
+        elif breakeven < 2.5:
+            return 'ELEVATED'
+        elif breakeven < 3.0:
+            return 'HIGH_INFLATION'
+        else:
+            return 'EXTREME_INFLATION'
+
+    def _get_allocation_shift(self, regime: str, breakeven: float,
+                              tip_data: 'TIPSData',
+                              tips_data: Dict[str, 'TIPSData']) -> Tuple[str, float, str]:
+        """Get allocation signal, confidence, and rationale from regime."""
+        regimes = {
+            'DISINFLATION': ('MIN_TIPS', 0.6, f"Breakeven {breakeven:.2f}% below 1.5% - favor nominal Treasuries"),
+            'LOW_STABLE': ('NEUTRAL', 0.5, f"Breakeven {breakeven:.2f}% in target range - neutral allocation"),
+            'ELEVATED': ('MODERATE_TIPS', 0.7, f"Breakeven {breakeven:.2f}% elevated - increase TIPS allocation"),
+            'HIGH_INFLATION': ('HIGH_TIPS', 0.8, f"Breakeven {breakeven:.2f}% high - significant TIPS overweight"),
+            'EXTREME_INFLATION': ('MAX_TIPS', 0.9, f"Breakeven {breakeven:.2f}% extreme - maximize TIPS, minimize nominal duration"),
+        }
+        signal, confidence, rationale = regimes.get(regime, ('NEUTRAL', 0.5, f"Unknown regime: {regime}"))
+
+        # Adjust for real yield
+        real_yield = tip_data.real_yield
+        if real_yield < -0.5:
+            rationale += " | Negative real yield - TIPS expensive but still protective"
+
+        return signal, confidence, rationale
     
     def save_signal(self, signal: Dict):
         """Save signal to database."""
