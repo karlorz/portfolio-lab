@@ -57,6 +57,13 @@ from src.signals.tsmom_overlay import TSMOMOverlay
 from src.agents.risk_agent_hmm import PortfolioRegimeManager, MarketRegime
 from src.signals.fed_policy_overlay import FedPolicyOverlay
 
+# Guarded import for AI Controller (MARL v2.51)
+try:
+    from src.agents.ai_controller import AIController
+    _AI_CONTROLLER_AVAILABLE = True
+except ImportError:
+    _AI_CONTROLLER_AVAILABLE = False
+
 
 # Signal source weights
 SIGNAL_WEIGHTS = {
@@ -147,7 +154,15 @@ class CombinedSignalOrchestrator:
         self.tsmom = TSMOMOverlay(max_deviation=0.10)
         self.hmm_manager = PortfolioRegimeManager(base_allocation=self.base_allocation)
         self.fed_overlay = FedPolicyOverlay()
-        
+
+        # Initialize AI Controller (MARL v2.51) if available
+        self.ai_controller = None
+        if _AI_CONTROLLER_AVAILABLE:
+            try:
+                self.ai_controller = AIController()
+            except Exception:
+                pass  # Will fall back to neutral signal
+
         # Load trained models
         self.hmm_manager.detector.load()
     
@@ -218,14 +233,47 @@ class CombinedSignalOrchestrator:
                 notes='Data unavailable'
             )
         
-        # AI Agent (placeholder - would call MARL controller)
-        signals['ai_agent'] = SignalSource(
-            source='ai_agent',
-            deltas={t: 0.0 for t in self.base_allocation},  # Neutral for now
-            confidence=0.70,
-            regime=None,
-            notes='MARL controller v2.51'
-        )
+        # AI Agent (MARL v2.51)
+        if self.ai_controller:
+            try:
+                ai_result = self.ai_controller.infer(
+                    portfolio_value=100000.0,
+                    current_allocation=self.base_allocation
+                )
+                if 'error' not in ai_result:
+                    rec = ai_result.get('recommended_allocation', self.base_allocation)
+                    signals['ai_agent'] = SignalSource(
+                        source='ai_agent',
+                        deltas={t: rec.get(t, 0) - self.base_allocation.get(t, 0)
+                                for t in self.base_allocation},
+                        confidence=ai_result.get('confidence', 0.70),
+                        regime=None,
+                        notes=f"MARL v{ai_result.get('version', '?')} consensus={ai_result.get('consensus_level', 0):.2f}"
+                    )
+                else:
+                    signals['ai_agent'] = SignalSource(
+                        source='ai_agent',
+                        deltas={t: 0.0 for t in self.base_allocation},
+                        confidence=0.0,
+                        regime=None,
+                        notes=f"MARL error: {ai_result.get('error', 'unknown')}"
+                    )
+            except Exception as e:
+                signals['ai_agent'] = SignalSource(
+                    source='ai_agent',
+                    deltas={t: 0.0 for t in self.base_allocation},
+                    confidence=0.0,
+                    regime=None,
+                    notes=f"MARL inference failed: {e}"
+                )
+        else:
+            signals['ai_agent'] = SignalSource(
+                source='ai_agent',
+                deltas={t: 0.0 for t in self.base_allocation},
+                confidence=0.0,
+                regime=None,
+                notes='MARL controller not available'
+            )
         
         # Base technical (placeholder)
         signals['base'] = SignalSource(

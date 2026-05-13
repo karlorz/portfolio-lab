@@ -42,6 +42,7 @@ import sqlite3
 import argparse
 import sys
 import statistics
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
@@ -636,8 +637,8 @@ class MacroSignal(SignalSource):
             
             if row:
                 return float(row[0])
-        except:
-            pass
+        except Exception as e:
+            warnings.warn(f"Failed to fetch Fed hawk/dove score: {e}")
         
         # Default: neutral/slightly dovish given current environment
         return -0.2
@@ -668,8 +669,8 @@ class MacroSignal(SignalSource):
                     # Steepening (TLT rising faster than SHY) = bullish
                     spread_change = tlt_change - shy_change
                     return max(-1.0, min(1.0, spread_change * 5))
-        except:
-            pass
+        except Exception as e:
+            warnings.warn(f"Failed to compute yield curve spread: {e}")
         
         return 0.0
     
@@ -684,8 +685,8 @@ class MacroSignal(SignalSource):
                 # HYG underperforming LQD = spreads widening = bearish
                 spread_change = hyg_change - lqd_change
                 return max(-1.0, min(1.0, -spread_change * 10))
-        except:
-            pass
+        except Exception as e:
+            warnings.warn(f"Failed to compute credit spread: {e}")
         
         return 0.0
     
@@ -709,8 +710,8 @@ class MacroSignal(SignalSource):
                 current = rows[0][0]
                 prev = rows[-1][0]
                 return (current - prev) / prev
-        except:
-            pass
+        except Exception as e:
+            warnings.warn(f"Failed to compute 30d change: {e}")
         
         return None
     
@@ -920,7 +921,7 @@ class SignalIntegrator:
                 if signal:
                     component_signals.append(signal)
             except Exception as e:
-                pass  # Skip failed sources
+                warnings.warn(f"Signal source {source.source_name} failed for {ticker}: {e}")
         
         # Check minimum signal count
         if len(component_signals) < MIN_SIGNAL_SOURCES:
@@ -1040,8 +1041,8 @@ class SignalIntegrator:
                     return "bull"
                 else:
                     return "neutral"
-        except:
-            pass
+        except Exception as e:
+            warnings.warn(f"Failed to detect regime: {e}")
         
         return "neutral"
     
