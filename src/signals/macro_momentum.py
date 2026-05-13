@@ -659,7 +659,7 @@ def main():
                     'gld_shift': shifts.get('GLD', 0),
                 })
             except Exception as e:
-                pass
+                warnings.warn(f"Macro reading failed for {date}: {e}")
         
         df = pd.DataFrame(results)
         
