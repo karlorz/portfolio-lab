@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **370/370 passing** — all tests green
+- **414/414 passing** — all tests green
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -136,6 +136,7 @@
 - `test_odte_overlay.py` — 50 tests: 0DTE options, GEX calculator, position sizing, three-stop system, iron condor construction
 - `test_network_momentum.py` — 32 tests: network momentum lead-lag, DTW distance, Levy area, ensemble signals
 - `test_generator.py` — 35 tests: dashboard generator, VIX regime detection, health status, alerts, broker data
+- `test_fed_analyzer.py` — 44 tests: FOMC parser, hawk-dove scoring, stance classification, uncertainty detection
 - `test_tips_monitor.py` — 11 tests: TIPS yield tracking, signal generation, regime classification, allocation guidance
 - `test_alternative_data.py` — 22 tests: data classes, database init, satellite/credit card/supply chain adapters, composite signals, earnings predictions, agreement detection
 - `test_factor_rotation.py` — 27 tests: factor scoring, momentum evaluation, allocation weighting, signal strength, category diversity, recommendation, backtest
