@@ -120,7 +120,7 @@
 - Dashboard status integration
 
 ## Test Coverage (tests/)
-- **893/893 passing** — all tests green
+- **1027/1027 passing** — all tests green
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
 - `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
 - `test_position_sync.py` — 7 tests: drift calculation, edge cases
@@ -149,6 +149,10 @@
 - `test_trend_integration.py` — 36 tests: CTA trend signals, carry, replication ETFs, vol regimes, overlay sizing
 - `test_arp_overlay.py` — 51 tests: carry/value signals, allocation adjustments, signal adapters
 - `test_regime_ml.py` — 38 tests: regime detection, ML scoring, allocation, ensemble smoothing
+- `test_quantum_hybrid.py` — 32 tests: QUBO, QAOA/VQE simulation, hybrid optimization, risk parity
+- `test_risk_agent_hmm.py` — 26 tests: HMM regime detection, feature extraction, allocation shifts, save/load
+- `test_combined_strategy.py` — 25 tests: signal combination, Fed regime, baseline backtest, crisis returns
+- `test_tail_hedge.py` — 49 tests: put/VIX hedge calculation, hybrid optimization, regime detection, analytics
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep

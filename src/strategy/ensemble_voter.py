@@ -59,6 +59,7 @@ class SignalSource(Enum):
     MULTI_SPEED_MOM = "multi_speed_momentum"  # v2.56 Multi-speed
     DURATION_REGIME = "duration_regime"       # v2.17-2.18 Yield curve
     CIRCUIT_BREAKER = "circuit_breaker"     # v2.14 Risk controls
+    FACTOR_ROTATION = "factor_rotation"       # v3.00 Quality+Momentum overlay
 
 
 @dataclass
@@ -111,39 +112,43 @@ class EnsembleVote:
 # Regime-dependent weights
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.40,
-        SignalSource.MULTI_SPEED_MOM: 0.25,
-        SignalSource.CTA_TREND: 0.20,
-        SignalSource.MACRO_MOMENTUM: 0.10,
+        SignalSource.TSFM_MOMENTUM: 0.38,
+        SignalSource.MULTI_SPEED_MOM: 0.23,
+        SignalSource.CTA_TREND: 0.18,
+        SignalSource.MACRO_MOMENTUM: 0.09,
+        SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.DURATION_REGIME: 0.05,
-        SignalSource.HMM_REGIME: 0.0,       # Minimal in normal
+        SignalSource.HMM_REGIME: 0.02,       # Minimal in normal
         SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
     },
     Regime.HIGH_VOL: {
-        SignalSource.HMM_REGIME: 0.35,
-        SignalSource.CTA_TREND: 0.30,
-        SignalSource.MULTI_SPEED_MOM: 0.20,
-        SignalSource.MACRO_MOMENTUM: 0.10,
+        SignalSource.HMM_REGIME: 0.33,
+        SignalSource.CTA_TREND: 0.28,
+        SignalSource.MULTI_SPEED_MOM: 0.18,
+        SignalSource.MACRO_MOMENTUM: 0.09,
+        SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.CIRCUIT_BREAKER: 0.05,
-        SignalSource.TSFM_MOMENTUM: 0.0,
+        SignalSource.TSFM_MOMENTUM: 0.02,
         SignalSource.DURATION_REGIME: 0.0,
     },
     Regime.CRISIS: {
-        SignalSource.CIRCUIT_BREAKER: 0.35,
-        SignalSource.CTA_TREND: 0.35,
-        SignalSource.HMM_REGIME: 0.20,
-        SignalSource.MACRO_MOMENTUM: 0.10,
-        SignalSource.MULTI_SPEED_MOM: 0.0,  # Too slow in crisis
+        SignalSource.CIRCUIT_BREAKER: 0.33,
+        SignalSource.CTA_TREND: 0.33,
+        SignalSource.HMM_REGIME: 0.19,
+        SignalSource.MACRO_MOMENTUM: 0.09,
+        SignalSource.FACTOR_ROTATION: 0.03,   # Reduced in crisis (defensive factor focus)
+        SignalSource.MULTI_SPEED_MOM: 0.03,
         SignalSource.TSFM_MOMENTUM: 0.0,
         SignalSource.DURATION_REGIME: 0.0,
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.30,  # Speed diversity key
-        SignalSource.HMM_REGIME: 0.25,
-        SignalSource.CTA_TREND: 0.20,
-        SignalSource.TSFM_MOMENTUM: 0.15,
-        SignalSource.MACRO_MOMENTUM: 0.10,
-        SignalSource.DURATION_REGIME: 0.0,
+        SignalSource.MULTI_SPEED_MOM: 0.28,
+        SignalSource.HMM_REGIME: 0.23,
+        SignalSource.CTA_TREND: 0.18,
+        SignalSource.TSFM_MOMENTUM: 0.13,
+        SignalSource.MACRO_MOMENTUM: 0.09,
+        SignalSource.FACTOR_ROTATION: 0.06,   # Higher in recovery (momentum captures)
+        SignalSource.DURATION_REGIME: 0.03,
         SignalSource.CIRCUIT_BREAKER: 0.0,
     }
 }
@@ -349,6 +354,30 @@ class EnsembleVoter:
         
         # 3. CTA Trend (if available)
         # Placeholder - would load from existing CTA module
+        
+        # 4. Factor Rotation Signal (v3.00)
+        try:
+            from src.signals.factor_rotation import FactorRotationIntegrator
+            integrator = FactorRotationIntegrator()
+            signal = integrator.get_signal_for_ensemble(date)
+            
+            readings[SignalSource.FACTOR_ROTATION] = SignalReading(
+                source=SignalSource.FACTOR_ROTATION,
+                timestamp=signal["date"],
+                value=signal["signal_value"],
+                confidence=signal["confidence"],
+                weight=0.0,
+                regime_fit=signal["direction"],
+                asset_signals={
+                    'MTUM': signal["factor_allocations"].get('MTUM', 0),
+                    'QUAL': signal["factor_allocations"].get('QUAL', 0),
+                    'USMV': signal["factor_allocations"].get('USMV', 0),
+                    'VLUE': signal["factor_allocations"].get('VLUE', 0),
+                },
+                explanation=f"Factor rotation: {signal['rationale'][0] if signal['rationale'] else 'No additional info'}"
+            )
+        except ImportError:
+            pass
         
         self.current_readings = readings
         return readings
