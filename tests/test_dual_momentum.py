@@ -190,8 +190,18 @@ class TestDualMomentumEngine:
     def test_calculate_momentum_score_above_sma(self, tmp_path):
         engine = _make_engine(tmp_path)
         conn = _init_db(engine.db_path)
-        # Strong uptrend → price above SMA
-        _insert_prices(conn, 'SPY', n_days=300, base_price=400.0, drift=0.002)
+        # Create a linear uptrend: price rises every day
+        from datetime import datetime, timedelta
+        d = datetime(2025, 1, 2)
+        rows = []
+        for i in range(300):
+            while d.weekday() >= 5:
+                d += timedelta(days=1)
+            price = 400.0 + i * 1.0  # Linear increase
+            rows.append((d.strftime('%Y-%m-%d'), 'SPY', round(price, 2), 1000000))
+            d += timedelta(days=1)
+        conn.executemany("INSERT INTO prices VALUES (?, ?, ?, ?)", rows)
+        conn.commit()
         conn.close()
         score = engine._calculate_momentum_score('SPY')
         assert score is not None
