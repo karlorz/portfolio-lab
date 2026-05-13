@@ -89,13 +89,15 @@ ASSET_TICKERS = {
     'SPY': 'SPY',
     'GLD': 'GLD',
     'TLT': 'TLT',
+    'DBC': 'DBC',  # Phase 2: Commodity diversification
     'CASH': 'CASH',
 }
 
 DEFAULT_BASE_ALLOCATION = {
     'SPY': 0.46,
-    'GLD': 0.38,
+    'GLD': 0.34,  # Reduced from 0.38 to accommodate DBC
     'TLT': 0.16,
+    'DBC': 0.04,  # Phase 2: 4% commodity exposure
     'CASH': 0.0,
 }
 
