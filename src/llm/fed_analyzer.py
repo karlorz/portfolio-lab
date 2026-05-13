@@ -193,7 +193,7 @@ class FOMCParser:
             "sections": sections,
             "speaker_turns": self._extract_turns(cleaned),
             "hawkish_matches": self._find_phrases(cleaned, self.HAWKISH_PHRASES),
-            "dovish_matches": self._find_phrases(cleaned, self.DOIVISH_PHRASES),
+            "dovish_matches": self._find_phrases(cleaned, self.DOVISH_PHRASES),
             "word_count": len(cleaned.split()),
             "is_minutes": True,
         }
