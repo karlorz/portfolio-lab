@@ -8,6 +8,7 @@ import { BrokerPanel } from './BrokerPanel';
 import { UnderwaterChart, RollingMetricsChart, CrisisOverlay } from './AnalyticsCharts';
 import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
+import { ZeroDTEPanel } from './ZeroDTEPanel';
 import DurationOverlayPanel from './DurationOverlayPanel';
 import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData } from '../types/live';
 
@@ -15,7 +16,7 @@ interface LiveDashboardProps {
   refreshInterval?: number; // seconds
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics';
+type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -118,7 +119,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'history', label: 'History' },
     { id: 'performance', label: 'Performance' },
     { id: 'rebalance', label: 'Rebalance' },
-    { id: 'analytics', label: 'Analytics' }
+    { id: 'analytics', label: 'Analytics' },
+    { id: 'options', label: '0DTE', badge: signals?.zero_dte?.positions?.length || undefined }
   ];
 
   return (
@@ -486,6 +488,19 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                 <small>Data points: {analytics?.data_points || 0}</small>
               </div>
             )}
+          </div>
+        )}
+
+        {/* 0DTE Options Tab */}
+        {activeTab === 'options' && (
+          <div className="tab-panel options-panel">
+            <ZeroDTEPanel
+              positions={signals?.zero_dte?.positions || []}
+              config={signals?.zero_dte?.config || null}
+              portfolioValue={portfolioValue}
+              vix={signals?.regime?.vix || null}
+              weeklyLimitRemaining={2 - (signals?.zero_dte?.weekly_trades_used || 0)}
+            />
           </div>
         )}
       </div>

@@ -1,143 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import type { ZeroDTEPosition, ZeroDTEConfig, ZeroDTETrade } from '../types/live';
 
-interface ZeroDTEPosition {
-  id: string;
-  symbol: string;
-  strike: number;
-  expiry: string;
-  delta: number;
-  theta: number;
-  gamma: number;
-  vega: number;
-  premium_collected: number;
-  current_pnl: number;
-  status: 'active' | 'closed' | 'assigned';
-  entry_time: string;
-  exit_time?: string;
-}
-
-interface ZeroDTEStats {
-  active_positions: number;
-  max_positions: number;
-  weekly_positions_used: number;
-  weekly_positions_max: number;
-  total_premium_ytd: number;
-  total_premium_month: number;
-  total_premium_week: number;
-  win_rate_30d: number;
-  avg_premium_per_trade: number;
-  total_delta_exposure: number;
-  max_delta_exposure: number;
-  allocation_used: number;
-  allocation_max: number;
-}
-
-interface ZeroDTEConfig {
-  enabled: boolean;
-  vix_current: number;
-  vix_min: number;
-  vix_max: number;
-  can_enter: boolean;
-  reason?: string;
-}
-
-interface ZeroDTEData {
+interface ZeroDTEPanelProps {
   positions: ZeroDTEPosition[];
-  stats: ZeroDTEStats;
-  config: ZeroDTEConfig;
-  last_updated: string;
+  config: ZeroDTEConfig | null;
+  portfolioValue: number;
+  vix: number | null;
+  weeklyLimitRemaining: number;
 }
 
-export function ZeroDTEPanel() {
-  const [data, setData] = useState<ZeroDTEData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [expandedPosition, setExpandedPosition] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000); // 30s refresh
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchData = async () => {
-    try {
-      const response = await fetch('/data/odte_positions.json');
-      if (!response.ok) {
-        // Fallback to mock data for development
-        setData(getMockData());
-        setLoading(false);
-        return;
-      }
-      const json = await response.json();
-      setData(json);
-      setLoading(false);
-    } catch (err) {
-      setError('Failed to load 0DTE data');
-      setData(getMockData()); // Fallback
-      setLoading(false);
-    }
-  };
-
-  const getMockData = (): ZeroDTEData => ({
-    positions: [
-      {
-        id: 'odte-001',
-        symbol: 'SPY',
-        strike: 585,
-        expiry: '2026-05-14',
-        delta: 0.28,
-        theta: -0.45,
-        gamma: 0.12,
-        vega: 0.08,
-        premium_collected: 420,
-        current_pnl: 385,
-        status: 'active',
-        entry_time: '2026-05-14T11:30:00Z'
-      }
-    ],
-    stats: {
-      active_positions: 1,
-      max_positions: 2,
-      weekly_positions_used: 1,
-      weekly_positions_max: 2,
-      total_premium_ytd: 2840,
-      total_premium_month: 890,
-      total_premium_week: 420,
-      win_rate_30d: 0.72,
-      avg_premium_per_trade: 520,
-      total_delta_exposure: 0.28,
-      max_delta_exposure: 0.80,
-      allocation_used: 0.005,
-      allocation_max: 0.02
-    },
-    config: {
-      enabled: true,
-      vix_current: 18.5,
-      vix_min: 15,
-      vix_max: 35,
-      can_enter: true
-    },
-    last_updated: new Date().toISOString()
-  });
-
-  if (loading) {
-    return (
-      <div className="zero-dte-panel loading">
-        <div className="panel-header">
-          <h3>0DTE Yield Enhancement</h3>
-          <span className="loading-text">Loading...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!data) return null;
-
-  const { positions, stats, config } = data;
-  const vixStatus = config.vix_current < config.vix_min ? 'below-min' : 
-                    config.vix_current > config.vix_max ? 'above-max' : 'ok';
-
+export function ZeroDTEPanel({ 
+  positions, 
+  config, 
+  portfolioValue, 
+  vix,
+  weeklyLimitRemaining 
+}: ZeroDTEPanelProps) {
   const formatCurrency = (v: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -147,205 +25,194 @@ export function ZeroDTEPanel() {
     }).format(v);
   };
 
-  const formatPct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const formatPct = (v: number) => `${(v * 100).toFixed(2)}%`;
   const formatGreek = (v: number) => v.toFixed(3);
+
+  // Calculate metrics
+  const totalDeltaExposure = positions.reduce((sum, pos) => 
+    sum + (pos.delta_exposure || 0), 0);
+  const totalPremiumCollected = positions.reduce((sum, pos) => 
+    sum + (pos.premium_collected || 0), 0);
+  const totalUnrealizedPnl = positions.reduce((sum, pos) => 
+    sum + (pos.unrealized_pnl || 0), 0);
+  const totalAllocated = positions.reduce((sum, pos) => 
+    sum + (pos.notional_value || 0), 0);
+
+  const maxAllocation = portfolioValue * (config?.max_portfolio_allocation || 0.02);
+  const allocationPct = totalAllocated / portfolioValue;
+  const maxDeltaExposure = portfolioValue * (config?.max_delta_exposure || 0.08);
+
+  // Entry status
+  const canEnterNew = (
+    (vix === null || (vix >= (config?.min_vix || 15) && vix <= (config?.max_vix || 35))) &&
+    weeklyLimitRemaining > 0 &&
+    totalDeltaExposure < maxDeltaExposure &&
+    totalAllocated < maxAllocation
+  );
+
+  const entryStatus = canEnterNew ? 'ready' : 
+    (vix !== null && (vix < (config?.min_vix || 15) || vix > (config?.max_vix || 35))) ? 'vix-blocked' :
+    weeklyLimitRemaining === 0 ? 'limit-reached' :
+    totalDeltaExposure >= maxDeltaExposure ? 'delta-limit' : 'allocation-limit';
 
   return (
     <div className="zero-dte-panel">
       <div className="panel-header">
         <h3>0DTE Yield Enhancement</h3>
-        <div className={`status-badge ${config.can_enter ? 'active' : 'paused'}`}>
-          {config.can_enter ? '● Active' : '● Paused'}
-        </div>
+        <span className={`entry-badge ${entryStatus}`}>
+          {entryStatus === 'ready' ? '● Ready' :
+           entryStatus === 'vix-blocked' ? `VIX ${vix?.toFixed(1)}` :
+           entryStatus === 'limit-reached' ? 'Weekly Limit' :
+           entryStatus === 'delta-limit' ? 'Delta Limit' : 'Allocation Limit'}
+        </span>
       </div>
 
-      {/* VIX Status Bar */}
-      <div className={`vix-bar ${vixStatus}`}>
-        <div className="vix-label">VIX</div>
-        <div className="vix-value">{config.vix_current.toFixed(1)}</div>
-        <div className="vix-range">
-          Target: {config.vix_min}-{config.vix_max}
-        </div>
-        {vixStatus !== 'ok' && (
-          <div className="vix-warning">
-            {vixStatus === 'below-min' ? '⚠ Below entry threshold' : '⚠ High volatility - paused'}
-          </div>
-        )}
-      </div>
-
-      {/* Key Metrics */}
-      <div className="metrics-grid">
-        <div className="metric-card">
-          <div className="metric-label">YTD Premium</div>
-          <div className="metric-value positive">+{formatCurrency(stats.total_premium_ytd)}</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label">30D Win Rate</div>
-          <div className={`metric-value ${stats.win_rate_30d >= 0.65 ? 'positive' : 'warning'}`}>
-            {formatPct(stats.win_rate_30d)}
-          </div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label">Active Positions</div>
-          <div className="metric-value">
-            {stats.active_positions}/{stats.max_positions}
-          </div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label">Weekly Used</div>
-          <div className="metric-value">
-            {stats.weekly_positions_used}/{stats.weekly_positions_max}
-          </div>
-        </div>
-      </div>
-
-      {/* Risk Gauges */}
-      <div className="risk-section">
-        <h4>Risk Limits</h4>
-        
+      {/* Risk Summary */}
+      <div className="risk-summary">
         <div className="risk-gauge">
-          <div className="gauge-label">
-            <span>Delta Exposure</span>
-            <span>{formatPct(stats.total_delta_exposure)} / {formatPct(stats.max_delta_exposure)}</span>
+          <div className="gauge-row">
+            <label>Delta Exposure</label>
+            <div className="gauge-bar">
+              <div 
+                className={`gauge-fill ${totalDeltaExposure / maxDeltaExposure > 0.8 ? 'warning' : ''}`}
+                style={{ width: `${Math.min((totalDeltaExposure / maxDeltaExposure) * 100, 100)}%` }}
+              />
+            </div>
+            <span className="gauge-value">
+              {formatPct(totalDeltaExposure / portfolioValue)} / {formatPct(config?.max_delta_exposure || 0.08)}
+            </span>
           </div>
-          <div className="gauge-bar">
-            <div 
-              className={`gauge-fill ${stats.total_delta_exposure / stats.max_delta_exposure > 0.8 ? 'warning' : 'ok'}`}
-              style={{ width: `${(stats.total_delta_exposure / stats.max_delta_exposure) * 100}%` }}
-            />
+          
+          <div className="gauge-row">
+            <label>Allocation</label>
+            <div className="gauge-bar">
+              <div 
+                className={`gauge-fill ${allocationPct > 0.015 ? 'warning' : ''}`}
+                style={{ width: `${Math.min((allocationPct / (config?.max_portfolio_allocation || 0.02)) * 100, 100)}%` }}
+              />
+            </div>
+            <span className="gauge-value">
+              {formatPct(allocationPct)} / {formatPct(config?.max_portfolio_allocation || 0.02)}
+            </span>
+          </div>
+
+          <div className="gauge-row">
+            <label>Weekly Trades</label>
+            <div className="gauge-bar">
+              <div 
+                className="gauge-fill"
+                style={{ width: `${((config?.max_weekly_positions || 2) - weeklyLimitRemaining) / (config?.max_weekly_positions || 2) * 100}%` }}
+              />
+            </div>
+            <span className="gauge-value">
+              {(config?.max_weekly_positions || 2) - weeklyLimitRemaining} / {config?.max_weekly_positions || 2}
+            </span>
           </div>
         </div>
 
-        <div className="risk-gauge">
-          <div className="gauge-label">
-            <span>Capital Allocation</span>
-            <span>{formatPct(stats.allocation_used)} / {formatPct(stats.allocation_max)}</span>
+        {/* Premium Summary */}
+        <div className="premium-summary">
+          <div className="premium-stat">
+            <label>Premium Collected (MTD)</label>
+            <span className="positive">+{formatCurrency(totalPremiumCollected)}</span>
           </div>
-          <div className="gauge-bar">
-            <div 
-              className="gauge-fill ok"
-              style={{ width: `${(stats.allocation_used / stats.allocation_max) * 100}%` }}
-            />
+          <div className={`premium-stat ${totalUnrealizedPnl >= 0 ? 'positive' : 'negative'}`}>
+            <label>Unrealized P&L</label>
+            <span>{totalUnrealizedPnl >= 0 ? '+' : ''}{formatCurrency(totalUnrealizedPnl)}</span>
           </div>
         </div>
       </div>
 
       {/* Active Positions */}
-      {positions.length > 0 && (
-        <div className="positions-section">
-          <h4>Active Positions</h4>
-          {positions.map(pos => (
-            <div 
-              key={pos.id} 
-              className={`position-card ${pos.status}`}
-              onClick={() => setExpandedPosition(expandedPosition === pos.id ? null : pos.id)}
-            >
-              <div className="position-header">
-                <div className="position-main">
-                  <span className="symbol">{pos.symbol}</span>
-                  <span className="strike">${pos.strike} Call</span>
-                  <span className="expiry">Exp: {pos.expiry}</span>
-                </div>
-                <div className={`position-pnl ${pos.current_pnl >= 0 ? 'positive' : 'negative'}`}>
-                  {pos.current_pnl >= 0 ? '+' : ''}{formatCurrency(pos.current_pnl)}
-                </div>
-              </div>
-
-              <div className="position-summary">
-                <div className="summary-item">
-                  <span className="summary-label">Delta</span>
-                  <span className="summary-value">{formatGreek(pos.delta)}</span>
-                </div>
-                <div className="summary-item">
-                  <span className="summary-label">Premium</span>
-                  <span className="summary-value">+{formatCurrency(pos.premium_collected)}</span>
-                </div>
-                <div className="summary-item">
-                  <span className="summary-label">Theta</span>
-                  <span className="summary-value">{formatGreek(pos.theta)}</span>
-                </div>
-              </div>
-
-              {expandedPosition === pos.id && (
-                <div className="position-details">
-                  <div className="detail-row">
-                    <span>Entry Time:</span>
-                    <span>{new Date(pos.entry_time).toLocaleTimeString()}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span>Gamma:</span>
-                    <span>{formatGreek(pos.gamma)}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span>Vega:</span>
-                    <span>{formatGreek(pos.vega)}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span>Status:</span>
-                    <span className={`status-${pos.status}`}>{pos.status.toUpperCase()}</span>
-                  </div>
-                </div>
-              )}
-
-              <div className="expand-hint">
-                {expandedPosition === pos.id ? '▼ Click to collapse' : '▶ Click to expand'}
-              </div>
-            </div>
-          ))}
+      {positions.length > 0 ? (
+        <div className="positions-table-container">
+          <h4>Active Positions ({positions.length})</h4>
+          <table className="positions-table detailed">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Type</th>
+                <th>Strike</th>
+                <th>Expiry</th>
+                <th>Delta</th>
+                <th>Theta</th>
+                <th>Premium</th>
+                <th>P&L</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((pos, i) => (
+                <tr key={i} className={pos.status}>
+                  <td><strong>{pos.underlying}</strong></td>
+                  <td>{pos.option_type === 'call' ? 'C' : 'P'}</td>
+                  <td>{pos.strike.toFixed(1)}</td>
+                  <td>{new Date(pos.expiration).toLocaleDateString()}</td>
+                  <td>{formatGreek(pos.current_delta || 0)}</td>
+                  <td>{formatGreek(pos.current_theta || 0)}</td>
+                  <td className="positive">+{formatCurrency(pos.premium_collected || 0)}</td>
+                  <td className={pos.unrealized_pnl && pos.unrealized_pnl >= 0 ? 'positive' : 'negative'}>
+                    {pos.unrealized_pnl && pos.unrealized_pnl >= 0 ? '+' : ''}
+                    {formatCurrency(pos.unrealized_pnl || 0)}
+                  </td>
+                  <td>
+                    <span className={`status-badge ${pos.status}`}>
+                      {pos.status === 'open' ? 'Open' :
+                       pos.status === 'pending' ? 'Pending' :
+                       pos.status === 'stopped' ? 'Stopped' : pos.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="no-positions">
+          <p>No active 0DTE positions</p>
+          {entryStatus === 'ready' && (
+            <small>VIX in range, ready for next entry opportunity</small>
+          )}
         </div>
       )}
 
-      {/* Weekly Stats */}
-      <div className="weekly-stats">
-        <h4>Period Performance</h4>
-        <div className="period-grid">
-          <div className="period-item">
-            <span className="period-label">This Week</span>
-            <span className="period-value positive">+{formatCurrency(stats.total_premium_week)}</span>
+      {/* Risk Controls */}
+      <div className="risk-controls">
+        <h4>Risk Controls</h4>
+        <div className="control-grid">
+          <div className="control-item">
+            <label>Max Loss/Trade</label>
+            <span>{formatPct(config?.max_loss_pct || 0.015)}</span>
           </div>
-          <div className="period-item">
-            <span className="period-label">This Month</span>
-            <span className="period-value positive">+{formatCurrency(stats.total_premium_month)}</span>
+          <div className="control-item">
+            <label>Delta Target</label>
+            <span>{formatPct(config?.delta_target || 0.30)}</span>
           </div>
-          <div className="period-item">
-            <span className="period-label">YTD</span>
-            <span className="period-value positive">+{formatCurrency(stats.total_premium_ytd)}</span>
+          <div className="control-item">
+            <label>Emergency Delta</label>
+            <span>{formatPct(config?.emergency_close_delta || 0.50)}</span>
           </div>
-          <div className="period-item">
-            <span className="period-label">Avg/Trade</span>
-            <span className="period-value">{formatCurrency(stats.avg_premium_per_trade)}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Constraints Summary */}
-      <div className="constraints-section">
-        <h4>Strategy Constraints</h4>
-        <div className="constraint-list">
-          <div className={`constraint-item ${stats.active_positions < stats.max_positions ? 'ok' : 'at-limit'}`}>
-            <span className="constraint-icon">{stats.active_positions < stats.max_positions ? '✓' : '●'}</span>
-            <span>Max {stats.max_positions} concurrent positions</span>
-          </div>
-          <div className={`constraint-item ${stats.weekly_positions_used < stats.weekly_positions_max ? 'ok' : 'at-limit'}`}>
-            <span className="constraint-icon">{stats.weekly_positions_used < stats.weekly_positions_max ? '✓' : '●'}</span>
-            <span>Max {stats.weekly_positions_max} per week</span>
-          </div>
-          <div className={`constraint-item ${stats.total_delta_exposure < stats.max_delta_exposure ? 'ok' : 'at-limit'}`}>
-            <span className="constraint-icon">{stats.total_delta_exposure < stats.max_delta_exposure ? '✓' : '⚠'}</span>
-            <span>Delta exposure &lt; {formatPct(stats.max_delta_exposure)}</span>
-          </div>
-          <div className={`constraint-item ${vixStatus === 'ok' ? 'ok' : 'blocked'}`}>
-            <span className="constraint-icon">{vixStatus === 'ok' ? '✓' : '✗'}</span>
-            <span>VIX entry filter ({config.vix_min}-{config.vix_max})</span>
+          <div className="control-item">
+            <label>Min Premium</label>
+            <span>{formatPct(config?.min_premium_pct || 0.004)}</span>
           </div>
         </div>
       </div>
 
-      <div className="last-updated">
-        Last updated: {new Date(data.last_updated).toLocaleTimeString()}
-      </div>
+      {/* VIX Indicator */}
+      {vix !== null && (
+        <div className="vix-indicator">
+          <div className={`vix-value ${vix < 15 ? 'low' : vix > 35 ? 'high' : 'normal'}`}>
+            <label>VIX</label>
+            <span>{vix.toFixed(1)}</span>
+          </div>
+          <div className="vix-range">
+            <span className={vix < 15 ? 'active' : ''}>Below 15: No Entry</span>
+            <span className={vix >= 15 && vix <= 35 ? 'active' : ''}>15-35: Active</span>
+            <span className={vix > 35 ? 'active' : ''}>Above 35: Pause</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-export default ZeroDTEPanel;

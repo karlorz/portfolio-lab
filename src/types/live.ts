@@ -63,6 +63,12 @@ export interface SignalsData {
   };
   smart_rebalance?: SmartRebalanceData;
   broker?: BrokerData;
+  zero_dte?: {
+    positions: ZeroDTEPosition[];
+    config: ZeroDTEConfig | null;
+    weekly_trades_used: number;
+    total_premium_collected_mtd: number;
+  };
 }
 
 export interface Position {
@@ -293,4 +299,58 @@ export interface SmartRebalanceData {
       annual_cost_limit: string;
     };
   };
+}
+
+// 0DTE Options Types (v3.12)
+export interface ZeroDTEConfig {
+  max_portfolio_allocation: number;  // e.g., 0.02 = 2%
+  max_weekly_positions: number;      // e.g., 2
+  position_size_pct: number;          // e.g., 0.005 = 0.5%
+  min_vix: number;                    // e.g., 15
+  max_vix: number;                    // e.g., 35
+  delta_target: number;               // e.g., 0.30
+  min_premium_pct: number;            // e.g., 0.004 = 0.4%
+  max_delta_exposure: number;         // e.g., 0.08 = 8%
+  emergency_close_delta: number;      // e.g., 0.50
+  max_loss_pct: number;               // e.g., 0.015 = 1.5%
+}
+
+export interface ZeroDTETrade {
+  id: string;
+  underlying: string;
+  option_type: 'call' | 'put';
+  side: 'buy' | 'sell';
+  quantity: number;
+  strike: number;
+  expiration: string;
+  entry_price: number;
+  entry_time: string;
+  exit_price?: number;
+  exit_time?: string;
+  premium_collected: number;
+  realized_pnl?: number;
+}
+
+export interface ZeroDTEPosition {
+  id: string;
+  underlying: string;
+  option_type: 'call' | 'put';
+  side: 'buy' | 'sell';
+  strike: number;
+  expiration: string;
+  quantity: number;
+  entry_price: number;
+  entry_time: string;
+  entry_delta: number;
+  entry_theta: number;
+  current_delta: number;
+  current_theta: number;
+  current_underlying_price: number;
+  status: 'pending' | 'open' | 'closed' | 'stopped' | 'expired_itm' | 'expired_otm' | 'rolled';
+  unrealized_pnl?: number;
+  realized_pnl?: number;
+  premium_collected: number;
+  delta_exposure: number;
+  notional_value: number;
+  close_reason?: 'expiration' | 'profit_take' | 'stop_loss' | 'delta_stop' | 'time_exit' | 'manual' | 'roll' | 'emergency';
 }
