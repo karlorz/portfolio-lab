@@ -75,7 +75,7 @@ class TestEnums:
         assert SignalSource.CTA_TREND.value == 'cta_trend'
 
     def test_signal_source_members(self):
-        assert len(SignalSource) == 8
+        assert len(SignalSource) == 9
 
 
 # ---------------------------------------------------------------------------

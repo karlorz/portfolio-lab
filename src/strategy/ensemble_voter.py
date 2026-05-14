@@ -68,6 +68,7 @@ class SignalSource(Enum):
     DURATION_REGIME = "duration_regime"       # v2.17-2.18 Yield curve
     CIRCUIT_BREAKER = "circuit_breaker"     # v2.14 Risk controls
     FACTOR_ROTATION = "factor_rotation"       # v3.00 Quality+Momentum overlay
+    CLOSING_AUCTION = "closing_auction"       # v3.17 MOC/IOC imbalance signals
 
 
 @dataclass
@@ -120,44 +121,48 @@ class EnsembleVote:
 # Regime-dependent weights
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.38,
-        SignalSource.MULTI_SPEED_MOM: 0.23,
-        SignalSource.CTA_TREND: 0.18,
+        SignalSource.TSFM_MOMENTUM: 0.37,
+        SignalSource.MULTI_SPEED_MOM: 0.22,
+        SignalSource.CTA_TREND: 0.17,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.DURATION_REGIME: 0.05,
         SignalSource.HMM_REGIME: 0.02,       # Minimal in normal
         SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
+        SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
     },
     Regime.HIGH_VOL: {
-        SignalSource.HMM_REGIME: 0.33,
-        SignalSource.CTA_TREND: 0.28,
-        SignalSource.MULTI_SPEED_MOM: 0.18,
+        SignalSource.HMM_REGIME: 0.32,
+        SignalSource.CTA_TREND: 0.27,
+        SignalSource.MULTI_SPEED_MOM: 0.17,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.CIRCUIT_BREAKER: 0.05,
         SignalSource.TSFM_MOMENTUM: 0.02,
         SignalSource.DURATION_REGIME: 0.0,
+        SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
     },
     Regime.CRISIS: {
-        SignalSource.CIRCUIT_BREAKER: 0.33,
-        SignalSource.CTA_TREND: 0.33,
-        SignalSource.HMM_REGIME: 0.19,
+        SignalSource.CIRCUIT_BREAKER: 0.32,
+        SignalSource.CTA_TREND: 0.32,
+        SignalSource.HMM_REGIME: 0.18,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.03,   # Reduced in crisis (defensive factor focus)
         SignalSource.MULTI_SPEED_MOM: 0.03,
         SignalSource.TSFM_MOMENTUM: 0.0,
         SignalSource.DURATION_REGIME: 0.0,
+        SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.28,
-        SignalSource.HMM_REGIME: 0.23,
-        SignalSource.CTA_TREND: 0.18,
+        SignalSource.MULTI_SPEED_MOM: 0.27,
+        SignalSource.HMM_REGIME: 0.22,
+        SignalSource.CTA_TREND: 0.17,
         SignalSource.TSFM_MOMENTUM: 0.13,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.06,   # Higher in recovery (momentum captures)
         SignalSource.DURATION_REGIME: 0.03,
         SignalSource.CIRCUIT_BREAKER: 0.0,
+        SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
     }
 }
 
@@ -363,7 +368,42 @@ class EnsembleVoter:
         # 3. CTA Trend (if available)
         # Placeholder - would load from existing CTA module
         
-        # 4. Factor Rotation Signal (v3.00)
+        # 4. Closing Auction Signal (v3.17)
+        try:
+            from src.signals.closing_auction import ClosingAuctionSignalGenerator, SignalConfidence
+            
+            # Load latest MOC signals from JSON if available
+            signal_path = Path("data/signals/closing_auction.json")
+            if signal_path.exists():
+                with open(signal_path) as f:
+                    signal_data = json.load(f)
+                
+                # Filter to tradeable signals with medium+ confidence
+                tradeable = [
+                    s for s in signal_data.get('tradeable_signals', [])
+                    if s.get('confidence') in ['high', 'medium']
+                ]
+                
+                if tradeable:
+                    # Aggregate signal: average direction score
+                    avg_direction = sum(s.get('direction_score', 0) for s in tradeable) / len(tradeable)
+                    # Normalize to -1..1 range
+                    signal_value = max(-1, min(1, avg_direction / 3))
+                    
+                    readings[SignalSource.CLOSING_AUCTION] = SignalReading(
+                        source=SignalSource.CLOSING_AUCTION,
+                        timestamp=signal_data.get('timestamp', str(datetime.now())),
+                        value=signal_value,
+                        confidence=0.6 if any(s.get('confidence') == 'high' for s in tradeable) else 0.5,
+                        weight=0.0,
+                        regime_fit="all",
+                        asset_signals={s['symbol']: s.get('direction_score', 0) / 3 for s in tradeable},
+                        explanation=f"MOC imbalance: {len(tradeable)} tradeable signals, avg_direction={avg_direction:+.2f}"
+                    )
+        except Exception as e:
+            pass
+        
+        # 5. Factor Rotation Signal (v3.00)
         try:
             from src.signals.factor_rotation import FactorRotationIntegrator
             integrator = FactorRotationIntegrator()
