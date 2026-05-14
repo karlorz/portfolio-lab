@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Portfolio-Lab v2.55: Combined Signal Orchestrator
+Portfolio-Lab v2.56: Combined Signal Orchestrator
 
 Master signal aggregation engine combining:
-    - v2.52 TSMOM Overlay (35% weight): Time-series momentum from AQR research
+    - v2.52 TSMOM Overlay (25% weight): Time-series momentum from AQR research
     - v2.53 HMM Regime Detector (25% weight): Market state classification
     - v2.54 Fed Policy Overlay (25% weight): Fed rate/inflation regime
     - v2.51 AI Agent Controller (10% weight): MARL reinforcement learning
+    - v3.11 Duration Overlay (5% weight): Yield curve regime duration shifts
+    - v2.70 Behavioral Sentiment (5% weight): Contrarian crowd sentiment
     - Base Technical/Macro (5% weight): Traditional indicators
 
 Signal Combination Strategy:
@@ -18,14 +20,16 @@ Signal Combination Strategy:
 
 Conflict Resolution:
     - TSMOM vs Fed Policy: Split difference if both high confidence
+    - Behavioral vs Trend: Trend wins (contrarian slower to act)
     - HMM neutral: Reduce overall deviation magnitude
     - High volatility regime: Cap max deviation at 5%
     - All agree: Amplify signal (+20% boost)
 
-Current Signal Snapshot (2026-05-13):
+Current Signal Snapshot (2026-05-14):
     TSMOM:   SPY -3.9%, GLD -4.6%, TLT +3.5% (reduce equities, add bonds)
     HMM:     All NEUTRAL (no change)
     Fed:     SPY +2.6%, GLD +3.0%, TLT -5.5% (risk-on, reduce duration)
+    Behavioral: NEUTRAL (z=+0.08, no extreme sentiment)
     Conflict: TSMOM and Fed disagree on SPY/GLD direction
 
 Usage:
@@ -38,6 +42,7 @@ Reference:
     - AQR: "Time Series Momentum" (Moskowitz et al., 2012)
     - arXiv:2407.19858: HMM-LSTM hybrid regime detection
     - FRED/Goldman Sachs: Fed policy allocation frameworks
+    - Barber, Odean (2024): "Behavioral Sentiment Contrarian Signals"
 """
 
 import numpy as np
@@ -64,14 +69,22 @@ try:
 except ImportError:
     _AI_CONTROLLER_AVAILABLE = False
 
+# Guarded import for Behavioral Sentiment (v2.70)
+try:
+    from src.signals.behavioral_sentiment import BehavioralSentimentSignal
+    _BEHAVIORAL_AVAILABLE = True
+except ImportError:
+    _BEHAVIORAL_AVAILABLE = False
+
 
 # Signal source weights
 SIGNAL_WEIGHTS = {
-    'tsmom': 0.30,
+    'tsmom': 0.25,  # Reduced from 0.30 to make room for behavioral
     'hmm_regime': 0.25,
     'fed_policy': 0.25,
     'ai_agent': 0.10,
-    'duration_overlay': 0.05,  # v3.11 Yield curve regime duration shifts
+    'duration_overlay': 0.05,
+    'behavioral_sentiment': 0.05,  # v2.70 Contrarian crowd sentiment overlay
     'base': 0.05,
 }
 
@@ -328,6 +341,47 @@ class CombinedSignalOrchestrator:
                 notes=f'Duration overlay error: {str(e)}'
             )
         
+        # Behavioral Sentiment (v2.70) - Contrarian crowd sentiment overlay
+        if _BEHAVIORAL_AVAILABLE:
+            try:
+                behavioral = BehavioralSentimentSignal()
+                behav_signal = behavioral.get_signal()
+                
+                # Map behavioral signal to SPY equity shift (contrarian)
+                # Buy fear = increase equity, sell greed = decrease equity
+                behav_deltas = {t: 0.0 for t in self.base_allocation}
+                behav_deltas['SPY'] = behav_signal.equity_shift_pct / 100.0
+                # Inverse for defensive assets (GLD, TLT)
+                defensive_shift = -behav_deltas['SPY'] * 0.5  # Split between GLD and TLT
+                if 'GLD' in behav_deltas:
+                    behav_deltas['GLD'] = defensive_shift
+                if 'TLT' in behav_deltas:
+                    behav_deltas['TLT'] = defensive_shift
+                
+                signals['behavioral_sentiment'] = SignalSource(
+                    source='behavioral_sentiment',
+                    deltas=behav_deltas,
+                    confidence=behav_signal.confidence,
+                    regime=behav_signal.signal_type,
+                    notes=f"Z-score: {behav_signal.z_score:+.2f}, Composite: {behav_signal.composite_score:+.2f}, VIX: {behav_signal.vix:.1f}"
+                )
+            except Exception as e:
+                signals['behavioral_sentiment'] = SignalSource(
+                    source='behavioral_sentiment',
+                    deltas={t: 0.0 for t in self.base_allocation},
+                    confidence=0.0,
+                    regime='error',
+                    notes=f'Behavioral sentiment error: {str(e)}'
+                )
+        else:
+            signals['behavioral_sentiment'] = SignalSource(
+                source='behavioral_sentiment',
+                deltas={t: 0.0 for t in self.base_allocation},
+                confidence=0.0,
+                regime='unavailable',
+                notes='Behavioral sentiment module not available'
+            )
+        
         return signals
     
     def detect_conflicts(self, signals: Dict[str, SignalSource]) -> List[str]:
@@ -350,6 +404,19 @@ class CombinedSignalOrchestrator:
                 if abs(tsmom_delta) > 0.01 and abs(fed_delta) > 0.01:
                     if (tsmom_delta > 0 and fed_delta < 0) or (tsmom_delta < 0 and fed_delta > 0):
                         conflicts.append(f'{ticker}: TSMOM({tsmom_delta:+.2%}) vs Fed({fed_delta:+.2%})')
+        
+        # Check Behavioral vs Trend signals
+        # Trend signals win - behavioral is contrarian (slower to act)
+        behavioral = signals.get('behavioral_sentiment')
+        if behavioral and behavioral.confidence > 0.6 and tsmom and tsmom.confidence > 0.6:
+            for ticker in tickers:
+                behav_delta = behavioral.deltas.get(ticker, 0)
+                tsmom_delta = tsmom.deltas.get(ticker, 0)
+                
+                # Both signals active and in opposite directions
+                if abs(behav_delta) > 0.01 and abs(tsmom_delta) > 0.01:
+                    if (behav_delta > 0 and tsmom_delta < 0) or (behav_delta < 0 and tsmom_delta > 0):
+                        conflicts.append(f'{ticker}: Behavioral({behav_delta:+.2%}) vs TSMOM({tsmom_delta:+.2%}) - Trend wins')
         
         return conflicts
     
