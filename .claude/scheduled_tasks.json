@@ -5,7 +5,8 @@
       "cron": "*/15 * * * *",
       "prompt": "go ahead implement and run /dev-loop high",
       "createdAt": 1778721581993,
-      "recurring": true
+      "recurring": true,
+      "lastFiredAt": 1778722574633
     }
   ]
 }
