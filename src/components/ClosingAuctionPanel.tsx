@@ -6,7 +6,7 @@ interface ClosingAuctionPanelProps {
   isMarketOpen?: boolean;
 }
 
-export function ClosingAuctionPanel({ signals, isMarketOpen = true }: ClosingAuctionPanelPropsProps) {
+export function ClosingAuctionPanel({ signals, isMarketOpen = true }: ClosingAuctionPanelProps) {
   const getDirectionColor = (direction: string) => {
     switch (direction) {
       case 'STRONG_BUY':
