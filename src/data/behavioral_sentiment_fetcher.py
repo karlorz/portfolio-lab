@@ -2,6 +2,8 @@
 Behavioral Sentiment Data Fetcher for Portfolio-Lab v2.70
 Fetches CBOE SKEW, VIX9D/VIX ratios, and retail flow indicators
 for contrarian sentiment overlay strategy.
+
+v2.70 Phase 4: Integrated Reddit Sentiment for real social data
 """
 
 import sqlite3
@@ -12,6 +14,16 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 import logging
+
+# Import Reddit sentiment fetcher (v2.70 Phase 4)
+try:
+    from src.data.reddit_sentiment_fetcher import (
+        RedditSentimentFetcher,
+        RedditSentimentSnapshot,
+    )
+    REDDIT_AVAILABLE = True
+except ImportError:
+    REDDIT_AVAILABLE = False
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -62,13 +74,20 @@ class RetailFlow:
 
 @dataclass
 class SocialIntensity:
-    """Social media sentiment intensity"""
+    """Social media sentiment intensity - now includes Reddit data"""
     timestamp: str
     mention_velocity_7d: float  # 7d vs 30d rolling avg
     sentiment_divergence: float  # Bullish/bearish vs price momentum
     bot_activity_flag: bool  # Coordinated activity detected
     influencer_concentration: float  # % volume from high-follower accounts
-    
+    # Reddit-specific metrics (v2.70 Phase 4)
+    reddit_sentiment: float = 0.0  # -1.0 to +1.0 aggregate
+    reddit_mention_velocity_1h: float = 0.0  # Posts per hour
+    reddit_mention_velocity_24h: float = 0.0  # Posts per day
+    reddit_virality_flag: bool = False  # True if trending
+    reddit_engagement_score: float = 0.0  # 0-100 composite
+    reddit_data_source: str = "proxy"  # "reddit_api" or "proxy"
+
     def to_dict(self) -> Dict:
         return asdict(self)
 
@@ -286,9 +305,44 @@ class BehavioralSentimentFetcher:
             )
     
     def _estimate_social_intensity(self) -> SocialIntensity:
-        """Estimate social media intensity (simplified without full API)"""
-        # Without Reddit/Twitter API access, we use market volatility as proxy
-        # High VIX often correlates with high social media activity
+        """
+        Estimate social media intensity using Reddit data when available.
+        Falls back to VIX-based proxy if Reddit is unavailable.
+        """
+        # Try Reddit data first (v2.70 Phase 4)
+        if REDDIT_AVAILABLE:
+            try:
+                reddit_fetcher = RedditSentimentFetcher(cache_db=self.cache_db)
+                reddit_snapshot = reddit_fetcher.fetch_sentiment()
+                
+                # Convert Reddit sentiment to social intensity metrics
+                # Reddit sentiment: -1 to +1, SocialIntensity divergence uses similar scale
+                sentiment_divergence = reddit_snapshot.aggregate_sentiment
+                
+                # Virality flag indicates bot-like activity or coordinated campaigns
+                bot_activity = reddit_snapshot.virality_flag
+                
+                # Engagement score maps to influencer concentration concept
+                influencer_proxy = reddit_snapshot.engagement_score / 100.0
+                
+                return SocialIntensity(
+                    timestamp=datetime.now().isoformat(),
+                    mention_velocity_7d=reddit_snapshot.mention_velocity_24h / 24.0,  # Scale to hourly
+                    sentiment_divergence=sentiment_divergence,
+                    bot_activity_flag=bot_activity,
+                    influencer_concentration=influencer_proxy,
+                    # Reddit-specific fields
+                    reddit_sentiment=reddit_snapshot.aggregate_sentiment,
+                    reddit_mention_velocity_1h=reddit_snapshot.mention_velocity_1h,
+                    reddit_mention_velocity_24h=reddit_snapshot.mention_velocity_24h,
+                    reddit_virality_flag=reddit_snapshot.virality_flag,
+                    reddit_engagement_score=reddit_snapshot.engagement_score,
+                    reddit_data_source="reddit_api"
+                )
+            except Exception as e:
+                logger.warning(f"Reddit fetch failed, falling back to proxy: {e}")
+        
+        # Fallback: VIX-based proxy estimation
         vix, vix9d = self._fetch_vix_data()
         
         # Estimate mention velocity from VIX level
@@ -306,7 +360,8 @@ class BehavioralSentimentFetcher:
             mention_velocity_7d=base_velocity,
             sentiment_divergence=sentiment_div,
             bot_activity_flag=vix > 30,  # Flag during high vol
-            influencer_concentration=0.15  # Typical
+            influencer_concentration=0.15,  # Typical
+            reddit_data_source="proxy"
         )
     
     def _calculate_options_sentiment(self) -> OptionsSentiment:
