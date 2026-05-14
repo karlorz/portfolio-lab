@@ -1,289 +1,296 @@
-"""FX Currency Carry data fetcher for UUP/UDN ETFs.
+"""
+FX Currency Carry Data Fetcher
+Fetches UUP/UDN data for currency carry signal detection.
 
-Fetches UUP (US Dollar Bullish) and UDN (US Dollar Bearish) data
-from Yahoo Finance for currency carry regime detection.
+Part of v3.15: FX Currency Carry Overlay
 """
 
+import os
 import json
 import sqlite3
+import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Dict, Any
+import requests
 
-import yfinance as yf
-import numpy as np
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Data directory (consistent with other modules)
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-
-# Constants
-CACHE_DB = DATA_DIR / "fx_cache.db"
+DB_PATH = Path("data/market.db")
 CACHE_TTL_HOURS = 4
-UUP_SYMBOL = "UUP"
-UDN_SYMBOL = "UDN"
 
 
 @dataclass
 class FXMetrics:
-    """FX carry metrics for UUP/UDN."""
+    """Currency carry metrics for UUP/UDN analysis."""
     timestamp: str
     uup_price: float
     udn_price: float
     uup_return_30d: float
     udn_return_30d: float
     usd_strength_score: float  # -1.0 to 1.0
-    carry_regime: str  # positive, negative, neutral
-    momentum_direction: str  # bullish, bearish, neutral
-    volatility_regime: str  # low, medium, high
-    
-    def to_dict(self) -> dict:
-        return asdict(self)
-    
-    def to_json(self) -> str:
-        return json.dumps(self.to_dict(), indent=2)
+    carry_regime: str  # positive/negative/neutral
+    momentum_direction: str  # bullish/bearish/neutral
+    volatility_regime: str  # low/medium/high
+    data_freshness_hours: float
 
 
-def init_cache():
-    """Initialize SQLite cache for FX data."""
-    CACHE_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(CACHE_DB)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fx_data (
-            symbol TEXT PRIMARY KEY,
-            price REAL,
-            return_30d REAL,
-            volatility REAL,
-            timestamp TEXT
+class FXFetcher:
+    """Fetches and caches UUP/UDN data from Yahoo Finance."""
+    
+    def __init__(self, db_path: Optional[Path] = None):
+        self.db_path = db_path or DB_PATH
+        self._init_db()
+    
+    def _init_db(self):
+        """Initialize SQLite cache table."""
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS fx_cache (
+                    symbol TEXT PRIMARY KEY,
+                    price REAL,
+                    price_30d_ago REAL,
+                    volatility_30d REAL,
+                    updated_at TIMESTAMP
+                )
+            """)
+            conn.commit()
+    
+    def _is_cache_fresh(self, symbol: str) -> bool:
+        """Check if cache entry is within TTL."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT updated_at FROM fx_cache WHERE symbol = ?",
+                (symbol,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+            updated = datetime.fromisoformat(row[0])
+            age = datetime.now() - updated
+            return age < timedelta(hours=CACHE_TTL_HOURS)
+    
+    def _fetch_yahoo(self, symbol: str) -> Dict[str, Any]:
+        """Fetch data from Yahoo Finance v8 API."""
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        params = {
+            "interval": "1d",
+            "range": "60d",
+            "events": "div,splits"
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; PortfolioLab/1.0)"
+        }
+        
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            
+            result = data["chart"]["result"][0]
+            timestamps = result["timestamp"]
+            prices = result["indicators"]["adjclose"][0]["adjclose"]
+            
+            # Filter None values
+            valid_data = [(ts, p) for ts, p in zip(timestamps, prices) if p is not None]
+            
+            if len(valid_data) < 30:
+                raise ValueError(f"Insufficient data: {len(valid_data)} days")
+            
+            current_price = valid_data[-1][1]
+            price_30d_ago = valid_data[-31][1] if len(valid_data) >= 31 else valid_data[0][1]
+            
+            # Calculate 30-day volatility
+            returns = []
+            for i in range(1, min(31, len(valid_data))):
+                if valid_data[i-1][1] > 0:
+                    ret = (valid_data[i][1] - valid_data[i-1][1]) / valid_data[i-1][1]
+                    returns.append(ret)
+            
+            if len(returns) > 1:
+                import statistics
+                volatility = statistics.stdev(returns) * (252 ** 0.5)  # Annualized
+            else:
+                volatility = 0.1  # Default 10%
+            
+            return {
+                "price": current_price,
+                "price_30d_ago": price_30d_ago,
+                "volatility_30d": volatility,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching {symbol}: {e}")
+            raise
+    
+    def _get_cached_or_fetch(self, symbol: str) -> Dict[str, Any]:
+        """Get data from cache or fetch fresh."""
+        if self._is_cache_fresh(symbol):
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT price, price_30d_ago, volatility_30d, updated_at FROM fx_cache WHERE symbol = ?",
+                    (symbol,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "price": row[0],
+                        "price_30d_ago": row[1],
+                        "volatility_30d": row[2],
+                        "timestamp": row[3]
+                    }
+        
+        # Fetch fresh data
+        data = self._fetch_yahoo(symbol)
+        
+        # Update cache
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO fx_cache 
+                   (symbol, price, price_30d_ago, volatility_30d, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (symbol, data["price"], data["price_30d_ago"], 
+                 data["volatility_30d"], data["timestamp"])
+            )
+            conn.commit()
+        
+        return data
+    
+    def fetch_metrics(self) -> FXMetrics:
+        """Fetch and compute FX carry metrics."""
+        uup_data = self._get_cached_or_fetch("UUP")
+        udn_data = self._get_cached_or_fetch("UDN")
+        
+        # Calculate returns
+        uup_return = ((uup_data["price"] - uup_data["price_30d_ago"]) 
+                      / uup_data["price_30d_ago"]) * 100
+        udn_return = ((udn_data["price"] - udn_data["price_30d_ago"]) 
+                      / udn_data["price_30d_ago"]) * 100
+        
+        # USD strength score (-1.0 to 1.0)
+        usd_strength = (uup_return - udn_return) / 8.0  # Normalize
+        usd_strength = max(-1.0, min(1.0, usd_strength))
+        
+        # Determine regimes
+        USD_BULL_THRESHOLD = 2.0
+        USD_BEAR_THRESHOLD = -2.0
+        
+        if uup_return > USD_BULL_THRESHOLD and udn_return < -1.0:
+            carry_regime = "positive"
+            momentum_direction = "bullish"
+        elif udn_return > USD_BULL_THRESHOLD and uup_return < -1.0:
+            carry_regime = "negative"
+            momentum_direction = "bearish"
+        else:
+            carry_regime = "neutral"
+            momentum_direction = "neutral"
+        
+        # Average volatility
+        avg_vol = (uup_data["volatility_30d"] + udn_data["volatility_30d"]) / 2
+        if avg_vol < 0.08:
+            volatility_regime = "low"
+        elif avg_vol < 0.15:
+            volatility_regime = "medium"
+        else:
+            volatility_regime = "high"
+        
+        # Calculate freshness
+        updated = datetime.fromisoformat(uup_data["timestamp"])
+        freshness_hours = (datetime.now() - updated).total_seconds() / 3600
+        
+        return FXMetrics(
+            timestamp=datetime.now().isoformat(),
+            uup_price=uup_data["price"],
+            udn_price=udn_data["price"],
+            uup_return_30d=round(uup_return, 2),
+            udn_return_30d=round(udn_return, 2),
+            usd_strength_score=round(usd_strength, 2),
+            carry_regime=carry_regime,
+            momentum_direction=momentum_direction,
+            volatility_regime=volatility_regime,
+            data_freshness_hours=round(freshness_hours, 1)
         )
-    """)
-    conn.commit()
-    conn.close()
-
-
-def get_cached_data(symbol: str) -> Optional[dict]:
-    """Get cached FX data if fresh."""
-    if not CACHE_DB.exists():
-        return None
     
-    conn = sqlite3.connect(CACHE_DB)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT price, return_30d, volatility, timestamp FROM fx_data WHERE symbol = ?",
-        (symbol,)
-    )
-    row = cursor.fetchone()
-    conn.close()
+    def save_metrics(self, metrics: FXMetrics, output_path: Optional[Path] = None):
+        """Save metrics to JSON file."""
+        output_path = output_path or Path("data/fx_metrics.json")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            json.dump(asdict(metrics), f, indent=2)
+        
+        logger.info(f"Saved FX metrics to {output_path}")
     
-    if row is None:
-        return None
-    
-    price, ret_30d, vol, timestamp = row
-    cached_time = datetime.fromisoformat(timestamp)
-    
-    if datetime.now() - cached_time > timedelta(hours=CACHE_TTL_HOURS):
-        return None
-    
-    return {
-        "price": price,
-        "return_30d": ret_30d,
-        "volatility": vol,
-        "timestamp": timestamp
-    }
-
-
-def save_to_cache(symbol: str, price: float, ret_30d: float, volatility: float):
-    """Save FX data to cache."""
-    init_cache()
-    conn = sqlite3.connect(CACHE_DB)
-    cursor = conn.cursor()
-    cursor.execute(
-        """INSERT OR REPLACE INTO fx_data (symbol, price, return_30d, volatility, timestamp)
-           VALUES (?, ?, ?, ?, ?)""",
-        (symbol, price, ret_30d, volatility, datetime.now().isoformat())
-    )
-    conn.commit()
-    conn.close()
-
-
-def fetch_etf_data(symbol: str) -> Tuple[float, float, float]:
-    """Fetch ETF price and calculate 30-day return and volatility.
-    
-    Returns:
-        Tuple of (current_price, return_30d, volatility)
-    """
-    # Check cache first
-    cached = get_cached_data(symbol)
-    if cached:
-        return cached["price"], cached["return_30d"], cached["volatility"]
-    
-    # Fetch from Yahoo Finance
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="60d")
-    
-    if len(hist) < 30:
-        raise ValueError(f"Insufficient data for {symbol}: {len(hist)} days")
-    
-    current_price = hist["Close"].iloc[-1]
-    price_30d_ago = hist["Close"].iloc[-30]
-    
-    return_30d = ((current_price / price_30d_ago) - 1) * 100
-    
-    # Calculate 30-day volatility (annualized)
-    returns_30d = hist["Close"].iloc[-30:].pct_change().dropna()
-    volatility = returns_30d.std() * np.sqrt(252) * 100
-    
-    # Cache the result
-    save_to_cache(symbol, current_price, return_30d, volatility)
-    
-    return current_price, return_30d, volatility
-
-
-def calculate_usd_strength_score(uup_return: float, udn_return: float) -> float:
-    """Calculate USD strength score from -1.0 to 1.0."""
-    # Normalize based on typical ranges (±4%)
-    raw_score = (uup_return - udn_return) / 8.0
-    return max(-1.0, min(1.0, raw_score))
-
-
-def classify_carry_regime(uup_return: float, udn_return: float) -> str:
-    """Classify carry regime based on momentum."""
-    if uup_return > 2.0 and udn_return < -1.0:
-        return "positive"  # USD carry advantage
-    elif udn_return > 2.0 and uup_return < -1.0:
-        return "negative"  # USD carry disadvantage
-    else:
-        return "neutral"
-
-
-def classify_momentum_direction(uup_return: float, udn_return: float) -> str:
-    """Classify momentum direction."""
-    if uup_return > 2.0 and udn_return < -1.0:
-        return "bullish"
-    elif udn_return > 2.0 and uup_return < -1.0:
-        return "bearish"
-    else:
-        return "neutral"
-
-
-def classify_volatility_regime(volatility: float) -> str:
-    """Classify volatility regime."""
-    if volatility < 8:
-        return "low"
-    elif volatility < 15:
-        return "medium"
-    else:
-        return "high"
-
-
-def fetch_fx_metrics() -> FXMetrics:
-    """Fetch complete FX metrics for UUP/UDN."""
-    uup_price, uup_return, uup_vol = fetch_etf_data(UUP_SYMBOL)
-    udn_price, udn_return, udn_vol = fetch_etf_data(UDN_SYMBOL)
-    
-    # Use average volatility for regime classification
-    avg_volatility = (uup_vol + udn_vol) / 2
-    
-    usd_strength = calculate_usd_strength_score(uup_return, udn_return)
-    carry_regime = classify_carry_regime(uup_return, udn_return)
-    momentum = classify_momentum_direction(uup_return, udn_return)
-    vol_regime = classify_volatility_regime(avg_volatility)
-    
-    return FXMetrics(
-        timestamp=datetime.now().isoformat(),
-        uup_price=uup_price,
-        udn_price=udn_price,
-        uup_return_30d=uup_return,
-        udn_return_30d=udn_return,
-        usd_strength_score=usd_strength,
-        carry_regime=carry_regime,
-        momentum_direction=momentum,
-        volatility_regime=vol_regime
-    )
-
-
-def save_metrics(metrics: FXMetrics, filepath: Optional[Path] = None) -> Path:
-    """Save metrics to JSON file."""
-    if filepath is None:
-        filepath = DATA_DIR / "fx_metrics.json"
-    
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w") as f:
-        f.write(metrics.to_json())
-    
-    return filepath
-
-
-def load_latest_metrics(filepath: Optional[Path] = None) -> Optional[FXMetrics]:
-    """Load latest metrics from file."""
-    if filepath is None:
-        filepath = DATA_DIR / "fx_metrics.json"
-    
-    if not filepath.exists():
-        return None
-    
-    with open(filepath) as f:
-        data = json.load(f)
-    
-    return FXMetrics(**data)
-
-
-def get_signal_summary() -> dict:
-    """Get human-readable signal summary."""
-    metrics = fetch_fx_metrics()
-    
-    return {
-        "timestamp": metrics.timestamp,
-        "uup_30d_return": f"{metrics.uup_return_30d:.2f}%",
-        "udn_30d_return": f"{metrics.udn_return_30d:.2f}%",
-        "usd_strength": f"{metrics.usd_strength_score:.2f}",
-        "carry_regime": metrics.carry_regime,
-        "momentum": metrics.momentum_direction,
-        "volatility": metrics.volatility_regime,
-        "signal": "USD_STRENGTH" if metrics.carry_regime == "positive" else
-                  "USD_WEAKNESS" if metrics.carry_regime == "negative" else
-                  "NEUTRAL"
-    }
+    def get_signal(self) -> Dict[str, Any]:
+        """Get current carry signal for ensemble integration."""
+        metrics = self.fetch_metrics()
+        
+        # Risk controls
+        if metrics.volatility_regime == "high":
+            signal_type = "neutral"
+            confidence = 0.0
+            reason = "high_volatility"
+        elif metrics.carry_regime == "neutral":
+            signal_type = "neutral"
+            confidence = 0.0
+            reason = "no_clear_regime"
+        else:
+            signal_type = "usd_strength" if metrics.momentum_direction == "bullish" else "usd_weakness"
+            # Confidence based on strength score
+            confidence = min(abs(metrics.usd_strength_score), 1.0)
+            reason = "momentum_aligned"
+        
+        return {
+            "signal_type": signal_type,
+            "confidence": round(confidence, 2),
+            "regime": metrics.carry_regime,
+            "direction": metrics.momentum_direction,
+            "reason": reason,
+            "timestamp": metrics.timestamp
+        }
 
 
 def main():
-    """CLI entry point."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="FX Currency Carry data fetcher")
-    parser.add_argument("--fetch", action="store_true", help="Fetch fresh data")
-    parser.add_argument("--save", action="store_true", help="Save to file")
-    parser.add_argument("--signal", action="store_true", help="Print signal summary")
-    parser.add_argument("--history", action="store_true", help="Show historical context")
+    parser = argparse.ArgumentParser(description="FX Currency Carry Data Fetcher")
+    parser.add_argument("--fetch", action="store_true", help="Fetch current metrics")
+    parser.add_argument("--save", action="store_true", help="Save to JSON file")
+    parser.add_argument("--signal", action="store_true", help="Get signal for ensemble")
+    parser.add_argument("--output", type=str, default="data/fx_metrics.json", 
+                       help="Output file path")
+    parser.add_argument("--history", action="store_true", 
+                       help="Show 30-day momentum history")
     
     args = parser.parse_args()
     
-    if args.fetch or args.save or args.signal or not any([args.fetch, args.save, args.signal, args.history]):
-        metrics = fetch_fx_metrics()
+    fetcher = FXFetcher()
+    
+    if args.fetch or (not args.signal and not args.history):
+        metrics = fetcher.fetch_metrics()
+        print(json.dumps(asdict(metrics), indent=2))
         
         if args.save:
-            path = save_metrics(metrics)
-            print(f"Saved to {path}")
-        
-        if args.signal or not args.save:
-            summary = get_signal_summary()
-            print(json.dumps(summary, indent=2))
+            fetcher.save_metrics(metrics, Path(args.output))
+    
+    if args.signal:
+        signal = fetcher.get_signal()
+        print(json.dumps(signal, indent=2))
     
     if args.history:
-        # Load cached data for historical context
-        conn = sqlite3.connect(CACHE_DB)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT symbol, price, return_30d, timestamp FROM fx_data ORDER BY timestamp DESC LIMIT 10"
-        )
-        rows = cursor.fetchall()
-        conn.close()
-        
-        print("Historical FX Data (last cached):")
-        for row in rows:
-            symbol, price, ret_30d, timestamp = row
-            print(f"  {symbol}: ${price:.2f} ({ret_30d:+.2f}%) at {timestamp}")
+        # Show current momentum context
+        metrics = fetcher.fetch_metrics()
+        print(f"\n30-Day Momentum History Context:")
+        print(f"  UUP: {metrics.uup_return_30d:+.2f}%")
+        print(f"  UDN: {metrics.udn_return_30d:+.2f}%")
+        print(f"  USD Strength: {metrics.usd_strength_score:+.2f}")
+        print(f"  Regime: {metrics.carry_regime.upper()}")
+        print(f"  Direction: {metrics.momentum_direction.upper()}")
+        print(f"  Volatility: {metrics.volatility_regime.upper()}")
 
 
 if __name__ == "__main__":

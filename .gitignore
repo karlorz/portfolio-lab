@@ -149,3 +149,4 @@ dist/
 .venv/
 uv.lock
 .python-version
+raw/market/
