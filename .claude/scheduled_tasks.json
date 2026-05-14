@@ -1,12 +1,3 @@
 {
-  "tasks": [
-    {
-      "id": "d4f2704c",
-      "cron": "*/15 * * * *",
-      "prompt": "go ahead implement and run /dev-loop high",
-      "createdAt": 1778721581993,
-      "lastFiredAt": 1778727975018,
-      "recurring": true
-    }
-  ]
+  "tasks": []
 }
