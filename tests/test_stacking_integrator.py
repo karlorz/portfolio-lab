@@ -1,732 +1,553 @@
-#!/usr/bin/env python3
 """
-Tests for stacking_integrator.py (v3.10 Phase 3)
+Tests for Stacking Ensemble Integrator (v3.10 Phase 3)
 
-Target: 20+ tests covering:
-- Initialization and model loading
-- Prediction logic with/without model
-- Fallback mechanisms
-- Feature vector creation
-- Model status reporting
-- Edge cases (missing model, old model, low confidence)
+Covers:
+- Model loading and metadata
+- Prediction with and without model
+- Fallback to weighted voting
+- Feature extraction
+- Drift detection
+- Prediction history tracking
+
+Author: Portfolio-Lab Agent
+Version: v3.10 Phase 3
 """
 
-import unittest
-import json
-import pickle
-import tempfile
-import shutil
-from pathlib import Path
-from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, MagicMock
+import pytest
 import numpy as np
+import pickle
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import Mock, MagicMock, patch
+import tempfile
 
-# Add project root to path
+# Add src to path
 import sys
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, '/root/projects/portfolio-lab/src')
 
-from src.signals.stacking_integrator import (
-    StackingEnsembleIntegrator, StackingPrediction, ModelMetadata
+from signals.stacking_integrator import (
+    StackingIntegrator,
+    StackingPrediction,
+    ModelMetadata,
+    get_stacking_prediction
 )
-from src.signals.stacking_feature_engine import (
-    SignalSource, RegimeContext, Signal, HistoricalAccuracy
-)
 
 
-class TestModelMetadata(unittest.TestCase):
-    """Test ModelMetadata dataclass."""
+class TestStackingPrediction:
+    """Test StackingPrediction dataclass"""
     
-    def test_basic_creation(self):
-        """Test creating ModelMetadata with required fields."""
-        meta = ModelMetadata(
-            version="v1.0",
-            training_date=datetime.now().isoformat(),
-            train_accuracy=0.75,
-            validation_accuracy=0.72,
-            validation_auc=0.78,
-            top_features=[("feature1", 0.15), ("feature2", 0.12)],
-            feature_count=102,
-            samples_trained=1000
-        )
-        
-        self.assertEqual(meta.version, "v1.0")
-        self.assertEqual(meta.train_accuracy, 0.75)
-        self.assertEqual(len(meta.top_features), 2)
-    
-    def test_age_days_fresh_model(self):
-        """Test age calculation for fresh model."""
-        meta = ModelMetadata(
-            version="v1.0",
-            training_date=datetime.now().isoformat(),
-            train_accuracy=0.75,
-            validation_accuracy=0.72,
-            validation_auc=0.78,
-            top_features=[],
-            feature_count=102,
-            samples_trained=1000
-        )
-        
-        # Should be 0 or 1 days old
-        self.assertLessEqual(meta.age_days, 1)
-    
-    def test_age_days_old_model(self):
-        """Test age calculation for old model."""
-        old_date = (datetime.now() - timedelta(days=100)).isoformat()
-        meta = ModelMetadata(
-            version="v1.0",
-            training_date=old_date,
-            train_accuracy=0.75,
-            validation_accuracy=0.72,
-            validation_auc=0.78,
-            top_features=[],
-            feature_count=102,
-            samples_trained=1000
-        )
-        
-        self.assertGreaterEqual(meta.age_days, 99)
-        self.assertLessEqual(meta.age_days, 101)
-
-
-class TestStackingPrediction(unittest.TestCase):
-    """Test StackingPrediction dataclass."""
-    
-    def test_basic_creation(self):
-        """Test creating prediction with all fields."""
+    def test_prediction_creation(self):
+        """Test creating a prediction object"""
         pred = StackingPrediction(
-            timestamp=datetime.now().isoformat(),
-            direction=1,
+            direction='bullish',
             confidence=0.75,
-            raw_probability=0.72,
-            feature_vector=[0.1] * 102,
-            top_features=[("f1", 0.1), ("f2", 0.08)],
-            used_fallback=False,
-            fallback_reason=None,
-            model_version="v1.0",
-            model_age_days=5,
-            regime="normal",
-            vix_level=18.5
+            probability_bullish=0.75,
+            probability_bearish=0.15,
+            probability_neutral=0.10,
+            fallback_used=False,
+            model_version='v1.0',
+            latency_ms=2.5
         )
         
-        self.assertEqual(pred.direction, 1)
-        self.assertEqual(pred.confidence, 0.75)
-        self.assertEqual(len(pred.feature_vector), 102)
-
-
-class TestIntegratorInitialization(unittest.TestCase):
-    """Test StackingEnsembleIntegrator initialization."""
+        assert pred.direction == 'bullish'
+        assert pred.confidence == 0.75
+        assert not pred.fallback_used
+        assert pred.model_version == 'v1.0'
+        assert pred.latency_ms == 2.5
+        assert isinstance(pred.timestamp, datetime)
     
-    def setUp(self):
-        """Create temporary directory for test models."""
-        self.temp_dir = tempfile.mkdtemp()
-        self.models_dir = Path(self.temp_dir) / "models"
-        self.models_dir.mkdir()
-    
-    def tearDown(self):
-        """Clean up temporary directory."""
-        shutil.rmtree(self.temp_dir)
-    
-    def test_init_no_model(self):
-        """Test initialization when no model exists."""
-        integrator = StackingEnsembleIntegrator(
-            model_path=None,
-            fallback_enabled=True
+    def test_prediction_defaults(self):
+        """Test prediction with default values"""
+        pred = StackingPrediction(
+            direction='neutral',
+            confidence=0.5,
+            probability_bullish=0.33,
+            probability_bearish=0.33,
+            probability_neutral=0.34,
+            fallback_used=True
         )
         
-        self.assertIsNone(integrator.model)
-        self.assertIsNone(integrator.model_metadata)
-        status = integrator.get_model_status()
-        self.assertEqual(status["status"], "unavailable")
+        assert pred.top_features == []
+        assert isinstance(pred.timestamp, datetime)
+        assert pred.model_version == 'unknown'
+        assert pred.latency_ms == 0.0
+
+
+class TestModelMetadata:
+    """Test ModelMetadata dataclass"""
     
-    def test_init_with_mock_model(self):
-        """Test initialization with a mock model file."""
-        # Create simple dict model that can be pickled
-        mock_model = {"version": "test", "predict_proba": None}
+    def test_metadata_creation(self):
+        """Test creating metadata object"""
+        meta = ModelMetadata(
+            version='v1.2',
+            training_date=datetime(2026, 5, 1),
+            feature_count=102,
+            accuracy_train=0.75,
+            accuracy_val=0.68,
+            feature_importance={'feature_1': 0.15, 'feature_2': 0.12},
+            total_samples=15000
+        )
         
-        model_path = self.models_dir / "test_model.pkl"
+        assert meta.version == 'v1.2'
+        assert meta.feature_count == 102
+        assert meta.accuracy_train == 0.75
+        assert len(meta.feature_importance) == 2
+
+
+class TestStackingIntegratorInit:
+    """Test StackingIntegrator initialization"""
+    
+    def test_init_without_model(self):
+        """Test integrator initializes without model"""
+        integrator = StackingIntegrator()
+        
+        assert integrator.model is None
+        assert integrator.metadata is None
+        assert integrator.fallback_threshold == 0.6
+        assert integrator.prediction_history == []
+    
+    def test_init_with_custom_threshold(self):
+        """Test integrator with custom fallback threshold"""
+        integrator = StackingIntegrator(fallback_threshold=0.7)
+        
+        assert integrator.fallback_threshold == 0.7
+    
+    def test_init_with_feature_engine(self):
+        """Test integrator with feature engine"""
+        mock_engine = Mock()
+        integrator = StackingIntegrator(feature_engine=mock_engine)
+        
+        assert integrator.feature_engine == mock_engine
+
+
+# Create picklable mock models at module level
+class PicklableModel:
+    """Picklable mock model for testing"""
+    def __init__(self, probs):
+        self.classes_ = ['bearish', 'neutral', 'bullish']
+        self._probs = probs
+    
+    def predict_proba(self, X):
+        return np.array([self._probs])
+
+
+class PicklableModelLowConf:
+    """Picklable mock model returning low confidence"""
+    def __init__(self):
+        self.classes_ = ['bearish', 'neutral', 'bullish']
+    
+    def predict_proba(self, X):
+        return np.array([[0.3, 0.35, 0.35]])
+
+
+class TestModelLoading:
+    """Test model loading functionality"""
+    
+    def test_load_valid_model(self, tmp_path):
+        """Test loading a valid model pickle"""
+        model_data = {
+            'model': PicklableModel([0.1, 0.2, 0.7]),
+            'metadata': {
+                'version': 'v1.0',
+                'training_date': datetime(2026, 5, 1),
+                'feature_count': 102,
+                'accuracy_train': 0.75,
+                'accuracy_val': 0.68,
+                'feature_importance': {'feat_1': 0.15},
+                'total_samples': 10000
+            }
+        }
+        
+        model_path = tmp_path / "test_model.pkl"
         with open(model_path, 'wb') as f:
-            pickle.dump(mock_model, f)
+            pickle.dump(model_data, f)
         
-        # Create metadata
-        meta = {
-            "version": "test_v1",
-            "training_date": datetime.now().isoformat(),
-            "train_accuracy": 0.75,
-            "validation_accuracy": 0.72,
-            "validation_auc": 0.78,
-            "top_features": [("f1", 0.15), ("f2", 0.12)],
-            "feature_count": 102,
-            "samples_trained": 1000
+        integrator = StackingIntegrator()
+        result = integrator.load_model(model_path)
+        
+        assert result is True
+        assert integrator.model is not None
+        assert integrator.metadata is not None
+        assert integrator.metadata.version == 'v1.0'
+        assert integrator.metadata.accuracy_val == 0.68
+    
+    def test_load_invalid_model(self, tmp_path):
+        """Test loading non-existent model"""
+        integrator = StackingIntegrator()
+        result = integrator.load_model(tmp_path / "nonexistent.pkl")
+        
+        assert result is False
+        assert integrator.model is None
+    
+    def test_load_corrupted_model(self, tmp_path):
+        """Test loading corrupted pickle file"""
+        model_path = tmp_path / "corrupted.pkl"
+        with open(model_path, 'wb') as f:
+            f.write(b'not a valid pickle')
+        
+        integrator = StackingIntegrator()
+        result = integrator.load_model(model_path)
+        
+        assert result is False
+
+
+class TestPredictionWithoutModel:
+    """Test prediction when no model loaded"""
+    
+    def test_fallback_to_weighted_voting(self):
+        """Test fallback when no model available"""
+        integrator = StackingIntegrator()
+        
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.8, 'strength': 0.7},
+            'hmm_regime': {'direction': 'bullish', 'confidence': 0.6, 'strength': 0.5},
+            'base': {'direction': 'neutral', 'confidence': 0.5, 'strength': 0.3}
         }
         
-        meta_path = model_path.with_suffix('.json')
-        with open(meta_path, 'w') as f:
-            json.dump(meta, f)
+        result = integrator.predict(base_signals)
         
-        # Initialize integrator
-        integrator = StackingEnsembleIntegrator(
-            model_path=model_path,
-            db_path=None,
-            fallback_enabled=True
+        assert isinstance(result, StackingPrediction)
+        assert result.fallback_used is True
+        assert result.model_version == 'fallback_v2.81'
+        assert result.confidence > 0
+        assert result.direction in ['bullish', 'bearish', 'neutral']
+    
+    def test_weighted_voting_calculation(self):
+        """Test weighted voting produces correct results"""
+        integrator = StackingIntegrator()
+        
+        # All bullish signals with high confidence
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.9, 'strength': 0.8},
+            'hmm_regime': {'direction': 'bullish', 'confidence': 0.9, 'strength': 0.8},
+            'fed_policy': {'direction': 'bullish', 'confidence': 0.9, 'strength': 0.8},
+        }
+        
+        result = integrator.predict(base_signals)
+        
+        assert result.direction == 'bullish'
+        assert result.probability_bullish > result.probability_bearish
+        assert result.probability_bullish > result.probability_neutral
+
+
+class TestPredictionWithModel:
+    """Test prediction with loaded model"""
+    
+    def test_high_confidence_prediction(self, tmp_path):
+        """Test prediction when model gives high confidence"""
+        model_data = {
+            'model': PicklableModel([0.05, 0.10, 0.85]),
+            'metadata': {
+                'version': 'v2.0',
+                'training_date': datetime(2026, 5, 1),
+                'feature_count': 102,
+                'accuracy_train': 0.80,
+                'accuracy_val': 0.75,
+                'feature_importance': {},
+                'total_samples': 20000
+            }
+        }
+        
+        model_path = tmp_path / "test_model.pkl"
+        with open(model_path, 'wb') as f:
+            pickle.dump(model_data, f)
+        
+        integrator = StackingIntegrator(model_path=model_path)
+        
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.8},
+            'hmm_regime': {'direction': 'bullish', 'confidence': 0.7}
+        }
+        
+        result = integrator.predict(base_signals)
+        
+        assert result.fallback_used is False
+        assert result.direction == 'bullish'
+        assert result.confidence == 0.85
+        assert result.probability_bullish == 0.85
+        assert result.model_version == 'v2.0'
+    
+    def test_low_confidence_fallback(self, tmp_path):
+        """Test fallback when model confidence is below threshold"""
+        model_data = {
+            'model': PicklableModelLowConf(),
+            'metadata': {
+                'version': 'v1.0',
+                'training_date': datetime(2026, 5, 1),
+                'feature_count': 102,
+                'accuracy_train': 0.75,
+                'accuracy_val': 0.68,
+                'feature_importance': {},
+                'total_samples': 10000
+            }
+        }
+        
+        model_path = tmp_path / "test_model.pkl"
+        with open(model_path, 'wb') as f:
+            pickle.dump(model_data, f)
+        
+        integrator = StackingIntegrator(model_path=model_path, fallback_threshold=0.6)
+        
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.8}
+        }
+        
+        result = integrator.predict(base_signals)
+        
+        # Should fallback due to low confidence (0.35 < 0.6)
+        assert result.fallback_used is True
+
+
+class TestFeatureExtraction:
+    """Test feature extraction functionality"""
+    
+    def test_simple_feature_extraction(self):
+        """Test simple feature extraction without feature engine"""
+        integrator = StackingIntegrator()
+        integrator.metadata = Mock()
+        integrator.metadata.feature_count = 20
+        
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.8, 'strength': 0.7},
+            'hmm_regime': {'direction': 'bearish', 'confidence': 0.6, 'strength': 0.5}
+        }
+        
+        features = integrator._extract_simple_features(
+            base_signals, 'bull', 20.0
         )
         
-        self.assertIsNotNone(integrator.model)
-        self.assertIsNotNone(integrator.model_metadata)
-        if integrator.model_metadata:
-            self.assertEqual(integrator.model_metadata.version, "test_v1")
+        assert isinstance(features, np.ndarray)
+        assert len(features) == 20  # Should pad to metadata count
+        assert features.dtype == np.float32
     
-    def test_find_latest_model(self):
-        """Test finding latest model in models directory."""
-        # Create multiple model files with dummy content (not mock - can't pickle)
+    def test_feature_extraction_with_none_regime(self):
+        """Test feature extraction with None regime"""
+        integrator = StackingIntegrator()
+        
+        base_signals = {'tsmom': {'direction': 'neutral', 'confidence': 0.5}}
+        
+        features = integrator._extract_simple_features(
+            base_signals, None, None
+        )
+        
+        assert isinstance(features, np.ndarray)
+        assert len(features) > 0
+
+
+class TestPredictionHistory:
+    """Test prediction history tracking"""
+    
+    def test_history_tracking(self):
+        """Test predictions are added to history"""
+        integrator = StackingIntegrator()
+        
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.8}
+        }
+        
+        # Make multiple predictions
+        for _ in range(5):
+            integrator.predict(base_signals)
+        
+        assert len(integrator.prediction_history) == 5
+    
+    def test_history_size_limit(self):
+        """Test history is limited to max size"""
+        integrator = StackingIntegrator()
+        integrator.max_history = 10
+        
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.8}
+        }
+        
+        # Make more predictions than limit
+        for _ in range(15):
+            integrator.predict(base_signals)
+        
+        assert len(integrator.prediction_history) == 10
+    
+    def test_get_accuracy_stats(self):
+        """Test accuracy statistics calculation"""
+        integrator = StackingIntegrator()
+        
+        # Add some mock predictions
+        for i in range(5):
+            pred = StackingPrediction(
+                direction='bullish',
+                confidence=0.7 + i * 0.05,
+                probability_bullish=0.7,
+                probability_bearish=0.15,
+                probability_neutral=0.15,
+                fallback_used=i % 2 == 0,
+                latency_ms=2.0 + i
+            )
+            integrator.prediction_history.append(pred)
+        
+        stats = integrator.get_accuracy_stats(window_days=30)
+        
+        assert stats['count'] == 5
+        assert stats['fallback_rate'] == 0.6  # 3 out of 5 (indices 0, 2, 4 are True)
+        assert stats['avg_confidence'] > 0
+        assert stats['avg_latency_ms'] > 0
+    
+    def test_accuracy_stats_empty_history(self):
+        """Test accuracy stats with empty history"""
+        integrator = StackingIntegrator()
+        
+        stats = integrator.get_accuracy_stats()
+        
+        assert stats['accuracy'] == 0.0
+        assert stats['count'] == 0
+        assert stats['fallback_rate'] == 0.0
+
+
+class TestDriftDetection:
+    """Test model drift detection"""
+    
+    def test_no_drift_normal_operation(self):
+        """Test no drift detected with normal fallback rate"""
+        integrator = StackingIntegrator()
+        integrator.metadata = Mock()
+        integrator.metadata.accuracy_train = 0.75
+        integrator.metadata.accuracy_val = 0.70
+        
+        # Add predictions with low fallback rate
+        for i in range(10):
+            pred = StackingPrediction(
+                direction='bullish',
+                confidence=0.8,
+                probability_bullish=0.8,
+                probability_bearish=0.1,
+                probability_neutral=0.1,
+                fallback_used=False
+            )
+            integrator.prediction_history.append(pred)
+        
+        drift = integrator.detect_drift()
+        
+        assert drift is None
+    
+    def test_drift_high_fallback_rate(self):
+        """Test drift detected with high fallback rate"""
+        integrator = StackingIntegrator()
+        integrator.metadata = Mock()
+        integrator.metadata.accuracy_train = 0.75
+        integrator.metadata.accuracy_val = 0.70
+        
+        # Add predictions with high fallback rate
+        for i in range(10):
+            pred = StackingPrediction(
+                direction='bullish',
+                confidence=0.8,
+                probability_bullish=0.8,
+                probability_bearish=0.1,
+                probability_neutral=0.1,
+                fallback_used=True  # All fallback
+            )
+            integrator.prediction_history.append(pred)
+        
+        drift = integrator.detect_drift()
+        
+        assert drift is not None
+        assert 'High fallback rate' in drift
+    
+    def test_drift_no_metadata(self):
+        """Test drift detection with no metadata"""
+        integrator = StackingIntegrator()
+        
+        drift = integrator.detect_drift()
+        
+        assert drift is None
+
+
+class TestExport:
+    """Test prediction log export"""
+    
+    def test_export_prediction_log(self, tmp_path):
+        """Test exporting prediction history to JSON"""
+        integrator = StackingIntegrator()
+        
+        # Add some predictions
         for i in range(3):
-            model_path = self.models_dir / f"signal_stacker_v{i}.pkl"
-            # Write dummy pickle (just a dict that can be pickled)
-            with open(model_path, 'wb') as f:
-                pickle.dump({"version": f"v{i}", "dummy": True}, f)
-            # Add small delay to ensure different mtimes
-            import time
-            time.sleep(0.01)
+            pred = StackingPrediction(
+                direction='bullish',
+                confidence=0.75,
+                probability_bullish=0.75,
+                probability_bearish=0.15,
+                probability_neutral=0.10,
+                fallback_used=False,
+                model_version='v1.0',
+                latency_ms=2.5
+            )
+            integrator.prediction_history.append(pred)
         
-        # Temporarily patch models dir
-        orig_path = self.models_dir
-        test_models = self.models_dir
+        export_path = tmp_path / "predictions.json"
+        result = integrator.export_prediction_log(export_path)
         
-        integrator = StackingEnsembleIntegrator(model_path=None)
-        # Manually set models dir for test
+        assert result is True
+        assert export_path.exists()
         
-        # Find all signal_stacker_*.pkl files
-        model_files = sorted(
-            test_models.glob("signal_stacker_*.pkl"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True
-        )
+        # Verify content
+        with open(export_path) as f:
+            data = json.load(f)
         
-        self.assertEqual(len(model_files), 3)
-        # Most recent should be v2
-        self.assertIn("signal_stacker_v2.pkl", str(model_files[0]))
-
-
-class TestPredictionLogic(unittest.TestCase):
-    """Test prediction generation logic."""
+        assert len(data) == 3
+        assert data[0]['direction'] == 'bullish'
+        assert data[0]['confidence'] == 0.75
     
-    def setUp(self):
-        """Set up integrator with mock data."""
-        self.integrator = StackingEnsembleIntegrator(
-            model_path=None,
-            fallback_enabled=True
-        )
+    def test_export_empty_history(self, tmp_path):
+        """Test exporting empty history"""
+        integrator = StackingIntegrator()
         
-        # Test signals
-        self.test_signals = {
-            SignalSource.TSFM_MOMENTUM: 0.3,
-            SignalSource.CTA_TREND: 0.2,
-            SignalSource.MULTI_SPEED_MOM: 0.1,
-            SignalSource.HMM_REGIME: 0.4,
-            SignalSource.MACRO_MOMENTUM: 0.15,
-            SignalSource.DURATION_REGIME: -0.1,
-            SignalSource.CIRCUIT_BREAKER: 0.0,
-            SignalSource.FACTOR_ROTATION: 0.25
+        export_path = tmp_path / "empty.json"
+        result = integrator.export_prediction_log(export_path)
+        
+        assert result is True
+        
+        with open(export_path) as f:
+            data = json.load(f)
+        
+        assert len(data) == 0
+
+
+class TestConvenienceFunction:
+    """Test the convenience function"""
+    
+    def test_get_stacking_prediction(self):
+        """Test convenience function for getting predictions"""
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.8}
         }
         
-        self.regime_context = RegimeContext(
-            vix_level=18.5,
-            trend_strength=0.3,
-            timestamp=datetime.now()
-        )
-    
-    def test_predict_without_model_uses_fallback(self):
-        """Test that prediction without model uses fallback."""
-        result = self.integrator.predict(
-            signals=self.test_signals,
-            regime_context=self.regime_context
-        )
+        result = get_stacking_prediction(base_signals)
         
-        self.assertIsInstance(result, StackingPrediction)
-        self.assertTrue(result.used_fallback)
-        self.assertEqual(result.fallback_reason, "no_model_available")
-    
-    def test_predict_generates_feature_vector(self):
-        """Test that prediction generates 102-dimensional feature vector."""
-        result = self.integrator.predict(
-            signals=self.test_signals,
-            regime_context=self.regime_context
-        )
-        
-        self.assertIsNotNone(result.feature_vector)
-        if result.feature_vector is not None:
-            self.assertEqual(len(result.feature_vector), 102)
-    
-    def test_predict_with_complete_signals(self):
-        """Test prediction with all 8 signal sources."""
-        result = self.integrator.predict(
-            signals=self.test_signals,
-            regime_context=self.regime_context
-        )
-        
-        # Verify prediction structure
-        self.assertIn(result.direction, [-1, 0, 1])
-        self.assertGreaterEqual(result.confidence, 0.0)
-        self.assertLessEqual(result.confidence, 1.0)
-        self.assertEqual(result.vix_level, 18.5)
+        assert isinstance(result, StackingPrediction)
+        assert result.direction in ['bullish', 'bearish', 'neutral']
 
 
-class TestFallbackLogic(unittest.TestCase):
-    """Test fallback decision logic."""
+class TestPerformance:
+    """Test performance requirements"""
     
-    def setUp(self):
-        """Set up integrator."""
-        self.integrator = StackingEnsembleIntegrator(
-            model_path=None,
-            fallback_enabled=True
-        )
-    
-    def test_fallback_low_confidence(self):
-        """Test fallback triggers on low confidence."""
-        # Create low confidence prediction (with valid model context)
-        pred = StackingPrediction(
-            timestamp=datetime.now().isoformat(),
-            direction=1,
-            confidence=0.5,  # Below threshold
-            raw_probability=0.55,
-            feature_vector=None,
-            top_features=None,
-            used_fallback=False,
-            fallback_reason=None,
-            model_version="v1",
-            model_age_days=5,  # Fresh model
-            regime="normal",
-            vix_level=18.0
-        )
+    def test_prediction_latency(self):
+        """Test prediction latency is under 10ms"""
+        import time
         
-        # Inject a mock model to test confidence logic specifically
-        self.integrator.model = Mock()
+        integrator = StackingIntegrator()
         
-        should_fallback, reason = self.integrator._should_use_fallback(pred)
-        self.assertTrue(should_fallback)
-        self.assertIn("low_confidence", reason)
-    
-    def test_fallback_neutral_prediction(self):
-        """Test fallback triggers on neutral prediction."""
-        pred = StackingPrediction(
-            timestamp=datetime.now().isoformat(),
-            direction=0,
-            confidence=0.7,
-            raw_probability=0.52,  # Near 0.5, neutral
-            feature_vector=None,
-            top_features=None,
-            used_fallback=False,
-            fallback_reason=None,
-            model_version="v1",
-            model_age_days=5,  # Fresh model
-            regime="normal",
-            vix_level=18.0
-        )
-        
-        # Inject a mock model
-        self.integrator.model = Mock()
-        
-        should_fallback, reason = self.integrator._should_use_fallback(pred)
-        self.assertTrue(should_fallback)
-        self.assertIn("neutral_prediction", reason)
-    
-    def test_no_fallback_high_confidence(self):
-        """Test no fallback on high confidence prediction."""
-        pred = StackingPrediction(
-            timestamp=datetime.now().isoformat(),
-            direction=1,
-            confidence=0.8,  # Above threshold
-            raw_probability=0.75,  # Far from 0.5
-            feature_vector=None,
-            top_features=None,
-            used_fallback=False,
-            fallback_reason=None,
-            model_version="v1",
-            model_age_days=5,  # Fresh model
-            regime="normal",
-            vix_level=18.0
-        )
-        
-        # Inject a mock model
-        self.integrator.model = Mock()
-        
-        should_fallback, reason = self.integrator._should_use_fallback(pred)
-        self.assertFalse(should_fallback)
-        self.assertEqual(reason, "")
-    
-    def test_fallback_old_model(self):
-        """Test fallback on old model."""
-        pred = StackingPrediction(
-            timestamp=datetime.now().isoformat(),
-            direction=1,
-            confidence=0.8,
-            raw_probability=0.75,
-            feature_vector=None,
-            top_features=None,
-            used_fallback=False,
-            fallback_reason=None,
-            model_version="v1",
-            model_age_days=100,  # Old model
-            regime="normal",
-            vix_level=18.0
-        )
-        
-        # Inject a mock model
-        self.integrator.model = Mock()
-        
-        # Also need to set mock model_metadata with old age
-        from src.signals.stacking_integrator import ModelMetadata
-        old_date = (datetime.now() - timedelta(days=100)).isoformat()
-        self.integrator.model_metadata = ModelMetadata(
-            version="v1",
-            training_date=old_date,
-            train_accuracy=0.75,
-            validation_accuracy=0.72,
-            validation_auc=0.78,
-            top_features=[],
-            feature_count=102,
-            samples_trained=1000
-        )
-        
-        should_fallback, reason = self.integrator._should_use_fallback(pred)
-        self.assertTrue(should_fallback)
-        self.assertIn("model_too_old", reason)
-
-
-class TestModelStatus(unittest.TestCase):
-    """Test model status reporting."""
-    
-    def test_status_no_model(self):
-        """Test status when no model available."""
-        integrator = StackingEnsembleIntegrator(model_path=None)
-        status = integrator.get_model_status()
-        
-        self.assertEqual(status["status"], "unavailable")
-        self.assertTrue(status["fallback_active"])
-    
-    def test_status_fresh_model(self):
-        """Test status with fresh model."""
-        integrator = StackingEnsembleIntegrator(model_path=None)
-        
-        # Mock model and metadata
-        mock_meta = ModelMetadata(
-            version="v1.0",
-            training_date=datetime.now().isoformat(),
-            train_accuracy=0.75,
-            validation_accuracy=0.72,
-            validation_auc=0.78,
-            top_features=[],
-            feature_count=102,
-            samples_trained=1000
-        )
-        
-        integrator.model = MagicMock()
-        integrator.model_metadata = mock_meta
-        
-        status = integrator.get_model_status()
-        
-        self.assertEqual(status["status"], "fresh")
-        self.assertEqual(status["age_days"], 0)
-        self.assertEqual(status["validation_auc"], 0.78)
-    
-    def test_status_stale_model(self):
-        """Test status with stale model."""
-        integrator = StackingEnsembleIntegrator(model_path=None)
-        
-        old_date = (datetime.now() - timedelta(days=50)).isoformat()
-        mock_meta = ModelMetadata(
-            version="v1.0",
-            training_date=old_date,
-            train_accuracy=0.75,
-            validation_accuracy=0.72,
-            validation_auc=0.78,
-            top_features=[],
-            feature_count=102,
-            samples_trained=1000
-        )
-        
-        integrator.model = MagicMock()
-        integrator.model_metadata = mock_meta
-        
-        status = integrator.get_model_status()
-        
-        self.assertEqual(status["status"], "ok")
-        self.assertGreaterEqual(status["age_days"], 49)
-        self.assertLessEqual(status["age_days"], 51)
-
-
-class TestPredictWithSignals(unittest.TestCase):
-    """Test predict_with_signals convenience method."""
-    
-    def setUp(self):
-        """Set up integrator and test data."""
-        self.integrator = StackingEnsembleIntegrator(
-            model_path=None,
-            fallback_enabled=True
-        )
-        
-        self.signal_readings = [
-            Signal(source=SignalSource.TSFM_MOMENTUM, value=0.3, 
-                   timestamp=datetime.now(), confidence=0.7),
-            Signal(source=SignalSource.CTA_TREND, value=0.2,
-                   timestamp=datetime.now(), confidence=0.6),
-            Signal(source=SignalSource.MULTI_SPEED_MOM, value=0.1,
-                   timestamp=datetime.now(), confidence=0.5),
-            Signal(source=SignalSource.HMM_REGIME, value=0.4,
-                   timestamp=datetime.now(), confidence=0.8),
-            Signal(source=SignalSource.MACRO_MOMENTUM, value=0.15,
-                   timestamp=datetime.now(), confidence=0.6),
-            Signal(source=SignalSource.DURATION_REGIME, value=-0.1,
-                   timestamp=datetime.now(), confidence=0.5),
-            Signal(source=SignalSource.CIRCUIT_BREAKER, value=0.0,
-                   timestamp=datetime.now(), confidence=0.9),
-            Signal(source=SignalSource.FACTOR_ROTATION, value=0.25,
-                   timestamp=datetime.now(), confidence=0.7),
-        ]
-    
-    def test_predict_with_signal_list(self):
-        """Test prediction from list of Signal objects."""
-        result = self.integrator.predict_with_signals(
-            signal_readings=self.signal_readings,
-            vix_level=20.0,
-            trend_strength=0.4
-        )
-        
-        self.assertIsInstance(result, StackingPrediction)
-        self.assertEqual(result.vix_level, 20.0)
-        self.assertTrue(result.used_fallback)  # No model
-
-
-class TestHistoricalAccuracy(unittest.TestCase):
-    """Test historical accuracy fetching."""
-    
-    def setUp(self):
-        """Set up integrator with temp database."""
-        self.temp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.temp_dir) / "test.db"
-        
-        # Create test database
-        import sqlite3
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS signal_predictions (
-                id INTEGER PRIMARY KEY,
-                signal_source TEXT,
-                prediction_date TEXT,
-                direction_correct INTEGER
-            )
-        """)
-        
-        # Insert test data
-        today = datetime.now()
-        for i in range(30):
-            date = (today - timedelta(days=i)).strftime("%Y-%m-%d")
-            for source in SignalSource:
-                correct = 1 if i % 2 == 0 else 0  # 50% accuracy
-                cursor.execute(
-                    "INSERT INTO signal_predictions (signal_source, prediction_date, direction_correct) VALUES (?, ?, ?)",
-                    (source.value, date, correct)
-                )
-        
-        conn.commit()
-        conn.close()
-        
-        self.integrator = StackingEnsembleIntegrator(
-            model_path=None,
-            db_path=self.db_path
-        )
-    
-    def tearDown(self):
-        """Clean up."""
-        shutil.rmtree(self.temp_dir)
-    
-    def test_fetch_historical_accuracy(self):
-        """Test fetching historical accuracy from database."""
-        accuracy = self.integrator._fetch_historical_accuracy(
-            as_of=datetime.now(),
-            days=90
-        )
-        
-        # Should return all signal sources
-        self.assertEqual(len(accuracy), 8)
-        
-        # All sources should have accuracy around 0.5
-        for source, acc in accuracy.items():
-            self.assertIsInstance(source, SignalSource)
-            self.assertGreaterEqual(acc, 0.0)
-            self.assertLessEqual(acc, 1.0)
-    
-    def test_fetch_missing_database(self):
-        """Test graceful handling of missing database."""
-        integrator = StackingEnsembleIntegrator(
-            model_path=None,
-            db_path=Path("/nonexistent/db.sqlite")
-        )
-        
-        accuracy = integrator._fetch_historical_accuracy(
-            as_of=datetime.now(),
-            days=90
-        )
-        
-        # Should return default 0.5 for all sources
-        self.assertEqual(len(accuracy), 8)
-        for acc in accuracy.values():
-            self.assertEqual(acc, 0.5)
-
-    def test_confidence_threshold_boundary(self):
-        """Test confidence threshold exactly at boundary."""
-        integrator = StackingEnsembleIntegrator(model_path=None)
-        
-        # Inject a mock model so we can test confidence logic
-        integrator.model = Mock()
-        
-        pred = StackingPrediction(
-            timestamp=datetime.now().isoformat(),
-            direction=1,
-            confidence=0.6,  # Exactly at threshold
-            raw_probability=0.65,
-            feature_vector=None,
-            top_features=None,
-            used_fallback=False,
-            fallback_reason=None,
-            model_version="v1",
-            model_age_days=5,
-            regime="normal",
-            vix_level=18.0
-        )
-        
-        should_fallback, reason = integrator._should_use_fallback(pred)
-        # 0.6 is not < 0.6, so should not fallback for confidence
-        # But model age is fine, so should not fallback at all
-        self.assertFalse(should_fallback)
-
-
-class TestIntegrationEdgeCases(unittest.TestCase):
-    """Test edge cases and error handling."""
-    
-    def test_disabled_fallback(self):
-        """Test prediction with fallback disabled."""
-        integrator = StackingEnsembleIntegrator(
-            model_path=None,
-            fallback_enabled=False
-        )
-        
-        # Inject mock model so we test fallback_enabled=False logic, not no-model logic
-        integrator.model = Mock()
-        
-        signals = {
-            SignalSource.TSFM_MOMENTUM: 0.3,
-            SignalSource.CTA_TREND: 0.2,
-            SignalSource.MULTI_SPEED_MOM: 0.1,
-            SignalSource.HMM_REGIME: 0.4,
-            SignalSource.MACRO_MOMENTUM: 0.15,
-            SignalSource.DURATION_REGIME: -0.1,
-            SignalSource.CIRCUIT_BREAKER: 0.0,
-            SignalSource.FACTOR_ROTATION: 0.25
+        base_signals = {
+            'tsmom': {'direction': 'bullish', 'confidence': 0.8},
+            'hmm_regime': {'direction': 'bullish', 'confidence': 0.7}
         }
         
-        result = integrator.predict(
-            signals=signals,
-            regime_context=RegimeContext(
-                vix_level=18.0,
-                trend_strength=0.3,
-                timestamp=datetime.now()
-            )
-        )
+        start = time.time()
+        result = integrator.predict(base_signals)
+        elapsed_ms = (time.time() - start) * 1000
         
-        # With fallback disabled but model exists, should not use fallback
-        # (unless other triggers like low confidence fire)
-        # NOTE: In current implementation, prediction error also triggers fallback
-        self.assertIsInstance(result, StackingPrediction)
-    
-    def test_disabled_fallback_no_model(self):
-        """Test that no model still generates prediction but won't use fallback flag."""
-        integrator = StackingEnsembleIntegrator(
-            model_path=None,
-            fallback_enabled=False
-        )
-        
-        signals = {
-            SignalSource.TSFM_MOMENTUM: 0.3,
-            SignalSource.CTA_TREND: 0.2,
-            SignalSource.MULTI_SPEED_MOM: 0.1,
-            SignalSource.HMM_REGIME: 0.4,
-            SignalSource.MACRO_MOMENTUM: 0.15,
-            SignalSource.DURATION_REGIME: -0.1,
-            SignalSource.CIRCUIT_BREAKER: 0.0,
-            SignalSource.FACTOR_ROTATION: 0.25
-        }
-        
-        result = integrator.predict(
-            signals=signals,
-            regime_context=RegimeContext(
-                vix_level=18.0,
-                trend_strength=0.3,
-                timestamp=datetime.now()
-            )
-        )
-        
-        # Even with fallback disabled, no model means we generate prediction
-        # but used_fallback will be False because fallback_enabled=False
-        # (the prediction still works, just doesn't get marked as fallback)
-        self.assertIsInstance(result, StackingPrediction)
-    
-    def test_confidence_threshold_boundary(self):
-        """Test confidence threshold exactly at boundary."""
-        integrator = StackingEnsembleIntegrator(model_path=None)
-        
-        # Inject a mock model so we can test confidence logic specifically
-        from unittest.mock import Mock
-        integrator.model = Mock()
-        
-        pred = StackingPrediction(
-            timestamp=datetime.now().isoformat(),
-            direction=1,
-            confidence=0.6,  # Exactly at threshold (not below)
-            raw_probability=0.65,  # Far from 0.5
-            feature_vector=None,
-            top_features=None,
-            used_fallback=False,
-            fallback_reason=None,
-            model_version="v1",
-            model_age_days=5,  # Fresh model
-            regime="normal",
-            vix_level=18.0
-        )
-        
-        should_fallback, reason = integrator._should_use_fallback(pred)
-        # 0.6 is not < 0.6, so should not fallback for confidence
-        # Raw probability 0.65 is not within 0.1 of 0.5
-        # Model age 5 is not > 90
-        # So should not fallback at all
-        self.assertFalse(should_fallback)
+        # Should be very fast (fallback path)
+        assert elapsed_ms < 10.0
+        assert result.latency_ms < 10.0
 
 
 if __name__ == '__main__':
-    # Run tests
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-    
-    # Add all test classes
-    suite.addTests(loader.loadTestsFromTestCase(TestModelMetadata))
-    suite.addTests(loader.loadTestsFromTestCase(TestStackingPrediction))
-    suite.addTests(loader.loadTestsFromTestCase(TestIntegratorInitialization))
-    suite.addTests(loader.loadTestsFromTestCase(TestPredictionLogic))
-    suite.addTests(loader.loadTestsFromTestCase(TestFallbackLogic))
-    suite.addTests(loader.loadTestsFromTestCase(TestModelStatus))
-    suite.addTests(loader.loadTestsFromTestCase(TestPredictWithSignals))
-    suite.addTests(loader.loadTestsFromTestCase(TestHistoricalAccuracy))
-    suite.addTests(loader.loadTestsFromTestCase(TestIntegrationEdgeCases))
-    
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-    
-    # Print summary
-    print(f"\n{'='*70}")
-    print(f"Tests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-    print(f"Skipped: {len(result.skipped)}")
-    print(f"{'='*70}")
-    
-    sys.exit(0 if result.wasSuccessful() else 1)
+    pytest.main([__file__, '-v'])
