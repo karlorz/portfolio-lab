@@ -163,3 +163,26 @@ cron-reset:
 	@python3 $(CRON_UPDATE) portfolio-lab-build pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-position-sync pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
+
+# ── Verification ─────────────────────────────────────────────────────
+
+.PHONY: verify-cron-sync
+verify-cron-sync:
+	@echo "=== Cron Backend Sync Check ==="
+	@python3 -c "from cron_compat import active_backend; print(f'Active backend: {active_backend()}')"
+	@echo ""
+	@echo "Checking Makefile target coverage vs crontab..."
+	@MISSING=0; \
+	TARGETS="data dashboard health eval research wiki-sync build sync"; \
+	for t in $$TARGETS; do \
+		if grep -q "make.*$$t" $(PROJECT_DIR)/crontab 2>/dev/null; then \
+			echo "  ✓ $$t (in crontab)"; \
+		else \
+			echo "  ✗ $$t MISSING from crontab"; \
+			MISSING=$$((MISSING + 1)); \
+		fi; \
+	done; \
+	if [ $$MISSING -eq 0 ]; then echo "OK: All targets synced"; else echo "FAIL: $$MISSING targets missing from crontab"; exit 1; fi
+	@echo ""
+	@echo "Checking cron_status.json integrity..."
+	@cd $(PROJECT_DIR) && python3 scripts/cron_verify.py

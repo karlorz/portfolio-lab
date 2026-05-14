@@ -1,0 +1,36 @@
+# Portfolio-Lab Crontab — standalone mode (without Hermes)
+# Install: crontab /root/projects/portfolio-lab/crontab
+# All jobs call the Makefile, which updates data/cron_status.json
+# for the dashboard health panel.
+#
+# To switch FROM Hermes cron TO system cron:
+#   1. hermes cron pause <job_id>  (for each portfolio-lab job)
+#   2. crontab /root/projects/portfolio-lab/crontab
+#
+# To switch back:
+#   1. crontab -r
+#   2. hermes cron resume <job_id>  (for each portfolio-lab job)
+
+# Data pipeline — hourly at :05
+5 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab data >> /root/projects/portfolio-lab/data/cron.log 2>&1
+
+# Dashboard — every 10 minutes
+*/10 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab dashboard >> /root/projects/portfolio-lab/data/dashboard.log 2>&1
+
+# Health monitor — every 15 minutes at :07
+7,22,37,52 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab health >> /root/projects/portfolio-lab/data/health.log 2>&1
+
+# Strategy evaluator — every 30 minutes at :13
+13,43 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab eval >> /root/projects/portfolio-lab/data/eval.log 2>&1
+
+# Research agent — every 30 minutes at :19
+19,49 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab research >> /root/projects/portfolio-lab/data/research.log 2>&1
+
+# Wiki sync — every 30 minutes at :27
+27,57 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab wiki-sync >> /root/projects/portfolio-lab/data/wiki_sync.log 2>&1
+
+# App build — hourly at :31
+31 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab build >> /root/projects/portfolio-lab/data/build.log 2>&1
+
+# Position sync — hourly at :41
+41 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab sync >> /root/projects/portfolio-lab/data/position_sync.log 2>&1

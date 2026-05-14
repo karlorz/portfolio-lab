@@ -119,6 +119,13 @@
 - Urgency mapping: >0.75 = immediate, <0.25 = wait for optimal window
 - Dashboard status integration
 
+### v3.16 Dual-Mode Cron Resilience - COMPLETED
+- **Feature flag**: `CRON_BACKEND` env var (hermes/crontab/manual), `src/cron_compat.py`
+- **Ops layer**: `Makefile` (8 targets + verify-cron-sync), project-local `data/cron_status.json`
+- **Standalone**: `crontab` file for operation without Hermes Agent
+- **ADR**: `wiki/projects/portfolio-lab/architecture/adr-dual-mode-cron-resilience.md`
+- **Concept**: `wiki/concepts/dual-mode-cron-agent-resilience.md` (generalized pattern)
+
 ## Test Coverage (tests/)
 - **2740 passing** — 2 pre-existing failures (test_generator, test_vpin_rebalancer)
 - `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
@@ -216,17 +223,17 @@ python -m src.agents.ai_controller --mode infer --portfolio 46/38/16
 python -m src.agents.ai_controller --mode train --episodes 500
 ```
 
-## Wiki Compound Pages (11 total)
-- grid-search-results
-- rolling-window-analysis
-- correlation-regime-analysis
-- drawdown-recovery-fire
-- fire-withdrawal-rebalance-tolerance
-- monte-carlo-fire-simulation
-- decision-framework
-- factor-tilt-analysis
-- commodities-analysis
-- tactical-rebalancing
+## Wiki Compound Pages (97+ total)
+- 11 original research: grid-search-results, rolling-window-analysis, correlation-regime-analysis, drawdown-recovery-fire, fire-withdrawal-rebalance-tolerance, monte-carlo-fire-simulation, decision-framework, factor-tilt-analysis, commodities-analysis, tactical-rebalancing
+- 86+ strategy/cycle pages in `wiki/projects/portfolio-lab/compound/`
+- Full index: `wiki/projects/portfolio-lab/knowledge.md` (auto-generated)
+
+## Environment Gotchas
+- `bc` is NOT available — use `date +%s` for duration math, avoid `date +%s%N | bc`
+- Makefile `define` with multiline Python is fragile — use separate helper scripts (see `scripts/cron_update.py`)
+- `skillwiki validate` requires `started:`, `updated:`, `completed:` (when status=completed) frontmatter fields
+- `hermes chat -q "<prompt>"` gets one-shot advice from Hermes agent without interactive session
+- `make verify-cron-sync` catches backend drift — run after changing Makefile targets or crontab
 
 ## Python: uv Package Manager
 
@@ -258,3 +265,55 @@ bun run fetch-data   # refresh data from Yahoo Finance v8 API
 1. `bun run fetch-data` → fetches from Yahoo Finance v8 chart API (auto-detects today's date)
 2. Saves to `public/data/prices.json` (compact: {d, p} per symbol, ~2.4MB)
 3. App loads `/data/prices.json` on startup, runs backtests client-side
+
+## Cron Compatibility Contract (dual-mode: Hermes + system crontab)
+
+portfolio-lab supports **three cron backends** via `CRON_BACKEND` env var:
+- `hermes` (default) — Hermes Agent cron scheduler (11 jobs in `~/.hermes/scripts/`)
+- `crontab` — system crontab (standalone, no Hermes needed)
+- `manual` — `make <target>` from terminal or Claude Code
+
+### Feature flag
+
+Import from `src/cron_compat.py` — never hardcode Hermes paths in application code:
+```python
+from src.cron_compat import IS_HERMES, IS_CRONTAB, BACKEND, CRON_TARGETS
+```
+
+### When adding a new cron job
+
+You MUST update three files in lockstep:
+1. **`Makefile`** — add a `.PHONY` target that runs the module + calls `scripts/cron_update.py`
+2. **`crontab`** — add a crontab entry for standalone mode
+3. **`src/cron_compat.py`** — add the job name to `CRON_TARGETS` list
+
+### When changing code that a cron job calls
+
+- The Makefile target is the **source of truth** for how each job runs. If you change CLI flags, env vars, or module paths, update the Makefile target first.
+- After changing a Makefile target, run `make verify-cron-sync` to confirm the crontab file still matches.
+- Do NOT add `~/.hermes/` path dependencies — use project-relative paths only. The one exception is `src/dashboard/generator.py` which reads `data/cron_status.json` (backend-agnostic).
+
+### When changing generator.py or dashboard data
+
+- `generator.py` reads `data/cron_status.json` (not `~/.hermes/cron/state.json`). Keep the JSON format stable: `{jobs: [{name, status, last_run, duration_seconds, backend}]}`.
+- The `backend` field in each job entry tracks which runner executed it (`hermes`, `crontab`, `manual`).
+
+### Verification
+
+```bash
+make verify-cron-sync          # check Makefile ↔ crontab ↔ cron_status.json sync
+CRON_BACKEND=crontab make all  # test full pipeline with crontab backend
+python3 -c "from src.cron_compat import active_backend; print(active_backend())"  # discover active backend
+```
+
+### Switching backends
+
+```bash
+# To system crontab:
+hermes cron pause <ids> && crontab crontab
+
+# Back to Hermes:
+crontab -r && hermes cron resume <ids>
+```
+
+See `compound/dual-mode-hermes-claude-code-resilience.md` in wiki for full architecture.

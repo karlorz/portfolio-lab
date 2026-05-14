@@ -5,6 +5,14 @@ import os
 import sys
 from datetime import datetime
 
+# Use cron_compat for backend discovery
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+try:
+    from cron_compat import active_backend
+    _default_backend = active_backend()
+except ImportError:
+    _default_backend = os.environ.get("CRON_BACKEND", "manual")
+
 def main():
     if len(sys.argv) < 4:
         print(f"Usage: {sys.argv[0]} <job_name> <status> <duration_seconds> [backend]", file=sys.stderr)
@@ -13,7 +21,7 @@ def main():
     job_name = sys.argv[1]
     status = sys.argv[2]
     duration = float(sys.argv[3])
-    backend = sys.argv[4] if len(sys.argv) > 4 else os.environ.get("CRON_BACKEND", "manual")
+    backend = sys.argv[4] if len(sys.argv) > 4 else _default_backend
 
     status_file = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
