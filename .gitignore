@@ -141,3 +141,6 @@ dist
 dist/
 .env.local
 *.pyc
+
+# Claude Code
+.claude/scheduled_tasks.lock
