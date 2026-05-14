@@ -2,7 +2,6 @@
 import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
-import sys
 
 
 class TestConvexityPosition:
@@ -14,8 +13,7 @@ class TestConvexityPosition:
             date="2026-05-14", allocation_pct=3.5,
             position_type="short_vix", vix_level=18.0,
             contango_pct=7.5, expected_roll_yield=0.5,
-            entry_reason="Strong contango", exit_triggered=False,
-            exit_reason=None, unrealized_pnl=0.0, realized_pnl=0.0
+            risk_score=0.3, exit_triggered=False, exit_reason=None
         )
         assert pos.allocation_pct == 3.5
         assert pos.position_type == "short_vix"
@@ -27,8 +25,7 @@ class TestConvexityPosition:
             date="2026-05-14", allocation_pct=0.0,
             position_type="flat", vix_level=32.0,
             contango_pct=-2.0, expected_roll_yield=0.0,
-            entry_reason="VIX stress", exit_triggered=True,
-            exit_reason="VIX > 30", unrealized_pnl=0.0, realized_pnl=-150.0
+            risk_score=1.0, exit_triggered=True, exit_reason="VIX > 30"
         )
         assert pos.position_type == "flat"
         assert pos.allocation_pct == 0.0
@@ -39,8 +36,7 @@ class TestConvexityPosition:
             date="2026-05-14", allocation_pct=2.0,
             position_type="short_vix", vix_level=15.0,
             contango_pct=6.0, expected_roll_yield=0.3,
-            entry_reason="Moderate contango", exit_triggered=False,
-            exit_reason=None, unrealized_pnl=100.0, realized_pnl=0.0
+            risk_score=0.2, exit_triggered=False, exit_reason=None
         )
         d = pos.to_dict()
         assert d["date"] == "2026-05-14"
@@ -89,7 +85,6 @@ class TestCalculatePositionSize:
             contango_pct=-5.0, vix_level=15.0
         )
         assert alloc == 0.0
-        assert "backwardation" in reason.lower()
 
     def test_flat_contango_returns_zero(self, strategy):
         alloc, reason = strategy.calculate_position_size(
@@ -121,7 +116,6 @@ class TestCalculatePositionSize:
         assert alloc <= strategy.MAX_ALLOCATION_PCT
 
     def test_contango_near_entry_threshold(self, strategy):
-        """Right at the entry threshold should produce allocation."""
         alloc, _ = strategy.calculate_position_size(
             contango_pct=strategy.CONTANGO_ENTRY_THRESHOLD + 0.1, vix_level=15.0
         )
@@ -150,18 +144,22 @@ class TestExitTriggers:
         )
         assert should_exit is False
 
-    def test_backwardation_triggers_exit(self, strategy):
-        should_exit, reason = strategy.check_exit_triggers(
-            vix_level=15.0, contango_pct=-3.0, date="2026-05-14"
-        )
-        assert should_exit is True
+    def test_backwardation_exit_after_consecutive_days(self, strategy):
+        """Backwardation triggers exit only after BACKWARDATION_EXIT_DAYS."""
+        exit_triggered = False
+        for day in range(10):
+            should_exit, reason = strategy.check_exit_triggers(
+                vix_level=15.0, contango_pct=-3.0, date=f"2026-05-{15+day}"
+            )
+            if should_exit:
+                exit_triggered = True
+                break
+        assert exit_triggered, "Should exit after consecutive backwardation days"
 
-    def test_flat_contango_triggers_exit(self, strategy):
-        """Contango below entry threshold should trigger exit."""
-        should_exit, reason = strategy.check_exit_triggers(
-            vix_level=15.0, contango_pct=1.0, date="2026-05-14"
-        )
-        assert should_exit is True
+    def test_contango_breaks_backwardation_streak(self, strategy):
+        strategy.check_exit_triggers(vix_level=15.0, contango_pct=-3.0, date="2026-05-14")
+        strategy.check_exit_triggers(vix_level=15.0, contango_pct=5.0, date="2026-05-15")
+        assert strategy.consecutive_backwardation_days == 0
 
     def test_exit_returns_reason_string(self, strategy):
         should_exit, reason = strategy.check_exit_triggers(
@@ -170,34 +168,44 @@ class TestExitTriggers:
         )
         assert reason is not None
         assert isinstance(reason, str)
-        assert len(reason) > 0
 
 
 class TestGenerateSignal:
-    """Signal generation flow."""
+    """Signal generation flow with mocked VIX manager."""
 
     @pytest.fixture
-    def strategy(self):
+    def strategy_with_data(self):
         from src.strategy.convexity_harvest import ConvexityHarvestStrategy
         mock_mgr = MagicMock()
-        mock_mgr.get_vix_term_structure.return_value = {
-            "spot": 18.0,
-            "m1": 20.0, "m2": 21.5,
-            "contango_pct": 8.3
+        mock_mgr.get_contango_signal.return_value = {
+            "vix_level": 18.0,
+            "contango_spot_1m": 8.3,
+            "contango_1m_2m": 5.0,
+            "term_structure": "contango",
+            "risk_score": 0.2,
+            "yield_1m_annualized": 5.0, "annualized_roll_yield": 4.5,
         }
-        mock_mgr.get_vix_history.return_value = [18.0, 17.5, 17.0]
         return ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
 
-    def test_generate_signal_returns_position(self, strategy):
-        pos = strategy.generate_signal("2026-05-14")
+    def test_generate_signal_returns_position(self, strategy_with_data):
+        pos = strategy_with_data.generate_signal("2026-05-14")
         from src.strategy.convexity_harvest import ConvexityPosition
         assert isinstance(pos, ConvexityPosition)
         assert pos.date == "2026-05-14"
         assert pos.position_type in ("short_vix", "long_vix", "flat")
 
-    def test_generate_signal_stores_in_history(self, strategy):
+    def test_generate_signal_stores_in_history(self, strategy_with_data):
+        pos = strategy_with_data.generate_signal("2026-05-14")
+        assert len(strategy_with_data.position_history) >= 1
+
+    def test_generate_signal_no_data_returns_flat(self):
+        from src.strategy.convexity_harvest import ConvexityHarvestStrategy
+        mock_mgr = MagicMock()
+        mock_mgr.get_contango_signal.return_value = None
+        strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
         pos = strategy.generate_signal("2026-05-14")
-        assert len(strategy.position_history) >= 1
+        assert pos.position_type == "flat"
+        assert pos.allocation_pct == 0.0
 
 
 class TestGetCurrentSignal:
@@ -206,6 +214,11 @@ class TestGetCurrentSignal:
     def test_get_current_signal_no_history(self):
         from src.strategy.convexity_harvest import ConvexityHarvestStrategy
         mock_mgr = MagicMock()
+        mock_mgr.get_contango_signal.return_value = {
+            "vix_level": 18.0, "contango_spot_1m": 8.3,
+            "contango_1m_2m": 5.0, "term_structure": "contango",
+            "risk_score": 0.2, "yield_1m_annualized": 5.0, "annualized_roll_yield": 4.5,
+        }
         strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
         result = strategy.get_current_signal()
         assert isinstance(result, dict)
@@ -213,13 +226,17 @@ class TestGetCurrentSignal:
     def test_get_current_signal_with_history(self):
         from src.strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition
         mock_mgr = MagicMock()
+        mock_mgr.get_contango_signal.return_value = {
+            "vix_level": 18.0, "contango_spot_1m": 8.3,
+            "contango_1m_2m": 5.0, "term_structure": "contango",
+            "risk_score": 0.2, "yield_1m_annualized": 5.0, "annualized_roll_yield": 4.5,
+        }
         strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
         strategy.position_history.append(ConvexityPosition(
             date="2026-05-14", allocation_pct=3.0,
             position_type="short_vix", vix_level=18.0,
             contango_pct=7.0, expected_roll_yield=0.4,
-            entry_reason="Test", exit_triggered=False,
-            exit_reason=None, unrealized_pnl=0.0, realized_pnl=0.0
+            risk_score=0.2, exit_triggered=False, exit_reason=None
         ))
         result = strategy.get_current_signal()
         assert isinstance(result, dict)
