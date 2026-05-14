@@ -32,6 +32,7 @@ dependencies = [
     "hmmlearn>=0.3",
     "joblib>=1.4",
     "typing-extensions>=4.12",
+    "arch>=7.0",
 ]
 
 [dependency-groups]

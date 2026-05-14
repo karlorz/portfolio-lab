@@ -127,72 +127,10 @@
 - **Concept**: `wiki/concepts/dual-mode-cron-agent-resilience.md` (generalized pattern)
 
 ## Test Coverage (tests/)
-- **2740 passing** — 2 pre-existing failures (test_generator, test_vpin_rebalancer)
-- `test_integrator.py` — 34 tests: data structures, normalization, composite signal aggregation, regime detection, allocation deltas, signal agreement, signal history
-- `test_order_router.py` — 14 tests: signal-to-order conversion, kill switch, dry-run, retry logic, price fetching
-- `test_position_sync.py` — 7 tests: drift calculation, edge cases
-- `test_signal_execution_bridge.py` — 21 tests: urgency classification, allocation deltas, order generation
-- `test_liquidity_checks.py` — 18 tests: premium thresholds, trade eligibility, force override
-- `test_rebalance_scheduler.py` — 14 tests: order scheduling, urgency windows, batch rebalancing
-- `test_vpin_rebalancer.py` — 13 tests: BVC calculator, VPIN engine, smart rebalancer integration
-- `test_sentiment_client.py` — 30 tests: LLM sentiment client, cost tracking, retry logic, JSON parsing
-- `test_alternative_data.py` — 22 tests: satellite/credit card/supply chain adapters, composite signals, earnings predictions
-- `test_factor_rotation.py` — 27 tests: factor scoring, allocation, signal strength, recommendations, backtest
-- `test_health_monitor.py` — 25 tests: health scoring, weight adjustment, volatility regime detection, health reports
-- `test_tips_monitor.py` — 11 tests: TIPS monitoring, inflation regime classification, allocation guidance
-- `test_odte_overlay.py` — 50 tests: 0DTE options, GEX calculator, position sizing, three-stop system, iron condor construction
-- `test_network_momentum.py` — 32 tests: network momentum lead-lag, DTW distance, Levy area, ensemble signals
-- `test_generator.py` — 35 tests: dashboard generator, VIX regime detection, health status, alerts, broker data
-- `test_fed_analyzer.py` — 44 tests: FOMC parser, hawk-dove scoring, stance classification, uncertainty detection
-- `test_earnings_analyzer.py` — 45 tests: transcript parsing, sentiment analysis, tone shifts, guidance clarity
-- `test_correlation_regime_detector.py` — 51 tests: regime classification, Ledoit-Wolf shrinkage, hierarchical clustering, risk parity
-- `test_tsmom_overlay.py` — 46 tests: AQR time-series momentum, formation returns, volatility scaling, portfolio construction
-- `test_macro_momentum.py` — 36 tests: macro signal themes, regime classification, allocation shifts, FRED data
-- `test_risk_parity_overlay.py` — 34 tests: volatility targeting, risk parity allocation, leverage, regime detection
-- `test_regime_hmm.py` — 30 tests: Wasserstein HMM, template matching, rule-based fallback, state persistence
-- `test_multi_speed_momentum.py` — 36 tests: speed tiers, ensemble aggregation, confidence, portfolio construction
-- `test_signal_health_monitor.py` — 31 tests: health scoring, win rate, decay detection, weight adjustment, reports
-- `test_institutional_crypto.py` — 45 tests: Basel III risk weights, tokenized treasuries, compliance, rebalancing
-- `test_trend_integration.py` — 36 tests: CTA trend signals, carry, replication ETFs, vol regimes, overlay sizing
-- `test_arp_overlay.py` — 51 tests: carry/value signals, allocation adjustments, signal adapters
-- `test_regime_ml.py` — 38 tests: regime detection, ML scoring, allocation, ensemble smoothing
-- `test_quantum_hybrid.py` — 32 tests: QUBO, QAOA/VQE simulation, hybrid optimization, risk parity
-- `test_risk_agent_hmm.py` — 26 tests: HMM regime detection, feature extraction, allocation shifts, save/load
-- `test_combined_strategy.py` — 25 tests: signal combination, Fed regime, baseline backtest, crisis returns
-- `test_tail_hedge.py` — 49 tests: put/VIX hedge calculation, hybrid optimization, regime detection, analytics
-- `test_esg_integration.py` — 38 tests: WACI, ESG scoring, climate scenarios, tilt optimization, carbon pairs
-- `test_ensemble_voter.py` — 29 tests: regime detection, signal weighting, vote consensus, allocation recommendation
-- `test_ensemble_backtest.py` — 22 tests: returns calculation, max drawdown, crisis alpha, allocation deltas, price fetching, target validation
-- `test_fed_policy_overlay.py` — 35 tests: FRED series, CPI YoY, real rate, regime classification, allocation shifts, overlay recommendation
-- `test_vix_position_manager.py` — 39 tests: position lifecycle, mark-to-market, roll detection, budget tracking, performance stats
-- `test_combined_orchestrator.py` — 27 tests: signal weights, conflict detection, resolution strategies, recommendation generation
-- `test_tail_hedge_calculator.py` — 46 tests: VIX percentile, put/VIX premium estimation, protective put analysis, VIX overlay, full recommendation
-- `test_alt_data_walkforward_stress.py` — 52 tests: constants, data classes, compute_metrics, build_daily_returns, walk_forward_test, stress_test, data loaders
-- `test_dual_momentum.py` — 32 tests: momentum scoring, absolute/relative momentum filtering, allocation generation, rebalance recommendations, backtest
-- `test_duration_allocation.py` — 63 tests: leveraged ETF configs, regime classification, base/leveraged allocation, capital freed, expense drag, duration exposure, risk scoring, recommendations
-- `test_evaluator.py` — 31 tests: constants, Position/Portfolio, state persistence, total value, weights, order generation, order execution, risk limits, performance, graduation
-- `test_inflation_risk_parity.py` — 26 tests: dataclasses, asset constants, volatility, inverse-vol weights, regime tilt (4 regimes + confidence scaling), CLI
-- `test_vol_parity_allocator.py` — 22 tests: dataclass, constants, core allocation by VIX regime, VIX allocation sizing, vol contribution
-- `test_notifier.py` — 29 tests: Alert dataclass, fingerprinting, rate limiting, deduplication, state persistence, log management, notify routing, severity helpers
-- `test_multi_strategy_adapters.py` — 17 tests: MultiSpeed/RiskParity/NetworkMomentum adapters, signal generation, portfolio signals, get_all_strategy_signals
-- `test_vix_insurance_signal.py` — 29 tests: InsuranceSignal enum, VIXInsuranceSignal dataclass, allocation logic, regime classification, signal generation, export, CLI
-- `test_health_backfill.py` — 12 tests: health score calculation, status classification, weight multiplier, integration verification, CLI
-- `test_macro_features.py` — 26 tests: synthetic macro/VIX data, feature engineering (yield curve, VIX, regimes, momentum), save/load, CLI
-- `test_cvar_metrics.py` — 32 tests: CVaRMetrics dataclass, VaR/CVaR calculation, tail severity, volatility, metric computation, history save/load, CLI
-- `test_sector_momentum_calc.py` — 30 tests: sector momentum calculation, dual momentum, all-momentum ranking, regime adjustment, allocation generation, signal generation
-- `test_vix_ensemble_adapter.py` — 24 tests: VIXEnsembleStatus dataclass, constants, defensive bias, status flags, next action logic, ensemble signal, save/load
-- `test_factor_timing_pipeline.py` — 21 tests: factor feature engineering (lags, rolling stats, correlations, dispersion), build dataset, save/load, summary, CLI
-- `test_factor_data_fetcher.py` — 24 tests: constants, synthetic factor data, factor statistics, load/cache, fetch fallback, CLI
-- `test_mock_quality_scores.py` — 24 tests: ETF characteristics, quality score calculation, deterministic noise, CLI
-- `test_tsmom_integration.py` — 16 tests: confidence calculation, signal generation, portfolio signals, allocation deltas, convenience function
-- `test_market_calendar.py` — 35 tests: US holidays, trading day detection, weekend/holiday handling, market hours, stale threshold, formatting
-- `test_defi_dashboard.py` — 16 tests: DeFiDashboard init, recommendation logic, display_status, alerts, TVL, thresholds, CLI
-- `test_etf_premium_display.py` — 26 tests: ETF premium dashboard, status colors, format_premium_display, compact summary, health check export, CLI
-- `test_stacking_trainer.py` — 17 tests: XGBoost meta-learner, time-series CV, model persistence, feature importance, synthetic data
-- `test_run_actual_ubt_validation.py` — 32 tests: extract_prices, calculate_returns, find_overlap, align_series, calculate_metrics, correlation
-- `test_alternative_data_backfill.py` — 35 tests: DailyAlternativeSignal, crisis detection, regime classification, signal generation, backfill, metadata, save/CLI
-- `test_crypto_correlation_monitor.py` — 28 tests: constants, CorrelationMetrics, correlation/volatility calculation, regime detection, allocation signal, signal explanation
-- `test_duration_yield_backtest.py` — 44 tests: BacktestResult, regime classification, returns/Sharpe/maxDD/CAGR, run_backtest with synthetic data, save/print results, CLI
+- **2740 passing**, 2 pre-existing failures (test_generator, test_vpin_rebalancer)
+- 55+ test files covering signals, strategy, dashboard, broker, agents, data, research, monitor
+- Run: `uv run pytest tests/` (full suite), `uv run pytest tests/ -m heavy` (ML tests, needs PORTFOLIO_LAB_ENABLE_ML=1)
+- Key modules: test_evaluator (31), test_duration_allocation (63), test_alt_data_walkforward_stress (52), test_correlation_regime_detector (51), test_arp_overlay (51), test_odte_overlay (50), test_tail_hedge (49), test_tail_hedge_calculator (46), test_tsmom_overlay (46), test_earnings_analyzer (45), test_institutional_crypto (45), test_fed_analyzer (44), test_duration_yield_backtest (44), test_vix_position_manager (39), test_esg_integration (38), test_regime_ml (38), test_trend_integration (36), test_multi_speed_momentum (36), test_macro_momentum (36), test_fed_policy_overlay (35), test_market_calendar (35), test_generator (35), test_alternative_data_backfill (35), test_risk_parity_overlay (34), test_integrator (34), test_network_momentum (32), test_dual_momentum (32), test_run_actual_ubt_validation (32), test_cvar_metrics (32), test_quantum_hybrid (32), test_signal_health_monitor (31), test_sentiment_client (30), test_regime_hmm (30), test_sector_momentum_calc (30), test_ensemble_voter (29), test_notifier (29), test_vix_insurance_signal (29), test_crypto_correlation_monitor (28), test_factor_rotation (27), test_combined_orchestrator (27), test_inflation_risk_parity (26), test_risk_agent_hmm (26), test_macro_features (26), test_etf_premium_display (26), test_health_monitor (25), test_combined_strategy (25), test_vix_ensemble_adapter (24), test_factor_data_fetcher (24), test_mock_quality_scores (24), test_vol_parity_allocator (22), test_alternative_data (22), test_ensemble_backtest (22), test_signal_execution_bridge (21), test_factor_timing_pipeline (21), test_liquidity_checks (18), test_multi_strategy_adapters (17), test_stacking_trainer (17), test_tsmom_integration (16), test_defi_dashboard (16), test_order_router (14), test_rebalance_scheduler (14), test_vpin_rebalancer (13), test_health_backfill (12), test_tips_monitor (11), test_position_sync (7)
 
 ## Analysis Scripts (src/backtest/)
 - `grid-search.ts` — 94-config allocation sweep
