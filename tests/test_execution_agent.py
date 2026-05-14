@@ -1,3 +1,4 @@
+import pytest; pytestmark = pytest.mark.heavy
 #!/usr/bin/env python3
 """
 Tests for execution_agent.py — ExecutionStyle enum, ExecutionNetwork architecture,
@@ -10,16 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import numpy as np
+import torch
 from datetime import datetime
 from unittest.mock import patch, MagicMock
-
-# Mock heavy dependencies before import to avoid loading torch (~63MB)
-_orig_modules = {}
-_mock_targets = ['torch', 'torch.nn', 'torch.optim', 'torch.distributions']
-for mod in _mock_targets:
-    _orig_modules[mod] = sys.modules.get(mod)
-    sys.modules[mod] = MagicMock()
-import torch  # now mocked
 
 from src.agents.base_agent import (
     AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
@@ -31,12 +25,15 @@ from src.agents.execution_agent import (
     SCHEDULER_AVAILABLE,
 )
 
-# Restore original modules
-for mod, orig in _orig_modules.items():
-    if orig is not None:
-        sys.modules[mod] = orig
-    else:
-        sys.modules.pop(mod, None)
+from src.agents.base_agent import (
+    AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
+)
+from src.agents.execution_agent import (
+    ExecutionStyle,
+    ExecutionNetwork,
+    ExecutionAgent,
+    SCHEDULER_AVAILABLE,
+)
 
 
 # ---------------------------------------------------------------------------

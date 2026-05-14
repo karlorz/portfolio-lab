@@ -1,3 +1,4 @@
+import pytest; pytestmark = pytest.mark.heavy
 """
 Tests for Stacking Ensemble Trainer (v3.10 Phase 2)
 
@@ -21,25 +22,9 @@ import sys
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# Mock heavy dependencies before import to avoid loading xgboost (~78MB)
-_orig_modules = {}
-_mock_targets = ['xgboost', 'xgboost.core', 'xgboost.callback', 'xgboost.compat']
-for mod in _mock_targets:
-    _orig_modules[mod] = sys.modules.get(mod)
-    sys.modules[mod] = MagicMock()
-
-from unittest.mock import MagicMock
-
 from src.ml.stacking_trainer import (
     StackingTrainer, TrainingConfig, TrainingResult, PredictionResult
 )
-
-# Restore original modules
-for mod, orig in _orig_modules.items():
-    if orig is not None:
-        sys.modules[mod] = orig
-    else:
-        sys.modules.pop(mod, None)
 
 
 class TestTrainingConfig:

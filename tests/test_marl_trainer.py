@@ -1,3 +1,4 @@
+import pytest; pytestmark = pytest.mark.heavy
 #!/usr/bin/env python3
 """
 Tests for MARL Trainer — Transition/RolloutBuffer data classes,
