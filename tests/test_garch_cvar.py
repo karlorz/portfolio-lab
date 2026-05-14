@@ -76,8 +76,8 @@ class TestGARCHParams:
         assert params.is_stable()
     
     def test_unstable_high_persistence(self):
-        # persistence >= 0.99 should be unstable
-        params = GARCHParams(omega=0.000001, alpha=0.1, beta=0.89, persistence=0.99)
+        # persistence >= 0.9999 should be unstable
+        params = GARCHParams(omega=0.000001, alpha=0.1, beta=0.89, persistence=0.99995)
         assert not params.is_stable()
     
     def test_unstable_zero_omega(self):

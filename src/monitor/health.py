@@ -5,6 +5,7 @@ Monitors cron job results and reports status. Can trigger alerts or Claude Code 
 """
 
 import json
+import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta
@@ -14,6 +15,19 @@ from typing import Dict, List, Optional
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.market_calendar import MarketCalendar, format_stale_status, is_weekend_stale
+
+# GARCH-CVaR integration (v3.21)
+try:
+    from cvar_metrics import fetch_portfolio_returns, calculate_volatility
+    from garch_cvar import calculate_garch_cvar, GARCHCVaRMetrics
+    GARCH_CVAR_AVAILABLE = True
+except ImportError:
+    try:
+        from .cvar_metrics import fetch_portfolio_returns, calculate_volatility
+        from .garch_cvar import calculate_garch_cvar, GARCHCVaRMetrics
+        GARCH_CVAR_AVAILABLE = True
+    except ImportError:
+        GARCH_CVAR_AVAILABLE = False
 
 DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 LOG_DIR = DATA_DIR
@@ -260,24 +274,93 @@ class HealthMonitor:
             return True
     
     def check_cvar_metrics(self) -> bool:
-        """Check CVaR tail risk metrics from risk_metrics.json."""
-        risk_file = DATA_DIR / "risk_metrics.json"
-        if not risk_file.exists():
-            self.checks.append({
-                "name": "cvar_metrics",
-                "status": "not_initialized",
-                "ok": True
-            })
-            return True
+        """Check CVaR tail risk metrics from risk_metrics.json.
+        
+        Uses GARCH-Filtered CVaR (v3.21) when available for improved
+        tail risk accuracy during volatility clustering periods.
+        """
+        # Use GARCH-CVaR if enabled and available
+        use_garch = os.getenv('USE_GARCH_CVAR', 'true').lower() == 'true' and GARCH_CVAR_AVAILABLE
+        
+        if use_garch:
+            try:
+                # Compute GARCH-CVaR directly from portfolio returns
+                returns, current_dd, max_dd = fetch_portfolio_returns(days=252)
+                if len(returns) >= 100:  # Minimum for GARCH
+                    garch_metrics = calculate_garch_cvar(returns, current_dd, max_dd, window=252)
+                    
+                    # Write GARCH-CVaR metrics to risk_metrics.json
+                    risk_metrics = {
+                        "timestamp": garch_metrics.timestamp,
+                        "var_95_daily": garch_metrics.var_95,
+                        "cvar_95_daily": garch_metrics.cvar_95,
+                        "cvar_ratio": garch_metrics.cvar_ratio,
+                        "tail_severity": garch_metrics.tail_severity,
+                        "max_drawdown": garch_metrics.max_drawdown,
+                        "current_drawdown": garch_metrics.current_drawdown,
+                        "volatility_annual": garch_metrics.volatility_annual,
+                        "garch_filtered": garch_metrics.garch_filtered,
+                        "garch_active": garch_metrics.filter_active,
+                        "garch_params": {
+                            "omega": garch_metrics.garch_omega,
+                            "alpha": garch_metrics.garch_alpha,
+                            "beta": garch_metrics.garch_beta,
+                            "persistence": garch_metrics.garch_persistence
+                        } if garch_metrics.filter_active else None,
+                        "interpretation": {
+                            "var_description": "Typical worst daily loss (95% confidence)",
+                            "cvar_description": "Average loss in tail events (worst 5%)",
+                            "garch_description": "GARCH-filtered for volatility clustering",
+                            "severity_normal": "CVaR 1.3-1.5x: Normal tail risk",
+                            "severity_moderate": "CVaR 1.5-1.8x: Elevated (monitor closely)",
+                            "severity_severe": "CVaR >1.8x: Severe (reduce equity 10-15%)"
+                        }
+                    }
+                    
+                    risk_file = DATA_DIR / "risk_metrics.json"
+                    with open(risk_file, 'w') as f:
+                        json.dump(risk_metrics, f, indent=2)
+                    
+                    garch_status = "active" if garch_metrics.filter_active else "fallback"
+                    garch_badge = f" [GARCH-{garch_status}]"
+                else:
+                    use_garch = False  # Fall back to file-based
+            except Exception:
+                use_garch = False  # Fall back to file-based
+        
+        # Fallback to existing risk_metrics.json if GARCH not used/failed
+        if not use_garch:
+            risk_file = DATA_DIR / "risk_metrics.json"
+            if not risk_file.exists():
+                self.checks.append({
+                    "name": "cvar_metrics",
+                    "status": "not_initialized",
+                    "ok": True
+                })
+                return True
+            
+            try:
+                with open(risk_file) as f:
+                    metrics = json.load(f)
+            except Exception as e:
+                self.checks.append({
+                    "name": "cvar_metrics",
+                    "status": f"error: {str(e)}",
+                    "ok": True
+                })
+                return True
+        else:
+            # Already loaded above in garch_metrics
+            metrics = risk_metrics
+            garch_badge = garch_badge if 'garch_badge' in locals() else ""
         
         try:
-            with open(risk_file) as f:
-                metrics = json.load(f)
-            
             cvar_95 = metrics.get("cvar_95_daily")
             var_95 = metrics.get("var_95_daily")
             cvar_ratio = metrics.get("cvar_ratio")
             tail_severity = metrics.get("tail_severity", "unknown")
+            garch_active = metrics.get("garch_active", False)
+            garch_filtered = metrics.get("garch_filtered", False)
             
             # Validate metrics
             issues = []
@@ -298,19 +381,27 @@ class HealthMonitor:
             
             ok = len(issues) == 0
             
+            # Build status with GARCH indicator
+            status_base = f"{tail_severity} ({cvar_ratio:.2f}x)" if cvar_ratio else "unknown"
+            if garch_filtered:
+                status_base += " [GARCH]" if garch_active else " [GARCH-fallback]"
+            
             self.checks.append({
                 "name": "cvar_metrics",
-                "status": f"{tail_severity} ({cvar_ratio:.2f}x)" if cvar_ratio else "unknown",
+                "status": status_base,
                 "ok": ok,
                 "cvar_95": cvar_95,
                 "var_95": var_95,
                 "cvar_ratio": cvar_ratio,
                 "tail_severity": tail_severity,
+                "garch_filtered": garch_filtered,
+                "garch_active": garch_active,
                 "details": {
                     "interpretation": "CVaR captures avg loss in worst 5% of outcomes",
                     "severity_normal": "CVaR 1.3-1.5x: Normal tail risk",
                     "severity_elevated": "CVaR 1.5-1.8x: Monitor closely",
-                    "severity_severe": "CVaR >1.8x: Reduce equity 10-15%, add hedge"
+                    "severity_severe": "CVaR >1.8x: Reduce equity 10-15%, add hedge",
+                    "garch_note": "GARCH filtering improves accuracy during volatility clustering" if garch_active else None
                 }
             })
             

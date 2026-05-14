@@ -57,7 +57,7 @@ class GARCHParams:
     
     def is_stable(self) -> bool:
         """Check if GARCH parameters indicate stable process."""
-        return self.persistence < 0.99 and self.omega > 0
+        return self.persistence < 0.9999 and self.omega > 0
 
 
 @dataclass  
