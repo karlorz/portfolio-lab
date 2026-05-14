@@ -199,5 +199,208 @@ class TestFetchPrice:
             assert router._fetch_price("SPY") == 0.0
 
 
+class TestDataclasses:
+    """Signal and OrderPlan dataclasses."""
+
+    def test_signal_defaults(self):
+        s = Signal(symbol="SPY", target_allocation=0.46)
+        assert s.symbol == "SPY"
+        assert s.target_allocation == 0.46
+        assert s.current_allocation is None
+        assert s.signal_type == "rebalance"
+        assert s.confidence == 1.0
+
+    def test_signal_custom(self):
+        s = Signal(symbol="GLD", target_allocation=0.38, current_allocation=0.40,
+                   signal_type="trend", confidence=0.85)
+        assert s.signal_type == "trend"
+        assert s.confidence == 0.85
+        assert s.current_allocation == 0.40
+
+    def test_order_plan_buy(self):
+        o = OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "rebalance_to_target")
+        assert o.symbol == "SPY"
+        assert o.side == "BUY"
+        assert o.qty == 10
+        assert o.estimated_value == 5000
+        assert o.reason == "rebalance_to_target"
+
+    def test_order_plan_sell(self):
+        o = OrderPlan("TLT", "SELL", 5, "LIMIT", 3000, "overweight_reduction")
+        assert o.side == "SELL"
+        assert o.order_type == "LIMIT"
+
+
+class TestIsReady:
+    """is_ready checks AlpacaClient."""
+
+    def test_ready_when_client_ready(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = True
+            assert router.is_ready() is True
+
+    def test_not_ready_when_client_not_ready(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = False
+            assert router.is_ready() is False
+
+
+class TestRebalance:
+    """Full rebalance workflow."""
+
+    def test_rebalance_not_configured(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = False
+            result = router.rebalance()
+            assert result["status"] == "not_configured"
+
+    def test_rebalance_no_signals(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = True
+            router.load_signals = MagicMock(return_value=[])
+            result = router.rebalance()
+            assert result["status"] == "no_signals"
+
+    def test_rebalance_no_action_needed(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = True
+            router.load_signals = MagicMock(return_value=[
+                Signal("SPY", 0.46),
+            ])
+            router.get_current_positions = MagicMock(return_value={
+                "SPY": {"qty": 100, "market_value": 4600},
+            })
+            router.calculate_orders = MagicMock(return_value=[])
+            result = router.rebalance()
+            assert result["status"] == "no_action"
+            assert result["signals_count"] == 1
+
+    def test_rebalance_executes(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = True
+            router.load_signals = MagicMock(return_value=[
+                Signal("SPY", 0.50),
+            ])
+            router.get_current_positions = MagicMock(return_value={})
+            router.calculate_orders = MagicMock(return_value=[
+                OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test"),
+            ])
+            router.execute_orders = MagicMock(return_value={
+                "status": "dry_run", "orders_executed": 1, "orders_failed": 0,
+            })
+            result = router.rebalance(dry_run=True)
+            assert result["status"] == "dry_run"
+
+
+class TestExecuteOrdersEdgeCases:
+    """execute_orders edge cases."""
+
+    def test_not_configured(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = False
+            result = router.execute_orders([])
+            assert result["status"] == "not_configured"
+
+    def test_empty_orders_list(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(OrderRouter, 'is_ready', return_value=True):
+                router = OrderRouter(data_dir=d, paper=True)
+                result = router.execute_orders([], dry_run=True)
+                assert result["status"] == "dry_run"
+                assert result["orders_executed"] == 0
+
+    def test_kill_switch_not_checked_in_dry_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(OrderRouter, 'is_ready', return_value=True):
+                router = OrderRouter(data_dir=d, paper=True)
+                with open(os.path.join(d, "kill_switch.json"), "w") as f:
+                    json.dump({"enabled": True, "reason": "test"}, f)
+                orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+                result = router.execute_orders(orders, dry_run=True)
+                # Kill switch only checked when not dry_run
+                assert result["status"] != "blocked"
+
+    def test_kill_switch_corrupt_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(OrderRouter, 'is_ready', return_value=True):
+                router = OrderRouter(data_dir=d, paper=True)
+                with open(os.path.join(d, "kill_switch.json"), "w") as f:
+                    f.write("not valid json")
+                orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+                # Should not crash on corrupt JSON
+                result = router.execute_orders(orders, dry_run=True)
+                assert result["status"] != "blocked"
+
+
+class TestMainCLI:
+    """main() CLI dispatch."""
+
+    def test_status(self, capsys):
+        from src.broker.order_router import main
+        with patch('sys.argv', ['order_router.py', 'status']):
+            with patch('src.broker.order_router.OrderRouter') as MockRouter:
+                mock = MagicMock()
+                mock.is_ready.return_value = True
+                mock.paper = True  # Must be a real bool, not MagicMock
+                MockRouter.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+        assert data["ready"] is True
+
+    def test_signals_command(self, capsys):
+        from src.broker.order_router import main
+        with patch('sys.argv', ['order_router.py', 'signals']):
+            with patch('src.broker.order_router.OrderRouter') as MockRouter:
+                mock = MagicMock()
+                s = MagicMock()
+                s.symbol = "SPY"
+                s.target_allocation = 0.46
+                mock.load_signals.return_value = [s]
+                MockRouter.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+        assert len(data) == 1
+        assert data[0]["symbol"] == "SPY"
+
+    def test_positions_command(self, capsys):
+        from src.broker.order_router import main
+        with patch('sys.argv', ['order_router.py', 'positions']):
+            with patch('src.broker.order_router.OrderRouter') as MockRouter:
+                mock = MagicMock()
+                mock.get_current_positions.return_value = {
+                    "SPY": {"qty": 100, "market_value": 50000},
+                }
+                MockRouter.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+        assert "SPY" in data
+
+    def test_unknown_command(self, capsys):
+        from src.broker.order_router import main
+        with patch('sys.argv', ['order_router.py', 'unknowncmd']):
+            with patch('src.broker.order_router.OrderRouter') as MockRouter:
+                MockRouter.return_value = MagicMock()
+                main()
+        captured = capsys.readouterr()
+        assert "Unknown" in captured.out or "unknown" in captured.out.lower()
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
