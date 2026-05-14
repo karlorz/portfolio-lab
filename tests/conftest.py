@@ -1,21 +1,27 @@
 """
-pytest configuration: heavy-test markers, experimental gating.
+pytest configuration: ML feature gating.
 
-Default: heavy tests (torch/xgboost) are SKIPPED to avoid OOM/CPU stalls.
-The full 2853-test suite exhausts ~6.6GB RAM in a single process because
-torch (63MB) + xgboost (78MB) accumulate alongside test data fixtures.
+ML features (torch/xgboost) are DISABLED by default via env var to prevent
+OOM/CPU stalls. torch (~63MB) + xgboost (~78MB) accumulate in single-process
+test runs, causing SIGKILL at ~47% through the 2853-test suite.
 
-Use --include-heavy to run heavy ML tests alongside lightweight ones:
-  pytest tests/ --include-heavy
-
-Or run heavy tests separately:
-  pytest tests/ -m heavy --include-heavy
-
-Lightweight tests only (default, safe):
+Default (safe, ~2700 tests):
   pytest tests/
+
+Include ML tests:
+  PORTFOLIO_LAB_ENABLE_ML=1 pytest tests/ -m heavy
+
+All tests including ML:
+  PORTFOLIO_LAB_ENABLE_ML=1 pytest tests/
 """
 
+import os
 import pytest
+
+# Set before ANY test module imports to prevent torch/xgboost loading.
+# Individual tests can override: os.environ["PORTFOLIO_LAB_ENABLE_ML"] = "1"
+if "PORTFOLIO_LAB_ENABLE_ML" not in os.environ:
+    os.environ["PORTFOLIO_LAB_ENABLE_ML"] = "0"
 
 
 def pytest_addoption(parser):
@@ -23,7 +29,7 @@ def pytest_addoption(parser):
         "--include-heavy",
         action="store_true",
         default=False,
-        help="Include tests that require heavy ML libraries (torch, xgboost). Disabled by default.",
+        help="Run tests marked heavy (torch/xgboost). Requires PORTFOLIO_LAB_ENABLE_ML=1.",
     )
 
 
@@ -32,13 +38,17 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    # Default: skip heavy tests unless --include-heavy is set
-    if not config.getoption("--include-heavy"):
-        skip_heavy = pytest.mark.skip(reason="heavy tests disabled (use --include-heavy to enable)")
+    # Skip heavy tests unless --include-heavy AND env var is set
+    ml_enabled = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+
+    if not ml_enabled or not config.getoption("--include-heavy"):
+        skip_heavy = pytest.mark.skip(
+            reason="heavy ML tests skipped (set PORTFOLIO_LAB_ENABLE_ML=1 and use --include-heavy)"
+        )
         count = 0
         for item in items:
             if "heavy" in item.keywords:
                 item.add_marker(skip_heavy)
                 count += 1
         if count > 0:
-            print(f"\n[Skipped {count} heavy tests (torch/xgboost). Use --include-heavy to run them.]")
+            print(f"\n[Skipped {count} heavy ML tests. Use PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy to run.]")
