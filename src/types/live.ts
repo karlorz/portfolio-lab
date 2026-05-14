@@ -74,6 +74,8 @@ export interface SignalsData {
     weekly_trades_used: number;
     total_premium_collected_mtd: number;
   };
+  garch_cvar?: GarchCvarData;
+  entropy?: EntropyData;
 }
 
 export interface Position {
