@@ -46,12 +46,18 @@ class EntropyMetrics:
 class EntropyCalculator:
     """Calculate diversification metrics using information entropy."""
     
-    # Thresholds for concentration risk levels
+    # Thresholds for concentration risk levels (raw entropy values)
+    # These thresholds are designed for portfolios with 3-10 assets
+    # For 3 assets: max entropy = ln(3) ≈ 1.10
+    # Critical: entropy < 0.5 (~45% of max possible for 3 assets)
+    # Warning: entropy 0.5-0.7 (~45-65% of max)  
+    # Moderate: entropy 0.7-0.9 (~65-80% of max)
+    # Good: entropy > 0.9 (>80% of max)
     RISK_THRESHOLDS = {
-        'critical': 1.5,   # Severe concentration
-        'warning': 2.0,    # Elevated concentration  
-        'moderate': 2.5,   # Below optimal
-        'good': 3.0       # Healthy diversification
+        'critical': 0.5,   # Severe concentration (<45% of max diversification)
+        'warning': 0.7,    # Elevated concentration (45-65%)
+        'moderate': 0.9,   # Below optimal (65-80%)
+        'good': 1.0       # Good diversification (>80%)
     }
     
     def __init__(self, risk_thresholds: Optional[Dict[str, float]] = None):

@@ -177,43 +177,43 @@ class TestRiskLevels:
     """Test concentration risk level determination."""
     
     def test_critical_threshold(self):
-        """Entropy below 1.5 is critical."""
+        """Entropy below 0.5 is critical."""
         calc = EntropyCalculator()
         
-        assert calc.concentration_risk_level(1.4) == 'critical'
-        assert calc.concentration_risk_level(1.49) == 'critical'
+        assert calc.concentration_risk_level(0.4) == 'critical'
+        assert calc.concentration_risk_level(0.49) == 'critical'
     
     def test_high_threshold(self):
-        """Entropy 1.5-2.0 is high."""
+        """Entropy 0.5-0.7 is high (warning)."""
         calc = EntropyCalculator()
         
-        assert calc.concentration_risk_level(1.5) == 'high'
-        assert calc.concentration_risk_level(1.8) == 'high'
-        assert calc.concentration_risk_level(1.99) == 'high'
+        assert calc.concentration_risk_level(0.5) == 'high'
+        assert calc.concentration_risk_level(0.6) == 'high'
+        assert calc.concentration_risk_level(0.69) == 'high'
     
     def test_medium_threshold(self):
-        """Entropy 2.0-2.5 is medium."""
+        """Entropy 0.7-0.9 is medium."""
         calc = EntropyCalculator()
         
-        assert calc.concentration_risk_level(2.0) == 'medium'
-        assert calc.concentration_risk_level(2.3) == 'medium'
-        assert calc.concentration_risk_level(2.49) == 'medium'
+        assert calc.concentration_risk_level(0.7) == 'medium'
+        assert calc.concentration_risk_level(0.8) == 'medium'
+        assert calc.concentration_risk_level(0.89) == 'medium'
     
     def test_low_threshold(self):
-        """Entropy 2.5-3.0 is low."""
+        """Entropy 0.9-1.0 is low."""
         calc = EntropyCalculator()
         
-        assert calc.concentration_risk_level(2.5) == 'low'
-        assert calc.concentration_risk_level(2.8) == 'low'
-        assert calc.concentration_risk_level(2.99) == 'low'
+        assert calc.concentration_risk_level(0.9) == 'low'
+        assert calc.concentration_risk_level(0.95) == 'low'
+        assert calc.concentration_risk_level(0.99) == 'low'
     
     def test_good_threshold(self):
-        """Entropy above 3.0 is good."""
+        """Entropy above 1.0 is good."""
         calc = EntropyCalculator()
         
-        assert calc.concentration_risk_level(3.0) == 'good'
-        assert calc.concentration_risk_level(3.5) == 'good'
-        assert calc.concentration_risk_level(4.0) == 'good'
+        assert calc.concentration_risk_level(1.0) == 'good'
+        assert calc.concentration_risk_level(1.5) == 'good'
+        assert calc.concentration_risk_level(2.0) == 'good'
 
 
 class TestCorrelationEntropy:
@@ -341,14 +341,14 @@ class TestAlertChecking:
                    'VXUS': 0.125, 'IEF': 0.125, 'DBC': 0.125, 'MTUM': 0.125}
         metrics = calc.calculate_metrics(weights)
         
-        # With 8 equal-weighted assets, entropy should be high
-        assert metrics.shannon_entropy > 1.5, f"Entropy {metrics.shannon_entropy} too low for 8 assets"
+        # With 8 equal-weighted assets, entropy should be high (ln(8) ≈ 2.08)
+        assert metrics.shannon_entropy > 1.0, f"Entropy {metrics.shannon_entropy} too low for 8 assets"
         
         alert = calc.check_alert(metrics)
         
         # Should either have no alert or a non-critical level
         if alert is not None:
-            assert alert['level'] in ['monitor', 'warning', 'low']
+            assert alert['level'] in ['monitor', 'low']
             # Should not be critical for equal weights
             assert alert['level'] != 'critical'
 
