@@ -11,13 +11,15 @@ import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
 import { ZeroDTEPanel } from './ZeroDTEPanel';
 import DurationOverlayPanel from './DurationOverlayPanel';
-import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData } from '../types/live';
+import { GarchCvarPanel } from './GarchCvarPanel';
+import { EntropyPanel } from './EntropyPanel';
+import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData } from '../types/live';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction';
+type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -117,6 +119,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const tabs: { id: TabType; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview', badge: criticalAlerts.length || undefined },
     { id: 'health', label: 'Health', badge: health?.system_status === 'critical' ? 1 : undefined },
+    { id: 'risk', label: 'Risk', badge: (signals?.garch_cvar?.cvar_ratio || 0) > 1.5 ? 1 : undefined },
     { id: 'history', label: 'History' },
     { id: 'performance', label: 'Performance' },
     { id: 'rebalance', label: 'Rebalance' },
@@ -513,6 +516,16 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               signals={signals?.closing_auction?.signals || []}
               isMarketOpen={signals?.closing_auction?.market_open || false}
             />
+          </div>
+        )}
+
+        {/* Risk Tab (GARCH-CVaR + Entropy) */}
+        {activeTab === 'risk' && (
+          <div className="tab-panel risk-panel">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <GarchCvarPanel data={signals?.garch_cvar as GarchCvarData | null | undefined} />
+              <EntropyPanel data={signals?.entropy as EntropyData | null | undefined} />
+            </div>
           </div>
         )}
       </div>

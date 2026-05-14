@@ -360,6 +360,31 @@ export interface ZeroDTEPosition {
   close_reason?: 'expiration' | 'profit_take' | 'stop_loss' | 'delta_stop' | 'time_exit' | 'manual' | 'roll' | 'emergency';
 }
 
+// GARCH-CVaR Types (v3.21)
+export interface GarchCvarData {
+  cvar_95: number;
+  cvar_95_garch: number;
+  var_95: number;
+  var_95_garch: number;
+  cvar_ratio: number;
+  garch_active: boolean;
+  current_volatility: number;
+  forecast_volatility: number;
+  volatility_clustering: 'low' | 'normal' | 'elevated' | 'high';
+}
+
+// Entropy Monitor Types (v3.22)
+export interface EntropyData {
+  shannon_entropy: number;
+  effective_n: number;
+  max_possible: number;
+  normalized_score: number;
+  concentration_risk: 'critical' | 'high' | 'medium' | 'low' | 'good';
+  hhi_index: number;
+  correlation_entropy?: number;
+  participation_ratio?: number;
+}
+
 // Closing Auction Types (v3.17)
 export interface MOCImbalance {
   symbol: string;
