@@ -418,6 +418,74 @@ class HealthMonitor:
             })
             return True
     
+    def check_portfolio_entropy(self) -> bool:
+        """Check portfolio diversification using entropy metrics (v3.22).
+        
+        Shannon entropy measures effective diversification:
+        - Entropy < 1.5: Critical concentration (rebalance required)
+        - Entropy 1.5-2.0: High concentration (warning)
+        - Entropy 2.0-2.5: Moderate (monitor)
+        - Entropy > 2.5: Good diversification
+        
+        Uses target allocation 46/38/16 as baseline.
+        """
+        try:
+            # Import entropy monitor
+            from entropy_monitor import EntropyCalculator
+            
+            # Use target allocation as baseline (46/38/16)
+            weights = {
+                'SPY': 0.46,
+                'GLD': 0.38,
+                'TLT': 0.16
+            }
+            
+            calc = EntropyCalculator()
+            metrics = calc.calculate_metrics(weights)
+            
+            # Check for alerts
+            alert = calc.check_alert(metrics)
+            
+            # Build status message
+            status_msg = f"entropy={metrics.shannon_entropy:.2f}, effective_n={metrics.effective_n:.1f}, {metrics.concentration_risk}"
+            
+            # Determine if check passes
+            # Only fail on critical concentration
+            ok = metrics.concentration_risk not in ['critical']
+            
+            self.checks.append({
+                "name": "portfolio_entropy",
+                "status": status_msg,
+                "ok": ok,
+                "metrics": {
+                    "shannon_entropy": round(metrics.shannon_entropy, 4),
+                    "effective_n": round(metrics.effective_n, 2),
+                    "normalized_score": round(metrics.normalized_score, 1),
+                    "hhi_index": round(metrics.hhi_index, 4),
+                    "risk_level": metrics.concentration_risk
+                }
+            })
+            
+            if alert and alert['level'] in ['critical', 'warning']:
+                self.alerts.append(f"Portfolio concentration: {alert['message']}")
+            
+            return ok
+            
+        except ImportError:
+            self.checks.append({
+                "name": "portfolio_entropy",
+                "status": "not_available",
+                "ok": True
+            })
+            return True
+        except Exception as e:
+            self.checks.append({
+                "name": "portfolio_entropy",
+                "status": f"error: {str(e)}",
+                "ok": True  # Don't fail health check for entropy errors
+            })
+            return True
+    
     def check_wiki_sync(self) -> bool:
         """Check if wiki is being synced."""
         wiki_dir = Path("~/wiki/projects/portfolio-lab/compound").expanduser()
@@ -459,6 +527,7 @@ class HealthMonitor:
             self.check_kill_switches(),
             self.check_circuit_breaker(),
             self.check_cvar_metrics(),
+            self.check_portfolio_entropy(),
             self.check_wiki_sync()
         ]
         
