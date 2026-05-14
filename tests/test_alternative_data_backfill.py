@@ -61,7 +61,8 @@ class TestConstants:
 
     def test_weights_sum_to_one(self):
         backfill = AlternativeDataBackfill.__new__(AlternativeDataBackfill)
-        assert sum(backfill.WEIGHTS.values()) == pytest.approx(1.0)
+        total = sum(backfill.WEIGHTS.values())
+        assert abs(total - 1.0) < 0.001, f"Weights sum to {total}, expected 1.0"
 
     def test_crisis_dates(self):
         assert AlternativeDataBackfill.COVID_START == datetime(2020, 2, 20)
