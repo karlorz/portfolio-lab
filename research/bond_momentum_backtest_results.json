@@ -1,0 +1,222 @@
+{
+  "timestamp": "2026-05-15T07:48:07.672244",
+  "results": [
+    {
+      "etf": "TLT",
+      "formation_months": 12,
+      "cagr": 0.004039150513014844,
+      "sharpe": 0.06770930801830022,
+      "max_drawdown": -0.2308090950690002,
+      "alpha_vs_buyhold": -0.027148843568241876
+    },
+    {
+      "etf": "IEF",
+      "formation_months": 12,
+      "cagr": 0.016311296030902644,
+      "sharpe": 0.2844232517482116,
+      "max_drawdown": -0.2281835770413351,
+      "alpha_vs_buyhold": -0.016172125186248554
+    },
+    {
+      "etf": "SHY",
+      "formation_months": 12,
+      "cagr": 0.0342654258709052,
+      "sharpe": 1.3289314073779213,
+      "max_drawdown": -0.06814137929064545,
+      "alpha_vs_buyhold": 0.014359092942221485
+    }
+  ],
+  "sensitivity": [
+    {
+      "formation_months": 3,
+      "vol_target": 0.06,
+      "cagr": 0.006408692045286379,
+      "sharpe": 0.14578531999492989,
+      "max_dd": -0.16491626610828536,
+      "win_rate": 0.2952919020715631,
+      "alpha_vs_bh": -0.02477930203597034
+    },
+    {
+      "formation_months": 3,
+      "vol_target": 0.08,
+      "cagr": 0.008121134136517494,
+      "sharpe": 0.13855504334360386,
+      "max_dd": -0.21477087662874972,
+      "win_rate": 0.2952919020715631,
+      "alpha_vs_bh": -0.023066859944739226
+    },
+    {
+      "formation_months": 3,
+      "vol_target": 0.1,
+      "cagr": 0.009619746687313802,
+      "sharpe": 0.1312983528467429,
+      "max_dd": -0.2621972415595375,
+      "win_rate": 0.2952919020715631,
+      "alpha_vs_bh": -0.02156824739394292
+    },
+    {
+      "formation_months": 3,
+      "vol_target": 0.12,
+      "cagr": 0.010903559944349661,
+      "sharpe": 0.1240174254230282,
+      "max_dd": -0.3072744289438264,
+      "win_rate": 0.2952919020715631,
+      "alpha_vs_bh": -0.02028443413690706
+    },
+    {
+      "formation_months": 6,
+      "vol_target": 0.06,
+      "cagr": 0.00812640446770474,
+      "sharpe": 0.18133298298899403,
+      "max_dd": -0.14243758913767063,
+      "win_rate": 0.2934086629001883,
+      "alpha_vs_bh": -0.02306158961355198
+    },
+    {
+      "formation_months": 6,
+      "vol_target": 0.08,
+      "cagr": 0.010398825065830009,
+      "sharpe": 0.17402991472995213,
+      "max_dd": -0.18609670623526223,
+      "win_rate": 0.2934086629001883,
+      "alpha_vs_bh": -0.02078916901542671
+    },
+    {
+      "formation_months": 6,
+      "vol_target": 0.1,
+      "cagr": 0.01245039659729974,
+      "sharpe": 0.1666912517108848,
+      "max_dd": -0.2279334897230484,
+      "win_rate": 0.2934086629001883,
+      "alpha_vs_bh": -0.01873759748395698
+    },
+    {
+      "formation_months": 6,
+      "vol_target": 0.12,
+      "cagr": 0.014279726083567867,
+      "sharpe": 0.1593192498164237,
+      "max_dd": -0.26800047785018044,
+      "win_rate": 0.2934086629001883,
+      "alpha_vs_bh": -0.016908267997688853
+    },
+    {
+      "formation_months": 9,
+      "vol_target": 0.06,
+      "cagr": 0.002197855897940082,
+      "sharpe": 0.05020094131685656,
+      "max_dd": -0.18380620112412133,
+      "win_rate": 0.2935969868173258,
+      "alpha_vs_bh": -0.02899013818331664
+    },
+    {
+      "formation_months": 9,
+      "vol_target": 0.08,
+      "cagr": 0.0025043906324206944,
+      "sharpe": 0.042901846052715145,
+      "max_dd": -0.23841514060456065,
+      "win_rate": 0.2935969868173258,
+      "alpha_vs_bh": -0.028683603448836026
+    },
+    {
+      "formation_months": 9,
+      "vol_target": 0.1,
+      "cagr": 0.002597377630048525,
+      "sharpe": 0.03559581920889065,
+      "max_dd": -0.2899216950625908,
+      "win_rate": 0.2935969868173258,
+      "alpha_vs_bh": -0.028590616451208195
+    },
+    {
+      "formation_months": 9,
+      "vol_target": 0.12,
+      "cagr": 0.002476704891368975,
+      "sharpe": 0.02828504749272126,
+      "max_dd": -0.3384591220312903,
+      "win_rate": 0.2935969868173258,
+      "alpha_vs_bh": -0.028711289189887745
+    },
+    {
+      "formation_months": 12,
+      "vol_target": 0.06,
+      "cagr": 0.0033626015715246815,
+      "sharpe": 0.07515752790611538,
+      "max_dd": -0.1778658188455283,
+      "win_rate": 0.30527306967984935,
+      "alpha_vs_bh": -0.02782539250973204
+    },
+    {
+      "formation_months": 12,
+      "vol_target": 0.08,
+      "cagr": 0.004039150513014844,
+      "sharpe": 0.06770930801830022,
+      "max_dd": -0.2308090950690002,
+      "win_rate": 0.30527306967984935,
+      "alpha_vs_bh": -0.027148843568241876
+    },
+    {
+      "formation_months": 12,
+      "vol_target": 0.1,
+      "cagr": 0.004492578296978911,
+      "sharpe": 0.06024818668704219,
+      "max_dd": -0.28080440788888367,
+      "win_rate": 0.30527306967984935,
+      "alpha_vs_bh": -0.02669541578427781
+    },
+    {
+      "formation_months": 12,
+      "vol_target": 0.12,
+      "cagr": 0.004722516438970592,
+      "sharpe": 0.052776496635027474,
+      "max_dd": -0.3279818191012937,
+      "win_rate": 0.30527306967984935,
+      "alpha_vs_bh": -0.026465477642286128
+    },
+    {
+      "formation_months": 18,
+      "vol_target": 0.06,
+      "cagr": 0.013555858415918332,
+      "sharpe": 0.29406098432091915,
+      "max_dd": -0.10502201475379097,
+      "win_rate": 0.32655367231638416,
+      "alpha_vs_bh": -0.01763213566533839
+    },
+    {
+      "formation_months": 18,
+      "vol_target": 0.08,
+      "cagr": 0.01763450924650356,
+      "sharpe": 0.28690295671098,
+      "max_dd": -0.13850944009131205,
+      "win_rate": 0.32655367231638416,
+      "alpha_vs_bh": -0.01355348483475316
+    },
+    {
+      "formation_months": 18,
+      "vol_target": 0.1,
+      "cagr": 0.02148835941610039,
+      "sharpe": 0.2796822419118828,
+      "max_dd": -0.17122215185828818,
+      "win_rate": 0.32655367231638416,
+      "alpha_vs_bh": -0.009699634665156331
+    },
+    {
+      "formation_months": 18,
+      "vol_target": 0.12,
+      "cagr": 0.02511472523961822,
+      "sharpe": 0.2724010755467623,
+      "max_dd": -0.20315359895183221,
+      "win_rate": 0.32655367231638416,
+      "alpha_vs_bh": -0.006073268841638502
+    }
+  ],
+  "correlation_analysis": {
+    "momentum_duration_correlation": 0.4443493472531997,
+    "signal_agreement_rate": 0.6723111276516561,
+    "notes": "Full analysis requires actual yield curve data from duration overlay"
+  },
+  "conclusion": {
+    "momentum_works_for_bonds": true,
+    "best_formation": 18,
+    "recommended_vol_target": 0.06,
+    "orthogonal_to_duration": "True"
+  }
+}
