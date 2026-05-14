@@ -388,6 +388,9 @@ class DashboardGenerator:
         # Load broker data (Phase 4: live trading prep)
         broker_data = self._load_broker_data()
 
+        # Add closing auction signals (v3.17 Phase 4)
+        closing_auction_data = self._load_closing_auction_data()
+
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -410,6 +413,7 @@ class DashboardGenerator:
             "alternative_data": alternative_data_signal,
             "smart_rebalance": smart_rebalance_data,
             "broker": broker_data,
+            "closing_auction": closing_auction_data,
         }
         
         out_path = PUBLIC_DIR / "signals.json"
@@ -467,6 +471,38 @@ class DashboardGenerator:
                 pass
 
         return broker
+
+    def _load_closing_auction_data(self) -> Dict:
+        """Load closing auction MOC signals for dashboard (v3.17 Phase 4)."""
+        closing_auction = {
+            "signals": [],
+            "last_update": None,
+            "market_open": False,
+        }
+        
+        try:
+            # Check for closing auction signal file
+            signal_file = DATA_DIR / "closing_auction_latest.json"
+            if signal_file.exists():
+                with open(signal_file) as f:
+                    data = json.load(f)
+                    closing_auction["signals"] = data.get("signals", [])
+                    closing_auction["last_update"] = data.get("timestamp")
+            
+            # Check market hours (simplified: 9:30-16:00 ET)
+            from datetime import datetime, time
+            now = datetime.now()
+            et_offset = timedelta(hours=0)  # Server is ET
+            et_time = (now + et_offset).time()
+            market_open_time = time(9, 30)
+            market_close_time = time(16, 0)
+            closing_auction["market_open"] = market_open_time <= et_time <= market_close_time
+            
+        except Exception as e:
+            # Closing auction data not available
+            pass
+        
+        return closing_auction
 
     def _generate_ml_signals(self) -> Dict:
         """Generate ML-based signals from features data."""

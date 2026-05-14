@@ -63,6 +63,11 @@ export interface SignalsData {
   };
   smart_rebalance?: SmartRebalanceData;
   broker?: BrokerData;
+  closing_auction?: {
+    signals: ClosingAuctionSignal[];
+    last_update: string | null;
+    market_open: boolean;
+  };
   zero_dte?: {
     positions: ZeroDTEPosition[];
     config: ZeroDTEConfig | null;
@@ -353,4 +358,33 @@ export interface ZeroDTEPosition {
   delta_exposure: number;
   notional_value: number;
   close_reason?: 'expiration' | 'profit_take' | 'stop_loss' | 'delta_stop' | 'time_exit' | 'manual' | 'roll' | 'emergency';
+}
+
+// Closing Auction Types (v3.17)
+export interface MOCImbalance {
+  symbol: string;
+  timestamp: string;
+  imbalance_shares: number;
+  paired_shares: number;
+  reference_price: number;
+  source: string;
+  imbalance_ratio: number;
+  direction_score: number;
+}
+
+export interface ClosingAuctionSignal {
+  symbol: string;
+  timestamp: string;
+  direction: 'STRONG_BUY' | 'BUY' | 'WEAK_BUY' | 'NEUTRAL' | 'WEAK_SELL' | 'SELL' | 'STRONG_SELL';
+  direction_score: number;
+  confidence: 'high' | 'medium' | 'low' | 'insufficient_data';
+  imbalance: MOCImbalance;
+  entry_price: number;
+  target_exit_price: number;
+  stop_loss_price?: number;
+  historical_win_rate: number | null;
+  historical_count: number;
+  max_position_pct: number;
+  urgency: 'immediate' | 'high' | 'normal';
+  should_trade: boolean;
 }

@@ -5,6 +5,7 @@ import { SPYComparisonChart } from './SPYComparisonChart';
 import { RebalancePanel } from './RebalancePanel';
 import { SmartRebalancePanel } from './SmartRebalancePanel';
 import { BrokerPanel } from './BrokerPanel';
+import { ClosingAuctionPanel } from './ClosingAuctionPanel';
 import { UnderwaterChart, RollingMetricsChart, CrisisOverlay } from './AnalyticsCharts';
 import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
@@ -16,7 +17,7 @@ interface LiveDashboardProps {
   refreshInterval?: number; // seconds
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options';
+type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -120,7 +121,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'performance', label: 'Performance' },
     { id: 'rebalance', label: 'Rebalance' },
     { id: 'analytics', label: 'Analytics' },
-    { id: 'options', label: '0DTE', badge: signals?.zero_dte?.positions?.length || undefined }
+    { id: 'options', label: '0DTE', badge: signals?.zero_dte?.positions?.length || undefined },
+    { id: 'auction', label: 'Auction', badge: signals?.closing_auction?.signals?.filter(s => s.should_trade).length || undefined }
   ];
 
   return (
@@ -500,6 +502,16 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               portfolioValue={portfolioValue}
               vix={signals?.regime?.vix || null}
               weeklyLimitRemaining={2 - (signals?.zero_dte?.weekly_trades_used || 0)}
+            />
+          </div>
+        )}
+
+        {/* Closing Auction Tab */}
+        {activeTab === 'auction' && (
+          <div className="tab-panel auction-panel">
+            <ClosingAuctionPanel
+              signals={signals?.closing_auction?.signals || []}
+              isMarketOpen={signals?.closing_auction?.market_open || false}
             />
           </div>
         )}
