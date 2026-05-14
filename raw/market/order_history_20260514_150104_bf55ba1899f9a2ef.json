@@ -1,0 +1,48 @@
+---
+type: raw
+source_type: market_data
+sha256: bf55ba1899f9a2ef
+created: 2026-05-14T15:01:04.887639
+---
+
+[
+  {
+    "symbol": "SPY",
+    "side": "buy",
+    "shares": 62.362734612002846,
+    "estimated_price": 737.6199951171875,
+    "estimated_value": 46000.0,
+    "reason": "rebalance_up",
+    "drift_before": 0.46,
+    "fill_price": 738.3576151123046,
+    "fill_shares": 62.362734612002846,
+    "fill_value": 46046.0,
+    "timestamp": "2026-05-11T03:20:31.447694"
+  },
+  {
+    "symbol": "GLD",
+    "side": "buy",
+    "shares": 87.60403200416498,
+    "estimated_price": 433.7699890136719,
+    "estimated_value": 38000.0,
+    "reason": "rebalance_up",
+    "drift_before": 0.38,
+    "fill_price": 434.2037590026855,
+    "fill_shares": 87.60403200416498,
+    "fill_value": 38038.0,
+    "timestamp": "2026-05-11T03:20:31.447712"
+  },
+  {
+    "symbol": "TLT",
+    "side": "buy",
+    "shares": 185.8736019941365,
+    "estimated_price": 86.08000183105469,
+    "estimated_value": 16000.0,
+    "reason": "rebalance_up",
+    "drift_before": 0.16,
+    "fill_price": 86.16608183288574,
+    "fill_shares": 184.71305253113616,
+    "fill_value": 15916.0,
+    "timestamp": "2026-05-11T03:20:31.447717"
+  }
+]
