@@ -134,19 +134,18 @@ def fetch_curve_signal(
     with open(path) as f:
         data = json.load(f)
 
-    symbols = data.get("symbols", {})
-    if ticker not in symbols:
+    if ticker not in data:
         raise ValueError(f"No price data for ticker: {ticker}")
 
-    prices = symbols[ticker].get("p", [])
+    prices = data[ticker]
     if len(prices) < 2:
         raise ValueError(f"Insufficient data for {ticker}: need >=2 data points")
 
     # Sort by date ascending
     sorted_prices = sorted(prices, key=lambda x: x["d"])
 
-    # Front-month = most recent close
-    front_price = sorted_prices[-1]["c"]
+    # Front-month = most recent close (field 'p' = adjusted close)
+    front_price = sorted_prices[-1]["p"]
 
     # Deferred-month proxy = close from ~1 month ago
     target_date = sorted_prices[-1]["d"]
@@ -160,9 +159,9 @@ def fetch_curve_signal(
 
     if not deferred_candidates:
         # Fall back to oldest available price
-        deferred_price = sorted_prices[0]["c"]
+        deferred_price = sorted_prices[0]["p"]
     else:
-        deferred_price = deferred_candidates[-1]["c"]
+        deferred_price = deferred_candidates[-1]["p"]
 
     regime, spread = compute_curve_spread(front_price, deferred_price)
 
