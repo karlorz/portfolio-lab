@@ -11,7 +11,14 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from src.data.credit_fetcher import CreditFetcher, CreditData, RISK_OFF_THRESHOLD, RISK_ON_THRESHOLD
+from src.data.credit_fetcher import (
+    CreditFetcher, CreditMetrics, CreditSignal, 
+    SPREAD_WIDENING_THRESHOLD, SPREAD_TIGHTENING_THRESHOLD
+)
+
+# Map threshold names for backward compatibility in this module
+RISK_OFF_THRESHOLD = SPREAD_TIGHTENING_THRESHOLD
+RISK_ON_THRESHOLD = SPREAD_WIDENING_THRESHOLD
 
 
 class CreditSignalType(Enum):
