@@ -234,7 +234,8 @@ class TestCalculateSharpe:
         assert calculate_sharpe(rets) == 0.0
 
     def test_zero_vol(self):
-        rets = pd.Series([0.001] * 100)
+        # Use returns equal to risk-free rate so excess mean is also 0
+        rets = pd.Series([0.02 / 252] * 100)
         assert calculate_sharpe(rets) == 0.0
 
     def test_with_risk_free_rate(self):
