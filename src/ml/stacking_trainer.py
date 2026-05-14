@@ -19,7 +19,6 @@ Performance Targets:
 
 import json
 import numpy as np
-import xgboost as xgb
 import sqlite3
 import argparse
 from typing import Dict, List, Optional, Tuple, NamedTuple
@@ -27,9 +26,35 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
 import logging
+import os
+
+# Conditional xgboost import — disabled by default (see src/experimental.py)
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+
+if _ML_ENABLED:
+    import xgboost as xgb
+    from sklearn.model_selection import TimeSeriesSplit
+    from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
+else:
+    # Stub xgboost for import compatibility
+    import types as _types
+    _stub_xgb = _types.ModuleType("xgboost")
+    _stub_xgb.XGBClassifier = lambda **kw: None
+    _stub_xgb.XGBRegressor = lambda **kw: None
+    _stub_xgb.train = lambda *a, **kw: None
+    _stub_xgb.DMatrix = lambda *a, **kw: None
+    _stub_xgb.cv = lambda *a, **kw: {"test-auc-mean": [0.5]}
+    xgb = _stub_xgb
+
+    # Stub sklearn for import compatibility
+    TimeSeriesSplit = lambda **kw: None
+    accuracy_score = lambda *a: 0.5
+    roc_auc_score = lambda *a: 0.5
+    classification_report = lambda *a: ""
+
+    import sys as _sys
+    _sys.modules.setdefault("xgboost", _stub_xgb)
 
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
