@@ -814,24 +814,13 @@ class DashboardGenerator:
             "generated_at": datetime.now().isoformat()
         }
         
-        # Get cron job status from hermes CLI
+        # Get cron job status from project-local status file
         try:
-            # Try reading from hermes state directory since CLI may not work in cron context
-            hermes_state = Path.home() / ".hermes" / "cron" / "state.json"
-            if hermes_state.exists():
-                with open(hermes_state) as f:
-                    state = json.load(f)
-                    for job_id, job in state.get("jobs", {}).items():
-                        if job.get("name", "").startswith("portfolio-lab"):
-                            health_data["cron_jobs"].append({
-                                "id": job_id[:12],
-                                "name": job.get("name"),
-                                "schedule": job.get("schedule"),
-                                "last_run": job.get("last_run_at"),
-                                "next_run": job.get("next_run_at"),
-                                "status": "ok" if job.get("last_status") == "ok" else "error",
-                                "state": job.get("state", "unknown")
-                            })
+            cron_status_file = DATA_DIR / "cron_status.json"
+            if cron_status_file.exists():
+                with open(cron_status_file) as f:
+                    cron_data = json.load(f)
+                health_data["cron_jobs"] = cron_data.get("jobs", [])
             else:
                 # Fallback: mark as unknown but system healthy
                 health_data["cron_jobs"] = [
