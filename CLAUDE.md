@@ -224,6 +224,36 @@ PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ -m heavy
 PORTFOLIO_LAB_ENABLE_ML=1 uv run python -m src.agents.ai_controller --mode status
 ```
 
+## Dev Constraints (HARD RULES)
+
+### No ML imports without explicit user override
+- **NEVER** import `torch`, `xgboost`, `sklearn`, or any ML library without the user explicitly requesting ML work
+- Importing `torch` loads 63MB+ into memory and can exhaust host CPU, freezing all processes
+- **ALWAYS** keep `PORTFOLIO_LAB_ENABLE_ML=0` (the default) for all test runs and dev work
+- **ONLY** set `PORTFOLIO_LAB_ENABLE_ML=1` when the user explicitly asks for ML agent work (training, inference, etc.)
+
+### ML-gated modules (do NOT import these without user request)
+These modules import torch and will stall the machine without `PORTFOLIO_LAB_ENABLE_ML=1`:
+- `src/agents/ai_controller.py` (492 lines) — MARL entry point
+- `src/agents/analyst_agent.py` (321 lines) — PPO policy
+- `src/agents/controller_agent.py` (458 lines) — centralized critic
+- `src/agents/sentiment_agent.py` (332 lines) — sentiment RL agent
+- `src/agents/agent_graph.py` (394 lines) — LangGraph topology
+- `src/agents/marl_trainer.py` (543 lines) — MAPPO training
+- `src/agents/base_agent.py` (266 lines) — uses torch stubs (safe without ML, tested)
+
+### Test coverage for ML-gated modules
+- Tests for agent modules exist (`test_marl_trainer.py`, `test_base_agent.py`, etc.) but require mocking
+- `test_base_agent.py` (54 tests) runs without ML — uses torch stubs
+- Remaining agent modules (`analyst_agent`, `controller_agent`, `sentiment_agent`, `ai_controller`, `agent_graph`) lack dedicated test files — write them ONLY when the user explicitly requests ML agent work
+
+### Preferred dev targets (no ML, safe to test anytime)
+These modules have NO ML deps and are always safe to work on:
+- `src/strategy/` — comparison, evaluator, dual_momentum, etc.
+- `src/signals/` — signal modules (credit_spread, commodity_curve, etc.)
+- `src/broker/` — broker integration (options_utils, order_router, position_sync)
+- `src/monitor/` — entropy_monitor, garch_cvar, etc.
+
 ## To Run
 ```bash
 cd /Users/karlchow/Desktop/code/portfolio-lab
