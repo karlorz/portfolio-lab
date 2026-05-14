@@ -47,8 +47,20 @@ const LEVERAGED_TREASURY_ETFS = [
   'TMF',   // Direxion Daily 20+ Year Treasury Bull 3X (3x TLT)
 ];
 
+// FX Currency ETFs (v3.15, v3.19 ML FX Carry Infrastructure)
+const FX_SYMBOLS = [
+  'UUP',   // Invesco DB US Dollar Index Bullish Fund
+  'UDN',   // Invesco DB US Dollar Index Bearish Fund
+  'FXE',   // Invesco CurrencyShares Euro Trust
+  'FXY',   // Invesco CurrencyShares Japanese Yen Trust
+  'FXB',   // Invesco CurrencyShares British Pound Sterling Trust
+  'FXA',   // Invesco CurrencyShares Australian Dollar Trust
+  'FXC',   // Invesco CurrencyShares Canadian Dollar Trust
+  'FXF',   // Invesco CurrencyShares Swiss Franc Trust
+];
+
 // Combined symbol list for backward compatibility
-const SYMBOLS = [...CORE_SYMBOLS, ...SECTOR_ETFS, ...LEVERAGED_TREASURY_ETFS];
+const SYMBOLS = [...CORE_SYMBOLS, ...SECTOR_ETFS, ...LEVERAGED_TREASURY_ETFS, ...FX_SYMBOLS];
 const FRED_SERIES = {
   dgs2: 'DGS2',
   dgs10: 'DGS10',
@@ -316,7 +328,7 @@ export async function fetchCoreData(
 }
 
 // Export symbol lists for strategy modules
-export { CORE_SYMBOLS, SECTOR_ETFS, SYMBOLS };
+export { CORE_SYMBOLS, SECTOR_ETFS, FX_SYMBOLS, SYMBOLS };
 
 // CLI usage
 if (import.meta.main) {
