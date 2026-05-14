@@ -24,9 +24,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+DATA_DIR = Path(__file__).parent.parent.parent / "data"
 FACTOR_DIR = DATA_DIR / "factors"
-FACTOR_DIR.mkdir(exist_ok=True)
+FACTOR_DIR.mkdir(exist_ok=True, parents=True)
 
 # Fama-French 5 Factor URLs
 FF_URLS = {

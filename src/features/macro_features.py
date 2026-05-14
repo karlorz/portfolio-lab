@@ -28,9 +28,9 @@ import sqlite3
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+DATA_DIR = Path(__file__).parent.parent.parent / "data"
 FEATURE_DIR = DATA_DIR / "features"
-FEATURE_DIR.mkdir(exist_ok=True)
+FEATURE_DIR.mkdir(exist_ok=True, parents=True)
 
 FRED_DATA_PATH = DATA_DIR / "fred_data.json"
 VIX_DATA_PATH = DATA_DIR / "vix_term_structure.json"
