@@ -228,6 +228,24 @@ python -m src.agents.ai_controller --mode train --episodes 500
 - commodities-analysis
 - tactical-rebalancing
 
+## Python: uv Package Manager
+
+All Python dependencies managed via [uv](https://docs.astral.sh/uv/). Core deps
+in `pyproject.toml`, ML deps (torch/xgboost) in `[dependency-groups] ml`.
+
+```bash
+uv sync                  # install core deps (no ML libs)
+uv sync --group ml       # install core + ML deps
+uv run python script.py  # run a script
+uv run pytest tests/     # run tests (ML disabled by default)
+```
+
+**ML features disabled by default.** Set `PORTFOLIO_LAB_ENABLE_ML=1` to enable:
+```bash
+PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ -m heavy
+PORTFOLIO_LAB_ENABLE_ML=1 uv run python -m src.agents.ai_controller --mode status
+```
+
 ## To Run
 ```bash
 cd /Users/karlchow/Desktop/code/portfolio-lab

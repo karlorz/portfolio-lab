@@ -1,0 +1,61 @@
+[project]
+name = "portfolio-lab"
+version = "2.70.0"
+description = "All-Season Portfolio backtesting and comparison lab with MARL agents"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "karlorz" },
+]
+
+dependencies = [
+    # Data & Scientific
+    "numpy>=2.0",
+    "pandas>=2.0",
+    "scipy>=1.15",
+    "scikit-learn>=1.6",
+    # Finance & Data Fetching
+    "yfinance>=0.2",
+    "requests>=2.32",
+    "aiohttp>=3.11",
+    "httpx>=0.28",
+    # Data Validation & Serialization
+    "pydantic>=2.10",
+    "pyyaml>=6.0",
+    "python-dateutil>=2.9",
+    # Web & API
+    "flask>=3.0",
+    "beautifulsoup4>=4.12",
+    # Utilities
+    "tqdm>=4.67",
+    "hmmlearn>=0.3",
+    "joblib>=1.4",
+    "typing-extensions>=4.12",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+]
+ml = [
+    "torch>=2.5",
+    "xgboost>=2.1",
+    "sympy>=1.13",
+]
+
+[tool.uv]
+# ML deps are optional — not synced by default.
+# Use: uv sync --group ml  to include torch/xgboost
+# Or:   uv run --group ml python -m src.agents.ai_controller
+no-build-isolation-package = []
+
+[tool.pytest.ini_options]
+markers = [
+    "heavy: tests requiring heavy ML libraries (torch, xgboost) — require PORTFOLIO_LAB_ENABLE_ML=1",
+    "db: tests that require SQLite database access",
+    "network: tests that make real HTTP requests",
+    "slow: tests that take >2 seconds to complete",
+]
+testpaths = ["tests"]
+pythonpath = ["."]

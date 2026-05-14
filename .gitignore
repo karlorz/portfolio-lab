@@ -144,3 +144,8 @@ dist/
 
 # Claude Code
 .claude/scheduled_tasks.lock
+
+# uv Python package manager
+.venv/
+uv.lock
+.python-version
