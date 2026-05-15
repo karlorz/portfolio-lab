@@ -41,6 +41,16 @@
 
 ### v4.80 Dynamic Bond Duration Rotation - COMPLETED
 
+### v4.90 Unified Overlay Orchestrator - COMPLETED
+- **Orchestrator**: `src/strategy/unified_orchestrator.py` (430 lines) — multi-overlay integration
+  - Combines 4 overlays: collar (25%), bond duration (25%), crypto (15%), calendar (10%)
+  - Weighted-sum conflict resolution with hard constraint enforcement
+  - 7-asset model: SPY, GLD, TLT, IEF, SHY, BTC, ETH
+  - Hard bounds: SPY 36-56%, GLD 28-48%, bonds 6-26%, crypto 0-5%
+  - Estimated Sharpe projection: baseline 0.79 → 0.91 target
+- **Tests**: `tests/test_unified_orchestrator.py` (23 tests passing)
+- **Status**: All phases complete
+
 ### v4.60 Collar Live Options Integration - COMPLETED
 - **Bridge**: `src/broker/collar_options_bridge.py` (330 lines) — collar↔broker options chain
   - Async options chain fetch with graceful fallback (no PriceFetcher, no API keys)
@@ -258,10 +268,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **4011 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **4145 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **4034 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **4168 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~3100 passing, pre-existing failures in yield curve and a few other suites
-- 117 test files covering signals, strategy, dashboard, broker, agents, data, research
+- 118 test files covering signals, strategy, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
