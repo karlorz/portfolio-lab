@@ -39,6 +39,20 @@
 
 ## Recent Implementation Updates (2026-05-16)
 
+### v4.80 Dynamic Bond Duration Rotation - COMPLETED
+- **Signal Generator**: `src/signals/bond_duration_signal.py` (280 lines) — yield curve + real rate analysis
+  - 4 curve regimes: STEEP (>1.0%), NORMAL (0.3-1.0%), FLAT (0.0-0.3%), INVERTED (<0.0%)
+  - 3 rate directions: FALLING, STABLE, RISING (6-month trend)
+  - 12-cell strategy matrix: curve regime × rate direction → TLT/IEF/SHY weights
+  - Real rate >2% shifts toward longer duration for carry
+- **Rotation Strategy**: `src/strategy/bond_duration_rotator.py` (260 lines) — bond sleeve allocation
+  - Rotates 16% bond sleeve across TLT (16yr dur), IEF (7yr), SHY (2yr)
+  - Baseline comparison engine: static TLT vs dynamic rotation
+  - 8% EnsembleVoter weight, state persistence
+- **Tests**: `tests/test_bond_duration_signal.py` (36 tests) + `tests/test_bond_duration_rotator.py` (22 tests) = 58 tests passing
+- **Expected Impact**: +0.02-0.03 Sharpe through better risk-adjusted fixed-income positioning
+- **Status**: All phases complete
+
 ### v4.70 Crypto Tactical Allocation - COMPLETED
 - **Signal Generator**: `src/signals/crypto_momentum.py` (340 lines) — BTC/ETH momentum + vol regime
   - 6-month/3-month/1-month momentum computation with 180-day lookback
@@ -235,10 +249,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **3938 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **4072 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **3996 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **4130 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~3100 passing, pre-existing failures in yield curve and a few other suites
-- 114 test files covering signals, strategy, dashboard, broker, agents, data, research
+- 116 test files covering signals, strategy, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
