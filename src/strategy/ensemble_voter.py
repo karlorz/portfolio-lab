@@ -71,6 +71,7 @@ class SignalSource(Enum):
     CLOSING_AUCTION = "closing_auction"       # v3.17 MOC/IOC imbalance signals
     UNIFIED_OVERLAY = "unified_overlay"       # v4.90 Multi-overlay orchestration
     MEAN_REVERSION = "mean_reversion"         # v4.81 VIX-gated mean-reversion
+    TRANSFORMER_REGIME = "transformer_regime"  # v3.18 Transformer regime detector
 
 
 @dataclass
@@ -134,6 +135,7 @@ REGIME_WEIGHTS = {
         SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
         SignalSource.UNIFIED_OVERLAY: 0.02,  # v4.90 Multi-overlay orchestration
+        SignalSource.TRANSFORMER_REGIME: 0.05,  # v3.18 Transformer regime detection
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.27,
@@ -146,6 +148,7 @@ REGIME_WEIGHTS = {
         SignalSource.TSFM_MOMENTUM: 0.02,
         SignalSource.DURATION_REGIME: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
+        SignalSource.TRANSFORMER_REGIME: 0.08,  # v3.18 Most useful in volatile transitions
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.30,
@@ -159,6 +162,7 @@ REGIME_WEIGHTS = {
         SignalSource.DURATION_REGIME: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
+        SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Low weight in crisis (regime obvious)
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.24,
@@ -171,6 +175,7 @@ REGIME_WEIGHTS = {
         SignalSource.DURATION_REGIME: 0.03,
         SignalSource.CIRCUIT_BREAKER: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
+        SignalSource.TRANSFORMER_REGIME: 0.06,  # v3.18 Detect recovery transitions
     }
 }
 

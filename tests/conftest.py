@@ -48,6 +48,7 @@ _HEAVY_TEST_FILES = [
     "test_regime_ml.py",
     "test_factor_timing_backtest.py",
     "test_fx_carry_ml.py",
+    "test_transformer_regime.py",
 ]
 
 if os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") != "1":
