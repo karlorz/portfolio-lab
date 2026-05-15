@@ -41,6 +41,17 @@
 
 ### v4.80 Dynamic Bond Duration Rotation - COMPLETED
 
+### v4.90 Combined Overlay Backtest - COMPLETED
+- **Backtest Engine**: `src/backtest/combined_overlay_backtest.py` (360 lines) — validates theoretical Sharpe
+  - Runs all 4 overlays together on historical/synthetic data (2006-2026)
+  - Synthetic data with realistic correlations and crisis regimes
+  - Crisis decomposition: 2008, 2020, 2022 returns
+  - Overlay activity tracking: % days active per overlay
+  - Target validation: Sharpe >= 0.90, Max DD >= -22%
+  - CLI: `run`, `--save` for JSON output
+- **Tests**: `tests/test_combined_overlay_backtest.py` (20 tests passing)
+- **Status**: All phases complete
+
 ### v4.90 Unified Overlay Orchestrator - COMPLETED
 - **Orchestrator**: `src/strategy/unified_orchestrator.py` (430 lines) — multi-overlay integration
   - Combines 4 overlays: collar (25%), bond duration (25%), crypto (15%), calendar (10%)
@@ -268,10 +279,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **4034 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **4168 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **4054 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **4188 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~3100 passing, pre-existing failures in yield curve and a few other suites
-- 118 test files covering signals, strategy, dashboard, broker, agents, data, research
+- 120 test files covering signals, strategy, backtest, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
