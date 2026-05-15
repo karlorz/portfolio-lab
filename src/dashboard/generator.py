@@ -1122,30 +1122,48 @@ class DashboardGenerator:
                 json.dump(report, f, indent=2)
             return out_path
     
+    def generate_overlay_json(self) -> Optional[Path]:
+        """Generate overlay dashboard data from all tactical overlays."""
+        try:
+            from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
+            gen = OverlayDashboardGenerator()
+            dashboard = gen.generate()
+            gen.save(dashboard)
+            return gen.OUTPUT_PATH
+        except Exception as e:
+            print(f"  Overlay dashboard: {e}")
+            return None
+
     def run(self):
         """Generate all dashboard files."""
         print(f"[{datetime.now()}] Generating dashboard data...")
-        
+
         paths = [
             self.generate_performance_json(),
             self.generate_signals_json(),
             self.generate_stats_json(),
             self.generate_alerts_json(),
             self.generate_health_json(),
-            self.generate_analytics_json(),  # NEW
+            self.generate_analytics_json(),
         ]
-        
+
+        # Overlay dashboard (separate path — may fail gracefully)
+        overlay_path = self.generate_overlay_json()
+        if overlay_path:
+            paths.append(overlay_path)
+
         for p in paths:
-            print(f"  Generated: {p}")
-        
+            if p:
+                print(f"  Generated: {p}")
+
         # Create index
         index = {
-            "files": [str(p.name) for p in paths],
+            "files": [str(p.name) for p in paths if p],
             "generated_at": datetime.now().isoformat()
         }
         with open(PUBLIC_DIR / "index.json", 'w') as f:
             json.dump(index, f)
-        
+
         self.conn.close()
         print(f"[{datetime.now()}] Dashboard generation complete")
 
