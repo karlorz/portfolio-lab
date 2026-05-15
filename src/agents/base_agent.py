@@ -81,9 +81,10 @@ else:
     nn = _stub_nn
 
     # Register stubs in sys.modules so other agent modules find them
+    # (overwrites any existing entries to prevent silent no-op from setdefault)
     import sys as _sys
-    _sys.modules.setdefault("torch", _stub_torch)
-    _sys.modules.setdefault("torch.nn", _stub_nn)
+    _sys.modules["torch"] = _stub_torch
+    _sys.modules["torch.nn"] = _stub_nn
 
 
 class AgentType(Enum):

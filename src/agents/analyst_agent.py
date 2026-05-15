@@ -19,11 +19,19 @@ Actions:
 - confidence [0, 1]: certainty in assessment
 """
 
+import os
 import numpy as np
-import torch
-import torch.nn as nn
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+
+# Conditional ML import — disabled by default to prevent OOM in test suites.
+# Set PORTFOLIO_LAB_ENABLE_ML=1 to load real torch.
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED:
+    import torch
+    import torch.nn as nn
+else:
+    from .base_agent import torch, nn
 
 from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
 

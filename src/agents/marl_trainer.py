@@ -14,15 +14,22 @@ Training Architecture:
 - Consensus reward shaping: Agent agreement bonus
 """
 
+import os
 import numpy as np
-import torch
-import torch.nn as nn
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 import json
 from collections import deque
+
+# Conditional ML import — disabled by default to prevent OOM in test suites.
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED:
+    import torch
+    import torch.nn as nn
+else:
+    from .base_agent import torch, nn
 
 from .base_agent import BaseAgent, AgentObservation, AgentAction
 from .agent_graph import AgentGraph

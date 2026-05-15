@@ -12,12 +12,18 @@ Target: +0.03-0.05 Sharpe improvement over static factor allocation.
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
 from datetime import datetime
 import json
 import warnings
 warnings.filterwarnings('ignore')
+
+# Conditional sklearn import — only loaded when actually running the backtest
+try:
+    from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.preprocessing import StandardScaler
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 FEATURES_FILE = DATA_DIR / "features" / "factor_timing_features.csv"
@@ -87,6 +93,8 @@ def walk_forward_backtest(
     Walk-forward backtest: train on train_years, predict next month,
     rebalance monthly. Compare ML-timed vs static factor allocation.
     """
+    if not SKLEARN_AVAILABLE:
+        return {'error': 'sklearn not available — run with PORTFOLIO_LAB_ENABLE_ML=1 or install sklearn'}
     # Merge features and targets
     merged = df[feature_cols].join(targets)
     # Drop rows where composite target is NaN (last row)

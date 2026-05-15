@@ -22,8 +22,8 @@ Integration:
     - Format: JSON via stdout and file output
 """
 
+import os
 import numpy as np
-import torch
 import json
 import sqlite3
 import argparse
@@ -31,6 +31,11 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
+
+# Conditional ML import — disabled by default to prevent OOM in test suites.
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED:
+    import torch
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent

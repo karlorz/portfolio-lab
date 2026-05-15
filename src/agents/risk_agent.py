@@ -20,13 +20,20 @@ Actions:
 - confidence [0, 1]: certainty in risk assessment
 """
 
+import os
 import numpy as np
-import torch
-import torch.nn as nn
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 
 from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
+
+# Conditional ML import — disabled by default to prevent OOM in test suites.
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED:
+    import torch
+    import torch.nn as nn
+else:
+    from .base_agent import torch, nn
 
 
 class RiskNetwork(nn.Module):
