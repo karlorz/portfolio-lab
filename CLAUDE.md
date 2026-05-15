@@ -39,6 +39,22 @@
 
 ## Recent Implementation Updates (2026-05-16)
 
+### v4.70 Crypto Tactical Allocation - COMPLETED
+- **Signal Generator**: `src/signals/crypto_momentum.py` (340 lines) — BTC/ETH momentum + vol regime
+  - 6-month/3-month/1-month momentum computation with 180-day lookback
+  - 4 vol regimes: LOW (<40%), NORMAL (40-70%), HIGH (70-100%), EXTREME (>100%)
+  - Vol-scaling: target 40% annualized, position range 0.25x-2.0x
+  - BTC 60% / ETH 40% of crypto sleeve, funded from GLD
+- **Tactical Overlay**: `src/strategy/crypto_allocation.py` (280 lines) — allocation + backtest
+  - Entry: 6m momentum positive + vol regime normal/low
+  - Exit: momentum negative OR vol extreme (>100% ann.)
+  - Hard cap: 5% portfolio, 5% EnsembleVoter weight
+  - Backtest engine with baseline vs crypto comparison
+- **Tests**: `tests/test_crypto_momentum.py` (37 tests) + `tests/test_crypto_allocation.py` (23 tests) = 60 tests passing
+- **State**: `data/crypto_allocation_state.json` — tracks current crypto allocation
+- **Correlation**: BTC/ETH near-zero (0.05-0.15) to traditional 60/40 portfolio
+- **Status**: All phases complete
+
 ### v3.50 Calendar Seasonality Overlay - COMPLETED
 - **Signal Generator**: `src/signals/calendar_seasonality.py` (440 lines) — calendar-based execution timing
   - NYSECalendar with Easter computation, 12+ US market holidays, trading day logic
@@ -219,10 +235,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **3878 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **4012 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **3938 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **4072 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~3100 passing, pre-existing failures in yield curve and a few other suites
-- 112 test files covering signals, strategy, dashboard, broker, agents, data, research
+- 114 test files covering signals, strategy, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
