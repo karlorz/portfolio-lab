@@ -37,6 +37,23 @@
   - Inference latency: 4.7ms (target: <50ms) ✓
   - Integrates with v2.24 signal integrator (5% weight in composite)
 
+## Recent Implementation Updates (2026-05-16)
+
+### v4.60 Cashless Collar Options Overlay - COMPLETED
+- **Signal Generator**: `src/signals/collar_signal.py` (340 lines) — Black-Scholes pricing, strike selection
+  - VIX-aware strike widening across 4 volatility regimes (NORMAL/ELEVATED/STRESS/CRISIS)
+  - Binary search strike selection by target delta (30-delta call, 20-delta put)
+  - No ML dependencies (scipy.stats.norm fallback to math.erf)
+- **Tactical Overlay**: `src/strategy/collar_overlay.py` (340 lines) — roll logic, backtest engine
+  - Monthly collar cycle: write OTM call, buy OTM put, net premium near zero
+  - CRISIS freeze (VIX >40 disables collar — cost prohibitive)
+  - Historical backtest: hedged vs unhedged comparison engine
+- **Integration**: 10% weight in EnsembleVoter via CollarOverlayIntegrator
+- **Tests**: `tests/test_collar_signal.py` (49 tests) + `tests/test_collar_overlay.py` (26 tests) = 75 tests passing
+- **State**: `data/collar_overlay_state.json` — tracks current collar status
+- **Target**: Max DD -26.2% → ≤-20%, Sharpe +0.03-0.05
+- **Status**: All phases complete
+
 ## Recent Implementation Updates (2026-05-15)
 
 ### v4.50 VIX Term Structure Overlay - Phase 3 COMPLETED
@@ -190,10 +207,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **3775 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **3909 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **3804 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **3938 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~3100 passing, pre-existing failures in yield curve and a few other suites
-- 109 test files covering signals, strategy, dashboard, broker, agents, data, research
+- 111 test files covering signals, strategy, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
