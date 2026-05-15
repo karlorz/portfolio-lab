@@ -40,6 +40,15 @@
 ## Recent Implementation Updates (2026-05-16)
 
 ### v4.80 Dynamic Bond Duration Rotation - COMPLETED
+
+### v4.60 Collar Live Options Integration - COMPLETED
+- **Bridge**: `src/broker/collar_options_bridge.py` (330 lines) — collar↔broker options chain
+  - Async options chain fetch with graceful fallback (no PriceFetcher, no API keys)
+  - Live chain delta search: call 0.30, put -0.20
+  - Liquidity filtering: min volume 10, min OI 100, max spread 5%
+  - Live-vs-theoretical comparison, numpy-safe JSON serialization
+- **Tests**: `tests/test_collar_options_bridge.py` (15 tests passing)
+- **Status**: All phases complete
 - **Signal Generator**: `src/signals/bond_duration_signal.py` (280 lines) — yield curve + real rate analysis
   - 4 curve regimes: STEEP (>1.0%), NORMAL (0.3-1.0%), FLAT (0.0-0.3%), INVERTED (<0.0%)
   - 3 rate directions: FALLING, STABLE, RISING (6-month trend)
@@ -249,10 +258,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **3996 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **4130 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **4011 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **4145 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~3100 passing, pre-existing failures in yield curve and a few other suites
-- 116 test files covering signals, strategy, dashboard, broker, agents, data, research
+- 117 test files covering signals, strategy, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
