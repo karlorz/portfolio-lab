@@ -296,7 +296,7 @@ listing. New heavy test files MUST be added to this list.
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
 ### TypeScript (tests/ts/)
-- **167 tests** across 9 files (DSR 24, duration-signals 35, purged-cv 21, car25 23, stress-validation 15, sector-attribution 19, sector-momentum 15, leveraged-treasury 7)
+- **191 tests** across 10 files (DSR 24, duration-signals 35, purged-cv 21, car25 23, stress-validation 15, sector-attribution 19, sector-momentum 15, leveraged-treasury 7, overlay-panels 24)
 - Run: `bun test tests/ts/`
 - Bun native test runner, zero configuration needed
 
