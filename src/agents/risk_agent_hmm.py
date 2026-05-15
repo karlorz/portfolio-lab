@@ -32,6 +32,7 @@ Reference:
     Target: Sharpe 0.96 → 1.05 (+0.09 improvement)
 """
 
+import os
 import numpy as np
 import pandas as pd
 import json
@@ -49,13 +50,19 @@ from enum import Enum
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-try:
-    from hmmlearn.hmm import GaussianHMM
-    from sklearn.preprocessing import StandardScaler
-    HMM_AVAILABLE = True
-except ImportError:
+# Conditional ML import — disabled by default to prevent OOM in test suites.
+# hmmlearn (~23MB) + sklearn (~78MB) accumulate in single-process test runs.
+_ML_ENABLED_RISK = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED_RISK:
+    try:
+        from hmmlearn.hmm import GaussianHMM
+        from sklearn.preprocessing import StandardScaler
+        HMM_AVAILABLE = True
+    except ImportError:
+        HMM_AVAILABLE = False
+        print("Warning: hmmlearn not available. Install with: pip install hmmlearn")
+else:
     HMM_AVAILABLE = False
-    print("Warning: hmmlearn not available. Install with: pip install hmmlearn")
 
 # Import existing modules
 from src.signals.tsmom_overlay import TSMOMOverlay

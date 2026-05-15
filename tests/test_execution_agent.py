@@ -11,19 +11,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import numpy as np
-import torch
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
-from src.agents.base_agent import (
-    AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
-)
-from src.agents.execution_agent import (
-    ExecutionStyle,
-    ExecutionNetwork,
-    ExecutionAgent,
-    SCHEDULER_AVAILABLE,
-)
+# torch is guarded at module level — importing it during test collection
+# (even for skipped heavy tests) loads 63MB+ and can exhaust CPU on low-resource
+# machines. Only import when ML features are explicitly enabled.
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED:
+    import torch  # noqa: F811
 
 from src.agents.base_agent import (
     AgentType, AgentObservation, AgentAction, AgentMessage, MessageType

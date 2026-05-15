@@ -23,10 +23,14 @@ import asyncio
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-try:
-    from hmmlearn.hmm import GaussianHMM
-    HMM_AVAILABLE = True
-except ImportError:
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED:
+    try:
+        from hmmlearn.hmm import GaussianHMM
+        HMM_AVAILABLE = True
+    except ImportError:
+        HMM_AVAILABLE = False
+else:
     HMM_AVAILABLE = False
 
 # Database path
