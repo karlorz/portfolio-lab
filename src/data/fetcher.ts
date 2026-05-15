@@ -24,7 +24,15 @@ export interface TreasuryYield {
 }
 
 // Core portfolio symbols
-const CORE_SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', 'MTUM', 'VLUE', 'USMV', 'QUAL'];
+const CORE_SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS'];
+
+// Factor ETFs for alternative risk premia harvesting (v4.10)
+const FACTOR_ETFS = [
+  'MTUM',  // iShares MSCI USA Momentum Factor ETF
+  'VLUE',  // iShares MSCI USA Value Factor ETF
+  'USMV',  // iShares MSCI USA Min Vol Factor ETF
+  'QUAL',  // iShares MSCI USA Quality Factor ETF
+];
 
 // Sector ETF symbols (v2.40 - Sector Rotation Momentum)
 const SECTOR_ETFS = [
@@ -60,7 +68,7 @@ const FX_SYMBOLS = [
 ];
 
 // Combined symbol list for backward compatibility
-const SYMBOLS = [...CORE_SYMBOLS, ...SECTOR_ETFS, ...LEVERAGED_TREASURY_ETFS, ...FX_SYMBOLS];
+const SYMBOLS = [...CORE_SYMBOLS, ...SECTOR_ETFS, ...LEVERAGED_TREASURY_ETFS, ...FX_SYMBOLS, ...FACTOR_ETFS];
 const FRED_SERIES = {
   dgs2: 'DGS2',
   dgs10: 'DGS10',
