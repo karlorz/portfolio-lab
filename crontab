@@ -34,3 +34,9 @@
 
 # Position sync — hourly at :41
 41 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab sync >> /root/projects/portfolio-lab/data/position_sync.log 2>&1
+
+# Overlay signals — every 20 minutes at :03, :23, :43
+3,23,43 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab overlay-signals >> /root/projects/portfolio-lab/data/overlay_signals.log 2>&1
+
+# Overlay dashboard — every 15 minutes at :11, :26, :41, :56
+11,26,41,56 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab overlay-dashboard >> /root/projects/portfolio-lab/data/overlay_dashboard.log 2>&1

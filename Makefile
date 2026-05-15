@@ -9,9 +9,11 @@
 #   make research     Run research agent
 #   make wiki-sync    Sync findings to wiki vault
 #   make build        TypeScript check + Vite production build
-#   make sync         Broker position sync
-#   make all          Run all maintenance tasks sequentially
-#   make cron-reset   Reset cron status file
+#   make sync              Broker position sync
+#   make overlay-signals    Generate all overlay signals
+#   make overlay-dashboard  Generate overlay dashboard data
+#   make all               Run all maintenance tasks sequentially
+#   make cron-reset        Reset cron status file
 
 SHELL := /bin/bash
 PROJECT_DIR := $(shell pwd)
@@ -182,10 +184,38 @@ sync:
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR
 
+# ── Overlay Pipeline ──────────────────────────────────────────────────
+
+.PHONY: overlay-signals
+overlay-signals:
+	@echo "=== Overlay Signals: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && python3 -m src.signals.collar_signal --save 2>&1 | tail -1; \
+	cd $(PROJECT_DIR) && python3 -m src.signals.calendar_seasonality --save 2>&1 | tail -1; \
+	cd $(PROJECT_DIR) && python3 -m src.signals.crypto_momentum --save 2>&1 | tail -1; \
+	cd $(PROJECT_DIR) && python3 -m src.signals.bond_duration_signal --save 2>&1 | tail -1; \
+	cd $(PROJECT_DIR) && python3 -m src.regime.kurtosis_regime --save 2>&1 | tail -1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	python3 $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR
+
+.PHONY: overlay-dashboard
+overlay-dashboard:
+	@echo "=== Overlay Dashboard: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && python3 -m src.dashboard.overlay_dashboard --save 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
+
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
-all: data dashboard health eval research wiki-sync sync build
+all: data dashboard health eval research wiki-sync sync build overlay-signals overlay-dashboard
 	@echo "=== All tasks complete: $$(date) ==="
 
 # ── Cron Status Management ───────────────────────────────────────────
@@ -201,6 +231,8 @@ cron-reset:
 	@python3 $(CRON_UPDATE) portfolio-lab-wiki-sync pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-build pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-position-sync pending 0 manual
+	@python3 $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
+	@python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 
 # ── Verification ─────────────────────────────────────────────────────

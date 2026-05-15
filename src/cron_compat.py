@@ -32,6 +32,8 @@ CRON_TARGETS = [
     "portfolio-lab-wiki-sync",
     "portfolio-lab-build",
     "portfolio-lab-position-sync",
+    "portfolio-lab-overlay-signals",
+    "portfolio-lab-overlay-dashboard",
 ]
 
 def active_backend() -> str:
