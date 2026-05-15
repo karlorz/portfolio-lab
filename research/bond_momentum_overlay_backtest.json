@@ -1,0 +1,113 @@
+{
+  "timestamp": "2026-05-16T01:40:32.639987",
+  "config": {
+    "formation_months": 18,
+    "base_tlt_weight": 0.16,
+    "base_spy_weight": 0.46,
+    "base_gld_weight": 0.38
+  },
+  "results": {
+    "total_return": 4.124945127551387,
+    "cagr": 0.10522413569229072,
+    "volatility": 0.10349800518092986,
+    "sharpe_ratio": 1.0166779109253683,
+    "max_drawdown": -0.17797046692356808,
+    "baseline_sharpe": 1.0661914732561122,
+    "sharpe_improvement": -0.04951356233074389,
+    "overlay_trades": 58,
+    "return_2008": null,
+    "return_2020": 0.20343317003498984,
+    "return_2022": -0.09141219826158553,
+    "avg_tlt_weight": 0.01234620824604647,
+    "avg_ief_weight": 0.031972356040889376,
+    "avg_shy_weight": 0.11568143571306416
+  },
+  "sensitivity": [
+    {
+      "formation_months": 12,
+      "bond_weight": 0.1,
+      "cagr": 0.1076988114096169,
+      "sharpe": 1.014829770016709,
+      "max_dd": -0.18422578344570045,
+      "sharpe_improvement": -0.03774157081945062,
+      "overlay_trades": 52
+    },
+    {
+      "formation_months": 12,
+      "bond_weight": 0.16,
+      "cagr": 0.10483308991624685,
+      "sharpe": 1.0173221065153597,
+      "max_dd": -0.17762091092797705,
+      "sharpe_improvement": -0.04995473643807036,
+      "overlay_trades": 52
+    },
+    {
+      "formation_months": 12,
+      "bond_weight": 0.2,
+      "cagr": 0.10291742861642472,
+      "sharpe": 1.0187048162021475,
+      "max_dd": -0.1732012221206355,
+      "sharpe_improvement": -0.05282557630322526,
+      "overlay_trades": 52
+    },
+    {
+      "formation_months": 18,
+      "bond_weight": 0.1,
+      "cagr": 0.10770660135643317,
+      "sharpe": 1.0148094147572548,
+      "max_dd": -0.18423989336503463,
+      "sharpe_improvement": -0.03776192607890483,
+      "overlay_trades": 58
+    },
+    {
+      "formation_months": 18,
+      "bond_weight": 0.16,
+      "cagr": 0.10484614636336143,
+      "sharpe": 1.0173436280988999,
+      "max_dd": -0.1776445348599194,
+      "sharpe_improvement": -0.04993321485453017,
+      "overlay_trades": 58
+    },
+    {
+      "formation_months": 18,
+      "bond_weight": 0.2,
+      "cagr": 0.10293424037120791,
+      "sharpe": 1.018781405766853,
+      "max_dd": -0.17323163483754914,
+      "sharpe_improvement": -0.0527489867385198,
+      "overlay_trades": 58
+    },
+    {
+      "formation_months": 24,
+      "bond_weight": 0.1,
+      "cagr": 0.10771131812459211,
+      "sharpe": 1.0149437270833734,
+      "max_dd": -0.18423989336503466,
+      "sharpe_improvement": -0.037627613752786226,
+      "overlay_trades": 51
+    },
+    {
+      "formation_months": 24,
+      "bond_weight": 0.16,
+      "cagr": 0.10485304807091,
+      "sharpe": 1.0175088406332737,
+      "max_dd": -0.17764453485991902,
+      "sharpe_improvement": -0.049768002320156324,
+      "overlay_trades": 51
+    },
+    {
+      "formation_months": 24,
+      "bond_weight": 0.2,
+      "cagr": 0.10294233204055692,
+      "sharpe": 1.018941993417042,
+      "max_dd": -0.17323163483754914,
+      "sharpe_improvement": -0.052588399088330684,
+      "overlay_trades": 51
+    }
+  ],
+  "success_criteria": {
+    "sharpe_improvement_target": 0.02,
+    "sharpe_improvement_achieved": -0.04951356233074389,
+    "meets_target": "False"
+  }
+}

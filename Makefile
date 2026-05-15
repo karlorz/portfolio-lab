@@ -48,8 +48,8 @@ test:
 	echo "  Memory cap: 1GB virtual (ulimit -v)"; \
 	echo "  Heavy tests: excluded via collect_ignore"; \
 	START=$$(date +%s); \
-	bash -c 'ulimit -v 1048576; \
-		PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/ -q --tb=short'; \
+	bash -c 'ulimit -v 3145728; \
+		PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/ -q --tb=short -p no:cacheprovider'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \

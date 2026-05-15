@@ -218,6 +218,10 @@ def train_model(
     n_total = len(y)
     logger.info(f"Training: {n_total} samples, {n_unwinds} unwind events ({n_unwinds/n_total*100:.1f}%)")
 
+    import os as _os
+    if _os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") != "1":
+        logger.warning("PORTFOLIO_LAB_ENABLE_ML=0 — skipping ML training.")
+        return None
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 

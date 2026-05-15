@@ -173,10 +173,29 @@
 - **Tests**: 24 passing, `src/signals/credit_spread.py` (387 lines)
 
 ## Test Coverage
+
+### Test Safety: 4-Layer CPU Exhaust Defense
+Heavy ML libraries (torch 63MB, sklearn 78MB, hmmlearn 23MB) can OOM-kill the test
+suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happens:
+
+| Layer | Mechanism | Effect |
+|-------|-----------|--------|
+| 0 | `collect_ignore` in conftest.py | Heavy test files **never opened** by pytest |
+| 1 | `PORTFOLIO_LAB_ENABLE_ML=0` env var | ML features disabled before any import |
+| 2 | `builtins.__import__` hook | Blocks torch/sklearn/xgboost/hmmlearn at interpreter level |
+| 3 | Post-collection leak check | Warns if real ML libs evaded all guards |
+
+**Layer 0 is the strongest**: `collect_ignore = ["test_execution_agent.py", ...]` in
+`tests/conftest.py` prevents pytest from even opening those files during directory
+listing. New heavy test files MUST be added to this list.
+
 ### Python (tests/)
-- **3679 collected** (~3100 passing, pre-existing failures in yield curve and a few other suites)
+- **3775 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **3909 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- ~3100 passing, pre-existing failures in yield curve and a few other suites
 - 109 test files covering signals, strategy, dashboard, broker, agents, data, research
-- Run: `uv run pytest tests/` (full suite), `uv run pytest tests/ -m heavy` (ML tests, needs PORTFOLIO_LAB_ENABLE_ML=1)
+- **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
+- **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
 ### TypeScript (tests/ts/)
 - **167 tests** across 9 files (DSR 24, duration-signals 35, purged-cv 21, car25 23, stress-validation 15, sector-attribution 19, sector-momentum 15, leveraged-treasury 7)
@@ -245,20 +264,36 @@ PORTFOLIO_LAB_ENABLE_ML=1 uv run python -m src.agents.ai_controller --mode statu
 ## Dev Constraints (HARD RULES)
 
 ### No ML imports without explicit user override
-- **NEVER** import `torch`, `xgboost`, `sklearn`, or any ML library without the user explicitly requesting ML work
-- Importing `torch` loads 63MB+ into memory and can exhaust host CPU, freezing all processes
+- **NEVER** import `torch`, `xgboost`, `sklearn`, `hmmlearn` without user explicitly requesting ML
+- torch 63MB + sklearn 78MB + hmmlearn 23MB = **164MB+** total, OOM-kills at ~49% on sg01
 - **ALWAYS** keep `PORTFOLIO_LAB_ENABLE_ML=0` (the default) for all test runs and dev work
-- **ONLY** set `PORTFOLIO_LAB_ENABLE_ML=1` when the user explicitly asks for ML agent work (training, inference, etc.)
+- **ONLY** set `PORTFOLIO_LAB_ENABLE_ML=1` when the user explicitly asks for ML agent work
+- **Safe test run**: `make test` (4-layer defense: collect_ignore + env var + import hook + 3GB ulimit)
 
 ### ML-gated modules (do NOT import these without user request)
-These modules import torch and will stall the machine without `PORTFOLIO_LAB_ENABLE_ML=1`:
+These modules import torch/sklearn/hmmlearn and will stall the machine without `PORTFOLIO_LAB_ENABLE_ML=1`:
 - `src/agents/ai_controller.py` (492 lines) — MARL entry point
 - `src/agents/analyst_agent.py` (321 lines) — PPO policy
 - `src/agents/controller_agent.py` (458 lines) — centralized critic
 - `src/agents/sentiment_agent.py` (332 lines) — sentiment RL agent
 - `src/agents/agent_graph.py` (394 lines) — LangGraph topology
 - `src/agents/marl_trainer.py` (543 lines) — MAPPO training
+- `src/agents/risk_agent_hmm.py` (600+ lines) — HMM-LSTM regime detector (sklearn/hmmlearn)
+- `src/strategy/regime_hmm.py` (500+ lines) — Wasserstein HMM regime (hmmlearn)
 - `src/agents/base_agent.py` (266 lines) — uses torch stubs (safe without ML, tested)
+
+### How the ML gate works
+`tests/conftest.py` provides a 4-layer defense:
+1. **`collect_ignore`** — known heavy test files never opened by pytest (0 CPU)
+2. **`builtins.__import__` hook** — blocks torch/sklearn/xgboost/hmmlearn at interpreter level
+3. **Post-collection check** — warns if real ML libs evaded the hook (checks `__file__`/`__version__`)
+4. **`make test` ulimit -v** — OS kernel enforces 3GB virtual memory cap
+
+`src/agents/base_agent.py` and `src/agents/execution_agent.py` use conditional imports
+(`if os.environ.get("PORTFOLIO_LAB_ENABLE_ML") == "1": import torch else: stubs`).
+`src/agents/risk_agent_hmm.py` and `src/strategy/regime_hmm.py` use the same pattern
+for sklearn/hmmlearn. These stubs are registered in `sys.modules` so any subsequent
+`import torch` finds the 0MB stub rather than the 63MB real library.
 
 ### Test coverage for ML-gated modules
 - Tests for agent modules exist (`test_marl_trainer.py`, `test_base_agent.py`, etc.) but require mocking
@@ -271,6 +306,14 @@ These modules have NO ML deps and are always safe to work on:
 - `src/signals/` — signal modules (credit_spread, commodity_curve, etc.)
 - `src/broker/` — broker integration (options_utils, order_router, position_sync)
 - `src/monitor/` — entropy_monitor, garch_cvar, etc.
+
+## Quick Start
+```bash
+make test            # safe test suite (ML disabled, 3GB memory cap, 3775 tests)
+make test-ml         # full suite including ML (needs >3GB RAM)
+bash scripts/run-tests-safe           # standalone safe runner with --ml flag
+PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/  # manual safe run
+```
 
 ## To Run
 ```bash

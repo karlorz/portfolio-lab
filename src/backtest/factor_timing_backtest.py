@@ -9,6 +9,7 @@ to predict next-month factor returns and dynamically tilt factor weights.
 Target: +0.03-0.05 Sharpe improvement over static factor allocation.
 """
 
+import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -17,12 +18,17 @@ import json
 import warnings
 warnings.filterwarnings('ignore')
 
-# Conditional sklearn import — only loaded when actually running the backtest
-try:
-    from sklearn.ensemble import GradientBoostingRegressor
-    from sklearn.preprocessing import StandardScaler
-    SKLEARN_AVAILABLE = True
-except ImportError:
+# ML-gated sklearn import — prevented during test collection by conftest.py's
+# import hook. Only loaded when PORTFOLIO_LAB_ENABLE_ML=1 AND sklearn is installed.
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED:
+    try:
+        from sklearn.ensemble import GradientBoostingRegressor
+        from sklearn.preprocessing import StandardScaler
+        SKLEARN_AVAILABLE = True
+    except ImportError:
+        SKLEARN_AVAILABLE = False
+else:
     SKLEARN_AVAILABLE = False
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"

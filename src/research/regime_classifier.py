@@ -10,21 +10,27 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
 
-# Try to import ML libraries
-try:
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.model_selection import train_test_split
-    from sklearn.metrics import classification_report, accuracy_score
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
+# ML-gated imports — prevented during test collection by conftest.py's
+# import hook. Only loaded when PORTFOLIO_LAB_ENABLE_ML=1 AND libs are installed.
+_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+if _ML_ENABLED:
+    try:
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import classification_report, accuracy_score
+        SKLEARN_AVAILABLE = True
+    except ImportError:
+        SKLEARN_AVAILABLE = False
 
-try:
-    import xgboost as xgb
-    XGBOOST_AVAILABLE = True
-except ImportError:
+    try:
+        import xgboost as xgb
+        XGBOOST_AVAILABLE = True
+    except ImportError:
+        XGBOOST_AVAILABLE = False
+else:
+    SKLEARN_AVAILABLE = False
     XGBOOST_AVAILABLE = False
 
 
