@@ -70,6 +70,7 @@ class SignalSource(Enum):
     FACTOR_ROTATION = "factor_rotation"       # v3.00 Quality+Momentum overlay
     CLOSING_AUCTION = "closing_auction"       # v3.17 MOC/IOC imbalance signals
     UNIFIED_OVERLAY = "unified_overlay"       # v4.90 Multi-overlay orchestration
+    MEAN_REVERSION = "mean_reversion"         # v4.81 VIX-gated mean-reversion
 
 
 @dataclass
@@ -122,19 +123,22 @@ class EnsembleVote:
 # Regime-dependent weights
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.37,
-        SignalSource.MULTI_SPEED_MOM: 0.22,
-        SignalSource.CTA_TREND: 0.17,
+        SignalSource.TSFM_MOMENTUM: 0.35,
+        SignalSource.MULTI_SPEED_MOM: 0.21,
+        SignalSource.CTA_TREND: 0.15,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.DURATION_REGIME: 0.05,
+        SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly idle in normal)
         SignalSource.HMM_REGIME: 0.02,       # Minimal in normal
         SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
+        SignalSource.UNIFIED_OVERLAY: 0.02,  # v4.90 Multi-overlay orchestration
     },
     Regime.HIGH_VOL: {
-        SignalSource.HMM_REGIME: 0.32,
-        SignalSource.CTA_TREND: 0.27,
+        SignalSource.HMM_REGIME: 0.27,
+        SignalSource.CTA_TREND: 0.24,
+        SignalSource.MEAN_REVERSION: 0.08,   # v4.81 VIX-gated (active in high vol)
         SignalSource.MULTI_SPEED_MOM: 0.17,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
@@ -144,23 +148,26 @@ REGIME_WEIGHTS = {
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
     },
     Regime.CRISIS: {
-        SignalSource.CIRCUIT_BREAKER: 0.32,
-        SignalSource.CTA_TREND: 0.32,
+        SignalSource.CIRCUIT_BREAKER: 0.30,
+        SignalSource.CTA_TREND: 0.30,
         SignalSource.HMM_REGIME: 0.18,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.03,   # Reduced in crisis (defensive factor focus)
+        SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly frozen in crisis)
         SignalSource.MULTI_SPEED_MOM: 0.03,
         SignalSource.TSFM_MOMENTUM: 0.0,
         SignalSource.DURATION_REGIME: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
+        SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.27,
-        SignalSource.HMM_REGIME: 0.22,
+        SignalSource.MULTI_SPEED_MOM: 0.24,
+        SignalSource.HMM_REGIME: 0.20,
         SignalSource.CTA_TREND: 0.17,
         SignalSource.TSFM_MOMENTUM: 0.13,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.06,   # Higher in recovery (momentum captures)
+        SignalSource.MEAN_REVERSION: 0.05,    # v4.81 VIX-gated (declining VIX, moderate)
         SignalSource.DURATION_REGIME: 0.03,
         SignalSource.CIRCUIT_BREAKER: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
@@ -425,6 +432,28 @@ class EnsembleVoter:
                 },
                 explanation=f"Factor rotation: {signal['rationale'][0] if signal['rationale'] else 'No additional info'}"
             )
+        except ImportError:
+            pass
+        
+        # 6. VIX-Gated Mean-Reversion Signal (v4.81)
+        try:
+            from src.strategy.mean_reversion_overlay import get_mean_reversion_ensemble_signals
+            mr_signals = get_mean_reversion_ensemble_signals()
+            mr = mr_signals.get("mean_reversion", {})
+            
+            if mr:
+                readings[SignalSource.MEAN_REVERSION] = SignalReading(
+                    source=SignalSource.MEAN_REVERSION,
+                    timestamp=str(datetime.now()),
+                    value=mr.get("signal_value", 0.0),
+                    confidence=0.7 if mr.get("active") else 0.3,
+                    weight=0.0,
+                    regime_fit="high_vol",
+                    asset_signals={
+                        'SPY': mr.get("signal_value", 0.0),
+                    },
+                    explanation=f"Mean-reversion: {mr.get('rationale', 'idle')}, alloc={mr.get('allocation_pct', 0):.1f}%, VIX={mr.get('vix_level', 0):.1f}, regime={mr.get('vix_regime', 'N/A')}"
+                )
         except ImportError:
             pass
         
