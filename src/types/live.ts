@@ -81,6 +81,8 @@ export interface SignalsData {
     timestamp: string;
     ensemble: BondMomentumEnsemble;
   };
+  vix_term_structure?: VIXTermStructureData;
+  vix_overlay?: VIXOverlayState;
 }
 
 export interface Position {
@@ -441,4 +443,37 @@ export interface BondMomentumEnsemble {
   confidence: string;
   action: string;
   recommendation: string;
+}
+
+// VIX Term Structure Types (v4.50)
+export interface VIXTermStructureLevel {
+  value: number;
+  timestamp: string;
+}
+
+export interface VIXTermStructureData {
+  vix: VIXTermStructureLevel;
+  vix3m: VIXTermStructureLevel;
+  vix6m?: VIXTermStructureLevel;
+  slope: number;
+  roll_yield: number;
+  composite_signal: number;
+  regime: 'extreme_contango' | 'steep_contango' | 'mild_contango' | 'flat' | 'backwardation' | 'extreme_backwardation';
+  z_score: number;
+  percentile_1y?: number;
+}
+
+export interface VIXOverlayShift {
+  date: string;
+  shifts: Record<string, number>;
+  signal_value: number;
+  regime: string;
+  new_allocation: Record<string, number>;
+}
+
+export interface VIXOverlayState {
+  allocation: Record<string, number>;
+  last_shift_date: string;
+  shift_history: VIXOverlayShift[];
+  disabled_until: string | null;
 }
