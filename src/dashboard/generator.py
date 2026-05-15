@@ -397,6 +397,9 @@ class DashboardGenerator:
         # Add entropy diversification metrics (v3.22)
         entropy_data = self._load_entropy_data()
 
+        # Add bond momentum signals (v3.30)
+        bond_momentum_data = self._load_bond_momentum_data()
+
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -422,6 +425,7 @@ class DashboardGenerator:
             "closing_auction": closing_auction_data,
             "garch_cvar": garch_cvar_data,
             "entropy": entropy_data,
+            "bond_momentum": bond_momentum_data,
         }
         
         out_path = PUBLIC_DIR / "signals.json"
@@ -588,6 +592,57 @@ class DashboardGenerator:
             pass
         
         return entropy
+
+    def _load_bond_momentum_data(self) -> Dict:
+        """Load bond momentum signals for dashboard (v3.30)."""
+        bond_momentum = {
+            "signals": [],
+            "timestamp": datetime.now().isoformat(),
+            "ensemble": {
+                "weight": 2.5,
+                "confidence": "low",
+                "action": "neutral",
+                "recommendation": "Burn-in period (30 days) - signal monitoring only"
+            }
+        }
+        
+        try:
+            # Import bond momentum module
+            sys.path.insert(0, str(Path(__file__).parent.parent / 'signals'))
+            from bond_momentum import BondMomentumCalculator
+            
+            # Create calculator and load prices
+            calc = BondMomentumCalculator()
+            if calc.load_prices_from_file():
+                signals = calc.get_all_signals()
+                
+                # Convert signals to JSON-serializable format
+                bond_momentum["signals"] = [
+                    {
+                        "etf": s.etf,
+                        "timestamp": s.timestamp.isoformat() if s.timestamp else None,
+                        "signal": s.signal,
+                        "position_size": s.position_size,
+                        "formation_return": s.formation_return,
+                        "realized_vol": s.realized_vol,
+                        "formation_months": s.formation_months,
+                        "volatility_target": s.volatility_target,
+                        "confidence": s.confidence,
+                        "action": s.action,
+                        "weight_delta": s.weight_delta
+                    }
+                    for s in signals
+                ]
+                
+                # Get ensemble recommendation
+                ensemble = calc.get_ensemble_recommendation(signals)
+                bond_momentum["ensemble"] = ensemble
+                bond_momentum["timestamp"] = datetime.now().isoformat()
+        except Exception as e:
+            # Use default values
+            pass
+        
+        return bond_momentum
 
     def _generate_ml_signals(self) -> Dict:
         """Generate ML-based signals from features data."""

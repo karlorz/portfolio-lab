@@ -13,6 +13,7 @@ import { ZeroDTEPanel } from './ZeroDTEPanel';
 import DurationOverlayPanel from './DurationOverlayPanel';
 import { GarchCvarPanel } from './GarchCvarPanel';
 import { EntropyPanel } from './EntropyPanel';
+import { BondMomentumPanel } from './BondMomentumPanel';
 import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData } from '../types/live';
 
 interface LiveDashboardProps {
@@ -519,12 +520,19 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           </div>
         )}
 
-        {/* Risk Tab (GARCH-CVaR + Entropy) */}
+        {/* Risk Tab (GARCH-CVaR + Entropy + Bond Momentum) */}
         {activeTab === 'risk' && (
           <div className="tab-panel risk-panel">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <GarchCvarPanel data={signals?.garch_cvar as GarchCvarData | null | undefined} />
               <EntropyPanel data={signals?.entropy as EntropyData | null | undefined} />
+            </div>
+            <div className="mt-4">
+              <BondMomentumPanel 
+                signals={signals?.bond_momentum?.signals || []}
+                timestamp={signals?.bond_momentum?.timestamp}
+                ensembleRecommendation={signals?.bond_momentum?.ensemble}
+              />
             </div>
           </div>
         )}

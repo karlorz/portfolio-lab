@@ -76,6 +76,11 @@ export interface SignalsData {
   };
   garch_cvar?: GarchCvarData;
   entropy?: EntropyData;
+  bond_momentum?: {
+    signals: BondMomentumSignal[];
+    timestamp: string;
+    ensemble: BondMomentumEnsemble;
+  };
 }
 
 export interface Position {
@@ -414,4 +419,26 @@ export interface ClosingAuctionSignal {
   max_position_pct: number;
   urgency: 'immediate' | 'high' | 'normal';
   should_trade: boolean;
+}
+
+// Bond Momentum Types (v3.30)
+export interface BondMomentumSignal {
+  etf: string;
+  timestamp: string;
+  signal: number;
+  position_size: number;
+  formation_return: number;
+  realized_vol: number;
+  formation_months: number;
+  volatility_target: number;
+  confidence: 'strong' | 'moderate' | 'weak';
+  action: 'increase' | 'hold' | 'reduce' | 'avoid';
+  weight_delta: number;
+}
+
+export interface BondMomentumEnsemble {
+  weight: number;
+  confidence: string;
+  action: string;
+  recommendation: string;
 }
