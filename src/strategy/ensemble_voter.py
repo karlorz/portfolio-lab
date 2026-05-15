@@ -69,6 +69,7 @@ class SignalSource(Enum):
     CIRCUIT_BREAKER = "circuit_breaker"     # v2.14 Risk controls
     FACTOR_ROTATION = "factor_rotation"       # v3.00 Quality+Momentum overlay
     CLOSING_AUCTION = "closing_auction"       # v3.17 MOC/IOC imbalance signals
+    UNIFIED_OVERLAY = "unified_overlay"       # v4.90 Multi-overlay orchestration
 
 
 @dataclass

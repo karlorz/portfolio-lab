@@ -41,6 +41,15 @@
 
 ### v4.80 Dynamic Bond Duration Rotation - COMPLETED
 
+### v4.90 Orchestrator-EnsembleVoter Bridge - COMPLETED
+- **Bridge**: `src/strategy/orchestrator_ensemble_bridge.py` (300 lines) — orchestrator→ensemble voter
+  - Converts 7-asset allocation weights to -1/+1 directional signals
+  - Added `UNIFIED_OVERLAY` to `SignalSource` enum in ensemble_voter.py
+  - Recommended 20% weight in ensemble (highest single-source)
+  - Risk and execution signals from conflict count + calendar modifier
+- **Tests**: `tests/test_orchestrator_ensemble_bridge.py` (21 tests passing)
+- **Status**: All phases complete
+
 ### v4.90 Combined Overlay Backtest - COMPLETED
 - **Backtest Engine**: `src/backtest/combined_overlay_backtest.py` (360 lines) — validates theoretical Sharpe
   - Runs all 4 overlays together on historical/synthetic data (2006-2026)
@@ -279,8 +288,8 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **4054 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **4188 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **4075 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **4209 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~3100 passing, pre-existing failures in yield curve and a few other suites
 - 120 test files covering signals, strategy, backtest, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
