@@ -26,6 +26,8 @@ export PYTHONPATH
 help:
 	@echo "Portfolio-Lab Makefile"
 	@echo ""
+	@echo "  make test         Run test suite (safe: ML disabled, 1GB memory cap)"
+	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
 	@echo "  make data         Fetch Yahoo Finance market data"
 	@echo "  make dashboard    Regenerate dashboard JSON files"
 	@echo "  make health       Run system health monitor"
@@ -36,6 +38,43 @@ help:
 	@echo "  make sync         Broker position reconciliation"
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
+
+# ── Test Suite ────────────────────────────────────────────────────────
+
+.PHONY: test
+test:
+	@echo "=== Test Suite (safe mode): $$(date) ==="; \
+	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
+	echo "  Memory cap: 1GB virtual (ulimit -v)"; \
+	echo "  Heavy tests: excluded via collect_ignore"; \
+	START=$$(date +%s); \
+	bash -c 'ulimit -v 1048576; \
+		PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/ -q --tb=short'; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite: exit $$EXIT, duration $${DUR}s ==="; \
+	if [ $$EXIT -eq 137 ]; then \
+		echo "SIGKILL (137): memory limit exceeded. Check for ML import leaks."; \
+	elif [ $$EXIT -ne 0 ]; then \
+		echo "Some tests failed (exit $$EXIT). Review output above."; \
+	fi; \
+	exit $$EXIT
+
+.PHONY: test-ml
+test-ml:
+	@echo "=== Test Suite (ML mode): $$(date) ==="; \
+	echo "  ML: enabled (PORTFOLIO_LAB_ENABLE_ML=1)"; \
+	echo "  Heavy tests: included"; \
+	echo "  WARNING: May use >3GB memory. Run on hosts with sufficient RAM."; \
+	START=$$(date +%s); \
+	PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ -q --tb=short --include-heavy; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite (ML): exit $$EXIT, duration $${DUR}s ==="
 
 # ── Data Pipeline ────────────────────────────────────────────────────
 

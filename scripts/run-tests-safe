@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# run-tests-safe — guaranteed-safe test execution for low-resource hosts (sg01)
+#
+# 4-layer defense against CPU/memory exhaustion:
+#   0. pytest collect_ignore — heavy test files never opened
+#   1. PORTFOLIO_LAB_ENABLE_ML=0 — env var gate
+#   2. builtins.__import__ hook — blocks torch/sklearn/xgboost/hmmlearn
+#   3. ulimit -v 1048576 — OS kernel enforces 1GB virtual memory cap
+#
+# Usage:
+#   ./scripts/run-tests-safe              # safe mode (default, ~3700 tests)
+#   ./scripts/run-tests-safe --ml         # ML mode (all tests, needs >3GB RAM)
+#   ./scripts/run-tests-safe -k "factor"  # filter tests by keyword
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
+
+MODE="safe"
+PYTEST_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ml) MODE="ml"; shift ;;
+        --help|-h)
+            echo "Usage: run-tests-safe [--ml] [pytest args...]"
+            echo ""
+            echo "  (default)    Safe mode: ML disabled, 1GB cap, ~3700 tests"
+            echo "  --ml         ML mode: all tests including heavy ML"
+            echo "  --help       This message"
+            exit 0
+            ;;
+        *) PYTEST_ARGS+=("$1"); shift ;;
+    esac
+done
+
+if [ "$MODE" = "safe" ]; then
+    echo "=== Safe Test Run ==="
+    echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
+    echo "  Memory: 1GB virtual cap (ulimit -v)"
+    echo "  Heavy tests: excluded via collect_ignore"
+    echo ""
+
+    # ulimit -v sets the maximum virtual memory in KB.
+    # 1048576 KB = 1 GB. If exceeded, the process gets SIGSEGV (not SIGKILL),
+    # which is cleaner than OOM-killer and protects the host.
+    (
+        ulimit -v 1048576
+        export PORTFOLIO_LAB_ENABLE_ML=0
+        exec uv run pytest tests/ -q --tb=short "${PYTEST_ARGS[@]}"
+    )
+    EXIT=$?
+
+    echo ""
+    if [ $EXIT -eq 139 ]; then
+        echo "FATAL: SIGSEGV (139) — virtual memory cap (1GB) exceeded."
+        echo "An ML library may have loaded despite guards. Investigate immediately."
+    elif [ $EXIT -eq 137 ]; then
+        echo "FATAL: SIGKILL (137) — system OOM killer. Memory use too high."
+    elif [ $EXIT -ne 0 ]; then
+        echo "Some tests failed (exit $EXIT). See output above."
+    else
+        echo "All safe tests passed."
+    fi
+    exit $EXIT
+else
+    echo "=== ML Test Run ==="
+    echo "  ML: enabled (PORTFOLIO_LAB_ENABLE_ML=1)"
+    echo "  WARNING: May use >3GB memory"
+    echo ""
+
+    export PORTFOLIO_LAB_ENABLE_ML=1
+    exec uv run pytest tests/ -q --tb=short --include-heavy "${PYTEST_ARGS[@]}"
+fi
