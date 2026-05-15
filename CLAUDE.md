@@ -39,6 +39,18 @@
 
 ## Recent Implementation Updates (2026-05-16)
 
+### v3.50 Calendar Seasonality Overlay - COMPLETED
+- **Signal Generator**: `src/signals/calendar_seasonality.py` (440 lines) — calendar-based execution timing
+  - NYSECalendar with Easter computation, 12+ US market holidays, trading day logic
+  - 8 calendar windows: TOM, Pre/Post-Holiday, Quarter-End, Monday, Pre-FOMC, December, OPEX
+  - Composite urgency modifier (0.0-1.0, multiplicative) for rebalancing timing
+  - FOMC schedule for 2026, options expiry (3rd Friday), future window prediction
+- **Integration**: Convenience `get_calendar_modifier()` for rebalance scheduler
+- **CLI**: `calendar <YYYY-MM>` calendar view, `check` current date assessment
+- **Tests**: `tests/test_calendar_seasonality.py` (74 tests passing)
+- **Expected Impact**: +0.01-0.02 Sharpe through 5-15 bps better execution annually
+- **Status**: All phases complete
+
 ### v4.60 Cashless Collar Options Overlay - COMPLETED
 - **Signal Generator**: `src/signals/collar_signal.py` (340 lines) — Black-Scholes pricing, strike selection
   - VIX-aware strike widening across 4 volatility regimes (NORMAL/ELEVATED/STRESS/CRISIS)
@@ -207,10 +219,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **3804 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **3938 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **3878 safe** tests (134 heavy excluded via collect_ignore, never imported)
+- **4012 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~3100 passing, pre-existing failures in yield curve and a few other suites
-- 111 test files covering signals, strategy, dashboard, broker, agents, data, research
+- 112 test files covering signals, strategy, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
