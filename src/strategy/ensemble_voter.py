@@ -80,6 +80,7 @@ class SignalSource(Enum):
     FACTOR_TIMING = "factor_timing"          # v6.02 Factor timing (cross-sectional Z-scores)
     RISK_BUDGET = "risk_budget"              # v6.04 Factor risk budgeting & scenario analysis
     LLM_NARRATIVE = "llm_narrative"          # v7.01 LLM macro/narrative signal
+    TAX_AWARE = "tax_aware"                  # v7.03 Tax-aware rebalancing alpha
 
 
 @dataclass
