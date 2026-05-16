@@ -1,0 +1,671 @@
+#!/usr/bin/env python3
+"""
+v5.70: Performance Attribution System
+
+Tracks each signal source's contribution to portfolio P&L, enabling
+identification of which modules add alpha vs degrade performance.
+
+Key metrics per signal source:
+- Contribution to return (bps)
+- Hit rate (directionally correct %)
+- Sharpe contribution
+- Correlation with other signals
+- Win/loss ratio
+- Average return when active vs inactive
+
+Usage:
+    python -m src.monitor.performance_attribution report
+    python -m src.monitor.performance_attribution report --days 90
+    python -m src.monitor.performance_attribution dashboard
+"""
+
+import json
+import logging
+import sqlite3
+from dataclasses import dataclass, asdict, field
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+import numpy as np
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+ENSEMBLE_DB = DATA_DIR / "ensemble_signals.db"
+ATTRIBUTION_DIR = DATA_DIR / "attribution"
+PAPER_TRADING_DB = DATA_DIR / "paper_trading.db"
+
+# All known signal sources with display names
+SIGNAL_SOURCE_META = {
+    "tsfm_momentum": {"name": "TSFM Factor Momentum", "category": "trend", "weight_tier": "primary"},
+    "hmm_regime": {"name": "HMM Regime Detector", "category": "regime", "weight_tier": "secondary"},
+    "cta_trend": {"name": "CTA Trend Overlay", "category": "trend", "weight_tier": "primary"},
+    "macro_momentum": {"name": "Macro Momentum", "category": "macro", "weight_tier": "secondary"},
+    "multi_speed_momentum": {"name": "Multi-Speed Momentum", "category": "trend", "weight_tier": "primary"},
+    "duration_regime": {"name": "Duration/Yield Curve", "category": "rates", "weight_tier": "secondary"},
+    "circuit_breaker": {"name": "Circuit Breaker", "category": "risk", "weight_tier": "defensive"},
+    "factor_rotation": {"name": "Factor Rotation", "category": "factor", "weight_tier": "secondary"},
+    "closing_auction": {"name": "Closing Auction MOC", "category": "execution", "weight_tier": "tactical"},
+    "unified_overlay": {"name": "Unified Overlay", "category": "orchestration", "weight_tier": "tactical"},
+    "mean_reversion": {"name": "Mean Reversion", "category": "meanrev", "weight_tier": "tactical"},
+    "transformer_regime": {"name": "Transformer Regime", "category": "regime", "weight_tier": "secondary"},
+    "transient_factors": {"name": "Transient Factors", "category": "factor", "weight_tier": "tactical"},
+    "visibility_graph": {"name": "Visibility Graph (VGRSI)", "category": "network", "weight_tier": "tactical"},
+    "vp_macd": {"name": "VP-MACD", "category": "momentum", "weight_tier": "tactical"},
+    "cross_asset_rv": {"name": "Cross-Asset RV", "category": "meanrev", "weight_tier": "tactical"},
+}
+
+
+@dataclass
+class SourceAttribution:
+    """Attribution metrics for a single signal source."""
+    source: str
+    display_name: str
+    category: str
+
+    # Signal activity
+    total_readings: int
+    active_days: int
+
+    # Directional accuracy
+    hit_rate: float          # % of times signal direction matched subsequent return
+    win_rate: float          # % of times signal produced positive return contribution
+    avg_return_bps: float    # Average daily return contribution (bps)
+    total_return_bps: float  # Cumulative return contribution (bps)
+
+    # Risk-adjusted
+    sharpe_contribution: float
+    max_consecutive_losses: int
+
+    # Correlation with other signals
+    avg_correlation: float   # Average pairwise correlation with all other sources
+
+    # Weight contribution
+    avg_weight: float        # Average weight assigned in ensemble
+    current_weight_regime: str = "normal"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @property
+    def efficiency_ratio(self) -> float:
+        """Return per-unit-of-risk efficiency."""
+        if self.avg_return_bps == 0:
+            return 0.0
+        return self.hit_rate * abs(self.avg_return_bps) / 100
+
+
+@dataclass
+class AttributionReport:
+    """Complete attribution report."""
+    timestamp: str
+    start_date: str
+    end_date: str
+    analysis_days: int
+
+    # Per-source attribution
+    sources: Dict[str, SourceAttribution]
+
+    # Aggregate
+    best_source: Optional[str]
+    worst_source: Optional[str]
+    avg_hit_rate: float
+    avg_correlation: float
+
+    # Signal diversity
+    avg_active_sources_per_day: float
+    total_sources_tracked: int
+
+    # Special flags
+    degradation_signals: List[str]  # Sources degrading performance
+    top_performers: List[str]       # Sources adding most value
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), indent=2, default=str)
+
+
+class PerformanceAttribution:
+    """Compute and report per-source performance attribution."""
+
+    def __init__(self, data_dir: Optional[Path] = None):
+        self.data_dir = Path(data_dir) if data_dir else DATA_DIR
+        self.ensemble_db = self.data_dir / "ensemble_signals.db"
+        self.attribution_dir = self.data_dir / "attribution"
+        self.attribution_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_signal_history(self, days: int = 90) -> List[Dict]:
+        """Extract signal reading history from ensemble database."""
+        if not self.ensemble_db.exists():
+            logger.warning(f"Ensemble DB not found: {self.ensemble_db}")
+            return []
+
+        history = []
+        try:
+            with sqlite3.connect(self.ensemble_db) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                # Get source readings from the source_readings table
+                cursor.execute("""
+                    SELECT timestamp, source, value, confidence, weight, regime_fit, explanation
+                    FROM source_readings
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (days * len(SIGNAL_SOURCE_META) * 2,))
+
+                for row in cursor.fetchall():
+                    history.append({
+                        "timestamp": row["timestamp"],
+                        "source": row["source"],
+                        "value": row["value"],
+                        "confidence": row["confidence"],
+                        "weight": row["weight"],
+                        "regime_fit": row["regime_fit"],
+                        "explanation": row["explanation"],
+                    })
+
+                # Also get ensemble votes to cross-reference
+                cursor.execute("""
+                    SELECT timestamp, regime, consensus, agreement_ratio, equity_bias,
+                           duration_bias, gold_bias, action, confidence, reasoning
+                    FROM ensemble_votes
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (days,))
+
+                for row in cursor.fetchall():
+                    history.append({
+                        "type": "ensemble_vote",
+                        "timestamp": row["timestamp"],
+                        "regime": row["regime"],
+                        "consensus": row["consensus"],
+                        "agreement_ratio": row["agreement_ratio"],
+                        "equity_bias": row["equity_bias"],
+                        "duration_bias": row["duration_bias"],
+                        "gold_bias": row["gold_bias"],
+                        "action": row["action"],
+                        "confidence": row["confidence"],
+                        "reasoning": row["reasoning"],
+                    })
+
+        except Exception as e:
+            logger.error(f"Error reading signal history: {e}")
+
+        return history
+
+    def _get_paper_trading_returns(self, days: int = 90) -> Dict[str, Dict]:
+        """Get daily returns from paper trading simulation."""
+        daily_returns = {}
+        paper_db = self.data_dir / "paper_trading.db"
+
+        if paper_db.exists():
+            try:
+                with sqlite3.connect(paper_db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT date, daily_return, cumulative_return
+                        FROM daily_snapshots
+                        ORDER BY date DESC
+                        LIMIT ?
+                    """, (days,))
+                    for row in cursor.fetchall():
+                        daily_returns[row["date"]] = {
+                            "daily_return": row["daily_return"],
+                            "cumulative_return": row["cumulative_return"],
+                        }
+            except Exception as e:
+                logger.warning(f"Could not read paper trading DB: {e}")
+
+        # Fallback: check json reports
+        if not daily_returns:
+            perf_file = max(
+                Path("data/logs").expanduser().glob("performance_summary_*.json"),
+                default=None,
+            )
+            if perf_file and perf_file.exists():
+                try:
+                    with open(perf_file) as f:
+                        data = json.load(f)
+                    if "daily_returns" in data:
+                        for dr in data["daily_returns"]:
+                            daily_returns[dr["date"]] = {
+                                "daily_return": dr["return"],
+                                "cumulative_return": dr["cumulative"],
+                            }
+                except Exception as e:
+                    logger.warning(f"Could not read performance file: {e}")
+
+        return daily_returns
+
+    def _compute_hit_rate(
+        self,
+        signal_value: float,
+        subsequent_return: float,
+    ) -> bool:
+        """Determine if signal correctly predicted direction."""
+        if abs(signal_value) < 0.05:  # Neutral signal
+            return abs(subsequent_return) < 0.001  # Correct if market flat
+        return (signal_value > 0 and subsequent_return > 0) or \
+               (signal_value < 0 and subsequent_return < 0)
+
+    def _compute_source_attribution(
+        self,
+        source_signals: List[Dict],
+        daily_returns: Dict[str, Dict],
+    ) -> SourceAttribution:
+        """Compute attribution metrics for a single signal source."""
+        if not source_signals:
+            return SourceAttribution(
+                source="unknown",
+                display_name="Unknown",
+                category="unknown",
+                total_readings=0,
+                active_days=0,
+                hit_rate=0.0,
+                win_rate=0.0,
+                avg_return_bps=0.0,
+                total_return_bps=0.0,
+                sharpe_contribution=0.0,
+                max_consecutive_losses=0,
+                avg_correlation=0.0,
+                avg_weight=0.0,
+            )
+
+        source = source_signals[0]["source"]
+        meta = SIGNAL_SOURCE_META.get(source, {"name": source, "category": "other"})
+
+        hits = 0
+        wins = 0
+        total = 0
+        daily_contributions = []
+        weights = []
+        consecutive_losses = 0
+        max_consecutive_losses = 0
+        prev_negative = False
+
+        for sig in source_signals:
+            sig_date = sig["timestamp"][:10]  # Extract YYYY-MM-DD
+            value = sig.get("value", 0)
+
+            if isinstance(value, str):
+                try:
+                    value = float(value)
+                except (ValueError, TypeError):
+                    continue
+
+            weight = sig.get("weight", 0)
+            if isinstance(weight, str):
+                try:
+                    weight = float(weight)
+                except (ValueError, TypeError):
+                    weight = 0
+            weights.append(weight)
+
+            if sig_date not in daily_returns:
+                continue
+
+            ret = daily_returns[sig_date].get("daily_return", 0)
+            if ret is None:
+                continue
+
+            total += 1
+
+            # Hit rate: signal direction matches return direction
+            if self._compute_hit_rate(value, ret):
+                hits += 1
+
+            # Win: positive return contribution when signal active
+            if ret > 0:
+                wins += 1
+                if prev_negative:
+                    consecutive_losses = 0
+                    prev_negative = False
+            else:
+                consecutive_losses += 1
+                max_consecutive_losses = max(max_consecutive_losses, consecutive_losses)
+                prev_negative = True
+
+            # Return contribution (bps) when signal is directional
+            if abs(value) > 0.05:
+                contribution_bps = ret * 10000 * abs(value)
+            else:
+                contribution_bps = ret * 10000 * weight * 2  # Scaled by weight
+            daily_contributions.append(contribution_bps)
+
+        hit_rate = hits / max(total, 1)
+        win_rate = wins / max(total, 1)
+        avg_return_bps = np.mean(daily_contributions) if daily_contributions else 0.0
+        total_return_bps = np.sum(daily_contributions) if daily_contributions else 0.0
+
+        # Sharpe contribution (annualized)
+        if len(daily_contributions) > 1 and np.std(daily_contributions) > 0:
+            daily_sharpe = np.mean(daily_contributions) / np.std(daily_contributions)
+            sharpe_contribution = daily_sharpe * np.sqrt(252)
+        else:
+            sharpe_contribution = 0.0
+
+        avg_weight = np.mean(weights) if weights else 0.0
+
+        # Average correlation placeholder — computed across sources later
+        avg_correlation = 0.0
+
+        return SourceAttribution(
+            source=source,
+            display_name=meta["name"],
+            category=meta.get("category", "other"),
+            total_readings=len(source_signals),
+            active_days=total,
+            hit_rate=round(hit_rate, 4),
+            win_rate=round(win_rate, 4),
+            avg_return_bps=round(avg_return_bps, 2),
+            total_return_bps=round(total_return_bps, 2),
+            sharpe_contribution=round(sharpe_contribution, 4),
+            max_consecutive_losses=max_consecutive_losses,
+            avg_correlation=round(avg_correlation, 4),
+            avg_weight=round(avg_weight, 4),
+        )
+
+    def _compute_correlation_matrix(
+        self, source_data: Dict[str, List[Dict]]
+    ) -> Dict[str, float]:
+        """Compute average pairwise correlation for each source."""
+        # Build aligned time series of signal values
+        sources = list(source_data.keys())
+        if len(sources) < 2:
+            return {s: 0.0 for s in sources}
+
+        # Get all unique dates
+        all_dates = set()
+        date_values = {}
+        for src, signals in source_data.items():
+            for sig in signals:
+                d = sig["timestamp"][:10]
+                all_dates.add(d)
+                if d not in date_values:
+                    date_values[d] = {}
+                val = sig.get("value", 0)
+                if isinstance(val, str):
+                    try:
+                        val = float(val)
+                    except (ValueError, TypeError):
+                        val = 0
+                date_values[d][src] = val
+
+        sorted_dates = sorted(all_dates)
+        if len(sorted_dates) < 5:
+            return {s: 0.0 for s in sources}
+
+        # Build value matrix
+        matrix = np.zeros((len(sorted_dates), len(sources)))
+        for i, d in enumerate(sorted_dates):
+            for j, src in enumerate(sources):
+                matrix[i, j] = date_values.get(d, {}).get(src, 0)
+
+        # Compute pairwise correlation for each source
+        avg_corrs = []
+        corr_matrix = np.corrcoef(matrix.T)
+        avg_corrs = {
+            src: float(np.nanmean([corr_matrix[i, j]
+                                   for j in range(len(sources))
+                                   if j != i and not np.isnan(corr_matrix[i, j])]))
+            for i, src in enumerate(sources)
+        }
+
+        return avg_corrs
+
+    def generate_report(self, days: int = 90) -> AttributionReport:
+        """Generate complete performance attribution report."""
+        logger.info(f"Generating attribution report over {days} days...")
+
+        signal_history = self._get_signal_history(days)
+        daily_returns = self._get_paper_trading_returns(days)
+
+        # Group signals by source
+        source_signals: Dict[str, List[Dict]] = {}
+        ensemble_votes = []
+
+        for entry in signal_history:
+            if entry.get("type") == "ensemble_vote":
+                ensemble_votes.append(entry)
+            else:
+                src = entry.get("source", "unknown")
+                if src not in source_signals:
+                    source_signals[src] = []
+                source_signals[src].append(entry)
+
+        # Compute per-source attribution
+        sources = {}
+        source_list = []
+        for src, signals in source_signals.items():
+            attribution = self._compute_source_attribution(signals, daily_returns)
+            sources[src] = attribution
+            source_list.append(attribution)
+
+        # Compute correlation matrix
+        correlations = self._compute_correlation_matrix(source_signals)
+        for src in sources:
+            if src in correlations:
+                sources[src].avg_correlation = round(correlations[src], 4)
+
+        # Find best/worst
+        valid_sources = [s for s in source_list if s.total_readings > 0]
+
+        best_source = None
+        worst_source = None
+        if valid_sources:
+            # Best by sharpe contribution
+            best_source = max(valid_sources, key=lambda s: s.sharpe_contribution).source
+            worst_source = min(valid_sources, key=lambda s: s.sharpe_contribution).source
+
+        # Identify degradation signals (negative sharpe or hit rate < 0.4)
+        degradation_signals = [
+            s.source for s in valid_sources
+            if s.sharpe_contribution < -0.1 or (s.hit_rate < 0.4 and s.total_readings > 5)
+        ]
+
+        top_performers = [
+            s.source for s in valid_sources
+            if s.sharpe_contribution > 0.5
+        ]
+
+        avg_hit_rate = float(np.mean([s.hit_rate for s in valid_sources])) if valid_sources else 0.0
+        avg_corr = float(np.mean([s.avg_correlation for s in valid_sources])) if valid_sources else 0.0
+
+        # Count average active sources per day
+        active_counts = []
+        for entry in signal_history:
+            if entry.get("type") != "ensemble_vote":
+                active_counts.append(1)
+        avg_active = len(set(
+            e.get("source", "") for e in signal_history
+            if e.get("type") != "ensemble_vote"
+        ))
+
+        now = datetime.now()
+        report = AttributionReport(
+            timestamp=now.isoformat(),
+            start_date=(now - timedelta(days=days)).strftime("%Y-%m-%d"),
+            end_date=now.strftime("%Y-%m-%d"),
+            analysis_days=days,
+            sources=sources,
+            best_source=best_source,
+            worst_source=worst_source,
+            avg_hit_rate=round(avg_hit_rate, 4),
+            avg_correlation=round(avg_corr, 4),
+            avg_active_sources_per_day=avg_active,
+            total_sources_tracked=len(sources),
+            degradation_signals=degradation_signals,
+            top_performers=top_performers,
+        )
+
+        return report
+
+    def save_report(self, report: AttributionReport) -> Path:
+        """Save attribution report to disk."""
+        self.attribution_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"attribution_{report.timestamp[:10]}.json"
+        path = self.attribution_dir / filename
+        with open(path, "w") as f:
+            json.dump(report.to_dict(), f, indent=2, default=str)
+        logger.info(f"Saved attribution report: {path}")
+        return path
+
+    def load_latest_report(self) -> Optional[AttributionReport]:
+        """Load most recent attribution report."""
+        files = sorted(self.attribution_dir.glob("attribution_*.json"), reverse=True)
+        if not files:
+            return None
+        try:
+            with open(files[0]) as f:
+                data = json.load(f)
+            sources = {}
+            for src_key, src_data in data.get("sources", {}).items():
+                sources[src_key] = SourceAttribution(**src_data)
+            data["sources"] = sources
+            return AttributionReport(**data)
+        except Exception as e:
+            logger.error(f"Error loading report: {e}")
+            return None
+
+
+def print_report(report: AttributionReport):
+    """Pretty-print attribution report to console."""
+    print("\n" + "=" * 72)
+    print("  PERFORMANCE ATTRIBUTION REPORT")
+    print("=" * 72)
+    print(f"  Period: {report.start_date} → {report.end_date} ({report.analysis_days} days)")
+    print(f"  Generated: {report.timestamp}")
+    print(f"  Sources tracked: {report.total_sources_tracked}")
+    print()
+
+    # Sort sources by sharpe contribution
+    sorted_sources = sorted(
+        report.sources.values(),
+        key=lambda s: s.sharpe_contribution,
+        reverse=True,
+    )
+
+    print(f"  {'Source':30} {'HitRate':>9} {'WinRate':>9} {'AvgRet':>9} {'Sharpe':>9} {'Corr':>7} {'Active':>7}")
+    print("  " + "-" * 80)
+    for s in sorted_sources:
+        print(
+            f"  {s.display_name:30}"
+            f" {s.hit_rate:>8.1%}"
+            f" {s.win_rate:>8.1%}"
+            f" {s.avg_return_bps:>8.2f}"
+            f" {s.sharpe_contribution:>8.2f}"
+            f" {s.avg_correlation:>6.2f}"
+            f" {s.active_days:>6d}"
+        )
+    print()
+
+    if report.degradation_signals:
+        print(f"  ⚠ DEGRADATION SIGNALS (negative/weak contribution):")
+        for sig in report.degradation_signals:
+            src = report.sources.get(sig)
+            if src:
+                print(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
+        print()
+
+    if report.top_performers:
+        print(f"  ★ TOP PERFORMERS:")
+        for sig in report.top_performers:
+            src = report.sources.get(sig)
+            if src:
+                print(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
+        print()
+
+    if report.best_source and report.best_source in report.sources:
+        best = report.sources[report.best_source]
+        print(f"  Best source:  {best.display_name} (Sharpe {best.sharpe_contribution:+.2f})")
+
+    if report.worst_source and report.worst_source in report.sources:
+        worst = report.sources[report.worst_source]
+        print(f"  Worst source: {worst.display_name} (Sharpe {worst.sharpe_contribution:+.2f})")
+
+    print(f"\n  Average hit rate: {report.avg_hit_rate:.1%}")
+    print(f"  Average signal correlation: {report.avg_correlation:.2f}")
+    print("=" * 72)
+    print()
+
+
+def patch_save_vote():
+    """Patch EnsembleVoter._save_vote to also log source readings.
+
+    Call this once at startup to instrument the ensemble voter.
+    """
+    import src.strategy.ensemble_voter as ev
+    original_save = ev.EnsembleVoter._save_vote
+
+    def patched_save(self, vote):
+        # Call original
+        original_save(self, vote)
+        # Also save source readings
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                for reading in vote.source_votes:
+                    conn.execute("""
+                        INSERT INTO source_readings
+                        (timestamp, source, value, confidence, weight, regime_fit, explanation)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        vote.timestamp,
+                        reading.source.value if hasattr(reading.source, 'value') else str(reading.source),
+                        float(reading.value),
+                        float(reading.confidence),
+                        float(reading.weight),
+                        reading.regime_fit,
+                        reading.explanation[:500] if reading.explanation else "",
+                    ))
+        except Exception as e:
+            logger.warning(f"Failed to save source readings: {e}")
+
+    ev.EnsembleVoter._save_vote = patched_save
+    logger.info("Patched EnsembleVoter._save_vote to log source readings")
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Performance Attribution System")
+    subparsers = parser.add_subparsers(dest="command")
+
+    report_parser = subparsers.add_parser("report", help="Generate attribution report")
+    report_parser.add_argument("--days", type=int, default=90, help="Analysis window (days)")
+    report_parser.add_argument("--save", action="store_true", help="Save report to disk")
+
+    dashboard_parser = subparsers.add_parser("dashboard", help="Show latest saved report")
+
+    patch_parser = subparsers.add_parser("patch", help="Patch EnsembleVoter to log source readings")
+
+    args = parser.parse_args()
+    attributor = PerformanceAttribution()
+
+    if args.command == "report":
+        report = attributor.generate_report(days=args.days)
+        print_report(report)
+        if args.save:
+            attributor.save_report(report)
+
+    elif args.command == "dashboard":
+        report = attributor.load_latest_report()
+        if report:
+            print_report(report)
+        else:
+            print("No saved reports found. Run 'report' first.")
+
+    elif args.command == "patch":
+        patch_save_vote()
+        print("EnsembleVoter patched. Run ensemble_voter vote to populate source_readings.")
+
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

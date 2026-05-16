@@ -75,6 +75,7 @@ class SignalSource(Enum):
     TRANSIENT_FACTORS = "transient_factors"   # v5.01 Transient statistical factors
     VISIBILITY_GRAPH = "visibility_graph"     # v5.41 VGRSI network-science indicator
     VP_MACD = "vp_macd"                       # v5.55 Volume-Price Adjusted MACD
+    CROSS_ASSET_RV = "cross_asset_rv"         # v5.71 Cross-asset relative value
 
 
 @dataclass
@@ -142,6 +143,7 @@ REGIME_WEIGHTS = {
         SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI network-science indicator
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
+        SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.22,
@@ -156,9 +158,10 @@ REGIME_WEIGHTS = {
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
         SignalSource.TRANSFORMER_REGIME: 0.06,  # v3.18 Most useful in volatile transitions
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
-        SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors (active in vol)
+        SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Transient statistical factors (active in vol)
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI useful in volatile transitions
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
+        SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.28,
@@ -176,6 +179,7 @@ REGIME_WEIGHTS = {
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Low weight during crisis
         SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 Minimal during crisis
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
+        SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.20,
@@ -193,6 +197,7 @@ REGIME_WEIGHTS = {
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Detect transition out of crisis
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 Good for recovery structure detection
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
+        SignalSource.CROSS_ASSET_RV: 0.02,       # v5.71 Cross-asset relative value
     }
 }
 
@@ -546,6 +551,26 @@ class EnsembleVoter:
         except ImportError:
             pass
 
+        # 10. Cross-Asset Relative Value (v5.71)
+        try:
+            from src.signals.cross_asset_relative_value import CrossAssetRVScanner
+            rv_scanner = CrossAssetRVScanner()
+            rv_signal = rv_scanner.get_ensemble_signal()
+
+            if rv_signal.get("signal_value") is not None:
+                readings[SignalSource.CROSS_ASSET_RV] = SignalReading(
+                    source=SignalSource.CROSS_ASSET_RV,
+                    timestamp=rv_signal.get("timestamp", str(datetime.now())),
+                    value=rv_signal["signal_value"],
+                    confidence=rv_signal.get("confidence", 0.5),
+                    weight=0.0,
+                    regime_fit="all",
+                    asset_signals=rv_signal.get("asset_signals", {}),
+                    explanation=f"Cross-asset RV: z={rv_signal.get('avg_z_score', 0):+.2f}, diverged={rv_signal.get('num_diverged', 0)}/{rv_signal.get('total_pairs', 0)} pairs"
+                )
+        except ImportError:
+            pass
+
         self.current_readings = readings
         return readings
     
@@ -715,7 +740,7 @@ class EnsembleVoter:
         return vote
     
     def _save_vote(self, vote: EnsembleVote):
-        """Save vote to database."""
+        """Save vote to database, including per-source readings (v5.70)."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO ensemble_votes
@@ -734,6 +759,25 @@ class EnsembleVoter:
                 vote.confidence,
                 vote.reasoning
             ))
+
+            # v5.70: Save individual source readings for attribution
+            for reading in vote.source_votes:
+                try:
+                    conn.execute("""
+                        INSERT INTO source_readings
+                        (timestamp, source, value, confidence, weight, regime_fit, explanation)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        vote.timestamp,
+                        reading.source.value if hasattr(reading.source, 'value') else str(reading.source),
+                        float(reading.value),
+                        float(reading.confidence),
+                        float(reading.weight),
+                        reading.regime_fit or "",
+                        (reading.explanation or "")[:500],
+                    ))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to save source reading {reading.source}: {e}")
     
     def recommend_allocation(
         self,
