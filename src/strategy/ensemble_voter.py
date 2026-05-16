@@ -79,6 +79,7 @@ class SignalSource(Enum):
     REGIME_CLASSIFIER = "regime_classifier"   # v5.73 ML-Light Regime Predictor
     FACTOR_TIMING = "factor_timing"          # v6.02 Factor timing (cross-sectional Z-scores)
     RISK_BUDGET = "risk_budget"              # v6.04 Factor risk budgeting & scenario analysis
+    LLM_NARRATIVE = "llm_narrative"          # v7.01 LLM macro/narrative signal
 
 
 @dataclass
@@ -150,6 +151,7 @@ REGIME_WEIGHTS = {
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (cross-sectional Z-scores)
         SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget monitoring
+        SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative signal
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
@@ -171,6 +173,7 @@ REGIME_WEIGHTS = {
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (defensive tilt in high vol)
         SignalSource.RISK_BUDGET: 0.03,         # v6.04 Factor risk budget (active in high vol)
+        SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative signal
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.26,
@@ -192,6 +195,7 @@ REGIME_WEIGHTS = {
         SignalSource.REGIME_CLASSIFIER: 0.02,    # v5.73 ML-Light Regime Predictor (lower in crisis)
         SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (crisis tilts defensive)
         SignalSource.RISK_BUDGET: 0.03,         # v6.04 Factor risk budget (crisis monitoring)
+        SignalSource.LLM_NARRATIVE: 0.05,       # v7.01 LLM macro/narrative — highest in crisis
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.18,
@@ -213,6 +217,7 @@ REGIME_WEIGHTS = {
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (momentum capture in recovery)
         SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget (recovery monitoring)
+        SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative (recovery regime)
     }
 }
 
@@ -610,6 +615,35 @@ class EnsembleVoter:
                                 f"divergence={ft_signal.get('factor_divergence', 0):.2f}σ"
                 )
         except Exception:
+            pass
+
+        # 12. LLM Narrative Signal (v7.01)
+        try:
+            from src.signals.llm_narrative_signal import get_narrative_signal
+            narrative = get_narrative_signal()
+
+            if narrative.get("value") is not None:
+                asset_signals = narrative.get("asset_signals", {})
+                readings[SignalSource.LLM_NARRATIVE] = SignalReading(
+                    source=SignalSource.LLM_NARRATIVE,
+                    timestamp=str(datetime.now()),
+                    value=narrative["value"],
+                    confidence=narrative.get("confidence", 0.3),
+                    weight=0.0,
+                    regime_fit="all",
+                    asset_signals=asset_signals,
+                    explanation=f"Macro narrative: {narrative.get('macro_health', '?')} "
+                                f"(score={narrative['value']:+.2f}). "
+                                f"FOMC: {narrative.get('fomc_tone', 'neutral')}. "
+                                f"Signal: SPY={asset_signals.get('SPY', 0):+.2f}, "
+                                f"TLT={asset_signals.get('TLT', 0):+.2f}, "
+                                f"GLD={asset_signals.get('GLD', 0):+.2f}. "
+                                f"{narrative.get('num_releases', 0)} releases analyzed."
+                )
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"LLM narrative signal unavailable: {e}")
             pass
 
         self.current_readings = readings

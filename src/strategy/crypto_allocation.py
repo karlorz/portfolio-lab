@@ -30,6 +30,10 @@ from src.signals.crypto_momentum import (
     CryptoSignalState,
     CryptoVolRegime,
 )
+from src.strategy.crypto_staking import (
+    ETHStakingModel,
+    StakingAllocationInfluence,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,6 +70,12 @@ class CryptoAllocationDecision:
     recommendation: str
     is_actionable: bool
 
+    # v7.02 Staking yield integration
+    staking_yield_pct: float = 0.0     # ETH staking yield (e.g., 3.5)
+    staking_carry_bps: float = 0.0     # Yield contribution in bps
+    eth_preference: float = 0.0        # -1 to +1 preference for ETH
+    is_staking_attractive: bool = False
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -85,6 +95,7 @@ class CryptoAllocationOverlay:
 
     def __init__(self, state_file: Optional[Path] = None):
         self._signal_gen = CryptoMomentumSignalGenerator()
+        self._staking_model = ETHStakingModel()
         self.state_file = state_file or self.STATE_FILE
         self._state = self._load_state()
 
@@ -159,6 +170,31 @@ class CryptoAllocationOverlay:
         self._state["gld_reduction"] = round(signal.gld_reduction, 4)
         self._save_state()
 
+        # v7.02: Staking yield influence
+        eth_metrics = self._staking_model.get_live_yield()
+        carry = self._staking_model.compute_crypto_carry(btc_w, eth_w, eth_metrics)
+        staking_yield_pct = round(eth_metrics.annual_yield * 100, 2)
+        staking_carry_bps = round(carry["total_carry_bps"], 2)
+        is_staking_attractive = eth_metrics.is_attractive
+
+        # If staking is attractive and crypto is active, nudge ETH preference
+        eth_preference = 0.0
+        if status == CryptoAllocationStatus.ACTIVE and is_staking_attractive:
+            influence = self._staking_model.compute_allocation_influence(btc_w, eth_w)
+            eth_preference = influence.eth_preference
+            # Apply moderate tilt (20% influence from staking, 80% from momentum)
+            btc_w = btc_w * 0.8 + influence.btc_weight * 0.2
+            eth_w = eth_w * 0.8 + influence.eth_weight * 0.2
+            # Normalize
+            total = btc_w + eth_w
+            if total > 0:
+                btc_w = btc_w / total * (btc_w + eth_w)  # Preserve total
+                eth_w = eth_w / total * (btc_w + eth_w)
+            btc_w = round(btc_w, 4)
+            eth_w = round(eth_w, 4)
+        elif status == CryptoAllocationStatus.ACTIVE:
+            eth_preference = 0.0  # Neutral split
+
         return CryptoAllocationDecision(
             timestamp=datetime.now().isoformat(),
             status=status.value,
@@ -174,6 +210,10 @@ class CryptoAllocationOverlay:
             confidence=signal.confidence,
             recommendation=recommendation,
             is_actionable=actionable,
+            staking_yield_pct=staking_yield_pct,
+            staking_carry_bps=staking_carry_bps,
+            eth_preference=eth_preference,
+            is_staking_attractive=is_staking_attractive,
         )
 
     def get_allocation_shifts(self) -> Dict[str, float]:
@@ -343,6 +383,12 @@ def main():
     print(f"Confidence: {decision.confidence:.0f}%")
     print(f"Recommendation: {decision.recommendation}")
     print(f"Actionable: {decision.is_actionable}")
+    print()
+    print("--- Staking Yield (v7.02) ---")
+    print(f"ETH Staking Yield: {decision.staking_yield_pct:.1f}%")
+    print(f"Carry Contribution: {decision.staking_carry_bps:.1f} bps")
+    print(f"Staking Attractive: {decision.is_staking_attractive}")
+    print(f"ETH Preference: {decision.eth_preference:+.2f}")
     print("=" * 60)
 
 
