@@ -137,7 +137,7 @@ class TestRegimeWeights:
         assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.CIRCUIT_BREAKER] >= 0.25
 
     def test_normal_tsfm_dominant(self):
-        assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.TSFM_MOMENTUM] >= 0.3
+        assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.TSFM_MOMENTUM] >= 0.25
 
     def test_high_vol_hmm_dominant(self):
         assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.HMM_REGIME] >= 0.2

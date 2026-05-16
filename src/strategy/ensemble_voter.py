@@ -76,6 +76,7 @@ class SignalSource(Enum):
     VISIBILITY_GRAPH = "visibility_graph"     # v5.41 VGRSI network-science indicator
     VP_MACD = "vp_macd"                       # v5.55 Volume-Price Adjusted MACD
     CROSS_ASSET_RV = "cross_asset_rv"         # v5.71 Cross-asset relative value
+    REGIME_CLASSIFIER = "regime_classifier"   # v5.73 ML-Light Regime Predictor
 
 
 @dataclass
@@ -128,10 +129,10 @@ class EnsembleVote:
 # Regime-dependent weights
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.30,
+        SignalSource.TSFM_MOMENTUM: 0.28,
         SignalSource.MULTI_SPEED_MOM: 0.19,
-        SignalSource.CTA_TREND: 0.14,
-        SignalSource.MACRO_MOMENTUM: 0.09,
+        SignalSource.CTA_TREND: 0.13,
+        SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.DURATION_REGIME: 0.05,
         SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly idle in normal)
@@ -144,12 +145,13 @@ REGIME_WEIGHTS = {
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI network-science indicator
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
+        SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
     },
     Regime.HIGH_VOL: {
-        SignalSource.HMM_REGIME: 0.22,
-        SignalSource.CTA_TREND: 0.21,
+        SignalSource.HMM_REGIME: 0.20,
+        SignalSource.CTA_TREND: 0.20,
         SignalSource.MEAN_REVERSION: 0.08,   # v4.81 VIX-gated (active in high vol)
-        SignalSource.MULTI_SPEED_MOM: 0.14,
+        SignalSource.MULTI_SPEED_MOM: 0.13,
         SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.CIRCUIT_BREAKER: 0.05,
@@ -162,11 +164,12 @@ REGIME_WEIGHTS = {
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI useful in volatile transitions
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
+        SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
     },
     Regime.CRISIS: {
-        SignalSource.CIRCUIT_BREAKER: 0.28,
-        SignalSource.CTA_TREND: 0.27,
-        SignalSource.HMM_REGIME: 0.17,
+        SignalSource.CIRCUIT_BREAKER: 0.26,
+        SignalSource.CTA_TREND: 0.26,
+        SignalSource.HMM_REGIME: 0.16,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.03,   # Reduced in crisis (defensive factor focus)
         SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly frozen in crisis)
@@ -180,13 +183,14 @@ REGIME_WEIGHTS = {
         SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 Minimal during crisis
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
+        SignalSource.REGIME_CLASSIFIER: 0.02,    # v5.73 ML-Light Regime Predictor (lower in crisis)
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.20,
-        SignalSource.HMM_REGIME: 0.19,
-        SignalSource.CTA_TREND: 0.16,
-        SignalSource.TSFM_MOMENTUM: 0.12,
-        SignalSource.MACRO_MOMENTUM: 0.09,
+        SignalSource.MULTI_SPEED_MOM: 0.18,
+        SignalSource.HMM_REGIME: 0.18,
+        SignalSource.CTA_TREND: 0.15,
+        SignalSource.TSFM_MOMENTUM: 0.11,
+        SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # Higher in recovery (momentum captures)
         SignalSource.MEAN_REVERSION: 0.05,    # v4.81 VIX-gated (declining VIX, moderate)
         SignalSource.DURATION_REGIME: 0.03,
@@ -198,6 +202,7 @@ REGIME_WEIGHTS = {
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 Good for recovery structure detection
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.02,       # v5.71 Cross-asset relative value
+        SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
     }
 }
 
