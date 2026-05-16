@@ -340,6 +340,46 @@ def _get_attribution_section() -> Dict[str, Any]:
     }
 
 
+def _get_adaptive_weights_section() -> Dict[str, Any]:
+    """Adaptive ensemble weights from adaptive_weights_state.json."""
+    state = _read_json("adaptive_weights_state.json")
+    if not state or not state.get("adjusted_weights"):
+        return {"available": False}
+
+    adjusted = state.get("adjusted_weights", {})
+    multipliers = state.get("multipliers", {})
+    baseline = state.get("baseline_weights", {})
+
+    # Compute top changes
+    changes = []
+    for source, adj_weight in adjusted.items():
+        base = baseline.get(source, 0)
+        diff = adj_weight - base
+        changes.append({
+            "source": source,
+            "base_weight": round(base, 4),
+            "adjusted_weight": round(adj_weight, 4),
+            "change": round(diff, 4),
+            "multiplier": round(multipliers.get(source, 1.0), 2),
+        })
+    changes.sort(key=lambda x: abs(x["change"]), reverse=True)
+
+    # Find biggest winners / losers
+    top_boosted = [c for c in changes if c["change"] > 0][:3]
+    top_reduced = [c for c in changes if c["change"] < 0][:3]
+
+    return {
+        "available": True,
+        "timestamp": state.get("timestamp"),
+        "regime": state.get("regime", "normal"),
+        "num_sources": len(adjusted),
+        "top_changes": changes[:10],
+        "top_boosted": top_boosted,
+        "top_reduced": top_reduced,
+        "history_count": len(state.get("history", [])),
+    }
+
+
 def _get_cron_section() -> Dict[str, Any]:
     """Cron job status summary."""
     status = _read_json("cron_status.json")
@@ -424,6 +464,7 @@ def generate_unified_dashboard() -> Dict[str, Any]:
         "overlays": _get_overlays_section(),
         "regime": _get_regime_section(),
         "attribution": _get_attribution_section(),
+        "adaptive_weights": _get_adaptive_weights_section(),
         "cron": _get_cron_section(),
     }
 
@@ -601,6 +642,19 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
             print(f"       ... and {remaining} more sources")
     else:
         print("  ❌ ATTRIBUTION: not available")
+
+    print()
+
+    # ── Adaptive Weights ──
+    aw = dashboard.get("adaptive_weights", {})
+    if aw.get("available"):
+        print(f"  🔄 ADAPTIVE ENSEMBLE WEIGHTS (v6.09)")
+        print(f"     Regime: {aw.get('regime', '?')} | Sources: {aw.get('num_sources')} | History: {aw.get('history_count')} adj")
+        for c in aw.get("top_changes", [])[:5]:
+            arrow = "⬆" if c["change"] > 0 else "⬇"
+            print(f"       {arrow} {c['source']:<25} {c['base_weight']:.4f} → {c['adjusted_weight']:.4f} (×{c['multiplier']})")
+    else:
+        print(f"  🔄 ADAPTIVE WEIGHTS: not available (run attribution first)")
 
     print()
 

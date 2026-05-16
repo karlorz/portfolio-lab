@@ -214,6 +214,21 @@ overlay-dashboard:
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
 
+# ── Performance Attribution ────────────────────────────────────────────
+
+.PHONY: attribution
+attribution:
+	@echo "=== Performance Attribution: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && python3 -m src.monitor.performance_attribution report --save 2>&1 | tee -a $(DATA_DIR)/attribution.log; \
+	EXIT=$${PIPESTATUS[0]}; \
+	cd $(PROJECT_DIR) && python3 -m src.strategy.adaptive_ensemble_weights update --regime normal 2>&1 | tee -a $(DATA_DIR)/adaptive_weights.log; \
+	EXIT2=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ] && [ $$EXIT2 -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	python3 $(CRON_UPDATE) portfolio-lab-attribution $$STATUS $$DUR
+
 # ── Unified Dashboard ────────────────────────────────────────────────
 
 .PHONY: unified-dashboard
@@ -224,7 +239,7 @@ unified-dashboard:
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
-all: data dashboard health eval research wiki-sync sync build overlay-signals overlay-dashboard unified-dashboard
+all: data dashboard health eval research wiki-sync sync build overlay-signals overlay-dashboard attribution unified-dashboard
 	@echo "=== All tasks complete: $$(date) ==="
 
 # ── Cron Status Management ───────────────────────────────────────────
@@ -242,6 +257,7 @@ cron-reset:
 	@python3 $(CRON_UPDATE) portfolio-lab-position-sync pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
+	@python3 $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 

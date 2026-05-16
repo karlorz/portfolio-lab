@@ -639,6 +639,53 @@ class EnsembleVoter:
         # Get weights for regime
         weights = REGIME_WEIGHTS[regime]
         
+        # Apply adaptive ensemble weighting (v6.09) if available
+        try:
+            from src.strategy.adaptive_ensemble_weights import AdaptiveEnsembleWeights
+            
+            # Try to load latest attribution data
+            attribution_dir = Path("~/projects/portfolio-lab/data/attribution").expanduser()
+            attribution_files = sorted(attribution_dir.glob("attribution_*.json"), reverse=True)
+            
+            if attribution_files:
+                with open(attribution_files[0]) as f:
+                    attribution_data = json.load(f)
+                
+                # Check if attribution is stale (>7 days old)
+                attr_timestamp = attribution_data.get("timestamp", "")
+                if attr_timestamp:
+                    attr_date = attr_timestamp[:10]
+                    days_stale = (datetime.now() - datetime.strptime(attr_date, "%Y-%m-%d")).days
+                else:
+                    days_stale = 999
+                
+                if days_stale <= 7:
+                    # Check if we have enough data points
+                    sources = attribution_data.get("sources", {})
+                    total_readings = sum(s.get("total_readings", 0) for s in sources.values())
+                    num_sources = len(sources)
+                    avg_readings = total_readings / max(num_sources, 1)
+                    
+                    if avg_readings >= 5:  # Minimum average readings to enable adaptive
+                        # Build base weights in string-keyed format
+                        base_str = {k.value: v for k, v in weights.items()}
+                        
+                        adaptive = AdaptiveEnsembleWeights(base_weights=base_str)
+                        adapted = adaptive.update_weights(attribution_data, regime.value)
+                        
+                        # Convert back to enum-keyed dict for EnsembleVoter
+                        adaptive_weights_enum = {}
+                        for source_enum in weights:
+                            source_str = source_enum.value
+                            if source_str in adapted:
+                                adaptive_weights_enum[source_enum] = adapted[source_str]
+                        
+                        if adaptive_weights_enum:
+                            logger.info(f"Using adaptive ensemble weights for regime={regime.value}")
+                            weights = adaptive_weights_enum
+        except Exception as e:
+            logger.warning(f"Could not apply adaptive ensemble weights: {e}")
+        
         # Apply health-adjusted weighting (v3.12)
         # Reduce weight for signals with poor health scores
         try:
