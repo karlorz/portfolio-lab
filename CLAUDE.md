@@ -135,6 +135,22 @@
 - **Target**: Max DD -26.2% → ≤-20%, Sharpe +0.03-0.05
 - **Status**: All phases complete
 
+## Recent Implementation Updates (2026-05-16)
+
+### v5.72 Graduation Metrics Fix - COMPLETED
+- **Fix**: `src/strategy/evaluator.py` — intra-day snapshot deduplication graduation bug
+  - Added `_deduplicate_to_daily()` to filter 30-min snapshots to trading-day-level
+  - Added vol floor `max(std, 0.0001)` and Sharpe cap `MAX_REALISTIC_SHARPE=3.0`
+  - No more false PROMOTION CANDIDATE alerts from Sharpe 68+ blowup
+- **Tests**: `tests/test_evaluator.py` — 10 new tests (41 total), all passing
+- **Commit**: `fecedd4`
+- **Status**: Complete
+
+### v5.70+v5.71 Performance Attribution + Cross-Asset RV - COMPLETED
+- **Performance Attribution**: Tracks each signal source contribution to P&L, hit rate, etc.
+- **Cross-Asset Relative Value**: Z-score of N-asset rolling returns, mean-reversion triggers
+- **Status**: Complete
+
 ## Recent Implementation Updates (2026-05-15)
 
 ### v4.50 VIX Term Structure Overlay - Phase 3 COMPLETED
