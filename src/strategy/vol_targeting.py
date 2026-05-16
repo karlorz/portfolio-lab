@@ -290,6 +290,57 @@ class VolatilityEngine:
             'final_value': portfolio_values[-1]
         }
 
+    def calculate_skew_adjusted_target(
+        self, symbol: str = "SPY", base_target: Optional[float] = None
+    ) -> dict:
+        """
+        Calculate skew-adjusted vol target using v5.40 Skew Engineering.
+
+        Integrates with SkewEngine to apply asymmetric volatility penalty.
+
+        Args:
+            symbol: Asset symbol to analyze (default: SPY)
+            base_target: Base annualized vol target (default: from config)
+
+        Returns:
+            dict with skew metrics and adjusted target
+        """
+        try:
+            from src.monitor.skew_engineering import SkewEngine
+
+            target = base_target or self.config.target_vol
+            skew = SkewEngine(symbol=symbol)
+            metrics = skew.compute()
+
+            adjusted_target = target * (1.0 - metrics.vol_penalty)
+            adjusted_target = max(adjusted_target, target * 0.5)  # Floor at 50% of base
+
+            return {
+                'symbol': symbol,
+                'base_target': target,
+                'skew_ratio_21d': metrics.skew_ratio_21d,
+                'skew_ratio_63d': metrics.skew_ratio_63d,
+                'composite_regime': metrics.composite_regime,
+                'vol_penalty': metrics.vol_penalty,
+                'adjusted_target': round(adjusted_target, 6),
+                'reduction_pct': round((1.0 - adjusted_target / target) * 100, 2),
+                'n_obs': metrics.n_obs,
+            }
+        except ImportError:
+            return {
+                'error': 'skew_engineering module not available',
+                'base_target': base_target or self.config.target_vol,
+                'adjusted_target': base_target or self.config.target_vol,
+                'vol_penalty': 0.0,
+            }
+        except Exception as e:
+            return {
+                'error': str(e),
+                'base_target': base_target or self.config.target_vol,
+                'adjusted_target': base_target or self.config.target_vol,
+                'vol_penalty': 0.0,
+            }
+
 
 class PortfolioVolTarget:
     """Portfolio-level volatility targeting"""
@@ -453,6 +504,36 @@ def cmd_portfolio(args):
         print(f"  {sym}: {weight*100:.1f}%")
 
 
+def cmd_skew(args):
+    """Compute skew-adjusted vol target."""
+    config = VolTargetConfig(target_vol=args.target / 100)
+    engine = VolatilityEngine(config)
+
+    print(f"\n🎯 Skew-Adjusted Vol Target ({args.symbol})")
+    print(f"{'='*60}")
+
+    result = engine.calculate_skew_adjusted_target(
+        symbol=args.symbol,
+        base_target=args.target / 100,
+    )
+
+    if 'error' in result:
+        print(f"  Error: {result['error']}")
+        print(f"  Using base target: {result['adjusted_target']*100:.1f}%")
+    else:
+        print(f"  Symbol:           {result['symbol']}")
+        print(f"  Base target:      {result['base_target']*100:.1f}%")
+        print(f"  Skew ratio (21d): {result['skew_ratio_21d']:.3f}")
+        print(f"  Skew ratio (63d): {result['skew_ratio_63d']:.3f}")
+        print(f"  Composite regime: {result['composite_regime']}")
+        print(f"  Vol penalty:      {result['vol_penalty']:.1%}")
+        print(f"  Adjusted target:  {result['adjusted_target']*100:.2f}%")
+        print(f"  Reduction:        {result['reduction_pct']:.1f}%")
+        print(f"  Observations:     {result['n_obs']}")
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='v2.42b Volatility Targeting Module',
@@ -478,6 +559,11 @@ Examples:
     
     portfolio_parser = subparsers.add_parser('portfolio', help='Portfolio analysis')
     portfolio_parser.set_defaults(func=cmd_portfolio)
+
+    skew_parser = subparsers.add_parser('skew', help='Skew-adjusted vol target')
+    skew_parser.add_argument('--symbol', type=str, default='SPY', help='Symbol to analyze')
+    skew_parser.add_argument('--target', type=float, default=10.0, help='Base vol target %')
+    skew_parser.set_defaults(func=cmd_skew)
     
     args = parser.parse_args()
     
