@@ -35,6 +35,18 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Cost-aware optimization imports (v6.07)
+try:
+    from src.strategy.almgren_chriss_cost import (
+        AlmgrenChrissCostModel,
+        compute_cost_penalty,
+    )
+    _HAS_COST_MODEL = True
+except ImportError:
+    _HAS_COST_MODEL = False
+    AlmgrenChrissCostModel = None
+    compute_cost_penalty = None
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 STATE_PATH = DATA_DIR / "regime_optimizer_state.json"
@@ -281,11 +293,21 @@ class RegimeConstrainedOptimizer:
     No ML dependencies — uses cvxpy (convex optimization) + numpy.
     """
 
-    def __init__(self, data_dir: Optional[Path] = None, risk_free_rate: float = 0.04):
+    def __init__(self, data_dir: Optional[Path] = None, risk_free_rate: float = 0.04,
+                 cost_aversion: float = 0.01):
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.state_path = self.data_dir / "regime_optimizer_state.json"
         self.regime_state_path = self.data_dir / "regime_classifier_state.json"
         self.risk_free_rate = risk_free_rate
+        self.cost_aversion = cost_aversion
+
+        # Cost model (v6.07)
+        self._cost_model: Optional['AlmgrenChrissCostModel'] = None
+        if _HAS_COST_MODEL and AlmgrenChrissCostModel is not None:
+            self._cost_model = AlmgrenChrissCostModel(
+                data_dir=self.data_dir,
+                default_cost_aversion=self.cost_aversion,
+            )
 
         # State
         self.last_result: Optional[OptimizerResult] = None
@@ -478,6 +500,70 @@ class RegimeConstrainedOptimizer:
 
         return np.array(w.value), problem.status, elapsed
 
+    def _solve_cost_aware(self, cov: np.ndarray, bounds: List[Tuple[float, float]],
+                          expected_returns: np.ndarray, current_weights: np.ndarray,
+                          spread_costs: np.ndarray, impact_costs: np.ndarray,
+                          cost_aversion: float = 0.01) -> Tuple[np.ndarray, str, float]:
+        """
+        Solve cost-aware portfolio optimization.
+
+        minimize    w^T Σ w + Σ_i [ a_i * |w_i - w₀_i| + b_i * (w_i - w₀_i)² ]
+        subject to  Σ w_i = 1, w_i_min ≤ w_i ≤ w_i_max, w^T μ >= min_return
+
+        Where a_i = γ * spread_i  (linear turnover penalty)
+              b_i = γ * impact_i  (quadratic impact penalty)
+
+        Cost-aware optimization penalizes turnover proportional to transaction costs,
+        keeping allocations closer to the base when costs are high.
+
+        Uses CVXPY convex formulation (abs and square are DCP-compliant when
+        multiplied by non-negative constants).
+        """
+        import cvxpy as cp
+
+        n = cov.shape[0]
+        w = cp.Variable(n)
+
+        # Pre-multiply cost aversion into cost coefficients so they're
+        # DCP-compliant constants (not Parameters)
+        # This way: constant * abs(delta) is DCP because constant >= 0
+        spread_penalty = cost_aversion * spread_costs  # Linear penalty coeffs
+        impact_penalty = cost_aversion * impact_costs  # Quadratic penalty coeffs
+
+        # Risk term
+        risk = cp.quad_form(w, cov)
+
+        # Cost penalty: Σ_i [ a_i * |w_i - w₀_i| + b_i * (w_i - w₀_i)² ]
+        delta = w - current_weights
+        cost_penalty = spread_penalty @ cp.abs(delta) + cp.quad_form(delta, np.diag(impact_penalty))
+
+        # Combined objective
+        objective = cp.Minimize(risk + cost_penalty)
+
+        # Constraints: sum = 1, bounds, minimum return
+        constraints = [cp.sum(w) == 1]
+        for i, (lo, hi) in enumerate(bounds):
+            constraints.append(w[i] >= lo)
+            constraints.append(w[i] <= hi)
+
+        # Excess return constraint (minimum acceptable)
+        mu_excess = expected_returns - self.risk_free_rate
+        constraints.append(mu_excess @ w >= 0.01)
+
+        import time
+        t0 = time.time()
+        problem = cp.Problem(objective, constraints)
+        problem.solve(solver=cp.CLARABEL, verbose=False)
+        elapsed = (time.time() - t0) * 1000
+
+        if w.value is None:
+            problem.solve(solver=cp.SCS, verbose=False)
+            elapsed = (time.time() - t0) * 1000
+
+        if w.value is not None:
+            return np.array(w.value), problem.status, elapsed
+        return np.array([0.46, 0.38, 0.16, 0.0, 0.0, 0.0, 0.0]), "infeasible", elapsed
+
     # ── Main Optimization Entry Point ───────────────────────────────────────
 
     def optimize(self, method: str = "min_vol") -> OptimizerResult:
@@ -515,7 +601,7 @@ class RegimeConstrainedOptimizer:
         ])
 
         # Validate method
-        valid_methods = {"min_vol", "max_sharpe", "risk_parity"}
+        valid_methods = {"min_vol", "max_sharpe", "risk_parity", "cost_aware"}
         if method not in valid_methods:
             logger.warning(f"Unknown method '{method}', falling back to min_vol")
             method = "min_vol"
@@ -527,6 +613,31 @@ class RegimeConstrainedOptimizer:
             weights, status, solve_time = self._solve_max_sharpe(expected_returns, cov, bounds)
         elif method == "risk_parity":
             weights, status, solve_time = self._solve_risk_parity(cov, bounds)
+        elif method == "cost_aware":
+            # Cost-aware: get cost parameters from model
+            if self._cost_model is not None:
+                cost_params = self._cost_model.get_cost_params(assets)
+            else:
+                # Fallback if cost model not available: use defaults
+                logger.warning("Cost model not available, using default costs")
+                cost_params = type('obj', (object,), {
+                    'spread': {a: 1.0 for a in assets},
+                    'impact': {a: 0.5 for a in assets},
+                })()
+
+            # Build current weights vector (from base allocation or last state)
+            cur_weights_dict = dict(BASE_ALLOCATION)
+            if self.last_result and self.last_result.weights:
+                cur_weights_dict = self.last_result.weights
+
+            w0 = np.array([cur_weights_dict.get(a, 0.0) for a in assets])
+            spread_vec = np.array([cost_params.spread.get(a, 2.0) for a in assets])
+            impact_vec = np.array([cost_params.impact.get(a, 1.0) for a in assets])
+
+            weights, status, solve_time = self._solve_cost_aware(
+                cov, bounds, expected_returns, w0,
+                spread_vec, impact_vec, self.cost_aversion,
+            )
         else:
             raise ValueError(f"Unexpected method after validation: {method}")
 
@@ -698,15 +809,15 @@ def main():
         optimizer.print_cov_status()
 
     elif sys.argv[1] == "all":
-        # Run all three optimization methods
+        # Run all four optimization methods
         print()
-        for method in ["min_vol", "max_sharpe", "risk_parity"]:
+        for method in ["min_vol", "max_sharpe", "risk_parity", "cost_aware"]:
             result = optimizer.optimize(method=method)
             optimizer.print_optimization(result)
             print()
 
     else:
-        print("Usage: python -m src.strategy.regime_optimizer [optimize|status|cov|all] [--mode min_vol|max_sharpe|risk_parity]")
+        print("Usage: python -m src.strategy.regime_optimizer [optimize|status|cov|all] [--mode min_vol|max_sharpe|risk_parity|cost_aware]")
 
 
 if __name__ == "__main__":

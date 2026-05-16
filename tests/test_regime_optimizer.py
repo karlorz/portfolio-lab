@@ -537,3 +537,121 @@ class TestCLI:
         monkeypatch.setattr(sys, "argv", ["regime_optimizer.py", "all"])
 
         ro.main()
+
+    # ── v6.07: Cost-Aware Optimization Tests ─────────────────────────────────
+
+    def test_cost_aware_solve_basic(self, normal_regime_state):
+        """Cost-aware optimization should produce valid weights."""
+        import src.strategy.regime_optimizer as ro
+
+        opt = ro.RegimeConstrainedOptimizer(
+            data_dir=normal_regime_state, cost_aversion=0.01
+        )
+        result = opt.optimize(method="cost_aware")
+
+        assert result is not None
+        assert result.method == "cost_aware"
+        assert abs(sum(result.weights.values()) - 1.0) < 0.01
+        for asset, w in result.weights.items():
+            lo, hi = ro.HARD_BOUNDS.get(asset, (0.0, 1.0))
+            assert lo - 0.001 <= w <= hi + 0.001, f"{asset}: {w:.4f} not in [{lo:.2f}, {hi:.2f}]"
+        assert result.solver_status in ("optimal", "optimal_inaccurate")
+
+    def test_cost_aware_returns_reasonable(self, normal_regime_state):
+        """Cost-aware optimizer should return reasonable expected metrics."""
+        import src.strategy.regime_optimizer as ro
+
+        opt = ro.RegimeConstrainedOptimizer(
+            data_dir=normal_regime_state, cost_aversion=0.01
+        )
+        result = opt.optimize(method="cost_aware")
+        assert -0.20 <= result.expected_return <= 0.30
+        assert 0.02 <= result.expected_volatility <= 0.50
+
+    def test_cost_aware_converges_quickly(self, normal_regime_state):
+        """Cost-aware optimization should solve quickly."""
+        import src.strategy.regime_optimizer as ro
+
+        opt = ro.RegimeConstrainedOptimizer(
+            data_dir=normal_regime_state, cost_aversion=0.01
+        )
+        result = opt.optimize(method="cost_aware")
+        assert result.solver_time_ms < 5000
+
+    def test_cost_aversion_parameter_changes_weights(self, normal_regime_state):
+        """Higher cost aversion should keep weights closer to base."""
+        import src.strategy.regime_optimizer as ro
+
+        opt_low = ro.RegimeConstrainedOptimizer(
+            data_dir=normal_regime_state, cost_aversion=0.001
+        )
+        opt_high = ro.RegimeConstrainedOptimizer(
+            data_dir=normal_regime_state, cost_aversion=0.1
+        )
+        result_low = opt_low.optimize(method="cost_aware")
+        result_high = opt_high.optimize(method="cost_aware")
+
+        base = ro.BASE_ALLOCATION
+        dev_low = sum(abs(result_low.weights.get(a, 0) - base.get(a, 0)) for a in base)
+        dev_high = sum(abs(result_high.weights.get(a, 0) - base.get(a, 0)) for a in base)
+        assert dev_high <= dev_low + 0.01, (
+            f"High cost ({dev_high:.4f}) should not deviate more than "
+            f"low cost ({dev_low:.4f})"
+        )
+
+    def test_cost_aware_vs_min_vol_different(self, normal_regime_state):
+        """Cost-aware and min_vol should produce different results."""
+        import src.strategy.regime_optimizer as ro
+
+        opt = ro.RegimeConstrainedOptimizer(
+            data_dir=normal_regime_state, cost_aversion=0.05
+        )
+        result_ca = opt.optimize(method="cost_aware")
+        result_mv = opt.optimize(method="min_vol")
+
+        ca_w = [result_ca.weights.get(a, 0) for a in ro.ASSETS[:3]]
+        mv_w = [result_mv.weights.get(a, 0) for a in ro.ASSETS[:3]]
+        diff = sum(abs(c - m) for c, m in zip(ca_w, mv_w))
+        assert diff > 0.001, f"cost_aware vs min_vol should differ (diff={diff:.4f})"
+
+    def test_cost_aware_with_real_tca(self):
+        """Cost-aware should work with real TCA calibration factors."""
+        import src.strategy.regime_optimizer as ro
+
+        opt = ro.RegimeConstrainedOptimizer(cost_aversion=0.01)
+        result = opt.optimize(method="cost_aware")
+        assert result is not None
+        if result.solver_status != "infeasible":
+            assert abs(sum(result.weights.values()) - 1.0) < 0.01
+
+    def test_cost_model_smoke(self):
+        """AlmgrenChrissCostModel should load and produce estimates."""
+        from src.strategy.almgren_chriss_cost import AlmgrenChrissCostModel
+
+        model = AlmgrenChrissCostModel()
+        params = model.get_cost_params(["SPY", "GLD", "TLT"])
+        assert params.spread["SPY"] > 0
+        assert params.impact["SPY"] > 0
+
+        est = model.estimate_turnover_cost(
+            {"SPY": 0.46, "GLD": 0.38},
+            {"SPY": 0.50, "GLD": 0.34},
+        )
+        assert est.total_cost_bps > 0
+        assert est.active_turnover_pct > 0
+
+    def test_cost_aware_cli_in_all(self, monkeypatch, normal_regime_state):
+        """CLI 'all' command should include cost_aware mode without error."""
+        import sys
+        import src.strategy.regime_optimizer as ro
+
+        original_init = ro.RegimeConstrainedOptimizer.__init__
+
+        def patched_init(self, data_dir=None, risk_free_rate=0.04, cost_aversion=0.01):
+            original_init(self, data_dir=normal_regime_state,
+                          risk_free_rate=risk_free_rate,
+                          cost_aversion=cost_aversion)
+
+        monkeypatch.setattr(ro.RegimeConstrainedOptimizer, "__init__", patched_init)
+        monkeypatch.setattr(sys, "argv", ["regime_optimizer.py", "all"])
+        ro.main()
