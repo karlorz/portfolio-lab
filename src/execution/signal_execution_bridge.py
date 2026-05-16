@@ -151,6 +151,9 @@ class SignalExecutionBridge:
         self.db_path = db_path
         
         self._price_cache: Dict[str, float] = {}
+        self._tca_feedback_cache: Optional[Dict[str, Any]] = None
+        self._tca_feedback_cache_time: Optional[datetime] = None
+        self._tca_feedback_cache_ttl = timedelta(minutes=15)
         
     def _get_latest_price(self, symbol: str) -> Optional[float]:
         """Fetch latest price from database"""
@@ -179,17 +182,65 @@ class SignalExecutionBridge:
             return price
         return None
     
+    def _get_tca_feedback_path(self) -> Path:
+        """Get path to TCA feedback state file."""
+        return Path(__file__).parent.parent.parent / "data" / "tca_feedback_state.json"
+    
+    def _load_tca_feedback(self) -> Optional[Dict[str, Any]]:
+        """
+        Load TCA feedback adjustments with caching.
+        
+        Refreshes every 15 minutes to balance freshness vs I/O.
+        Returns None if feedback state doesn't exist or is empty.
+        Handles missing attributes gracefully (for tests using __new__).
+        """
+        # Defensive: ensure cache attributes exist
+        if not hasattr(self, '_tca_feedback_cache'):
+            self._tca_feedback_cache = None
+        if not hasattr(self, '_tca_feedback_cache_time'):
+            self._tca_feedback_cache_time = None
+        if not hasattr(self, '_tca_feedback_cache_ttl'):
+            self._tca_feedback_cache_ttl = timedelta(minutes=15)
+        
+        now = datetime.now()
+        if (self._tca_feedback_cache is not None and 
+            self._tca_feedback_cache_time is not None and
+            now - self._tca_feedback_cache_time < self._tca_feedback_cache_ttl):
+            return self._tca_feedback_cache
+        
+        try:
+            from src.execution.tca_feedback_loop import TCAFeedbackLoop
+            loop = TCAFeedbackLoop()
+            adjustments = loop.get_adjustments()
+            
+            if adjustments.get("status") == "no_data":
+                self._tca_feedback_cache = None
+                self._tca_feedback_cache_time = now
+                return None
+            
+            self._tca_feedback_cache = adjustments
+            self._tca_feedback_cache_time = now
+            return adjustments
+        except Exception:
+            self._tca_feedback_cache = None
+            self._tca_feedback_cache_time = now
+            return None
+    
     def _calculate_urgency(
         self,
         signal_score: float,
         confidence: float,
-        regime: str
+        regime: str,
+        symbol: str = "",
     ) -> OrderUrgency:
         """
         Determine order urgency based on signal characteristics
         
         High-confidence, high-magnitude signals get URGENT/HIGH priority.
         Low-confidence or neutral signals get NORMAL/LOW priority.
+        
+        TCA feedback adjusts urgency based on historical execution quality
+        per symbol (poor execution → less urgent → wait for better windows).
         """
         abs_score = abs(signal_score)
         
@@ -205,6 +256,18 @@ class SignalExecutionBridge:
         
         # Check combined score + confidence
         combined = (adjusted_score + confidence) / 2
+        
+        # Apply TCA feedback adjustment
+        if symbol:
+            try:
+                from src.execution.tca_feedback_loop import apply_urgency_adjustment
+                feedback = self._load_tca_feedback()
+                if feedback:
+                    combined = apply_urgency_adjustment(
+                        abs_score, confidence, symbol, feedback, regime
+                    )
+            except Exception:
+                pass  # Fall through to default if TCA feedback unavailable
         
         # Apply thresholds
         if combined >= 0.70 or (abs_score >= 0.75 and confidence >= 0.70):
@@ -276,7 +339,8 @@ class SignalExecutionBridge:
                 
             # Calculate urgency
             urgency = self._calculate_urgency(
-                signal.composite_score, signal.composite_confidence, signal.detected_regime
+                signal.composite_score, signal.composite_confidence, signal.detected_regime,
+                symbol=symbol
             )
             
             # Calculate dollar value
@@ -302,9 +366,23 @@ class SignalExecutionBridge:
         """Convert allocation deltas to scheduled orders"""
         orders = []
         
+        # Load TCA feedback once for all symbols
+        feedback = self._load_tca_feedback()
+        
         for delta in deltas:
+            # Determine symbol-specific minimum trade value
+            min_trade = self.MIN_TRADE_VALUE
+            if feedback:
+                try:
+                    from src.execution.tca_feedback_loop import apply_min_trade_adjustment
+                    min_trade = apply_min_trade_adjustment(
+                        self.MIN_TRADE_VALUE, delta.symbol, feedback
+                    )
+                except Exception:
+                    pass  # Fall through to default
+            
             # Skip if below minimum trade value
-            if delta.estimated_value < self.MIN_TRADE_VALUE:
+            if delta.estimated_value < min_trade:
                 continue
                 
             # Determine side

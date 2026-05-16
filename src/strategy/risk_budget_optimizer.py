@@ -276,8 +276,13 @@ def _load_regime_state() -> Dict:
         try:
             state = json.loads(regime_path.read_text())
             reading = state.get("last_reading", {})
+            reading_regime = reading.get("regime")
+            # Graceful fallback: if last reading is "unknown" (e.g. data fetch
+            # failure), use the more stable root-level current_regime instead.
+            if reading_regime is None or reading_regime == "unknown":
+                reading_regime = state.get("current_regime", "normal")
             return {
-                "regime": reading.get("regime", state.get("current_regime", "normal")),
+                "regime": reading_regime,
                 "confidence": reading.get("confidence", 0.7),
                 "previous_regime": state.get("previous_regime"),
                 "regime_start_date": state.get("regime_start_date"),
