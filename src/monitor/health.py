@@ -16,6 +16,13 @@ from typing import Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.market_calendar import MarketCalendar, format_stale_status, is_weekend_stale
 
+# v6.10: Graduation checklist import (used in check_graduation_candidate)
+try:
+    from src.strategy.graduation_checklist import GraduationChecklist, CheckResult
+    GRADUATION_AVAILABLE = True
+except ImportError:
+    GRADUATION_AVAILABLE = False
+
 # GARCH-CVaR integration (v3.21)
 try:
     from cvar_metrics import fetch_portfolio_returns, calculate_volatility
@@ -178,30 +185,98 @@ class HealthMonitor:
         return ok
     
     def check_graduation_candidate(self) -> bool:
-        """Check for promotion to live."""
-        trigger_file = DATA_DIR / ".promote_to_live"
-        if not trigger_file.exists():
-            self.checks.append({"name": "graduation", "status": "no_candidate", "ok": True})
-            return True
-        
-        with open(trigger_file) as f:
-            trigger = json.load(f)
-        
-        metrics = trigger.get("metrics", {})
-        
-        self.checks.append({
-            "name": "graduation",
-            "status": "candidate_ready",
-            "ok": True,
-            "metrics": {
-                "sharpe": metrics.get("sharpe"),
-                "max_dd": metrics.get("max_drawdown"),
-                "win_rate": metrics.get("win_rate")
+        """Check for promotion to live using v6.10 GraduationChecklist.
+
+        Uses structured multi-criteria gates and minimum observation period.
+        Only generates PROMOTION CANDIDATE alert when all criteria pass AND
+        at least MIN_OBSERVATION_DAYS of data exists.
+        """
+        if GRADUATION_AVAILABLE:
+            checklist = GraduationChecklist()
+            state = checklist._load_state()
+            results = checklist.check(state)
+            is_ready = checklist.is_graduation_ready(results)
+            score = checklist.readiness_score(results)
+
+            # Estimate trading days from portfolio history
+            portfolio = state.get("portfolio", {})
+            history = portfolio.get("history", [])
+            unique_dates = set()
+            for entry in history:
+                ts = entry.get("timestamp", "")
+                date_key = ts[:10] if len(ts) >= 10 else ts
+                unique_dates.add(date_key)
+            n_days = len(unique_dates)
+
+            # Build graduation metrics from results
+            default_cr = CheckResult("", False, 0, 0, "")
+            metrics = {
+                "sharpe": results.get("min_sharpe", default_cr).value,
+                "max_dd": results.get("max_drawdown", default_cr).value,
+                "win_rate": results.get("min_win_rate", default_cr).value,
+                "readiness_score": score,
+                "trading_days": n_days,
+                "criteria_met": sum(1 for n, r in results.items() if n != "manual_approval" and r.passed),
+                "criteria_total": sum(1 for n in results if n != "manual_approval"),
             }
-        })
-        
-        self.alerts.append("PROMOTION CANDIDATE: Ready for live trading approval")
-        
+
+            # Gate: minimum observation period
+            if n_days < GraduationChecklist.MIN_OBSERVATION_DAYS:
+                self.checks.append({
+                    "name": "graduation",
+                    "status": f"observing ({n_days}/{GraduationChecklist.MIN_OBSERVATION_DAYS} days)",
+                    "ok": True,
+                    "metrics": metrics,
+                    "readiness_score": score,
+                })
+                return True
+
+            if is_ready:
+                self.checks.append({
+                    "name": "graduation",
+                    "status": "candidate_ready",
+                    "ok": True,
+                    "metrics": metrics,
+                    "readiness_score": score,
+                })
+                self.alerts.append(
+                    f"PROMOTION CANDIDATE: All {metrics['criteria_met']}/{metrics['criteria_total']} "
+                    f"criteria met (score {score}%). Manual approval required to go live."
+                )
+            else:
+                self.checks.append({
+                    "name": "graduation",
+                    "status": f"in_progress ({score:.0f}% readiness)",
+                    "ok": True,
+                    "metrics": metrics,
+                    "readiness_score": score,
+                })
+                # Don't alert — just tracking
+        else:
+            # Fallback: use existing trigger file logic
+            trigger_file = DATA_DIR / ".promote_to_live"
+            if not trigger_file.exists():
+                self.checks.append({"name": "graduation", "status": "no_candidate", "ok": True})
+                return True
+
+            with open(trigger_file) as f:
+                trigger = json.load(f)
+
+            trigger_metrics = trigger.get("metrics", {})
+
+            self.checks.append({
+                "name": "graduation",
+                "status": "candidate_ready",
+                "ok": True,
+                "metrics": {
+                    "sharpe": trigger_metrics.get("sharpe"),
+                    "max_dd": trigger_metrics.get("max_drawdown"),
+                    "win_rate": trigger_metrics.get("win_rate"),
+                }
+            })
+
+            self.alerts.append("PROMOTION CANDIDATE: Ready for live trading approval")
+
         return True
     
     def check_kill_switches(self) -> bool:
