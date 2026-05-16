@@ -22,6 +22,7 @@ from src.strategy.evaluator import (
     Portfolio,
     calculate_performance,
     check_graduation_criteria,
+    _deduplicate_to_daily,
 )
 
 
@@ -345,17 +346,23 @@ class TestGraduationCriteria:
 
     def test_good_performance(self, tmp_path, capsys):
         p = _make_portfolio(tmp_path)
-        # 63 days of positive returns with slight variation
-        np.random.seed(42)
+        # 63 days of positive returns — deterministic, realistic Sharpe
+        rng = np.random.RandomState(12345)
         p.history = []
         val = 100000
         for i in range(63):
-            ret = 0.002 + np.random.normal(0, 0.0005)  # Positive with noise
+            # Realistic: 0.08% mean daily (~20% ann), 1% std (~16% ann vol)
+            # Sharpe ~0.08/1*sqrt(252) ≈ 1.27
+            ret = rng.normal(0.0008, 0.01)
             val *= (1 + ret)
-            p.history.append({"total_value": val, "daily_return": ret})
+            p.history.append({
+                "timestamp": f"2026-01-{i+1:02d}T23:00:00",
+                "total_value": round(val, 2),
+                "daily_return": ret,
+            })
         check_graduation_criteria(p)
         captured = capsys.readouterr()
-        assert "GRADUATION CANDIDATE" in captured.out
+        assert "GRADUATION CANDIDATE" in captured.out, f"Output: '{captured.out.strip()}'"
 
     def test_poor_performance_no_graduation(self, tmp_path, capsys):
         p = _make_portfolio(tmp_path)
@@ -366,7 +373,152 @@ class TestGraduationCriteria:
         for i in range(63):
             ret = np.random.normal(-0.001, 0.03)
             val *= (1 + ret)
-            p.history.append({"total_value": val, "daily_return": ret})
+            p.history.append({
+                "timestamp": f"2026-01-{i+1:02d}T23:00:00",
+                "total_value": val,
+                "daily_return": ret,
+            })
         check_graduation_criteria(p)
         captured = capsys.readouterr()
         assert "GRADUATION CANDIDATE" not in captured.out
+
+    def test_intra_day_data_does_not_trigger(self, tmp_path, capsys):
+        """Intra-day snapshots with zero daily_return should not contaminate graduation."""
+        p = _make_portfolio(tmp_path)
+        # Simulate 63 unique days, each with 24 intra-day snapshots (daily_return=0)
+        np.random.seed(42)
+        p.history = []
+        val = 100000
+        for day in range(63):
+            for intra in range(24):
+                p.history.append({
+                    "timestamp": f"2026-01-{day+1:02d}T{intra:02d}:00:00",
+                    "total_value": val,
+                    "daily_return": 0.0,
+                })
+            # End-of-day: realistic return with noise
+            ret = np.random.normal(0.001, 0.005)
+            val *= (1 + ret)
+            p.history.append({
+                "timestamp": f"2026-01-{day+1:02d}T23:00:00",
+                "total_value": val,
+                "daily_return": ret,
+            })
+        check_graduation_criteria(p)
+        captured = capsys.readouterr()
+        # After dedup to 63 trading days:
+        # Check results aren't obviously broken
+        assert "WARNING" not in captured.out
+        assert "GRADUATION DEFERRED" not in captured.out
+
+    def test_near_zero_std_vol_floor(self, tmp_path, capsys):
+        """Volatility floor prevents division-by-zero, but Sharpe cap still catches."""
+        p = _make_portfolio(tmp_path)
+        # 63 entries with nearly identical returns (std ≈ 0)
+        p.history = []
+        for i in range(63):
+            p.history.append({
+                "timestamp": f"2026-01-{i+1:02d}T00:00:00",
+                "total_value": 100000 + i * 10,
+                "daily_return": 0.0001,
+            })
+        check_graduation_criteria(p)
+        captured = capsys.readouterr()
+        # Vol floor prevents NaN/Inf, but Sharpe = 0.0001/0.0001*sqrt(252) = 15.87
+        # This still exceeds MAX_REALISTIC_SHARPE (3.0), so warning is printed
+        assert "WARNING" in captured.out
+        assert "exceeds realistic maximum" in captured.out
+
+    def test_unrealistic_sharpe_rejected(self, tmp_path, capsys):
+        """Sharpe > 3.0 should be rejected with warning."""
+        p = _make_portfolio(tmp_path)
+        # Create exactly identical returns (zero std)
+        p.history = []
+        for i in range(63):
+            p.history.append({
+                "timestamp": f"2026-01-{i+1:02d}T00:00:00",
+                "total_value": 100000,
+                "daily_return": 0.0001,
+            })
+        check_graduation_criteria(p)
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "exceeds realistic maximum" in captured.out
+        assert "GRADUATION CANDIDATE" not in captured.out
+
+
+class TestDeduplicateToDaily:
+
+    def test_empty_history(self):
+        assert _deduplicate_to_daily([]) == []
+
+    def test_single_entry(self):
+        h = [{"timestamp": "2026-01-01T12:00:00", "value": 100}]
+        result = _deduplicate_to_daily(h)
+        assert len(result) == 1
+        assert result[0]["value"] == 100
+
+    def test_intra_day_deduplication(self):
+        """Multiple entries on same day → only last retained."""
+        h = [
+            {"timestamp": "2026-01-01T09:00:00", "value": 100},
+            {"timestamp": "2026-01-01T12:00:00", "value": 101},
+            {"timestamp": "2026-01-01T15:00:00", "value": 102},
+        ]
+        result = _deduplicate_to_daily(h)
+        assert len(result) == 1
+        assert result[0]["value"] == 102  # Last entry wins
+
+    def test_multiple_days(self):
+        h = [
+            {"timestamp": "2026-01-01T09:00:00", "value": 100},
+            {"timestamp": "2026-01-02T09:00:00", "value": 101},
+            {"timestamp": "2026-01-02T15:00:00", "value": 102},
+            {"timestamp": "2026-01-03T09:00:00", "value": 103},
+        ]
+        result = _deduplicate_to_daily(h)
+        assert len(result) == 3
+        assert result[0]["value"] == 100
+        assert result[1]["value"] == 102  # Last on Jan 2
+        assert result[2]["value"] == 103
+
+    def test_chronological_order(self):
+        h = [
+            {"timestamp": "2026-01-03T09:00:00", "value": 103},
+            {"timestamp": "2026-01-01T09:00:00", "value": 101},
+            {"timestamp": "2026-01-02T09:00:00", "value": 102},
+        ]
+        result = _deduplicate_to_daily(h)
+        values = [e["value"] for e in result]
+        assert values == [101, 102, 103]
+
+    def test_timestamp_missing(self):
+        h = [{"daily_return": 0.1}, {"daily_return": 0.2}]
+        result = _deduplicate_to_daily(h)
+        # Both have no valid date_key (empty string), so last overwrites
+        assert len(result) == 1
+        assert result[0]["daily_return"] == 0.2
+
+    def test_deferred_when_too_few_trading_days(self, tmp_path, capsys):
+        """63 snapshots but only 3 unique days → should defer with message."""
+        p = _make_portfolio(tmp_path)
+        val = 100000
+        p.history = []
+        for day in range(3):
+            for intra in range(21):
+                p.history.append({
+                    "timestamp": f"2026-01-{day+1:02d}T{intra:02d}:00:00",
+                    "total_value": val,
+                    "daily_return": 0,
+                })
+            val *= 1.01
+            # Add EOD entry
+            p.history.append({
+                "timestamp": f"2026-01-{day+1:02d}T23:00:00",
+                "total_value": val,
+                "daily_return": 0.01,
+            })
+        check_graduation_criteria(p)
+        captured = capsys.readouterr()
+        assert "GRADUATION DEFERRED" in captured.out
+        assert "unique trading days" in captured.out

@@ -354,22 +354,61 @@ def main():
     conn.close()
     print(f"[{datetime.now()}] Evaluation complete")
 
+def _deduplicate_to_daily(history: List[Dict]) -> List[Dict]:
+    """Filter history to keep only the last entry per trading day.
+
+    History entries are recorded every ~30 minutes during market hours.
+    Using raw entries for graduation metrics produces garbage results because
+    most intra-day snapshots have daily_return=0.0 (price unchanged within day).
+    This function groups by date and keeps the last snapshot per day.
+    """
+    daily: Dict[str, Dict] = {}
+    for entry in history:
+        ts = entry.get("timestamp", "")
+        # Extract date from ISO timestamp: "2026-05-11T03:20:31" -> "2026-05-11"
+        date_key = ts[:10] if len(ts) >= 10 else ts
+        # Keep last entry per date (later timestamps overwrite earlier)
+        daily[date_key] = entry
+    # Return in chronological order
+    sorted_dates = sorted(daily.keys())
+    return [daily[d] for d in sorted_dates]
+
+
 def check_graduation_criteria(portfolio: Portfolio):
-    """Check if paper trading performance warrants live promotion."""
+    """Check if paper trading performance warrants live promotion.
+
+    Uses trading-day-level data (deduplicates intra-day snapshots) and
+    includes sanity validation to prevent false positives from near-zero
+    standard deviation in intra-day return data.
+    """
     MIN_DAYS = 63  # ~3 months
     MIN_SHARPE = 0.5
     MAX_DD = 0.15
     MIN_WIN_RATE = 0.45
+    MAX_REALISTIC_SHARPE = 3.0  # Any Sharpe > 3.0 is unrealistic
     
     if len(portfolio.history) < MIN_DAYS:
         return
     
-    recent = portfolio.history[-MIN_DAYS:]
+    # Deduplicate intra-day snapshots to trading-day-level data
+    daily_history = _deduplicate_to_daily(portfolio.history)
+    
+    # Need at least MIN_DAYS trading days after dedup
+    if len(daily_history) < MIN_DAYS:
+        print(f"GRADUATION DEFERRED: Only {len(daily_history)} unique trading days "
+              f"(need {MIN_DAYS}), skipping intra-day snapshots")
+        return
+    
+    recent = daily_history[-MIN_DAYS:]
     returns = [h["daily_return"] for h in recent]
     
     # Calculate metrics
     total_return = (recent[-1]["total_value"] - recent[0]["total_value"]) / recent[0]["total_value"]
-    sharpe = np.mean(returns) / np.std(returns) * np.sqrt(252) if np.std(returns) > 0 else 0
+    
+    # Volatility floor: prevent division-by-near-zero when intra-day return
+    # data has been recorded but shows zero variation within each day
+    daily_std = max(np.std(returns), 0.0001)
+    sharpe = np.mean(returns) / daily_std * np.sqrt(252) if daily_std > 0 else 0
     
     peak = recent[0]["total_value"]
     max_dd = 0
@@ -380,7 +419,14 @@ def check_graduation_criteria(portfolio: Portfolio):
         if dd > max_dd:
             max_dd = dd
     
-    win_rate = sum(1 for r in returns if r > 0) / len(returns)
+    win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0
+    
+    # Sanity validation: reject unrealistic metrics before writing trigger
+    if sharpe > MAX_REALISTIC_SHARPE:
+        print(f"WARNING: Sharpe {sharpe:.2f} exceeds realistic maximum "
+              f"{MAX_REALISTIC_SHARPE}. This is likely caused by intra-day "
+              f"snapshot contamination. Skipping promotion.")
+        return
     
     # Check criteria
     if sharpe > MIN_SHARPE and max_dd < MAX_DD and win_rate > MIN_WIN_RATE:
@@ -390,10 +436,10 @@ def check_graduation_criteria(portfolio: Portfolio):
         trigger = {
             "action": "promote_to_live",
             "metrics": {
-                "sharpe": sharpe,
-                "max_drawdown": max_dd,
-                "win_rate": win_rate,
-                "total_return": total_return
+                "sharpe": round(sharpe, 2),
+                "max_drawdown": round(max_dd, 4),
+                "win_rate": round(win_rate, 4),
+                "total_return": round(total_return, 6)
             },
             "timestamp": datetime.now().isoformat(),
             "requires_approval": True
