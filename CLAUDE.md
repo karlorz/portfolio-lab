@@ -177,6 +177,56 @@
 - **Tests**: `tests/test_vixy_hedge_sizing.py` (34 tests) + `tests/test_hedge_efficiency.py` (25 tests) = 59 tests passing
 - **Status**: All phases complete
 
+### v3.10 ML Signal Stacking Ensemble — Phase 1-5 Complete
+
+- **Feature Engineering**: `src/signals/stacking_feature_engine.py` — 84 features from 8 base signals
+- **Training**: `src/ml/stacking_trainer.py` (688 lines) — XGBoost meta-learner, time-series CV
+- **Inference**: `src/signals/stacking_integrator.py` (418 lines) — production inference with fallback
+- **Backtest**: `src/backtest/stacking_ensemble_backtest.py` (~380 lines)
+  - Monte Carlo simulation: 65% vs 76% directional accuracy impact
+  - **Key Finding**: +11% accuracy produces +0.000 Sharpe when applied as +/-5% shift on 15% of days
+  - Signal frequency and shift magnitude are the binding constraints, not accuracy
+  - t-stat: -0.74 — not statistically significant
+- **Dashboard**: `src/components/StackingEnsemblePanel.tsx` — Accuracy comparison, probability bars, feature importance
+- **Tests**: 76 tests (20 feature + 17 trainer + 26 integrator + 13 backtest)
+- **Status**: All phases complete
+
+### v3.00 Factor Rotation — Backtest Validation Complete
+
+- **Data**: `src/data/factor_data.py` (472 lines) — MTUM/QUAL/USMV/VLUE ETF data fetcher
+- **Signal**: `src/signals/factor_rotation.py` (575 lines) — quality-momentum blend, regime-based allocation
+- **Integration**: `FACTOR_ROTATION` in SignalSource enum, 5% ensemble weight
+- **Backtest**: `src/backtest/factor_rotation_backtest.py` (~430 lines)
+  - SPY baseline vs factor rotation on 2021-2026 data
+  - Sharpe delta: -0.216 (defensive drag in bulls), DD improvement: +5.8pp (met)
+  - Regime: bull -0.141, neutral 0.666, elevated 0.882, high_vol 1.474, crisis 0.588
+  - Finding: Factor rotation is a defensive tool — reduces drawdowns, not an alpha generator
+- **Tests**: `tests/test_factor_rotation.py` (29 tests) + `tests/test_factor_rotation_backtest.py` (16 tests) = 45 tests
+- **Dashboard**: `src/components/FactorRotationPanel.tsx` — Factor pie chart, regime badge, Q+M score
+- **Status**: All phases complete
+
+### v2.70 Behavioral Sentiment Overlay — Phase 1-4 Complete
+
+- **Data Fetcher**: `src/data/behavioral_sentiment_fetcher.py` (356 lines) — CBOE SKEW, VIX9D, P/C ratio, Reddit sentiment
+  - `BehavioralSentimentSnapshot` dataclass with composite score (-3 to +3)
+  - Sentiment weights: Options 35%, Retail 40%, Social 25%
+  - SQLite cache with 4-hour TTL
+- **Signal Generator**: `src/signals/behavioral_sentiment.py` (411 lines) — contrarian allocation signals
+  - Z-score normalization against 90-day rolling window
+  - Regime-gated suppression: VIX >30 disabled, VIX >25 half weight
+  - Circuit breakers: 5-day churn control, earnings blackout, duplicate rejection
+  - Historical backfill using VIX proxy for pre-2024 periods
+- **Ensemble Integration**: 5% weight in combined_orchestrator.py
+  - Conflict resolution: Trend wins over behavioral, Macro wins during Fed events
+- **Walk-Forward Backtest**: `src/backtest/behavioral_sentiment_backtest.py` (~430 lines)
+  - 2021-2026 validation: Sharpe delta **-0.216** — VIX-proxy contrarian signals degrade performance
+  - False positive rate: 65.8%, 5-regime VIX bucket analysis
+  - Finding: Simple VIX-level signals are net negative; real-time SKEW/PCR data needed
+  - CLI: `run`, `--summary`, `--output` for JSON export
+- **Tests**: `tests/test_behavioral_sentiment.py` (43 tests) + `tests/test_behavioral_sentiment_backtest.py` (19 tests) = 62 tests passing
+- **Dashboard**: `src/components/BehavioralSentimentPanel.tsx` — Fear/Greed gauge, options/retail/social panels
+- **Status**: All phases complete
+
 ### v5.80 Cron Guard Hardening - COMPLETED
 - **Guard Script**: `scripts/cron_guard.sh` — shared library for all Hermes cron jobs
   - 4-layer defense: load gating (max load 5), flock overlap prevention, ulimit memory cap, timeout watchdog
@@ -349,10 +399,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **5478 safe** tests (221 heavy excluded via collect_ignore, never imported)
-- **5699 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **5526 safe** tests (221 heavy excluded via collect_ignore, never imported)
+- **5747 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
-- 176 test files covering signals, strategy, backtest, dashboard, broker, agents, data, research
+- 179 test files + 3 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 

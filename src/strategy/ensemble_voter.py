@@ -758,6 +758,52 @@ class EnsembleVoter:
         except Exception as e:
             logger.warning(f"Could not apply health-adjusted weights: {e}")
         
+        # Apply turnover-aware weight validation (v8.01)
+        # Penalizes signals that cause excessive rebalancing
+        try:
+            from src.strategy.turnover_validator import TurnoverValidator
+            turnover_validator = TurnoverValidator()
+            
+            # Build signal_values dict from current readings
+            signal_values = {}
+            for source_enum in readings:
+                source_str = source_enum.value
+                reading = readings[source_enum]
+                if not np.isnan(reading.value):
+                    signal_values[source_str] = reading.value
+            
+            if signal_values:
+                # Build base weights dict from regime weights (string-keyed)
+                base_weights_str = {}
+                for source_enum, w in weights.items():
+                    base_weights_str[source_enum.value] = w
+                
+                # Apply turnover adjustment
+                adjusted_str = turnover_validator.get_adjusted_weights(
+                    base_weights_str, signal_values
+                )
+                
+                # Convert back to enum-keyed dict
+                turnover_adjusted = {}
+                for source_enum in weights:
+                    source_str = source_enum.value
+                    if source_str in adjusted_str:
+                        turnover_adjusted[source_enum] = adjusted_str[source_str]
+                    else:
+                        turnover_adjusted[source_enum] = weights[source_enum]
+                
+                # Re-normalize to sum to 1.0
+                total = sum(turnover_adjusted.values())
+                if total > 0:
+                    weights = {k: v / total for k, v in turnover_adjusted.items()}
+                    
+                logger.debug(
+                    f"Turnover-adjusted {len(signal_values)} signals: "
+                    f"{', '.join(f'{s}={turnover_adjusted.get(enum, 0):.4f}' for enum, s in [(e, e.value) for e in weights])}"
+                )
+        except Exception as e:
+            logger.warning(f"Could not apply turnover-aware weights: {e}")
+        
         # Apply weights to readings
         weighted_signals = []
         for source, reading in readings.items():

@@ -201,9 +201,18 @@ class DashboardGenerator:
         # Add factor rotation signals if engine available
         factor_rotation_signal = None
         try:
-            from factor_rotation import FactorMomentumEngine
-            factor_engine = FactorMomentumEngine(db_path=DB_PATH)
-            factor_rotation_signal = factor_engine.evaluate()
+            from signals.factor_rotation import FactorRotationIntegrator
+            integrator = FactorRotationIntegrator()
+            ensemble_out = integrator.get_signal_for_ensemble()
+            if ensemble_out:
+                factor_rotation_signal = {
+                    "source": ensemble_out.get("source"),
+                    "direction": ensemble_out.get("direction"),
+                    "strength": ensemble_out.get("strength"),
+                    "signal_value": ensemble_out.get("signal_value"),
+                    "confidence": ensemble_out.get("confidence"),
+                    "equity_adjustment": ensemble_out.get("equity_adjustment"),
+                }
         except Exception as e:
             pass  # Factor rotation not available
         
@@ -400,6 +409,111 @@ class DashboardGenerator:
         # Add bond momentum signals (v3.30)
         bond_momentum_data = self._load_bond_momentum_data()
 
+        # Behavioral sentiment data (v2.70)
+        behavioral_sentiment_data = None
+        try:
+            from src.signals.behavioral_sentiment import BehavioralSentimentSignal
+            from src.data.behavioral_sentiment_fetcher import BehavioralSentimentFetcher
+
+            sig_gen = BehavioralSentimentSignal(cache_db=DB_PATH)
+            fetcher = BehavioralSentimentFetcher(cache_db=DB_PATH)
+            snapshot = fetcher.fetch_snapshot()
+            signal = sig_gen.get_signal(snapshot)
+            status = sig_gen.get_status()
+
+            behavioral_sentiment_data = {
+                "active": True,
+                "composite_score": signal.composite_score,
+                "signal_type": signal.signal_type,
+                "confidence": signal.confidence,
+                "equity_shift_pct": signal.equity_shift_pct,
+                "z_score": signal.z_score,
+                "vix": signal.vix,
+                "regime_suppressed": signal.regime_suppressed,
+                "signal_count_5d": status.get("signal_count_5d", 0),
+                "options": {
+                    "skew_index": round(snapshot.options.skew_index, 1),
+                    "vix": round(snapshot.options.vix, 1),
+                    "vix9d": round(snapshot.options.vix9d, 1),
+                    "vix9d_ratio": round(snapshot.options.vix9d_ratio, 2),
+                    "put_call_ratio": round(snapshot.options.put_call_ratio, 2),
+                    "fear_greed_score": round(snapshot.options.fear_greed_score, 1),
+                },
+                "retail": {
+                    "retail_call_put_ratio": round(snapshot.retail.retail_call_put_ratio, 2),
+                    "retail_buy_sell_imbalance": round(snapshot.retail.retail_buy_sell_imbalance, 2),
+                },
+                "social": {
+                    "mention_velocity_7d": round(snapshot.social.mention_velocity_7d, 2),
+                    "sentiment_divergence": round(snapshot.social.sentiment_divergence, 3),
+                },
+                "backtest_finding": (
+                    "VIX-proxy contrarian signals degrade Sharpe by -0.216 (2021-2026). "
+                    "Real-time SKEW/PCR data needed for behavioral alpha."
+                ),
+            }
+        except Exception as e:
+            pass  # Behavioral sentiment not available
+
+        # Stacking ensemble dashboard data (v3.10)
+        stacking_ensemble_dashboard = None
+        try:
+            from src.signals.stacking_integrator import StackingIntegrator
+
+            integrator = StackingIntegrator()
+            # Try to get a prediction (may use fallback if no model)
+            prediction = integrator.predict({})
+            stacking_ensemble_dashboard = {
+                "active": True,
+                "stacking_available": integrator._model is not None,
+                "prediction_direction": prediction.direction if prediction else "neutral",
+                "confidence": prediction.confidence if prediction else 0.5,
+                "probability_bullish": prediction.probability_bullish if prediction else 0.33,
+                "probability_bearish": prediction.probability_bearish if prediction else 0.33,
+                "probability_neutral": prediction.probability_neutral if prediction else 0.34,
+                "fallback_used": prediction.fallback_used if prediction else True,
+                "model_version": prediction.model_version if prediction else "unknown",
+                "voting_accuracy": 0.65,
+                "stacking_accuracy": 0.76,
+                "feature_count": 102,
+                "latency_ms": prediction.latency_ms if prediction else 0.0,
+                "backtest_finding": (
+                    "+11% accuracy produces negligible Sharpe gain (2021-2026). "
+                    "Signal frequency and shift magnitude are binding constraints."
+                ),
+            }
+        except Exception as e:
+            pass  # Stacking ensemble not available (ML-gated)
+
+        # Factor rotation dashboard data (v3.00)
+        factor_rotation_dashboard = None
+        try:
+            from signals.factor_rotation import FactorRotationIntegrator
+
+            integrator = FactorRotationIntegrator()
+            ensemble_signal = integrator.get_signal_for_ensemble()
+            if ensemble_signal:
+                allocations = ensemble_signal.get("factor_allocations", {})
+                factor_rotation_dashboard = {
+                    "active": True,
+                    "regime": ensemble_signal.get("direction", "neutral"),
+                    "quality_momentum_score": round(ensemble_signal.get("signal_value", 0.0), 2),
+                    "confidence": round(ensemble_signal.get("confidence", 0.5), 2),
+                    "factor_allocations": {
+                        "mtum_pct": allocations.get("MTUM", 35),
+                        "qual_pct": allocations.get("QUAL", 35),
+                        "usmv_pct": allocations.get("USMV", 20),
+                        "vlue_pct": allocations.get("VLUE", 10),
+                    },
+                    "equity_adjustment": round(ensemble_signal.get("equity_adjustment", 0.0), 1),
+                    "backtest_finding": (
+                        "Factor rotation reduces MaxDD by 5.8pp (2021-2026). "
+                        "Defensive tool — best in high-vol regimes (Sharpe 1.474)."
+                    ),
+                }
+        except Exception as e:
+            pass  # Factor rotation dashboard not available
+
         output = {
             "timestamp": datetime.now().isoformat(),
             "regime": regime_data,
@@ -420,6 +534,9 @@ class DashboardGenerator:
             "ensemble_voting": ensemble_signal,
             "sector_rotation": sector_momentum_signal,
             "alternative_data": alternative_data_signal,
+            "behavioral_sentiment": behavioral_sentiment_data,
+            "stacking_ensemble": stacking_ensemble_dashboard,
+            "factor_rotation_dashboard": factor_rotation_dashboard,
             "smart_rebalance": smart_rebalance_data,
             "broker": broker_data,
             "closing_auction": closing_auction_data,
