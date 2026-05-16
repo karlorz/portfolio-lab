@@ -74,6 +74,7 @@ class SignalSource(Enum):
     TRANSFORMER_REGIME = "transformer_regime"  # v3.18 Transformer regime detector
     TRANSIENT_FACTORS = "transient_factors"   # v5.01 Transient statistical factors
     VISIBILITY_GRAPH = "visibility_graph"     # v5.41 VGRSI network-science indicator
+    VP_MACD = "vp_macd"                       # v5.55 Volume-Price Adjusted MACD
 
 
 @dataclass
