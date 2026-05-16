@@ -77,6 +77,7 @@ class SignalSource(Enum):
     VP_MACD = "vp_macd"                       # v5.55 Volume-Price Adjusted MACD
     CROSS_ASSET_RV = "cross_asset_rv"         # v5.71 Cross-asset relative value
     REGIME_CLASSIFIER = "regime_classifier"   # v5.73 ML-Light Regime Predictor
+    FACTOR_TIMING = "factor_timing"          # v6.02 Factor timing (cross-sectional Z-scores)
 
 
 @dataclass
@@ -131,7 +132,7 @@ REGIME_WEIGHTS = {
     Regime.NORMAL: {
         SignalSource.TSFM_MOMENTUM: 0.28,
         SignalSource.MULTI_SPEED_MOM: 0.19,
-        SignalSource.CTA_TREND: 0.13,
+        SignalSource.CTA_TREND: 0.10,
         SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.DURATION_REGIME: 0.05,
@@ -146,6 +147,7 @@ REGIME_WEIGHTS = {
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
+        SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (cross-sectional Z-scores)
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
@@ -165,6 +167,7 @@ REGIME_WEIGHTS = {
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
+        SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (defensive tilt in high vol)
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.26,
@@ -184,6 +187,7 @@ REGIME_WEIGHTS = {
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.02,    # v5.73 ML-Light Regime Predictor (lower in crisis)
+        SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (crisis tilts defensive)
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.18,
@@ -203,6 +207,7 @@ REGIME_WEIGHTS = {
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.02,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
+        SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (momentum capture in recovery)
     }
 }
 
@@ -574,6 +579,32 @@ class EnsembleVoter:
                     explanation=f"Cross-asset RV: z={rv_signal.get('avg_z_score', 0):+.2f}, diverged={rv_signal.get('num_diverged', 0)}/{rv_signal.get('total_pairs', 0)} pairs"
                 )
         except ImportError:
+            pass
+
+        # 11. Factor Timing Signal (v6.02)
+        try:
+            # Detect current regime or default to normal
+            current_regime = self.detect_regime() if hasattr(self, 'detect_regime') else (None, 0.5)
+            regime_name = current_regime[0].value if current_regime[0] else "normal"
+
+            from src.signals.factor_timing_signal import get_ensemble_signal
+            ft_signal = get_ensemble_signal(regime=regime_name)
+
+            if ft_signal.get("active") and ft_signal.get("signal_value") is not None:
+                readings[SignalSource.FACTOR_TIMING] = SignalReading(
+                    source=SignalSource.FACTOR_TIMING,
+                    timestamp=str(datetime.now()),
+                    value=ft_signal["signal_value"],
+                    confidence=ft_signal.get("confidence", 0.5),
+                    weight=0.0,
+                    regime_fit=regime_name,
+                    asset_signals=ft_signal.get("factor_scores", {}),
+                    explanation=f"Factor timing: top={ft_signal.get('top_factor', '?')} ({ft_signal.get('factor_scores', {}).get(ft_signal.get('top_factor', ''), 0):+.2f}σ), "
+                                f"bottom={ft_signal.get('bottom_factor', '?')}, "
+                                f"urgency={ft_signal.get('urgency', 0):.2f}, "
+                                f"divergence={ft_signal.get('factor_divergence', 0):.2f}σ"
+                )
+        except Exception:
             pass
 
         self.current_readings = readings
