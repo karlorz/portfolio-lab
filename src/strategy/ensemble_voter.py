@@ -78,6 +78,7 @@ class SignalSource(Enum):
     CROSS_ASSET_RV = "cross_asset_rv"         # v5.71 Cross-asset relative value
     REGIME_CLASSIFIER = "regime_classifier"   # v5.73 ML-Light Regime Predictor
     FACTOR_TIMING = "factor_timing"          # v6.02 Factor timing (cross-sectional Z-scores)
+    RISK_BUDGET = "risk_budget"              # v6.04 Factor risk budgeting & scenario analysis
 
 
 @dataclass
@@ -148,6 +149,7 @@ REGIME_WEIGHTS = {
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (cross-sectional Z-scores)
+        SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget monitoring
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
@@ -168,6 +170,7 @@ REGIME_WEIGHTS = {
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (defensive tilt in high vol)
+        SignalSource.RISK_BUDGET: 0.03,         # v6.04 Factor risk budget (active in high vol)
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.26,
@@ -188,6 +191,7 @@ REGIME_WEIGHTS = {
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.02,    # v5.73 ML-Light Regime Predictor (lower in crisis)
         SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (crisis tilts defensive)
+        SignalSource.RISK_BUDGET: 0.03,         # v6.04 Factor risk budget (crisis monitoring)
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.18,
@@ -208,6 +212,7 @@ REGIME_WEIGHTS = {
         SignalSource.CROSS_ASSET_RV: 0.02,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (momentum capture in recovery)
+        SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget (recovery monitoring)
     }
 }
 
