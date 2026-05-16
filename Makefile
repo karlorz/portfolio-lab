@@ -12,6 +12,7 @@
 #   make sync              Broker position sync
 #   make overlay-signals    Generate all overlay signals
 #   make overlay-dashboard  Generate overlay dashboard data
+#   make unified-dashboard  Generate unified system dashboard
 #   make all               Run all maintenance tasks sequentially
 #   make cron-reset        Reset cron status file
 
@@ -40,6 +41,7 @@ help:
 	@echo "  make sync         Broker position reconciliation"
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
+	@echo "  make unified-dashboard  Generate unified system dashboard"
 
 # ── Test Suite ────────────────────────────────────────────────────────
 
@@ -212,10 +214,17 @@ overlay-dashboard:
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
 
+# ── Unified Dashboard ────────────────────────────────────────────────
+
+.PHONY: unified-dashboard
+unified-dashboard:
+	@echo "=== Unified Dashboard: $$(date) ==="; \
+	cd $(PROJECT_DIR) && python3 -m src.monitor.unified_dashboard --save 2>&1
+
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
-all: data dashboard health eval research wiki-sync sync build overlay-signals overlay-dashboard
+all: data dashboard health eval research wiki-sync sync build overlay-signals overlay-dashboard unified-dashboard
 	@echo "=== All tasks complete: $$(date) ==="
 
 # ── Cron Status Management ───────────────────────────────────────────
@@ -233,6 +242,7 @@ cron-reset:
 	@python3 $(CRON_UPDATE) portfolio-lab-position-sync pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
+	@python3 $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 
 # ── Verification ─────────────────────────────────────────────────────

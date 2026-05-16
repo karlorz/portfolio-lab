@@ -20,6 +20,9 @@
 # Health monitor — every 15 minutes at :07
 7,22,37,52 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab health >> /root/projects/portfolio-lab/data/health.log 2>&1
 
+# Unified dashboard — every 15 minutes at :10 (after health and overlay-dashboard)
+10,25,40,55 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab unified-dashboard >> /root/projects/portfolio-lab/data/unified_dashboard.log 2>&1
+
 # Strategy evaluator — every 30 minutes at :13
 13,43 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab eval >> /root/projects/portfolio-lab/data/eval.log 2>&1
 
