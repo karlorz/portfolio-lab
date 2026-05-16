@@ -73,6 +73,7 @@ class SignalSource(Enum):
     MEAN_REVERSION = "mean_reversion"         # v4.81 VIX-gated mean-reversion
     TRANSFORMER_REGIME = "transformer_regime"  # v3.18 Transformer regime detector
     TRANSIENT_FACTORS = "transient_factors"   # v5.01 Transient statistical factors
+    VISIBILITY_GRAPH = "visibility_graph"     # v5.41 VGRSI network-science indicator
 
 
 @dataclass
@@ -125,7 +126,7 @@ class EnsembleVote:
 # Regime-dependent weights
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.32,
+        SignalSource.TSFM_MOMENTUM: 0.30,
         SignalSource.MULTI_SPEED_MOM: 0.19,
         SignalSource.CTA_TREND: 0.14,
         SignalSource.MACRO_MOMENTUM: 0.09,
@@ -138,9 +139,10 @@ REGIME_WEIGHTS = {
         SignalSource.UNIFIED_OVERLAY: 0.02,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Transformer regime detection
         SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors
+        SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI network-science indicator
     },
     Regime.HIGH_VOL: {
-        SignalSource.HMM_REGIME: 0.24,
+        SignalSource.HMM_REGIME: 0.22,
         SignalSource.CTA_TREND: 0.21,
         SignalSource.MEAN_REVERSION: 0.08,   # v4.81 VIX-gated (active in high vol)
         SignalSource.MULTI_SPEED_MOM: 0.14,
@@ -153,10 +155,11 @@ REGIME_WEIGHTS = {
         SignalSource.TRANSFORMER_REGIME: 0.06,  # v3.18 Most useful in volatile transitions
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors (active in vol)
+        SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI useful in volatile transitions
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.28,
-        SignalSource.CTA_TREND: 0.28,
+        SignalSource.CTA_TREND: 0.27,
         SignalSource.HMM_REGIME: 0.17,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.03,   # Reduced in crisis (defensive factor focus)
@@ -168,9 +171,10 @@ REGIME_WEIGHTS = {
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Low weight in crisis (regime obvious)
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Low weight during crisis
+        SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 Minimal during crisis
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.22,
+        SignalSource.MULTI_SPEED_MOM: 0.20,
         SignalSource.HMM_REGIME: 0.19,
         SignalSource.CTA_TREND: 0.16,
         SignalSource.TSFM_MOMENTUM: 0.12,
@@ -183,6 +187,7 @@ REGIME_WEIGHTS = {
         SignalSource.TRANSFORMER_REGIME: 0.04,  # v3.18 Detect recovery transitions
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Detect transition out of crisis
+        SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 Good for recovery structure detection
     }
 }
 
@@ -491,7 +496,30 @@ class EnsembleVoter:
                 )
         except ImportError:
             pass
-        
+
+        # 8. Visibility Graph Signal (v5.41)
+        try:
+            from src.signals.visibility_graph import get_ensemble_signal
+            vg_signal = get_ensemble_signal()
+
+            if vg_signal and vg_signal.get("signal_value") is not None:
+                sig_val = vg_signal["signal_value"]
+                conf = vg_signal.get("confidence", 0.5)
+                readings[SignalSource.VISIBILITY_GRAPH] = SignalReading(
+                    source=SignalSource.VISIBILITY_GRAPH,
+                    timestamp=str(datetime.now()),
+                    value=sig_val,
+                    confidence=conf,
+                    weight=0.0,
+                    regime_fit="normal",
+                    asset_signals={
+                        'SPY': sig_val,
+                    },
+                    explanation=f"VGRSI: {vg_signal.get('rationale', 'N/A')}"
+                )
+        except ImportError:
+            pass
+
         self.current_readings = readings
         return readings
     
