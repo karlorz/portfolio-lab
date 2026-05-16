@@ -86,11 +86,14 @@ test-ml:
 data:
 	@echo "=== Data Pipeline: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.data.pipeline 2>&1 | tee -a $(DATA_DIR)/cron.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 python3 -m src.data.pipeline 2>&1 | tee -a $(DATA_DIR)/cron.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
 	echo "Data pipeline done ($$STATUS, $${DUR}s)"
 
@@ -100,11 +103,14 @@ data:
 dashboard:
 	@echo "=== Dashboard Generator: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.dashboard.generator 2>&1 | tee -a $(DATA_DIR)/dashboard.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.dashboard.generator 2>&1 | tee -a $(DATA_DIR)/dashboard.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR
 
 # ── Health Monitor ───────────────────────────────────────────────────
@@ -113,11 +119,14 @@ dashboard:
 health:
 	@echo "=== Health Monitor: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.monitor.health 2>&1 | tee -a $(DATA_DIR)/health.log; \
+	cd $(PROJECT_DIR) && ulimit -v 1048576 && timeout 60 python3 -m src.monitor.health 2>&1 | tee -a $(DATA_DIR)/health.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR
 
 # ── Strategy Evaluator ───────────────────────────────────────────────
@@ -126,11 +135,14 @@ health:
 eval:
 	@echo "=== Strategy Evaluator: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ALPHALAB_MODE=$${ALPHALAB_MODE:-paper} python3 -m src.strategy.evaluator 2>&1 | tee -a $(DATA_DIR)/eval.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 ALPHALAB_MODE=$${ALPHALAB_MODE:-paper} python3 -m src.strategy.evaluator 2>&1 | tee -a $(DATA_DIR)/eval.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-eval $$STATUS $$DUR
 
 # ── Research Agent ───────────────────────────────────────────────────
@@ -139,11 +151,14 @@ eval:
 research:
 	@echo "=== Research Agent: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.research.agent 2>&1 | tee -a $(DATA_DIR)/research.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 python3 -m src.research.agent 2>&1 | tee -a $(DATA_DIR)/research.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-research $$STATUS $$DUR
 
 # ── Wiki Sync ────────────────────────────────────────────────────────
@@ -152,11 +167,14 @@ research:
 wiki-sync:
 	@echo "=== Wiki Sync: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.research.wiki_sync 2>&1 | tee -a $(DATA_DIR)/wiki_sync.log; \
+	cd $(PROJECT_DIR) && ulimit -v 1048576 && timeout 120 python3 -m src.research.wiki_sync 2>&1 | tee -a $(DATA_DIR)/wiki_sync.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR
 
 # ── App Build ────────────────────────────────────────────────────────
@@ -166,11 +184,14 @@ build:
 	@echo "=== App Build: $$(date) ==="; \
 	START=$$(date +%s); \
 	export PATH="$$HOME/.bun/bin:$$PATH"; \
-	cd $(PROJECT_DIR) && bun run tsc --noEmit 2>&1 | tee -a $(DATA_DIR)/build.log && bun run build 2>&1 | tee -a $(DATA_DIR)/build.log; \
-	EXIT=$${PIPESTATUS[0]}; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 sh -c 'bun run tsc --noEmit 2>&1 | tee -a $(DATA_DIR)/build.log && bun run build 2>&1 | tee -a $(DATA_DIR)/build.log'; \
+	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-build $$STATUS $$DUR
 
 # ── Position Sync ────────────────────────────────────────────────────
@@ -179,11 +200,14 @@ build:
 sync:
 	@echo "=== Position Sync: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.broker.position_sync 2>&1 | tee -a $(DATA_DIR)/position_sync.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 python3 -m src.broker.position_sync 2>&1 | tee -a $(DATA_DIR)/position_sync.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR
 
 # ── Overlay Pipeline ──────────────────────────────────────────────────
@@ -192,26 +216,36 @@ sync:
 overlay-signals:
 	@echo "=== Overlay Signals: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.signals.collar_signal --save 2>&1 | tail -1; \
-	cd $(PROJECT_DIR) && python3 -m src.signals.calendar_seasonality --save 2>&1 | tail -1; \
-	cd $(PROJECT_DIR) && python3 -m src.signals.crypto_momentum --save 2>&1 | tail -1; \
-	cd $(PROJECT_DIR) && python3 -m src.signals.bond_duration_signal --save 2>&1 | tail -1; \
-	cd $(PROJECT_DIR) && python3 -m src.regime.kurtosis_regime --save 2>&1 | tail -1; \
+	export PROJECT_DIR="$(PROJECT_DIR)"; \
+	export DATA_DIR="$(DATA_DIR)"; \
+	timeout 600 sh -c '\
+		cd $$PROJECT_DIR && ulimit -v 3145728 && \
+		python3 -m src.signals.collar_signal --save 2>&1 | tail -1 && \
+		python3 -m src.signals.calendar_seasonality --save 2>&1 | tail -1 && \
+		python3 -m src.signals.crypto_momentum --save 2>&1 | tail -1 && \
+		python3 -m src.signals.bond_duration_signal --save 2>&1 | tail -1 && \
+		python3 -m src.regime.kurtosis_regime --save 2>&1 | tail -1'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR
 
 .PHONY: overlay-dashboard
 overlay-dashboard:
 	@echo "=== Overlay Dashboard: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.dashboard.overlay_dashboard --save 2>&1; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.dashboard.overlay_dashboard --save 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
 
 # ── Performance Attribution ────────────────────────────────────────────
@@ -234,7 +268,7 @@ attribution:
 .PHONY: unified-dashboard
 unified-dashboard:
 	@echo "=== Unified Dashboard: $$(date) ==="; \
-	cd $(PROJECT_DIR) && python3 -m src.monitor.unified_dashboard --save 2>&1
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.monitor.unified_dashboard --save 2>&1
 
 # ── Run All ──────────────────────────────────────────────────────────
 

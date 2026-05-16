@@ -81,6 +81,7 @@ class SignalSource(Enum):
     RISK_BUDGET = "risk_budget"              # v6.04 Factor risk budgeting & scenario analysis
     LLM_NARRATIVE = "llm_narrative"          # v7.01 LLM macro/narrative signal
     TAX_AWARE = "tax_aware"                  # v7.03 Tax-aware rebalancing alpha
+    VIXY_HEDGE = "vixy_hedge"              # v7.04 Dynamic VIXY hedge sizing
 
 
 @dataclass
@@ -133,9 +134,9 @@ class EnsembleVote:
 # Regime-dependent weights
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.28,
-        SignalSource.MULTI_SPEED_MOM: 0.19,
-        SignalSource.CTA_TREND: 0.10,
+        SignalSource.TSFM_MOMENTUM: 0.25,
+        SignalSource.MULTI_SPEED_MOM: 0.17,
+        SignalSource.CTA_TREND: 0.08,
         SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.DURATION_REGIME: 0.05,
@@ -153,34 +154,38 @@ REGIME_WEIGHTS = {
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (cross-sectional Z-scores)
         SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget monitoring
         SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative signal
+        SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
+        SignalSource.VIXY_HEDGE: 0.05,          # v7.04 Dynamic VIXY hedge sizing
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
-        SignalSource.CTA_TREND: 0.20,
+        SignalSource.CTA_TREND: 0.17,
         SignalSource.MEAN_REVERSION: 0.08,   # v4.81 VIX-gated (active in high vol)
-        SignalSource.MULTI_SPEED_MOM: 0.13,
-        SignalSource.MACRO_MOMENTUM: 0.08,
+        SignalSource.MULTI_SPEED_MOM: 0.10,
+        SignalSource.MACRO_MOMENTUM: 0.06,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.CIRCUIT_BREAKER: 0.05,
         SignalSource.TSFM_MOMENTUM: 0.02,
         SignalSource.DURATION_REGIME: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
-        SignalSource.TRANSFORMER_REGIME: 0.06,  # v3.18 Most useful in volatile transitions
+        SignalSource.TRANSFORMER_REGIME: 0.05,  # v3.18 Most useful in volatile transitions
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Transient statistical factors (active in vol)
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI useful in volatile transitions
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
-        SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (defensive tilt in high vol)
-        SignalSource.RISK_BUDGET: 0.03,         # v6.04 Factor risk budget (active in high vol)
+        SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (defensive tilt in high vol)
+        SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget (active in high vol)
         SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative signal
+        SignalSource.TAX_AWARE: 0.01,            # v7.03 Tax-aware rebalancing (minimal in vol)
+        SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (active in vol)
     },
     Regime.CRISIS: {
-        SignalSource.CIRCUIT_BREAKER: 0.26,
-        SignalSource.CTA_TREND: 0.26,
-        SignalSource.HMM_REGIME: 0.16,
-        SignalSource.MACRO_MOMENTUM: 0.09,
+        SignalSource.CIRCUIT_BREAKER: 0.25,
+        SignalSource.CTA_TREND: 0.22,
+        SignalSource.HMM_REGIME: 0.12,
+        SignalSource.MACRO_MOMENTUM: 0.06,
         SignalSource.FACTOR_ROTATION: 0.03,   # Reduced in crisis (defensive factor focus)
         SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly frozen in crisis)
         SignalSource.MULTI_SPEED_MOM: 0.03,
@@ -197,12 +202,14 @@ REGIME_WEIGHTS = {
         SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (crisis tilts defensive)
         SignalSource.RISK_BUDGET: 0.03,         # v6.04 Factor risk budget (crisis monitoring)
         SignalSource.LLM_NARRATIVE: 0.05,       # v7.01 LLM macro/narrative — highest in crisis
+        SignalSource.TAX_AWARE: 0.01,            # v7.03 Tax-aware rebalancing (minimal in crisis)
+        SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (max in crisis)
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.18,
-        SignalSource.HMM_REGIME: 0.18,
-        SignalSource.CTA_TREND: 0.15,
-        SignalSource.TSFM_MOMENTUM: 0.11,
+        SignalSource.MULTI_SPEED_MOM: 0.16,
+        SignalSource.HMM_REGIME: 0.17,
+        SignalSource.CTA_TREND: 0.14,
+        SignalSource.TSFM_MOMENTUM: 0.10,
         SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # Higher in recovery (momentum captures)
         SignalSource.MEAN_REVERSION: 0.05,    # v4.81 VIX-gated (declining VIX, moderate)
@@ -219,6 +226,8 @@ REGIME_WEIGHTS = {
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (momentum capture in recovery)
         SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget (recovery monitoring)
         SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative (recovery regime)
+        SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
+        SignalSource.VIXY_HEDGE: 0.03,          # v7.04 Dynamic VIXY hedge (minimal in recovery)
     }
 }
 

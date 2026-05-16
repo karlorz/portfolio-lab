@@ -158,6 +158,34 @@
 - **Cross-Asset Relative Value**: Z-score of N-asset rolling returns, mean-reversion triggers
 - **Status**: Complete
 
+### v7.04 Dynamic VIXY Hedge Sizing - COMPLETED
+- **Sizing Engine**: `src/strategy/vixy_hedge_sizing.py` (~350 lines) — VIX-based hedge allocation
+  - QuantPedia-derived formula: VIX/10 = target allocation% (VIX=28 → 2.8%)
+  - 4 hedge regimes: NORMAL (VIX<20), ELEVATED (VIX 20-30), STRESS (VIX 30-40), CRISIS (VIX>40)
+  - Regime-aware floors/ceilings: NORMAL(0-2%), ELEVATED(1-3.5%), STRESS(2-6%), CRISIS(3-10%)
+  - Vol scaling: realized/implied vol ratio adjusts allocation
+  - CRISIS freeze: collar complement disabled when VIXY >8%
+  - CLI: `status`, `recommend`, `backtest`, `update` modes
+- **Efficiency Monitor**: `src/monitor/hedge_efficiency.py` (~250 lines) — cost-benefit tracking
+  - Drawdown detection from SPY cumulative returns
+  - Running efficiency: YTD benefit / YTD cost with A-F grading
+  - Strategy comparison: VIXY vs collar vs trend-following vs cash benchmarks
+  - State persistence to `data/hedge_efficiency_state.json`
+- **Ensemble Integration**: Added `VIXY_HEDGE` to `SignalSource` enum in ensemble_voter.py
+  - Weights: NORMAL=5%, HIGH_VOL=10%, CRISIS=10%, RECOVERY=3%
+  - Fixed pre-existing TAX_AWARE missing weight bug (v7.03 follow-up)
+- **Tests**: `tests/test_vixy_hedge_sizing.py` (34 tests) + `tests/test_hedge_efficiency.py` (25 tests) = 59 tests passing
+- **Status**: All phases complete
+
+### v5.80 Cron Guard Hardening - COMPLETED
+- **Guard Script**: `scripts/cron_guard.sh` — shared library for all Hermes cron jobs
+  - 4-layer defense: load gating (max load 5), flock overlap prevention, ulimit memory cap, timeout watchdog
+  - TEMPFAIL exit code 75 for transient failures (Hermes-aware)
+  - All 10 Hermes scripts + 11 Makefile targets updated
+- **Config**: `src/cron_compat.py` — Added `CRON_EXPECTED_DURATIONS` and `CRON_GUARD_CONFIG`
+- **Root Cause**: May 16 incident — autonomous agent cron job dispatching LLM-powered sessions every 15 min, sessions 10+ min, overlapping → loadavg 48.75
+- **Status**: Complete
+
 ## Recent Implementation Updates (2026-05-15)
 
 ### v4.50 VIX Term Structure Overlay - Phase 3 COMPLETED
@@ -311,10 +339,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **4299 safe** tests (134 heavy excluded via collect_ignore, never imported)
-- **4433 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
-- ~3100 passing, pre-existing failures in yield curve and a few other suites
-- 120 test files covering signals, strategy, backtest, dashboard, broker, agents, data, research
+- **5478 safe** tests (221 heavy excluded via collect_ignore, never imported)
+- **5699 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- ~4500+ passing, pre-existing failures in yield curve and a few other suites
+- 176 test files covering signals, strategy, backtest, dashboard, broker, agents, data, research
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
