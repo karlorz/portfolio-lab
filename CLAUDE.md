@@ -137,6 +137,13 @@
 
 ## Recent Implementation Updates (2026-05-16)
 
+### v6.00 Post-Trade TCA Engine - COMPLETED
+- **Engine**: `src/execution/tca_engine.py` (~680 lines) — Order parsing from `orders.jsonl`, Almgren-Chriss impact decomposition, quality scoring (0-100), symbol/side aggregation
+- **Scorecard**: `src/execution/tca_scorecard.py` (~300 lines) — Peer-group normalization, trend analysis, dashboard JSON export
+- **Tests**: `tests/test_tca_engine.py` — 44 tests passing
+- **Real Data**: 3 orders from May 11 rebalance analyzed (avg slip -10 bps, avg quality 43.3/100)
+- **Commit**: `9e460c6`
+
 ### v5.72 Graduation Metrics Fix - COMPLETED
 - **Fix**: `src/strategy/evaluator.py` — intra-day snapshot deduplication graduation bug
   - Added `_deduplicate_to_daily()` to filter 30-min snapshots to trading-day-level
