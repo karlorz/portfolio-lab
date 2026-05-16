@@ -72,6 +72,7 @@ class SignalSource(Enum):
     UNIFIED_OVERLAY = "unified_overlay"       # v4.90 Multi-overlay orchestration
     MEAN_REVERSION = "mean_reversion"         # v4.81 VIX-gated mean-reversion
     TRANSFORMER_REGIME = "transformer_regime"  # v3.18 Transformer regime detector
+    TRANSIENT_FACTORS = "transient_factors"   # v5.01 Transient statistical factors
 
 
 @dataclass
@@ -124,9 +125,9 @@ class EnsembleVote:
 # Regime-dependent weights
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.35,
-        SignalSource.MULTI_SPEED_MOM: 0.21,
-        SignalSource.CTA_TREND: 0.15,
+        SignalSource.TSFM_MOMENTUM: 0.32,
+        SignalSource.MULTI_SPEED_MOM: 0.19,
+        SignalSource.CTA_TREND: 0.14,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.DURATION_REGIME: 0.05,
@@ -135,25 +136,28 @@ REGIME_WEIGHTS = {
         SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
         SignalSource.UNIFIED_OVERLAY: 0.02,  # v4.90 Multi-overlay orchestration
-        SignalSource.TRANSFORMER_REGIME: 0.05,  # v3.18 Transformer regime detection
+        SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Transformer regime detection
+        SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors
     },
     Regime.HIGH_VOL: {
-        SignalSource.HMM_REGIME: 0.27,
-        SignalSource.CTA_TREND: 0.24,
+        SignalSource.HMM_REGIME: 0.24,
+        SignalSource.CTA_TREND: 0.21,
         SignalSource.MEAN_REVERSION: 0.08,   # v4.81 VIX-gated (active in high vol)
-        SignalSource.MULTI_SPEED_MOM: 0.17,
-        SignalSource.MACRO_MOMENTUM: 0.09,
+        SignalSource.MULTI_SPEED_MOM: 0.14,
+        SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.CIRCUIT_BREAKER: 0.05,
         SignalSource.TSFM_MOMENTUM: 0.02,
         SignalSource.DURATION_REGIME: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
-        SignalSource.TRANSFORMER_REGIME: 0.08,  # v3.18 Most useful in volatile transitions
+        SignalSource.TRANSFORMER_REGIME: 0.06,  # v3.18 Most useful in volatile transitions
+        SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
+        SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors (active in vol)
     },
     Regime.CRISIS: {
-        SignalSource.CIRCUIT_BREAKER: 0.30,
-        SignalSource.CTA_TREND: 0.30,
-        SignalSource.HMM_REGIME: 0.18,
+        SignalSource.CIRCUIT_BREAKER: 0.28,
+        SignalSource.CTA_TREND: 0.28,
+        SignalSource.HMM_REGIME: 0.17,
         SignalSource.MACRO_MOMENTUM: 0.09,
         SignalSource.FACTOR_ROTATION: 0.03,   # Reduced in crisis (defensive factor focus)
         SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly frozen in crisis)
@@ -163,19 +167,22 @@ REGIME_WEIGHTS = {
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Low weight in crisis (regime obvious)
+        SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Low weight during crisis
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.24,
-        SignalSource.HMM_REGIME: 0.20,
-        SignalSource.CTA_TREND: 0.17,
-        SignalSource.TSFM_MOMENTUM: 0.13,
+        SignalSource.MULTI_SPEED_MOM: 0.22,
+        SignalSource.HMM_REGIME: 0.19,
+        SignalSource.CTA_TREND: 0.16,
+        SignalSource.TSFM_MOMENTUM: 0.12,
         SignalSource.MACRO_MOMENTUM: 0.09,
-        SignalSource.FACTOR_ROTATION: 0.06,   # Higher in recovery (momentum captures)
+        SignalSource.FACTOR_ROTATION: 0.05,   # Higher in recovery (momentum captures)
         SignalSource.MEAN_REVERSION: 0.05,    # v4.81 VIX-gated (declining VIX, moderate)
         SignalSource.DURATION_REGIME: 0.03,
         SignalSource.CIRCUIT_BREAKER: 0.0,
-        SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
-        SignalSource.TRANSFORMER_REGIME: 0.06,  # v3.18 Detect recovery transitions
+        SignalSource.CLOSING_AUCTION: 0.02,  # v3.17 MOC signals
+        SignalSource.TRANSFORMER_REGIME: 0.04,  # v3.18 Detect recovery transitions
+        SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
+        SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Detect transition out of crisis
     }
 }
 
@@ -458,6 +465,29 @@ class EnsembleVoter:
                         'SPY': mr.get("signal_value", 0.0),
                     },
                     explanation=f"Mean-reversion: {mr.get('rationale', 'idle')}, alloc={mr.get('allocation_pct', 0):.1f}%, VIX={mr.get('vix_level', 0):.1f}, regime={mr.get('vix_regime', 'N/A')}"
+                )
+        except ImportError:
+            pass
+        
+        # 7. Transient Statistical Factors Signal (v5.01)
+        try:
+            from src.monitor.transient_factors import generate_ensemble_signal
+            tf_signal = generate_ensemble_signal()
+            
+            if tf_signal and tf_signal.get("signal_value") is not None:
+                sig_val = tf_signal["signal_value"]
+                conf = tf_signal.get("confidence", 0.5)
+                readings[SignalSource.TRANSIENT_FACTORS] = SignalReading(
+                    source=SignalSource.TRANSIENT_FACTORS,
+                    timestamp=str(datetime.now()),
+                    value=sig_val,
+                    confidence=conf,
+                    weight=0.0,
+                    regime_fit="high_vol",
+                    asset_signals={
+                        'SPY': sig_val,
+                    },
+                    explanation=f"Transient factors: stability={tf_signal.get('stability', 0):.2f}, trend={tf_signal.get('trend', 'N/A')}, n_factors={tf_signal.get('n_factors', 0)}, transition={tf_signal.get('transition_score', 0):.2f}"
                 )
         except ImportError:
             pass
