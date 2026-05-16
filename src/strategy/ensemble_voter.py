@@ -141,6 +141,7 @@ REGIME_WEIGHTS = {
         SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Transformer regime detection
         SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI network-science indicator
+        SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.22,
@@ -157,6 +158,7 @@ REGIME_WEIGHTS = {
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors (active in vol)
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI useful in volatile transitions
+        SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.28,
@@ -173,6 +175,7 @@ REGIME_WEIGHTS = {
         SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Low weight in crisis (regime obvious)
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Low weight during crisis
         SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 Minimal during crisis
+        SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.20,
@@ -189,6 +192,7 @@ REGIME_WEIGHTS = {
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Detect transition out of crisis
         SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 Good for recovery structure detection
+        SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
     }
 }
 
@@ -517,6 +521,27 @@ class EnsembleVoter:
                         'SPY': sig_val,
                     },
                     explanation=f"VGRSI: {vg_signal.get('rationale', 'N/A')}"
+                )
+        except ImportError:
+            pass
+
+        # 9. VP-MACD Signal (v5.55)
+        try:
+            from src.signals.vp_macd import generate_signal
+            vp_signal = generate_signal(ticker="SPY")
+
+            if vp_signal is not None and vp_signal.vp_macd_value is not None:
+                readings[SignalSource.VP_MACD] = SignalReading(
+                    source=SignalSource.VP_MACD,
+                    timestamp=vp_signal.timestamp,
+                    value=vp_signal.vp_macd_value,
+                    confidence=vp_signal.confidence,
+                    weight=0.0,
+                    regime_fit="all",
+                    asset_signals={
+                        'SPY': vp_signal.vp_macd_value,
+                    },
+                    explanation=f"VP-MACD: {vp_signal.vp_macd_signal}, hist={vp_signal.histogram:.4f}, thresh={vp_signal.volatility_adjusted_threshold:.4f}, vol={vp_signal.regime}"
                 )
         except ImportError:
             pass
