@@ -13,10 +13,13 @@ from .smart_rebalancer import (
     CostBudgetTracker,
 )
 from .integration import SmartRebalanceGate
+from .adaptive_bridge import AdaptiveRebalanceBridge, AdaptiveRebalanceResult
 
 __all__ = [
     'SmartRebalancingController',
     'SmartRebalanceGate',
+    'AdaptiveRebalanceBridge',
+    'AdaptiveRebalanceResult',
     'PortfolioSnapshot',
     'MarketConditions',
     'RebalanceDecision',
