@@ -273,9 +273,11 @@ def low_vol_prices(tmp_path):
 class TestRegimeClassifierInit:
     """Test classifier initialization and state management."""
 
-    def test_init_default(self):
+    def test_init_default(self, tmp_path):
         """Default initialization should not crash."""
-        classifier = RegimeClassifier()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        classifier = RegimeClassifier(data_dir=data_dir)
         assert classifier.current_regime == Regime.NORMAL
         assert classifier.previous_regime is None
         assert len(classifier.regime_history) == 0
