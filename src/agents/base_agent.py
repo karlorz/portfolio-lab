@@ -76,6 +76,9 @@ else:
     _stub_nn.Sigmoid = lambda: _StubModule()
     _stub_nn.MSELoss = lambda: lambda x, y: 0.0
     _stub_nn.L1Loss = lambda: lambda x, y: 0.0
+    _stub_nn.LayerNorm = lambda *a, **kw: _StubModule()
+    _stub_nn.Dropout = lambda *a, **kw: _StubModule()
+    _stub_nn.Softmax = lambda *a, **kw: lambda x: x
 
     torch = _stub_torch
     nn = _stub_nn

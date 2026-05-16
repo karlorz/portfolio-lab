@@ -27,6 +27,11 @@ from collections import defaultdict
 
 from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
 
+# FPILOT inference-time planning (numpy-only, no ML deps)
+_INFERENCE_TIME_PLANNING = os.environ.get("INFERENCE_TIME_PLANNING", "0") == "1"
+if _INFERENCE_TIME_PLANNING:
+    from .predictive_model import PredictiveModel, TrajectoryOptimizer, PredictionResult
+
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
@@ -209,8 +214,11 @@ class ControllerAgent(BaseAgent):
         agent_id: str = "controller",
         n_assets: int = 4,
         hidden_dim: int = 256,
-        device: str = "cpu"
+        device: str = "cpu",
+        enable_planning: bool = False,
     ):
+        self.enable_planning = enable_planning or _INFERENCE_TIME_PLANNING
+        
         # obs_dim = price history + 4 agents * 3 outputs + portfolio state
         n_agent_outputs = 4 * 3  # 4 agents, 3 outputs each
         # Portfolio state: weights (n) + deviations (n) + value (1) + consensus (3)
@@ -241,7 +249,194 @@ class ControllerAgent(BaseAgent):
         # Current allocation
         self.current_allocation = self.DEFAULT_ALLOCATION.copy()
         self.target_allocation = self.DEFAULT_ALLOCATION.copy()
-    
+        
+        # FPILOT planning components
+        if self.enable_planning:
+            try:
+                self.predictive_model = PredictiveModel(
+                    n_assets=n_assets,
+                    window=252,
+                    horizon=5,
+                )
+                self.trajectory_optimizer = TrajectoryOptimizer(
+                    n_assets=n_assets,
+                    n_candidates=50,
+                    n_elite=10,
+                    n_iterations=3,
+                )
+                self._planning_enabled = True
+            except Exception:
+                self._planning_enabled = False
+                self.predictive_model = None
+                self.trajectory_optimizer = None
+        else:
+            self._planning_enabled = False
+            self.predictive_model = None
+            self.trajectory_optimizer = None
+        
+        # Planning history for tracking
+        self.planning_history: List[Dict[str, Any]] = []
+
+    # ────────────────────────────────────────────────────────────────────────
+    # FPILOT Inference-Time Planning
+    # ────────────────────────────────────────────────────────────────────────
+
+    def _is_planning_ready(self) -> bool:
+        """Check if planning components are initialized."""
+        return (
+            self._planning_enabled
+            and self.predictive_model is not None
+            and self.trajectory_optimizer is not None
+        )
+
+    def update_price_history(self, prices: np.ndarray):
+        """Update predictive model with latest prices."""
+        if self._is_planning_ready() and self.predictive_model is not None:
+            self.predictive_model.update_prices(prices)
+
+    def plan(self, obs: AgentObservation) -> Optional[Dict[str, Any]]:
+        """
+        FPILOT planning step: generate optimal allocation via trajectory optimization.
+
+        Uses PredictiveModel to forecast prices and TrajectoryOptimizer to
+        find the best allocation trajectory over the planning horizon.
+
+        Args:
+            obs: Current agent observation
+
+        Returns:
+            Dict with planned allocation info, or None if planning is disabled/failed
+        """
+        if not self._is_planning_ready():
+            return None
+
+        try:
+            start_time = datetime.now()
+
+            # Get price history from observation
+            prices = obs.prices
+            if prices.size < 2:
+                return None
+
+            # Update and fit predictive model
+            model = self.predictive_model
+            optimizer = self.trajectory_optimizer
+
+            # Reshape prices if needed: ensure we have enough data
+            if prices.ndim == 1:
+                # Single asset price history, need multi-asset
+                # Use current weights to distribute
+                model.update_prices(prices[:model.n_assets] if len(prices) >= model.n_assets else prices)
+            else:
+                # (n_days, n_assets) shape
+                for i in range(prices.shape[0]):
+                    model.update_prices(prices[i])
+
+            # Fit model
+            if len(model._price_history) >= model.window + 2:
+                price_array = np.array(model._price_history)
+                fit_ok = model.fit(price_array)
+            else:
+                fit_ok = False
+
+            # Generate prediction
+            prediction = model.predict(horizon=5)
+
+            # If prediction is invalid or model not fitted, fallback
+            if not prediction.valid or not model.is_fitted:
+                plan_time = (datetime.now() - start_time).total_seconds()
+                self.planning_history.append({
+                    "timestamp": datetime.now().isoformat(),
+                    "success": False,
+                    "reason": "model_not_ready",
+                    "duration_seconds": plan_time,
+                })
+                return None
+
+            # Get current weights from observation
+            current_weights = np.array([
+                obs.current_weights.get('SPY', 0.46),
+                obs.current_weights.get('GLD', 0.38),
+                obs.current_weights.get('TLT', 0.16),
+                obs.current_weights.get('CASH', 0.0),
+            ])
+
+            # Generate candidate trajectories
+            candidates = optimizer.generate_trajectories(
+                prediction=prediction,
+                current_weights=current_weights,
+                horizon=5,
+            )
+
+            # Select optimal trajectory
+            optimal = optimizer.select_optimal(
+                candidates=candidates,
+                risk_aversion=obs.volatility if obs.volatility > 0 else 1.0,
+            )
+
+            # Extract planned allocation
+            planned_allocation = optimal.allocations[0]
+
+            plan_time = (datetime.now() - start_time).total_seconds()
+
+            # Log planning result
+            plan_result = {
+                "timestamp": datetime.now().isoformat(),
+                "success": True,
+                "duration_seconds": plan_time,
+                "expected_return": optimal.expected_return,
+                "expected_risk": optimal.expected_risk,
+                "score": optimal.score,
+                "planned_allocation": [float(w) for w in planned_allocation],
+                "current_allocation": [float(w) for w in current_weights],
+                "feasible": optimal.feasible,
+                "n_candidates": len(candidates),
+            }
+            self.planning_history.append(plan_result)
+
+            # Keep history bounded
+            if len(self.planning_history) > 100:
+                self.planning_history = self.planning_history[-100:]
+
+            return plan_result
+
+        except Exception as e:
+            # Graceful fallback — don't crash on planning errors
+            plan_result = {
+                "timestamp": datetime.now().isoformat(),
+                "success": False,
+                "reason": str(e),
+                "duration_seconds": 0.0,
+            }
+            self.planning_history.append(plan_result)
+            return None
+
+    def get_planning_stats(self) -> Dict[str, Any]:
+        """Get planning performance statistics."""
+        if not self.planning_history:
+            return {"enabled": False, "total_plans": 0}
+
+        total = len(self.planning_history)
+        successful = sum(1 for h in self.planning_history if h.get("success"))
+        durations = [
+            h.get("duration_seconds", 0)
+            for h in self.planning_history
+            if h.get("success")
+        ]
+
+        return {
+            "enabled": True,
+            "total_plans": total,
+            "successful": successful,
+            "success_rate": successful / total if total > 0 else 0,
+            "avg_duration_ms": (sum(durations) / len(durations) * 1000) if durations else 0,
+            "recent_scores": [
+                h.get("score", 0)
+                for h in self.planning_history[-10:]
+                if h.get("success")
+            ],
+        }
+
     def build_network(self) -> nn.ModuleDict:
         """Build network (already done in __init__)."""
         return nn.ModuleDict({'main': self.network})
