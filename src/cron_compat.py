@@ -2,7 +2,7 @@
 Cron backend compatibility — feature flag for dual-mode operation.
 
 portfolio-lab supports three cron backends:
-  - hermes   (Hermes Agent cron scheduler, 11 jobs active)
+  - hermes   (Hermes Agent cron scheduler, 12 targets registered)
   - crontab  (system crontab, standalone without Hermes)
   - manual   (make <target> from terminal or Claude Code)
 
@@ -34,6 +34,7 @@ CRON_TARGETS = [
     "portfolio-lab-position-sync",
     "portfolio-lab-overlay-signals",
     "portfolio-lab-overlay-dashboard",
+    "portfolio-lab-attribution",
     "portfolio-lab-unified-dashboard",
 ]
 
@@ -46,9 +47,10 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-research": 300,  # 5 min — research loops
     "portfolio-lab-wiki-sync": 120, # 2 min — git operations
     "portfolio-lab-build": 600,     # 10 min — tsc + bun build
-    "portfolio-lab-position-sync": 300,  # 5 min — broker API
+    "portfolio-lab-position-sync": 60,   # 1 min — placeholder/no-op
     "portfolio-lab-overlay-signals": 600,  # 10 min — 5 sequential modules
     "portfolio-lab-overlay-dashboard": 120,  # 2 min — JSON serialization
+    "portfolio-lab-attribution": 300,  # 5 min — attribution + adaptive weights
     "portfolio-lab-unified-dashboard": 120,  # 2 min — JSON serialization
 }
 

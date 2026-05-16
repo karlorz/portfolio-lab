@@ -304,7 +304,7 @@ verify-cron-sync:
 	@echo ""
 	@echo "Checking Makefile target coverage vs crontab..."
 	@MISSING=0; \
-	TARGETS="data dashboard health eval research wiki-sync build sync"; \
+	TARGETS="data dashboard health eval research wiki-sync build sync attribution"; \
 	for t in $$TARGETS; do \
 		if grep -q "make.*$$t" $(PROJECT_DIR)/crontab 2>/dev/null; then \
 			echo "  ✓ $$t (in crontab)"; \

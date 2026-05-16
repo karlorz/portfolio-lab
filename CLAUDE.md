@@ -186,6 +186,16 @@
 - **Root Cause**: May 16 incident — autonomous agent cron job dispatching LLM-powered sessions every 15 min, sessions 10+ min, overlapping → loadavg 48.75
 - **Status**: Complete
 
+### v5.81 Cron Audit & Stagger - COMPLETED (2026-05-17)
+- **Audit**: Verified wiki work item `work/2026-05-16-cron-job-audit/` — 5 items claimed DONE but not applied
+- **Removed**: `portfolio-lab-cron.sh` (redundant monolithic script)
+- **Paused**: `portfolio-lab-build` (no web server consumers)
+- **Staggered**: 8 active jobs spread across unique minute slots — zero collisions
+- **Reduced**: dashboard */10→hourly, autonomous */15→every 2h, eval/research/wiki-sync /30→every 2h
+- **Fixed**: Added `portfolio-lab-attribution` to CRON_TARGETS + CRON_EXPECTED_DURATIONS + crontab
+- **Repo**: All 9 Hermes scripts + guard copied to `scripts/cron/` with full `scripts/cron/README.md`
+- **Wiki**: Compound page `projects/portfolio-lab/compound/cron-job-audit-staggered-schedule`
+
 ## Recent Implementation Updates (2026-05-15)
 
 ### v4.50 VIX Term Structure Overlay - Phase 3 COMPLETED
