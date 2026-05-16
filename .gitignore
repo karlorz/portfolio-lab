@@ -151,3 +151,4 @@ uv.lock
 .python-version
 raw/market/
 .claude/scheduled_tasks.json
+.claude/scheduled_tasks.json
