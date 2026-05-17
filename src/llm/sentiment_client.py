@@ -401,9 +401,18 @@ class SentimentAnalyzer:
         anthropic_api_key: Optional[str] = None,
         daily_budget_usd: float = DEFAULT_DAILY_BUDGET,
     ):
-        self.gpt4o_mini = OpenAIGPT4oMiniClient(api_key=openai_api_key)
-        self.claude_sonnet = ClaudeSonnetClient(api_key=anthropic_api_key)
-        self.cost_tracker = CostTracker(daily_budget_usd=daily_budget_usd)
+        openai_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
+        anthropic_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+
+        self.disabled = not (openai_key or anthropic_key)
+        self.gpt4o_mini = None
+        self.claude_sonnet = None
+        self.cost_tracker = None
+
+        if not self.disabled:
+            self.gpt4o_mini = OpenAIGPT4oMiniClient(api_key=openai_api_key)
+            self.claude_sonnet = ClaudeSonnetClient(api_key=anthropic_api_key)
+            self.cost_tracker = CostTracker(daily_budget_usd=daily_budget_usd)
 
     _LONG_DOC_TYPES = {"earnings_call", "filing_10k", "filing_10q"}
 
@@ -421,6 +430,21 @@ class SentimentAnalyzer:
         force_model: Optional[str] = None,
         system_prompt: str = SYSTEM_PROMPT,
     ) -> SentimentResult:
+        if self.disabled:
+            return SentimentResult(
+                sentiment="neutral",
+                confidence=0.0,
+                key_factors=["llm_disabled"],
+                price_impact="neutral",
+                time_horizon="short_term",
+                summary="LLM sentiment disabled — no API keys configured.",
+                model="none",
+                cost_usd=0.0,
+                prompt_tokens=0,
+                cached_tokens=0,
+                completion_tokens=0,
+            )
+
         if force_model == "gpt4o_mini":
             client = self.gpt4o_mini
         elif force_model == "claude":

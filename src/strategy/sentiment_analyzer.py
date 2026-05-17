@@ -87,8 +87,9 @@ class SentimentAggregator:
         self.history: deque = deque(maxlen=lookback_days)
         try:
             self.analyzer = SentimentAnalyzer()
+            if self.analyzer.disabled:
+                self.analyzer = None
         except Exception as e:
-            print(f"Warning: Could not initialize LLM client in aggregator ({e})")
             self.analyzer = None
         
     def calculate_ema(self, values: List[float], alpha: Optional[float] = None) -> float:
@@ -264,8 +265,9 @@ class SentimentAnalyzerPipeline:
         self.aggregator = SentimentAggregator()
         try:
             self.analyzer = SentimentAnalyzer()
+            if self.analyzer.disabled:
+                self.analyzer = None
         except Exception as e:
-            print(f"Warning: Could not initialize LLM client ({e})")
             self.analyzer = None
         
     def analyze_text(self, text: str, source_type: str = "news") -> Optional[SentimentResult]:
