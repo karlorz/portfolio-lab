@@ -82,6 +82,7 @@ class SignalSource(Enum):
     LLM_NARRATIVE = "llm_narrative"          # v7.01 LLM macro/narrative signal
     TAX_AWARE = "tax_aware"                  # v7.03 Tax-aware rebalancing alpha
     VIXY_HEDGE = "vixy_hedge"              # v7.04 Dynamic VIXY hedge sizing
+    MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # v8.06 Multi-timeframe fusion
 
 
 @dataclass
@@ -156,6 +157,7 @@ REGIME_WEIGHTS = {
         SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative signal
         SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
         SignalSource.VIXY_HEDGE: 0.05,          # v7.04 Dynamic VIXY hedge sizing
+        SignalSource.MULTI_TIMEFRAME_FUSION: 0.03,  # v8.06 Meta-timeframe fusion
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
@@ -180,6 +182,7 @@ REGIME_WEIGHTS = {
         SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative signal
         SignalSource.TAX_AWARE: 0.01,            # v7.03 Tax-aware rebalancing (minimal in vol)
         SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (active in vol)
+        SignalSource.MULTI_TIMEFRAME_FUSION: 0.03,  # v8.06 Meta-timeframe fusion
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.25,
@@ -204,6 +207,7 @@ REGIME_WEIGHTS = {
         SignalSource.LLM_NARRATIVE: 0.05,       # v7.01 LLM macro/narrative — highest in crisis
         SignalSource.TAX_AWARE: 0.01,            # v7.03 Tax-aware rebalancing (minimal in crisis)
         SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (max in crisis)
+        SignalSource.MULTI_TIMEFRAME_FUSION: 0.02,  # v8.06 Lower in crisis (short-term dominates)
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.16,
@@ -228,6 +232,7 @@ REGIME_WEIGHTS = {
         SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative (recovery regime)
         SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
         SignalSource.VIXY_HEDGE: 0.03,          # v7.04 Dynamic VIXY hedge (minimal in recovery)
+        SignalSource.MULTI_TIMEFRAME_FUSION: 0.04,  # v8.06 Higher in recovery (long-term bets)
     }
 }
 

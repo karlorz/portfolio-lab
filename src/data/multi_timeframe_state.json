@@ -1,0 +1,39 @@
+{
+  "initialized": "2026-05-17T16:47:13.436246",
+  "fusion_count": 1,
+  "last_fusion": "2026-05-17T16:47:13.436504",
+  "previous_signals": {
+    "tsfm_momentum": 0.35,
+    "hmm_regime": 0.1,
+    "cta_trend": 0.25,
+    "macro_momentum": 0.2,
+    "multi_speed_momentum": 0.15,
+    "duration_regime": -0.1,
+    "circuit_breaker": 0.0,
+    "factor_rotation": 0.05,
+    "closing_auction": 0.02,
+    "unified_overlay": 0.08,
+    "mean_reversion": -0.03,
+    "transformer_regime": 0.12,
+    "transient_factors": 0.05,
+    "visibility_graph": 0.08,
+    "vp_macd": 0.1,
+    "cross_asset_rv": 0.15,
+    "regime_classifier": 0.05,
+    "factor_timing": 0.1,
+    "risk_budget": 0.05,
+    "llm_narrative": 0.12,
+    "tax_aware": 0.03,
+    "vixy_hedge": 0.05
+  },
+  "history": [
+    {
+      "timestamp": "2026-05-17T16:47:13.436504",
+      "overall_signal": 0.1009,
+      "short": 0.0323,
+      "medium": 0.1187,
+      "long": 0.1091,
+      "regime": "normal"
+    }
+  ]
+}
