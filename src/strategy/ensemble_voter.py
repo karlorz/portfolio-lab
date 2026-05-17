@@ -87,6 +87,7 @@ class SignalSource(Enum):
     FX_CARRY = "fx_carry"                  # v3.15 FX Currency Carry
     INTERNATIONAL_MOMENTUM = "international_momentum"  # v3.13 International equity momentum
     COMMODITY_CURVE = "commodity_curve"    # v3.20 Commodity curve overlay
+    ALTERNATIVE_DATA = "alternative_data"  # v9.00 Alternative data signal (SEC EDGAR, NewsAPI, jobs)
 
 
 @dataclass
@@ -166,6 +167,7 @@ REGIME_WEIGHTS = {
         SignalSource.FX_CARRY: 0.02,               # v3.15 FX Currency Carry
         SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
         SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
+        SignalSource.ALTERNATIVE_DATA: 0.02,        # v9.00 Alternative data (SEC/News/Jobs)
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
@@ -195,6 +197,7 @@ REGIME_WEIGHTS = {
         SignalSource.FX_CARRY: 0.01,               # v3.15 FX Currency Carry (lower in high vol)
         SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
         SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
+        SignalSource.ALTERNATIVE_DATA: 0.01,        # v9.00 Reduced in high vol
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.25,
@@ -224,6 +227,7 @@ REGIME_WEIGHTS = {
         SignalSource.FX_CARRY: 0.0,                # v3.15 Disabled in crisis
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0,   # v3.13 Disabled in crisis
         SignalSource.COMMODITY_CURVE: 0.0,          # v3.20 Disabled in crisis
+        SignalSource.ALTERNATIVE_DATA: 0.0,         # v9.00 Disabled in crisis
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.16,
@@ -253,6 +257,7 @@ REGIME_WEIGHTS = {
         SignalSource.FX_CARRY: 0.02,               # v3.15 FX Currency Carry (recovery momentum)
         SignalSource.INTERNATIONAL_MOMENTUM: 0.02,  # v3.13 International equity momentum (recovery tracking)
         SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
+        SignalSource.ALTERNATIVE_DATA: 0.02,        # v9.00 Recovery tracking via alt data
     }
 }
 
@@ -842,6 +847,33 @@ class EnsembleVoter:
             pass
         except Exception as e:
             logger.debug(f"Commodity curve unavailable: {e}")
+            pass
+
+        # 17. Alternative Data (v9.00) — SEC EDGAR, NewsAPI, Jobs data
+        try:
+            alt_data_file = Path("~/projects/portfolio-lab/data/signals").expanduser() / "alternative_data_latest.json"
+            if alt_data_file.exists():
+                import json as json_mod
+                with open(alt_data_file) as f:
+                    alt_data = json_mod.load(f)
+
+                regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
+                signal_value = regime_map.get(alt_data.get("regime", "neutral"), 0.0)
+
+                readings[SignalSource.ALTERNATIVE_DATA] = SignalReading(
+                    source=SignalSource.ALTERNATIVE_DATA,
+                    timestamp=alt_data.get("timestamp", str(datetime.now())),
+                    value=signal_value,
+                    confidence=alt_data.get("confidence", 0.5),
+                    weight=0.0,
+                    regime_fit="all",
+                    asset_signals={"SPY": signal_value},
+                    explanation=f"Alt Data: regime={alt_data.get('regime')}, "
+                                f"prob={alt_data.get('probability', 0):.2f}, "
+                                f"conf={alt_data.get('confidence', 0):.2f}"
+                )
+        except Exception as e:
+            logger.debug(f"Alternative data unavailable: {e}")
             pass
 
         self.current_readings = readings
