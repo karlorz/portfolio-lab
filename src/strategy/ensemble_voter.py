@@ -84,6 +84,9 @@ class SignalSource(Enum):
     VIXY_HEDGE = "vixy_hedge"              # v7.04 Dynamic VIXY hedge sizing
     MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # v8.06 Multi-timeframe fusion
     MACRO_REGIME_SYNTHESIS = "macro_regime_synthesis"  # v8.07 Meta-regime consensus
+    FX_CARRY = "fx_carry"                  # v3.15 FX Currency Carry
+    INTERNATIONAL_MOMENTUM = "international_momentum"  # v3.13 International equity momentum
+    COMMODITY_CURVE = "commodity_curve"    # v3.20 Commodity curve overlay
 
 
 @dataclass
@@ -138,14 +141,14 @@ REGIME_WEIGHTS = {
     Regime.NORMAL: {
         SignalSource.TSFM_MOMENTUM: 0.25,
         SignalSource.MULTI_SPEED_MOM: 0.17,
-        SignalSource.CTA_TREND: 0.08,
-        SignalSource.MACRO_MOMENTUM: 0.08,
+        SignalSource.CTA_TREND: 0.07,
+        SignalSource.MACRO_MOMENTUM: 0.07,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.DURATION_REGIME: 0.05,
         SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly idle in normal)
         SignalSource.HMM_REGIME: 0.02,       # Minimal in normal
         SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
-        SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
+        SignalSource.CLOSING_AUCTION: 0.02,  # v3.17 MOC signals
         SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Transformer regime detection
         SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors
@@ -160,22 +163,25 @@ REGIME_WEIGHTS = {
         SignalSource.VIXY_HEDGE: 0.05,          # v7.04 Dynamic VIXY hedge sizing
         SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Meta-timeframe fusion
         SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus
+        SignalSource.FX_CARRY: 0.02,               # v3.15 FX Currency Carry
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
+        SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
         SignalSource.CTA_TREND: 0.17,
         SignalSource.MEAN_REVERSION: 0.08,   # v4.81 VIX-gated (active in high vol)
         SignalSource.MULTI_SPEED_MOM: 0.10,
-        SignalSource.MACRO_MOMENTUM: 0.06,
+        SignalSource.MACRO_MOMENTUM: 0.05,
         SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
         SignalSource.CIRCUIT_BREAKER: 0.05,
-        SignalSource.TSFM_MOMENTUM: 0.02,
+        SignalSource.TSFM_MOMENTUM: 0.01,
         SignalSource.DURATION_REGIME: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
         SignalSource.TRANSFORMER_REGIME: 0.05,  # v3.18 Most useful in volatile transitions
         SignalSource.UNIFIED_OVERLAY: 0.0,  # v4.90 (de-prioritized in high vol)
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Transient statistical factors (active in vol)
-        SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 VGRSI useful in volatile transitions
+        SignalSource.VISIBILITY_GRAPH: 0.0,     # v5.41 VGRSI (minimal in high vol)
         SignalSource.VP_MACD: 0.0,              # v5.55 (de-prioritized in high vol)
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
@@ -186,6 +192,9 @@ REGIME_WEIGHTS = {
         SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (active in vol)
         SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Meta-timeframe fusion
         SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus (higher in high vol)
+        SignalSource.FX_CARRY: 0.01,               # v3.15 FX Currency Carry (lower in high vol)
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
+        SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.25,
@@ -212,6 +221,9 @@ REGIME_WEIGHTS = {
         SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (max in crisis)
         SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Lower in crisis (short-term dominates)
         SignalSource.MACRO_REGIME_SYNTHESIS: 0.03,  # v8.07 Highest in crisis (regime detection critical)
+        SignalSource.FX_CARRY: 0.0,                # v3.15 Disabled in crisis
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.0,   # v3.13 Disabled in crisis
+        SignalSource.COMMODITY_CURVE: 0.0,          # v3.20 Disabled in crisis
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.16,
@@ -238,6 +250,9 @@ REGIME_WEIGHTS = {
         SignalSource.VIXY_HEDGE: 0.03,          # v7.04 Dynamic VIXY hedge (minimal in recovery)
         SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Higher in recovery (long-term bets)
         SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus
+        SignalSource.FX_CARRY: 0.02,               # v3.15 FX Currency Carry (recovery momentum)
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.02,  # v3.13 International equity momentum (recovery tracking)
+        SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
     }
 }
 
@@ -689,6 +704,144 @@ class EnsembleVoter:
             pass
         except Exception as e:
             logger.debug(f"Macro regime synthesis unavailable: {e}")
+            pass
+
+        # 14. FX Currency Carry (v3.15)
+        try:
+            from src.signals.fx_carry_signal import FXCarrySignalGenerator
+            fx_gen = FXCarrySignalGenerator()
+            fx_signal = fx_gen.generate_signal()
+
+            if fx_signal.is_valid:
+                # Map signal_type to numeric value: usd_strength=-1, usd_weakness=+1, neutral=0
+                signal_map = {"usd_strength": -0.5, "usd_weakness": 0.5, "neutral": 0.0}
+                signal_value = signal_map.get(fx_signal.signal_type, 0.0)
+
+                readings[SignalSource.FX_CARRY] = SignalReading(
+                    source=SignalSource.FX_CARRY,
+                    timestamp=fx_signal.timestamp,
+                    value=signal_value,
+                    confidence=fx_signal.confidence,
+                    weight=0.0,
+                    regime_fit="all",
+                    asset_signals={
+                        'SPY': fx_signal.spy_shift,
+                        'EFA': fx_signal.efa_shift,
+                        'VXUS': fx_signal.vxus_shift,
+                    },
+                    explanation=f"FX Carry: {fx_signal.signal_type}, "
+                                f"regime={fx_signal.regime}, dir={fx_signal.direction}, "
+                                f"reason={fx_signal.reason}, spy_shift={fx_signal.spy_shift:+.1f}%"
+                )
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"FX Carry signal unavailable: {e}")
+            pass
+
+        # 15. International Equity Momentum (v3.13)
+        try:
+            from src.signals.international_momentum import InternationalMomentumGenerator
+
+            # Load price data for SPY, EFA, EEM
+            price_data = self._load_price_data()
+            if price_data is not None and not price_data.empty:
+                # Compute basic 6-month momentum for international comparison
+                window = 126  # ~6 months of trading days
+                required_cols = [c for c in ['SPY', 'EFA', 'EEM'] if c in price_data.columns]
+                if len(required_cols) >= 2:
+                    # Build data dict in format expected by InternationalMomentumGenerator
+                    recent = price_data[required_cols].iloc[-window:] if len(price_data) >= window else price_data[required_cols]
+                    if len(recent) >= 20:
+                        efa_mom = (recent['EFA'].iloc[-1] / recent['EFA'].iloc[0] - 1) * 100 if 'EFA' in recent else 0.0
+                        eem_mom = (recent['EEM'].iloc[-1] / recent['EEM'].iloc[0] - 1) * 100 if 'EEM' in recent else 0.0
+                        spy_mom = (recent['SPY'].iloc[-1] / recent['SPY'].iloc[0] - 1) * 100
+
+                        data = {
+                            'timestamp': str(datetime.now()),
+                            'relative': {
+                                'efa_momentum_6m': efa_mom,
+                                'eem_momentum_6m': eem_mom,
+                                'spy_momentum_6m': spy_mom,
+                                'efa_vs_spy': efa_mom - spy_mom,
+                                'eem_vs_spy': eem_mom - spy_mom,
+                            },
+                            'data_fresh': True,
+                        }
+
+                        intl_gen = InternationalMomentumGenerator()
+                        intl_signal = intl_gen.generate_signal(data)
+                        signal_value = 0.0
+                        if intl_signal.signal_type == "efa_lead":
+                            signal_value = 0.3
+                        elif intl_signal.signal_type == "eem_lead":
+                            signal_value = 0.4
+                        elif intl_signal.signal_type == "neutral":
+                            signal_value = 0.0
+
+                        readings[SignalSource.INTERNATIONAL_MOMENTUM] = SignalReading(
+                            source=SignalSource.INTERNATIONAL_MOMENTUM,
+                            timestamp=intl_signal.timestamp,
+                            value=signal_value,
+                            confidence=intl_signal.confidence,
+                            weight=0.0,
+                            regime_fit="all",
+                            asset_signals={
+                                'SPY': intl_signal.spy_shift,
+                                'EFA': intl_signal.efa_shift,
+                                'EEM': intl_signal.eem_shift,
+                            },
+                            explanation=f"Intl Momentum: {intl_signal.signal_type}, "
+                                        f"conf={intl_signal.confidence_level}, "
+                                        f"EFA/SPY={efa_mom - spy_mom:+.2%}, "
+                                        f"EEM/SPY={eem_mom - spy_mom:+.2%}, "
+                                        f"VIX_filter={intl_signal.vix_filter_active}"
+                        )
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"International momentum unavailable: {e}")
+            pass
+
+        # 16. Commodity Curve Overlay (v3.20)
+        try:
+            from src.signals.commodity_curve import fetch_curve_signal, CurveRegime
+
+            # Check DBC (broad commodity) curve regime
+            dbc_signal = fetch_curve_signal("DBC")
+            gsg_signal = fetch_curve_signal("GSG")
+
+            # Compute consensus signal: backwardation=+1, flat=0, contango=-1
+            def regime_value(r: CurveRegime) -> float:
+                if r == CurveRegime.BACKWARDATION:
+                    return 0.5
+                elif r == CurveRegime.CONTANGO:
+                    return -0.5
+                return 0.0
+
+            dbc_val = regime_value(dbc_signal.regime)
+            gsg_val = regime_value(gsg_signal.regime)
+            avg_signal = (dbc_val + gsg_val) / 2.0
+
+            readings[SignalSource.COMMODITY_CURVE] = SignalReading(
+                source=SignalSource.COMMODITY_CURVE,
+                timestamp=str(datetime.now()),
+                value=avg_signal,
+                confidence=0.5,
+                weight=0.0,
+                regime_fit="all",
+                asset_signals={
+                    'DBC': dbc_val,
+                    'GSG': gsg_val,
+                },
+                explanation=f"Commodity Curve: DBC={dbc_signal.regime.name}({dbc_signal.spread_pct:+.2f}%), "
+                            f"GSG={gsg_signal.regime.name}({gsg_signal.spread_pct:+.2f}%), "
+                            f"consensus={avg_signal:+.2f}"
+            )
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"Commodity curve unavailable: {e}")
             pass
 
         self.current_readings = readings

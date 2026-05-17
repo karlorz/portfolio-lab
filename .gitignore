@@ -136,8 +136,13 @@ dist
 .pnp.*
 
 # Portfolio Lab specific
+# Data files
 /data/
 /public/data/
+
+# Runtime state files (generated during operation)
+*_state.json
+*_state.json.*
 dist/
 .env.local
 *.pyc
