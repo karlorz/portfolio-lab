@@ -50,8 +50,8 @@ MIN_ACTIVE_WEIGHT = 0.01
 # Sparsity alert threshold
 SPARSITY_ALERT_THRESHOLD = 0.3
 
-# Default lambda for unknown regimes
-DEFAULT_LAMBDA = 0.05
+# Default lambda for unknown regimes (conservative — treat as normal/minimal pruning)
+DEFAULT_LAMBDA = 0.01
 
 # State file paths
 STATE_FILE = "data/basis_pursuit_state.json"

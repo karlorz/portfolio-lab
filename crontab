@@ -1,9 +1,8 @@
-# Portfolio-Lab Crontab — standalone mode (without Hermes)
-# Install: crontab /root/projects/portfolio-lab/crontab
-# All jobs call the Makefile, which updates data/cron_status.json
-# for the dashboard health panel.
+# Portfolio-Lab Crontab — fallback/standalone mode (all jobs now in Hermes cron)
+# SWITCHED TO HERMES CRON 2026-05-17 — 10 jobs registered via cronjob tool.
+# This file is kept as documentation + fallback only.
 #
-# To switch FROM Hermes cron TO system cron:
+# To activate fallback (switch FROM Hermes cron TO system cron):
 #   1. hermes cron pause <job_id>  (for each portfolio-lab job)
 #   2. crontab /root/projects/portfolio-lab/crontab
 #
@@ -11,12 +10,8 @@
 #   1. crontab -r
 #   2. hermes cron resume <job_id>  (for each portfolio-lab job)
 #
-# UPDATED 2026-05-17: Post-audit fixes applied:
-#   - Removed monolithic portfolio-lab-cron.sh (redundant)
-#   - Dashboard reduced from */10 to */30
-#   - Position-sync reduced from 300s to 60s guard
-#   - Build DISABLED (no web server consumers found)
-#   - Attribution added (was orphan in Makefile only)
+# All jobs call the Makefile, which updates data/cron_status.json
+# for the dashboard health panel.
 
 # Data pipeline — hourly at :05
 5 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab data >> /root/projects/portfolio-lab/data/cron.log 2>&1

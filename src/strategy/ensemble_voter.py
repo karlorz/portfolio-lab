@@ -83,6 +83,7 @@ class SignalSource(Enum):
     TAX_AWARE = "tax_aware"                  # v7.03 Tax-aware rebalancing alpha
     VIXY_HEDGE = "vixy_hedge"              # v7.04 Dynamic VIXY hedge sizing
     MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # v8.06 Multi-timeframe fusion
+    MACRO_REGIME_SYNTHESIS = "macro_regime_synthesis"  # v8.07 Meta-regime consensus
 
 
 @dataclass
@@ -145,10 +146,10 @@ REGIME_WEIGHTS = {
         SignalSource.HMM_REGIME: 0.02,       # Minimal in normal
         SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
-        SignalSource.UNIFIED_OVERLAY: 0.02,  # v4.90 Multi-overlay orchestration
+        SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
         SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Transformer regime detection
         SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors
-        SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI network-science indicator
+        SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 VGRSI network-science indicator
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
@@ -157,7 +158,8 @@ REGIME_WEIGHTS = {
         SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative signal
         SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
         SignalSource.VIXY_HEDGE: 0.05,          # v7.04 Dynamic VIXY hedge sizing
-        SignalSource.MULTI_TIMEFRAME_FUSION: 0.03,  # v8.06 Meta-timeframe fusion
+        SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Meta-timeframe fusion
+        SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
@@ -171,10 +173,10 @@ REGIME_WEIGHTS = {
         SignalSource.DURATION_REGIME: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
         SignalSource.TRANSFORMER_REGIME: 0.05,  # v3.18 Most useful in volatile transitions
-        SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
+        SignalSource.UNIFIED_OVERLAY: 0.0,  # v4.90 (de-prioritized in high vol)
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Transient statistical factors (active in vol)
-        SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 VGRSI useful in volatile transitions
-        SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
+        SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 VGRSI useful in volatile transitions
+        SignalSource.VP_MACD: 0.0,              # v5.55 (de-prioritized in high vol)
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (defensive tilt in high vol)
@@ -182,7 +184,8 @@ REGIME_WEIGHTS = {
         SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative signal
         SignalSource.TAX_AWARE: 0.01,            # v7.03 Tax-aware rebalancing (minimal in vol)
         SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (active in vol)
-        SignalSource.MULTI_TIMEFRAME_FUSION: 0.03,  # v8.06 Meta-timeframe fusion
+        SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Meta-timeframe fusion
+        SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus (higher in high vol)
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.25,
@@ -194,20 +197,21 @@ REGIME_WEIGHTS = {
         SignalSource.MULTI_SPEED_MOM: 0.03,
         SignalSource.TSFM_MOMENTUM: 0.0,
         SignalSource.DURATION_REGIME: 0.0,
-        SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
-        SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
+        SignalSource.CLOSING_AUCTION: 0.02,  # v3.17 MOC signals
+        SignalSource.UNIFIED_OVERLAY: 0.0,  # v4.90 (merged into broader signals)
         SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Low weight in crisis (regime obvious)
-        SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Low weight during crisis
-        SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 Minimal during crisis
-        SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
+        SignalSource.TRANSIENT_FACTORS: 0.01,   # v5.01 Low weight during crisis
+        SignalSource.VISIBILITY_GRAPH: 0.0,     # v5.41 Minimal during crisis
+        SignalSource.VP_MACD: 0.0,              # v5.55 (de-prioritized in crisis)
         SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
-        SignalSource.REGIME_CLASSIFIER: 0.02,    # v5.73 ML-Light Regime Predictor (lower in crisis)
+        SignalSource.REGIME_CLASSIFIER: 0.01,    # v5.73 ML-Light Regime Predictor (lower in crisis)
         SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (crisis tilts defensive)
         SignalSource.RISK_BUDGET: 0.03,         # v6.04 Factor risk budget (crisis monitoring)
         SignalSource.LLM_NARRATIVE: 0.05,       # v7.01 LLM macro/narrative — highest in crisis
         SignalSource.TAX_AWARE: 0.01,            # v7.03 Tax-aware rebalancing (minimal in crisis)
         SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (max in crisis)
-        SignalSource.MULTI_TIMEFRAME_FUSION: 0.02,  # v8.06 Lower in crisis (short-term dominates)
+        SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Lower in crisis (short-term dominates)
+        SignalSource.MACRO_REGIME_SYNTHESIS: 0.03,  # v8.07 Highest in crisis (regime detection critical)
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.16,
@@ -217,22 +221,23 @@ REGIME_WEIGHTS = {
         SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # Higher in recovery (momentum captures)
         SignalSource.MEAN_REVERSION: 0.05,    # v4.81 VIX-gated (declining VIX, moderate)
-        SignalSource.DURATION_REGIME: 0.03,
+        SignalSource.DURATION_REGIME: 0.02,
         SignalSource.CIRCUIT_BREAKER: 0.0,
-        SignalSource.CLOSING_AUCTION: 0.02,  # v3.17 MOC signals
-        SignalSource.TRANSFORMER_REGIME: 0.04,  # v3.18 Detect recovery transitions
-        SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
-        SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Detect transition out of crisis
-        SignalSource.VISIBILITY_GRAPH: 0.02,     # v5.41 Good for recovery structure detection
+        SignalSource.CLOSING_AUCTION: 0.01,  # v3.17 MOC signals
+        SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Detect recovery transitions
+        SignalSource.UNIFIED_OVERLAY: 0.0,  # v4.90 (merged into broader signals)
+        SignalSource.TRANSIENT_FACTORS: 0.01,   # v5.01 Detect transition out of crisis
+        SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 Good for recovery structure detection
         SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
-        SignalSource.CROSS_ASSET_RV: 0.02,       # v5.71 Cross-asset relative value
+        SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (momentum capture in recovery)
         SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget (recovery monitoring)
         SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative (recovery regime)
         SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
         SignalSource.VIXY_HEDGE: 0.03,          # v7.04 Dynamic VIXY hedge (minimal in recovery)
-        SignalSource.MULTI_TIMEFRAME_FUSION: 0.04,  # v8.06 Higher in recovery (long-term bets)
+        SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Higher in recovery (long-term bets)
+        SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus
     }
 }
 
@@ -659,6 +664,31 @@ class EnsembleVoter:
             pass
         except Exception as e:
             logger.debug(f"LLM narrative signal unavailable: {e}")
+            pass
+
+        # 13. Macro Regime Meta-Synthesis (v8.07)
+        try:
+            from src.signals.macro_regime_synthesis import MetaRegimeSynthesizer
+            mrs = MetaRegimeSynthesizer()
+            ensemble_signal = mrs.get_ensemble_signal()
+            regime_name, regime_conf = mrs.get_regime_for_ensemble_voter()
+
+            readings[SignalSource.MACRO_REGIME_SYNTHESIS] = SignalReading(
+                source=SignalSource.MACRO_REGIME_SYNTHESIS,
+                timestamp=str(datetime.now()),
+                value=ensemble_signal,
+                confidence=regime_conf,
+                weight=0.0,
+                regime_fit=regime_name,
+                asset_signals={
+                    'SPY': ensemble_signal,
+                },
+                explanation=f"Macro meta-regime: consensus={regime_name}, signal={ensemble_signal:+.4f}, confidence={regime_conf:.1%}"
+            )
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"Macro regime synthesis unavailable: {e}")
             pass
 
         self.current_readings = readings
