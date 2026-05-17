@@ -778,6 +778,45 @@ class EnsembleVoter:
                 for source_enum, w in weights.items():
                     base_weights_str[source_enum.value] = w
                 
+                # --- v8.02: Basis-Pursuit Signal Selection ---
+                # Prune redundant and near-zero signals via L1 regularization
+                try:
+                    from src.strategy.basis_pursuit_selector import BasisPursuitSelector
+                    bp_selector = BasisPursuitSelector()
+                    bp_result = bp_selector.select_signals(
+                        signal_values, base_weights_str, regime=regime.value
+                    )
+                    base_weights_str = bp_result.active_signals
+                    sparsity_msg = (
+                        f" (sparsity={bp_result.sparsity_ratio:.2f}, "
+                        f"{bp_result.num_pruned} pruned)"
+                        if bp_result.num_pruned > 0
+                        else ""
+                    )
+                    logger.debug(f"Basis-pursuit selection applied{sparsity_msg}")
+                except Exception as bp_e:
+                    logger.warning(f"Could not apply basis-pursuit selection: {bp_e}")
+                
+                # --- v8.03: Regret-Weighted Adjustment ---
+                # Penalize signals with high regret (covariance with ensemble decision)
+                try:
+                    from src.strategy.regret_weighted_selector import RegretWeightedSelector
+                    rw_selector = RegretWeightedSelector()
+                    # Use persisted previous ensemble decision, defaulting to 0.0
+                    prev_decision = getattr(rw_selector.state, 'last_ensemble_decision', 0.0)
+                    rw_result = rw_selector.adjust_weights(
+                        signal_values, prev_decision, base_weights_str, regime=regime.value
+                    )
+                    base_weights_str = rw_result.adjusted_weights
+                    if rw_result.signals_with_high_regret:
+                        logger.info(
+                            f"Regret-adjusted weights: penalized "
+                            f"{', '.join(rw_result.signals_with_high_regret)}"
+                            f" (avg_regret={rw_result.avg_regret:.3f})"
+                        )
+                except Exception as rw_e:
+                    logger.warning(f"Could not apply regret-weighted adjustment: {rw_e}")
+                
                 # Apply turnover adjustment
                 adjusted_str = turnover_validator.get_adjusted_weights(
                     base_weights_str, signal_values
@@ -911,6 +950,15 @@ class EnsembleVoter:
             reasoning="\n".join(reasons),
             source_votes=weighted_signals
         )
+        
+        # Persist ensemble decision for next regret-weighted cycle (v8.03)
+        try:
+            from src.strategy.regret_weighted_selector import RegretWeightedSelector
+            rw_selector = RegretWeightedSelector()
+            rw_selector.state.last_ensemble_decision = weighted_consensus
+            rw_selector._save_state()
+        except Exception as rw_e:
+            logger.debug(f"Could not persist ensemble decision to regret-weighted state: {rw_e}")
         
         # Save to DB
         self._save_vote(vote)
