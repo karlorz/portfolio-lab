@@ -35,10 +35,11 @@ DEFAULT_ROLLING_WINDOW = 60
 
 # L1 regularization (lambda) by regime
 LAMBDA_BY_REGIME = {
-    "normal": 0.01,    # Minimal pruning — keep diverse signals
-    "high_vol": 0.05,  # Moderate pruning
-    "crisis": 0.15,    # Aggressive pruning — only strongest signals
-    "recovery": 0.03,  # Light pruning during recovery
+    "normal": 0.01,          # Minimal pruning — keep diverse signals
+    "high_vol": 0.05,        # Moderate pruning
+    "crisis": 0.15,          # Aggressive pruning — only strongest signals
+    "recovery": 0.03,        # Light pruning during recovery
+    "unknown_regime": 0.01,  # Conservative — treat unknown as normal (same as DEFAULT_LAMBDA)
 }
 
 # Correlation threshold for redundant signal pairs
@@ -50,7 +51,7 @@ MIN_ACTIVE_WEIGHT = 0.01
 # Sparsity alert threshold
 SPARSITY_ALERT_THRESHOLD = 0.3
 
-# Default lambda for unknown regimes (conservative — treat as normal/minimal pruning)
+# Default lambda for unlisted regimes (conservative — treat as normal/minimal pruning)
 DEFAULT_LAMBDA = 0.01
 
 # State file paths

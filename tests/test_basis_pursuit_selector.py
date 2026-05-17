@@ -246,7 +246,7 @@ class TestSelection:
     def test_unknown_regime_uses_default(self, selector, sample_signals, sample_weights):
         """Unknown regime falls back to default lambda."""
         result = selector.select_signals(sample_signals, sample_weights, "unknown_regime")
-        assert result.lambda_used == 0.05  # DEFAULT_LAMBDA
+        assert result.lambda_used == 0.01  # DEFAULT_LAMBDA (conservative — treat unknown as normal)
 
     def test_empty_signals(self, selector):
         """Empty signal dict returns empty."""
