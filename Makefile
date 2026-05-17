@@ -268,7 +268,16 @@ attribution:
 .PHONY: unified-dashboard
 unified-dashboard:
 	@echo "=== Unified Dashboard: $$(date) ==="; \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.monitor.unified_dashboard --save 2>&1
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.monitor.unified_dashboard --save 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	python3 $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR
 
 # ── Run All ──────────────────────────────────────────────────────────
 
