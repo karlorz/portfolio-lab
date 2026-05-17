@@ -16,6 +16,8 @@ import { EntropyPanel } from './EntropyPanel';
 import { BondMomentumPanel } from './BondMomentumPanel';
 import { VIXTermStructurePanel } from './VIXTermStructurePanel';
 import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData } from '../types/live';
+import { RebalanceHealthPanel } from './RebalanceHealthPanel';
+import type { RebalanceHealthData } from './RebalanceHealthPanel';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -32,20 +34,22 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [rebalanceHealth, setRebalanceHealth] = useState<RebalanceHealthData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [expandedHealth, setExpandedHealth] = useState(false);
 
   const fetchData = async () => {
     try {
-      const [signalsRes, perfRes, alertsRes, statsRes, dashboardRes, healthRes, analyticsRes] = await Promise.all([
+      const [signalsRes, perfRes, alertsRes, statsRes, dashboardRes, healthRes, analyticsRes, rhRes] = await Promise.all([
         fetch('/data/signals.json'),
         fetch('/data/dashboard.json'),
         fetch('/data/alerts.json'),
         fetch('/data/stats.json'),
         fetch('/data/dashboard.json'),
         fetch('/data/health.json'),
-        fetch('/data/analytics.json')
+        fetch('/data/analytics.json'),
+        fetch('/data/rebalance_health.json')
       ]);
 
       if (signalsRes.ok) {
@@ -76,6 +80,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
       if (analyticsRes.ok) {
         const an = await analyticsRes.json();
         setAnalytics(an);
+      }
+      if (rhRes.ok) {
+        const rh = await rhRes.json();
+        setRebalanceHealth(rh);
       }
 
       setError(null);
@@ -419,6 +427,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           <div className="tab-panel rebalance-panel-container">
             <BrokerPanel data={signals?.broker} />
             <SmartRebalancePanel data={signals?.smart_rebalance} />
+            <RebalanceHealthPanel
+              rebalanceData={signals?.smart_rebalance}
+              healthData={rebalanceHealth}
+            />
             <RebalancePanel
               signals={signals}
               readOnly={true}

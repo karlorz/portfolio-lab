@@ -224,7 +224,8 @@ overlay-signals:
 		python3 -m src.signals.calendar_seasonality --save 2>&1 | tail -1 && \
 		python3 -m src.signals.crypto_momentum --save 2>&1 | tail -1 && \
 		python3 -m src.signals.bond_duration_signal --save 2>&1 | tail -1 && \
-		python3 -m src.regime.kurtosis_regime --save 2>&1 | tail -1'; \
+		python3 -m src.regime.kurtosis_regime --save 2>&1 | tail -1 && \
+		python3 -m src.monitor.rebalance_health 2>&1 | tail -1'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
