@@ -584,12 +584,21 @@ class PortfolioExplainability:
         return json.dumps(asdict(report), indent=2, default=str)
 
     def save_report(self, report: ExplainabilityReport) -> Path:
-        """Save report to disk."""
+        """Save report to disk (data/ + public/data/ for dashboard fetch)."""
         output_dir = self.data_dir / "explainability"
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / f"explainability_{report.analysis_date}.json"
+        report_json = json.dumps(asdict(report), indent=2, default=str)
         with open(path, "w") as f:
-            json.dump(asdict(report), f, indent=2, default=str)
+            f.write(report_json)
+
+        # Also write to public/data/ for dashboard
+        public_dir = Path.home() / "projects" / "portfolio-lab" / "public" / "data" / "explainability"
+        public_dir.mkdir(parents=True, exist_ok=True)
+        latest_path = public_dir / "explainability_latest.json"
+        with open(latest_path, "w") as f:
+            f.write(report_json)
+
         logger.info("Saved explainability report: %s", path)
         return path
 
