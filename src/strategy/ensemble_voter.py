@@ -89,6 +89,7 @@ class SignalSource(Enum):
     COMMODITY_CURVE = "commodity_curve"    # v3.20 Commodity curve overlay
     ALTERNATIVE_DATA = "alternative_data"  # v9.00 Alternative data signal (SEC EDGAR, NewsAPI, jobs)
     CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # v8.09 Cross-asset regime arbitrage
+    ZERO_DTE = "zero_dte"  # v3.12 0DTE options yield enhancement
 
 
 @dataclass
@@ -145,44 +146,45 @@ REGIME_WEIGHTS = {
         SignalSource.MULTI_SPEED_MOM: 0.17,
         SignalSource.CTA_TREND: 0.07,
         SignalSource.MACRO_MOMENTUM: 0.07,
-        SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
+        SignalSource.FACTOR_ROTATION: 0.05,
         SignalSource.DURATION_REGIME: 0.05,
-        SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly idle in normal)
+        SignalSource.MEAN_REVERSION: 0.02,    # v4.81 VIX-gated (mostly idle in normal)
         SignalSource.HMM_REGIME: 0.02,       # Minimal in normal
         SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
-        SignalSource.CLOSING_AUCTION: 0.02,  # v3.17 MOC signals
-        SignalSource.UNIFIED_OVERLAY: 0.01,  # v4.90 Multi-overlay orchestration
-        SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Transformer regime detection
-        SignalSource.TRANSIENT_FACTORS: 0.03,   # v5.01 Transient statistical factors
-        SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 VGRSI network-science indicator
-        SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
-        SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
-        SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
-        SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (cross-sectional Z-scores)
-        SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget monitoring
-        SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative signal
+        SignalSource.CLOSING_AUCTION: 0.01,  # v3.17 MOC signals
+        SignalSource.UNIFIED_OVERLAY: 0.005,  # v4.90 Multi-overlay orchestration
+        SignalSource.TRANSFORMER_REGIME: 0.02,  # v3.18 Transformer regime detection
+        SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Transient statistical factors
+        SignalSource.VISIBILITY_GRAPH: 0.005,     # v5.41 VGRSI network-science indicator
+        SignalSource.VP_MACD: 0.005,              # v5.55 Volume-Price Adjusted MACD
+        SignalSource.CROSS_ASSET_RV: 0.005,       # v5.71 Cross-asset relative value
+        SignalSource.REGIME_CLASSIFIER: 0.02,    # v5.73 ML-Light Regime Predictor
+        SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (cross-sectional Z-scores)
+        SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budgeting & scenario analysis
+        SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative signal
         SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
         SignalSource.VIXY_HEDGE: 0.05,          # v7.04 Dynamic VIXY hedge sizing
         SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Meta-timeframe fusion
-        SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus
-        SignalSource.FX_CARRY: 0.02,               # v3.15 FX Currency Carry
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
-        SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
+        SignalSource.MACRO_REGIME_SYNTHESIS: 0.01,  # v8.07 Meta-regime consensus
+        SignalSource.FX_CARRY: 0.01,               # v3.15 FX Currency Carry
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.005,  # v3.13 International equity momentum
+        SignalSource.COMMODITY_CURVE: 0.005,         # v3.20 Commodity curve overlay
         SignalSource.ALTERNATIVE_DATA: 0.02,        # v9.00 Alternative data (SEC/News/Jobs)
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.02,  # v8.09 Cross-asset regime arbitrage
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.01,  # v8.09 Cross-asset regime arbitrage
+        SignalSource.ZERO_DTE: 0.005,  # v3.12 0DTE options yield enhancement
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
-        SignalSource.CTA_TREND: 0.17,
+        SignalSource.CTA_TREND: 0.15,
         SignalSource.MEAN_REVERSION: 0.08,   # v4.81 VIX-gated (active in high vol)
         SignalSource.MULTI_SPEED_MOM: 0.10,
         SignalSource.MACRO_MOMENTUM: 0.05,
-        SignalSource.FACTOR_ROTATION: 0.05,   # v3.00 Quality+Momentum overlay
+        SignalSource.FACTOR_ROTATION: 0.04,   # v3.00 Quality+Momentum overlay
         SignalSource.CIRCUIT_BREAKER: 0.05,
         SignalSource.TSFM_MOMENTUM: 0.01,
         SignalSource.DURATION_REGIME: 0.0,
         SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
-        SignalSource.TRANSFORMER_REGIME: 0.05,  # v3.18 Most useful in volatile transitions
+        SignalSource.TRANSFORMER_REGIME: 0.04,  # v3.18 Most useful in volatile transitions
         SignalSource.UNIFIED_OVERLAY: 0.0,  # v4.90 (de-prioritized in high vol)
         SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Transient statistical factors (active in vol)
         SignalSource.VISIBILITY_GRAPH: 0.0,     # v5.41 VGRSI (minimal in high vol)
@@ -198,9 +200,10 @@ REGIME_WEIGHTS = {
         SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus (higher in high vol)
         SignalSource.FX_CARRY: 0.01,               # v3.15 FX Currency Carry (lower in high vol)
         SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
-        SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
+        SignalSource.COMMODITY_CURVE: 0.005,         # v3.20 Commodity curve overlay
         SignalSource.ALTERNATIVE_DATA: 0.01,        # v9.00 Reduced in high vol
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.03,  # v8.09 Cross-asset regime arb (more active in vol)
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.02,  # v8.09 Cross-asset regime arb (more active in vol)
+        SignalSource.ZERO_DTE: 0.0,  # v3.12 Disabled in high vol (elevated tail risk)
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.25,
@@ -232,15 +235,16 @@ REGIME_WEIGHTS = {
         SignalSource.COMMODITY_CURVE: 0.0,          # v3.20 Disabled in crisis
         SignalSource.ALTERNATIVE_DATA: 0.0,         # v9.00 Disabled in crisis
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.01,  # v8.09 Cross-asset regime arb (active in crisis)
+        SignalSource.ZERO_DTE: 0.0,  # v3.12 Disabled in crisis (extreme tail risk)
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.16,
-        SignalSource.HMM_REGIME: 0.17,
+        SignalSource.HMM_REGIME: 0.15,
         SignalSource.CTA_TREND: 0.14,
         SignalSource.TSFM_MOMENTUM: 0.10,
         SignalSource.MACRO_MOMENTUM: 0.08,
         SignalSource.FACTOR_ROTATION: 0.05,   # Higher in recovery (momentum captures)
-        SignalSource.MEAN_REVERSION: 0.05,    # v4.81 VIX-gated (declining VIX, moderate)
+        SignalSource.MEAN_REVERSION: 0.04,    # v4.81 VIX-gated (declining VIX, moderate)
         SignalSource.DURATION_REGIME: 0.02,
         SignalSource.CIRCUIT_BREAKER: 0.0,
         SignalSource.CLOSING_AUCTION: 0.01,  # v3.17 MOC signals
@@ -253,16 +257,17 @@ REGIME_WEIGHTS = {
         SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
         SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (momentum capture in recovery)
         SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget (recovery monitoring)
-        SignalSource.LLM_NARRATIVE: 0.04,       # v7.01 LLM macro/narrative (recovery regime)
+        SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative (recovery regime)
         SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
         SignalSource.VIXY_HEDGE: 0.03,          # v7.04 Dynamic VIXY hedge (minimal in recovery)
         SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Higher in recovery (long-term bets)
         SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus
         SignalSource.FX_CARRY: 0.02,               # v3.15 FX Currency Carry (recovery momentum)
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.02,  # v3.13 International equity momentum (recovery tracking)
-        SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum (recovery tracking)
+        SignalSource.COMMODITY_CURVE: 0.005,         # v3.20 Commodity curve overlay
         SignalSource.ALTERNATIVE_DATA: 0.02,        # v9.00 Recovery tracking via alt data
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.02,  # v8.09 Cross-asset regime arb
+        SignalSource.ZERO_DTE: 0.01,  # v3.12 0DTE options yield enhancement (gradual return in recovery)
     }
 }
 
@@ -907,6 +912,60 @@ class EnsembleVoter:
             pass
         except Exception as e:
             logger.debug(f"Cross-asset regime arb unavailable: {e}")
+            pass
+
+        # 19. 0DTE Options Yield Enhancement (v3.12)
+        try:
+            odte_state_file = Path("~/projects/portfolio-lab/data/odte_state.json").expanduser()
+            if odte_state_file.exists():
+                import json as json_mod
+                with open(odte_state_file) as f:
+                    odte_state = json_mod.load(f)
+
+                # 0DTE signal: slightly positive when selling calls for yield
+                # (implies modest bullish view with volatility premium capture)
+                # Signal value based on active positions and recent performance
+                active_positions = odte_state.get("active_positions", 0)
+                recent_profit = odte_state.get("recent_profit", 0.0)
+                cumulative_pnl = odte_state.get("cumulative_pnl", 0.0)
+
+                # Base signal: small positive yield enhancement bias
+                base_signal = 0.05
+
+                # Adjust for active positions (more positions = more yield capture)
+                position_bonus = min(0.10, active_positions * 0.03)
+
+                # Adjust for recent performance
+                perf_bonus = min(0.05, max(-0.05, recent_profit * 0.01))
+
+                signal_value = min(0.20, max(-0.10, base_signal + position_bonus + perf_bonus))
+
+                readings[SignalSource.ZERO_DTE] = SignalReading(
+                    source=SignalSource.ZERO_DTE,
+                    timestamp=str(datetime.now()),
+                    value=signal_value,
+                    confidence=0.4,  # Moderate confidence (yield enhancement, not directional)
+                    weight=0.0,
+                    regime_fit="normal",
+                    asset_signals={"SPY": signal_value},
+                    explanation=f"0DTE Yield Enhancement: {active_positions} active positions, "
+                                f"recent P&L=${recent_profit:.2f}, "
+                                f"cumulative=${cumulative_pnl:.2f}"
+                )
+            else:
+                # No state file yet — signal is neutral but present
+                readings[SignalSource.ZERO_DTE] = SignalReading(
+                    source=SignalSource.ZERO_DTE,
+                    timestamp=str(datetime.now()),
+                    value=0.0,
+                    confidence=0.3,
+                    weight=0.0,
+                    regime_fit="normal",
+                    asset_signals={"SPY": 0.0},
+                    explanation="0DTE Yield Enhancement: No active positions (state file not found)"
+                )
+        except Exception as e:
+            logger.debug(f"0DTE signal unavailable: {e}")
             pass
 
         self.current_readings = readings
