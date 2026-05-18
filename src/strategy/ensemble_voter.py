@@ -88,6 +88,7 @@ class SignalSource(Enum):
     INTERNATIONAL_MOMENTUM = "international_momentum"  # v3.13 International equity momentum
     COMMODITY_CURVE = "commodity_curve"    # v3.20 Commodity curve overlay
     ALTERNATIVE_DATA = "alternative_data"  # v9.00 Alternative data signal (SEC EDGAR, NewsAPI, jobs)
+    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # v8.09 Cross-asset regime arbitrage
 
 
 @dataclass
@@ -168,6 +169,7 @@ REGIME_WEIGHTS = {
         SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
         SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
         SignalSource.ALTERNATIVE_DATA: 0.02,        # v9.00 Alternative data (SEC/News/Jobs)
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.02,  # v8.09 Cross-asset regime arbitrage
     },
     Regime.HIGH_VOL: {
         SignalSource.HMM_REGIME: 0.20,
@@ -198,6 +200,7 @@ REGIME_WEIGHTS = {
         SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
         SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
         SignalSource.ALTERNATIVE_DATA: 0.01,        # v9.00 Reduced in high vol
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.03,  # v8.09 Cross-asset regime arb (more active in vol)
     },
     Regime.CRISIS: {
         SignalSource.CIRCUIT_BREAKER: 0.25,
@@ -228,6 +231,7 @@ REGIME_WEIGHTS = {
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0,   # v3.13 Disabled in crisis
         SignalSource.COMMODITY_CURVE: 0.0,          # v3.20 Disabled in crisis
         SignalSource.ALTERNATIVE_DATA: 0.0,         # v9.00 Disabled in crisis
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.01,  # v8.09 Cross-asset regime arb (active in crisis)
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.16,
@@ -258,6 +262,7 @@ REGIME_WEIGHTS = {
         SignalSource.INTERNATIONAL_MOMENTUM: 0.02,  # v3.13 International equity momentum (recovery tracking)
         SignalSource.COMMODITY_CURVE: 0.01,         # v3.20 Commodity curve overlay
         SignalSource.ALTERNATIVE_DATA: 0.02,        # v9.00 Recovery tracking via alt data
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.02,  # v8.09 Cross-asset regime arb
     }
 }
 
@@ -874,6 +879,34 @@ class EnsembleVoter:
                 )
         except Exception as e:
             logger.debug(f"Alternative data unavailable: {e}")
+            pass
+
+        # 18. Cross-Asset Regime Arbitrage (v8.09)
+        try:
+            from src.signals.cross_asset_regime_arb import CrossAssetRegimeArbDetector
+            arb_detector = CrossAssetRegimeArbDetector()
+            arb_signal = arb_detector.get_ensemble_signal()
+
+            if arb_signal.get("active") and arb_signal.get("signal_value") is not None:
+                readings[SignalSource.CROSS_ASSET_REGIME_ARB] = SignalReading(
+                    source=SignalSource.CROSS_ASSET_REGIME_ARB,
+                    timestamp=arb_signal.get("timestamp", str(datetime.now())),
+                    value=arb_signal["signal_value"],
+                    confidence=arb_signal.get("confidence", 0.5),
+                    weight=0.0,
+                    regime_fit="all",
+                    asset_signals=arb_signal.get("asset_signals", {}),
+                    explanation=f"Cross-asset regime arb: pattern={arb_signal.get('pattern', '?')}, "
+                                f"eq={arb_signal.get('equity_regime', '?')}, "
+                                f"bd={arb_signal.get('bond_regime', '?')}, "
+                                f"gd={arb_signal.get('gold_regime', '?')}, "
+                                f"persist={arb_signal.get('persistence_days', 0)}d, "
+                                f"{arb_signal.get('explanation', '')}"
+                )
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"Cross-asset regime arb unavailable: {e}")
             pass
 
         self.current_readings = readings
