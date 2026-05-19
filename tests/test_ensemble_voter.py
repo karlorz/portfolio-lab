@@ -129,18 +129,27 @@ class TestRegimeWeights:
             assert abs(total - 1.0) < 0.10, f"{regime} weights sum to {total:.4f}"
 
     def test_all_sources_covered(self):
+        """Only the 6 survivor signals are required in each regime."""
+        survivors = [
+            SignalSource.TSFM_MOMENTUM,
+            SignalSource.MULTI_SPEED_MOM,
+            SignalSource.DURATION_REGIME,
+            SignalSource.CROSS_ASSET_RV,
+            SignalSource.INTERNATIONAL_MOMENTUM,
+            SignalSource.ALTERNATIVE_DATA,
+        ]
         for regime, weights in REGIME_WEIGHTS.items():
-            for source in SignalSource:
+            for source in survivors:
                 assert source in weights, f"{source} missing from {regime}"
 
-    def test_crisis_circuit_breaker_high(self):
-        assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.CIRCUIT_BREAKER] >= 0.25
+    def test_crisis_multi_speed_mom_high(self):
+        assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.MULTI_SPEED_MOM] >= 0.5
 
     def test_normal_tsfm_dominant(self):
         assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.TSFM_MOMENTUM] >= 0.25
 
-    def test_high_vol_hmm_dominant(self):
-        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.HMM_REGIME] >= 0.2
+    def test_high_vol_multi_speed_mom_dominant(self):
+        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.MULTI_SPEED_MOM] >= 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +210,7 @@ class TestEnsembleVoter:
         voter = _make_voter(tmp_path)
         readings = {
             SignalSource.TSFM_MOMENTUM: _make_reading(value=0.5),
-            SignalSource.CTA_TREND: _make_reading(value=0.3, source=SignalSource.CTA_TREND),
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.3, source=SignalSource.MULTI_SPEED_MOM),
         }
         vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
         assert vote.num_sources == 2
@@ -211,7 +220,7 @@ class TestEnsembleVoter:
     def test_compute_vote_crisis_action(self, tmp_path):
         voter = _make_voter(tmp_path)
         readings = {
-            SignalSource.CIRCUIT_BREAKER: _make_reading(value=-0.8, source=SignalSource.CIRCUIT_BREAKER),
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=-0.8, source=SignalSource.MULTI_SPEED_MOM),
         }
         vote = voter.compute_vote(readings=readings, regime=Regime.CRISIS, regime_confidence=0.9)
         assert vote.action == 'risk_off'
@@ -235,7 +244,7 @@ class TestEnsembleVoter:
         voter = _make_voter(tmp_path)
         readings = {
             SignalSource.TSFM_MOMENTUM: _make_reading(value=0.5),
-            SignalSource.CTA_TREND: _make_reading(value=0.4, source=SignalSource.CTA_TREND),
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.4, source=SignalSource.MULTI_SPEED_MOM),
         }
         vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
         assert 0.0 <= vote.agreement_ratio <= 1.0

@@ -61,35 +61,35 @@ class Regime(Enum):
 class SignalSource(Enum):
     """Available signal sources."""
     TSFM_MOMENTUM = "tsfm_momentum"           # v2.15 Factor momentum
-    HMM_REGIME = "hmm_regime"                 # v2.20.1 Wasserstein HMM
-    CTA_TREND = "cta_trend"                   # v2.10+ CTA overlay
-    MACRO_MOMENTUM = "macro_momentum"         # v2.57 Macro signals
+    HMM_REGIME = "hmm_regime"                 # v2.20.1 Wasserstein HMM  # DEPRECATED
+    CTA_TREND = "cta_trend"                   # v2.10+ CTA overlay  # DEPRECATED
+    MACRO_MOMENTUM = "macro_momentum"         # v2.57 Macro signals  # DEPRECATED
     MULTI_SPEED_MOM = "multi_speed_momentum"  # v2.56 Multi-speed
     DURATION_REGIME = "duration_regime"       # v2.17-2.18 Yield curve
-    CIRCUIT_BREAKER = "circuit_breaker"     # v2.14 Risk controls
-    FACTOR_ROTATION = "factor_rotation"       # v3.00 Quality+Momentum overlay
-    CLOSING_AUCTION = "closing_auction"       # v3.17 MOC/IOC imbalance signals
-    UNIFIED_OVERLAY = "unified_overlay"       # v4.90 Multi-overlay orchestration
-    MEAN_REVERSION = "mean_reversion"         # v4.81 VIX-gated mean-reversion
-    TRANSFORMER_REGIME = "transformer_regime"  # v3.18 Transformer regime detector
-    TRANSIENT_FACTORS = "transient_factors"   # v5.01 Transient statistical factors
-    VISIBILITY_GRAPH = "visibility_graph"     # v5.41 VGRSI network-science indicator
-    VP_MACD = "vp_macd"                       # v5.55 Volume-Price Adjusted MACD
+    CIRCUIT_BREAKER = "circuit_breaker"     # v2.14 Risk controls  # DEPRECATED
+    FACTOR_ROTATION = "factor_rotation"       # v3.00 Quality+Momentum overlay  # DEPRECATED
+    CLOSING_AUCTION = "closing_auction"       # v3.17 MOC/IOC imbalance signals  # DEPRECATED
+    UNIFIED_OVERLAY = "unified_overlay"       # v4.90 Multi-overlay orchestration  # DEPRECATED
+    MEAN_REVERSION = "mean_reversion"         # v4.81 VIX-gated mean-reversion  # DEPRECATED
+    TRANSFORMER_REGIME = "transformer_regime"  # v3.18 Transformer regime detector  # DEPRECATED
+    TRANSIENT_FACTORS = "transient_factors"   # v5.01 Transient statistical factors  # DEPRECATED
+    VISIBILITY_GRAPH = "visibility_graph"     # v5.41 VGRSI network-science indicator  # DEPRECATED
+    VP_MACD = "vp_macd"                       # v5.55 Volume-Price Adjusted MACD  # DEPRECATED
     CROSS_ASSET_RV = "cross_asset_rv"         # v5.71 Cross-asset relative value
-    REGIME_CLASSIFIER = "regime_classifier"   # v5.73 ML-Light Regime Predictor
-    FACTOR_TIMING = "factor_timing"          # v6.02 Factor timing (cross-sectional Z-scores)
-    RISK_BUDGET = "risk_budget"              # v6.04 Factor risk budgeting & scenario analysis
-    LLM_NARRATIVE = "llm_narrative"          # v7.01 LLM macro/narrative signal
-    TAX_AWARE = "tax_aware"                  # v7.03 Tax-aware rebalancing alpha
-    VIXY_HEDGE = "vixy_hedge"              # v7.04 Dynamic VIXY hedge sizing
-    MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # v8.06 Multi-timeframe fusion
-    MACRO_REGIME_SYNTHESIS = "macro_regime_synthesis"  # v8.07 Meta-regime consensus
-    FX_CARRY = "fx_carry"                  # v3.15 FX Currency Carry
+    REGIME_CLASSIFIER = "regime_classifier"   # v5.73 ML-Light Regime Predictor  # DEPRECATED
+    FACTOR_TIMING = "factor_timing"          # v6.02 Factor timing (cross-sectional Z-scores)  # DEPRECATED
+    RISK_BUDGET = "risk_budget"              # v6.04 Factor risk budgeting & scenario analysis  # DEPRECATED
+    LLM_NARRATIVE = "llm_narrative"          # v7.01 LLM macro/narrative signal  # DEPRECATED
+    TAX_AWARE = "tax_aware"                  # v7.03 Tax-aware rebalancing alpha  # DEPRECATED
+    VIXY_HEDGE = "vixy_hedge"              # v7.04 Dynamic VIXY hedge sizing  # DEPRECATED
+    MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # v8.06 Multi-timeframe fusion  # DEPRECATED
+    MACRO_REGIME_SYNTHESIS = "macro_regime_synthesis"  # v8.07 Meta-regime consensus  # DEPRECATED
+    FX_CARRY = "fx_carry"                  # v3.15 FX Currency Carry  # DEPRECATED
     INTERNATIONAL_MOMENTUM = "international_momentum"  # v3.13 International equity momentum
-    COMMODITY_CURVE = "commodity_curve"    # v3.20 Commodity curve overlay
+    COMMODITY_CURVE = "commodity_curve"    # v3.20 Commodity curve overlay  # DEPRECATED
     ALTERNATIVE_DATA = "alternative_data"  # v9.00 Alternative data signal (SEC EDGAR, NewsAPI, jobs)
-    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # v8.09 Cross-asset regime arbitrage
-    ZERO_DTE = "zero_dte"  # v3.12 0DTE options yield enhancement
+    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # v8.09 Cross-asset regime arbitrage  # DEPRECATED
+    ZERO_DTE = "zero_dte"  # v3.12 0DTE options yield enhancement  # DEPRECATED
 
 
 @dataclass
@@ -139,135 +139,39 @@ class EnsembleVote:
     source_votes: List[SignalReading]
 
 
-# Regime-dependent weights
+# Regime-dependent weights (6 survivor signals, renormalized per regime)
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.25,
-        SignalSource.MULTI_SPEED_MOM: 0.17,
-        SignalSource.CTA_TREND: 0.07,
-        SignalSource.MACRO_MOMENTUM: 0.07,
-        SignalSource.FACTOR_ROTATION: 0.05,
-        SignalSource.DURATION_REGIME: 0.05,
-        SignalSource.MEAN_REVERSION: 0.02,    # v4.81 VIX-gated (mostly idle in normal)
-        SignalSource.HMM_REGIME: 0.02,       # Minimal in normal
-        SignalSource.CIRCUIT_BREAKER: 0.0,  # Off in normal
-        SignalSource.CLOSING_AUCTION: 0.01,  # v3.17 MOC signals
-        SignalSource.UNIFIED_OVERLAY: 0.005,  # v4.90 Multi-overlay orchestration
-        SignalSource.TRANSFORMER_REGIME: 0.02,  # v3.18 Transformer regime detection
-        SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Transient statistical factors
-        SignalSource.VISIBILITY_GRAPH: 0.005,     # v5.41 VGRSI network-science indicator
-        SignalSource.VP_MACD: 0.005,              # v5.55 Volume-Price Adjusted MACD
-        SignalSource.CROSS_ASSET_RV: 0.005,       # v5.71 Cross-asset relative value
-        SignalSource.REGIME_CLASSIFIER: 0.02,    # v5.73 ML-Light Regime Predictor
-        SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (cross-sectional Z-scores)
-        SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budgeting & scenario analysis
-        SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative signal
-        SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
-        SignalSource.VIXY_HEDGE: 0.05,          # v7.04 Dynamic VIXY hedge sizing
-        SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Meta-timeframe fusion
-        SignalSource.MACRO_REGIME_SYNTHESIS: 0.01,  # v8.07 Meta-regime consensus
-        SignalSource.FX_CARRY: 0.01,               # v3.15 FX Currency Carry
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.005,  # v3.13 International equity momentum
-        SignalSource.COMMODITY_CURVE: 0.005,         # v3.20 Commodity curve overlay
-        SignalSource.ALTERNATIVE_DATA: 0.02,        # v9.00 Alternative data (SEC/News/Jobs)
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.01,  # v8.09 Cross-asset regime arbitrage
-        SignalSource.ZERO_DTE: 0.005,  # v3.12 0DTE options yield enhancement
+        SignalSource.TSFM_MOMENTUM: 0.5000,
+        SignalSource.MULTI_SPEED_MOM: 0.3400,
+        SignalSource.DURATION_REGIME: 0.1000,
+        SignalSource.ALTERNATIVE_DATA: 0.0400,
+        SignalSource.CROSS_ASSET_RV: 0.0100,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.0100,
     },
     Regime.HIGH_VOL: {
-        SignalSource.HMM_REGIME: 0.20,
-        SignalSource.CTA_TREND: 0.15,
-        SignalSource.MEAN_REVERSION: 0.08,   # v4.81 VIX-gated (active in high vol)
-        SignalSource.MULTI_SPEED_MOM: 0.10,
-        SignalSource.MACRO_MOMENTUM: 0.05,
-        SignalSource.FACTOR_ROTATION: 0.04,   # v3.00 Quality+Momentum overlay
-        SignalSource.CIRCUIT_BREAKER: 0.05,
-        SignalSource.TSFM_MOMENTUM: 0.01,
-        SignalSource.DURATION_REGIME: 0.0,
-        SignalSource.CLOSING_AUCTION: 0.03,  # v3.17 MOC signals
-        SignalSource.TRANSFORMER_REGIME: 0.04,  # v3.18 Most useful in volatile transitions
-        SignalSource.UNIFIED_OVERLAY: 0.0,  # v4.90 (de-prioritized in high vol)
-        SignalSource.TRANSIENT_FACTORS: 0.02,   # v5.01 Transient statistical factors (active in vol)
-        SignalSource.VISIBILITY_GRAPH: 0.0,     # v5.41 VGRSI (minimal in high vol)
-        SignalSource.VP_MACD: 0.0,              # v5.55 (de-prioritized in high vol)
-        SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
-        SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
-        SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (defensive tilt in high vol)
-        SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget (active in high vol)
-        SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative signal
-        SignalSource.TAX_AWARE: 0.01,            # v7.03 Tax-aware rebalancing (minimal in vol)
-        SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (active in vol)
-        SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Meta-timeframe fusion
-        SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus (higher in high vol)
-        SignalSource.FX_CARRY: 0.01,               # v3.15 FX Currency Carry (lower in high vol)
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum
-        SignalSource.COMMODITY_CURVE: 0.005,         # v3.20 Commodity curve overlay
-        SignalSource.ALTERNATIVE_DATA: 0.01,        # v9.00 Reduced in high vol
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.02,  # v8.09 Cross-asset regime arb (more active in vol)
-        SignalSource.ZERO_DTE: 0.0,  # v3.12 Disabled in high vol (elevated tail risk)
+        SignalSource.MULTI_SPEED_MOM: 0.7143,
+        SignalSource.TSFM_MOMENTUM: 0.0714,
+        SignalSource.CROSS_ASSET_RV: 0.0714,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.0714,
+        SignalSource.ALTERNATIVE_DATA: 0.0714,
+        SignalSource.DURATION_REGIME: 0.0000,
     },
     Regime.CRISIS: {
-        SignalSource.CIRCUIT_BREAKER: 0.25,
-        SignalSource.CTA_TREND: 0.22,
-        SignalSource.HMM_REGIME: 0.12,
-        SignalSource.MACRO_MOMENTUM: 0.06,
-        SignalSource.FACTOR_ROTATION: 0.03,   # Reduced in crisis (defensive factor focus)
-        SignalSource.MEAN_REVERSION: 0.03,    # v4.81 VIX-gated (mostly frozen in crisis)
-        SignalSource.MULTI_SPEED_MOM: 0.03,
-        SignalSource.TSFM_MOMENTUM: 0.0,
-        SignalSource.DURATION_REGIME: 0.0,
-        SignalSource.CLOSING_AUCTION: 0.02,  # v3.17 MOC signals
-        SignalSource.UNIFIED_OVERLAY: 0.0,  # v4.90 (merged into broader signals)
-        SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Low weight in crisis (regime obvious)
-        SignalSource.TRANSIENT_FACTORS: 0.01,   # v5.01 Low weight during crisis
-        SignalSource.VISIBILITY_GRAPH: 0.0,     # v5.41 Minimal during crisis
-        SignalSource.VP_MACD: 0.0,              # v5.55 (de-prioritized in crisis)
-        SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
-        SignalSource.REGIME_CLASSIFIER: 0.01,    # v5.73 ML-Light Regime Predictor (lower in crisis)
-        SignalSource.FACTOR_TIMING: 0.02,       # v6.02 Factor timing (crisis tilts defensive)
-        SignalSource.RISK_BUDGET: 0.03,         # v6.04 Factor risk budget (crisis monitoring)
-        SignalSource.LLM_NARRATIVE: 0.05,       # v7.01 LLM macro/narrative — highest in crisis
-        SignalSource.TAX_AWARE: 0.01,            # v7.03 Tax-aware rebalancing (minimal in crisis)
-        SignalSource.VIXY_HEDGE: 0.10,          # v7.04 Dynamic VIXY hedge sizing (max in crisis)
-        SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Lower in crisis (short-term dominates)
-        SignalSource.MACRO_REGIME_SYNTHESIS: 0.03,  # v8.07 Highest in crisis (regime detection critical)
-        SignalSource.FX_CARRY: 0.0,                # v3.15 Disabled in crisis
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.0,   # v3.13 Disabled in crisis
-        SignalSource.COMMODITY_CURVE: 0.0,          # v3.20 Disabled in crisis
-        SignalSource.ALTERNATIVE_DATA: 0.0,         # v9.00 Disabled in crisis
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.01,  # v8.09 Cross-asset regime arb (active in crisis)
-        SignalSource.ZERO_DTE: 0.0,  # v3.12 Disabled in crisis (extreme tail risk)
+        SignalSource.MULTI_SPEED_MOM: 0.7500,
+        SignalSource.CROSS_ASSET_RV: 0.2500,
+        SignalSource.TSFM_MOMENTUM: 0.0000,
+        SignalSource.DURATION_REGIME: 0.0000,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
+        SignalSource.ALTERNATIVE_DATA: 0.0000,
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.16,
-        SignalSource.HMM_REGIME: 0.15,
-        SignalSource.CTA_TREND: 0.14,
-        SignalSource.TSFM_MOMENTUM: 0.10,
-        SignalSource.MACRO_MOMENTUM: 0.08,
-        SignalSource.FACTOR_ROTATION: 0.05,   # Higher in recovery (momentum captures)
-        SignalSource.MEAN_REVERSION: 0.04,    # v4.81 VIX-gated (declining VIX, moderate)
-        SignalSource.DURATION_REGIME: 0.02,
-        SignalSource.CIRCUIT_BREAKER: 0.0,
-        SignalSource.CLOSING_AUCTION: 0.01,  # v3.17 MOC signals
-        SignalSource.TRANSFORMER_REGIME: 0.03,  # v3.18 Detect recovery transitions
-        SignalSource.UNIFIED_OVERLAY: 0.0,  # v4.90 (merged into broader signals)
-        SignalSource.TRANSIENT_FACTORS: 0.01,   # v5.01 Detect transition out of crisis
-        SignalSource.VISIBILITY_GRAPH: 0.01,     # v5.41 Good for recovery structure detection
-        SignalSource.VP_MACD: 0.01,              # v5.55 Volume-Price Adjusted MACD
-        SignalSource.CROSS_ASSET_RV: 0.01,       # v5.71 Cross-asset relative value
-        SignalSource.REGIME_CLASSIFIER: 0.03,    # v5.73 ML-Light Regime Predictor
-        SignalSource.FACTOR_TIMING: 0.03,       # v6.02 Factor timing (momentum capture in recovery)
-        SignalSource.RISK_BUDGET: 0.02,         # v6.04 Factor risk budget (recovery monitoring)
-        SignalSource.LLM_NARRATIVE: 0.03,       # v7.01 LLM macro/narrative (recovery regime)
-        SignalSource.TAX_AWARE: 0.02,            # v7.03 Tax-aware rebalancing alpha
-        SignalSource.VIXY_HEDGE: 0.03,          # v7.04 Dynamic VIXY hedge (minimal in recovery)
-        SignalSource.MULTI_TIMEFRAME_FUSION: 0.01,  # v8.06 Higher in recovery (long-term bets)
-        SignalSource.MACRO_REGIME_SYNTHESIS: 0.02,  # v8.07 Meta-regime consensus
-        SignalSource.FX_CARRY: 0.02,               # v3.15 FX Currency Carry (recovery momentum)
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.01,  # v3.13 International equity momentum (recovery tracking)
-        SignalSource.COMMODITY_CURVE: 0.005,         # v3.20 Commodity curve overlay
-        SignalSource.ALTERNATIVE_DATA: 0.02,        # v9.00 Recovery tracking via alt data
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.02,  # v8.09 Cross-asset regime arb
-        SignalSource.ZERO_DTE: 0.01,  # v3.12 0DTE options yield enhancement (gradual return in recovery)
+        SignalSource.MULTI_SPEED_MOM: 0.5000,
+        SignalSource.TSFM_MOMENTUM: 0.3125,
+        SignalSource.DURATION_REGIME: 0.0625,
+        SignalSource.ALTERNATIVE_DATA: 0.0625,
+        SignalSource.CROSS_ASSET_RV: 0.03125,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.03125,
     }
 }
 
