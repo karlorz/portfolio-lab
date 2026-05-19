@@ -12,6 +12,12 @@ from unittest.mock import Mock, patch, MagicMock
 import sys
 import math
 
+# Save real numpy/pandas/yfinance BEFORE mocking (must happen before
+# sys.modules['numpy'] = mock_np, because import after that fetches the mock)
+_real_np = sys.modules.get('numpy')
+_real_pd = sys.modules.get('pandas')
+_real_yf = sys.modules.get('yfinance')
+
 # Mock dependencies BEFORE importing our modules
 mock_yf = MagicMock()
 mock_pd = MagicMock()
@@ -39,6 +45,14 @@ from signals.international_momentum import (
     InternationalMomentumSignal,
     InternationalMomentumGenerator
 )
+
+# Restore real numpy in sys.modules to avoid polluting other test files.
+# pandas and yfinance are left mocked since no other test files import them
+# at module level — only this file's own tests reference them.
+if _real_np is not None:
+    sys.modules['numpy'] = _real_np
+else:
+    sys.modules.pop('numpy', None)
 
 
 class TestMomentumMetrics(unittest.TestCase):

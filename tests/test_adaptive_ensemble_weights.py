@@ -491,7 +491,10 @@ class TestStatePersistence:
         original = adaptive_weights.update_weights(sample_attribution_good, "normal")
         adaptive_weights._load_state()
         for source in original:
-            assert adaptive_weights.adjusted_weights.get(source) == pytest.approx(original[source], abs=0.01)
+            loaded = adaptive_weights.adjusted_weights.get(source)
+            expected = float(original[source])
+            assert loaded is not None
+            assert abs(loaded - expected) <= 0.01, f"weight mismatch for {source}: {loaded} != {expected}"
 
     def test_load_nonexistent_file(self, adaptive_weights):
         """Loading non-existent file should not crash."""

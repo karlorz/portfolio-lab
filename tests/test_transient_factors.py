@@ -385,9 +385,22 @@ class TestEnsembleSignal:
 # ---------------------------------------------------------------------------
 
 class TestStatePersistence:
-    def test_save_load_state(self, stable_returns, tmp_path):
+    def test_save_load_state(self, tmp_path):
+        """Save and reload state."""
+        rng = np.random.RandomState(42)
+        n_assets = 5
+        n_days = 120
+        factor1 = rng.randn(n_days) * 0.01
+        factor2 = rng.randn(n_days) * 0.005
+        noise = rng.randn(n_assets, n_days) * 0.003
+        returns = np.array([[0.0] * n_days for _ in range(n_assets)], dtype=float)
+        for i in range(n_assets):
+            loading_1 = 0.5 + 0.5 * (i / n_assets)
+            loading_2 = 0.3 * (1 - i / n_assets)
+            returns[i] = loading_1 * factor1 + loading_2 * factor2 + noise[i]
+
         extractor = TransientFactorExtractor(window=60)
-        extractor.compute(stable_returns)
+        extractor.compute(returns)
         
         state_path = tmp_path / "test_transient_state.json"
         extractor.save_state(state_path)
