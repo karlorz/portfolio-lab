@@ -39,6 +39,14 @@
 
 ## Recent Implementation Updates (2026-05-19)
 
+### v9.11 Execution Module Test Coverage - COMPLETED
+- **Tests**: 65 new tests across 3 untested non-ML modules:
+  - `tests/test_goals.py` (35 tests): load/validate/risk_budget/account_type
+  - `tests/test_rebalance_health.py` (14 tests): order parsing, schedule compliance
+  - `tests/test_tca_scorecard.py` (16 tests): peer groups, trend analysis, quality distribution
+- **Test count**: 5652 safe (5873 total)
+- **Status**: All phases complete
+
 ### v9.10 GP-VCV Hybrid Gaussian Process Covariance Estimation - COMPLETED
 - **Estimator**: `src/monitor/gp_vcv_estimator.py` (~380 lines) — GP-based VCV using sklearn GPR
   - Hybrid kernel: RBF (long-term) + Matérn 3/2 (short-term) + WhiteKernel (noise)
@@ -415,10 +423,10 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **5587 safe** tests (221 heavy excluded via collect_ignore, never imported)
-- **5808 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
+- **5652 safe** tests (229 heavy excluded via collect_ignore, never imported)
+- **5873 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
-- 182 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat
+- 185 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
