@@ -516,8 +516,8 @@ class TestCLI:
 
         original_init = ro.RegimeConstrainedOptimizer.__init__
 
-        def patched_init(self, data_dir=None, risk_free_rate=0.04):
-            original_init(self, data_dir=normal_regime_state, risk_free_rate=risk_free_rate)
+        def patched_init(self, data_dir=None, risk_free_rate=0.04, estimator="ewma"):
+            original_init(self, data_dir=normal_regime_state, risk_free_rate=risk_free_rate, estimator=estimator)
 
         monkeypatch.setattr(ro.RegimeConstrainedOptimizer, "__init__", patched_init)
         monkeypatch.setattr(sys, "argv", ["regime_optimizer.py", "cov"])
@@ -530,8 +530,8 @@ class TestCLI:
 
         original_init = ro.RegimeConstrainedOptimizer.__init__
 
-        def patched_init(self, data_dir=None, risk_free_rate=0.04):
-            original_init(self, data_dir=normal_regime_state, risk_free_rate=risk_free_rate)
+        def patched_init(self, data_dir=None, risk_free_rate=0.04, estimator="ewma"):
+            original_init(self, data_dir=normal_regime_state, risk_free_rate=risk_free_rate, estimator=estimator)
 
         monkeypatch.setattr(ro.RegimeConstrainedOptimizer, "__init__", patched_init)
         monkeypatch.setattr(sys, "argv", ["regime_optimizer.py", "all"])
