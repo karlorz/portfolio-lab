@@ -44,7 +44,7 @@
   - `tests/test_goals.py` (35 tests): load/validate/risk_budget/account_type
   - `tests/test_rebalance_health.py` (14 tests): order parsing, schedule compliance
   - `tests/test_tca_scorecard.py` (16 tests): peer groups, trend analysis, quality distribution
-- **Test count**: 5652 safe (5873 total)
+- **Test count**: 5731 safe (5952 total)
 - **Status**: All phases complete
 
 ### v9.10 GP-VCV Hybrid Gaussian Process Covariance Estimation - COMPLETED
