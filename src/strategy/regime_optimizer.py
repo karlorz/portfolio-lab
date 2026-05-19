@@ -294,12 +294,16 @@ class RegimeConstrainedOptimizer:
     """
 
     def __init__(self, data_dir: Optional[Path] = None, risk_free_rate: float = 0.04,
-                 cost_aversion: float = 0.01):
+                 cost_aversion: float = 0.01, estimator: str = "ewma",
+                 gp_lookback: int = 504):
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.state_path = self.data_dir / "regime_optimizer_state.json"
         self.regime_state_path = self.data_dir / "regime_classifier_state.json"
         self.risk_free_rate = risk_free_rate
         self.cost_aversion = cost_aversion
+        self.estimator = estimator
+        self.gp_lookback = gp_lookback
+        self._gp_estimator = None  # lazy init
 
         # Cost model (v6.07)
         self._cost_model: Optional['AlmgrenChrissCostModel'] = None
@@ -360,7 +364,17 @@ class RegimeConstrainedOptimizer:
     def build_regime_covariance(self) -> RegimeCovariance:
         """
         Build regime-blended covariance matrix from current regime state.
+
+        Supports two estimators:
+          - 'ewma': Regime-blended heuristic (default, current behavior)
+          - 'gp_vcv': Gaussian Process covariance (requires ML)
         """
+        if self.estimator == "gp_vcv":
+            return self._build_gp_covariance()
+        return self._build_ewma_covariance()
+
+    def _build_ewma_covariance(self) -> RegimeCovariance:
+        """Original EWMA regime-blended covariance (unchanged logic)."""
         regime_state = self._load_regime_state()
         regime = regime_state.get("regime", "normal")
         confidence = regime_state.get("confidence", 0.7)
@@ -376,6 +390,74 @@ class RegimeConstrainedOptimizer:
             confidence=confidence,
             regime_probs=probs,
             matrix=blended,
+            blended=True,
+        )
+
+    def _build_gp_covariance(self) -> RegimeCovariance:
+        """GP-VCV covariance estimation with graceful fallback."""
+        import os as _os
+        if _os.environ.get("PORTFOLIO_LAB_ENABLE_ML") != "1":
+            logger.warning(
+                "GP-VCV requested but ML disabled. "
+                "Falling back to EWMA covariance."
+            )
+            return self._build_ewma_covariance()
+
+        prices = self._load_prices()
+        if prices is None:
+            logger.warning("No price data available for GP-VCV")
+            return self._build_ewma_covariance()
+
+        # Convert prices to log returns
+        try:
+            from src.monitor.gp_vcv_estimator import GaussianProcessVCV
+        except ImportError as e:
+            logger.warning(f"GP-VCV import failed: {e}. Using EWMA fallback.")
+            return self._build_ewma_covariance()
+
+        log_returns_list = []
+        valid_assets = []
+        for sym in ASSETS:
+            series = self._get_series(prices, sym)
+            if series is not None and len(series) > 2:
+                r = np.diff(np.log(np.maximum(series, 1e-12)))
+                log_returns_list.append(r)
+                valid_assets.append(sym)
+
+        if len(valid_assets) < 2:
+            logger.warning("Insufficient assets for GP-VCV")
+            return self._build_ewma_covariance()
+
+        # Align lengths
+        min_len = min(len(r) for r in log_returns_list)
+        log_returns = np.column_stack([r[-min_len:] for r in log_returns_list])
+
+        # Initialize GP estimator lazily
+        if self._gp_estimator is None:
+            self._gp_estimator = GaussianProcessVCV(
+                lookback=self.gp_lookback,
+                data_dir=self.data_dir,
+            )
+
+        result = self._gp_estimator.estimate(log_returns, valid_assets)
+
+        # Convert numpy cov matrix back to dict format for RegimeCovariance
+        cov_dict: Dict[str, Dict[str, float]] = {a: {} for a in valid_assets}
+        for i, a in enumerate(valid_assets):
+            for j, b in enumerate(valid_assets):
+                cov_dict[a][b] = float(result.cov_matrix[i, j])
+
+        # Get regime probabilities for consistency
+        regime_state = self._load_regime_state()
+        regime = regime_state.get("regime", "normal")
+        confidence = regime_state.get("confidence", 0.7)
+        probs = RegimeCovarianceBuilder.regime_probabilities(regime_state)
+
+        return RegimeCovariance(
+            regime=regime,
+            confidence=confidence,
+            regime_probs=probs,
+            matrix=cov_dict,
             blended=True,
         )
 
@@ -781,7 +863,21 @@ def main():
     """CLI entry point for regime optimizer."""
     import sys
 
-    optimizer = RegimeConstrainedOptimizer()
+    # Parse estimator flag
+    estimator = "ewma"
+    gp_lookback = 504
+    if "--estimator" in sys.argv:
+        idx = sys.argv.index("--estimator")
+        if idx + 1 < len(sys.argv):
+            estimator = sys.argv[idx + 1]
+    if "--gp-lookback" in sys.argv:
+        idx = sys.argv.index("--gp-lookback")
+        if idx + 1 < len(sys.argv):
+            gp_lookback = int(sys.argv[idx + 1])
+
+    optimizer = RegimeConstrainedOptimizer(
+        estimator=estimator, gp_lookback=gp_lookback
+    )
 
     if len(sys.argv) < 2 or sys.argv[1] == "optimize":
         # Determine method from args

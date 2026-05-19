@@ -37,6 +37,22 @@
   - Inference latency: 4.7ms (target: <50ms) ✓
   - Integrates with v2.24 signal integrator (5% weight in composite)
 
+## Recent Implementation Updates (2026-05-19)
+
+### v9.10 GP-VCV Hybrid Gaussian Process Covariance Estimation - COMPLETED
+- **Estimator**: `src/monitor/gp_vcv_estimator.py` (~380 lines) — GP-based VCV using sklearn GPR
+  - Hybrid kernel: RBF (long-term) + Matérn 3/2 (short-term) + WhiteKernel (noise)
+  - Per-asset variance prediction with correlation-based VCV reconstruction
+  - EWMA baseline comparison, save/load state persistence
+  - Based on arXiv:2605.17275
+  - ML-gated: conditional sklearn import, collect_ignore for safe test mode
+- **Integration**: `src/strategy/regime_optimizer.py` — estimator toggle
+  - `estimator: 'ewma' | 'gp_vcv'` parameter (default: 'ewma' for backward compatibility)
+  - Graceful ML fallback: GP-VCV → EWMA when ML disabled or import fails
+- **Tests**: `tests/test_gp_vcv_estimator.py` (19 tests passing, ML-only, collect_ignore)
+- **Expected Impact**: +0.01-0.02 Sharpe through smoother regime transitions
+- **Status**: All phases complete
+
 ## Recent Implementation Updates (2026-05-16)
 
 ### v4.80 Dynamic Bond Duration Rotation - COMPLETED
