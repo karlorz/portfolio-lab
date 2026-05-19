@@ -47,7 +47,8 @@ help:
 
 .PHONY: test
 test:
-	@echo "=== Test Suite (safe mode): $$(date) ==="; \
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (safe mode): $$(date) ==="; \
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
 	echo "  Memory cap: 1GB virtual (ulimit -v)"; \
 	echo "  Heavy tests: excluded via collect_ignore"; \
@@ -68,7 +69,8 @@ test:
 
 .PHONY: test-ml
 test-ml:
-	@echo "=== Test Suite (ML mode): $$(date) ==="; \
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (ML mode): $$(date) ==="; \
 	echo "  ML: enabled (PORTFOLIO_LAB_ENABLE_ML=1)"; \
 	echo "  Heavy tests: included"; \
 	echo "  WARNING: May use >3GB memory. Run on hosts with sufficient RAM."; \
