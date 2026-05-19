@@ -293,6 +293,25 @@ class EnsembleVoter:
         self.current_readings: Dict[SignalSource, SignalReading] = {}
         self.current_regime: Regime = Regime.NORMAL
         self.current_regime_confidence: float = 0.5
+
+        # Initialize bandit weighter for dynamic weight adaptation (vSpring Cleaning)
+        survivor_values = [
+            s.value for s in [
+                SignalSource.TSFM_MOMENTUM,
+                SignalSource.CROSS_ASSET_RV,
+                SignalSource.INTERNATIONAL_MOMENTUM,
+                SignalSource.ALTERNATIVE_DATA,
+                SignalSource.MULTI_SPEED_MOM,
+                SignalSource.DURATION_REGIME,
+            ]
+        ]
+        self.bandit = BanditWeighter(
+            signals=survivor_values,
+            epsilon=0.1,
+            window=252,
+        )
+        self._bandit_blend = 0.0
+        self._bandit_observations = 0
     
     def _init_db(self):
         """Initialize signal history database."""
@@ -970,7 +989,43 @@ class EnsembleVoter:
 
         self.current_readings = readings
         return readings
-    
+
+    def get_blended_weights(self, regime_name: str) -> dict:
+        """Get regime weights blended between static REGIME_WEIGHTS and bandit.
+
+        Cold start: 100% static. After 252 observations: 30% static, 70% bandit.
+        """
+        # Get static weights for this regime
+        regime_enum = getattr(Regime, regime_name, Regime.NORMAL)
+        static = dict(REGIME_WEIGHTS.get(regime_enum, {}))
+
+        # Get bandit weights
+        bandit = self.bandit.get_weights(regime_name)
+
+        if bandit is None:
+            return static  # Cold start: 100% static
+
+        # Blend: shifts from 100/0 to 30/70 static/bandit over 252 observations
+        blend = min(0.7, self._bandit_observations / 252 * 0.7)
+
+        blended = {}
+        for sig_enum, static_w in static.items():
+            sig_value = sig_enum.value
+            bandit_w = bandit.get(sig_value, static_w)
+            blended[sig_enum] = static_w * (1 - blend) + bandit_w * blend
+
+        return blended
+
+    def update_bandit(self, signal_returns: dict, regime_name: str):
+        """Update bandit with observed returns for each signal."""
+        for sig_value, daily_return in signal_returns.items():
+            self.bandit.update(
+                signal=sig_value,
+                regime=regime_name,
+                daily_return=daily_return,
+            )
+        self._bandit_observations += 1
+
     def compute_vote(
         self,
         readings: Optional[Dict[SignalSource, SignalReading]] = None,
@@ -992,8 +1047,8 @@ class EnsembleVoter:
         self.current_regime = regime
         self.current_regime_confidence = regime_confidence
         
-        # Get weights for regime
-        weights = REGIME_WEIGHTS[regime]
+        # Get weights for regime (blended with bandit if available)
+        weights = self.get_blended_weights(regime.name)
         
         # Apply adaptive ensemble weighting (v6.09) if available
         try:

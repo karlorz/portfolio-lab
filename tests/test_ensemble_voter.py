@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock
 
 from src.strategy.ensemble_voter import (
     Regime, SignalSource, SignalReading, EnsembleVote,
-    REGIME_WEIGHTS, EnsembleVoter,
+    REGIME_WEIGHTS, EnsembleVoter, BanditWeighter,
 )
 
 
@@ -45,6 +45,20 @@ def _make_voter(tmp_path):
     voter.current_readings = {}
     voter.current_regime = Regime.NORMAL
     voter.current_regime_confidence = 0.5
+    # Bandit weighter (vSpring Cleaning)
+    survivor_values = [
+        s.value for s in [
+            SignalSource.TSFM_MOMENTUM,
+            SignalSource.CROSS_ASSET_RV,
+            SignalSource.INTERNATIONAL_MOMENTUM,
+            SignalSource.ALTERNATIVE_DATA,
+            SignalSource.MULTI_SPEED_MOM,
+            SignalSource.DURATION_REGIME,
+        ]
+    ]
+    voter.bandit = BanditWeighter(signals=survivor_values, epsilon=0.1, window=252)
+    voter._bandit_blend = 0.0
+    voter._bandit_observations = 0
     voter._init_db()
     return voter
 
