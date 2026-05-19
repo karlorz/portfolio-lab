@@ -135,7 +135,7 @@ health:
 eval:
 	@echo "=== Strategy Evaluator: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 ALPHALAB_MODE=$${ALPHALAB_MODE:-paper} python3 -m src.strategy.evaluator 2>&1 | tee -a $(DATA_DIR)/eval.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 env ALPHALAB_MODE=$${ALPHALAB_MODE:-paper} python3 -m src.strategy.evaluator 2>&1 | tee -a $(DATA_DIR)/eval.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
