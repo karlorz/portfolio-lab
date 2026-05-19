@@ -1016,6 +1016,50 @@ class EnsembleVoter:
 
         return blended
 
+    def apply_goal_risk_budget(self, base_allocation: dict) -> dict:
+        """Scale allocation weights based on investment goals from goals.json.
+
+        Reads goals.json via src.config.goals, computes risk budget multiplier,
+        and shifts allocation toward safer assets proportionally.
+        """
+        try:
+            from src.config.goals import load_goals, get_risk_budget_multiplier
+            goals = load_goals()
+            risk_mult = get_risk_budget_multiplier(goals)
+        except Exception:
+            risk_mult = 1.0
+
+        if risk_mult >= 1.0:
+            return base_allocation
+
+        safe_assets = {"SHY", "IEF", "BIL", "TLT"}
+        total = sum(base_allocation.values()) if base_allocation else 1.0
+        if total == 0:
+            return base_allocation
+
+        shifted = {}
+        risky_reduction = 0.0
+        for asset, weight in base_allocation.items():
+            if asset in safe_assets:
+                shifted[asset] = weight
+            else:
+                reduced = weight * risk_mult
+                shifted[asset] = reduced
+                risky_reduction += weight - reduced
+
+        # Redistribute reduced risk to safe assets proportionally
+        safe_total = sum(shifted.get(a, 0) for a in safe_assets if a in shifted)
+        if safe_total > 0 and risky_reduction > 0:
+            for asset in safe_assets:
+                if asset in shifted:
+                    shifted[asset] += risky_reduction * (shifted[asset] / safe_total)
+
+        # Renormalize
+        new_total = sum(shifted.values())
+        if new_total == 0:
+            return base_allocation
+        return {k: v / new_total * total for k, v in shifted.items()}
+
     def update_bandit(self, signal_returns: dict, regime_name: str):
         """Update bandit with observed returns for each signal."""
         for sig_value, daily_return in signal_returns.items():
