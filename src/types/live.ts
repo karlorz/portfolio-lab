@@ -477,3 +477,24 @@ export interface VIXOverlayState {
   shift_history: VIXOverlayShift[];
   disabled_until: string | null;
 }
+
+// Chat Types (v7.10)
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface ChatQuery {
+  question: string;
+  answer: string;
+  timestamp: string;
+  fallback: boolean;
+}
+
+export interface ChatSuggestion {
+  label: string;
+  query: string;
+  category: 'portfolio' | 'risk' | 'signals' | 'overlays' | 'costs';
+}

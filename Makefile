@@ -290,6 +290,12 @@ daily-brief:
 		@cd $(CURDIR) && uv run python -m src.monitor.daily_brief --save
 		@echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Daily brief saved to data/daily_brief.json"
 
+# ── Portfolio Query ──────────────────────────────────────────────────
+
+.PHONY: ask
+ask:
+	@cd $(CURDIR) && uv run python -m src.chat.portfolio_query "$(ARGS)"
+
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
