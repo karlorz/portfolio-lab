@@ -282,6 +282,14 @@ unified-dashboard:
 	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR
 
+# ── Daily Brief ──────────────────────────────────────────────────────
+
+.PHONY: daily-brief
+daily-brief:
+		@echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Generating daily brief..."
+		@cd $(CURDIR) && uv run python -m src.monitor.daily_brief --save
+		@echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Daily brief saved to data/daily_brief.json"
+
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
