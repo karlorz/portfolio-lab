@@ -34,11 +34,17 @@ from src.rebalancing.backtest import (
     run_calendar_strategy, run_drift_only_strategy,
 )
 
-# Restore
+# Restore smart_rebalancer and evict modules that imported the mock version.
+# Without eviction, downstream modules retain MagicMock references from the
+# mock import window, which breaks code (e.g. JSON serialization in generator).
 if _orig_sr is None:
     sys.modules.pop('src.rebalancing.smart_rebalancer', None)
 else:
     sys.modules['src.rebalancing.smart_rebalancer'] = _orig_sr
+# Evict rebalancing submodules that cached mock references
+for key in list(sys.modules):
+    if key.startswith('src.rebalancing'):
+        del sys.modules[key]
 
 
 # ---------------------------------------------------------------------------

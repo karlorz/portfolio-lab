@@ -426,11 +426,19 @@ class TestBaseAgentSaveLoad:
 class TestBaseAgentAbstractMethods:
     """Abstract methods are callable on concrete subclass."""
 
+    @pytest.mark.skipif(
+        os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") != "1",
+        reason="Requires torch (ML mode only)",
+    )
     def test_build_network_returns_dict(self):
         agent = _TestAgent()
         net = agent.build_network()
         assert isinstance(net, dict)
 
+    @pytest.mark.skipif(
+        os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") != "1",
+        reason="Requires torch (ML mode only)",
+    )
     def test_extract_features_returns_array(self):
         agent = _TestAgent()
         obs = AgentObservation(
