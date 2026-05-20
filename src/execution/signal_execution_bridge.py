@@ -47,6 +47,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 from decimal import Decimal, ROUND_DOWN
 
+from src.paths import MARKET_DB
+
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -147,7 +149,7 @@ class SignalExecutionBridge:
         self.portfolio_value = portfolio_value
         
         if db_path is None:
-            db_path = Path("/root/projects/portfolio-lab/data/market.db")
+            db_path = MARKET_DB
         self.db_path = db_path
         
         self._price_cache: Dict[str, float] = {}

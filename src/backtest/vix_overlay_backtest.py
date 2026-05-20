@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -113,7 +115,7 @@ class VIXOverlayBacktester:
         """
         try:
             # Try to load from prices.json
-            prices_path = Path("/root/projects/portfolio-lab/public/data/prices.json")
+            prices_path = PRICES_JSON
             if not prices_path.exists():
                 prices_path = Path("public/data/prices.json")
             
@@ -515,7 +517,7 @@ class VIXOverlayBacktester:
     def save_results(self, result: BacktestResult, output_path: str = None):
         """Save backtest results to JSON."""
         if output_path is None:
-            output_path = "/root/projects/portfolio-lab/data/backtest_results/vix_overlay_backtest.json"
+            output_path = str(BACKTEST_RESULTS_DIR / "vix_overlay_backtest.json")
         
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         

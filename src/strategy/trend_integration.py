@@ -42,11 +42,12 @@ import math
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.paths import DATA_DIR
+
 # ---------------------------------------------------------------------------
 # Constants and Configuration
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 TREND_DB = DATA_DIR / "trend_signals.db"
 
 # Trend-following parameters

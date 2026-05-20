@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
+from src.paths import DATA_DIR, PRICES_JSON
+
 from .smart_rebalancer import (
     SmartRebalancingController,
     PortfolioSnapshot,
@@ -401,7 +403,7 @@ def _compute_strategy_result(
 
 
 def run_full_backtest(
-    price_filepath: str = '/root/projects/portfolio-lab/public/data/prices.json',
+    price_filepath: str = str(PRICES_JSON),
     start_date: str = '2005-01-01',
     end_date: str = '2026-05-08',
 ) -> Dict[str, StrategyResult]:
@@ -524,7 +526,7 @@ def save_results(results: Dict[str, StrategyResult]):
             'final_value': result.final_value,
         }
 
-    output_path = '/root/projects/portfolio-lab/data/smart_rebalance_backtest_results.json'
+    output_path = str(DATA_DIR / "smart_rebalance_backtest_results.json")
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w') as f:
         json.dump(output, f, indent=2)

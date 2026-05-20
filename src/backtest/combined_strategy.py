@@ -43,6 +43,8 @@ from collections import defaultdict
 import pickle
 
 # Add project root
+from src.paths import DATA_DIR, PRICES_JSON as PRICES_PATH
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -52,8 +54,6 @@ from src.signals.fed_policy_overlay import FedPolicyOverlay, classify_fed_regime
 
 
 # Paths
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-PRICES_PATH = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
 RESULTS_PATH = DATA_DIR / "combined_backtest_results.json"
 
 # Backtest parameters

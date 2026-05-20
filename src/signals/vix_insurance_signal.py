@@ -12,6 +12,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List
 
+from src.paths import VIX_OPTIONS_DB, SIGNALS_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -70,8 +72,8 @@ class VIXInsuranceSignalGenerator:
     Target: 1% allocation when VIX < 20, portfolio near ATH.
     """
     
-    DB_PATH = Path("/root/projects/portfolio-lab/data/vix_options.db")
-    OUTPUT_PATH = Path("/root/projects/portfolio-lab/data/signals/vix_insurance_overlay.json")
+    DB_PATH = VIX_OPTIONS_DB
+    OUTPUT_PATH = SIGNALS_DIR / "vix_insurance_overlay.json"
     
     # Configuration
     MAX_ALLOCATION = 0.01  # 1% of portfolio

@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections import defaultdict
 
+from src.paths import MARKET_DB
+
 
 @dataclass
 class PremiumSignal:
@@ -85,7 +87,7 @@ class AlternativeRiskPremiaEngine:
     
     def __init__(self, db_path: str = None):
         if db_path is None:
-            self.db_path = Path("/root/projects/portfolio-lab/data/market.db")
+            self.db_path = MARKET_DB
         else:
             self.db_path = Path(db_path).expanduser()
         self.data_cache: Dict[str, List[Tuple[str, float]]] = {}

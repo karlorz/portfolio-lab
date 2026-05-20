@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 
+from src.paths import CLOSING_AUCTION_DIR
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -575,7 +577,7 @@ def run_validation_backtest(
     
     # Save results
     if output_path is None:
-        output_path = Path("/root/projects/portfolio-lab/data/closing_auction/walkforward_results.json")
+        output_path = CLOSING_AUCTION_DIR / "walkforward_results.json"
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
     

@@ -55,8 +55,7 @@ ETF_FUTURES_PROXY = {
     "DBA": "DBA",
 }
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-PRICES_PATH = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
+from src.paths import DATA_DIR, PRICES_JSON as PRICES_PATH
 
 
 class CurveRegime(IntEnum):

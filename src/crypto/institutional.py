@@ -39,6 +39,8 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 import statistics
 
 # Add project root to path
+from src.paths import DATA_DIR
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -48,7 +50,6 @@ from src.strategy.circuit_breaker import DrawdownCircuitBreaker
 # Constants and Configuration
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 CRYPTO_DB = DATA_DIR / "crypto_allocation.db"
 
 # Basel III Risk Weights (per 2025 standards)

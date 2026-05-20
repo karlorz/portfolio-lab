@@ -72,8 +72,9 @@ FRED_SERIES = {
     'INDPRO': 'Industrial Production',
 }
 
+from src.paths import DATA_DIR
+
 # Cache directory
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 FRED_CACHE = DATA_DIR / "fred_data.json"
 
 

@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
 
+from src.paths import YIELDS_JSON, DATA_DIR
+
 DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 PUBLIC_DIR = Path("~/projects/portfolio-lab/public/data").expanduser()
 DB_PATH = DATA_DIR / "market.db"
@@ -861,7 +863,7 @@ class DashboardGenerator:
             "duration_allocation": None
         }
         
-        yields_file = Path("/root/projects/portfolio-lab/public/data/yields.json")
+        yields_file = YIELDS_JSON
         if not yields_file.exists():
             return result
         

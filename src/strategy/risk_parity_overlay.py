@@ -47,10 +47,11 @@ import sqlite3
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.paths import DATA_DIR, PRICES_JSON
+
 # Constants
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 DB_PATH = DATA_DIR / "signals.db"
-PRICES_PATH = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
+PRICES_PATH = PRICES_JSON
 
 # Risk Parity Parameters
 VOL_LOOKBACK = 252           # 1-year volatility estimation

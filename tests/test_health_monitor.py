@@ -376,7 +376,7 @@ class TestVolatilityRegime:
         market_db = self._create_spy_db(tmp_path, daily_vol=0.003)  # ~4.8% ann vol
         health_db = tmp_path / "health.db"
         with patch("src.signals.health_monitor.DB_PATH", health_db), \
-             patch("src.signals.health_monitor.MARKET_DB_PATH", market_db):
+             patch("src.signals.health_monitor.MARKET_DB", market_db):
             init_health_database()
             monitor = SignalHealthMonitor(db_path=health_db)
             regime, stability = monitor.detect_volatility_regime()
@@ -389,7 +389,7 @@ class TestVolatilityRegime:
         market_db = self._create_spy_db(tmp_path, daily_vol=0.0095)  # ~15% ann vol
         health_db = tmp_path / "health.db"
         with patch("src.signals.health_monitor.DB_PATH", health_db), \
-             patch("src.signals.health_monitor.MARKET_DB_PATH", market_db):
+             patch("src.signals.health_monitor.MARKET_DB", market_db):
             init_health_database()
             monitor = SignalHealthMonitor(db_path=health_db)
             regime, stability = monitor.detect_volatility_regime()
@@ -402,7 +402,7 @@ class TestVolatilityRegime:
         market_db = self._create_spy_db(tmp_path, daily_vol=0.016)  # ~25% ann vol
         health_db = tmp_path / "health.db"
         with patch("src.signals.health_monitor.DB_PATH", health_db), \
-             patch("src.signals.health_monitor.MARKET_DB_PATH", market_db):
+             patch("src.signals.health_monitor.MARKET_DB", market_db):
             init_health_database()
             monitor = SignalHealthMonitor(db_path=health_db)
             regime, stability = monitor.detect_volatility_regime()
@@ -421,7 +421,7 @@ class TestVolatilityRegime:
 
         health_db = tmp_path / "health.db"
         with patch("src.signals.health_monitor.DB_PATH", health_db), \
-             patch("src.signals.health_monitor.MARKET_DB_PATH", market_db):
+             patch("src.signals.health_monitor.MARKET_DB", market_db):
             init_health_database()
             monitor = SignalHealthMonitor(db_path=health_db)
             regime, stability = monitor.detect_volatility_regime()

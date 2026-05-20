@@ -19,6 +19,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.paths import MARKET_DB
+
 
 @dataclass
 class InflationRegime:
@@ -88,7 +90,7 @@ class InflationRiskParityEngine:
         db_path: Path = None
     ):
         if db_path is None:
-            self.db_path = Path("/root/projects/portfolio-lab/data/market.db")
+            self.db_path = MARKET_DB
         else:
             self.db_path = Path(db_path).expanduser()
         self.vol_lookback = 60  # 60-day volatility
@@ -350,7 +352,7 @@ def main():
     """CLI interface"""
     parser = argparse.ArgumentParser(description="Inflation-Aware Risk Parity Strategy")
     parser.add_argument("--current", action="store_true", help="Get current allocation")
-    parser.add_argument("--db", type=str, default="/root/projects/portfolio-lab/data/market.db", help="Database path")
+    parser.add_argument("--db", type=str, default=str(MARKET_DB), help="Database path")
     parser.add_argument("--json", action="store_true", help="Output raw JSON only")
     
     args = parser.parse_args()

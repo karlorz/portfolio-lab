@@ -12,9 +12,11 @@ from datetime import datetime
 from math import sqrt, pow
 import numpy as np
 
+from src.paths import HISTORICAL_JSON, DATA_DIR
+
 def load_historical_data():
     """Load historical data from JSON"""
-    data_path = '/root/projects/portfolio-lab/public/data/historical.json'
+    data_path = str(HISTORICAL_JSON)
     with open(data_path, 'r') as f:
         return json.load(f)
 
@@ -289,7 +291,7 @@ def main():
     }
     
     # Save report
-    output_path = '/root/projects/portfolio-lab/data/ubt_actual_validation.json'
+    output_path = str(DATA_DIR / "ubt_actual_validation.json")
     with open(output_path, 'w') as f:
         json.dump(report, f, indent=2)
     

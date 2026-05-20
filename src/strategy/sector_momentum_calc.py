@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 import numpy as np
 
+from src.paths import HISTORICAL_JSON
+
 # Sector ETF definitions
 SECTOR_ETF_DEFINITIONS = [
     {"symbol": "XLK", "name": "Technology", "beta": 1.10, "sectorGroup": "sensitive"},
@@ -283,6 +285,6 @@ def generate_sector_signals(historical_path: Path, vix: float = 0, regime: str =
 
 if __name__ == "__main__":
     # Test
-    path = Path("/root/projects/portfolio-lab/public/data/historical.json")
+    path = HISTORICAL_JSON
     signals = generate_sector_signals(path, vix=18.5)
     print(json.dumps(signals, indent=2))

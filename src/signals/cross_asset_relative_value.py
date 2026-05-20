@@ -36,10 +36,10 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from src.paths import DATA_DIR, PRICES_JSON
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
-
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 
 # Cross-asset pairs with (symbol_a, symbol_b, interpretation)
 # Z-score positive means A outperforming B (A overvalued vs B)
@@ -142,7 +142,7 @@ class CrossAssetRVScanner:
             prices_path = self.data_dir / "prices.json"
         if not prices_path.exists():
             # Try project root
-            prices_path = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
+            prices_path = PRICES_JSON
 
         if not prices_path.exists():
             logger.error(f"Price data not found: {prices_path}")

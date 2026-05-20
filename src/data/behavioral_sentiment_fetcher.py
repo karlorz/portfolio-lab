@@ -15,6 +15,8 @@ from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 import logging
 
+from src.paths import MARKET_DB
+
 # Import Reddit sentiment fetcher (v2.70 Phase 4)
 try:
     from src.data.reddit_sentiment_fetcher import (
@@ -30,7 +32,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
-CACHE_DB = Path("/root/projects/portfolio-lab/data/market.db")
+CACHE_DB = MARKET_DB
 CACHE_TTL_HOURS = 4
 
 # CBOE Data URLs

@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, Tuple
 import aiohttp
 import numpy as np
 
+from src.paths import DATA_DIR
+
 # Configuration
 CRYPTO_SYMBOLS = {
     'BTC': 'IBIT',      # BlackRock Bitcoin ETF (preferred vehicle)
@@ -28,7 +30,7 @@ CORRELATION_WINDOW = 30  # 30-day rolling correlation
 ALERT_THRESHOLD_LOW = 0.25  # Consider allocation if < 0.25 sustained
 ALERT_THRESHOLD_HIGH = 0.50   # Reduce/stop if > 0.50 sustained
 
-DATA_DIR = Path('/root/projects/portfolio-lab/data')
+DATA_DIR = DATA_DIR
 DB_PATH = DATA_DIR / 'crypto_correlation.db'
 JSON_PATH = DATA_DIR / 'crypto_monitor.json'
 

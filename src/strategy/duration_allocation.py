@@ -20,7 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+from src.paths import DATA_DIR
+
 DB_PATH = DATA_DIR / "market.db"
 ALLOCATION_STATE_PATH = DATA_DIR / ".duration_allocation_state.json"
 

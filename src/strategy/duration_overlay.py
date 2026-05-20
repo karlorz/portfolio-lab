@@ -43,8 +43,9 @@ from src.signals.yield_curve_regime import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from src.paths import DATA_DIR
+
 # Paths
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 DB_PATH = DATA_DIR / "market.db"
 STATE_PATH = DATA_DIR / ".duration_overlay_state.json"
 YIELDS_PATH = DATA_DIR / "yields.json"

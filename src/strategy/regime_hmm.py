@@ -33,8 +33,9 @@ if _ML_ENABLED:
 else:
     HMM_AVAILABLE = False
 
+from src.paths import DATA_DIR
+
 # Database path
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 DB_PATH = DATA_DIR / "market.db"
 
 

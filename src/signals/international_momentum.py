@@ -12,10 +12,12 @@ from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 import logging
 
+from src.paths import MARKET_DB, DATA_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CACHE_DB = Path("/root/projects/portfolio-lab/data/market.db")
+CACHE_DB = MARKET_DB
 
 
 class SignalType(Enum):
@@ -399,7 +401,7 @@ def main():
     if args.generate:
         if not args.data_file:
             # Try default location
-            args.data_file = "/root/projects/portfolio-lab/data/international_momentum.json"
+            args.data_file = str(DATA_DIR / "international_momentum.json")
         
         try:
             with open(args.data_file, 'r') as f:

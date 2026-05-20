@@ -14,6 +14,8 @@ from typing import Optional, List, Dict, Tuple
 import aiohttp
 import yfinance as yf
 
+from src.paths import VIX_OPTIONS_DB, SIGNALS_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -75,8 +77,8 @@ class VIXDataPipeline:
     Stores historical data for backtesting and signal generation.
     """
     
-    DB_PATH = Path("/root/projects/portfolio-lab/data/vix_options.db")
-    DATA_DIR = Path("/root/projects/portfolio-lab/data/signals")
+    DB_PATH = VIX_OPTIONS_DB
+    DATA_DIR = SIGNALS_DIR
     
     # VIX futures tickers for term structure
     VIX_FUTURES = {

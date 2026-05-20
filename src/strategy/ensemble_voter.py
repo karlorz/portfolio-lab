@@ -44,6 +44,8 @@ from enum import Enum
 import sys
 import logging
 
+from src.paths import DATA_DIR, PRICES_JSON, SIGNALS_DIR, ATTRIBUTION_DIR
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -283,7 +285,7 @@ class EnsembleVoter:
         data_path: Optional[Path] = None,
         regime_detector: Optional[str] = None
     ):
-        self.data_path = data_path or Path("~/projects/portfolio-lab/data").expanduser()
+        self.data_path = data_path or DATA_DIR
         self.db_path = self.data_path / "ensemble_signals.db"
         self._init_db()
         
@@ -395,7 +397,7 @@ class EnsembleVoter:
     
     def _load_price_data(self) -> Optional[pd.DataFrame]:
         """Load price data from JSON."""
-        prices_path = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
+        prices_path = PRICES_JSON
         
         if not prices_path.exists():
             return None
@@ -551,7 +553,7 @@ class EnsembleVoter:
 
         # 4. Alternative Data (v9.00) — SEC EDGAR, NewsAPI, Jobs data
         try:
-            alt_data_file = Path("~/projects/portfolio-lab/data/signals").expanduser() / "alternative_data_latest.json"
+            alt_data_file = SIGNALS_DIR / "alternative_data_latest.json"
             if alt_data_file.exists():
                 with open(alt_data_file) as f:
                     alt_data = json.load(f)
@@ -713,7 +715,7 @@ class EnsembleVoter:
             from src.strategy.adaptive_ensemble_weights import AdaptiveEnsembleWeights
             
             # Try to load latest attribution data
-            attribution_dir = Path("~/projects/portfolio-lab/data/attribution").expanduser()
+            attribution_dir = ATTRIBUTION_DIR
             attribution_files = sorted(attribution_dir.glob("attribution_*.json"), reverse=True)
             
             if attribution_files:

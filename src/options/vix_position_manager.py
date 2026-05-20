@@ -12,6 +12,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 
+from src.paths import VIX_OPTIONS_DB, POSITIONS_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -72,8 +74,8 @@ class VIXPositionManager:
     and manages insurance budget across positions.
     """
     
-    DB_PATH = Path("/root/projects/portfolio-lab/data/vix_options.db")
-    POSITIONS_PATH = Path("/root/projects/portfolio-lab/data/positions/vix_insurance.json")
+    DB_PATH = VIX_OPTIONS_DB
+    POSITIONS_PATH = POSITIONS_DIR / "vix_insurance.json"
     
     # Roll parameters
     ROLL_DAYS_BEFORE_EXPIRY = 5

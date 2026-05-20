@@ -48,6 +48,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 
 # Add project root to path
+from src.paths import DATA_DIR, MARKET_DB
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -55,9 +57,7 @@ sys.path.insert(0, str(project_root))
 # Constants and Configuration
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 DB_PATH = DATA_DIR / "signals.db"
-MARKET_DB_PATH = DATA_DIR / "market.db"
 HEALTH_LOG_PATH = DATA_DIR / "signal_health_log.json"
 
 # Health score thresholds
@@ -350,7 +350,7 @@ class SignalHealthMonitor:
             return None
         
         # Fetch corresponding prices from market.db
-        mkt_conn = sqlite3.connect(MARKET_DB_PATH)
+        mkt_conn = sqlite3.connect(MARKET_DB)
         mkt_cursor = mkt_conn.cursor()
         
         predictions = []
@@ -436,7 +436,7 @@ class SignalHealthMonitor:
             return None
         
         # Fetch corresponding prices from market.db
-        mkt_conn = sqlite3.connect(MARKET_DB_PATH)
+        mkt_conn = sqlite3.connect(MARKET_DB)
         mkt_cursor = mkt_conn.cursor()
         
         predictions = []
@@ -488,7 +488,7 @@ class SignalHealthMonitor:
         Returns:
             Tuple of (regime_name, stability_score)
         """
-        conn = sqlite3.connect(MARKET_DB_PATH)
+        conn = sqlite3.connect(MARKET_DB)
         cursor = conn.cursor()
         
         # Get price history

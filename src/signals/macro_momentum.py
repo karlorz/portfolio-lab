@@ -38,6 +38,8 @@ from enum import Enum
 import warnings
 
 # Add project root to path
+from src.paths import DATA_DIR, PRICES_JSON
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -133,7 +135,7 @@ class MacroMomentumEngine:
     }
     
     def __init__(self, db_path: Optional[Path] = None, fred_api_key: Optional[str] = None):
-        self.db_path = db_path or Path("~/projects/portfolio-lab/data/macro_data.db").expanduser()
+        self.db_path = db_path or DATA_DIR / "macro_data.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.fred_api_key = fred_api_key
         self.price_data: Optional[pd.DataFrame] = None
@@ -167,7 +169,7 @@ class MacroMomentumEngine:
     def load_price_data(self, prices_path: Optional[Path] = None) -> pd.DataFrame:
         """Load ETF price data as macro proxies."""
         if prices_path is None:
-            prices_path = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
+            prices_path = PRICES_JSON
         
         with open(prices_path) as f:
             data = json.load(f)

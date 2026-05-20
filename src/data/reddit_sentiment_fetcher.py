@@ -17,12 +17,14 @@ from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 import logging
 
+from src.paths import MARKET_DB
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
-CACHE_DB = Path("/root/projects/portfolio-lab/data/market.db")
+CACHE_DB = MARKET_DB
 CACHE_TTL_MINUTES = 15
 RATE_LIMIT_DELAY = 1.0  # seconds between API calls
 

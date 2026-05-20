@@ -13,6 +13,8 @@ from pathlib import Path
 import logging
 import math
 
+from src.paths import MARKET_DB, DATA_DIR
+
 try:
     import yfinance as yf
     import pandas as pd
@@ -29,7 +31,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
-CACHE_DB = Path("/root/projects/portfolio-lab/data/market.db")
+CACHE_DB = MARKET_DB
 CACHE_TTL_HOURS = 6
 MOMENTUM_WINDOWS = [21, 63, 126]  # 1M, 3M, 6M trading days
 SYMBOLS = {
@@ -333,7 +335,7 @@ class InternationalDataFetcher:
     def save_snapshot(self, data: InternationalData, output_path: Optional[Path] = None):
         """Save data snapshot to JSON"""
         if output_path is None:
-            output_path = Path("/root/projects/portfolio-lab/data/international_momentum.json")
+            output_path = DATA_DIR / "international_momentum.json"
         
         with open(output_path, 'w') as f:
             json.dump(data.to_dict(), f, indent=2)

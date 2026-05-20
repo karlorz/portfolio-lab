@@ -31,12 +31,13 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 import sqlite3
 
+from src.paths import DATA_DIR, PRICES_JSON
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 DB_PATH = DATA_DIR / "signals.db"
-PRICES_PATH = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
+PRICES_PATH = PRICES_JSON
 
 VOL_LOOKBACK = 252
 MAX_DEVIATION = 0.15  # ±15% deviation from base

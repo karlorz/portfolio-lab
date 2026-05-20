@@ -13,6 +13,8 @@ from dataclasses import dataclass, asdict
 from typing import List, Dict, Optional
 import os
 
+from src.paths import SIGNALS_DIR
+
 
 @dataclass
 class DailyAlternativeSignal:
@@ -327,13 +329,13 @@ def main():
     signals = backfill.generate_backfill('2020-01-01', '2026-05-13')
     
     # Save to JSON
-    output_path = '/root/projects/portfolio-lab/data/signals/alternative_data_historical_2020_2026.json'
+    output_path = str(SIGNALS_DIR / "alternative_data_historical_2020_2026.json")
     backfill.save_to_json(output_path)
     
     # Generate metadata
     metadata = backfill.generate_metadata()
     
-    metadata_path = '/root/projects/portfolio-lab/data/signals/alternative_data_metadata.json'
+    metadata_path = str(SIGNALS_DIR / "alternative_data_metadata.json")
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f, indent=2)
     

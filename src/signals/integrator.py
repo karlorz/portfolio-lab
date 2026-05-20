@@ -51,6 +51,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, NamedTuple
 
 # Add project root to path
+from src.paths import DATA_DIR
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -64,7 +66,6 @@ from src.data.alternative_data import AlternativeDataClient, AlternativeDataSign
 # Constants and Configuration
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 DB_PATH = DATA_DIR / "signals.db"
 
 # Base signal weights (adjusted dynamically by regime) - sum = 1.0

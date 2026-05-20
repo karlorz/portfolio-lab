@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
+from src.paths import PRICES_JSON, SIGNALS_DIR
+
 
 @dataclass
 class DailyReturn:
@@ -404,8 +406,8 @@ def stress_test(
 
 
 def run_full_backtest(
-    price_filepath: str = '/root/projects/portfolio-lab/public/data/prices.json',
-    alt_signal_filepath: str = '/root/projects/portfolio-lab/data/signals/alternative_data_historical_2020_2026.json',
+    price_filepath: str = str(PRICES_JSON),
+    alt_signal_filepath: str = str(SIGNALS_DIR / "alternative_data_historical_2020_2026.json"),
     confidence_threshold: float = 0.3,
 ) -> FullBacktestResult:
     """Run complete Phase 4.2 + 4.3 backtest."""
@@ -574,7 +576,7 @@ def save_results(result: FullBacktestResult):
         ],
     }
 
-    output_path = '/root/projects/portfolio-lab/data/signals/alt_data_walkforward_stress_results.json'
+    output_path = str(SIGNALS_DIR / "alt_data_walkforward_stress_results.json")
     with open(output_path, 'w') as f:
         json.dump(output, f, indent=2)
     print(f"\nResults saved to {output_path}")

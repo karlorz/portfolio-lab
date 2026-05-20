@@ -21,12 +21,13 @@ from typing import Dict, List, Optional, Tuple
 import statistics
 
 # Add project root to path
+from src.paths import DATA_DIR
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.signals.health_monitor import SignalHealthMonitor, HealthScore, HealthReport
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 DB_PATH = DATA_DIR / "signals.db"
 
 

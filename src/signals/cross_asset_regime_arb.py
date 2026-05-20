@@ -35,12 +35,12 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+
 project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-PUBLIC_DATA_DIR = Path("~/projects/portfolio-lab/public/data").expanduser()
-STATE_DIR = Path("~/projects/portfolio-lab/data/regime_arb").expanduser()
+STATE_DIR = DATA_DIR / "regime_arb"
 
 # Default detection parameters
 MOMENTUM_LOOKBACK = 60       # Trading days for momentum calculation

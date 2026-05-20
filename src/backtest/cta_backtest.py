@@ -15,6 +15,8 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import sys
 
+from src.paths import MARKET_DB, DATA_DIR
+
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from strategy.cta_overlay import CTATrendEngine, CTAPosition
@@ -59,7 +61,7 @@ class CTABacktestEngine:
     
     def __init__(self, db_path: Path = None):
         if db_path is None:
-            db_path = Path("/root/projects/portfolio-lab/data/market.db")
+            db_path = MARKET_DB
         self.db_path = db_path
         self.cta_engine = CTATrendEngine(db_path)
         
@@ -427,7 +429,7 @@ def main():
             print(f"{status_icon} {name}: {check['status']} - {check['detail']}")
         
         # Save results
-        output_path = Path("/root/projects/portfolio-lab/data/cta_backtest_results.json")
+        output_path = DATA_DIR / "cta_backtest_results.json"
         results_dict = {
             "timestamp": datetime.now().isoformat(),
             "backtest_config": {
