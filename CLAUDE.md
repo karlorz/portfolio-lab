@@ -47,6 +47,16 @@
 - **Test count**: 6324 → 6382 safe
 - **Status**: All phases complete
 
+### v9.19 Ensemble Voter Dead Signal Pruning - COMPLETED
+- **Pruned**: 14 deprecated signal collection blocks from `collect_signals()` — 396 net lines removed (566→170 lines)
+  - Removed: MACRO_MOMENTUM, CLOSING_AUCTION, FACTOR_ROTATION, MEAN_REVERSION, TRANSIENT_FACTORS, VISIBILITY_GRAPH, VP_MACD, FACTOR_TIMING, LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE, ZERO_DTE
+  - All had zero weight in REGIME_WEIGHTS — computation was discarded in compute_vote()
+- **Removed from REGIME_WEIGHTS**: TSFM_MOMENTUM and DURATION_REGIME (had weight but no data feeds)
+- **Active signals**: 5 — MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB
+- **Weights renormalized** per regime to sum=1.0
+- **Tests**: Updated 4 tests in test_ensemble_voter.py, 6382/6382 passing
+- **Status**: All phases complete
+
 ### v9.16 Coverage Gap Closure - COMPLETED
 - **Tests**: 60 new tests across 3 previously untested modules:
   - `tests/test_odte_executor.py` (27 tests): 0DTE options executor — enums, dataclasses, paper-mode simulation, exit logic
