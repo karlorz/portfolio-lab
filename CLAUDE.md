@@ -37,6 +37,18 @@
   - Inference latency: 4.7ms (target: <50ms) ✓
   - Integrates with v2.24 signal integrator (5% weight in composite)
 
+## Recent Implementation Updates (2026-05-20)
+
+### v9.16 Coverage Gap Closure - COMPLETED
+- **Tests**: 60 new tests across 3 previously untested modules:
+  - `tests/test_odte_executor.py` (27 tests): 0DTE options executor — enums, dataclasses, paper-mode simulation, exit logic
+  - `tests/test_health_tracker.py` (20 tests): signal health tracking — DB init, prediction logging, health score formula, decay detection
+  - `tests/test_health.py` (13 tests): HealthMonitor — kill switches, portfolio health, cron execution, data freshness, circuit breaker
+- **Test count**: 6020 → 6080 safe
+- **Bug found**: `paper_mode=False` overridden by env var in `ODTEExecutor.__init__` (False or True = True)
+- **False positive**: `src/strategy/comparison.py` was flagged as untested but has `test_strategy_comparison.py` (71 tests)
+- **Status**: All phases complete
+
 ## Recent Implementation Updates (2026-05-19)
 
 ### v9.11 Execution Module Test Coverage - COMPLETED
@@ -423,10 +435,11 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6020 safe** passed (251 pre-existing test pollution failures, 15 skipped)
+- **6080 safe** passed (251 pre-existing test pollution failures, 15 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
-- 187 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
+- 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
+- **New (v9.16)**: `test_odte_executor.py` (27 tests), `test_health_tracker.py` (20 tests), `test_health.py` (13 tests) — 60 tests for previously untested modules
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 
@@ -542,7 +555,7 @@ These modules have NO ML deps and are always safe to work on:
 
 ## Quick Start
 ```bash
-make test            # safe test suite (ML disabled, 3GB memory cap, 6020p/251f tests, see test-isolation for pollution bypass)
+make test            # safe test suite (ML disabled, 3GB memory cap, 6080p/251f tests, see test-isolation for pollution bypass)
 make test-ml         # full suite including ML (needs >3GB RAM)
 bash scripts/run-tests-safe           # standalone safe runner with --ml flag
 PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/  # manual safe run
