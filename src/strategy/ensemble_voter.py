@@ -139,48 +139,37 @@ class EnsembleVote:
     source_votes: List[SignalReading]
 
 
-# Regime-dependent weights (7 survivor signals, renormalized per regime)
-# v9.14: Increased proven alpha sources per knowledge synthesis findings:
-#   - Cross-Asset RV: +0.010 → +0.050 Sharpe contribution
-#   - Alternative Data: +0.030 → +0.050 Sharpe contribution
-#   - International Momentum: +0.030 → +0.030 Sharpe contribution
-# v8.09-activated: Cross-Asset Regime Arb activated at 2-10% weight per regime
+# Regime-dependent weights (5 active signals, renormalized per regime)
+# v9.19: Removed TSFM_MOMENTUM and DURATION_REGIME (no data feeds in collect_signals).
+# Weights renormalized to sum=1.0 across active sources only.
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.4200,
-        SignalSource.MULTI_SPEED_MOM: 0.3300,
-        SignalSource.DURATION_REGIME: 0.1000,
-        SignalSource.ALTERNATIVE_DATA: 0.0500,
-        SignalSource.CROSS_ASSET_RV: 0.0500,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.0300,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.0200,
+        SignalSource.MULTI_SPEED_MOM: 0.6000,
+        SignalSource.CROSS_ASSET_RV: 0.1200,
+        SignalSource.ALTERNATIVE_DATA: 0.1000,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.0800,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1000,
     },
     Regime.HIGH_VOL: {
         SignalSource.MULTI_SPEED_MOM: 0.6000,
-        SignalSource.TSFM_MOMENTUM: 0.0500,
         SignalSource.CROSS_ASSET_RV: 0.1000,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.1000,
-        SignalSource.ALTERNATIVE_DATA: 0.1000,
+        SignalSource.ALTERNATIVE_DATA: 0.1500,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.0500,
-        SignalSource.DURATION_REGIME: 0.0000,
     },
     Regime.CRISIS: {
         SignalSource.MULTI_SPEED_MOM: 0.7000,
         SignalSource.CROSS_ASSET_RV: 0.2000,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1000,
-        SignalSource.TSFM_MOMENTUM: 0.0000,
-        SignalSource.DURATION_REGIME: 0.0000,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
         SignalSource.ALTERNATIVE_DATA: 0.0000,
     },
     Regime.RECOVERY: {
         SignalSource.MULTI_SPEED_MOM: 0.4300,
-        SignalSource.TSFM_MOMENTUM: 0.3000,
-        SignalSource.DURATION_REGIME: 0.0500,
-        SignalSource.ALTERNATIVE_DATA: 0.0800,
-        SignalSource.CROSS_ASSET_RV: 0.0600,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.0500,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.0300,
+        SignalSource.ALTERNATIVE_DATA: 0.2000,
+        SignalSource.CROSS_ASSET_RV: 0.1200,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.1500,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1000,
     }
 }
 
@@ -303,15 +292,14 @@ class EnsembleVoter:
         self.current_regime: Regime = Regime.NORMAL
         self.current_regime_confidence: float = 0.5
 
-        # Initialize bandit weighter for dynamic weight adaptation (vSpring Cleaning)
+        # Initialize bandit weighter for dynamic weight adaptation
         survivor_values = [
             s.value for s in [
-                SignalSource.TSFM_MOMENTUM,
+                SignalSource.MULTI_SPEED_MOM,
                 SignalSource.CROSS_ASSET_RV,
                 SignalSource.INTERNATIONAL_MOMENTUM,
                 SignalSource.ALTERNATIVE_DATA,
-                SignalSource.MULTI_SPEED_MOM,
-                SignalSource.DURATION_REGIME,
+                SignalSource.CROSS_ASSET_REGIME_ARB,
             ]
         ]
         self.bandit = BanditWeighter(
@@ -433,20 +421,28 @@ class EnsembleVoter:
     
     def collect_signals(self, date: Optional[str] = None) -> Dict[SignalSource, SignalReading]:
         """
-        Collect signals from all available sources.
-        
-        This aggregates:
+        Collect signals from active (non-deprecated) sources.
+
+        Active sources (7 survivor signals per v9.14+ spring cleaning):
         - Multi-speed momentum (primary trend signal)
-        - Macro momentum (regime context)
-        - CTA trend overlay (crisis alpha)
+        - Cross-asset relative value (mean-reversion triggers)
+        - International equity momentum (EFA/VXUS trend)
+        - Alternative data (SEC EDGAR, NewsAPI, jobs)
+        - Cross-asset regime arbitrage (divergence detection)
+
+        Removed in v9.19 (deprecated, zero weight, no data feeds):
+        MACRO_MOMENTUM, CLOSING_AUCTION, FACTOR_ROTATION, MEAN_REVERSION,
+        TRANSIENT_FACTORS, VISIBILITY_GRAPH, VP_MACD, FACTOR_TIMING,
+        LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE,
+        ZERO_DTE, TSFM_MOMENTUM (no data feed), DURATION_REGIME (no data feed).
         """
         readings = {}
-        
+
         # 1. Multi-Speed Momentum (v2.56)
         try:
             from src.signals.multi_speed_momentum import MultiSpeedMomentum
             msm = MultiSpeedMomentum()
-            
+
             # Get ensemble signals for each asset
             msm_signals = {}
             for ticker in ['SPY', 'TLT', 'GLD']:
@@ -454,9 +450,9 @@ class EnsembleVoter:
                     sig = msm.get_signal_for_ticker(ticker, date)
                     if sig is not None:
                         msm_signals[ticker] = sig
-                except Exception as e:
+                except Exception:
                     pass
-            
+
             if msm_signals:
                 avg_signal = sum(msm_signals.values()) / len(msm_signals)
                 readings[SignalSource.MULTI_SPEED_MOM] = SignalReading(
@@ -471,185 +467,8 @@ class EnsembleVoter:
                 )
         except ImportError:
             pass
-        
-        # 2. Macro Momentum (v2.57)
-        try:
-            from src.signals.macro_momentum import MacroMomentumEngine
-            engine = MacroMomentumEngine()
-            reading = engine.compute_reading(date)
-            
-            # Aggregate macro signal from biases
-            macro_value = (reading.equity_bias + reading.duration_bias + reading.gold_bias) / 3
-            
-            readings[SignalSource.MACRO_MOMENTUM] = SignalReading(
-                source=SignalSource.MACRO_MOMENTUM,
-                timestamp=reading.timestamp,
-                value=macro_value,
-                confidence=0.6,
-                weight=0.0,
-                regime_fit=reading.regime_classification,
-                asset_signals={
-                    'SPY': reading.equity_bias,
-                    'TLT': reading.duration_bias,
-                    'GLD': reading.gold_bias
-                },
-                explanation=f"Regime: {reading.regime_classification}, Aggregate: {reading.aggregate_score:+.3f}"
-            )
-        except ImportError as e:
-            pass
-        
-        # 3. CTA Trend (if available)
-        # Placeholder - would load from existing CTA module
-        
-        # 4. Closing Auction Signal (v3.17)
-        try:
-            from src.signals.closing_auction import ClosingAuctionSignalGenerator, SignalConfidence
-            
-            # Load latest MOC signals from JSON if available
-            signal_path = Path("data/signals/closing_auction.json")
-            if signal_path.exists():
-                with open(signal_path) as f:
-                    signal_data = json.load(f)
-                
-                # Filter to tradeable signals with medium+ confidence
-                tradeable = [
-                    s for s in signal_data.get('tradeable_signals', [])
-                    if s.get('confidence') in ['high', 'medium']
-                ]
-                
-                if tradeable:
-                    # Aggregate signal: average direction score
-                    avg_direction = sum(s.get('direction_score', 0) for s in tradeable) / len(tradeable)
-                    # Normalize to -1..1 range
-                    signal_value = max(-1, min(1, avg_direction / 3))
-                    
-                    readings[SignalSource.CLOSING_AUCTION] = SignalReading(
-                        source=SignalSource.CLOSING_AUCTION,
-                        timestamp=signal_data.get('timestamp', str(datetime.now())),
-                        value=signal_value,
-                        confidence=0.6 if any(s.get('confidence') == 'high' for s in tradeable) else 0.5,
-                        weight=0.0,
-                        regime_fit="all",
-                        asset_signals={s['symbol']: s.get('direction_score', 0) / 3 for s in tradeable},
-                        explanation=f"MOC imbalance: {len(tradeable)} tradeable signals, avg_direction={avg_direction:+.2f}"
-                    )
-        except Exception as e:
-            pass
-        
-        # 5. Factor Rotation Signal (v3.00)
-        try:
-            from src.signals.factor_rotation import FactorRotationIntegrator
-            integrator = FactorRotationIntegrator()
-            signal = integrator.get_signal_for_ensemble(date)
-            
-            readings[SignalSource.FACTOR_ROTATION] = SignalReading(
-                source=SignalSource.FACTOR_ROTATION,
-                timestamp=signal["date"],
-                value=signal["signal_value"],
-                confidence=signal["confidence"],
-                weight=0.0,
-                regime_fit=signal["direction"],
-                asset_signals={
-                    'MTUM': signal["factor_allocations"].get('MTUM', 0),
-                    'QUAL': signal["factor_allocations"].get('QUAL', 0),
-                    'USMV': signal["factor_allocations"].get('USMV', 0),
-                    'VLUE': signal["factor_allocations"].get('VLUE', 0),
-                },
-                explanation=f"Factor rotation: {signal['rationale'][0] if signal['rationale'] else 'No additional info'}"
-            )
-        except ImportError:
-            pass
-        
-        # 6. VIX-Gated Mean-Reversion Signal (v4.81)
-        try:
-            from src.strategy.mean_reversion_overlay import get_mean_reversion_ensemble_signals
-            mr_signals = get_mean_reversion_ensemble_signals()
-            mr = mr_signals.get("mean_reversion", {})
-            
-            if mr:
-                readings[SignalSource.MEAN_REVERSION] = SignalReading(
-                    source=SignalSource.MEAN_REVERSION,
-                    timestamp=str(datetime.now()),
-                    value=mr.get("signal_value", 0.0),
-                    confidence=0.7 if mr.get("active") else 0.3,
-                    weight=0.0,
-                    regime_fit="high_vol",
-                    asset_signals={
-                        'SPY': mr.get("signal_value", 0.0),
-                    },
-                    explanation=f"Mean-reversion: {mr.get('rationale', 'idle')}, alloc={mr.get('allocation_pct', 0):.1f}%, VIX={mr.get('vix_level', 0):.1f}, regime={mr.get('vix_regime', 'N/A')}"
-                )
-        except ImportError:
-            pass
-        
-        # 7. Transient Statistical Factors Signal (v5.01)
-        try:
-            from src.monitor.transient_factors import generate_ensemble_signal
-            tf_signal = generate_ensemble_signal()
-            
-            if tf_signal and tf_signal.get("signal_value") is not None:
-                sig_val = tf_signal["signal_value"]
-                conf = tf_signal.get("confidence", 0.5)
-                readings[SignalSource.TRANSIENT_FACTORS] = SignalReading(
-                    source=SignalSource.TRANSIENT_FACTORS,
-                    timestamp=str(datetime.now()),
-                    value=sig_val,
-                    confidence=conf,
-                    weight=0.0,
-                    regime_fit="high_vol",
-                    asset_signals={
-                        'SPY': sig_val,
-                    },
-                    explanation=f"Transient factors: stability={tf_signal.get('stability', 0):.2f}, trend={tf_signal.get('trend', 'N/A')}, n_factors={tf_signal.get('n_factors', 0)}, transition={tf_signal.get('transition_score', 0):.2f}"
-                )
-        except ImportError:
-            pass
 
-        # 8. Visibility Graph Signal (v5.41)
-        try:
-            from src.signals.visibility_graph import get_ensemble_signal
-            vg_signal = get_ensemble_signal()
-
-            if vg_signal and vg_signal.get("signal_value") is not None:
-                sig_val = vg_signal["signal_value"]
-                conf = vg_signal.get("confidence", 0.5)
-                readings[SignalSource.VISIBILITY_GRAPH] = SignalReading(
-                    source=SignalSource.VISIBILITY_GRAPH,
-                    timestamp=str(datetime.now()),
-                    value=sig_val,
-                    confidence=conf,
-                    weight=0.0,
-                    regime_fit="normal",
-                    asset_signals={
-                        'SPY': sig_val,
-                    },
-                    explanation=f"VGRSI: {vg_signal.get('rationale', 'N/A')}"
-                )
-        except ImportError:
-            pass
-
-        # 9. VP-MACD Signal (v5.55)
-        try:
-            from src.signals.vp_macd import generate_signal
-            vp_signal = generate_signal(ticker="SPY")
-
-            if vp_signal is not None and vp_signal.vp_macd_value is not None:
-                readings[SignalSource.VP_MACD] = SignalReading(
-                    source=SignalSource.VP_MACD,
-                    timestamp=vp_signal.timestamp,
-                    value=vp_signal.vp_macd_value,
-                    confidence=vp_signal.confidence,
-                    weight=0.0,
-                    regime_fit="all",
-                    asset_signals={
-                        'SPY': vp_signal.vp_macd_value,
-                    },
-                    explanation=f"VP-MACD: {vp_signal.vp_macd_signal}, hist={vp_signal.histogram:.4f}, thresh={vp_signal.volatility_adjusted_threshold:.4f}, vol={vp_signal.regime}"
-                )
-        except ImportError:
-            pass
-
-        # 10. Cross-Asset Relative Value (v5.71)
+        # 2. Cross-Asset Relative Value (v5.71)
         try:
             from src.signals.cross_asset_relative_value import CrossAssetRVScanner
             rv_scanner = CrossAssetRVScanner()
@@ -669,131 +488,16 @@ class EnsembleVoter:
         except ImportError:
             pass
 
-        # 11. Factor Timing Signal (v6.02)
-        try:
-            # Detect current regime or default to normal
-            current_regime = self.detect_regime() if hasattr(self, 'detect_regime') else (None, 0.5)
-            regime_name = current_regime[0].value if current_regime[0] else "normal"
-
-            from src.signals.factor_timing_signal import get_ensemble_signal
-            ft_signal = get_ensemble_signal(regime=regime_name)
-
-            if ft_signal.get("active") and ft_signal.get("signal_value") is not None:
-                readings[SignalSource.FACTOR_TIMING] = SignalReading(
-                    source=SignalSource.FACTOR_TIMING,
-                    timestamp=str(datetime.now()),
-                    value=ft_signal["signal_value"],
-                    confidence=ft_signal.get("confidence", 0.5),
-                    weight=0.0,
-                    regime_fit=regime_name,
-                    asset_signals=ft_signal.get("factor_scores", {}),
-                    explanation=f"Factor timing: top={ft_signal.get('top_factor', '?')} ({ft_signal.get('factor_scores', {}).get(ft_signal.get('top_factor', ''), 0):+.2f}σ), "
-                                f"bottom={ft_signal.get('bottom_factor', '?')}, "
-                                f"urgency={ft_signal.get('urgency', 0):.2f}, "
-                                f"divergence={ft_signal.get('factor_divergence', 0):.2f}σ"
-                )
-        except Exception:
-            pass
-
-        # 12. LLM Narrative Signal (v7.01)
-        try:
-            from src.signals.llm_narrative_signal import get_narrative_signal
-            narrative = get_narrative_signal()
-
-            if narrative.get("value") is not None:
-                asset_signals = narrative.get("asset_signals", {})
-                readings[SignalSource.LLM_NARRATIVE] = SignalReading(
-                    source=SignalSource.LLM_NARRATIVE,
-                    timestamp=str(datetime.now()),
-                    value=narrative["value"],
-                    confidence=narrative.get("confidence", 0.3),
-                    weight=0.0,
-                    regime_fit="all",
-                    asset_signals=asset_signals,
-                    explanation=f"Macro narrative: {narrative.get('macro_health', '?')} "
-                                f"(score={narrative['value']:+.2f}). "
-                                f"FOMC: {narrative.get('fomc_tone', 'neutral')}. "
-                                f"Signal: SPY={asset_signals.get('SPY', 0):+.2f}, "
-                                f"TLT={asset_signals.get('TLT', 0):+.2f}, "
-                                f"GLD={asset_signals.get('GLD', 0):+.2f}. "
-                                f"{narrative.get('num_releases', 0)} releases analyzed."
-                )
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"LLM narrative signal unavailable: {e}")
-            pass
-
-        # 13. Macro Regime Meta-Synthesis (v8.07)
-        try:
-            from src.signals.macro_regime_synthesis import MetaRegimeSynthesizer
-            mrs = MetaRegimeSynthesizer()
-            ensemble_signal = mrs.get_ensemble_signal()
-            regime_name, regime_conf = mrs.get_regime_for_ensemble_voter()
-
-            readings[SignalSource.MACRO_REGIME_SYNTHESIS] = SignalReading(
-                source=SignalSource.MACRO_REGIME_SYNTHESIS,
-                timestamp=str(datetime.now()),
-                value=ensemble_signal,
-                confidence=regime_conf,
-                weight=0.0,
-                regime_fit=regime_name,
-                asset_signals={
-                    'SPY': ensemble_signal,
-                },
-                explanation=f"Macro meta-regime: consensus={regime_name}, signal={ensemble_signal:+.4f}, confidence={regime_conf:.1%}"
-            )
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"Macro regime synthesis unavailable: {e}")
-            pass
-
-        # 14. FX Currency Carry (v3.15)
-        try:
-            from src.signals.fx_carry_signal import FXCarrySignalGenerator
-            fx_gen = FXCarrySignalGenerator()
-            fx_signal = fx_gen.generate_signal()
-
-            if fx_signal.is_valid:
-                # Map signal_type to numeric value: usd_strength=-1, usd_weakness=+1, neutral=0
-                signal_map = {"usd_strength": -0.5, "usd_weakness": 0.5, "neutral": 0.0}
-                signal_value = signal_map.get(fx_signal.signal_type, 0.0)
-
-                readings[SignalSource.FX_CARRY] = SignalReading(
-                    source=SignalSource.FX_CARRY,
-                    timestamp=fx_signal.timestamp,
-                    value=signal_value,
-                    confidence=fx_signal.confidence,
-                    weight=0.0,
-                    regime_fit="all",
-                    asset_signals={
-                        'SPY': fx_signal.spy_shift,
-                        'EFA': fx_signal.efa_shift,
-                        'VXUS': fx_signal.vxus_shift,
-                    },
-                    explanation=f"FX Carry: {fx_signal.signal_type}, "
-                                f"regime={fx_signal.regime}, dir={fx_signal.direction}, "
-                                f"reason={fx_signal.reason}, spy_shift={fx_signal.spy_shift:+.1f}%"
-                )
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"FX Carry signal unavailable: {e}")
-            pass
-
-        # 15. International Equity Momentum (v3.13)
+        # 3. International Equity Momentum (v3.13)
         try:
             from src.signals.international_momentum import InternationalMomentumGenerator
 
             # Load price data for SPY, EFA, EEM
             price_data = self._load_price_data()
             if price_data is not None and not price_data.empty:
-                # Compute basic 6-month momentum for international comparison
                 window = 126  # ~6 months of trading days
                 required_cols = [c for c in ['SPY', 'EFA', 'EEM'] if c in price_data.columns]
                 if len(required_cols) >= 2:
-                    # Build data dict in format expected by InternationalMomentumGenerator
                     recent = price_data[required_cols].iloc[-window:] if len(price_data) >= window else price_data[required_cols]
                     if len(recent) >= 20:
                         efa_mom = (recent['EFA'].iloc[-1] / recent['EFA'].iloc[0] - 1) * 100 if 'EFA' in recent else 0.0
@@ -844,56 +548,13 @@ class EnsembleVoter:
             pass
         except Exception as e:
             logger.debug(f"International momentum unavailable: {e}")
-            pass
 
-        # 16. Commodity Curve Overlay (v3.20)
-        try:
-            from src.signals.commodity_curve import fetch_curve_signal, CurveRegime
-
-            # Check DBC (broad commodity) curve regime
-            dbc_signal = fetch_curve_signal("DBC")
-            gsg_signal = fetch_curve_signal("GSG")
-
-            # Compute consensus signal: backwardation=+1, flat=0, contango=-1
-            def regime_value(r: CurveRegime) -> float:
-                if r == CurveRegime.BACKWARDATION:
-                    return 0.5
-                elif r == CurveRegime.CONTANGO:
-                    return -0.5
-                return 0.0
-
-            dbc_val = regime_value(dbc_signal.regime)
-            gsg_val = regime_value(gsg_signal.regime)
-            avg_signal = (dbc_val + gsg_val) / 2.0
-
-            readings[SignalSource.COMMODITY_CURVE] = SignalReading(
-                source=SignalSource.COMMODITY_CURVE,
-                timestamp=str(datetime.now()),
-                value=avg_signal,
-                confidence=0.5,
-                weight=0.0,
-                regime_fit="all",
-                asset_signals={
-                    'DBC': dbc_val,
-                    'GSG': gsg_val,
-                },
-                explanation=f"Commodity Curve: DBC={dbc_signal.regime.name}({dbc_signal.spread_pct:+.2f}%), "
-                            f"GSG={gsg_signal.regime.name}({gsg_signal.spread_pct:+.2f}%), "
-                            f"consensus={avg_signal:+.2f}"
-            )
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"Commodity curve unavailable: {e}")
-            pass
-
-        # 17. Alternative Data (v9.00) — SEC EDGAR, NewsAPI, Jobs data
+        # 4. Alternative Data (v9.00) — SEC EDGAR, NewsAPI, Jobs data
         try:
             alt_data_file = Path("~/projects/portfolio-lab/data/signals").expanduser() / "alternative_data_latest.json"
             if alt_data_file.exists():
-                import json as json_mod
                 with open(alt_data_file) as f:
-                    alt_data = json_mod.load(f)
+                    alt_data = json.load(f)
 
                 regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
                 signal_value = regime_map.get(alt_data.get("regime", "neutral"), 0.0)
@@ -912,9 +573,8 @@ class EnsembleVoter:
                 )
         except Exception as e:
             logger.debug(f"Alternative data unavailable: {e}")
-            pass
 
-        # 18. Cross-Asset Regime Arbitrage (v8.09)
+        # 5. Cross-Asset Regime Arbitrage (v8.09)
         try:
             from src.signals.cross_asset_regime_arb import CrossAssetRegimeArbDetector
             arb_detector = CrossAssetRegimeArbDetector()
@@ -940,61 +600,6 @@ class EnsembleVoter:
             pass
         except Exception as e:
             logger.debug(f"Cross-asset regime arb unavailable: {e}")
-            pass
-
-        # 19. 0DTE Options Yield Enhancement (v3.12)
-        try:
-            odte_state_file = Path("~/projects/portfolio-lab/data/odte_state.json").expanduser()
-            if odte_state_file.exists():
-                import json as json_mod
-                with open(odte_state_file) as f:
-                    odte_state = json_mod.load(f)
-
-                # 0DTE signal: slightly positive when selling calls for yield
-                # (implies modest bullish view with volatility premium capture)
-                # Signal value based on active positions and recent performance
-                active_positions = odte_state.get("active_positions", 0)
-                recent_profit = odte_state.get("recent_profit", 0.0)
-                cumulative_pnl = odte_state.get("cumulative_pnl", 0.0)
-
-                # Base signal: small positive yield enhancement bias
-                base_signal = 0.05
-
-                # Adjust for active positions (more positions = more yield capture)
-                position_bonus = min(0.10, active_positions * 0.03)
-
-                # Adjust for recent performance
-                perf_bonus = min(0.05, max(-0.05, recent_profit * 0.01))
-
-                signal_value = min(0.20, max(-0.10, base_signal + position_bonus + perf_bonus))
-
-                readings[SignalSource.ZERO_DTE] = SignalReading(
-                    source=SignalSource.ZERO_DTE,
-                    timestamp=str(datetime.now()),
-                    value=signal_value,
-                    confidence=0.4,  # Moderate confidence (yield enhancement, not directional)
-                    weight=0.0,
-                    regime_fit="normal",
-                    asset_signals={"SPY": signal_value},
-                    explanation=f"0DTE Yield Enhancement: {active_positions} active positions, "
-                                f"recent P&L=${recent_profit:.2f}, "
-                                f"cumulative=${cumulative_pnl:.2f}"
-                )
-            else:
-                # No state file yet — signal is neutral but present
-                readings[SignalSource.ZERO_DTE] = SignalReading(
-                    source=SignalSource.ZERO_DTE,
-                    timestamp=str(datetime.now()),
-                    value=0.0,
-                    confidence=0.3,
-                    weight=0.0,
-                    regime_fit="normal",
-                    asset_signals={"SPY": 0.0},
-                    explanation="0DTE Yield Enhancement: No active positions (state file not found)"
-                )
-        except Exception as e:
-            logger.debug(f"0DTE signal unavailable: {e}")
-            pass
 
         self.current_readings = readings
         return readings
