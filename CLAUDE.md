@@ -54,6 +54,17 @@
 - **Test count**: 6382 → 6452 safe (6405 total passed, 15 pre-existing yield/sentiment failures)
 - **Status**: All phases complete
 
+### v9.22 Test Pollution Fix + Coverage Expansion - COMPLETED
+- **Fix**: `tests/test_rebalancing_backtest.py` — eliminated sys.modules pollution that caused 22 test failures across 7 downstream files
+  - Root cause: module-level `sys.modules` eviction of `src.rebalancing.*` corrupted Python import namespace for all subsequent tests
+  - Fix: replaced `sys.modules` manipulation + `importlib.reload` with `unittest.mock.patch.object` on backtest module symbols
+  - Previously failing files now all pass: test_sentiment_client (8), test_vix_insurance_signal (5), test_yield_curve_regime (3), test_yield_dashboard (3), test_tsmom_overlay (1), test_visibility_graph (1), test_vix_futures (1)
+- **Tests**: 56 new tests across 2 previously untested modules:
+  - `tests/test_fx_fetcher.py` (31 tests): FXMetrics dataclass, FXFetcher DB init/cache, Yahoo API mock, metrics computation (carry regime/vol regime/USD strength), signal generation, save_metrics, edge cases
+  - `tests/test_factor_correlation.py` (25 tests): calculate_returns, calculate_correlation (positive/negative/insufficient/zero variance), load_factor_prices, build_correlation_matrix (diagonal/symmetric/bounded), analyze_redundancy, generate_report
+- **Test count**: 6452 → 6506 safe (0 failures, previously 22 pre-existing failures now all fixed)
+- **Status**: All phases complete
+
 ### v9.19 Ensemble Voter Dead Signal Pruning - COMPLETED
 - **Pruned**: 14 deprecated signal collection blocks from `collect_signals()` — 396 net lines removed (566→170 lines)
   - Removed: MACRO_MOMENTUM, CLOSING_AUCTION, FACTOR_ROTATION, MEAN_REVERSION, TRANSIENT_FACTORS, VISIBILITY_GRAPH, VP_MACD, FACTOR_TIMING, LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE, ZERO_DTE
@@ -460,7 +471,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6452 safe** passed (0 failures, 13 skipped)
+- **6506 safe** passed (0 failures, 13 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
