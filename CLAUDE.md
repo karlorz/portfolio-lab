@@ -39,6 +39,14 @@
 
 ## Recent Implementation Updates (2026-05-20)
 
+### v9.18 Crypto Institutional Test Suite - COMPLETED
+- **Tests**: 58 new tests for `src/crypto/institutional.py` (902-line module, previously 0 tests):
+  - `tests/test_crypto_institutional.py` (58 tests): 4 dataclasses, init_database, TokenizedTreasuryStrategy (allocation + rebalance + circuit breaker + product performance + yield), CryptoRiskManager (risk assessment + compliance + rebalance deltas), CLI (4 commands), constants, edge cases
+  - Circuit breaker: all 5 states tested (green/yellow/orange/red/black)
+  - Edge cases: invalid risk profile fallback, zero portfolio, rebalance boundary
+- **Test count**: 6324 → 6382 safe
+- **Status**: All phases complete
+
 ### v9.16 Coverage Gap Closure - COMPLETED
 - **Tests**: 60 new tests across 3 previously untested modules:
   - `tests/test_odte_executor.py` (27 tests): 0DTE options executor — enums, dataclasses, paper-mode simulation, exit logic
@@ -435,10 +443,11 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6324 safe** passed (0 failures, 13 skipped)
+- **6382 safe** passed (0 failures, 13 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
+- **New (v9.18)**: `test_crypto_institutional.py` (58 tests) — TokenizedTreasuryStrategy + CryptoRiskManager + CLI
 - **New (v9.16)**: `test_odte_executor.py` (27 tests), `test_health_tracker.py` (20 tests), `test_health.py` (13 tests) — 60 tests for previously untested modules
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
