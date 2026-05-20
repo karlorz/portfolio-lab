@@ -54,7 +54,7 @@ class TestUnifiedOrchestrator:
         assert len(contributions) >= 1  # At least calendar should always work
         for c in contributions:
             assert isinstance(c, OverlayContribution)
-            assert c.name in ("collar", "crypto", "bond_duration", "calendar")
+            assert c.name in ("collar", "crypto", "bond_duration", "calendar", "vixy")
 
     def test_contributions_have_versions(self, orch):
         contributions = orch.collect_overlay_contributions()

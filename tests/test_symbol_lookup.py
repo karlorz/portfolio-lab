@@ -37,3 +37,6 @@ class TestGetSymbolCategory:
 
     def test_empty_string(self):
         assert get_symbol_category("") == "unknown"
+
+    def test_none_input(self):
+        assert get_symbol_category(None) == "unknown"

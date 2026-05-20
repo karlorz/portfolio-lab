@@ -1,9 +1,18 @@
 """
-Unified Overlay Orchestrator - v4.90 Implementation
-Combines all tactical overlays into a single portfolio recommendation.
+Unified Overlay Orchestrator - v9.15 Implementation
+Combines all tactical overlays into a single portfolio recommendation with
+VIX-gated activation, overlay conflict reduction, and explicit thresholds.
+
+v9.15 Changes:
+- VIX-gated overlay activation (collar active VIX<30, VIXY active VIX>20)
+- Limit concurrent premium-cost overlays to max 2
+- Collar/VIXY complement: VIX<20→collar, VIX>30→VIXY
+- Crypto: momentum threshold check (>0% 6m)
+- Live VIX detection instead of hardcoded defaults
 
 Overlays integrated:
 - v4.60 Cashless Collar (equity drawdown protection)
+- v7.04 VIXY Hedge Sizing (volatility hedge)
 - v3.50 Calendar Seasonality (execution timing)
 - v4.70 Crypto Tactical (uncorrelated alpha)
 - v4.80 Bond Duration Rotation (fixed-income optimization)
@@ -19,6 +28,7 @@ Usage:
 
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, date
 from enum import Enum
@@ -30,6 +40,13 @@ from src.signals.calendar_seasonality import get_calendar_modifier
 from src.signals.bond_duration_signal import generate_bond_duration_signal
 from src.signals.collar_signal import generate_collar_signal
 from src.signals.crypto_momentum import generate_crypto_signal
+
+try:
+    from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer
+    _HAS_VIXY = True
+except ImportError:
+    _HAS_VIXY = False
+    VIXYHedgeSizer = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -146,14 +163,20 @@ class UnifiedOrchestrator:
         "eth": (0.0, 0.02),
     }
 
-    # Overlay weights in unified model
+    # v9.15: Overlay weights — vixy added, collar & vixy share hedge budget
     OVERLAY_WEIGHTS = {
-        "collar": 0.25,
+        "collar": 0.20,
         "crypto": 0.15,
         "bond_duration": 0.25,
         "calendar": 0.10,
+        "vixy": 0.05,
         # Remaining 25% is base passive allocation
     }
+
+    # v9.15: VIX thresholds for overlay activation
+    VIX_COLLAR_MAX = 30.0         # Collar disabled above VIX 30 (cost prohibitive)
+    VIX_VIXY_MIN = 20.0           # VIXY hedge starts at VIX 20
+    VIX_CRISIS = 40.0             # Collar freeze threshold
 
     STATE_FILE = Path(__file__).parent.parent.parent / "data" / "unified_orchestrator_state.json"
 
@@ -179,18 +202,69 @@ class UnifiedOrchestrator:
         with open(self.STATE_FILE, "w") as f:
             json.dump(self._state, f, indent=2)
 
+    def _fetch_vix_level(self) -> float:
+        """Fetch VIX level from market DB for overlay gating."""
+        db_path = Path(__file__).parent.parent.parent / "data" / "market.db"
+        if not db_path.exists():
+            return 16.0  # default fallback (normal VIX)
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT close FROM prices WHERE symbol='^VIX' ORDER BY date DESC LIMIT 1"
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row and len(row) > 0 and row[0] > 0:
+                return float(row[0])
+        except Exception as e:
+            logger.debug(f"Could not fetch VIX from DB: {e}")
+        return 16.0  # fallback
+
     def collect_overlay_contributions(self) -> List[OverlayContribution]:
         """Collect signals from all active overlays."""
         contributions = []
+        vix_level = self._fetch_vix_level()
+
+        # ── Premium-cost overlay conflict reduction (v9.15) ────────
+        # Determine which hedges are appropriate based on VIX level
+        collar_active = vix_level < self.VIX_COLLAR_MAX
+        collar_crisis = vix_level >= self.VIX_CRISIS
+        vixy_active = vix_level >= self.VIX_VIXY_MIN
+
+        # If VIX is moderate (20-30), both can be active in reduced capacity
+        # If VIX < 20: collar preferred (cheaper), VIXY suppressed
+        # If VIX > 30: VIXY preferred, collar stressed/disabled
+        # If VIX > 40: collar crisis-disabled, VIXY fully active
+        if vix_level < self.VIX_VIXY_MIN:
+            vixy_status = "suppressed"
+            collar_status = "active"
+        elif vix_level >= self.VIX_CRISIS:
+            vixy_status = "active"
+            collar_status = "disabled"
+        elif vix_level >= self.VIX_COLLAR_MAX:
+            vixy_status = "active"
+            collar_status = "suppressed"  # expensive but not crisis-level
+        else:
+            # VIX 20-30: both can be active in reduced capacity
+            vixy_status = "active"
+            collar_status = "active"
+
+        # Count premium-cost active overlays (max 2)
+        premium_cost_active = sum(1 for s in [collar_status, vixy_status] if s == "active")
+        if premium_cost_active > 2:
+            # Safety: should never happen, but if so, suppress VIXY
+            vixy_status = "suppressed"
 
         # 1. Collar Overlay (v4.60)
         try:
-            collar = generate_collar_signal(spot=550.0, vix=16.0)
-            if collar.is_valid:
-                spy_shift = -(collar.strikes.net_premium / collar.underlying_price)
+            # v9.15: Use live data instead of hardcoded spot/vix
+            collar = generate_collar_signal(spot=None, vix=None)
+            if collar.is_valid and collar_status != "disabled":
+                spy_shift = -(collar.strikes.net_premium / collar.underlying_price) if collar.underlying_price > 0 else 0
                 contributions.append(OverlayContribution(
                     name="collar", version="v4.60",
-                    status="active" if collar.confidence > 50 else "suppressed",
+                    status=collar_status,
                     weight=self.OVERLAY_WEIGHTS["collar"],
                     spy_delta=round(spy_shift, 4) if abs(spy_shift) < 0.05 else 0.0,
                     gld_delta=0.01 if collar.confidence > 70 else 0.0,
@@ -198,18 +272,51 @@ class UnifiedOrchestrator:
                     btc_delta=0.0, eth_delta=0.0,
                     vol_impact=-0.005, sharpe_contribution=0.03,
                     confidence=collar.confidence,
-                    reason=f"Collar: {collar.regime}, {'cashless' if collar.strikes.is_cashless else 'debit'}",
+                    reason=f"Collar: {collar.regime} (VIX={vix_level:.1f}), "
+                           f"{'cashless' if collar.strikes.is_cashless else 'debit'}",
                 ))
         except Exception as e:
             logger.warning(f"Collar overlay unavailable: {e}")
 
-        # 2. Crypto Tactical (v4.70)
+        # 2. VIXY Hedge Overlay (v7.04) — v9.15: integrated into orchestrator
+        if _HAS_VIXY and vixy_status != "disabled":
+            try:
+                assert VIXYHedgeSizer is not None  # _HAS_VIXY guarantees this
+                sizer = VIXYHedgeSizer()
+                vixy_signal = sizer.get_signal(vix_level=vix_level)
+                if vixy_signal and vixy_signal.allocation_pct > 0:
+                    alloc_frac = vixy_signal.allocation_pct / 100.0
+                    # VIXY hedge is funded from SPY allocation
+                    spy_shift_vixy = -alloc_frac
+                    contributions.append(OverlayContribution(
+                        name="vixy", version="v7.04",
+                        status=vixy_status,
+                        weight=self.OVERLAY_WEIGHTS["vixy"],
+                        spy_delta=round(spy_shift_vixy, 4),
+                        gld_delta=0.0, tlt_delta=0.0,
+                        ief_delta=0.0, shy_delta=0.0,
+                        btc_delta=0.0, eth_delta=0.0,
+                        vol_impact=alloc_frac * 0.5,  # VIXY adds vol
+                        sharpe_contribution=0.01 if vixy_signal.hedge_efficiency > 1.0 else 0.0,
+                        confidence=vixy_signal.confidence * 100,
+                        reason=f"VIXY: {vixy_signal.regime} ({vixy_signal.allocation_pct:.1f}%), "
+                               f"efficiency {vixy_signal.hedge_efficiency:.2f}x",
+                    ))
+            except Exception as e:
+                logger.warning(f"VIXY overlay unavailable: {e}")
+
+        # 3. Crypto Tactical (v4.70) — v9.15: momentum threshold check
         try:
             crypto = generate_crypto_signal()
             if crypto.is_valid:
+                # v9.15: Only activate when 6m momentum > 0%
+                btc_mom = getattr(crypto.btc_signal, 'momentum_6m', 0)
+                crypto_has_momentum = btc_mom > 0.0 if btc_mom is not None else False
+                crypto_status = "active" if (crypto.confidence > 50 and crypto_has_momentum) else "suppressed"
+
                 contributions.append(OverlayContribution(
                     name="crypto", version="v4.70",
-                    status="active" if crypto.confidence > 50 else "suppressed",
+                    status=crypto_status,
                     weight=self.OVERLAY_WEIGHTS["crypto"],
                     spy_delta=0.0,
                     gld_delta=round(-crypto.composite_weight, 4),
@@ -219,12 +326,13 @@ class UnifiedOrchestrator:
                     vol_impact=0.003 if crypto.composite_weight > 0 else 0.0,
                     sharpe_contribution=0.02 if crypto.composite_weight > 0 else 0.0,
                     confidence=crypto.confidence,
-                    reason=f"Crypto: {crypto.signal_state}, {crypto.composite_weight:.1%} weight",
+                    reason=f"Crypto: {crypto.signal_state}, {crypto.composite_weight:.1%} weight"
+                           + (f", 6m mom={btc_mom:+.1%}" if btc_mom is not None else ""),
                 ))
         except Exception as e:
             logger.warning(f"Crypto overlay unavailable: {e}")
 
-        # 3. Bond Duration Rotation (v4.80)
+        # 4. Bond Duration Rotation (v4.80)
         try:
             bond = generate_bond_duration_signal()
             if bond.is_valid:
@@ -248,7 +356,7 @@ class UnifiedOrchestrator:
         except Exception as e:
             logger.warning(f"Bond duration overlay unavailable: {e}")
 
-        # 4. Calendar Seasonality (v3.50) — execution timing only
+        # 5. Calendar Seasonality (v3.50) — execution timing only
         try:
             mod = get_calendar_modifier()
             contributions.append(OverlayContribution(
@@ -376,6 +484,9 @@ class UnifiedOrchestrator:
             if c.status != "disabled"
         )
 
+        # v9.15: Include VIX info in recommendation
+        vix_level = self._fetch_vix_level()
+
         return UnifiedRecommendation(
             timestamp=datetime.now().isoformat(),
             baseline_spy=self.BASELINE["spy"],
@@ -400,7 +511,8 @@ class UnifiedOrchestrator:
             execution_recommendation=exec_rec,
             confidence=round(avg_confidence, 1),
             recommendation=(
-                f"Unified: {active_count}/4 overlays active, "
+                f"Unified: {active_count}/{len(contributions)} overlays active, "
+                f"VIX={vix_level:.1f}, "
                 f"SPY {weights['spy']:.1%}, GLD {weights['gld']:.1%}, "
                 f"Bonds {weights['tlt']+weights['ief']+weights['shy']:.1%}, "
                 f"Crypto {weights['btc']+weights['eth']:.1%}, "
@@ -428,7 +540,7 @@ def main():
     rec = orch.recommend()
 
     print("=" * 60)
-    print("UNIFIED OVERLAY ORCHESTRATOR v4.90")
+    print("UNIFIED OVERLAY ORCHESTRATOR v9.15")
     print("=" * 60)
     print(f"Timestamp: {rec.timestamp}")
     print()

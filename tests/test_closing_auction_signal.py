@@ -36,6 +36,12 @@ class TestSignalDirection:
         assert SignalDirection.SELL.value == -2
         assert SignalDirection.STRONG_SELL.value == -3
 
+    def test_buy_sell_symmetry(self):
+        """Test that buy/sell values are symmetric."""
+        assert SignalDirection.STRONG_BUY.value == -SignalDirection.STRONG_SELL.value
+        assert SignalDirection.BUY.value == -SignalDirection.SELL.value
+        assert SignalDirection.WEAK_BUY.value == -SignalDirection.WEAK_SELL.value
+
 
 class TestClosingAuctionSignal:
     """Test ClosingAuctionSignal dataclass."""
@@ -139,6 +145,24 @@ class TestClosingAuctionSignal:
             urgency="high"
         )
         assert signal.should_trade is False
+
+    def test_should_not_trade_insufficient_data(self, sample_imbalance):
+        """Test insufficient data confidence is not tradeable."""
+        signal = ClosingAuctionSignal(
+            symbol="SPY",
+            timestamp=datetime.now(),
+            direction=SignalDirection.BUY,
+            confidence=SignalConfidence.INSUFFICIENT_DATA,
+            imbalance=sample_imbalance,
+            entry_price=450.0,
+            target_exit_price=450.45,
+            stop_loss_price=449.1,
+            historical_win_rate=0.50,
+            historical_count=5,
+            max_position_pct=0.03,
+            urgency="high"
+        )
+        assert signal.should_trade is False
     
     def test_side_buy(self, sample_signal):
         """Test side property for buy."""
@@ -161,6 +185,53 @@ class TestClosingAuctionSignal:
             urgency="high"
         )
         assert signal.side == "sell"
+
+    def test_side_neutral(self, sample_imbalance):
+        """Test side property for neutral."""
+        signal = ClosingAuctionSignal(
+            symbol="SPY",
+            timestamp=datetime.now(),
+            direction=SignalDirection.NEUTRAL,
+            confidence=SignalConfidence.HIGH,
+            imbalance=sample_imbalance,
+            entry_price=450.0,
+            target_exit_price=450.0,
+            stop_loss_price=None,
+            historical_win_rate=0.60,
+            historical_count=50,
+            max_position_pct=0.03,
+            urgency="normal"
+        )
+        assert signal.side == "neutral"
+
+    def test_weak_buy_is_not_neutral(self, sample_imbalance):
+        """Test WEAK_BUY is still a buy side, not neutral."""
+        signal = ClosingAuctionSignal(
+            symbol="SPY",
+            timestamp=datetime.now(),
+            direction=SignalDirection.WEAK_BUY,
+            confidence=SignalConfidence.HIGH,
+            imbalance=sample_imbalance,
+            entry_price=450.0,
+            target_exit_price=450.45,
+            stop_loss_price=449.1,
+            historical_win_rate=0.60,
+            historical_count=30,
+            max_position_pct=0.03,
+            urgency="normal"
+        )
+        assert signal.side == "buy"
+        assert signal.direction != SignalDirection.NEUTRAL
+
+
+class TestSignalConfidence:
+    """Test SignalConfidence enum values."""
+
+    def test_confidence_values(self):
+        assert SignalConfidence.HIGH.value == "high"
+        assert SignalConfidence.MEDIUM.value == "medium"
+        assert SignalConfidence.LOW.value == "low"
+        assert SignalConfidence.INSUFFICIENT_DATA.value == "insufficient_data"
 
 
 class TestHistoricalValidator:

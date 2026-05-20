@@ -17,6 +17,8 @@ def get_symbol_category(symbol: str) -> str:
 
     Returns "unknown" for symbols not in the lookup table.
     """
+    if not symbol:
+        return "unknown"
     return SYMBOL_TO_CATEGORY.get(symbol.upper(), "unknown")
 
 
