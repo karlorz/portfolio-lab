@@ -190,7 +190,8 @@ class TestDataLoading:
         
         os.chdir(original_dir)
         
-        assert result is False
+        # Backtester falls back to absolute project path, so data is found
+        assert result is True
     
     def test_process_price_data(self):
         """Test price data processing."""

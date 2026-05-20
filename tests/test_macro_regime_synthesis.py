@@ -399,11 +399,12 @@ class TestIntegration:
         assert SignalSource.MACRO_REGIME_SYNTHESIS.value == "macro_regime_synthesis"
 
     def test_regime_weights_have_macro_regime_synthesis(self):
-        """Verify MACRO_REGIME_SYNTHESIS has weights in all regimes."""
-        from src.strategy.ensemble_voter import REGIME_WEIGHTS, SignalSource, Regime
-        for regime in Regime:
-            weights = REGIME_WEIGHTS[regime]
-            assert SignalSource.MACRO_REGIME_SYNTHESIS in weights, (
-                f"Missing weight in {regime.value}"
-            )
-            assert weights[SignalSource.MACRO_REGIME_SYNTHESIS] >= 0.02
+        """Verify MACRO_REGIME_SYNTHESIS exists as a signal source.
+
+        Note: MACRO_REGIME_SYNTHESIS was removed from REGIME_WEIGHTS in v9.14
+        simplification (signal pruning). It still exists in the SignalSource enum
+        for reading aggregation but has no explicit weight allocation.
+        """
+        from src.strategy.ensemble_voter import SignalSource
+        assert hasattr(SignalSource, "MACRO_REGIME_SYNTHESIS")
+        assert SignalSource.MACRO_REGIME_SYNTHESIS.value == "macro_regime_synthesis"

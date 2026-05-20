@@ -188,9 +188,10 @@ class TestRenderBriefText:
         assert "Everything is on track today." in text
 
     def test_header_shows_date(self, sample_dashboard):
+        from datetime import date
         sections = generate_brief_sections(sample_dashboard)
         text = render_brief_text(sections)
-        assert "2026-05-19" in text
+        assert date.today().isoformat() in text
 
 
 class TestGenerateNarrative:
