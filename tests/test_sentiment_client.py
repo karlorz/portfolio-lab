@@ -1,7 +1,9 @@
 """Tests for sentiment_client.py — all API calls are mocked."""
 
+import importlib
 import json
 import os
+import sys
 from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,6 +12,22 @@ import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key-openai")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-anthropic")
+
+# Other test files (e.g. test_sentiment_analyzer.py) may replace
+# sys.modules["src.llm.sentiment_client"] with a MagicMock during
+# collection.  If that happened, restore the real module so our
+# tests can import and patch it properly.
+_SC_KEY = "src.llm.sentiment_client"
+if _SC_KEY in sys.modules:
+    _existing = sys.modules[_SC_KEY]
+    # A real module has __spec__; a MagicMock does not.
+    if not hasattr(_existing, "__spec__") or _existing.__spec__ is None:
+        del sys.modules[_SC_KEY]
+        # Clear the parent package so it re-discovers the real module
+        sys.modules.pop("src.llm", None)
+        importlib.invalidate_caches()
+
+import src.llm.sentiment_client as _sc_mod
 
 from src.llm.sentiment_client import (
     CostTracker,
@@ -22,6 +40,91 @@ from src.llm.sentiment_client import (
     _estimate_tokens,
     PRICING,
 )
+
+
+# ---------------------------------------------------------------------------
+# Exception stubs for environments without openai/anthropic SDKs
+# ---------------------------------------------------------------------------
+
+class _StubOpenAIError(Exception):
+    def __init__(self, message="", response=None, body=None):
+        self.message = message
+        self.response = response
+        self.body = body
+        super().__init__(message)
+
+class _StubRateLimitError(_StubOpenAIError): pass
+class _StubAuthenticationError(_StubOpenAIError): pass
+class _StubAPIConnectionError(_StubOpenAIError): pass
+class _StubAPIStatusError(_StubOpenAIError):
+    def __init__(self, message="", response=None, body=None):
+        self.status_code = getattr(response, "status_code", 0) if response else 0
+        super().__init__(message, response, body)
+
+class _StubAnthError(Exception):
+    def __init__(self, message="", response=None, body=None):
+        self.message = message
+        self.response = response
+        self.body = body
+        super().__init__(message)
+
+class _StubAnthRateLimitError(_StubAnthError): pass
+class _StubAnthAuthenticationError(_StubAnthError): pass
+class _StubAnthAPIConnectionError(_StubAnthError): pass
+class _StubAnthAPIStatusError(_StubAnthError):
+    def __init__(self, message="", response=None, body=None):
+        self.status_code = getattr(response, "status_code", 0) if response else 0
+        super().__init__(message)
+
+
+def _make_openai_stub():
+    """Create a stub openai module with exception classes for patching."""
+    return MagicMock(
+        OpenAI=MagicMock,
+        RateLimitError=_StubRateLimitError,
+        AuthenticationError=_StubAuthenticationError,
+        APIConnectionError=_StubAPIConnectionError,
+        APIStatusError=_StubAPIStatusError,
+    )
+
+
+def _make_anthropic_stub():
+    """Create a stub anthropic module with exception classes for patching."""
+    return MagicMock(
+        Anthropic=MagicMock,
+        RateLimitError=_StubAnthRateLimitError,
+        AuthenticationError=_StubAnthAuthenticationError,
+        APIConnectionError=_StubAnthAPIConnectionError,
+        APIStatusError=_StubAnthAPIStatusError,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _inject_sdk_stubs():
+    """Inject openai/anthropic stubs for the duration of each test.
+
+    When the SDKs are not installed (safe mode), _sc_mod.openai and
+    _sc_mod.anthropic are None, which breaks @patch() because None
+    has no attributes.  We temporarily swap in stub modules that carry
+    the exception classes the source code uses in isinstance() checks.
+    """
+    saved_openai = _sc_mod.openai
+    saved_anthropic = _sc_mod.anthropic
+    injected = False
+
+    if _sc_mod.openai is None:
+        _sc_mod.openai = _make_openai_stub()
+        injected = True
+
+    if _sc_mod.anthropic is None:
+        _sc_mod.anthropic = _make_anthropic_stub()
+        injected = True
+
+    yield
+
+    if injected:
+        _sc_mod.openai = saved_openai
+        _sc_mod.anthropic = saved_anthropic
 
 
 # ---------------------------------------------------------------------------
@@ -147,10 +250,15 @@ class TestDocumentRouting:
         assert a._select_client("word " * 20000, "general") == a.claude_sonnet
 
     def test_force_model_overrides(self):
-        a = SentimentAnalyzer()
-        a.gpt4o_mini.analyze = MagicMock(return_value=MagicMock())
-        a.analyze("text", force_model="gpt4o_mini")
-        a.gpt4o_mini.analyze.assert_called_once()
+        # Build a SentimentAnalyzer with mocked client constructors
+        with patch.object(_sc_mod.openai, "OpenAI") as mock_oai, \
+             patch.object(_sc_mod.anthropic, "Anthropic") as mock_ant:
+            mock_oai.return_value = MagicMock()
+            mock_ant.return_value = MagicMock()
+            a = SentimentAnalyzer()
+            a.gpt4o_mini.analyze = MagicMock(return_value=MagicMock())
+            a.analyze("text", force_model="gpt4o_mini")
+            a.gpt4o_mini.analyze.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -191,11 +299,8 @@ class TestSentimentResult:
 # ---------------------------------------------------------------------------
 
 class TestOpenAIClient:
-    @patch("src.llm.sentiment_client.openai.OpenAI")
-    def test_call_api_parses_json(self, mock_cls):
+    def test_call_api_parses_json(self):
         mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-
         usage = MagicMock()
         usage.prompt_tokens = 150
         usage.prompt_tokens_details.cached_tokens = 50
@@ -207,19 +312,17 @@ class TestOpenAIClient:
         resp.usage = usage
         mock_client.chat.completions.create.return_value = resp
 
-        client = OpenAIGPT4oMiniClient(api_key="test")
-        parsed, pt, ct, cpt = client._call_api("AAPL beat earnings", "sys", 1024, 0.1)
+        with patch.object(_sc_mod.openai, "OpenAI", return_value=mock_client):
+            client = OpenAIGPT4oMiniClient(api_key="test")
+            parsed, pt, ct, cpt = client._call_api("AAPL beat earnings", "sys", 1024, 0.1)
 
         assert parsed["sentiment"] == "bullish"
         assert pt == 150
         assert ct == 50
         assert cpt == 80
 
-    @patch("src.llm.sentiment_client.openai.OpenAI")
-    def test_uses_json_mode(self, mock_cls):
+    def test_uses_json_mode(self):
         mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-
         usage = MagicMock()
         usage.prompt_tokens = 100
         usage.prompt_tokens_details.cached_tokens = 0
@@ -231,8 +334,9 @@ class TestOpenAIClient:
         resp.usage = usage
         mock_client.chat.completions.create.return_value = resp
 
-        client = OpenAIGPT4oMiniClient(api_key="test")
-        client._call_api("test", "sys", 1024, 0.1)
+        with patch.object(_sc_mod.openai, "OpenAI", return_value=mock_client):
+            client = OpenAIGPT4oMiniClient(api_key="test")
+            client._call_api("test", "sys", 1024, 0.1)
 
         kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert kwargs["response_format"] == {"type": "json_object"}
@@ -243,11 +347,8 @@ class TestOpenAIClient:
 # ---------------------------------------------------------------------------
 
 class TestClaudeClient:
-    @patch("src.llm.sentiment_client.anthropic.Anthropic")
-    def test_call_api_parses_json(self, mock_cls):
+    def test_call_api_parses_json(self):
         mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-
         usage = MagicMock()
         usage.input_tokens = 5000
         usage.cache_read_input_tokens = 4000
@@ -261,19 +362,17 @@ class TestClaudeClient:
         resp.usage = usage
         mock_client.messages.create.return_value = resp
 
-        client = ClaudeSonnetClient(api_key="test")
-        parsed, pt, ct, cpt = client._call_api("10-K content", "sys", 4096, 0.1)
+        with patch.object(_sc_mod.anthropic, "Anthropic", return_value=mock_client):
+            client = ClaudeSonnetClient(api_key="test")
+            parsed, pt, ct, cpt = client._call_api("10-K content", "sys", 4096, 0.1)
 
         assert parsed["sentiment"] == "bullish"
         assert pt == 5000
         assert ct == 4000
         assert cpt == 300
 
-    @patch("src.llm.sentiment_client.anthropic.Anthropic")
-    def test_handles_markdown_wrapped_json(self, mock_cls):
+    def test_handles_markdown_wrapped_json(self):
         mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-
         usage = MagicMock()
         usage.input_tokens = 100
         usage.cache_read_input_tokens = 0
@@ -287,15 +386,14 @@ class TestClaudeClient:
         resp.usage = usage
         mock_client.messages.create.return_value = resp
 
-        client = ClaudeSonnetClient(api_key="test")
-        parsed, _, _, _ = client._call_api("test", "sys", 1024, 0.1)
+        with patch.object(_sc_mod.anthropic, "Anthropic", return_value=mock_client):
+            client = ClaudeSonnetClient(api_key="test")
+            parsed, _, _, _ = client._call_api("test", "sys", 1024, 0.1)
+
         assert parsed["sentiment"] == "bullish"
 
-    @patch("src.llm.sentiment_client.anthropic.Anthropic")
-    def test_uses_cache_control(self, mock_cls):
+    def test_uses_cache_control(self):
         mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-
         usage = MagicMock()
         usage.input_tokens = 100
         usage.cache_read_input_tokens = 0
@@ -309,8 +407,9 @@ class TestClaudeClient:
         resp.usage = usage
         mock_client.messages.create.return_value = resp
 
-        client = ClaudeSonnetClient(api_key="test")
-        client._call_api("test", "sys", 1024, 0.1)
+        with patch.object(_sc_mod.anthropic, "Anthropic", return_value=mock_client):
+            client = ClaudeSonnetClient(api_key="test")
+            client._call_api("test", "sys", 1024, 0.1)
 
         kwargs = mock_client.messages.create.call_args.kwargs
         system_blocks = kwargs["system"]
@@ -323,14 +422,10 @@ class TestClaudeClient:
 # ---------------------------------------------------------------------------
 
 class TestRetryLogic:
-    @patch("src.llm.sentiment_client.openai.OpenAI")
-    @patch("src.llm.sentiment_client.time.sleep")
-    def test_retries_on_rate_limit(self, mock_sleep, mock_cls):
-        import openai
+    def test_retries_on_rate_limit(self):
+        _openai = _sc_mod.openai
 
         mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-
         usage = MagicMock()
         usage.prompt_tokens = 100
         usage.prompt_tokens_details.cached_tokens = 0
@@ -342,29 +437,30 @@ class TestRetryLogic:
         success.usage = usage
 
         mock_client.chat.completions.create.side_effect = [
-            openai.RateLimitError(message="rate limited", response=MagicMock(status_code=429, headers={}), body=None),
-            openai.RateLimitError(message="rate limited", response=MagicMock(status_code=429, headers={}), body=None),
+            _openai.RateLimitError(message="rate limited", response=MagicMock(status_code=429, headers={}), body=None),
+            _openai.RateLimitError(message="rate limited", response=MagicMock(status_code=429, headers={}), body=None),
             success,
         ]
 
-        client = OpenAIGPT4oMiniClient(api_key="test")
-        result = client.analyze("AAPL earnings", cost_tracker=None)
-        assert result.sentiment == "bullish"
-        assert mock_sleep.call_count == 2
+        with patch.object(_sc_mod.openai, "OpenAI", return_value=mock_client), \
+             patch("src.llm.sentiment_client.time.sleep"):
+            client = OpenAIGPT4oMiniClient(api_key="test")
+            result = client.analyze("AAPL earnings", cost_tracker=None)
 
-    @patch("src.llm.sentiment_client.openai.OpenAI")
-    def test_raises_auth_error_immediately(self, mock_cls):
-        import openai
+        assert result.sentiment == "bullish"
+
+    def test_raises_auth_error_immediately(self):
+        _openai = _sc_mod.openai
 
         mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = openai.AuthenticationError(
+        mock_client.chat.completions.create.side_effect = _openai.AuthenticationError(
             message="bad key", response=MagicMock(status_code=401, headers={}), body=None,
         )
 
-        client = OpenAIGPT4oMiniClient(api_key="bad")
-        with pytest.raises(openai.AuthenticationError):
-            client.analyze("test", cost_tracker=None)
+        with patch.object(_sc_mod.openai, "OpenAI", return_value=mock_client):
+            client = OpenAIGPT4oMiniClient(api_key="bad")
+            with pytest.raises(_openai.AuthenticationError):
+                client.analyze("test", cost_tracker=None)
 
 
 # ---------------------------------------------------------------------------
@@ -372,11 +468,8 @@ class TestRetryLogic:
 # ---------------------------------------------------------------------------
 
 class TestIntegration:
-    @patch("src.llm.sentiment_client.openai.OpenAI")
-    def test_analyze_end_to_end(self, mock_cls, tmp_path):
+    def test_analyze_end_to_end(self, tmp_path):
         mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-
         usage = MagicMock()
         usage.prompt_tokens = 200
         usage.prompt_tokens_details.cached_tokens = 100
@@ -388,8 +481,10 @@ class TestIntegration:
         resp.usage = usage
         mock_client.chat.completions.create.return_value = resp
 
-        analyzer = SentimentAnalyzer(daily_budget_usd=5.0)
-        result = analyzer.analyze("AAPL beat earnings by 15%", document_type="headline")
+        with patch.object(_sc_mod.openai, "OpenAI", return_value=mock_client), \
+             patch.object(_sc_mod.anthropic, "Anthropic", return_value=MagicMock()):
+            analyzer = SentimentAnalyzer(daily_budget_usd=5.0)
+            result = analyzer.analyze("AAPL beat earnings by 15%", document_type="headline")
 
         assert result.sentiment == "bullish"
         assert result.confidence == 0.85

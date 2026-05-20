@@ -47,7 +47,11 @@ class _MockSentimentAnalyzer:
             return _MockSentimentResult(sentiment="neutral", confidence=0.5)
 
 
-# Inject mocks before importing the module under test
+# Inject mocks before importing the module under test, but preserve the
+# original module so we don't pollute other test files that need the
+# real src.llm.sentiment_client (e.g. test_sentiment_client.py).
+_original_sentiment_client = sys.modules.get("src.llm.sentiment_client")
+
 sys.modules["src.llm.sentiment_client"] = MagicMock()
 sys.modules["src.llm.sentiment_client"].SentimentAnalyzer = _MockSentimentAnalyzer
 sys.modules["src.llm.sentiment_client"].SentimentResult = _MockSentimentResult
@@ -58,6 +62,22 @@ from src.strategy.sentiment_analyzer import (
     SentimentAnalyzerPipeline,
     demo,
 )
+
+
+# ---------------------------------------------------------------------------
+# Cleanup: restore original src.llm.sentiment_client after all tests in this
+# module finish, so that other test files (e.g. test_sentiment_client.py) see
+# the real module instead of our MagicMock stand-in.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_sentiment_client_module():
+    """Restore the real src.llm.sentiment_client after this module's tests."""
+    yield
+    if _original_sentiment_client is not None:
+        sys.modules["src.llm.sentiment_client"] = _original_sentiment_client
+    else:
+        sys.modules.pop("src.llm.sentiment_client", None)
 
 
 class TestAggregatedSentiment:

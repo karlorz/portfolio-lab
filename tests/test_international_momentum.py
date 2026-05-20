@@ -46,13 +46,22 @@ from signals.international_momentum import (
     InternationalMomentumGenerator
 )
 
-# Restore real numpy in sys.modules to avoid polluting other test files.
-# pandas and yfinance are left mocked since no other test files import them
-# at module level — only this file's own tests reference them.
+# Restore real numpy/pandas in sys.modules to avoid polluting other test files.
+# yfinance is also restored — some test files import it transitively.
 if _real_np is not None:
     sys.modules['numpy'] = _real_np
 else:
     sys.modules.pop('numpy', None)
+
+if _real_pd is not None:
+    sys.modules['pandas'] = _real_pd
+else:
+    sys.modules.pop('pandas', None)
+
+if _real_yf is not None:
+    sys.modules['yfinance'] = _real_yf
+else:
+    sys.modules.pop('yfinance', None)
 
 
 class TestMomentumMetrics(unittest.TestCase):
