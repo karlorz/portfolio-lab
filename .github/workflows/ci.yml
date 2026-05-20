@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint (ruff)
+        run: uv run ruff check src/ tests/
+
+      - name: Test (safe suite, ML disabled)
+        env:
+          PORTFOLIO_LAB_ENABLE_ML: "0"
+        run: |
+          uv run pytest tests/ \
+            -p no:cacheprovider \
+            --tb=short \
+            -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: TypeScript check
+        run: bunx --bun tsc --noEmit
+
+      - name: Build
+        run: bun run build
+
+      - name: Test (TypeScript)
+        run: bun test tests/ts/

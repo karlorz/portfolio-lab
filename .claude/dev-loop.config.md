@@ -167,6 +167,18 @@ glossary:
   update_on: new_concept_landed
 ```
 
+## CI
+
+CI-enabled with runtime discovery — dev-loop queries GitHub branch protection
+API to find required checks at MERGE time. No config duplication needed.
+
+```yaml
+ci_configured: true
+ci_discovery: runtime
+ci_workflow: .github/workflows/ci.yml
+required_checks: []
+```
+
 ## Notes
 
 ```yaml

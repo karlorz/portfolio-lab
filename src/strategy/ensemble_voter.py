@@ -88,7 +88,7 @@ class SignalSource(Enum):
     INTERNATIONAL_MOMENTUM = "international_momentum"  # v3.13 International equity momentum
     COMMODITY_CURVE = "commodity_curve"    # v3.20 Commodity curve overlay  # DEPRECATED
     ALTERNATIVE_DATA = "alternative_data"  # v9.00 Alternative data signal (SEC EDGAR, NewsAPI, jobs)
-    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # v8.09 Cross-asset regime arbitrage  # DEPRECATED
+    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # v8.09 Cross-asset regime arbitrage
     ZERO_DTE = "zero_dte"  # v3.12 0DTE options yield enhancement  # DEPRECATED
 
 
@@ -139,43 +139,48 @@ class EnsembleVote:
     source_votes: List[SignalReading]
 
 
-# Regime-dependent weights (6 survivor signals, renormalized per regime)
+# Regime-dependent weights (7 survivor signals, renormalized per regime)
 # v9.14: Increased proven alpha sources per knowledge synthesis findings:
 #   - Cross-Asset RV: +0.010 → +0.050 Sharpe contribution
 #   - Alternative Data: +0.030 → +0.050 Sharpe contribution
 #   - International Momentum: +0.030 → +0.030 Sharpe contribution
+# v8.09-activated: Cross-Asset Regime Arb activated at 2-10% weight per regime
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.TSFM_MOMENTUM: 0.4400,
+        SignalSource.TSFM_MOMENTUM: 0.4200,
         SignalSource.MULTI_SPEED_MOM: 0.3300,
         SignalSource.DURATION_REGIME: 0.1000,
         SignalSource.ALTERNATIVE_DATA: 0.0500,
         SignalSource.CROSS_ASSET_RV: 0.0500,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0300,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.0200,
     },
     Regime.HIGH_VOL: {
-        SignalSource.MULTI_SPEED_MOM: 0.6500,
+        SignalSource.MULTI_SPEED_MOM: 0.6000,
         SignalSource.TSFM_MOMENTUM: 0.0500,
         SignalSource.CROSS_ASSET_RV: 0.1000,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.1000,
         SignalSource.ALTERNATIVE_DATA: 0.1000,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.0500,
         SignalSource.DURATION_REGIME: 0.0000,
     },
     Regime.CRISIS: {
-        SignalSource.MULTI_SPEED_MOM: 0.7500,
-        SignalSource.CROSS_ASSET_RV: 0.2500,
+        SignalSource.MULTI_SPEED_MOM: 0.7000,
+        SignalSource.CROSS_ASSET_RV: 0.2000,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1000,
         SignalSource.TSFM_MOMENTUM: 0.0000,
         SignalSource.DURATION_REGIME: 0.0000,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
         SignalSource.ALTERNATIVE_DATA: 0.0000,
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.4500,
+        SignalSource.MULTI_SPEED_MOM: 0.4300,
         SignalSource.TSFM_MOMENTUM: 0.3000,
         SignalSource.DURATION_REGIME: 0.0500,
         SignalSource.ALTERNATIVE_DATA: 0.0800,
         SignalSource.CROSS_ASSET_RV: 0.0600,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.0600,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.0500,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.0300,
     }
 }
 
