@@ -423,7 +423,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6340 safe** tests (221 heavy excluded via collect_ignore, never imported)
+- **6020 safe** passed (251 pre-existing test pollution failures, 15 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy`
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 187 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
@@ -542,7 +542,7 @@ These modules have NO ML deps and are always safe to work on:
 
 ## Quick Start
 ```bash
-make test            # safe test suite (ML disabled, 3GB memory cap, 3775 tests)
+make test            # safe test suite (ML disabled, 3GB memory cap, 6020p/251f tests, see test-isolation for pollution bypass)
 make test-ml         # full suite including ML (needs >3GB RAM)
 bash scripts/run-tests-safe           # standalone safe runner with --ml flag
 PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/  # manual safe run

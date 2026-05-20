@@ -31,6 +31,7 @@ help:
 	@echo ""
 	@echo "  make test         Run test suite (safe: ML disabled, 1GB memory cap)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
+	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"
 	@echo "  make data         Fetch Yahoo Finance market data"
 	@echo "  make dashboard    Regenerate dashboard JSON files"
 	@echo "  make health       Run system health monitor"
@@ -67,7 +68,30 @@ test:
 	fi; \
 	exit $$EXIT
 
-.PHONY: test-ml
+.PHONY: test test-ml
+
+# ── Test Isolation (bypasses pollution) ────────────────
+
+.PHONY: test-isolation
+test-isolation:
+	@echo "=== Test Isolation Mode ===\n  Runs top-failing files individually to bypass test pollution.\n  Each file runs in a fresh process, so global-state leakage (DB,\n  singletons, module-level mocks) between unrelated test suites\n  is isolated.\n"
+	@total=0; passed=0; failed=0; \
+	ISOLATION_FILES="test_sentiment_client.py test_network_momentum_leadlag.py test_macro_features.py test_factor_data_fetcher.py test_tsmom_overlay.py test_correlation_regime_detector.py test_factor_timing_pipeline.py test_risk_parity_weight_overlay.py test_risk_parity_overlay.py test_duration_yield_backtest.py test_fed_policy_overlay.py test_combined_strategy.py test_sentiment_analyzer.py test_macro_momentum.py test_ensemble_voter.py test_dual_momentum.py test_multi_speed_momentum.py test_international_momentum.py test_garch_cvar.py test_factor_premia.py"; \
+	for f in $$ISOLATION_FILES; do \
+		echo "  Running $$f..."; \
+		if PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest "tests/$$f" -q --tb=line -p no:cacheprovider --no-header 2>/dev/null; then \
+			echo "    ✓ $$f PASSED"; \
+			passed=$$((passed + 1)); \
+		else \
+			echo "    ✗ $$f FAILED"; \
+			failed=$$((failed + 1)); \
+		fi; \
+		total=$$((total + 1)); \
+	done; \
+	echo ""; \
+	echo "=== Isolation Suite: $$passed/$$total passed, $$failed failed ==="; \
+	if [ $$failed -gt 0 ]; then exit 1; fi
+
 test-ml:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
 	echo "=== Test Suite (ML mode): $$(date) ==="; \

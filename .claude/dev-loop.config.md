@@ -134,6 +134,39 @@ manifests_count: 0
 remote_hosts: []
 ```
 
+## Interview
+
+```yaml
+interview:
+  backend: native
+  trigger: auto
+```
+
+`native` backend asks 3 fixed questions per work item:
+1. What are you building?
+2. What constraints apply?
+3. How will you know it's done?
+
+`auto` trigger fires the interview only when ambiguity detection flags the
+work item (conflicting prior decisions, vague description, zero prior art).
+Clear, well-scoped tasks skip the interview entirely.
+
+## Domain glossary
+
+`CONTEXT.md` at repo root (`/root/projects/portfolio-lab/CONTEXT.md`)
+defines key terms: overlay, ensemble voting, regime detection, MARL agents,
+VIX regime, VPIN, drift-based rebalancing, etc.
+
+Agents dispatched by dev-loop should load CONTEXT.md as a reference before
+writing specs or implementation code. Keep it updated as new concepts land.
+
+```yaml
+glossary:
+  path: CONTEXT.md
+  maintainer: dev-loop
+  update_on: new_concept_landed
+```
+
 ## Notes
 
 ```yaml
