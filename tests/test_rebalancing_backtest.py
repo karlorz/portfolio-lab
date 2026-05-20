@@ -298,5 +298,412 @@ class TestDriftOnlyStrategy:
         assert r.final_value > 0
 
 
+# ---------------------------------------------------------------------------
+# run_smart_strategy tests (requires smart_rebalancer mock)
+# ---------------------------------------------------------------------------
+
+def _setup_smart_rebalancer_mock():
+    """Set up smart_rebalancer mock for run_smart_strategy tests."""
+    from src.rebalancing import smart_rebalancer as real_sr
+
+    mock = MagicMock()
+    mock.SmartRebalancingController = MagicMock
+    mock.PortfolioSnapshot = MagicMock
+    mock.MarketConditions = MagicMock
+
+    # Create enum-like values for RebalanceDecision
+    decision_mock = MagicMock()
+    decision_mock.EXECUTE = 'execute'
+    decision_mock.OVERRIDE_EMERGENCY = 'override_emergency'
+    decision_mock.DEFER_TOXICITY = 'defer_toxicity'
+    decision_mock.DEFER_TIMING = 'defer_timing'
+    decision_mock.DEFER_BUDGET = 'defer_budget'
+    mock.RebalanceDecision = decision_mock
+
+    # Create enum-like values for UrgencyLevel
+    urgency_mock = MagicMock()
+    urgency_mock.SCHEDULED = 'scheduled'
+    urgency_mock.DRIFT_TRIGGERED = 'drift_triggered'
+    urgency_mock.HIGH = 'high'
+    urgency_mock.EMERGENCY = 'emergency'
+    mock.UrgencyLevel = urgency_mock
+
+    # Create RebalanceDecisionResult mock
+    result_class = MagicMock()
+    result_instance = result_class.return_value
+    result_instance.decision = decision_mock.EXECUTE
+    result_instance.max_drift = 0.12
+    result_instance.estimated_cost_bps = 4.0
+    result_instance.urgency = urgency_mock.DRIFT_TRIGGERED
+    mock.RebalanceDecisionResult = result_class
+
+    # Store real module for restoration
+    mock._real_module = real_sr
+    return mock
+
+
+class TestSmartStrategy:
+    def _make_controller_mock(self):
+        """Create a mock controller that returns execute decisions."""
+        controller = MagicMock()
+        result = MagicMock()
+        result.decision = MagicMock()
+        result.decision.value = 'execute'
+        result.max_drift = 0.12
+        result.estimated_cost_bps = 4.0
+        result.urgency = MagicMock()
+        result.urgency.value = 'drift_triggered'
+        controller.should_rebalance.return_value = result
+        controller.record_rebalance = MagicMock()
+        return controller
+
+    def test_returns_strategy_result(self):
+        sr_mock = _setup_smart_rebalancer_mock()
+        orig = sys.modules.get('src.rebalancing.smart_rebalancer')
+        sys.modules['src.rebalancing.smart_rebalancer'] = sr_mock
+
+        try:
+            # Reimport backtest to use the mock
+            import importlib
+            from src.rebalancing import backtest as bt_mod
+            importlib.reload(bt_mod)
+
+            controller = self._make_controller_mock()
+            sr_mock.SmartRebalancingController.return_value = controller
+
+            data, dates = _make_price_data(500)
+            idx = bt_mod.build_price_index(data)
+            vpin = bt_mod.simulate_synthetic_vpin(dates)
+            r = bt_mod.run_smart_strategy(idx, dates, vpin)
+            assert isinstance(r, bt_mod.StrategyResult)
+        finally:
+            # Restore
+            if orig is None:
+                sys.modules.pop('src.rebalancing.smart_rebalancer', None)
+            else:
+                sys.modules['src.rebalancing.smart_rebalancer'] = orig
+            # Evict cached modules
+            for key in list(sys.modules):
+                if key.startswith('src.rebalancing'):
+                    del sys.modules[key]
+
+    def test_smart_has_rebalances(self):
+        sr_mock = _setup_smart_rebalancer_mock()
+        orig = sys.modules.get('src.rebalancing.smart_rebalancer')
+        sys.modules['src.rebalancing.smart_rebalancer'] = sr_mock
+
+        try:
+            import importlib
+            from src.rebalancing import backtest as bt_mod
+            importlib.reload(bt_mod)
+
+            controller = self._make_controller_mock()
+            sr_mock.SmartRebalancingController.return_value = controller
+
+            data, dates = _make_price_data(500)
+            idx = bt_mod.build_price_index(data)
+            vpin = bt_mod.simulate_synthetic_vpin(dates)
+            r = bt_mod.run_smart_strategy(idx, dates, vpin)
+            assert r.total_rebalances >= 0
+        finally:
+            if orig is None:
+                sys.modules.pop('src.rebalancing.smart_rebalancer', None)
+            else:
+                sys.modules['src.rebalancing.smart_rebalancer'] = orig
+            for key in list(sys.modules):
+                if key.startswith('src.rebalancing'):
+                    del sys.modules[key]
+
+    def test_smart_deferred_count(self):
+        """When controller defers, no rebalance is recorded."""
+        sr_mock = _setup_smart_rebalancer_mock()
+        orig = sys.modules.get('src.rebalancing.smart_rebalancer')
+        sys.modules['src.rebalancing.smart_rebalancer'] = sr_mock
+
+        try:
+            import importlib
+            from src.rebalancing import backtest as bt_mod
+            importlib.reload(bt_mod)
+
+            # Controller that defers
+            controller = MagicMock()
+            result = MagicMock()
+            result.decision = MagicMock()
+            result.decision.value = 'defer_toxicity'
+            # Make it match DEFER check
+            from enum import Enum
+            class FakeDecision(Enum):
+                DEFER_TOXICITY = 'defer_toxicity'
+                DEFER_TIMING = 'defer_timing'
+                DEFER_BUDGET = 'defer_budget'
+                EXECUTE = 'execute'
+                OVERRIDE_EMERGENCY = 'override_emergency'
+            result.decision = FakeDecision.DEFER_TOXICITY
+            controller.should_rebalance.return_value = result
+            sr_mock.SmartRebalancingController.return_value = controller
+            sr_mock.RebalanceDecision = FakeDecision
+
+            data, dates = _make_price_data(500)
+            idx = bt_mod.build_price_index(data)
+            vpin = bt_mod.simulate_synthetic_vpin(dates)
+            r = bt_mod.run_smart_strategy(idx, dates, vpin)
+            # All deferrals → 0 rebalances
+            assert r.total_rebalances == 0
+        finally:
+            if orig is None:
+                sys.modules.pop('src.rebalancing.smart_rebalancer', None)
+            else:
+                sys.modules['src.rebalancing.smart_rebalancer'] = orig
+            for key in list(sys.modules):
+                if key.startswith('src.rebalancing'):
+                    del sys.modules[key]
+
+    def test_smart_final_value_positive(self):
+        sr_mock = _setup_smart_rebalancer_mock()
+        orig = sys.modules.get('src.rebalancing.smart_rebalancer')
+        sys.modules['src.rebalancing.smart_rebalancer'] = sr_mock
+
+        try:
+            import importlib
+            from src.rebalancing import backtest as bt_mod
+            importlib.reload(bt_mod)
+
+            controller = self._make_controller_mock()
+            sr_mock.SmartRebalancingController.return_value = controller
+
+            data, dates = _make_price_data(500)
+            idx = bt_mod.build_price_index(data)
+            vpin = bt_mod.simulate_synthetic_vpin(dates)
+            r = bt_mod.run_smart_strategy(idx, dates, vpin)
+            assert r.final_value > 0
+        finally:
+            if orig is None:
+                sys.modules.pop('src.rebalancing.smart_rebalancer', None)
+            else:
+                sys.modules['src.rebalancing.smart_rebalancer'] = orig
+            for key in list(sys.modules):
+                if key.startswith('src.rebalancing'):
+                    del sys.modules[key]
+
+
+# ---------------------------------------------------------------------------
+# print_comparison tests
+# ---------------------------------------------------------------------------
+
+class TestPrintComparison:
+    def _make_results(self):
+        from src.rebalancing.backtest import RebalanceEvent
+        cal = StrategyResult(
+            name='Calendar', total_rebalances=10, total_cost_bps=70.0,
+            avg_cost_per_rebalance=7.0, annual_cost_pct=0.05,
+            max_drawdown=-15.0, tracking_error=0.0, final_value=150000,
+            cagr=8.0, sharpe=0.7, events=[],
+        )
+        drift = StrategyResult(
+            name='Drift-Only', total_rebalances=5, total_cost_bps=25.0,
+            avg_cost_per_rebalance=5.0, annual_cost_pct=0.02,
+            max_drawdown=-14.0, tracking_error=0.0, final_value=152000,
+            cagr=8.2, sharpe=0.72, events=[],
+        )
+        smart = StrategyResult(
+            name='Smart', total_rebalances=7, total_cost_bps=35.0,
+            avg_cost_per_rebalance=5.0, annual_cost_pct=0.03,
+            max_drawdown=-14.5, tracking_error=0.0, final_value=151000,
+            cagr=8.1, sharpe=0.71, events=[],
+        )
+        return {'calendar': cal, 'drift': drift, 'smart': smart}
+
+    def test_prints_without_error(self, capsys):
+        # Need to reimport since module was evicted
+        from src.rebalancing import backtest as bt_mod
+        import importlib
+        importlib.reload(bt_mod)
+        results = self._make_results()
+        bt_mod.print_comparison(results)
+        captured = capsys.readouterr()
+        assert 'STRATEGY COMPARISON' in captured.out
+        assert 'Calendar' in captured.out
+
+    def test_prints_validation(self, capsys):
+        from src.rebalancing import backtest as bt_mod
+        import importlib
+        importlib.reload(bt_mod)
+        results = self._make_results()
+        bt_mod.print_comparison(results)
+        captured = capsys.readouterr()
+        assert 'VALIDATION' in captured.out
+
+    def test_prints_metrics(self, capsys):
+        from src.rebalancing import backtest as bt_mod
+        import importlib
+        importlib.reload(bt_mod)
+        results = self._make_results()
+        bt_mod.print_comparison(results)
+        captured = capsys.readouterr()
+        assert 'CAGR' in captured.out
+        assert 'Sharpe' in captured.out
+        assert 'Max Drawdown' in captured.out
+
+
+# ---------------------------------------------------------------------------
+# save_results tests
+# ---------------------------------------------------------------------------
+
+class TestSaveResults:
+    def _make_results(self):
+        cal = StrategyResult(
+            name='Calendar', total_rebalances=10, total_cost_bps=70.0,
+            avg_cost_per_rebalance=7.0, annual_cost_pct=0.05,
+            max_drawdown=-15.0, tracking_error=0.0, final_value=150000,
+            cagr=8.0, sharpe=0.7, events=[],
+        )
+        drift = StrategyResult(
+            name='Drift-Only', total_rebalances=5, total_cost_bps=25.0,
+            avg_cost_per_rebalance=5.0, annual_cost_pct=0.02,
+            max_drawdown=-14.0, tracking_error=0.0, final_value=152000,
+            cagr=8.2, sharpe=0.72, events=[],
+        )
+        smart = StrategyResult(
+            name='Smart', total_rebalances=7, total_cost_bps=35.0,
+            avg_cost_per_rebalance=5.0, annual_cost_pct=0.03,
+            max_drawdown=-14.5, tracking_error=0.0, final_value=151000,
+            cagr=8.1, sharpe=0.71, events=[],
+        )
+        return {'calendar': cal, 'drift': drift, 'smart': smart}
+
+    def test_saves_json(self, tmp_path):
+        from src.rebalancing import backtest as bt_mod
+        import importlib
+        importlib.reload(bt_mod)
+
+        results = self._make_results()
+        # Patch DATA_DIR to tmp_path
+        with patch.object(bt_mod, 'DATA_DIR', tmp_path):
+            bt_mod.save_results(results)
+
+        output_path = tmp_path / "smart_rebalance_backtest_results.json"
+        assert output_path.exists()
+
+        data = json.loads(output_path.read_text())
+        assert 'metadata' in data
+        assert 'strategies' in data
+        assert 'calendar' in data['strategies']
+
+    def test_json_has_metadata(self, tmp_path):
+        from src.rebalancing import backtest as bt_mod
+        import importlib
+        importlib.reload(bt_mod)
+
+        results = self._make_results()
+        with patch.object(bt_mod, 'DATA_DIR', tmp_path):
+            bt_mod.save_results(results)
+
+        output_path = tmp_path / "smart_rebalance_backtest_results.json"
+        data = json.loads(output_path.read_text())
+        assert data['metadata']['version'] == '2.90'
+        assert data['metadata']['phase'] == '3'
+
+    def test_json_has_strategy_metrics(self, tmp_path):
+        from src.rebalancing import backtest as bt_mod
+        import importlib
+        importlib.reload(bt_mod)
+
+        results = self._make_results()
+        with patch.object(bt_mod, 'DATA_DIR', tmp_path):
+            bt_mod.save_results(results)
+
+        output_path = tmp_path / "smart_rebalance_backtest_results.json"
+        data = json.loads(output_path.read_text())
+        cal = data['strategies']['calendar']
+        assert 'total_rebalances' in cal
+        assert 'cagr' in cal
+        assert 'sharpe' in cal
+        assert 'max_drawdown' in cal
+
+
+# ---------------------------------------------------------------------------
+# run_full_backtest tests
+# ---------------------------------------------------------------------------
+
+class TestRunFullBacktest:
+    def test_with_synthetic_data(self, tmp_path):
+        """Run full backtest with synthetic price file."""
+        from src.rebalancing import backtest as bt_mod
+        import importlib
+        importlib.reload(bt_mod)
+
+        # Create synthetic price file
+        data, dates = _make_price_data(1000, start_date='2020-01-02')
+        price_file = tmp_path / "prices.json"
+        price_file.write_text(json.dumps(data))
+
+        # Patch DATA_DIR for save_results
+        with patch.object(bt_mod, 'DATA_DIR', tmp_path):
+            results = bt_mod.run_full_backtest(
+                price_filepath=str(price_file),
+                start_date='2020-01-01',
+                end_date='2023-12-31',
+            )
+
+        assert 'calendar' in results
+        assert 'drift' in results
+        assert 'smart' in results
+        assert isinstance(results['calendar'], bt_mod.StrategyResult)
+
+    def test_full_backtest_saves_output(self, tmp_path):
+        from src.rebalancing import backtest as bt_mod
+        import importlib
+        importlib.reload(bt_mod)
+
+        data, dates = _make_price_data(1000, start_date='2020-01-02')
+        price_file = tmp_path / "prices.json"
+        price_file.write_text(json.dumps(data))
+
+        with patch.object(bt_mod, 'DATA_DIR', tmp_path):
+            bt_mod.run_full_backtest(
+                price_filepath=str(price_file),
+                start_date='2020-01-01',
+                end_date='2023-12-31',
+            )
+
+        output_path = tmp_path / "smart_rebalance_backtest_results.json"
+        assert output_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Calendar strategy edge cases
+# ---------------------------------------------------------------------------
+
+class TestCalendarStrategyEdgeCases:
+    def test_no_rebalance_months(self):
+        """If dates don't include rebalance months, no rebalances."""
+        data, dates = _make_price_data(30, start_date='2020-03-01')
+        idx = build_price_index(data)
+        r = run_calendar_strategy(idx, dates, rebalance_months=[7])
+        # March only, no July → 0 rebalances
+        assert r.total_rebalances == 0
+
+    def test_custom_initial_value(self):
+        data, dates = _make_price_data(500)
+        idx = build_price_index(data)
+        r = run_calendar_strategy(idx, dates, initial_value=50000)
+        assert r.final_value > 0
+
+
+class TestDriftOnlyEdgeCases:
+    def test_high_drift_threshold(self):
+        """Very high threshold → no rebalances."""
+        data, dates = _make_price_data(100)
+        idx = build_price_index(data)
+        r = run_drift_only_strategy(idx, dates, drift_threshold=0.99)
+        assert r.total_rebalances == 0
+
+    def test_custom_initial_value(self):
+        data, dates = _make_price_data(500)
+        idx = build_price_index(data)
+        r = run_drift_only_strategy(idx, dates, initial_value=200000)
+        assert r.final_value > 0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

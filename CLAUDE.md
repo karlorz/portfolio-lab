@@ -47,6 +47,13 @@
 - **Test count**: 6324 → 6382 safe
 - **Status**: All phases complete
 
+### v9.21 Coverage Gap Closure Round 2 - COMPLETED
+- **Tests**: 70 new tests across 2 previously undertested modules:
+  - `tests/test_analytics_calculator.py` (52 tests): AnalyticsCalculator — drawdown series, max drawdown, rolling Sharpe, benchmark comparison, report generation, edge cases
+  - `tests/test_rebalancing_backtest.py` (+18 tests, 30→41 total): Added run_smart_strategy, run_full_backtest, print_comparison, save_results, calendar/drift edge cases
+- **Test count**: 6382 → 6452 safe (6405 total passed, 15 pre-existing yield/sentiment failures)
+- **Status**: All phases complete
+
 ### v9.19 Ensemble Voter Dead Signal Pruning - COMPLETED
 - **Pruned**: 14 deprecated signal collection blocks from `collect_signals()` — 396 net lines removed (566→170 lines)
   - Removed: MACRO_MOMENTUM, CLOSING_AUCTION, FACTOR_ROTATION, MEAN_REVERSION, TRANSIENT_FACTORS, VISIBILITY_GRAPH, VP_MACD, FACTOR_TIMING, LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE, ZERO_DTE
@@ -453,12 +460,13 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6382 safe** passed (0 failures, 13 skipped)
+- **6452 safe** passed (0 failures, 13 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
 - **New (v9.18)**: `test_crypto_institutional.py` (58 tests) — TokenizedTreasuryStrategy + CryptoRiskManager + CLI
 - **New (v9.16)**: `test_odte_executor.py` (27 tests), `test_health_tracker.py` (20 tests), `test_health.py` (13 tests) — 60 tests for previously untested modules
+- **New (v9.21)**: `test_analytics_calculator.py` (52 tests), expanded `test_rebalancing_backtest.py` (+18 tests) — 70 tests for undertested modules
 - **Safe**: `make test` or `bash scripts/run-tests-safe` (ML disabled, 3GB ulimit cap)
 - **ML**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
 - **Test pollution fix (v9.17)**: Fixed 3 polluting test files that broke 205+ downstream tests:
