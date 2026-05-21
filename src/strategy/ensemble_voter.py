@@ -439,25 +439,28 @@ class EnsembleVoter:
 
             # Get ensemble signals for each asset
             msm_signals = {}
+            msm_confidences = []
             for ticker in ['SPY', 'TLT', 'GLD']:
                 try:
                     sig = msm.get_signal_for_ticker(ticker, date)
                     if sig is not None:
-                        msm_signals[ticker] = sig
+                        msm_signals[ticker] = sig["value"]
+                        msm_confidences.append(sig["confidence"])
                 except Exception:
                     pass
 
             if msm_signals:
                 avg_signal = sum(msm_signals.values()) / len(msm_signals)
+                avg_confidence = sum(msm_confidences) / len(msm_confidences) if msm_confidences else 0.5
                 readings[SignalSource.MULTI_SPEED_MOM] = SignalReading(
                     source=SignalSource.MULTI_SPEED_MOM,
                     timestamp=str(datetime.now()),
                     value=avg_signal,
-                    confidence=0.7,
+                    confidence=avg_confidence,
                     weight=0.0,
                     regime_fit="all",
                     asset_signals=msm_signals,
-                    explanation=f"Multi-speed momentum: avg_signal={avg_signal:.3f}, assets={list(msm_signals.keys())}"
+                    explanation=f"Multi-speed momentum: avg_signal={avg_signal:.3f}, avg_conf={avg_confidence:.3f}, assets={list(msm_signals.keys())}"
                 )
         except ImportError:
             pass
@@ -559,8 +562,15 @@ class EnsembleVoter:
                     with open(alt_data_file) as f:
                         alt_data = json.load(f)
 
-                    regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
-                    signal_value = regime_map.get(alt_data.get("regime", "neutral"), 0.0)
+                    # Use continuous composite_score instead of discrete regime buckets
+                    # to preserve the full alpha signal (avoids quantization loss)
+                    composite_score = alt_data.get("raw_data", {}).get("composite_score")
+                    if composite_score is not None:
+                        signal_value = float(np.clip(composite_score, -1, 1))
+                    else:
+                        # Fallback to regime map for backward compatibility
+                        regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
+                        signal_value = regime_map.get(alt_data.get("regime", "neutral"), 0.0)
 
                     readings[SignalSource.ALTERNATIVE_DATA] = SignalReading(
                         source=SignalSource.ALTERNATIVE_DATA,
@@ -571,6 +581,7 @@ class EnsembleVoter:
                         regime_fit="all",
                         asset_signals={"SPY": signal_value},
                         explanation=f"Alt Data: regime={alt_data.get('regime')}, "
+                                    f"composite={composite_score:.4f}, "
                                     f"prob={alt_data.get('probability', 0):.2f}, "
                                     f"conf={alt_data.get('confidence', 0):.2f}"
                     )

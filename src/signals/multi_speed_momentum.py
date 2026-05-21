@@ -457,21 +457,28 @@ class MultiSpeedMomentum:
             overall_confidence=overall_confidence
         )
 
-    def get_signal_for_ticker(self, ticker: str, date_str: Optional[str] = None) -> Optional[float]:
-        """Get ensemble signal value for a ticker (-1 to +1) for external integration."""
+    def get_signal_for_ticker(self, ticker: str, date_str: Optional[str] = None) -> Optional[Dict]:
+        """Get ensemble signal for a ticker for external integration.
+
+        Returns dict with 'value' (-1 to +1) and 'confidence' (0 to 1),
+        or None if data unavailable.
+        """
         try:
             prices_df = self._load_prices()
-            
+
             if ticker not in prices_df.columns:
                 return None
-            
+
             base_weight = 0.33
             signal = self.compute_ensemble_signal(ticker, base_weight, prices_df)
-            
+
             if signal:
                 raw_signal = signal.adjustment / self.max_deviation if self.max_deviation else 0
-                return float(np.clip(raw_signal, -1, 1))
-            return 0.0
+                return {
+                    "value": float(np.clip(raw_signal, -1, 1)),
+                    "confidence": signal.ensemble_confidence,
+                }
+            return {"value": 0.0, "confidence": 0.0}
         except Exception as e:
             return None
 
