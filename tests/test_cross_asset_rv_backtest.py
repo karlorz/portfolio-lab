@@ -37,7 +37,6 @@ class TestBacktestConfig:
         assert config.base_gld_weight == 0.38
         assert config.base_tlt_weight == 0.16
         assert config.z_score_window == 60
-        assert config.z_score_threshold == 1.5
         assert config.max_shift == 0.04
         assert config.transaction_cost_bps == 10.0
 
@@ -47,7 +46,6 @@ class TestBacktestConfig:
             end_date="2020-12-31",
             initial_capital=50000.0,
             z_score_window=30,
-            z_score_threshold=2.0,
             max_shift=0.06,
             transaction_cost_bps=5.0,
         )
@@ -55,7 +53,6 @@ class TestBacktestConfig:
         assert config.end_date == "2020-12-31"
         assert config.initial_capital == 50000.0
         assert config.z_score_window == 30
-        assert config.z_score_threshold == 2.0
         assert config.max_shift == 0.06
         assert config.transaction_cost_bps == 5.0
 
@@ -123,16 +120,14 @@ class TestCrossAssetRVBacktesterInit:
     def test_default_config(self):
         bt = CrossAssetRVBacktester()
         assert bt.config.z_score_window == 60
-        assert bt.config.z_score_threshold == 1.5
         assert bt.price_data == {}
         assert bt.dates == []
         assert bt.prices == {}
 
     def test_custom_config(self):
-        config = BacktestConfig(z_score_window=30, z_score_threshold=2.0)
+        config = BacktestConfig(z_score_window=30)
         bt = CrossAssetRVBacktester(config)
         assert bt.config.z_score_window == 30
-        assert bt.config.z_score_threshold == 2.0
 
 
 # ── Signal Computation Tests ────────────────────────────────────────────
@@ -144,7 +139,7 @@ class TestGetSignal:
     @pytest.fixture
     def backtester(self):
         """Create a backtester with 200 days of controlled price data."""
-        bt = CrossAssetRVBacktester(BacktestConfig(z_score_window=60, z_score_threshold=1.5))
+        bt = CrossAssetRVBacktester(BacktestConfig(z_score_window=60))
         bt.dates = [f"2020-{m:02d}-{d:02d}" for m in range(1, 8) for d in range(1, 29)]  # ~200 days
         bt.prices = {}
         for date in bt.dates:
@@ -160,10 +155,10 @@ class TestGetSignal:
     def test_spy_reversion_positive_z(self, backtester):
         """When SPY has a big recent gain (high z-score), mean-reversion signal
         should be negative (betting on reversion down)."""
-        # Flat 100.0 for first 59 days of the 60-day window, then +20% spike
+        # Near-flat 100.0 for first 59 days of the 60-day window, then +20% spike
         for i, date in enumerate(backtester.dates):
-            if i <= 159:  # dates[100] to dates[159]: flat
-                backtester.prices[date]["SPY"] = 100.0
+            if i <= 159:  # dates[100] to dates[159]: near-flat
+                backtester.prices[date]["SPY"] = 100.0 + (i - 100) * 0.01  # 0.01 drift to avoid zero-std
             elif i == 160:  # +20% jump on last day of window
                 backtester.prices[date]["SPY"] = 120.0
             else:
@@ -172,7 +167,7 @@ class TestGetSignal:
             backtester.prices[date]["TLT"] = 100.0
 
         signal_type, signal_value = backtester._get_signal(backtester.dates[161])
-        # Last return (dates[160]/dates[159]) = 20% -> positive z-score outlier
+        # Last return (dates[160]/dates[159]) ~20% -> positive z-score outlier
         # -> mean-reversion down -> negative signal
         assert signal_type == "spy_reversion"
         assert signal_value < 0
@@ -180,10 +175,10 @@ class TestGetSignal:
     def test_spy_reversion_negative_z(self, backtester):
         """When SPY has a big recent drop (low z-score), mean-reversion signal
         should be positive (betting on reversion up)."""
-        # Flat 100.0 for first 59 days of window, then -20% drop on last day
+        # Near-flat 100.0 for first 59 days of window, then -20% drop on last day
         for i, date in enumerate(backtester.dates):
-            if i <= 159:  # dates[100] to dates[159]: flat
-                backtester.prices[date]["SPY"] = 100.0
+            if i <= 159:  # dates[100] to dates[159]: near-flat
+                backtester.prices[date]["SPY"] = 100.0 + (i - 100) * 0.01  # 0.01 drift to avoid zero-std
             elif i == 160:  # -20% drop on last day of window
                 backtester.prices[date]["SPY"] = 80.0
             else:
@@ -192,7 +187,7 @@ class TestGetSignal:
             backtester.prices[date]["TLT"] = 100.0
 
         signal_type, signal_value = backtester._get_signal(backtester.dates[161])
-        # Last return (dates[160]/dates[159]) = -20% -> negative z-score outlier
+        # Last return (dates[160]/dates[159]) ~ -20% -> negative z-score outlier
         # -> mean-reversion up -> positive signal
         assert signal_type == "spy_reversion"
         assert signal_value > 0
@@ -456,7 +451,7 @@ class TestEdgeCases:
                 prices[date]["TLT"] = 500.0
 
         bt = CrossAssetRVBacktester(
-            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31", z_score_threshold=1.5)
+            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31")
         )
         bt.dates = dates
         bt.prices = prices

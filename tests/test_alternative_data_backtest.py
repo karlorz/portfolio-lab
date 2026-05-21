@@ -211,14 +211,15 @@ class TestInferRegime:
 
     def test_bull_above_threshold(self):
         bt = AlternativeDataBacktester()
-        # spy_bull_return = 0.05, so >5% 60d return -> bull
-        assert bt.infer_regime_from_spy_return(0.06) == "bull"
+        # Production _determine_regime: composite_score > 0.15 -> risk_on -> bull
+        # composite_score = clip(spy_60d_return * 2.0, -1, 1), so spy_60d_return > 0.075
+        assert bt.infer_regime_from_spy_return(0.08) == "bull"
         assert bt.infer_regime_from_spy_return(0.10) == "bull"
-        assert bt.infer_regime_from_spy_return(0.051) == "bull"
+        assert bt.infer_regime_from_spy_return(0.15) == "bull"
 
     def test_bull_exactly_at_threshold(self):
         bt = AlternativeDataBacktester()
-        # > 0.05 for bull, so exactly 0.05 is NOT bull
+        # composite_score = 0.05 * 2.0 = 0.10, which is < 0.15 -> neutral
         assert bt.infer_regime_from_spy_return(0.05) == "neutral"
 
     def test_neutral_band(self):
@@ -230,23 +231,24 @@ class TestInferRegime:
 
     def test_bear_band(self):
         bt = AlternativeDataBacktester()
-        # spy_bear_return_low = -0.15, so -15% to -5% -> bear
-        assert bt.infer_regime_from_spy_return(-0.06) == "bear"
+        # Production _determine_regime: composite_score < -0.15 -> risk_off -> bear
+        # composite_score = clip(spy_60d_return * 2.0, -1, 1), so spy_60d_return < -0.075 for bear
         assert bt.infer_regime_from_spy_return(-0.10) == "bear"
-        assert bt.infer_regime_from_spy_return(-0.14) == "bear"
+        assert bt.infer_regime_from_spy_return(-0.15) == "bear"
+        assert bt.infer_regime_from_spy_return(-0.20) == "bear"
 
     def test_crisis_below_threshold(self):
         bt = AlternativeDataBacktester()
-        # < -15% -> crisis
-        assert bt.infer_regime_from_spy_return(-0.16) == "crisis"
-        assert bt.infer_regime_from_spy_return(-0.30) == "crisis"
-        assert bt.infer_regime_from_spy_return(-0.50) == "crisis"
+        # Production code does not produce "crisis"; strongly negative returns map to "bear".
+        assert bt.infer_regime_from_spy_return(-0.16) == "bear"
+        assert bt.infer_regime_from_spy_return(-0.30) == "bear"
+        assert bt.infer_regime_from_spy_return(-0.50) == "bear"
 
     def test_extreme_returns(self):
         """Very large positive and negative returns should still classify."""
         bt = AlternativeDataBacktester()
-        assert bt.infer_regime_from_spy_return(1.0) == "bull"  # 100% return
-        assert bt.infer_regime_from_spy_return(-1.0) == "crisis"  # -100% return
+        assert bt.infer_regime_from_spy_return(1.0) == "bull"  # 100% return -> risk_on
+        assert bt.infer_regime_from_spy_return(-1.0) == "bear"  # -100% return -> risk_off
 
 
 # ── Signal Computation Tests ────────────────────────────────────────────

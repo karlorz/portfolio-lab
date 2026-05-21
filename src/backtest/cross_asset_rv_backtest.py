@@ -22,6 +22,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR, BASE_ALLOCATION
+from src.signals.cross_asset_relative_value import CrossAssetRVScanner, ZSCORE_ENTRY
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,7 +39,6 @@ class BacktestConfig:
     rebalance_frequency: str = "monthly"
     transaction_cost_bps: float = 10.0
     z_score_window: int = 60  # 60-day rolling window for z-score
-    z_score_threshold: float = 1.5  # Trigger at |z| > 1.5
     max_shift: float = 0.04
 
 
@@ -119,16 +119,13 @@ class CrossAssetRVBacktester:
         if any(len(v) < 20 for v in returns_window.values()):
             return "neutral", 0.0
 
-        # Compute z-scores of recent returns vs window
+        # Compute z-scores of recent returns vs window using production scanner
+        scanner = CrossAssetRVScanner()
         z_scores = {}
         for sym in symbols:
-            r = returns_window[sym]
-            mean_r = np.mean(r)
-            std_r = np.std(r)
-            if std_r > 0:
-                z_scores[sym] = (r[-1] - mean_r) / std_r
-            else:
-                z_scores[sym] = 0.0
+            r = np.array(returns_window[sym])
+            z_arr, _, _ = scanner._compute_z_score(r, window=len(r) - 1)
+            z_scores[sym] = z_arr[-1] if not np.isnan(z_arr[-1]) else 0.0
 
         # Signal: mean-reversion — if SPY z > threshold, expect reversion down
         # Find the most extreme z-score
@@ -139,11 +136,11 @@ class CrossAssetRVBacktester:
         avg_z = (abs(spy_z) + abs(gld_z) + abs(tlt_z)) / 3
 
         # SPY mean-reversion signal (negative z = oversold = buy)
-        if abs(spy_z) > self.config.z_score_threshold:
+        if abs(spy_z) > ZSCORE_ENTRY:
             # Mean-reversion: bet against the extreme
             signal_value = -np.sign(spy_z) * min(abs(spy_z) / 5.0, 0.5)
             direction = "spy_reversion"
-        elif abs(gld_z) > self.config.z_score_threshold:
+        elif abs(gld_z) > ZSCORE_ENTRY:
             signal_value = np.sign(gld_z) * min(abs(gld_z) / 5.0, 0.3)
             direction = "gld_reversion"
         else:

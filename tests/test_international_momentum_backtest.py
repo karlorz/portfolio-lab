@@ -169,7 +169,7 @@ class TestGetSignal:
         assert signal_value <= 0.5
 
     def test_spy_lead_signal(self, backtester):
-        """When SPY outperforms EFA by >3%, signal should be spy_lead."""
+        """When SPY outperforms EFA, production code returns neutral (no spy_lead signal)."""
         spy_base = 100.0
         efa_base = 100.0
         for i, date in enumerate(backtester.dates):
@@ -183,8 +183,9 @@ class TestGetSignal:
                 backtester.prices[date]["EFA"] = 100.0
 
         signal_type, signal_value = backtester._get_signal(backtester.dates[150])
-        assert signal_type == "spy_lead"
-        assert signal_value < 0
+        # Production code only signals when international outperforms, not when SPY leads
+        assert signal_type == "neutral"
+        assert signal_value == 0.0
 
     def test_neutral_when_close(self, backtester):
         """When SPY and EFA returns are close (<3% diff), signal should be neutral."""
@@ -231,7 +232,7 @@ class TestGetSignal:
         assert signal_value <= 0.5
 
     def test_signal_floored_at_neg_0_5(self, backtester):
-        """Signal value should be floored at -0.5."""
+        """Extreme SPY outperformance returns neutral (production has no spy_lead)."""
         for i, date in enumerate(backtester.dates):
             if i >= 126:
                 backtester.prices[date]["SPY"] = 100.0 * (1.05 ** (i - 126))  # Huge SPY gain
@@ -241,8 +242,9 @@ class TestGetSignal:
                 backtester.prices[date]["EFA"] = 100.0
 
         signal_type, signal_value = backtester._get_signal(backtester.dates[180])
-        assert signal_type == "spy_lead"
-        assert signal_value >= -0.5
+        # Production code only signals when international outperforms
+        assert signal_type == "neutral"
+        assert signal_value == 0.0
 
     def test_signal_respects_threshold_boundary(self, backtester):
         """Relative return just below 3% threshold should be neutral."""

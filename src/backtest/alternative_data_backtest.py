@@ -27,6 +27,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
+from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -57,11 +58,6 @@ class BacktestConfig:
     vix_bull_threshold: float = 15.0
     vix_bear_threshold: float = 20.0
     vix_crisis_threshold: float = 30.0
-
-    # SPY return proxy thresholds (used when VIX data unavailable)
-    spy_bull_return: float = 0.05  # >5% 60d return
-    spy_bear_return_low: float = -0.15  # < -15% 60d return (crisis)
-    spy_bear_return_high: float = -0.05  # -15% to -5%
 
 
 @dataclass
@@ -135,6 +131,7 @@ class AlternativeDataBacktester:
     def __init__(self, config: Optional[BacktestConfig] = None):
         self.config = config or BacktestConfig()
         self.data: List[DailyReturn] = []
+        self._signal_generator = AlternativeDataSignalGenerator()
 
     # ------------------------------------------------------------------
     # Data loading
@@ -214,18 +211,23 @@ class AlternativeDataBacktester:
     def infer_regime_from_spy_return(
         self, spy_60d_return: float
     ) -> str:
-        """Infer market regime from SPY 60-day return.
+        """Infer market regime from SPY 60-day return using production code.
 
-        Used as proxy when VIX data is unavailable.
+        Uses AlternativeDataSignalGenerator._determine_regime() to classify
+        the composite_score (scaled SPY return) into regime buckets.
+
+        Production regime labels are mapped to backtest regime labels:
+            risk_on  -> bull
+            neutral  -> neutral
+            risk_off -> bear
+
+        Note: the production classifier does not produce a "crisis" label;
+        strongly negative returns map to "bear".
         """
-        if spy_60d_return > self.config.spy_bull_return:
-            return "bull"
-        elif spy_60d_return > self.config.spy_bear_return_high:
-            return "neutral"
-        elif spy_60d_return > self.config.spy_bear_return_low:
-            return "bear"
-        else:
-            return "crisis"
+        composite_score = float(np.clip(spy_60d_return * 2.0, -1.0, 1.0))
+        production_regime = self._signal_generator._determine_regime(composite_score)
+        regime_map = {"risk_on": "bull", "risk_off": "bear", "neutral": "neutral"}
+        return regime_map.get(production_regime, "neutral")
 
     def get_signal_and_regime(
         self, day: DailyReturn, past_60d_returns: List[float]

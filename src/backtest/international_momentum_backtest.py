@@ -22,6 +22,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR, BASE_ALLOCATION
+from src.signals.international_momentum import InternationalMomentumGenerator, SignalType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class InternationalMomentumBacktester:
         return True
 
     def _get_signal(self, date: str) -> Tuple[str, float]:
-        """Compute international momentum signal from EFA/EEM vs SPY."""
+        """Compute international momentum signal using production signal logic."""
         idx = self.dates.index(date) if date in self.dates else -1
         if idx < self.config.lookback_days:
             return "neutral", 0.0
@@ -110,16 +111,22 @@ class InternationalMomentumBacktester:
         if not all([spy_now, spy_then, efa_now, efa_then]):
             return "neutral", 0.0
 
-        spy_ret = (spy_now / spy_then - 1) * 100
-        efa_ret = (efa_now / efa_then - 1) * 100
-        relative = efa_ret - spy_ret
+        # Compute relative momentum in decimal format for production signal logic
+        spy_momentum_6m = spy_now / spy_then - 1
+        efa_momentum_6m = efa_now / efa_then - 1
+        efa_vs_spy = efa_momentum_6m - spy_momentum_6m
 
-        if relative > 3.0:
-            return "efa_lead", min(relative / 10.0, 0.5)
-        elif relative < -3.0:
-            return "spy_lead", max(relative / 10.0, -0.5)
-        else:
-            return "neutral", 0.0
+        # Use production InternationalMomentumGenerator._determine_signal_type
+        # for the core signal logic (thresholds, confidence calculation).
+        # We skip __init__ because generate_signal() requires database access
+        # (VIX, correlation, save) that isn't available in the backtest context.
+        generator = object.__new__(InternationalMomentumGenerator)
+        signal_type, confidence = generator._determine_signal_type(efa_vs_spy, 0.0)
+
+        # Map SignalType to backtest return format
+        if signal_type in (SignalType.EFA_LEAD, SignalType.EEM_LEAD):
+            return "efa_lead", min(confidence, 0.5)
+        return "neutral", 0.0
 
     def run_backtest(self) -> Optional[BacktestResult]:
         if not self.dates:
