@@ -39,6 +39,16 @@
 
 ## Recent Implementation Updates (2026-05-22)
 
+### v9.45 Strategy ARP Overlay Test Coverage + Bug Fixes - COMPLETED
+- **Tests**: 102 new tests for `src/strategy/arp_overlay.py` (536 lines, previously 0 coverage):
+  - `tests/test_strategy_arp_overlay.py` (102 tests): PremiumSignal dataclass, ARPOverlay dataclass, AlternativeRiskPremiaEngine (init, constants, _load_price_data with real SQLite, _calculate_momentum, calculate_value_premium, calculate_momentum_premium, calculate_carry_premium, combine_premia, apply_overlay, get_arp_overlay, format_overlay, calculate_correlation_to_spy), CLI logic, edge cases
+  - No database required — uses in-memory SQLite and data_cache mocking
+- **Bug fixes** in `src/strategy/arp_overlay.py`:
+  - Duplicate SPY key in UNIVERSE dict removed (line 79 `{"class": "equity", "factor": "carry"}` silently overwrote line 71 `{"class": "equity", "factor": "momentum"}`)
+  - `elif args.overlay or True:` → `elif args.overlay:` + `else: parser.print_help()` (unconditional branch bypassed argparse)
+- **Test count**: 6793 → 6895 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.44 Regime Classifier Test Coverage - COMPLETED
 - **Tests**: 83 new tests for `src/research/regime_classifier.py` (484 lines, previously 0 coverage):
   - `tests/test_regime_classifier.py` (83 tests): Regime enum, RegimePrediction dataclass (to_dict, JSON serialization),
@@ -649,7 +659,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6793 safe** passed (0 failures, 10 skipped)
+- **6895 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
