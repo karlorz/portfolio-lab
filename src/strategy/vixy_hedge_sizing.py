@@ -495,6 +495,7 @@ def main():
                 spot = gen.get_vix_spot()
                 vix = spot if spot else 18.0
             except Exception:
+                logger.warning("Failed to get VIX spot from term structure, defaulting to 18.0")
                 vix = 18.0  # Default for development
 
         signal = sizer.get_signal(vix)

@@ -7,11 +7,14 @@ Based on CBOE (2024) and AQR (2025) research.
 """
 
 import json
+import logging
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -143,8 +146,8 @@ class ConvexityHarvestStrategy:
             cb_status = cb.get_status()
             if cb_status.get("status") in ["red", "black"]:
                 return True, f"Circuit breaker triggered ({cb_status['status']})"
-        except Exception:
-            # If circuit breaker check fails, continue without it
+        except ImportError:
+            logger.warning("Circuit breaker module not available, continuing without it")
             pass
         
         return False, None

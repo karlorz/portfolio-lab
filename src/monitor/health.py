@@ -5,6 +5,7 @@ Monitors cron job results and reports status. Can trigger alerts or Claude Code 
 """
 
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from src.paths import DATA_DIR, WIKI_DIR, WORK_DIR
+
+logger = logging.getLogger(__name__)
 
 LOG_DIR = DATA_DIR  # cron logs stored directly in data/
 
@@ -401,6 +404,7 @@ class HealthMonitor:
                 else:
                     use_garch = False  # Fall back to file-based
             except Exception:
+                logger.exception("GARCH CVaR computation failed, falling back to file-based")
                 use_garch = False  # Fall back to file-based
         
         # Fallback to existing risk_metrics.json if GARCH not used/failed

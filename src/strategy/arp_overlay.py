@@ -14,13 +14,12 @@ Implementation:
 - Combined overlay with 5% allocation cap
 """
 
-import os
 import json
 import sqlite3
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, NamedTuple
-from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 from pathlib import Path
 from collections import defaultdict
 

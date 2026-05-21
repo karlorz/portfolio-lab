@@ -1,6 +1,7 @@
 """
 Order router: Converts portfolio-lab signals to Alpaca orders.
 """
+import logging
 import os
 import sys
 import json
@@ -9,6 +10,8 @@ import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -79,9 +82,10 @@ class OrderRouter:
             row = cursor.fetchone()
             conn.close()
             return float(row[0]) if row else 0.0
-        except Exception:
+        except sqlite3.Error:
+            logger.warning("Failed to fetch price from %s for %s", self.db_path, symbol)
             return 0.0
-    
+
     def load_signals(self) -> List[Signal]:
         """Load signals from signals.json."""
         if not os.path.exists(self.signals_file):
@@ -145,7 +149,8 @@ class OrderRouter:
             try:
                 account = self.client.get_account()
                 total_value = account.get("equity", 0)
-            except Exception:
+            except (ConnectionError, TimeoutError, OSError):
+                logger.warning("Failed to get account from broker, falling back to position sum")
                 total_value = sum(p.get("market_value", 0) for p in positions.values())
         
         if not total_value or total_value < 100:

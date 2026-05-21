@@ -4,6 +4,7 @@ Portfolio-Lab Alpha: Notification System
 Telegram integration for critical alerts and notifications.
 """
 
+import logging
 import os
 import json
 import asyncio
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Optional, List, Dict
 from dataclasses import dataclass, asdict
 import hashlib
+
+logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR as PATHS_DATA_DIR
 
@@ -74,7 +77,8 @@ class NotificationManager:
                     self.hourly_reset = datetime.fromisoformat(
                         state.get('hourly_reset', datetime.now().isoformat())
                     )
-            except Exception:
+            except (FileNotFoundError, json.JSONDecodeError, ValueError):
+                logger.exception("Failed to load notification state, resetting")
                 self.recent_alerts = {}
                 self.hourly_count = 0
                 self.hourly_reset = datetime.now()
@@ -237,7 +241,8 @@ class NotificationManager:
                     if entry_time >= cutoff:
                         if level is None or entry.get('level') == level:
                             alerts.append(entry)
-                except Exception:
+                except (json.JSONDecodeError, ValueError):
+                    logger.exception("Failed to parse alert log line")
                     continue
         
         return sorted(alerts, key=lambda x: x.get('timestamp', ''), reverse=True)

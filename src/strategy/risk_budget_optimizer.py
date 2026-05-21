@@ -301,7 +301,8 @@ def _load_prices() -> Optional[Dict]:
         if path.exists():
             try:
                 return json.loads(path.read_text())
-            except Exception:
+            except (IOError, OSError, json.JSONDecodeError):
+                logger.warning("Failed to load prices from %s, trying next candidate", path)
                 continue
     return None
 
@@ -316,7 +317,8 @@ def _get_annualized_vol(prices: Dict, symbol: str) -> float:
             return 0.15
         log_rets = np.diff(np.log(closes))
         return float(np.std(log_rets) * np.sqrt(252))
-    except Exception:
+    except (ValueError, ZeroDivisionError):
+        logger.warning("Failed to compute annualized volatility for %s, defaulting to 0.15", symbol)
         return 0.15
 
 

@@ -169,7 +169,7 @@ class TestFitGARCH:
         # Should attempt up to 3 times
         with patch('src.monitor.garch_cvar.arch_model') as mock_model:
             mock_instance = MagicMock()
-            mock_instance.fit.side_effect = Exception("Convergence failed")
+            mock_instance.fit.side_effect = ValueError("Convergence failed")
             mock_model.return_value = mock_instance
             
             params, cond_vol = calc.fit_garch(returns)

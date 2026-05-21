@@ -7,10 +7,13 @@ Reads order history files and SmartRebalanceData to produce execution timeline.
 """
 
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path.home() / "projects" / "portfolio-lab" / "data"
 ORDERS_DIR = DATA_DIR / "historical_orders"
@@ -64,7 +67,8 @@ def _parse_order_file(path: Path) -> dict[str, Any] | None:
             "symbols": symbols,
             "reasons": sorted(set(o.get("reason", "rebalance") for o in orders)),
         }
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        logger.exception("Failed to parse order file: %s", path)
         return None
 
 

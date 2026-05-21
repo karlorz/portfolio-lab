@@ -20,9 +20,12 @@ Usage:
 """
 
 import json
+import logging
 from datetime import datetime
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 from .smart_rebalancer import (
     SmartRebalancingController,
@@ -93,6 +96,7 @@ class SmartRebalanceGate:
             vpin = self._vpin_engine.calculate_vpin(symbol)
             return vpin if vpin is not None else 0.30
         except Exception:
+            logger.warning("Failed to compute VPIN for %s, using default 0.30", symbol)
             return 0.30
 
     def evaluate(

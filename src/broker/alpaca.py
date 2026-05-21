@@ -2,6 +2,7 @@
 Alpaca broker API client for paper and live trading.
 Supports fractional shares, paper trading without KYC, and WebSocket streaming.
 """
+import logging
 import os
 import json
 import sqlite3
@@ -9,6 +10,8 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 # Alpaca SDK - optional dependency
 try:
@@ -139,9 +142,10 @@ class AlpacaClient:
             row = cursor.fetchone()
             conn.close()
             return float(row[0]) if row else 0.0
-        except Exception:
+        except sqlite3.Error:
+            logger.warning("Failed to fetch price from market.db for %s", symbol)
             return 0.0
-    
+
     def is_available(self) -> bool:
         """Check if alpaca-py SDK is installed."""
         return ALPACA_AVAILABLE
@@ -265,8 +269,9 @@ class AlpacaClient:
             position = client.get_open_position(symbol)
             return Position.from_alpaca(position)
         except Exception:
+            logger.warning("Failed to get position for %s", symbol)
             return None
-    
+
     def close_position(self, symbol: str, qty: Optional[float] = None) -> Order:
         """Close a position (fully or partially)."""
         client = self._get_client()

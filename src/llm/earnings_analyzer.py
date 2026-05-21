@@ -19,6 +19,7 @@ CLI:
 """
 
 import json
+import logging
 import re
 import sys
 from dataclasses import dataclass, field, asdict
@@ -26,6 +27,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 from src.llm.sentiment_client import SentimentAnalyzer, SentimentResult
 
@@ -522,7 +525,8 @@ class EarningsAnalyzer:
                     openai_api_key=None,  # Will auto-detect from env
                     anthropic_api_key=None,
                 )
-            except Exception:
+            except ImportError:
+                logger.exception("SentimentAnalyzer import failed, falling back to mock")
                 # Fall back to mock analyzer
                 self.sentiment_analyzer = MockSentimentAnalyzer()
     

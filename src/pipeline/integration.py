@@ -246,7 +246,8 @@ def _load_prices(symbol: str) -> Optional[np.ndarray]:
         elif isinstance(raw, list):
             return np.array(raw, dtype=np.float64)
         return None
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        logger.exception("Failed to load price data for symbol %s", symbol)
         return None
 
 

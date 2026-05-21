@@ -22,6 +22,7 @@ Integration:
     - Format: JSON via stdout and file output
 """
 
+import logging
 import os
 import numpy as np
 import json
@@ -31,6 +32,8 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
@@ -185,7 +188,8 @@ class AIController:
                 if prices[-1] > 0:
                     return prices
             return np.ones(days)
-        except Exception:
+        except sqlite3.Error:
+            logger.exception("Failed to fetch price history for %s", symbol)
             return np.ones(days)
 
     def build_observation_from_integrator(

@@ -19,11 +19,14 @@ Usage:
     metrics = calculator.compute(returns)
 """
 
+import logging
 import numpy as np
 import warnings
 from typing import Optional, Tuple, Dict, Literal
 from dataclasses import dataclass, asdict
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Try to import arch, fallback gracefully if not available
 try:
@@ -169,7 +172,8 @@ class GARCHFilteredCVaR:
                     self._last_params = garch_params
                     return garch_params, cond_vol
                     
-            except Exception:
+            except ValueError:
+                logger.exception("GARCH model fitting failed (attempt %d/%d)", attempt + 1, self.convergence_retries)
                 if attempt < self.convergence_retries - 1:
                     continue
                 return None, None

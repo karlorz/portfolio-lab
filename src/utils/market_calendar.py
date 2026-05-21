@@ -2,8 +2,11 @@
 
 Falls back to manual calendar if pandas_market_calendars not available.
 """
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Try to import pandas_market_calendars, but provide fallback
 try:
@@ -36,6 +39,7 @@ class MarketCalendar:
             try:
                 self.nyse = mcal.get_calendar('NYSE')
             except Exception:
+                logger.exception("Failed to load NYSE calendar from pandas_market_calendars")
                 self.nyse = None
                 self._has_mcal = False
         else:

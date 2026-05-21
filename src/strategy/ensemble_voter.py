@@ -545,6 +545,7 @@ class EnsembleVoter:
             goals = load_goals()
             risk_mult = get_risk_budget_multiplier(goals)
         except Exception:
+            logger.warning("Failed to load goals for risk budget, using risk_mult=1.0")
             risk_mult = 1.0
 
         if risk_mult >= 1.0:

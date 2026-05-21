@@ -348,7 +348,8 @@ class RegimeConstrainedOptimizer:
             if path.exists():
                 try:
                     return json.loads(path.read_text())
-                except Exception:
+                except (IOError, OSError, json.JSONDecodeError):
+                    logger.warning("Failed to load prices from %s, trying next candidate", path)
                     continue
         return None
 

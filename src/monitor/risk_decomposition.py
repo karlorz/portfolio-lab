@@ -625,7 +625,8 @@ class RiskDecomposer:
                 for j, fkey2 in enumerate(active_factors):
                     fname2 = self.factor_defs[fkey2]["name"]
                     factor_corr[fname1][fname2] = round(float(corr_matrix[i, j]), 4)
-        except Exception:
+        except (ValueError, ZeroDivisionError):
+            logger.exception("Failed to compute factor correlation matrix")
             factor_corr = None
 
         return PortfolioRiskDecomposition(

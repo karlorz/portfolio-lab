@@ -19,11 +19,14 @@ Actions:
 - rebalancing_trigger: whether to trade
 """
 
+import logging
 import os
 import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
 
@@ -265,7 +268,8 @@ class ControllerAgent(BaseAgent):
                     n_iterations=3,
                 )
                 self._planning_enabled = True
-            except Exception:
+            except (ValueError, ImportError):
+                logger.exception("Failed to initialize FPILOT planning components")
                 self._planning_enabled = False
                 self.predictive_model = None
                 self.trajectory_optimizer = None

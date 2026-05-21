@@ -11,6 +11,7 @@ Implements:
 """
 
 import json
+import logging
 import os
 import sys
 from dataclasses import dataclass, asdict
@@ -18,6 +19,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
 from collections import deque
+
+logger = logging.getLogger(__name__)
 import numpy as np
 
 # Add project root to path
@@ -361,7 +364,8 @@ class SentimentAnalyzerPipeline:
                     ts = datetime.fromisoformat(data["timestamp"])
                     if ts > cutoff:
                         history.append(AggregatedSentiment(**data))
-            except Exception:
+            except (IOError, OSError, json.JSONDecodeError):
+                logger.warning("Failed to load sentiment file %s, skipping", filepath)
                 continue
         
         return sorted(history, key=lambda x: x.timestamp)

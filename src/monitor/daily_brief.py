@@ -244,6 +244,7 @@ def generate_daily_brief() -> Dict[str, Any]:
         from src.monitor.unified_dashboard import generate_unified_dashboard
         dashboard = generate_unified_dashboard()
     except Exception:
+        logger.exception("Failed to generate unified dashboard")
         dashboard = {}
 
     sections = generate_brief_sections(dashboard)

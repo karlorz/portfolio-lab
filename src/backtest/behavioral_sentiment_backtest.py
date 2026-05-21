@@ -472,7 +472,8 @@ class BehavioralSentimentBacktest:
                     (dates[0], dates[-1]),
                 )
                 vix_prices = {row[0]: float(row[1]) for row in cursor.fetchall()}
-        except Exception:
+        except sqlite3.Error:
+            logger.exception("Failed to fetch VIX prices from cache_db")
             return (0.0, 0.0, 0.0, 0.0, 0.0)
 
         for i, d in enumerate(dates):

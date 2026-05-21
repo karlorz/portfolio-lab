@@ -699,7 +699,8 @@ class DashboardGenerator:
                             ts = feat.get("timestamp", "")
                             if sym and (sym not in latest_features or ts > latest_features[sym].get("timestamp", "")):
                                 latest_features[sym] = feat
-                        except Exception:
+                        except json.JSONDecodeError:
+                            logger.exception("Failed to parse feature line in ensemble_voter_signals.jsonl")
                             continue
 
                 if latest_features:

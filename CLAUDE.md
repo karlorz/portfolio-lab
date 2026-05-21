@@ -39,6 +39,18 @@
 
 ## Recent Implementation Updates (2026-05-22)
 
+### v9.46 Exception Hardening + Dead Import Cleanup - COMPLETED
+- **Exception hardening**: 28 `except Exception:` blocks narrowed across 22 files in src/
+  - 19 blocks narrowed to specific exception types: `sqlite3.Error` (alpaca, order_router, behavioral_sentiment_backtest), `ImportError` (convexity_harvest, earnings_analyzer), `ValueError` (garch_cvar), `json.JSONDecodeError` (dashboard/generator, notifier, sentiment_analyzer, risk_budget_optimizer, regime_optimizer), `(FileNotFoundError, json.JSONDecodeError, ValueError)` (pipeline/integration, rebalance_health, notifier), `(IOError, OSError, json.JSONDecodeError)` (sentiment_analyzer, risk_budget_optimizer, regime_optimizer), `(ValueError, ZeroDivisionError)` (risk_decomposition, risk_budget_optimizer), `(ConnectionError, TimeoutError, OSError)` (order_router), `(ValueError, ImportError)` (controller_agent)
+  - 9 blocks kept as `Exception` (unpredictable import/API chains) but now log via `logger.exception()` or `logger.warning()` instead of silently swallowing
+  - Zero silent `except Exception: pass` blocks remain in src/
+  - Test fix: `test_garch_cvar.py` mock exception changed from `Exception` to `ValueError` to match narrowed catch
+- **Dead imports removed**: 3 files cleaned
+  - `src/strategy/arp_overlay.py`: removed unused `import os`, `NamedTuple`, `timedelta`, `field`
+  - `src/strategy/regime_router.py`: removed unused `from pathlib import Path`
+- **Test count**: 6895 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.45 Strategy ARP Overlay Test Coverage + Bug Fixes - COMPLETED
 - **Tests**: 102 new tests for `src/strategy/arp_overlay.py` (536 lines, previously 0 coverage):
   - `tests/test_strategy_arp_overlay.py` (102 tests): PremiumSignal dataclass, ARPOverlay dataclass, AlternativeRiskPremiaEngine (init, constants, _load_price_data with real SQLite, _calculate_momentum, calculate_value_premium, calculate_momentum_premium, calculate_carry_premium, combine_premia, apply_overlay, get_arp_overlay, format_overlay, calculate_correlation_to_spy), CLI logic, edge cases

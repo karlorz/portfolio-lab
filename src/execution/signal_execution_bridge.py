@@ -227,6 +227,7 @@ class SignalExecutionBridge:
             self._tca_feedback_cache_time = now
             return adjustments
         except Exception:
+            logger.warning("Failed to get TCA feedback adjustments, using None fallback")
             self._tca_feedback_cache = None
             self._tca_feedback_cache_time = now
             return None
