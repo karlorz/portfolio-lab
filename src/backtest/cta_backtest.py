@@ -235,7 +235,7 @@ class CTABacktestEngine:
         annualized_return = (1 + total_return) ** (1 / num_years) - 1 if num_years > 0 else 0
 
         volatility = np.std(returns_array) * np.sqrt(252) if len(returns_array) > 0 else 0
-        sharpe_ratio = annualized_return / volatility if volatility > 0 else 0
+        sharpe_ratio = annualized_return / volatility if volatility > 0 else 0.0
 
         max_drawdown = self._calculate_max_drawdown(equity_array)
         calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown < 0 else 0

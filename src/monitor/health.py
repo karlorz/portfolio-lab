@@ -12,6 +12,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from src.paths import DATA_DIR
+
+LOG_DIR = DATA_DIR  # cron logs stored directly in data/
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.market_calendar import MarketCalendar, format_stale_status, is_weekend_stale
@@ -35,10 +39,6 @@ except ImportError:
         GARCH_CVAR_AVAILABLE = True
     except ImportError:
         GARCH_CVAR_AVAILABLE = False
-
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-LOG_DIR = DATA_DIR
-REPORT_PATH = DATA_DIR / ".health_report.json"
 
 
 class HealthMonitor:

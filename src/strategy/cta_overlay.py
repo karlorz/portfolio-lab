@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Tuple, NamedTuple
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.paths import MARKET_DB
 
 @dataclass
 class TrendSignal:
@@ -101,7 +102,7 @@ class CTATrendEngine:
     
     def __init__(
         self,
-        db_path: Path = Path("~/projects/portfolio-lab/data/market.db").expanduser()
+        db_path: Path = MARKET_DB
     ):
         self.db_path = db_path
         self.vol_lookback = 20

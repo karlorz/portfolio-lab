@@ -14,10 +14,11 @@ from typing import Dict, List, Optional, Tuple
 import asyncio
 import aiohttp
 
+from src.paths import DATA_DIR, MARKET_DB
+
 # Config
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 CACHE_DIR = DATA_DIR / "cache"
-DB_PATH = DATA_DIR / "market.db"
+DB_PATH = MARKET_DB  # alias for test compatibility
 SYMBOLS = {
     "core": ["SPY", "GLD", "TLT", "QQQ", "IEF"],
     "risk_indicators": ["^VIX", "DX-Y.NYB", "HYG", "LQD"],
