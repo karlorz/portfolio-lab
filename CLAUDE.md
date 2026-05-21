@@ -97,6 +97,15 @@
 - **Test count**: 6508 safe (0 failures)
 - **Status**: All phases complete
 
+### v9.25 Dead Code Purge - COMPLETED
+- **Removed**: 49 files (22,695 lines) — v9.19 pruning follow-through
+  - 26 source files (12,917 lines): 12 signal modules, 4 data fetchers, 2 feature pipelines, 1 execution module, 1 monitor module, 5 backtest engines, 1 signal infrastructure
+  - 23 test files (9,778 lines): corresponding tests for all removed modules
+- **Enum cleanup**: Removed 15 deprecated SignalSource entries with zero external references. Kept 8 entries still referenced by ML-gated stacking_feature_engine.py and orchestrator_ensemble_bridge.py
+- **SignalSource enum**: 13 entries (5 active + 8 kept-for-compat deprecated) — down from 29
+- **Test count**: 6508 → 5839 safe (670 dead tests removed, 1 test updated)
+- **Status**: All phases complete
+
 ### v9.19 Ensemble Voter Dead Signal Pruning - COMPLETED
 - **Pruned**: 14 deprecated signal collection blocks from `collect_signals()` — 396 net lines removed (566→170 lines)
   - Removed: MACRO_MOMENTUM, CLOSING_AUCTION, FACTOR_ROTATION, MEAN_REVERSION, TRANSIENT_FACTORS, VISIBILITY_GRAPH, VP_MACD, FACTOR_TIMING, LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE, ZERO_DTE
@@ -503,7 +512,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6508 safe** passed (0 failures, 12 skipped)
+- **5839 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
