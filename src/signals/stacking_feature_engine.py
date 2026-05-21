@@ -466,54 +466,36 @@ def demo():
     
     # Create synthetic signals
     signals = {
-        SignalSource.TSFM_MOMENTUM: Signal(
-            source=SignalSource.TSFM_MOMENTUM,
-            value=0.65,
-            timestamp=datetime.now(),
-            confidence=0.82
-        ),
-        SignalSource.HMM_REGIME: Signal(
-            source=SignalSource.HMM_REGIME,
-            value=0.42,
-            timestamp=datetime.now(),
-            confidence=0.71
-        ),
-        SignalSource.CTA_TREND: Signal(
-            source=SignalSource.CTA_TREND,
-            value=0.58,
-            timestamp=datetime.now(),
-            confidence=0.79
-        ),
-        SignalSource.MACRO_MOMENTUM: Signal(
-            source=SignalSource.MACRO_MOMENTUM,
-            value=0.31,
-            timestamp=datetime.now(),
-            confidence=0.65
-        ),
         SignalSource.MULTI_SPEED_MOM: Signal(
             source=SignalSource.MULTI_SPEED_MOM,
             value=0.72,
             timestamp=datetime.now(),
             confidence=0.85
         ),
-        SignalSource.DURATION_REGIME: Signal(
-            source=SignalSource.DURATION_REGIME,
+        SignalSource.CROSS_ASSET_RV: Signal(
+            source=SignalSource.CROSS_ASSET_RV,
             value=-0.15,
             timestamp=datetime.now(),
             confidence=0.68
         ),
-        SignalSource.CIRCUIT_BREAKER: Signal(
-            source=SignalSource.CIRCUIT_BREAKER,
-            value=0.95,
-            timestamp=datetime.now(),
-            confidence=0.91
-        ),
-        SignalSource.FACTOR_ROTATION: Signal(
-            source=SignalSource.FACTOR_ROTATION,
+        SignalSource.INTERNATIONAL_MOMENTUM: Signal(
+            source=SignalSource.INTERNATIONAL_MOMENTUM,
             value=0.48,
             timestamp=datetime.now(),
             confidence=0.74
-        )
+        ),
+        SignalSource.ALTERNATIVE_DATA: Signal(
+            source=SignalSource.ALTERNATIVE_DATA,
+            value=0.65,
+            timestamp=datetime.now(),
+            confidence=0.82
+        ),
+        SignalSource.CROSS_ASSET_REGIME_ARB: Signal(
+            source=SignalSource.CROSS_ASSET_REGIME_ARB,
+            value=0.31,
+            timestamp=datetime.now(),
+            confidence=0.71
+        ),
     }
     
     # Add some mock historical accuracy data

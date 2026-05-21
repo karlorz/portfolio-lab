@@ -24,7 +24,7 @@ from src.strategy.ensemble_voter import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_reading(source=SignalSource.TSFM_MOMENTUM, value=0.5, confidence=0.8,
+def _make_reading(source=SignalSource.MULTI_SPEED_MOM, value=0.5, confidence=0.8,
                   asset_signals=None):
     return SignalReading(
         source=source,
@@ -48,12 +48,11 @@ def _make_voter(tmp_path):
     # Bandit weighter (vSpring Cleaning)
     survivor_values = [
         s.value for s in [
-            SignalSource.TSFM_MOMENTUM,
+            SignalSource.MULTI_SPEED_MOM,
             SignalSource.CROSS_ASSET_RV,
             SignalSource.INTERNATIONAL_MOMENTUM,
             SignalSource.ALTERNATIVE_DATA,
-            SignalSource.MULTI_SPEED_MOM,
-            SignalSource.DURATION_REGIME,
+            SignalSource.CROSS_ASSET_REGIME_ARB,
         ]
     ]
     voter.bandit = BanditWeighter(signals=survivor_values, epsilon=0.1, window=252)
@@ -84,12 +83,12 @@ class TestEnums:
         assert Regime.RECOVERY.value == 'recovery'
 
     def test_signal_source_values(self):
-        assert SignalSource.TSFM_MOMENTUM.value == 'tsfm_momentum'
-        assert SignalSource.HMM_REGIME.value == 'hmm_regime'
-        assert SignalSource.CTA_TREND.value == 'cta_trend'
+        assert SignalSource.MULTI_SPEED_MOM.value == 'multi_speed_momentum'
+        assert SignalSource.CROSS_ASSET_RV.value == 'cross_asset_rv'
+        assert SignalSource.ALTERNATIVE_DATA.value == 'alternative_data'
 
     def test_signal_source_members(self):
-        assert len(SignalSource) >= 5  # 5 active + kept deprecated for compat
+        assert len(SignalSource) >= 5  # 5 active + UNIFIED_OVERLAY
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +98,7 @@ class TestEnums:
 class TestSignalReading:
     def test_creation(self):
         r = _make_reading()
-        assert r.source == SignalSource.TSFM_MOMENTUM
+        assert r.source == SignalSource.MULTI_SPEED_MOM
         assert r.value == 0.5
 
     def test_asset_signals(self):

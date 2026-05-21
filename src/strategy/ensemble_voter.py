@@ -62,19 +62,12 @@ class Regime(Enum):
 
 class SignalSource(Enum):
     """Available signal sources."""
-    TSFM_MOMENTUM = "tsfm_momentum"           # v2.15 Factor momentum (ref'd by stacking_feature_engine)
-    HMM_REGIME = "hmm_regime"                 # v2.20.1 (ref'd by stacking_feature_engine)  # DEPRECATED
-    CTA_TREND = "cta_trend"                   # v2.10+ (ref'd by stacking_feature_engine)  # DEPRECATED
-    MACRO_MOMENTUM = "macro_momentum"         # v2.57 (ref'd by stacking_feature_engine)  # DEPRECATED
     MULTI_SPEED_MOM = "multi_speed_momentum"  # v2.56 Multi-speed
-    DURATION_REGIME = "duration_regime"       # v2.17-2.18 (ref'd by stacking_feature_engine)
-    CIRCUIT_BREAKER = "circuit_breaker"       # v2.14 (ref'd by stacking_feature_engine)  # DEPRECATED
-    FACTOR_ROTATION = "factor_rotation"       # v3.00 (ref'd by stacking_feature_engine)  # DEPRECATED
-    UNIFIED_OVERLAY = "unified_overlay"       # v4.90 (ref'd by orchestrator_ensemble_bridge)  # DEPRECATED
     CROSS_ASSET_RV = "cross_asset_rv"         # v5.71 Cross-asset relative value
     INTERNATIONAL_MOMENTUM = "international_momentum"  # v3.13 International equity momentum
     ALTERNATIVE_DATA = "alternative_data"  # v9.00 Alternative data signal (SEC EDGAR, NewsAPI, jobs)
     CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # v8.09 Cross-asset regime arbitrage
+    UNIFIED_OVERLAY = "unified_overlay"       # v4.90 (ref'd by orchestrator_ensemble_bridge)
 
 
 @dataclass

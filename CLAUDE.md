@@ -189,7 +189,7 @@
 - **Bridge**: `src/strategy/orchestrator_ensemble_bridge.py` (300 lines) — orchestrator→ensemble voter
   - Converts 7-asset allocation weights to -1/+1 directional signals
   - Added `UNIFIED_OVERLAY` to `SignalSource` enum in ensemble_voter.py
-  - Recommended 20% weight in ensemble (highest single-source)
+  - Recommended 20% weight in ensemble (highest single-source) — NOT implemented in REGIME_WEIGHTS
   - Risk and execution signals from conflict count + calendar modifier
 - **Tests**: `tests/test_orchestrator_ensemble_bridge.py` (21 tests passing)
 - **Status**: All phases complete
@@ -231,7 +231,7 @@
 - **Rotation Strategy**: `src/strategy/bond_duration_rotator.py` (260 lines) — bond sleeve allocation
   - Rotates 16% bond sleeve across TLT (16yr dur), IEF (7yr), SHY (2yr)
   - Baseline comparison engine: static TLT vs dynamic rotation
-  - 8% EnsembleVoter weight, state persistence
+  - 8% EnsembleVoter weight (planned, NOT in REGIME_WEIGHTS), state persistence
 - **Tests**: `tests/test_bond_duration_signal.py` (36 tests) + `tests/test_bond_duration_rotator.py` (22 tests) = 58 tests passing
 - **Expected Impact**: +0.02-0.03 Sharpe through better risk-adjusted fixed-income positioning
 - **Status**: All phases complete
@@ -245,7 +245,7 @@
 - **Tactical Overlay**: `src/strategy/crypto_allocation.py` (280 lines) — allocation + backtest
   - Entry: 6m momentum positive + vol regime normal/low
   - Exit: momentum negative OR vol extreme (>100% ann.)
-  - Hard cap: 5% portfolio, 5% EnsembleVoter weight
+  - Hard cap: 5% portfolio, 5% EnsembleVoter weight (planned, NOT in REGIME_WEIGHTS)
   - Backtest engine with baseline vs crypto comparison
 - **Tests**: `tests/test_crypto_momentum.py` (37 tests) + `tests/test_crypto_allocation.py` (23 tests) = 60 tests passing
 - **State**: `data/crypto_allocation_state.json` — tracks current crypto allocation
@@ -273,7 +273,7 @@
   - Monthly collar cycle: write OTM call, buy OTM put, net premium near zero
   - CRISIS freeze (VIX >40 disables collar — cost prohibitive)
   - Historical backtest: hedged vs unhedged comparison engine
-- **Integration**: 10% weight in EnsembleVoter via CollarOverlayIntegrator
+- **Integration**: 10% weight in EnsembleVoter via CollarOverlayIntegrator (planned, NOT in REGIME_WEIGHTS)
 - **Tests**: `tests/test_collar_signal.py` (49 tests) + `tests/test_collar_overlay.py` (26 tests) = 75 tests passing
 - **State**: `data/collar_overlay_state.json` — tracks current collar status
 - **Target**: Max DD -26.2% → ≤-20%, Sharpe +0.03-0.05
@@ -315,9 +315,8 @@
   - Running efficiency: YTD benefit / YTD cost with A-F grading
   - Strategy comparison: VIXY vs collar vs trend-following vs cash benchmarks
   - State persistence to `data/hedge_efficiency_state.json`
-- **Ensemble Integration**: Added `VIXY_HEDGE` to `SignalSource` enum in ensemble_voter.py
-  - Weights: NORMAL=5%, HIGH_VOL=10%, CRISIS=10%, RECOVERY=3%
-  - Fixed pre-existing TAX_AWARE missing weight bug (v7.03 follow-up)
+- **Ensemble Integration**: Added `VIXY_HEDGE` to `SignalSource` enum in ensemble_voter.py (removed in v9.25 enum cleanup)
+  - Weights: NORMAL=5%, HIGH_VOL=10%, CRISIS=10%, RECOVERY=3% (were never in REGIME_WEIGHTS after v9.19 pruning)
 - **Tests**: `tests/test_vixy_hedge_sizing.py` (34 tests) + `tests/test_hedge_efficiency.py` (25 tests) = 59 tests passing
 - **Status**: All phases complete
 
@@ -339,7 +338,7 @@
 
 - **Data**: `src/data/factor_data.py` (472 lines) — MTUM/QUAL/USMV/VLUE ETF data fetcher
 - **Signal**: `src/signals/factor_rotation.py` (575 lines) — quality-momentum blend, regime-based allocation
-- **Integration**: `FACTOR_ROTATION` in SignalSource enum, 5% ensemble weight
+- **Integration**: `FACTOR_ROTATION` in SignalSource enum, 5% ensemble weight (planned, NOT in REGIME_WEIGHTS — signal pruned in v9.19)
 - **Backtest**: `src/backtest/factor_rotation_backtest.py` (~430 lines)
   - SPY baseline vs factor rotation on 2021-2026 data
   - Sharpe delta: -0.216 (defensive drag in bulls), DD improvement: +5.8pp (met)
@@ -398,7 +397,7 @@
   - Allocation shifts: SPY±10%, GLD±5%, TLT±5% based on term structure slope
   - Constraints: max 5% daily shift, 5-day holding period, VPIN freeze
   - VIX spike protection: >50% single-day spike disables overlay for 24h
-- **Integration**: 15% weight in ensemble voter, SmartRebalanceGate coordination
+- **Integration**: 15% weight in ensemble voter (planned, NOT in REGIME_WEIGHTS), SmartRebalanceGate coordination
 - **Tests**: `tests/test_vix_overlay.py` (22 tests passing)
 - **State**: `data/vix_overlay_state.json` — tracks current tactical allocation
 - **Status**: Phase 3 complete, Phase 4 backtest validation ready
