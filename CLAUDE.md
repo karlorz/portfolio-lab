@@ -104,6 +104,19 @@
 - **Tests**: Updated regime dominance assertions, 5839/5839 passing
 - **Status**: All phases complete
 
+### v9.30 Backtest Consolidation + Coverage Expansion - COMPLETED
+- **Backtest refactor**: All 11 backtest files now import from `src/backtest/metrics.py` — 99 lines removed, zero duplicated BacktestResult dataclasses
+- **agent_graph.py tests**: 79 tests for core MARL orchestration topology (NodeType, GraphEdge, message routing, topology viz, save/load)
+- **research/features.py tests**: 76 tests for feature engineering pipeline (Features dataclass, FeaturePipeline, FeatureStore, CLI)
+- **Test count**: 6059 → 6135 safe (0 failures, 6 pollution-affected in full suite)
+- **Status**: All phases complete
+
+### v9.29 Dead Enum Cleanup + Doc Accuracy - COMPLETED
+- **SignalSource enum**: 13 → 6 entries (5 active + UNIFIED_OVERLAY). Removed 7 dead values kept only for stacking_feature_engine.py demo
+- **CLAUDE.md fixes**: Marked 6 "EnsembleVoter weight" claims as "planned, NOT in REGIME_WEIGHTS" — collar (10%), crypto (5%), bond duration (8%), VIX (15%), factor rotation (5%), orchestrator (20%) were documented as completed but never implemented
+- **Test count**: 5980 → 6059 safe (0 failures)
+- **Status**: All phases complete
+
 ### v9.28 Coverage Expansion + Source Bug Fixes - COMPLETED
 - **Tests**: 141 new tests across 3 previously untested modules:
   - `tests/test_wiki_sync.py` (51 tests): WikiSync init, save_raw_source, sync methods, regime/graduation helpers
@@ -542,7 +555,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6059 safe** passed (0 failures, 10 skipped)
+- **6135 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
