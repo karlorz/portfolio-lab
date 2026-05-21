@@ -158,6 +158,12 @@ class TestRegimeWeights:
     def test_crisis_multi_speed_mom_high(self):
         assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.MULTI_SPEED_MOM] >= 0.5
 
+    def test_no_signal_exceeds_50_pct(self):
+        """v9.23: No single signal should exceed 50% weight in any regime."""
+        for regime, weights in REGIME_WEIGHTS.items():
+            for source, weight in weights.items():
+                assert weight <= 0.50, f"{source.value} exceeds 50% in {regime.value}: {weight:.4f}"
+
     def test_normal_multi_speed_mom_dominant(self):
         assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.MULTI_SPEED_MOM] >= 0.25
 

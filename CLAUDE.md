@@ -65,6 +65,20 @@
 - **Test count**: 6452 → 6506 safe (0 failures, previously 22 pre-existing failures now all fixed)
 - **Status**: All phases complete
 
+### v9.23 Ensemble Weight Rebalancing + Zero-Weight Signal Skip - COMPLETED
+- **Weight cap**: MULTI_SPEED_MOM capped at 50% max per regime (was 60-70%)
+  - Reduces single-point-of-failure: if dominant signal degrades, ensemble can compensate
+  - NORMAL: 60→50%, excess redistributed to CROSS_ASSET_RV (+3%), ALT_DATA (+2.5%), INTL_MOM (+2%), REGIME_ARB (+2.5%)
+  - HIGH_VOL: 60→50%, excess redistributed to ALT_DATA (+3.75%), CROSS_ASSET_RV (+2.5%), INTL_MOM (+2.5%), REGIME_ARB (+1.25%)
+  - CRISIS: 70→50%, excess redistributed to CROSS_ASSET_RV (+13.33%), REGIME_ARB (+6.67%)
+  - RECOVERY: unchanged (already 43%)
+- **Zero-weight skip**: collect_signals() now accepts regime parameter and skips sources with 0.000 weight
+  - CRISIS regime: INTERNATIONAL_MOMENTUM and ALTERNATIVE_DATA computation skipped (was wasting CPU)
+  - Backward compatible: CLI call without regime collects all signals
+- **Tests**: Added `test_no_signal_exceeds_50_pct` to enforce weight cap invariant
+- **Test count**: 6506 → 6508 safe (0 failures)
+- **Status**: All phases complete
+
 ### v9.19 Ensemble Voter Dead Signal Pruning - COMPLETED
 - **Pruned**: 14 deprecated signal collection blocks from `collect_signals()` — 396 net lines removed (566→170 lines)
   - Removed: MACRO_MOMENTUM, CLOSING_AUCTION, FACTOR_ROTATION, MEAN_REVERSION, TRANSIENT_FACTORS, VISIBILITY_GRAPH, VP_MACD, FACTOR_TIMING, LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE, ZERO_DTE
@@ -471,7 +485,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6506 safe** passed (0 failures, 13 skipped)
+- **6508 safe** passed (0 failures, 12 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
