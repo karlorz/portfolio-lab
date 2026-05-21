@@ -104,6 +104,18 @@
 - **Tests**: Updated regime dominance assertions, 5839/5839 passing
 - **Status**: All phases complete
 
+### v9.27 Shared Metrics Module + Wiki Sync Fix - COMPLETED
+- **Metrics module**: `src/backtest/metrics.py` — shared BacktestMetrics, compute_metrics(), compute_crisis_returns(), save_results_json()
+  - Eliminates ~800 lines of copy-paste metric logic across 11 backtest files
+  - Future backtests should import from this module instead of defining their own
+  - Tests: 23 new tests (5839 → 5862 safe)
+- **Wiki sync fix**: `src/research/wiki_sync.py` — stable filenames + skip unchanged writes
+  - Root cause: save_raw_source() created new timestamped JSON every 30-min cron run
+  - Fix: use stable filename (name.json) and skip write when content hash matches existing file
+  - Eliminates unbounded disk growth and citation-only diffs in compound pages
+- **Test count**: 5862 safe (0 failures)
+- **Status**: All phases complete
+
 ### v9.25 Dead Code Purge - COMPLETED
 - **Removed**: 49 files (22,695 lines) — v9.19 pruning follow-through
   - 26 source files (12,917 lines): 12 signal modules, 4 data fetchers, 2 feature pipelines, 1 execution module, 1 monitor module, 5 backtest engines, 1 signal infrastructure
@@ -519,7 +531,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **5839 safe** passed (0 failures, 10 skipped)
+- **5862 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
