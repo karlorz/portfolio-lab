@@ -33,6 +33,7 @@ HISTORICAL_JSON = PUBLIC_DATA_DIR / "historical.json"
 YIELDS_JSON = PUBLIC_DATA_DIR / "yields.json"
 
 # Subdirectories
+RESEARCH_DIR = PROJECT_ROOT / "research"
 SIGNALS_DIR = DATA_DIR / "signals"
 POSITIONS_DIR = DATA_DIR / "positions"
 BACKTEST_RESULTS_DIR = DATA_DIR / "backtest_results"

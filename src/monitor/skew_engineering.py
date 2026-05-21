@@ -33,9 +33,9 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from src.paths import PROJECT_ROOT, DATA_DIR
+
 # Paths
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
 STATE_FILE = DATA_DIR / "skew_state.json"
 
 

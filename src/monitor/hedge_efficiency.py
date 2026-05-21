@@ -77,7 +77,8 @@ class HedgeEfficiencyMonitor:
     """
 
     def __init__(self, project_root: Optional[Path] = None):
-        self._project_root = project_root or Path(__file__).resolve().parent.parent.parent
+        from src.paths import PROJECT_ROOT
+        self._project_root = project_root or PROJECT_ROOT
         self._state_file = self._project_root / "data" / "hedge_efficiency_state.json"
 
     # ── Drawdown Detection ────────────────────────────────────────────

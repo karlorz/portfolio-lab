@@ -28,11 +28,8 @@ import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
-import numpy as np
+from src.paths import DATA_DIR
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ML gate
@@ -228,7 +225,7 @@ class TransformerRegimeDetector:
     on real market data.
     """
 
-    MODEL_PATH = Path(__file__).parent.parent.parent / "data" / "transformer_regime_model.pt"
+    MODEL_PATH = DATA_DIR / "transformer_regime_model.pt"
     N_CLASSES = 5
     SEQ_LEN = 60
 

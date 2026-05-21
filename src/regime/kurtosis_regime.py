@@ -26,7 +26,8 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import numpy as np
 
-logging.basicConfig(level=logging.INFO)
+from src.paths import SIGNALS_DIR
+
 logger = logging.getLogger(__name__)
 
 
@@ -201,14 +202,14 @@ class KurtosisRegimeSignalGenerator:
     Main signal generator for kurtosis regime detection.
     """
 
-    OUTPUT_PATH = Path(__file__).parent.parent.parent / "data" / "signals" / "kurtosis_regime.json"
+    OUTPUT_PATH = SIGNALS_DIR / "kurtosis_regime.json"
 
     def __init__(self):
         self.detector = KurtosisRegimeDetector()
         self._ensure_dirs()
 
     def _ensure_dirs(self):
-        sig_dir = Path(__file__).parent.parent.parent / "data" / "signals"
+        sig_dir = SIGNALS_DIR
         sig_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_signal(self, returns: Optional[List[float]] = None) -> KurtosisRegimeSignal:

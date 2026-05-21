@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
+from src.paths import DATA_DIR
+
 import requests
 import pandas as pd
 import numpy as np
@@ -101,7 +103,7 @@ class TIPSMonitor:
     
     def __init__(self, data_dir: Optional[Path] = None):
         """Initialize TIPS monitor with database connection."""
-        self.data_dir = data_dir or Path(__file__).parent.parent.parent / 'data'
+        self.data_dir = data_dir or DATA_DIR
         self.db_path = self.data_dir / 'tips_yield_history.db'
         self.fred_api_key = self._load_fred_api_key()
         

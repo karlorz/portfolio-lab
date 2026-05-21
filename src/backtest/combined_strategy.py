@@ -49,10 +49,9 @@ from src.backtest.metrics import (
 )
 
 # Add project root
-from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON as PRICES_PATH
+from src.paths import BASE_ALLOCATION, DATA_DIR, PROJECT_ROOT, PRICES_JSON as PRICES_PATH
 
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.signals.tsmom_overlay import TSMOMOverlay, TSMOMBacktester, DEFAULT_BASE_ALLOCATION
 

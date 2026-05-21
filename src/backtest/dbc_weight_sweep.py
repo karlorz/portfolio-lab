@@ -72,6 +72,7 @@ class DBCSweepResult:
         d["rows"] = [r.to_dict() for r in self.rows]
         return d
 
+from src.paths import DATA_DIR
 
 class DBCWeightSweep:
     """
@@ -84,7 +85,7 @@ class DBCWeightSweep:
     BASELINE = {"spy": 0.46, "gld": 0.38, "tlt": 0.16}
 
     def __init__(self):
-        self.data_dir = Path(__file__).parent.parent.parent / "data"
+        self.data_dir = DATA_DIR
 
     def _generate_test_data(self) -> Dict:
         """Generate realistic test data with commodity-like returns."""

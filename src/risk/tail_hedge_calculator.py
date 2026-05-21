@@ -23,10 +23,11 @@ import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from enum import Enum
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from src.paths import PROJECT_ROOT
+
+sys.path.insert(0, str(PROJECT_ROOT))
 
 
 class HedgeStrategy(Enum):

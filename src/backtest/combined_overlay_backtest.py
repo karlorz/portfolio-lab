@@ -22,6 +22,7 @@ import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from src.paths import DATA_DIR, MARKET_DB
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
@@ -99,9 +100,7 @@ class CombinedOverlayBacktest:
     # BTC/ETH ~ synthetic high-vol assets
 
     def __init__(self, data_dir: Optional[Path] = None):
-        self.data_dir = data_dir or (
-            Path(__file__).parent.parent.parent / "data"
-        )
+        self.data_dir = data_dir or DATA_DIR
 
     def _load_historical_data(self) -> Dict:
         """Load historical price data from market.db or generate synthetic."""

@@ -328,7 +328,7 @@ def load_prices_data(data_path: Optional[str] = None) -> Dict:
     """
     if data_path is None:
         # Default to project data directory
-        data_file = Path(__file__).parent.parent.parent / 'data' / 'prices.json'
+        data_file = DATA_DIR / 'prices.json'
     else:
         data_file = Path(data_path)
     

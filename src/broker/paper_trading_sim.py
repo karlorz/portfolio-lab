@@ -22,6 +22,8 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
+
+from src.paths import DATA_DIR, MARKET_DB
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
@@ -141,7 +143,6 @@ class PaperTradingSimulator:
     COMMISSION_PER_TRADE = 1.0
     REBALANCE_THRESHOLD = 0.10  # 10% drift triggers rebalance
 
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
     OUTPUT_DIR = DATA_DIR / "paper_trading"
 
     def __init__(self):
@@ -151,7 +152,7 @@ class PaperTradingSimulator:
 
     def _load_prices(self) -> Dict[str, Dict]:
         """Load prices from market.db."""
-        db_path = self.DATA_DIR / "market.db"
+        db_path = MARKET_DB
         if not db_path.exists():
             logger.error("market.db not found")
             return {}

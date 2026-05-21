@@ -21,7 +21,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
-import numpy as np
+
+from src.paths import DATA_DIR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class OverlayDashboardGenerator:
     for frontend consumption, and saves to a single JSON file.
     """
 
-    OUTPUT_PATH = Path(__file__).parent.parent.parent / "data" / "dashboard" / "overlay_dashboard.json"
+    OUTPUT_PATH = DATA_DIR / "dashboard" / "overlay_dashboard.json"
 
     def __init__(self):
         self._ensure_dirs()

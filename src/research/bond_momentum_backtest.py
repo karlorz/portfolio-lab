@@ -17,8 +17,9 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-from pathlib import Path
 import json
+from pathlib import Path
+from src.paths import PRICES_JSON, RESEARCH_DIR
 
 
 @dataclass
@@ -52,7 +53,7 @@ class BondMomentumResult:
 def load_price_data(data_path: Path = None) -> pd.DataFrame:
     """Load Treasury ETF price data from prices.json"""
     if data_path is None:
-        data_path = Path(__file__).parent.parent.parent / "public" / "data" / "prices.json"
+        data_path = PRICES_JSON
     
     with open(data_path) as f:
         data = json.load(f)
@@ -357,7 +358,7 @@ def main():
     print("Saving results...")
     print("=" * 60)
     
-    output_dir = Path(__file__).parent.parent.parent / "research"
+    output_dir = RESEARCH_DIR
     output_dir.mkdir(exist_ok=True)
     
     # JSON results

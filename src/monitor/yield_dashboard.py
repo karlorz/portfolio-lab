@@ -24,8 +24,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-project_root = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = project_root / "data"
+from src.paths import DATA_DIR
 STATE_FILE = DATA_DIR / "yield_dashboard_state.json"
 
 

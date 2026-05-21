@@ -21,6 +21,7 @@ from typing import Optional, Dict, List, Tuple
 
 import numpy as np
 
+from src.paths import DATA_DIR
 from .options_utils import OptionsChainFetcher, OptionsChain, OptionQuote, OptionType
 from ..signals.collar_signal import (
     CollarSignalGenerator, CollarStrikes, CollarSignal,
@@ -91,7 +92,6 @@ class CollarOptionsBridge:
     4. Return live collar strikes for execution
     """
 
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
     OUTPUT_PATH = DATA_DIR / "signals" / "live_collar_strikes.json"
 
     # Target parameters
@@ -112,8 +112,8 @@ class CollarOptionsBridge:
         self._ensure_dirs()
 
     def _ensure_dirs(self):
-        self.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (self.DATA_DIR / "signals").mkdir(parents=True, exist_ok=True)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        (DATA_DIR / "signals").mkdir(parents=True, exist_ok=True)
 
     async def fetch_optimal_collar(
         self,
@@ -160,7 +160,7 @@ class CollarOptionsBridge:
         return 550.0
 
     def _get_vix(self) -> float:
-        vix_path = self.DATA_DIR / "vix_term_structure.json"
+        vix_path = DATA_DIR / "vix_term_structure.json"
         if vix_path.exists():
             try:
                 with open(vix_path) as f:

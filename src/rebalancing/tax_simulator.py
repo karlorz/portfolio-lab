@@ -21,14 +21,13 @@ from dataclasses import dataclass, field, asdict
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
-import random
 
+from src.paths import PROJECT_ROOT
 from .tax_lot_tracker import TaxLotTracker
 from .tax_aware_rebalancer import TaxAwareRebalancer, RebalancePlan
+import random
 
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
 @dataclass

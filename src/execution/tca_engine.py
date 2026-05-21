@@ -42,6 +42,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+from src.paths import DATA_DIR
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -177,7 +178,7 @@ class TCAEngine:
 
     def __init__(self, data_dir: Optional[str] = None):
         if data_dir is None:
-            data_dir = str(Path(__file__).parent.parent.parent / "data")
+            data_dir = str(DATA_DIR)
         self.data_dir = Path(data_dir)
         self.order_log_path = self.data_dir / "orders.jsonl"
 

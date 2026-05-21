@@ -47,6 +47,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+from src.paths import DATA_DIR
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -145,7 +147,7 @@ class TCAFeedbackLoop:
     BAD_MIN = 0
 
     # Default data directories
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
+    DATA_DIR = DATA_DIR
 
     # Feedback state path
     STATE_PATH = DATA_DIR / "tca_feedback_state.json"
@@ -154,7 +156,7 @@ class TCAFeedbackLoop:
     SCORECARD_PATH = DATA_DIR / "tca_scorecard.json"
 
     def __init__(self, data_dir: Optional[Path] = None):
-        self.data_dir = data_dir or self.DATA_DIR
+        self.data_dir = data_dir or DATA_DIR
         self.state_path = self.data_dir / "tca_feedback_state.json"
         self.scorecard_path = self.data_dir / "tca_scorecard.json"
 

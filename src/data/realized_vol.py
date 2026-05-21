@@ -232,12 +232,14 @@ class RealizedVolCalculator:
         )
 
 
+from src.paths import DATA_DIR
+
 class RealizedVolPipeline:
     """
     Pipeline for computing and storing realized volatility from market.db.
     """
 
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
+    DATA_DIR = DATA_DIR
     OUTPUT_DIR = DATA_DIR / "realized_vol"
 
     def __init__(self):

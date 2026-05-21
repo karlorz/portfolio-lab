@@ -39,6 +39,17 @@
 
 ## Recent Implementation Updates (2026-05-22)
 
+### v9.47 Path Centralization — 81 Files Migrated to src.paths - COMPLETED
+- **Migration**: 87 `Path(__file__).parent.parent.parent` occurrences across 81 files → zero remaining
+  - All hardcoded `PROJECT_ROOT`, `DATA_DIR`, `MARKET_DB`, `PRICES_JSON`, `SIGNALS_DIR` definitions replaced with imports from `src.paths`
+  - `sys.path.insert(0, str(Path(__file__).parent.parent.parent))` → `sys.path.insert(0, str(PROJECT_ROOT))`
+  - State file paths (crypto_allocation, collar_overlay, bond_duration, unified_orchestrator) migrated to `DATA_DIR / "..."` or `SIGNALS_DIR / "..."`
+  - Unused `from pathlib import Path` removed where no longer needed
+- **New constant**: `RESEARCH_DIR = PROJECT_ROOT / "research"` added to `src/paths.py`
+- **Test fixes**: `test_kelly_optimal_sizing.py` updated to patch `PRICES_JSON` instead of `PROJECT_ROOT`
+- **Test count**: 6894 safe (0 failures, 10 skipped, 1 pre-existing unified_dashboard failure)
+- **Status**: All phases complete
+
 ### v9.46 Exception Hardening + Dead Import Cleanup - COMPLETED
 - **Exception hardening**: 28 `except Exception:` blocks narrowed across 22 files in src/
   - 19 blocks narrowed to specific exception types: `sqlite3.Error` (alpaca, order_router, behavioral_sentiment_backtest), `ImportError` (convexity_harvest, earnings_analyzer), `ValueError` (garch_cvar), `json.JSONDecodeError` (dashboard/generator, notifier, sentiment_analyzer, risk_budget_optimizer, regime_optimizer), `(FileNotFoundError, json.JSONDecodeError, ValueError)` (pipeline/integration, rebalance_health, notifier), `(IOError, OSError, json.JSONDecodeError)` (sentiment_analyzer, risk_budget_optimizer, regime_optimizer), `(ValueError, ZeroDivisionError)` (risk_decomposition, risk_budget_optimizer), `(ConnectionError, TimeoutError, OSError)` (order_router), `(ValueError, ImportError)` (controller_agent)
@@ -671,7 +682,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6895 safe** passed (0 failures, 10 skipped)
+- **6894 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution

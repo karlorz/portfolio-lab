@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+from src.paths import DATA_DIR
 from .tca_engine import TCAEngine, TCAOrderResult, TCAAggregate
 
 
@@ -66,7 +67,7 @@ class TCAScorecard:
     def __init__(self, data_dir: Optional[str] = None):
         self.engine = TCAEngine(data_dir=data_dir)
         if data_dir is None:
-            data_dir = str(Path(__file__).parent.parent.parent / "data")
+            data_dir = str(DATA_DIR)
         self.data_dir = Path(data_dir)
 
     def generate_daily_report(self, days: int = 30) -> dict:

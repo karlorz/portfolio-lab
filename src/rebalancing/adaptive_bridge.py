@@ -26,15 +26,13 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, Optional, Any
-from dataclasses import dataclass, asdict
 from pathlib import Path
-
+from dataclasses import dataclass, asdict
+from src.paths import PROJECT_ROOT
 from src.rebalancing.integration import SmartRebalanceGate, RebalanceGateResult
 from src.strategy.adaptive_sizing import AdaptiveSizer, BASE_ALLOCATION
 
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
 @dataclass

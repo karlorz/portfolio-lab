@@ -212,7 +212,7 @@ class BayesianVolPipeline:
     4. Apply regime adaptation from return kurtosis
     """
 
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
+    from src.paths import DATA_DIR
     OUTPUT_DIR = DATA_DIR / "bayesian_vol"
 
     def __init__(self):

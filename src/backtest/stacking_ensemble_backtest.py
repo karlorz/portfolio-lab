@@ -49,8 +49,9 @@ MIN_HOLDING_DAYS = 5
 # Monte Carlo trials
 MC_TRIALS = 200
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-DEFAULT_CACHE_DB = REPO_ROOT / "data" / "market.db"
+from src.paths import DATA_DIR
+
+DEFAULT_CACHE_DB = DATA_DIR / "market.db"
 
 
 @dataclass

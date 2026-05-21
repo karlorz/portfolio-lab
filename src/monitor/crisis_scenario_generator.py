@@ -37,11 +37,9 @@ from src.paths import BASE_ALLOCATION
 # ---------------------------------------------------------------------------
 # project root
 # ---------------------------------------------------------------------------
-project_root = Path(__file__).resolve().parent.parent.parent
+from src.paths import PROJECT_ROOT as project_root, DATA_DIR
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
-
-DATA_DIR = project_root / "data"
 STATE_DIR = DATA_DIR / "crisis_scenarios"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 

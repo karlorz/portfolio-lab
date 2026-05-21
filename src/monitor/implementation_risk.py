@@ -31,10 +31,9 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
+from src.paths import PROJECT_ROOT, DATA_DIR, BACKTEST_RESULTS_DIR
+
 # Paths
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-BACKTEST_RESULTS_DIR = DATA_DIR / "backtest_results"
 PERFORMANCE_LOG = DATA_DIR / "performance.jsonl"
 PORTFOLIO_STATE = DATA_DIR / "portfolio_paper.json"
 STATE_PATH = DATA_DIR / "implementation_risk_state.json"

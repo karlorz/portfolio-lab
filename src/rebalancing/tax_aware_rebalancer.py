@@ -28,11 +28,10 @@ from datetime import date
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
+from src.paths import PROJECT_ROOT
 from .tax_lot_tracker import TaxLotTracker, LotSelectionMethod, HoldingPeriod
 
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
 class TaxAwareMode:

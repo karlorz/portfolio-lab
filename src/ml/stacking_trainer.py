@@ -24,7 +24,6 @@ import argparse
 from typing import Dict, List, Optional, Tuple, NamedTuple
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-from pathlib import Path
 import sys
 import logging
 import os
@@ -56,8 +55,8 @@ else:
     import sys as _sys
     _sys.modules.setdefault("xgboost", _stub_xgb)
 
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+from src.paths import PROJECT_ROOT
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.signals.stacking_feature_engine import StackingFeatureEngine, SignalSource
 

@@ -16,10 +16,9 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, asdict, field
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
+from src.paths import MARKET_DB
 
 logger = logging.getLogger(__name__)
-
-CACHE_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "market.db"
 CACHE_TTL_HOURS = 4
 
 SPREAD_WIDENING_THRESHOLD = 2.0
@@ -69,7 +68,7 @@ class CreditFetcher:
     SYMBOLS = ["LQD", "HYG", "AGG"]
 
     def __init__(self, cache_db: Path = None):
-        self.cache_db = cache_db or CACHE_DB_PATH
+        self.cache_db = cache_db or MARKET_DB
         self._init_cache()
 
     def _init_cache(self):

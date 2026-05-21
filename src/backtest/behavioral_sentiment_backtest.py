@@ -47,9 +47,10 @@ MAX_SHIFT = 0.05  # ±5%
 # Benchmark comparison: TSMOM expected Sharpe
 TSMOM_EXPECTED_SHARPE = 0.96
 
+from src.paths import DATA_DIR
+
 # Paths
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-DEFAULT_CACHE_DB = REPO_ROOT / "data" / "market.db"
+DEFAULT_CACHE_DB = DATA_DIR / "market.db"
 
 
 @dataclass

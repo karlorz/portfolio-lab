@@ -34,15 +34,18 @@ class VIXTermStructure:
         return cls(**data)
 
 
+from src.paths import DATA_DIR
+
+
 class VIXDataManager:
     """
     Manages VIX futures term structure data.
-    
+
     For production: Connects to CBOE or data provider API
     For backtesting: Uses historical simulation or proxy data
     """
-    
-    DATA_DIR = Path(__file__).parent.parent.parent / 'data'
+
+    DATA_DIR = DATA_DIR
     VIX_FILE = DATA_DIR / 'vix_term_structure.json'
     
     def __init__(self):

@@ -22,8 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from enum import Enum
 
-
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+from src.paths import PROJECT_ROOT
 
 
 class LotSelectionMethod(Enum):

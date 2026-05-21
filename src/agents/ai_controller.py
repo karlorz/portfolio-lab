@@ -29,7 +29,6 @@ import json
 import sqlite3
 import argparse
 import sys
-from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -40,9 +39,10 @@ _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
     import torch
 
+from src.paths import PROJECT_ROOT
+
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agents.agent_graph import AgentGraph
 from src.agents.marl_trainer import MARLTrainer, MarketEnvironment

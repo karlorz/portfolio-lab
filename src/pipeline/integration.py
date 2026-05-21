@@ -26,11 +26,10 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
 import numpy as np
 
+from src.paths import PROJECT_ROOT, DATA_DIR
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
 
 
 # =============================================================================

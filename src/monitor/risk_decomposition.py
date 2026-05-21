@@ -40,7 +40,7 @@ import numpy as np
 # project root, logging
 # ---------------------------------------------------------------------------
 
-project_root = Path(__file__).parent.parent.parent
+from src.paths import PROJECT_ROOT as project_root
 sys.path.insert(0, str(project_root))
 
 logger = logging.getLogger(__name__)

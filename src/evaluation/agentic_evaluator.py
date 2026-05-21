@@ -30,16 +30,15 @@ import os
 import sys
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
+from src.paths import PROJECT_ROOT, DATA_DIR
+
 # Paths
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
 EVAL_LOG_PATH = DATA_DIR / "agent_evaluation.jsonl"
 STATE_PATH = DATA_DIR / "agent_evaluation_state.json"
 

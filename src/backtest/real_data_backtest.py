@@ -67,6 +67,7 @@ class RealDataBacktestResult:
     def to_dict(self) -> dict:
         return asdict(self)
 
+from src.paths import DATA_DIR, MARKET_DB
 
 class RealDataBacktest:
     """
@@ -74,7 +75,7 @@ class RealDataBacktest:
     """
 
     BASELINE = {"spy": 0.46, "gld": 0.38, "tlt": 0.16}
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
+    DATA_DIR = DATA_DIR
 
     def _load_market_data(self) -> Dict[str, Dict]:
         """Load real price data from market.db."""

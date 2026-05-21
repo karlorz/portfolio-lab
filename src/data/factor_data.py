@@ -357,16 +357,13 @@ def fetch_factor_prices_from_pipeline(symbol: str, prices_data: Optional[Dict] =
     factor ETF historical data from public/data/prices.json.
     """
     import json
-    from pathlib import Path
-    
-    # Load from existing pipeline data
-    prices_path = Path(__file__).parent.parent.parent / "public" / "data" / "prices.json"
-    
+    from src.paths import PRICES_JSON
+
     if prices_data is None:
-        if not prices_path.exists():
-            logger.warning(f"Prices file not found: {prices_path}")
+        if not PRICES_JSON.exists():
+            logger.warning(f"Prices file not found: {PRICES_JSON}")
             return []
-        with open(prices_path, 'r') as f:
+        with open(PRICES_JSON, 'r') as f:
             prices_data = json.load(f)
     
     if symbol not in prices_data:
