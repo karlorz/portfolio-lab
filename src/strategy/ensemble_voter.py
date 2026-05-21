@@ -403,12 +403,18 @@ class EnsembleVoter:
 
                             intl_gen = InternationalMomentumGenerator()
                             intl_signal = intl_gen.generate_signal(data)
-                            signal_value = 0.0
+
+                            # Use continuous momentum differential instead of
+                            # discrete 3-level mapping (0.0/0.3/0.4) to preserve
+                            # full alpha signal — same fix as ALTERNATIVE_DATA
+                            # composite_score passthrough
+                            efa_vs_spy = data['relative']['efa_vs_spy']
+                            eem_vs_spy = data['relative']['eem_vs_spy']
                             if intl_signal.signal_type == "efa_lead":
-                                signal_value = 0.3
+                                signal_value = float(np.clip(efa_vs_spy / 10.0, -0.5, 0.5))
                             elif intl_signal.signal_type == "eem_lead":
-                                signal_value = 0.4
-                            elif intl_signal.signal_type == "neutral":
+                                signal_value = float(np.clip(eem_vs_spy / 10.0, -0.5, 0.5))
+                            else:
                                 signal_value = 0.0
 
                             readings[SignalSource.INTERNATIONAL_MOMENTUM] = SignalReading(
