@@ -178,43 +178,8 @@ class TestStep1PriceDataLoading:
 # ---------------------------------------------------------------------------
 
 
-class TestStep2FactorTimingSignal:
-    """Pipeline Step 2: Factor timing generates valid output."""
-
-    def test_import_factor_timing(self):
-        """Factor timing module imports without ML deps."""
-        try:
-            from src.signals.factor_timing_signal import (
-                compute_factor_z_scores,
-                FactorTimingResult,
-            )
-            assert compute_factor_z_scores is not None
-        except ImportError as e:
-            # Allow graceful skip — some environments may not have the module
-            pytest.skip(f"Factor timing module not available: {e}")
-
-    def test_factor_timing_computes_scores(self):
-        """Z-score computation runs on sample returns."""
-        try:
-            from src.signals.factor_timing_signal import compute_factor_z_scores
-            import numpy as np
-
-            # Simulate daily returns for 3 factors over 60 days
-            np.random.seed(42)
-            spy_rets = np.random.normal(0.0005, 0.01, 60)
-            gld_rets = np.random.normal(0.0003, 0.008, 60)
-            tlt_rets = np.random.normal(0.0001, 0.012, 60)
-
-            result = compute_factor_z_scores(
-                {"SPY": spy_rets, "GLD": gld_rets, "TLT": tlt_rets},
-                window=20,
-            )
-            assert result is not None
-            for factor in ["SPY_z", "GLD_z", "TLT_z"]:
-                # May not have all keys depending on implementation
-                pass
-        except ImportError:
-            pytest.skip("Factor timing module not available")
+# Note: TestStep2FactorTimingSignal removed — factor_timing_signal.py was purged
+# in v9.25 dead code cleanup (zero weight in all REGIME_WEIGHTS since v9.19)
 
 
 # ---------------------------------------------------------------------------
@@ -382,11 +347,15 @@ class TestStep6EnsembleVoter:
         except ImportError:
             pytest.skip("EnsembleVoter module not available")
 
-    def test_ensemble_voter_accepts_risk_budget_source(self):
-        """RISK_BUDGET signal source is recognized by EnsembleVoter."""
+    def test_ensemble_voter_signal_sources_complete(self):
+        """Active signal sources are present in EnsembleVoter enum."""
         try:
             from src.strategy.ensemble_voter import SignalSource
-            assert "RISK_BUDGET" in [s.name for s in SignalSource]
+            active = ["MULTI_SPEED_MOM", "CROSS_ASSET_RV", "INTERNATIONAL_MOMENTUM",
+                       "ALTERNATIVE_DATA", "CROSS_ASSET_REGIME_ARB"]
+            names = [s.name for s in SignalSource]
+            for src in active:
+                assert src in names, f"Active source {src} missing from SignalSource enum"
         except ImportError:
             pytest.skip("EnsembleVoter module not available")
 

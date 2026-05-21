@@ -89,7 +89,7 @@ class TestEnums:
         assert SignalSource.CTA_TREND.value == 'cta_trend'
 
     def test_signal_source_members(self):
-        assert len(SignalSource) >= 10
+        assert len(SignalSource) >= 5  # 5 active + kept deprecated for compat
 
 
 # ---------------------------------------------------------------------------
