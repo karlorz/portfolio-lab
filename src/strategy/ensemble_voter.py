@@ -421,11 +421,14 @@ class EnsembleVoter:
         
         return None
     
-    def collect_signals(self, date: Optional[str] = None) -> Dict[SignalSource, SignalReading]:
+    def collect_signals(self, date: Optional[str] = None, regime: Optional[Regime] = None) -> Dict[SignalSource, SignalReading]:
         """
         Collect signals from active (non-deprecated) sources.
 
-        Active sources (7 survivor signals per v9.14+ spring cleaning):
+        If regime is provided, skip signal sources with zero weight for that
+        regime — avoids wasted computation on signals that won't affect the vote.
+
+        Active sources (5 survivor signals per v9.19 pruning):
         - Multi-speed momentum (primary trend signal)
         - Cross-asset relative value (mean-reversion triggers)
         - International equity momentum (EFA/VXUS trend)
@@ -438,6 +441,12 @@ class EnsembleVoter:
         LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE,
         ZERO_DTE, TSFM_MOMENTUM (no data feed), DURATION_REGIME (no data feed).
         """
+        # Determine which signals have non-zero weight for this regime
+        active_sources = None
+        if regime is not None:
+            regime_weights = REGIME_WEIGHTS.get(regime, {})
+            active_sources = {src for src, w in regime_weights.items() if w > 0}
+
         readings = {}
 
         # 1. Multi-Speed Momentum (v2.56)
@@ -491,90 +500,100 @@ class EnsembleVoter:
             pass
 
         # 3. International Equity Momentum (v3.13)
-        try:
-            from src.signals.international_momentum import InternationalMomentumGenerator
+        # Skip if zero weight for current regime
+        if active_sources is not None and SignalSource.INTERNATIONAL_MOMENTUM not in active_sources:
+            logger.debug(f"Skipping INTERNATIONAL_MOMENTUM: zero weight for regime={regime.value if regime else '?' }")
+        else:
+            try:
+                from src.signals.international_momentum import InternationalMomentumGenerator
 
-            # Load price data for SPY, EFA, EEM
-            price_data = self._load_price_data()
-            if price_data is not None and not price_data.empty:
-                window = 126  # ~6 months of trading days
-                required_cols = [c for c in ['SPY', 'EFA', 'EEM'] if c in price_data.columns]
-                if len(required_cols) >= 2:
-                    recent = price_data[required_cols].iloc[-window:] if len(price_data) >= window else price_data[required_cols]
-                    if len(recent) >= 20:
-                        efa_mom = (recent['EFA'].iloc[-1] / recent['EFA'].iloc[0] - 1) * 100 if 'EFA' in recent else 0.0
-                        eem_mom = (recent['EEM'].iloc[-1] / recent['EEM'].iloc[0] - 1) * 100 if 'EEM' in recent else 0.0
-                        spy_mom = (recent['SPY'].iloc[-1] / recent['SPY'].iloc[0] - 1) * 100
+                # Load price data for SPY, EFA, EEM
+                price_data = self._load_price_data()
+                if price_data is not None and not price_data.empty:
+                    window = 126  # ~6 months of trading days
+                    required_cols = [c for c in ['SPY', 'EFA', 'EEM'] if c in price_data.columns]
+                    if len(required_cols) >= 2:
+                        recent = price_data[required_cols].iloc[-window:] if len(price_data) >= window else price_data[required_cols]
+                        if len(recent) >= 20:
+                            efa_mom = (recent['EFA'].iloc[-1] / recent['EFA'].iloc[0] - 1) * 100 if 'EFA' in recent else 0.0
+                            eem_mom = (recent['EEM'].iloc[-1] / recent['EEM'].iloc[0] - 1) * 100 if 'EEM' in recent else 0.0
+                            spy_mom = (recent['SPY'].iloc[-1] / recent['SPY'].iloc[0] - 1) * 100
 
-                        data = {
-                            'timestamp': str(datetime.now()),
-                            'relative': {
-                                'efa_momentum_6m': efa_mom,
-                                'eem_momentum_6m': eem_mom,
-                                'spy_momentum_6m': spy_mom,
-                                'efa_vs_spy': efa_mom - spy_mom,
-                                'eem_vs_spy': eem_mom - spy_mom,
-                            },
-                            'data_fresh': True,
-                        }
+                            data = {
+                                'timestamp': str(datetime.now()),
+                                'relative': {
+                                    'efa_momentum_6m': efa_mom,
+                                    'eem_momentum_6m': eem_mom,
+                                    'spy_momentum_6m': spy_mom,
+                                    'efa_vs_spy': efa_mom - spy_mom,
+                                    'eem_vs_spy': eem_mom - spy_mom,
+                                },
+                                'data_fresh': True,
+                            }
 
-                        intl_gen = InternationalMomentumGenerator()
-                        intl_signal = intl_gen.generate_signal(data)
-                        signal_value = 0.0
-                        if intl_signal.signal_type == "efa_lead":
-                            signal_value = 0.3
-                        elif intl_signal.signal_type == "eem_lead":
-                            signal_value = 0.4
-                        elif intl_signal.signal_type == "neutral":
+                            intl_gen = InternationalMomentumGenerator()
+                            intl_signal = intl_gen.generate_signal(data)
                             signal_value = 0.0
+                            if intl_signal.signal_type == "efa_lead":
+                                signal_value = 0.3
+                            elif intl_signal.signal_type == "eem_lead":
+                                signal_value = 0.4
+                            elif intl_signal.signal_type == "neutral":
+                                signal_value = 0.0
 
-                        readings[SignalSource.INTERNATIONAL_MOMENTUM] = SignalReading(
-                            source=SignalSource.INTERNATIONAL_MOMENTUM,
-                            timestamp=intl_signal.timestamp,
-                            value=signal_value,
-                            confidence=intl_signal.confidence,
-                            weight=0.0,
-                            regime_fit="all",
-                            asset_signals={
-                                'SPY': intl_signal.spy_shift,
-                                'EFA': intl_signal.efa_shift,
-                                'EEM': intl_signal.eem_shift,
-                            },
-                            explanation=f"Intl Momentum: {intl_signal.signal_type}, "
-                                        f"conf={intl_signal.confidence_level}, "
-                                        f"EFA/SPY={efa_mom - spy_mom:+.2%}, "
-                                        f"EEM/SPY={eem_mom - spy_mom:+.2%}, "
-                                        f"VIX_filter={intl_signal.vix_filter_active}"
-                        )
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"International momentum unavailable: {e}")
+                            readings[SignalSource.INTERNATIONAL_MOMENTUM] = SignalReading(
+                                source=SignalSource.INTERNATIONAL_MOMENTUM,
+                                timestamp=intl_signal.timestamp,
+                                value=signal_value,
+                                confidence=intl_signal.confidence,
+                                weight=0.0,
+                                regime_fit="all",
+                                asset_signals={
+                                    'SPY': intl_signal.spy_shift,
+                                    'EFA': intl_signal.efa_shift,
+                                    'EEM': intl_signal.eem_shift,
+                                },
+                                explanation=f"Intl Momentum: {intl_signal.signal_type}, "
+                                            f"conf={intl_signal.confidence_level}, "
+                                            f"EFA/SPY={efa_mom - spy_mom:+.2%}, "
+                                            f"EEM/SPY={eem_mom - spy_mom:+.2%}, "
+                                            f"VIX_filter={intl_signal.vix_filter_active}"
+                            )
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.debug(f"International momentum unavailable: {e}")
+
 
         # 4. Alternative Data (v9.00) — SEC EDGAR, NewsAPI, Jobs data
-        try:
-            alt_data_file = SIGNALS_DIR / "alternative_data_latest.json"
-            if alt_data_file.exists():
-                with open(alt_data_file) as f:
-                    alt_data = json.load(f)
+        # Skip if zero weight for current regime
+        if active_sources is not None and SignalSource.ALTERNATIVE_DATA not in active_sources:
+            logger.debug(f"Skipping ALTERNATIVE_DATA: zero weight for regime={regime.value if regime else '?' }")
+        else:
+            try:
+                alt_data_file = SIGNALS_DIR / "alternative_data_latest.json"
+                if alt_data_file.exists():
+                    with open(alt_data_file) as f:
+                        alt_data = json.load(f)
 
-                regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
-                signal_value = regime_map.get(alt_data.get("regime", "neutral"), 0.0)
+                    regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
+                    signal_value = regime_map.get(alt_data.get("regime", "neutral"), 0.0)
 
-                readings[SignalSource.ALTERNATIVE_DATA] = SignalReading(
-                    source=SignalSource.ALTERNATIVE_DATA,
-                    timestamp=alt_data.get("timestamp", str(datetime.now())),
-                    value=signal_value,
-                    confidence=alt_data.get("confidence", 0.5),
-                    weight=0.0,
-                    regime_fit="all",
-                    asset_signals={"SPY": signal_value},
-                    explanation=f"Alt Data: regime={alt_data.get('regime')}, "
-                                f"prob={alt_data.get('probability', 0):.2f}, "
-                                f"conf={alt_data.get('confidence', 0):.2f}"
-                )
-        except Exception as e:
-            logger.debug(f"Alternative data unavailable: {e}")
+                    readings[SignalSource.ALTERNATIVE_DATA] = SignalReading(
+                        source=SignalSource.ALTERNATIVE_DATA,
+                        timestamp=alt_data.get("timestamp", str(datetime.now())),
+                        value=signal_value,
+                        confidence=alt_data.get("confidence", 0.5),
+                        weight=0.0,
+                        regime_fit="all",
+                        asset_signals={"SPY": signal_value},
+                        explanation=f"Alt Data: regime={alt_data.get('regime')}, "
+                                    f"prob={alt_data.get('probability', 0):.2f}, "
+                                    f"conf={alt_data.get('confidence', 0):.2f}"
+                    )
+            except Exception as e:
+                logger.debug(f"Alternative data unavailable: {e}")
+
 
         # 5. Cross-Asset Regime Arbitrage (v8.09)
         try:
@@ -696,8 +715,11 @@ class EnsembleVoter:
         Compute ensemble vote with regime-dependent weighting.
         """
         if readings is None:
-            readings = self.current_readings or self.collect_signals()
-        
+            # Detect regime first so collect_signals can skip zero-weight sources
+            if regime is None:
+                regime, regime_confidence = self.detect_regime()
+            readings = self.current_readings or self.collect_signals(regime=regime)
+
         if regime is None:
             regime, regime_confidence = self.detect_regime()
         
