@@ -131,32 +131,32 @@ class EnsembleVote:
 # RECOVERY unchanged (already 43%). Weights sum=1.0 per regime.
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.MULTI_SPEED_MOM: 0.5000,
+        SignalSource.MULTI_SPEED_MOM: 0.2500,
         SignalSource.CROSS_ASSET_RV: 0.1500,
-        SignalSource.ALTERNATIVE_DATA: 0.1250,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.1000,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1250,
+        SignalSource.ALTERNATIVE_DATA: 0.2500,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.2000,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1500,
     },
     Regime.HIGH_VOL: {
-        SignalSource.MULTI_SPEED_MOM: 0.5000,
-        SignalSource.CROSS_ASSET_RV: 0.1250,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.1250,
-        SignalSource.ALTERNATIVE_DATA: 0.1875,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.0625,
+        SignalSource.MULTI_SPEED_MOM: 0.2500,
+        SignalSource.CROSS_ASSET_RV: 0.1500,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.1500,
+        SignalSource.ALTERNATIVE_DATA: 0.3000,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1500,
     },
     Regime.CRISIS: {
-        SignalSource.MULTI_SPEED_MOM: 0.5000,
-        SignalSource.CROSS_ASSET_RV: 0.3333,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1667,
+        SignalSource.MULTI_SPEED_MOM: 0.2500,
+        SignalSource.CROSS_ASSET_RV: 0.4000,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.2000,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
-        SignalSource.ALTERNATIVE_DATA: 0.0000,
+        SignalSource.ALTERNATIVE_DATA: 0.1500,
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.4300,
-        SignalSource.ALTERNATIVE_DATA: 0.2000,
-        SignalSource.CROSS_ASSET_RV: 0.1200,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.1500,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1000,
+        SignalSource.MULTI_SPEED_MOM: 0.2500,
+        SignalSource.ALTERNATIVE_DATA: 0.2500,
+        SignalSource.CROSS_ASSET_RV: 0.1500,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.2000,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1500,
     }
 }
 

@@ -155,8 +155,9 @@ class TestRegimeWeights:
             for source in survivors:
                 assert source in weights, f"{source} missing from {regime}"
 
-    def test_crisis_multi_speed_mom_high(self):
-        assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.MULTI_SPEED_MOM] >= 0.5
+    def test_crisis_cross_asset_rv_high(self):
+        """v9.26: CROSS_ASSET_RV is the dominant signal in CRISIS regime."""
+        assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.CROSS_ASSET_RV] >= 0.3
 
     def test_no_signal_exceeds_50_pct(self):
         """v9.23: No single signal should exceed 50% weight in any regime."""
@@ -164,11 +165,13 @@ class TestRegimeWeights:
             for source, weight in weights.items():
                 assert weight <= 0.50, f"{source.value} exceeds 50% in {regime.value}: {weight:.4f}"
 
-    def test_normal_multi_speed_mom_dominant(self):
+    def test_normal_multi_speed_mom_at_least_25(self):
+        """v9.26: MSM still significant but no longer dominant after backtest validation."""
         assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.MULTI_SPEED_MOM] >= 0.25
 
-    def test_high_vol_multi_speed_mom_dominant(self):
-        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.MULTI_SPEED_MOM] >= 0.5
+    def test_high_vol_alternative_data_dominant(self):
+        """v9.26: ALT_DATA is the dominant signal in HIGH_VOL regime (only positive alpha)."""
+        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.25
 
 
 # ---------------------------------------------------------------------------
