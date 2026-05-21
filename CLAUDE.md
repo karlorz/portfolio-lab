@@ -37,14 +37,33 @@
   - Inference latency: 4.7ms (target: <50ms) ✓
   - Integrates with v2.24 signal integrator (5% weight in composite)
 
-## Recent Implementation Updates (2026-05-20)
+## Recent Implementation Updates (2026-05-21)
+
+### v9.35 BanditWeighter Removal + Weight Rebalancing + Coverage Expansion - COMPLETED
+- **BanditWeighter removed**: 266 lines of dead code deleted
+  - update_bandit() had zero callers — bandit never received observations
+  - get_blended_weights() always returned 100% static REGIME_WEIGHTS via cold-start path
+  - Simplified to get_regime_weights() returning static weights directly
+  - Deleted: tests/test_bandit_weighter.py (10 tests for dead class)
+- **MSM weight reduced**: 21% → 10% across all regimes (net-negative -0.012 Sharpe per v9.24)
+  - Redistributed to ALT_DATA (21→26%, +0.015 Sharpe) and INTL_MOM (17→21%, +0.02 Sharpe)
+  - UNIFIED_OVERLAY increased from 15→17-21% depending on regime
+- **ALT_DATA enum naming fix**: health_tracker.py ALT_DATA → ALTERNATIVE_DATA (matches ensemble_voter.py)
+- **ODTE yield tests**: 170 tests for 3 previously untested modules (1293 lines)
+  - test_odte_yield.py: ZeroDTECalculator, StrikeSelector, ZeroDTEPosition + dataclasses + enums
+- **4 individual overlay backtests** (previously only group-tested via combined overlay):
+  - src/backtest/vixy_hedge_backtest.py + 29 tests — VIX-based hedge allocation
+  - src/backtest/collar_overlay_backtest.py + 44 tests — VIX-gated collar with CRISIS freeze
+  - src/backtest/bond_duration_backtest.py + 46 tests — TLT momentum-driven duration rotation
+  - src/backtest/crypto_allocation_backtest.py + 37 tests — SPY momentum-gated crypto, 5% cap
+- **Test count**: 6424 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
 
 ### v9.31 UNIFIED_OVERLAY Activation + Dead Code Removal - COMPLETED
 - **UNIFIED_OVERLAY activated**: Added 15% weight to all 4 regime weights (was dead code at 0%)
   - The orchestrator_ensemble_bridge.py was generating SignalReadings that compute_vote() silently discarded
   - UNIFIED_OVERLAY collection added to collect_signals() via bridge import
   - Weights redistributed proportionally from other signals (MSM 25→21%, ALT_DATA 25→21%, etc.)
-  - Added to BanditWeighter survivor list for dynamic weight adaptation
 - **vix_overlay.py removed**: 2000 lines of dead code (module + backtest + tests)
   - No production caller anywhere in src/ — fully disconnected from portfolio system
   - Removed: src/strategy/vix_overlay.py (570L), src/backtest/vix_overlay_backtest.py (590L), tests/test_vix_overlay.py (466L), tests/test_vix_overlay_backtest.py (374L)
@@ -569,7 +588,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6189 safe** passed (0 failures, 10 skipped)
+- **6424 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
