@@ -104,6 +104,18 @@
 - **Tests**: Updated regime dominance assertions, 5839/5839 passing
 - **Status**: All phases complete
 
+### v9.28 Coverage Expansion + Source Bug Fixes - COMPLETED
+- **Tests**: 141 new tests across 3 previously untested modules:
+  - `tests/test_wiki_sync.py` (51 tests): WikiSync init, save_raw_source, sync methods, regime/graduation helpers
+  - `tests/test_pipeline.py` (33 tests): init_db, fetch_yahoo, detect_regime, check_data_quality
+  - `tests/test_multi_strategy_adapters.py` (49 tests, rewritten): all 3 adapters, signals, confidence, portfolio
+- **Source bugs fixed**: 5 bugs found by tests:
+  - wiki_sync.py: f-string ValueError, unescaped `{` in citations (2), division by zero in win rate
+  - pipeline.py: SELECT missing symbol column → detect_regime always returned None
+  - multi_strategy_adapters.py: empty list `tickers=[]` fell through to defaults
+- **Test count**: 5862 → 5980 safe (0 failures)
+- **Status**: All phases complete
+
 ### v9.27 Shared Metrics Module + Wiki Sync Fix - COMPLETED
 - **Metrics module**: `src/backtest/metrics.py` — shared BacktestMetrics, compute_metrics(), compute_crisis_returns(), save_results_json()
   - Eliminates ~800 lines of copy-paste metric logic across 11 backtest files
@@ -531,7 +543,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **5862 safe** passed (0 failures, 10 skipped)
+- **5980 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
