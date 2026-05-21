@@ -21,6 +21,11 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.backtest.metrics import (
+    BacktestMetrics,
+    compute_metrics,
+    save_results_json,
+)
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
 logging.basicConfig(level=logging.INFO)
@@ -563,38 +568,19 @@ class AlternativeDataBacktester:
 
     @staticmethod
     def _calculate_metrics(returns: List[float]) -> Dict:
-        """Calculate CAGR, volatility, Sharpe, max drawdown."""
+        """Calculate CAGR, volatility, Sharpe, max drawdown. Delegates to shared module."""
         if not returns:
             return {"cagr": 0, "volatility": 0, "sharpe": 0, "max_dd": 0}
-
-        ret_arr = np.array(returns)
-
-        total_ret = np.prod(1 + ret_arr) - 1
-        n_years = len(returns) / 252
-        cagr = (
-            (1 + total_ret) ** (1 / n_years) - 1 if n_years > 0 else 0
-        )
-
-        vol = float(np.std(ret_arr) * np.sqrt(252) * 100)
-        sharpe = (cagr * 100) / vol if vol > 0 else 0
-
-        # Max drawdown
-        equity = [1.0]
+        # Build equity curve from returns
+        eq = [1.0]
         for r in returns:
-            equity.append(equity[-1] * (1 + r))
-        peak = equity[0]
-        max_dd = 0.0
-        for v in equity:
-            if v > peak:
-                peak = v
-            dd = (peak - v) / peak
-            max_dd = max(max_dd, dd)
-
+            eq.append(eq[-1] * (1.0 + r))
+        m = compute_metrics(eq, initial_capital=1.0)
         return {
-            "cagr": cagr * 100,
-            "volatility": vol,
-            "sharpe": sharpe,
-            "max_dd": -max_dd * 100,
+            "cagr": m.cagr,
+            "volatility": m.volatility,
+            "sharpe": m.sharpe_ratio,
+            "max_dd": m.max_drawdown,
         }
 
     @staticmethod
@@ -639,13 +625,7 @@ class AlternativeDataBacktester:
                 / "alternative_data_backtest.json"
             )
 
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_path, "w") as f:
-            json.dump(
-                asdict(result), f, indent=2, default=str
-            )
-
+        save_results_json(asdict(result), output_path=output_path)
         logger.info("Results saved to %s", output_path)
 
     def print_report(self, result: BacktestResult) -> None:

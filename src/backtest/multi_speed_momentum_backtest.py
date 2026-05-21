@@ -19,6 +19,12 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.backtest.metrics import (
+    BacktestMetrics,
+    compute_metrics,
+    compute_crisis_returns,
+    save_results_json,
+)
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
 logging.basicConfig(level=logging.INFO)
@@ -271,38 +277,22 @@ class MultiSpeedMomentumBacktester:
         return sum(abs(new[k] - old[k]) for k in old) / 2.0
 
     # ------------------------------------------------------------------
-    # Metrics
+    # Metrics — delegated to shared module
     # ------------------------------------------------------------------
     @staticmethod
-    def _returns_from_equity(equity: List[float]) -> List[float]:
-        return [(equity[i] - equity[i - 1]) / equity[i - 1] for i in range(1, len(equity))]
-
-    @staticmethod
     def _metrics(returns: List[float]) -> Dict[str, float]:
-        if not returns:
-            return {"cagr": 0.0, "volatility": 0.0, "sharpe": 0.0, "max_dd": 0.0}
-
-        arr = np.array(returns)
-        total_ret = float(np.prod(1 + arr)) - 1.0
-        n_years = len(returns) / 252.0
-        cagr = (1.0 + total_ret) ** (1.0 / n_years) - 1.0 if n_years > 0 else 0.0
-        vol = float(np.std(arr)) * np.sqrt(252.0) * 100.0
-        sharpe = (cagr * 100.0) / vol if vol > 1e-8 else 0.0
-        cagr_pct = cagr * 100.0
-
-        # max drawdown
+        """Legacy wrapper — delegates to shared compute_metrics."""
+        # Build an equity curve from returns
         eq = [1.0]
         for r in returns:
             eq.append(eq[-1] * (1.0 + r))
-        peak = eq[0]
-        max_dd = 0.0
-        for v in eq:
-            if v > peak:
-                peak = v
-            dd = (peak - v) / peak
-            max_dd = max(max_dd, dd)
-
-        return {"cagr": cagr_pct, "volatility": vol, "sharpe": sharpe, "max_dd": -max_dd * 100.0}
+        m = compute_metrics(eq, initial_capital=1.0)
+        return {
+            "cagr": m.cagr,
+            "volatility": m.volatility,
+            "sharpe": m.sharpe_ratio,
+            "max_dd": m.max_drawdown,
+        }
 
     @staticmethod
     def _annualize(returns: List[float]) -> float:
@@ -556,10 +546,7 @@ class MultiSpeedMomentumBacktester:
         if output_path is None:
             output_path = str(BACKTEST_RESULTS_DIR / "multi_speed_momentum_backtest.json")
 
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as f:
-            json.dump(asdict(result), f, indent=2, default=str)
-
+        save_results_json(asdict(result), output_path=output_path)
         logger.info("Results saved to %s", output_path)
 
 

@@ -29,6 +29,11 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.backtest.metrics import (
+    BacktestMetrics,
+    compute_metrics,
+    save_results_json,
+)
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
 logging.basicConfig(level=logging.INFO)
@@ -613,36 +618,18 @@ class CrossAssetRegimeArbBacktester:
         return returns
 
     def _calculate_metrics(self, returns: List[float]) -> Dict[str, float]:
-        """Calculate CAGR, volatility, Sharpe, and max drawdown."""
+        """Calculate CAGR, volatility, Sharpe, and max drawdown. Delegates to shared module."""
         if not returns:
             return {"cagr": 0.0, "volatility": 0.0, "sharpe": 0.0, "max_dd": 0.0}
-
-        arr = np.array(returns)
-
-        total_ret = np.prod(1 + arr) - 1
-        n_years = len(returns) / 252
-        cagr = (1 + total_ret) ** (1 / n_years) - 1 if n_years > 0 else 0.0
-
-        vol = float(np.std(arr) * np.sqrt(252) * 100)
-        sharpe = (cagr * 100) / vol if vol > 0 else 0.0
-
-        # Max drawdown
-        equity = [1.0]
+        eq = [1.0]
         for r in returns:
-            equity.append(equity[-1] * (1 + r))
-        peak = equity[0]
-        max_dd = 0.0
-        for v in equity:
-            if v > peak:
-                peak = v
-            dd = (peak - v) / peak
-            max_dd = max(max_dd, dd)
-
+            eq.append(eq[-1] * (1.0 + r))
+        m = compute_metrics(eq, initial_capital=1.0)
         return {
-            "cagr": cagr * 100,
-            "volatility": vol,
-            "sharpe": sharpe,
-            "max_dd": -max_dd * 100,
+            "cagr": m.cagr,
+            "volatility": m.volatility,
+            "sharpe": m.sharpe_ratio,
+            "max_dd": m.max_drawdown,
         }
 
     def _annualize(self, returns: List[float]) -> float:
@@ -736,12 +723,7 @@ class CrossAssetRegimeArbBacktester:
             output_path = str(
                 BACKTEST_RESULTS_DIR / "cross_asset_regime_arb_backtest.json"
             )
-
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_path, "w") as f:
-            json.dump(asdict(result), f, indent=2, default=str)
-
+        save_results_json(asdict(result), output_path=output_path)
         logger.info(f"Results saved to {output_path}")
 
 

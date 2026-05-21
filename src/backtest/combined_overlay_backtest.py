@@ -26,6 +26,12 @@ from typing import Optional, Dict, List, Tuple
 
 import numpy as np
 
+from src.backtest.metrics import (
+    BacktestMetrics,
+    compute_metrics,
+    save_results_json,
+)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -504,9 +510,7 @@ def main():
     # Save if requested
     if "--save" in sys.argv:
         out_path = bt.data_dir / "backtest_results" / "combined_overlay.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
+        save_results_json(result.to_dict(), output_path=str(out_path))
         print(f"\nSaved to {out_path}")
 
 

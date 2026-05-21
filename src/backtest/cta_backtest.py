@@ -15,6 +15,11 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import sys
 
+from src.backtest.metrics import (
+    BacktestMetrics,
+    compute_metrics,
+    save_results_json,
+)
 from src.paths import MARKET_DB, DATA_DIR
 
 # Add parent to path
@@ -47,64 +52,64 @@ class CTABacktestEngine:
     Backtest CTA Trend Overlay against historical data
     Validates: crisis alpha, trend detection, vol targeting
     """
-    
+
     # Crisis periods for validation
     CRISIS_PERIODS = {
         "2008": ("2008-09-01", "2008-12-31"),  # GFC
         "2020": ("2020-02-19", "2020-04-30"),  # COVID crash
         "2022": ("2022-01-01", "2022-10-31"),  # Bear market
     }
-    
+
     # SG Trend Index proxy (simplified: long/short trend on liquid futures)
     # We use trend-following on SPY, GLD, TLT as proxy
     SG_PROXY_UNIVERSE = ["SPY", "GLD", "TLT", "QQQ", "IWM"]
-    
+
     def __init__(self, db_path: Path = None):
         if db_path is None:
             db_path = MARKET_DB
         self.db_path = db_path
         self.cta_engine = CTATrendEngine(db_path)
-        
+
     def _fetch_historical_data(
-        self, 
-        symbol: str, 
-        start_date: str, 
+        self,
+        symbol: str,
+        start_date: str,
         end_date: str
     ) -> List[Dict]:
         """Fetch historical prices from database"""
         if not self.db_path.exists():
             return []
-            
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute("""
             SELECT date, close, volume
             FROM prices
             WHERE symbol = ? AND date >= ? AND date <= ?
             ORDER BY date ASC
         """, (symbol, start_date, end_date))
-        
+
         rows = cursor.fetchall()
         conn.close()
-        
+
         return [
             {"date": row[0], "close": row[1], "volume": row[2]}
             for row in rows
         ]
-    
+
     def _calculate_returns(self, prices: List[float]) -> np.ndarray:
         """Calculate daily returns from price series"""
         prices_arr = np.array(prices)
         returns = np.diff(prices_arr) / prices_arr[:-1]
         return returns
-    
+
     def _calculate_max_drawdown(self, equity_curve: np.ndarray) -> float:
         """Calculate maximum drawdown from equity curve"""
         peak = np.maximum.accumulate(equity_curve)
         drawdown = (equity_curve - peak) / peak
         return np.min(drawdown)
-    
+
     def run_backtest(
         self,
         start_date: str = "2005-01-01",
@@ -113,12 +118,12 @@ class CTABacktestEngine:
     ) -> BacktestResult:
         """
         Run full historical backtest of CTA overlay
-        
+
         Args:
             start_date: Backtest start date
-            end_date: Backtest end date  
+            end_date: Backtest end date
             initial_capital: Starting portfolio value
-            
+
         Returns:
             BacktestResult with performance metrics
         """
@@ -126,22 +131,22 @@ class CTABacktestEngine:
         spy_data = self._fetch_historical_data("SPY", start_date, end_date)
         if not spy_data:
             raise ValueError(f"No data found for SPY from {start_date} to {end_date}")
-        
+
         trading_dates = [d["date"] for d in spy_data]
-        
+
         # Track portfolio state
         capital = initial_capital
         equity_curve = [capital]
         daily_returns = []
         trades = []
-        
+
         # Rebalance weekly
         last_rebalance = None
         current_positions: Dict[str, dict] = {}
-        
+
         for i, date_str in enumerate(trading_dates):
             current_date = datetime.strptime(date_str, "%Y-%m-%d")
-            
+
             # Weekly rebalancing (every 5 trading days)
             if last_rebalance is None or (i - last_rebalance) >= 5:
                 # Get new CTA positions by evaluating each symbol
@@ -154,10 +159,10 @@ class CTABacktestEngine:
                 except Exception as e:
                     # Silently continue if data unavailable for date
                     continue
-                
+
                 if not new_positions:
                     continue
-                    
+
                 # Calculate trades
                 for symbol, new_pos in new_positions.items():
                     if symbol in current_positions:
@@ -180,7 +185,7 @@ class CTABacktestEngine:
                             "new_weight": new_pos.final_weight,
                             "change": new_pos.final_weight
                         })
-                
+
                 # Store simplified position data
                 current_positions = {
                     sym: {
@@ -191,80 +196,80 @@ class CTABacktestEngine:
                     for sym, pos in new_positions.items()
                 }
                 last_rebalance = i
-            
+
             # Calculate daily P&L (simplified - assume positions held)
             if i > 0 and current_positions:
                 daily_pnl = 0
                 total_weight = sum(pos["final_weight"] for pos in current_positions.values())
-                
+
                 if total_weight > 0:
                     for symbol, position in current_positions.items():
                         # Get price change for this symbol
                         price_data = self._fetch_historical_data(
-                            symbol, 
-                            trading_dates[max(0, i-1)], 
+                            symbol,
+                            trading_dates[max(0, i-1)],
                             date_str
                         )
                         if len(price_data) >= 2:
                             prev_price = price_data[0]["close"]
                             curr_price = price_data[-1]["close"]
                             symbol_return = (curr_price - prev_price) / prev_price
-                            
+
                             # Weighted contribution (use trend score for directional bias)
                             weight = position["final_weight"] / total_weight
                             trend_bias = position.get("trend_score", 0)
                             # Long-only: positive trend increases exposure
                             daily_pnl += weight * symbol_return * max(0, 0.5 + trend_bias * 0.5)
-                    
+
                     capital *= (1 + daily_pnl)
                     daily_returns.append(daily_pnl)
-                
+
             equity_curve.append(capital)
-        
+
         # Calculate metrics
         equity_array = np.array(equity_curve)
         returns_array = np.array(daily_returns) if daily_returns else np.array([0])
-        
+
         total_return = (equity_array[-1] - initial_capital) / initial_capital
         num_years = len(trading_dates) / 252
         annualized_return = (1 + total_return) ** (1 / num_years) - 1 if num_years > 0 else 0
-        
+
         volatility = np.std(returns_array) * np.sqrt(252) if len(returns_array) > 0 else 0
         sharpe_ratio = annualized_return / volatility if volatility > 0 else 0
-        
+
         max_drawdown = self._calculate_max_drawdown(equity_array)
         calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown < 0 else 0
-        
+
         # Win rate on trades
         if trades:
             # Simplified: count rebalances that had activity
             win_rate = min(1.0, len(trades) / max(1, len(trading_dates) / 5))
         else:
             win_rate = 0
-        
+
         # Crisis alpha calculation
         crisis_alpha = self._calculate_crisis_alpha(
             trading_dates, returns_array, equity_array
         )
-        
+
         # Correlation with SPY
         spy_returns = []
         for i in range(1, len(trading_dates)):
             data = self._fetch_historical_data(
-                "SPY", 
-                trading_dates[i-1], 
+                "SPY",
+                trading_dates[i-1],
                 trading_dates[i]
             )
             if len(data) >= 2:
                 ret = (data[-1]["close"] - data[0]["close"]) / data[0]["close"]
                 spy_returns.append(ret)
-        
+
         if len(spy_returns) == len(returns_array) and len(returns_array) > 1:
             spy_arr = np.array(spy_returns[:len(returns_array)])
             correlation = np.corrcoef(returns_array, spy_arr)[0, 1]
         else:
             correlation = 0
-        
+
         return BacktestResult(
             start_date=start_date,
             end_date=end_date,
@@ -282,7 +287,7 @@ class CTABacktestEngine:
             crisis_alpha_2022=crisis_alpha.get("2022", 0),
             vs_spy_correlation=correlation
         )
-    
+
     def _calculate_crisis_alpha(
         self,
         dates: List[str],
@@ -291,38 +296,38 @@ class CTABacktestEngine:
     ) -> Dict[str, float]:
         """Calculate crisis period performance vs buy-and-hold"""
         crisis_alpha = {}
-        
+
         for crisis_name, (start, end) in self.CRISIS_PERIODS.items():
             # Find indices for crisis period
             try:
                 start_idx = next(i for i, d in enumerate(dates) if d >= start)
                 end_idx = next(i for i, d in enumerate(dates) if d >= end)
-                
+
                 # CTA return during crisis
                 cta_crisis_return = (equity[end_idx] - equity[start_idx]) / equity[start_idx]
-                
+
                 # SPY return during crisis (buy and hold)
                 spy_data = self._fetch_historical_data("SPY", start, end)
                 if len(spy_data) >= 2:
                     spy_crisis_return = (spy_data[-1]["close"] - spy_data[0]["close"]) / spy_data[0]["close"]
                 else:
                     spy_crisis_return = 0
-                
+
                 # Crisis alpha = CTA return - SPY return
                 crisis_alpha[crisis_name] = cta_crisis_return - spy_crisis_return
-                
+
             except StopIteration:
                 crisis_alpha[crisis_name] = 0
-        
+
         return crisis_alpha
-    
+
     def validate_acceptance_criteria(self, result: BacktestResult, start_date: str) -> Dict:
         """Validate work item acceptance criteria"""
         # Determine which crisis periods have data
         has_2008_data = start_date <= "2008-12-31"
         has_2020_data = start_date <= "2020-04-30"
         has_2022_data = True  # All data has 2022
-        
+
         criteria = {
             "multi_timeframe_trend": {
                 "status": "PASS" if result.num_trades >= 5 else "CONDITIONAL",
@@ -353,7 +358,7 @@ class CTABacktestEngine:
                 "detail": f"Sharpe ratio: {result.sharpe_ratio:.2f}"
             }
         }
-        
+
         return criteria
 
 
@@ -362,9 +367,9 @@ def main():
     print("=" * 60)
     print("CTA TREND-FOLLOWING OVERLAY BACKTEST")
     print("=" * 60)
-    
+
     engine = CTABacktestEngine()
-    
+
     # Check data availability first
     spy_data = engine._fetch_historical_data("SPY", "2000-01-01", "2030-12-31")
     if spy_data:
@@ -372,23 +377,23 @@ def main():
         max_date = spy_data[-1]["date"]
         print(f"\nData availability: {min_date} to {max_date}")
         print(f"Total trading days: {len(spy_data)}")
-        
+
         # Adjust date range to available data
         start_date = max("2021-05-10", min_date)  # Earliest data available
         end_date = min("2026-05-13", max_date)    # Latest data available
     else:
         print("\n⚠️  No data available in database")
         return 1
-    
+
     print(f"Running backtest: {start_date} to {end_date}")
-    
+
     # Run backtest
     try:
         result = engine.run_backtest(
             start_date=start_date,
             end_date=end_date
         )
-        
+
         print(f"\nBacktest Period: {result.start_date} to {result.end_date}")
         print(f"Initial Capital: $100,000")
         print(f"Final Value: ${100000 * (1 + result.total_return):,.0f}")
@@ -407,11 +412,11 @@ def main():
         print(f"2022 Bear: {result.crisis_alpha_2022:.1%}")
         print(f"\n--- DIVERSIFICATION ---")
         print(f"Correlation with SPY: {result.vs_spy_correlation:.2f}")
-        
+
         # Validate acceptance criteria
         print(f"\n--- ACCEPTANCE CRITERIA VALIDATION ---")
         criteria = engine.validate_acceptance_criteria(result, start_date)
-        
+
         all_pass = True
         any_fail = False
         for name, check in criteria.items():
@@ -427,7 +432,7 @@ def main():
                 all_pass = False
                 any_fail = True
             print(f"{status_icon} {name}: {check['status']} - {check['detail']}")
-        
+
         # Save results
         output_path = DATA_DIR / "cta_backtest_results.json"
         results_dict = {
@@ -466,10 +471,9 @@ def main():
                 "2022 bear market validated successfully"
             ]
         }
-        
-        with open(output_path, 'w') as f:
-            json.dump(results_dict, f, indent=2)
-        
+
+        save_results_json(results_dict, output_path=str(output_path))
+
         print(f"\n✅ Results saved to: {output_path}")
         if all_pass:
             print(f"Overall Status: ALL CRITERIA PASSED ✅")
@@ -477,9 +481,9 @@ def main():
             print(f"Overall Status: PARTIAL - ACCEPTABLE WITH LIMITATIONS ⚠️")
         else:
             print(f"Overall Status: NEEDS REVIEW - See validation details 📊")
-        
+
         return 0 if (all_pass or not any_fail) else 1
-        
+
     except Exception as e:
         print(f"\n❌ Backtest failed: {e}")
         import traceback

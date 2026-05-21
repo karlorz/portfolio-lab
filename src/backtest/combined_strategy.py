@@ -19,7 +19,7 @@ Backtest Methodology:
 
 Attribution Analysis:
     - TSMOM contribution: Return from momentum overlay
-    - HMM contribution: Return from regime-based shifts  
+    - HMM contribution: Return from regime-based shifts
     - Fed contribution: Return from policy-based shifts
     - Interaction effects: Non-linear combinations
 
@@ -41,6 +41,12 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from collections import defaultdict
 import pickle
+
+from src.backtest.metrics import (
+    BacktestMetrics,
+    compute_metrics,
+    save_results_json,
+)
 
 # Add project root
 from src.paths import DATA_DIR, PRICES_JSON as PRICES_PATH
@@ -71,7 +77,7 @@ class DailyPosition:
     weights: Dict[str, float]
     prices: Dict[str, float]
     portfolio_value: float
-    
+
     # Metadata
     tsmom_deltas: Optional[Dict[str, float]] = None
     hmm_regime: Optional[str] = None
@@ -88,7 +94,7 @@ class BacktestResult:
     end_date: str
     trading_days: int
     rebalances: int
-    
+
     # Performance metrics
     start_value: float
     end_value: float
@@ -97,28 +103,28 @@ class BacktestResult:
     sharpe_ratio: float
     max_drawdown: float
     calmar_ratio: float
-    
+
     # Comparison to baseline
     baseline_cagr: float
     baseline_sharpe: float
     excess_return: float  # Annualized
     information_ratio: float
-    
+
     # Attribution
     tsmom_contribution: float
     hmm_contribution: float
     fed_contribution: float
-    
+
     # Crisis performance
     crisis_2008_return: Optional[float] = None
     crisis_2020_return: Optional[float] = None
     crisis_2022_return: Optional[float] = None
-    
+
     # Path
     daily_values: List[float] = None
     daily_returns: List[float] = None
     positions: List[DailyPosition] = None
-    
+
     def to_dict(self) -> dict:
         return {
             'strategy': self.strategy,
@@ -150,7 +156,7 @@ class CombinedStrategyBacktester:
     """
     Backtest engine for combined signal strategy.
     """
-    
+
     def __init__(
         self,
         tickers: List[str] = None,
@@ -162,29 +168,29 @@ class CombinedStrategyBacktester:
         self.base_allocation = base_allocation or DEFAULT_BASE_ALLOCATION.copy()
         self.transaction_cost = transaction_cost
         self.rebalance_freq = rebalance_freq
-        
+
         # Initialize signal modules
         self.tsmom = TSMOMOverlay(max_deviation=0.10)
         self.hmm_manager = PortfolioRegimeManager(base_allocation=self.base_allocation)
         self.fed_overlay = FedPolicyOverlay()
-        
+
         # Load trained HMM model
         self.hmm_manager.detector.load()
-        
+
         # Price data cache
         self.prices_df: Optional[pd.DataFrame] = None
         self.dates: List[str] = []
-        
+
     def load_prices(self) -> bool:
         """Load and align price data for all tickers."""
         if not PRICES_PATH.exists():
             print(f"Error: Price data not found at {PRICES_PATH}")
             return False
-        
+
         try:
             with open(PRICES_PATH) as f:
                 data = json.load(f)
-            
+
             all_prices = {}
             for ticker in self.tickers:
                 if ticker in data:
@@ -193,73 +199,73 @@ class CombinedStrategyBacktester:
                         dates = [item['d'] for item in ticker_data]
                         prices = [item['p'] for item in ticker_data]
                         all_prices[ticker] = pd.Series(prices, index=pd.to_datetime(dates))
-            
+
             if not all_prices:
                 print("Error: No valid price data loaded")
                 return False
-            
+
             # Combine into DataFrame
             self.prices_df = pd.DataFrame(all_prices)
             self.prices_df.dropna(inplace=True)
             self.dates = [d.strftime('%Y-%m-%d') for d in self.prices_df.index]
-            
+
             print(f"Loaded {len(self.prices_df)} days of price data")
             print(f"Date range: {self.dates[0]} to {self.dates[-1]}")
-            
+
             return True
-            
+
         except Exception as e:
             print(f"Error loading prices: {e}")
             return False
-    
+
     def _get_tsmom_deltas(
         self,
         current_idx: int
     ) -> Dict[str, float]:
         """Get TSMOM allocation deltas at a specific date index."""
         deltas = {}
-        
+
         for ticker in self.tickers:
             if ticker not in self.prices_df.columns:
                 continue
-            
+
             prices = self.prices_df[ticker].iloc[:current_idx + 1]
-            
+
             # Need at least lookback + skip days
             if len(prices) < self.tsmom.lookback_days + self.tsmom.skip_days:
                 deltas[ticker] = 0.0
                 continue
-            
+
             # Calculate formation return (excluding skip period)
             start_idx = len(prices) - 1 - self.tsmom.lookback_days - self.tsmom.skip_days
             end_idx = len(prices) - 1 - self.tsmom.skip_days
-            
+
             start_price = prices.iloc[start_idx]
             end_price = prices.iloc[end_idx]
             formation_return = (end_price - start_price) / start_price
-            
+
             # Signal
             signal = 0 if abs(formation_return) < 0.001 else (1 if formation_return > 0 else -1)
-            
+
             # Volatility
             if len(prices) >= self.tsmom.vol_window:
                 recent_returns = np.log(prices.iloc[-self.tsmom.vol_window:] / prices.iloc[-self.tsmom.vol_window-1:-1])
                 vol = recent_returns.std() * np.sqrt(252)
             else:
                 vol = 0.15
-            
+
             vol = max(vol, 0.01)
-            
+
             # Calculate adjustment
             position_normalized = np.clip(signal / vol * 0.15, -1, 1)
             adjustment = position_normalized * self.tsmom.max_deviation
-            
+
             base_weight = self.base_allocation.get(ticker, 0.25)
             target_weight = max(0.05, min(0.95, base_weight + adjustment))
             deltas[ticker] = target_weight - base_weight
-        
+
         return deltas
-    
+
     def _get_hmm_regime(
         self,
         current_idx: int
@@ -267,21 +273,21 @@ class CombinedStrategyBacktester:
         """Get HMM regime and deltas at a specific date index."""
         if not self.hmm_manager.detector.is_fitted:
             return None, {t: 0.0 for t in self.tickers}
-        
+
         # Detect regime for SPY (proxy for market)
         if 'SPY' not in self.prices_df.columns:
             return None, {t: 0.0 for t in self.tickers}
-        
+
         spy_prices = self.prices_df['SPY'].iloc[:current_idx + 1]
-        
+
         if len(spy_prices) < 126:  # Need enough history
             return None, {t: 0.0 for t in self.tickers}
-        
+
         regime_result = self.hmm_manager.detector.predict_regime(spy_prices, ticker='SPY')
-        
+
         if regime_result is None:
             return None, {t: 0.0 for t in self.tickers}
-        
+
         # Get allocation shifts based on regime
         shifts = {
             MarketRegime.BULL: {'SPY': +0.10, 'GLD': -0.05, 'TLT': -0.05},
@@ -290,44 +296,44 @@ class CombinedStrategyBacktester:
             MarketRegime.HIGH_VOL: {'SPY': -0.05, 'GLD': +0.10, 'TLT': -0.05},
             MarketRegime.CRISIS: {'SPY': -0.15, 'GLD': +0.10, 'TLT': +0.05},
         }
-        
+
         deltas = shifts.get(regime_result.regime, {t: 0.0 for t in self.tickers})
         return str(regime_result.regime), deltas
-    
+
     def _get_fed_regime_deltas(
         self,
         current_idx: int
     ) -> Tuple[Optional[str], Dict[str, float]]:
         """
         Get Fed policy regime and deltas.
-        
+
         For backtest: simulate Fed regime based on historical context
         (Fed Funds rate trends, inflation proxy from gold performance, etc.)
         """
         # Simplified: use gold/SPY ratio as inflation proxy
         # and rate changes from TLT performance as rate regime proxy
-        
+
         if len(self.prices_df) < current_idx + 63:
             return None, {t: 0.0 for t in self.tickers}
-        
+
         # Get recent 3-month data
         spy_prices = self.prices_df['SPY'].iloc[current_idx - 62:current_idx + 1]
         tlt_prices = self.prices_df['TLT'].iloc[current_idx - 62:current_idx + 1]
         gld_prices = self.prices_df['GLD'].iloc[current_idx - 62:current_idx + 1] if 'GLD' in self.prices_df else None
-        
+
         # SPY return (proxy for growth)
         spy_return = (spy_prices.iloc[-1] / spy_prices.iloc[0]) - 1
-        
+
         # TLT return (inverse proxy for rates)
         tlt_return = (tlt_prices.iloc[-1] / tlt_prices.iloc[0]) - 1
-        
+
         # Gold/SPY ratio change (proxy for inflation expectations)
         if gld_prices is not None:
             gld_return = (gld_prices.iloc[-1] / gld_prices.iloc[0]) - 1
             inflation_proxy = gld_return - spy_return
         else:
             inflation_proxy = 0.0
-        
+
         # Classify regime based on heuristics
         if tlt_return > 0.05 and spy_return > 0.05:
             # Both up = easing (rates down, growth up)
@@ -343,9 +349,9 @@ class CombinedStrategyBacktester:
         else:
             regime = 'UNCERTAIN'
             deltas = {'SPY': -0.05, 'GLD': +0.10, 'TLT': -0.05}
-        
+
         return regime, deltas
-    
+
     def _combine_signals(
         self,
         tsmom_deltas: Dict[str, float],
@@ -360,7 +366,7 @@ class CombinedStrategyBacktester:
         Simplified version of CombinedSignalOrchestrator for backtest.
         """
         tickers = self.tickers
-        
+
         # Weights (same as orchestrator)
         weights = {
             'tsmom': 0.35,
@@ -368,40 +374,40 @@ class CombinedStrategyBacktester:
             'fed': 0.25,
             'base': 0.15,
         }
-        
+
         # Weighted combination
         combined = {t: 0.0 for t in tickers}
-        
+
         for ticker in tickers:
             # TSMOM contribution (confidence ~0.85)
             combined[ticker] += tsmom_deltas.get(ticker, 0.0) * weights['tsmom'] * 0.85
-            
+
             # HMM contribution (confidence ~0.90 when regime is stable)
             hmm_conf = 0.9 if hmm_regime else 0.5
             combined[ticker] += hmm_deltas.get(ticker, 0.0) * weights['hmm'] * hmm_conf
-            
+
             # Fed contribution (lower confidence in backtest simulation)
             fed_conf = 0.7 if fed_regime else 0.5
             combined[ticker] += fed_deltas.get(ticker, 0.0) * weights['fed'] * fed_conf
-        
+
         # Normalize by total weight
-        total_weight = (weights['tsmom'] * 0.85 + 
-                       weights['hmm'] * hmm_conf + 
+        total_weight = (weights['tsmom'] * 0.85 +
+                       weights['hmm'] * hmm_conf +
                        weights['fed'] * fed_conf +
                        weights['base'] * 0.6)
-        
+
         if total_weight > 0:
             combined = {t: combined[t] / total_weight for t in tickers}
-        
+
         # Conflict detection (simplified)
         conflicts = []
         for ticker in tickers:
             tsmom_sign = 1 if tsmom_deltas.get(ticker, 0) > 0.01 else (-1 if tsmom_deltas.get(ticker, 0) < -0.01 else 0)
             fed_sign = 1 if fed_deltas.get(ticker, 0) > 0.01 else (-1 if fed_deltas.get(ticker, 0) < -0.01 else 0)
-            
+
             if tsmom_sign != 0 and fed_sign != 0 and tsmom_sign != fed_sign:
                 conflicts.append(f"{ticker}: TSMOM vs Fed")
-        
+
         # Conflict resolution
         resolution = "weighted_average"
         if conflicts:
@@ -409,15 +415,15 @@ class CombinedStrategyBacktester:
             # Reduce magnitude
             for ticker in combined:
                 combined[ticker] *= 0.7
-        
+
         # HMM neutral reduction
         if hmm_regime == 'neutral':
             resolution += ", hmm_neutral"
             for ticker in combined:
                 combined[ticker] *= 0.8
-        
+
         return combined, resolution
-    
+
     def run_backtest(
         self,
         start_date: str = START_DATE,
@@ -431,7 +437,7 @@ class CombinedStrategyBacktester:
         if self.prices_df is None:
             if not self.load_prices():
                 raise ValueError("Failed to load price data")
-        
+
         # Find start and end indices
         try:
             start_idx = self.dates.index(start_date)
@@ -443,7 +449,7 @@ class CombinedStrategyBacktester:
                     break
             else:
                 start_idx = len(self.dates) - 1
-        
+
         try:
             end_idx = self.dates.index(end_date)
         except ValueError:
@@ -453,13 +459,13 @@ class CombinedStrategyBacktester:
                     break
             else:
                 end_idx = len(self.dates) - 1
-        
+
         # Ensure we have enough history for TSMOM
         start_idx = max(start_idx, MIN_HISTORY_DAYS)
-        
+
         print(f"Backtest range: {self.dates[start_idx]} to {self.dates[end_idx]}")
         print(f"Trading days: {end_idx - start_idx + 1}")
-        
+
         # Initialize
         portfolio_value = initial_value
         current_weights = self.base_allocation.copy()
@@ -467,57 +473,57 @@ class CombinedStrategyBacktester:
         daily_values = [portfolio_value]
         daily_returns = []
         rebalances = 0
-        
+
         for idx in range(start_idx, end_idx + 1):
             current_date = self.dates[idx]
-            
+
             # Get current prices
             current_prices = {
                 t: self.prices_df[t].iloc[idx]
                 for t in self.tickers
             }
-            
+
             # Check if rebalance needed
             rebalance_executed = False
             turnover = 0.0
             tsmom_deltas = None
             hmm_regime = None
             fed_regime = None
-            
+
             if (idx - start_idx) % self.rebalance_freq == 0:
                 # Get signals
                 tsmom_deltas = self._get_tsmom_deltas(idx)
                 hmm_regime, hmm_deltas = self._get_hmm_regime(idx)
                 fed_regime, fed_deltas = self._get_fed_regime_deltas(idx)
-                
+
                 # Combine signals
                 combined_deltas, resolution = self._combine_signals(
                     tsmom_deltas, hmm_regime, hmm_deltas,
                     fed_regime, fed_deltas, idx
                 )
-                
+
                 # Calculate new weights
                 new_weights = {}
                 for ticker in self.tickers:
                     new_weight = self.base_allocation[ticker] + combined_deltas.get(ticker, 0.0)
                     new_weights[ticker] = max(0.05, min(0.90, new_weight))
-                
+
                 # Normalize
                 total = sum(new_weights.values())
                 new_weights = {t: w / total for t, w in new_weights.items()}
-                
+
                 # Calculate turnover
                 turnover = sum(abs(new_weights.get(t, 0) - current_weights.get(t, 0))
                              for t in self.tickers) / 2
-                
+
                 # Apply transaction costs
                 cost = turnover * self.transaction_cost * 2  # Both legs
                 portfolio_value *= (1 - cost)
-                
+
                 current_weights = new_weights
                 rebalances += 1
                 rebalance_executed = True
-                
+
                 if verbose and rebalances <= 10:
                     print(f"Rebalance {rebalances}: {current_date}")
                     print(f"  TSMOM: {tsmom_deltas}")
@@ -526,7 +532,7 @@ class CombinedStrategyBacktester:
                     print(f"  Combined: {combined_deltas}")
                     print(f"  New weights: {current_weights}")
                     print(f"  Turnover: {turnover:.2%}")
-            
+
             # Record position
             positions.append(DailyPosition(
                 date=current_date,
@@ -539,7 +545,7 @@ class CombinedStrategyBacktester:
                 rebalance_executed=rebalance_executed,
                 turnover=turnover
             ))
-            
+
             # Calculate daily return
             if idx > start_idx:
                 daily_return = 0
@@ -548,47 +554,43 @@ class CombinedStrategyBacktester:
                     curr_price = current_prices[ticker]
                     ticker_return = (curr_price / prev_price) - 1
                     daily_return += current_weights.get(ticker, 0) * ticker_return
-                
+
                 daily_returns.append(daily_return)
                 portfolio_value *= (1 + daily_return)
-            
+
             daily_values.append(portfolio_value)
-        
+
         # Calculate metrics
         returns_series = pd.Series(daily_returns)
-        
+
         days = len(daily_returns)
         years = days / 252
-        
-        cagr = (portfolio_value / initial_value) ** (1 / years) - 1
-        volatility = returns_series.std() * np.sqrt(252)
-        sharpe = cagr / volatility if volatility > 0 else 0
-        
-        # Max drawdown
-        peak = np.maximum.accumulate(daily_values)
-        drawdowns = (peak - daily_values) / peak
-        max_dd = drawdowns.max()
-        
-        calmar = cagr / max_dd if max_dd > 0 else 0
-        
+
+        metrics = compute_metrics(daily_values, initial_value)
+        cagr = metrics.cagr
+        volatility = metrics.volatility
+        sharpe = metrics.sharpe_ratio
+        max_dd = metrics.max_drawdown
+        calmar = cagr / abs(max_dd) if max_dd < 0 else 0
+
         # Baseline comparison (46/38/16 buy-and-hold)
         baseline_result = self._run_baseline(start_idx, end_idx, initial_value)
-        
+
         # Attribution (simplified - would need factor analysis for full attribution)
         tsmom_contrib = 0.0  # Placeholder - would need separate TSMOM-only backtest
         hmm_contrib = 0.0
         fed_contrib = 0.0
-        
+
         # Crisis returns
         crisis_2008 = self._calculate_crisis_return(positions, "2008-01-01", "2008-12-31")
         crisis_2020 = self._calculate_crisis_return(positions, "2020-02-01", "2020-04-30")
         crisis_2022 = self._calculate_crisis_return(positions, "2022-01-01", "2022-12-31")
-        
+
         # Information ratio
         excess_returns = np.array(daily_returns) - np.array(baseline_result['daily_returns'])
         tracking_error = excess_returns.std() * np.sqrt(252)
         information_ratio = (cagr - baseline_result['cagr']) / tracking_error if tracking_error > 0 else 0
-        
+
         return BacktestResult(
             strategy="Combined Signal v2.55 (TSMOM + HMM + Fed)",
             start_date=self.dates[start_idx],
@@ -616,7 +618,7 @@ class CombinedStrategyBacktester:
             daily_returns=daily_returns,
             positions=positions
         )
-    
+
     def _run_baseline(
         self,
         start_idx: int,
@@ -625,10 +627,10 @@ class CombinedStrategyBacktester:
     ) -> Dict:
         """Run baseline 46/38/16 buy-and-hold backtest."""
         baseline_weights = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
-        
+
         daily_returns = []
         portfolio_value = initial_value
-        
+
         for idx in range(start_idx + 1, end_idx + 1):
             daily_return = 0
             for ticker in self.tickers:
@@ -636,23 +638,23 @@ class CombinedStrategyBacktester:
                 curr_price = self.prices_df[ticker].iloc[idx]
                 ticker_return = (curr_price / prev_price) - 1
                 daily_return += baseline_weights.get(ticker, 0) * ticker_return
-            
+
             daily_returns.append(daily_return)
             portfolio_value *= (1 + daily_return)
-        
+
         days = len(daily_returns)
         years = days / 252
-        
+
         cagr = (portfolio_value / initial_value) ** (1 / years) - 1
         volatility = pd.Series(daily_returns).std() * np.sqrt(252)
         sharpe = cagr / volatility if volatility > 0 else 0
-        
+
         return {
             'cagr': cagr,
             'sharpe': sharpe,
             'daily_returns': daily_returns
         }
-    
+
     def _calculate_crisis_return(
         self,
         positions: List[DailyPosition],
@@ -664,20 +666,20 @@ class CombinedStrategyBacktester:
             p for p in positions
             if crisis_start <= p.date <= crisis_end
         ]
-        
+
         if not crisis_positions:
             return None
-        
+
         start_value = crisis_positions[0].portfolio_value
         end_value = crisis_positions[-1].portfolio_value
-        
+
         return (end_value / start_value) - 1
 
 
 def main():
     parser = argparse.ArgumentParser(description="Combined Strategy Backtest v2.55")
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
-    
+
     # backtest command
     backtest_parser = subparsers.add_parser('backtest', help='Run full backtest')
     backtest_parser.add_argument('--start', default=START_DATE, help='Start date')
@@ -685,19 +687,19 @@ def main():
     backtest_parser.add_argument('--initial', type=float, default=100000, help='Initial value')
     backtest_parser.add_argument('--verbose', action='store_true', help='Verbose output')
     backtest_parser.add_argument('--output', help='Output JSON file')
-    
+
     # summary command
     summary_parser = subparsers.add_parser('summary', help='Show backtest summary')
-    
+
     # status command
     status_parser = subparsers.add_parser('status', help='Show backtest status')
-    
+
     args = parser.parse_args()
-    
+
     if args.command == 'backtest':
         print("Running Combined Strategy Backtest...")
         print("This may take 2-3 minutes...")
-        
+
         backtester = CombinedStrategyBacktester()
         result = backtester.run_backtest(
             start_date=args.start,
@@ -705,7 +707,7 @@ def main():
             initial_value=args.initial,
             verbose=args.verbose
         )
-        
+
         print("\n" + "=" * 60)
         print("BACKTEST RESULTS")
         print("=" * 60)
@@ -735,24 +737,21 @@ def main():
         if result.crisis_2022_return:
             print(f"  2022: {result.crisis_2022_return:.2%}")
         print("=" * 60)
-        
+
         # Save results
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(result.to_dict(), f, indent=2)
+            save_results_json(result.to_dict(), output_path=args.output)
             print(f"\nResults saved to {args.output}")
-        
+
         # Also save to results path
-        RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(RESULTS_PATH, 'w') as f:
-            json.dump(result.to_dict(), f, indent=2)
+        save_results_json(result.to_dict(), output_path=str(RESULTS_PATH))
         print(f"Results saved to {RESULTS_PATH}")
-    
+
     elif args.command == 'summary':
         if RESULTS_PATH.exists():
             with open(RESULTS_PATH) as f:
                 results = json.load(f)
-            
+
             print("=" * 60)
             print("BACKTEST SUMMARY (Saved Results)")
             print("=" * 60)
@@ -764,11 +763,11 @@ def main():
         else:
             print(f"No saved results found at {RESULTS_PATH}")
             print("Run 'backtest' command first")
-    
+
     elif args.command == 'status':
         backtester = CombinedStrategyBacktester()
         loaded = backtester.load_prices()
-        
+
         print("Combined Strategy Backtest v2.55 - Status")
         print("=" * 40)
         print(f"Data loaded: {loaded}")
@@ -786,7 +785,7 @@ def main():
         print(f"  TSMOM: ready")
         print(f"  HMM: {backtester.hmm_manager.detector.is_fitted}")
         print(f"  Fed Policy: heuristic-based for backtest")
-    
+
     else:
         parser.print_help()
 

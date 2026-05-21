@@ -15,6 +15,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+from src.backtest.metrics import (
+    BacktestMetrics,
+    compute_metrics,
+    compute_crisis_returns,
+    save_results_json,
+)
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
 logging.basicConfig(level=logging.INFO)
@@ -186,35 +192,15 @@ class InternationalMomentumBacktester:
                 # Full-year return computed at end
                 pass
 
-        # Compute crisis year returns
-        for crisis_year in ['2008', '2020', '2022']:
-            year_days = [d for d in trading_days if d.startswith(crisis_year)]
-            if len(year_days) >= 2:
-                first_prices = self.prices.get(year_days[0], {})
-                last_prices = self.prices.get(year_days[-1], {})
-                base_ret = 0.0
-                for sym, w in [('SPY', 0.46), ('GLD', 0.38), ('TLT', 0.16)]:
-                    p1 = first_prices.get(sym)
-                    p2 = last_prices.get(sym)
-                    if p1 and p2 and p1 > 0:
-                        base_ret += w * (p2 / p1 - 1)
-                crisis_returns[crisis_year] = round(base_ret * 100, 2)
+        # Compute metrics using shared module
+        metrics = compute_metrics(equity_curve, self.config.initial_capital)
 
-        returns = []
-        for i in range(1, len(equity_curve)):
-            if equity_curve[i - 1] > 0:
-                returns.append(equity_curve[i] / equity_curve[i - 1] - 1)
-
-        cagr = (capital / self.config.initial_capital) ** (252 / max(len(returns), 1)) - 1
-        vol = np.std(returns) * np.sqrt(252) if returns else 0
-        sharpe = cagr / vol if vol > 0 else 0
-
-        peak = self.config.initial_capital
-        max_dd = 0.0
-        for val in equity_curve:
-            peak = max(peak, val)
-            dd = (val - peak) / peak
-            max_dd = min(max_dd, dd)
+        # Crisis year returns using shared module
+        crisis_returns = compute_crisis_returns(
+            self.prices, trading_days,
+            crisis_years=['2008', '2020', '2022'],
+            base_weights={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
+        )
 
         return BacktestResult(
             strategy_name="International Momentum Overlay",
@@ -222,9 +208,9 @@ class InternationalMomentumBacktester:
             end_date=trading_days[-1],
             initial_capital=self.config.initial_capital,
             final_value=round(capital, 2),
-            cagr=round(cagr * 100, 2),
-            sharpe=round(sharpe, 2),
-            max_drawdown=round(max_dd * 100, 2),
+            cagr=round(metrics.cagr, 2),
+            sharpe=round(metrics.sharpe_ratio, 2),
+            max_drawdown=round(metrics.max_drawdown, 2),
             total_rebalances=rebalance_count,
             total_cost_bps=round(total_cost * 10000, 1),
             crisis_returns=crisis_returns,
@@ -249,11 +235,10 @@ class InternationalMomentumBacktester:
             print(f"  {sig}: {count}")
 
     def save_results(self, result: BacktestResult, output_path: str = None):
-        BACKTEST_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        path = Path(output_path) if output_path else BACKTEST_RESULTS_DIR / "intl_momentum_backtest.json"
-        with open(path, 'w') as f:
-            json.dump(asdict(result), f, indent=2)
-        logger.info(f"Saved results to {path}")
+        save_results_json(
+            asdict(result),
+            output_path=output_path or str(BACKTEST_RESULTS_DIR / "intl_momentum_backtest.json"),
+        )
 
 
 def main():
