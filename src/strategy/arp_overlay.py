@@ -76,7 +76,6 @@ class AlternativeRiskPremiaEngine:
         "IEF": {"class": "intermediate_bond", "factor": "carry"},
         "HYG": {"class": "high_yield", "factor": "carry"},
         "LQD": {"class": "investment_grade", "factor": "carry"},
-        "SPY": {"class": "equity", "factor": "carry"},  # Dividend yield
         "GLD": {"class": "gold", "factor": "carry"},  # Real yield inverse
         "DBC": {"class": "commodity", "factor": "carry"},  # Roll yield
     }
@@ -528,11 +527,14 @@ if __name__ == "__main__":
         status = "✓ GOOD" if abs(corr) < 0.7 else "✗ HIGH"
         print(f"Status: {status}")
     
-    elif args.overlay or True:
+    elif args.overlay:
         base_alloc = None
         if args.base:
             base_alloc = json.loads(args.base)
-        
+
         overlay = engine.get_arp_overlay(base_alloc)
         formatted = engine.format_overlay(overlay)
         print(json.dumps(formatted, indent=2))
+
+    else:
+        parser.print_help()
