@@ -87,7 +87,7 @@ class AnalyticsCalculator:
     ]
     
     def __init__(self, data_dir: str = "~/projects/portfolio-lab/data"):
-        self.data_dir = Path(data_dir).expanduser()
+        self.data_dir = Path(data_dir)
         self.performance_file = self.data_dir / "performance.jsonl"
     
     def load_performance_data(self) -> List[Dict]:

@@ -11,11 +11,10 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
 
-from src.paths import YIELDS_JSON, DATA_DIR
+from src.paths import YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-PUBLIC_DIR = Path("~/projects/portfolio-lab/public/data").expanduser()
-DB_PATH = DATA_DIR / "market.db"
+PUBLIC_DIR = PUBLIC_DATA_DIR
+DB_PATH = MARKET_DB
 
 # Add src to path for importing signal health tracker
 import sys

@@ -38,6 +38,8 @@ from typing import Any, Optional
 from collections import defaultdict
 import statistics
 
+from src.paths import DATA_DIR
+
 # ---------------------------------------------------------------------------
 # Data Classes
 # ---------------------------------------------------------------------------
@@ -130,7 +132,6 @@ class EarningsPrediction:
 # Database Setup
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 ALT_DATA_DB = DATA_DIR / "alternative_data.db"
 
 

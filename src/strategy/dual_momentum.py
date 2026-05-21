@@ -21,6 +21,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.paths import MARKET_DB
+
 
 @dataclass
 class MomentumScore:
@@ -63,7 +65,7 @@ class DualMomentumEngine:
     
     def __init__(
         self,
-        db_path: Path = Path("~/projects/portfolio-lab/data/market.db").expanduser(),
+        db_path: Path = MARKET_DB,
         lookback_months: int = 12,
         sma_days: int = 200,
         top_n: int = 2,

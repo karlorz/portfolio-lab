@@ -14,7 +14,9 @@ from typing import Optional, List, Dict
 from dataclasses import dataclass, asdict
 import hashlib
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+from src.paths import DATA_DIR as PATHS_DATA_DIR
+
+DATA_DIR = PATHS_DATA_DIR
 ALERT_LOG = DATA_DIR / "alerts.jsonl"
 NOTIFIER_STATE = DATA_DIR / ".notifier_state.json"
 

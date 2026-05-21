@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
 import numpy as np
 
+from src.paths import DATA_DIR, CONFIG_DIR, MARKET_DB
+
 # Config
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-DB_PATH = DATA_DIR / "market.db"
-CONFIG_DIR = Path("~/projects/portfolio-lab/config").expanduser()
+DB_PATH = MARKET_DB
 ORDERS_LOG = DATA_DIR / "orders.jsonl"
 PERFORMANCE_LOG = DATA_DIR / "performance.jsonl"
 

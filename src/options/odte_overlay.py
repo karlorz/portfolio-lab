@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 
+from src.paths import DATA_DIR, MARKET_DB
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -38,8 +40,7 @@ logging.basicConfig(
 logger = logging.getLogger('odte_overlay')
 
 # Paths
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-DB_PATH = DATA_DIR / "market.db"
+DB_PATH = MARKET_DB
 CONFIG_PATH = DATA_DIR / "odte_config.json"
 STATE_PATH = DATA_DIR / "odte_state.json"
 TRADE_LOG_PATH = DATA_DIR / "odte_trades.jsonl"

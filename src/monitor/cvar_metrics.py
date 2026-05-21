@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-DB_PATH = DATA_DIR / "market.db"
+from src.paths import DATA_DIR, MARKET_DB
+
 RISK_METRICS_PATH = DATA_DIR / "risk_metrics.json"
 RISK_HISTORY_PATH = DATA_DIR / "risk_metrics_history.json"
 

@@ -19,6 +19,8 @@ from typing import Tuple, Dict, Optional, List
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
+from src.paths import DATA_DIR
+
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -50,7 +52,7 @@ class LiquidityChecker:
     
     def __init__(self):
         self.etf_engine = ETFPricingEngine()
-        self.log_path = Path("~/projects/portfolio-lab/data/liquidity_checks.log").expanduser()
+        self.log_path = DATA_DIR / "liquidity_checks.log"
     
     def check_trade_eligibility(
         self,

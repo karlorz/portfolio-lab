@@ -25,12 +25,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+from src.paths import DATA_DIR, ATTRIBUTION_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 STATE_FILE = DATA_DIR / "adaptive_weights_state.json"
-ATTRIBUTION_DIR = DATA_DIR / "attribution"
 
 # ─────────────────────────────────────────────
 #  Configuration

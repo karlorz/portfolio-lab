@@ -21,13 +21,15 @@ from enum import Enum
 import logging
 import numpy as np
 
+from src.paths import DATA_DIR, MARKET_DB
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Paths
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-DB_PATH = DATA_DIR / "market.db"
+DATA_DIR
+DB_PATH = MARKET_DB
 STATE_PATH = DATA_DIR / ".signal_health_state.json"
 
 

@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+from src.paths import DATA_DIR
+
 ETF_PRICING_PATH = DATA_DIR / "etf_pricing.json"
 
 

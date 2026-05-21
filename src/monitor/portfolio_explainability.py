@@ -31,10 +31,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+DATA_DIR
 
 # ─────────────────────────────────────────────
 #  Data Models
@@ -593,7 +595,7 @@ class PortfolioExplainability:
             f.write(report_json)
 
         # Also write to public/data/ for dashboard
-        public_dir = Path.home() / "projects" / "portfolio-lab" / "public" / "data" / "explainability"
+        public_dir = PUBLIC_DATA_DIR / "explainability"
         public_dir.mkdir(parents=True, exist_ok=True)
         latest_path = public_dir / "explainability_latest.json"
         with open(latest_path, "w") as f:

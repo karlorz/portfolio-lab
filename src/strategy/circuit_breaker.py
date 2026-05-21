@@ -19,8 +19,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-DB_PATH = DATA_DIR / "market.db"
+from src.paths import DATA_DIR, MARKET_DB
+
+DB_PATH = MARKET_DB
 CIRCUIT_STATE_PATH = DATA_DIR / ".circuit_breaker_state.json"
 
 

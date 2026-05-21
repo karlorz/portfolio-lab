@@ -32,6 +32,8 @@ MIN_SIGNAL_HISTORY = 5               # minimum history needed for computation
 DEFAULT_SIGNAL_COST = 0.001          # assumed transaction cost per signal unit (10bps)
 DEFAULT_RISK_FREE_RATE = 0.05        # annual risk-free rate for marginal score
 
+from src.paths import PROJECT_ROOT
+
 STATE_FILE = "data/turnover_validator_state.json"
 
 # ---------------------------------------------------------------------------
@@ -98,7 +100,7 @@ class TurnoverValidator:
         state_path: Optional[Path] = None,
         rolling_window: int = DEFAULT_ROLLING_WINDOW,
     ):
-        self.state_path = state_path or Path.home() / "projects" / "portfolio-lab" / STATE_FILE
+        self.state_path = state_path or PROJECT_ROOT / STATE_FILE
         self.rolling_window = rolling_window
         self.state = self._load_state()
 

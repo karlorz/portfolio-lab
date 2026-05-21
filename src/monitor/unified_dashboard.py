@@ -22,10 +22,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.paths import DATA_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 
 
 # ─────────────────────────────────────────────

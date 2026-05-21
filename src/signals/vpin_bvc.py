@@ -444,7 +444,8 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
     Uses daily bars — sufficient for portfolio-level VPIN estimation.
     """
     # Try market.db first
-    db_path = Path("~/projects/portfolio-lab/data/market.db").expanduser()
+    from src.paths import MARKET_DB
+    db_path = MARKET_DB
     if db_path.exists():
         conn = sqlite3.connect(str(db_path))
         try:

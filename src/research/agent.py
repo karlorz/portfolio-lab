@@ -12,7 +12,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+from src.paths import DATA_DIR as _DATA_DIR
+
+DATA_DIR = _DATA_DIR
 WIKI_DIR = Path("~/wiki/projects/portfolio-lab").expanduser()
 WORK_DIR = Path("~/projects/portfolio-lab/work").expanduser()
 DB_PATH = DATA_DIR / "market.db"

@@ -17,9 +17,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+from src.paths import DATA_DIR
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+logger = logging.getLogger(__name__)
 
 GOAL_TYPES = {
     "retirement", "major_purchase", "education", "emergency_fund",

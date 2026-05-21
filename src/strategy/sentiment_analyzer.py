@@ -23,6 +23,8 @@ import numpy as np
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from src.paths import DATA_DIR
+
 from src.llm.sentiment_client import SentimentAnalyzer, SentimentResult
 
 
@@ -260,7 +262,7 @@ class SentimentAnalyzerPipeline:
     """
     
     def __init__(self, data_dir: Optional[Path] = None):
-        self.data_dir = data_dir or Path("~/projects/portfolio-lab/data/sentiment").expanduser()
+        self.data_dir = data_dir or DATA_DIR / "sentiment"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.aggregator = SentimentAggregator()
         try:

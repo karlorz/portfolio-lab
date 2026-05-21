@@ -25,6 +25,8 @@ import numpy as np
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from src.paths import DATA_DIR
+
 from src.strategy.sentiment_analyzer import (
     SentimentAggregator, 
     AggregatedSentiment,
@@ -313,7 +315,7 @@ class RegimeSentimentPipeline:
     """
     
     def __init__(self, data_dir: Optional[Path] = None):
-        self.data_dir = data_dir or Path("~/projects/portfolio-lab/data/regime_sentiment").expanduser()
+        self.data_dir = data_dir or DATA_DIR / "regime_sentiment"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.sentiment_pipeline = SentimentAnalyzerPipeline()
         self.integrator = RegimeSentimentIntegrator()

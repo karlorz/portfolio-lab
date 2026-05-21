@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Tuple, NamedTuple
 
 import numpy as np
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+from src.paths import DATA_DIR
 
 
 class CheckResult(NamedTuple):

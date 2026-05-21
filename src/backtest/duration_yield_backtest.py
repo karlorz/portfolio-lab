@@ -31,14 +31,13 @@ from src.backtest.metrics import (
     compute_metrics,
     save_results_json,
 )
+from src.paths import DATA_DIR, MARKET_DB
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Paths
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-DB_PATH = DATA_DIR / "market.db"
 PRICES_PATH = DATA_DIR / "prices.json"
 YIELDS_PATH = DATA_DIR / "yields.json"
 OUTPUT_PATH = DATA_DIR / ".duration_backtest_results.json"
@@ -191,8 +190,8 @@ def load_yield_spread_history() -> pd.DataFrame:
     logger.info("Loading yield spread history...")
 
     # Try database first
-    if DB_PATH.exists():
-        conn = sqlite3.connect(DB_PATH)
+    if MARKET_DB.exists():
+        conn = sqlite3.connect(MARKET_DB)
         cursor = conn.cursor()
 
         # Check if we have yield data

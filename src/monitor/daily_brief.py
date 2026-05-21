@@ -20,9 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from src.paths import DATA_DIR
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+logger = logging.getLogger(__name__)
 
 # Guarded anthropic import (follows src/llm/sentiment_client.py pattern)
 try:

@@ -28,12 +28,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+
+from src.paths import DATA_DIR, ENSEMBLE_DB, ATTRIBUTION_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-ENSEMBLE_DB = DATA_DIR / "ensemble_signals.db"
-ATTRIBUTION_DIR = DATA_DIR / "attribution"
 PAPER_TRADING_DB = DATA_DIR / "paper_trading.db"
 
 # All known signal sources with display names
@@ -224,7 +224,7 @@ class PerformanceAttribution:
         # Fallback: check json reports
         if not daily_returns:
             perf_file = max(
-                Path("data/logs").expanduser().glob("performance_summary_*.json"),
+                (DATA_DIR / "logs").glob("performance_summary_*.json"),
                 default=None,
             )
             if perf_file and perf_file.exists():

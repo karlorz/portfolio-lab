@@ -33,10 +33,11 @@ from pathlib import Path
 from typing import Optional, Dict
 import numpy as np
 
+from src.paths import DATA_DIR, PRICES_JSON
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 STATE_FILE = DATA_DIR / "vol_volume_gap_state.json"
 
 
@@ -228,8 +229,7 @@ def load_prices(symbol: str = "SPY") -> Optional[np.ndarray]:
     candidates = [
         DATA_DIR / "prices.json",
         DATA_DIR / ".." / "public" / "data" / "prices.json",
-        Path("~/projects/portfolio-lab/data/prices.json").expanduser(),
-        Path("~/projects/portfolio-lab/public/data/prices.json").expanduser(),
+        PRICES_JSON,
         Path("data/prices.json"),
         Path("public/data/prices.json"),
     ]

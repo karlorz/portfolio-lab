@@ -16,7 +16,7 @@ from pathlib import Path
 from enum import Enum
 import sqlite3
 
-# Import existing components (use absolute imports from project root)
+from src.paths import MARKET_DB
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -120,7 +120,7 @@ class RegimeDetector:
     HYG_SPREAD_STRESS = 400.0  # bps
     MOMENTUM_BEARISH = -0.10   # -10%
     
-    def __init__(self, db_path: Path = Path("~/projects/portfolio-lab/data/market.db").expanduser()):
+    def __init__(self, db_path: Path = MARKET_DB):
         self.db_path = db_path
         self.feature_pipeline = FeaturePipeline(str(db_path))
         
@@ -513,7 +513,7 @@ class RegimeConditionalEngine:
         use_regime_ml: bool = True,
         enable_smoothing: bool = True
     ):
-        self.db_path = db_path or Path("~/projects/portfolio-lab/data/market.db").expanduser()
+        self.db_path = db_path or MARKET_DB
         self.top_n = top_n
         self.use_regime_ml = use_regime_ml
         self.enable_smoothing = enable_smoothing

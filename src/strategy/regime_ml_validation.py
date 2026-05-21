@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 
-# Add project root to path
+from src.paths import MARKET_DB
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -85,7 +85,7 @@ class RegimeMLValidator:
     """
     
     def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = db_path or Path("~/projects/portfolio-lab/data/market.db").expanduser()
+        self.db_path = db_path or MARKET_DB
         self.results: List[ValidationResult] = []
         
     def fetch_historical_data(

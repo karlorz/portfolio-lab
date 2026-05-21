@@ -30,6 +30,8 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Optional
 
+from src.paths import LLM_COSTS_DIR
+
 # Top-level imports for patching support (guarded for environments without SDKs)
 try:
     import openai
@@ -40,8 +42,6 @@ try:
     import anthropic
 except ImportError:
     anthropic = None  # type: ignore
-
-COST_DIR = Path("~/projects/portfolio-lab/data/llm_costs").expanduser()
 
 # ---------------------------------------------------------------------------
 # Pricing per 1M tokens (input / cached_input / output)
@@ -191,9 +191,9 @@ class CostTracker:
 
     def save_daily_report(self) -> Path:
         """Persist daily cost report to disk."""
-        COST_DIR.mkdir(parents=True, exist_ok=True)
+        LLM_COSTS_DIR.mkdir(parents=True, exist_ok=True)
         date_str = datetime.now().strftime("%Y-%m-%d")
-        report_path = COST_DIR / f"costs_{date_str}.json"
+        report_path = LLM_COSTS_DIR / f"costs_{date_str}.json"
         report = {"date": date_str, "updated_at": datetime.now().isoformat(), **self.to_dict()}
         with open(report_path, "w") as f:
             json.dump(report, f, indent=2)

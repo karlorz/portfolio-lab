@@ -19,8 +19,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 import time
 
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
-DB_PATH = DATA_DIR / "market.db"
+from src.paths import DATA_DIR, MARKET_DB
+
 ETF_PRICING_PATH = DATA_DIR / "etf_pricing.json"
 ETF_HISTORY_PATH = DATA_DIR / "etf_pricing_history.json"
 
@@ -63,7 +63,7 @@ class ETFPricingEngine:
     
     def __init__(self):
         self.data_dir = DATA_DIR
-        self.db_path = DB_PATH
+        self.db_path = MARKET_DB
         self.cache_ttl_seconds = 15  # 15 second refresh during market hours
         
     def fetch_yahoo_quote(self, symbol: str) -> Optional[Dict]:
