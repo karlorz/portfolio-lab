@@ -30,13 +30,26 @@ class WikiSync:
         return hashlib.sha256(content.encode()).hexdigest()[:16]
     
     def save_raw_source(self, data: Dict, name: str) -> Path:
-        """Save data as raw source file with provenance."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        """Save data as raw source file with provenance.
+
+        Uses a stable filename (name.json) so repeated runs with
+        unchanged data don't create duplicate files. Only writes
+        when the content hash differs from the existing file.
+        """
         content = json.dumps(data, indent=2, default=str)
         hash_val = self.hash_file(content)
-        
-        raw_path = RAW_DIR / f"{name}_{timestamp}_{hash_val}.json"
-        
+
+        raw_path = RAW_DIR / f"{name}.json"
+
+        # Skip write if file exists with same content hash
+        if raw_path.exists():
+            try:
+                existing = raw_path.read_text()
+                if f"sha256: {hash_val}" in existing:
+                    return raw_path  # Unchanged — skip write
+            except Exception:
+                pass  # If read fails, overwrite
+
         frontmatter = f"""---
 type: raw
 source_type: market_data
@@ -47,7 +60,7 @@ created: {datetime.now().isoformat()}
 """
         with open(raw_path, 'w') as f:
             f.write(frontmatter + content)
-        
+
         return raw_path
     
     def sync_regime_analysis(self) -> Optional[Path]:
