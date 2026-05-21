@@ -4,24 +4,19 @@ Portfolio-Lab v2.58: Ensemble Signal Voter
 Multi-source signal aggregation with regime-dependent weighting and health-adjusted weighting.
 Implements soft voting with confidence-based consensus for portfolio decisions.
 
-Sources:
-- TSFM Factor Momentum (v2.15) - Factor-based momentum signals
-- HMM Regime Detector (v2.20.1) - Latent state classification
-- CTA Trend Overlay (v2.10+) - Multi-timeframe trend following
-- Macro Momentum (v2.57) - Business cycle / monetary policy
+Active Sources (6):
 - Multi-Speed Momentum (v2.56) - Speed-diversified trends
-- Duration/Yield Curve (v2.17-2.18) - Rate regime detection
-- Circuit Breaker (v2.14) - Risk limits and controls
+- Cross-Asset Relative Value (v5.71) - Mean-reversion triggers
+- International Equity Momentum (v3.13) - EFA/EEM vs SPY
+- Alternative Data (v9.00) - SEC EDGAR, NewsAPI, jobs
+- Cross-Asset Regime Arbitrage (v8.09) - Divergence detection
+- Unified Overlay (v4.90) - Collar + bond + crypto + calendar
 
-Voting Strategy:
-- Normal regime: TSFM 40%, MultiSpeed 25%, CTA 20%, Macro 10%, Duration 5%
-- High vol regime: HMM 35%, CTA 30%, MultiSpeed 20%, Macro 10%, Circuit 5%
-- Crisis regime: Circuit 35%, CTA 35%, HMM 20%, Macro 10%
-
-Health-Adjusted Weighting (v3.12):
-- Signals with health < 0.5 get weight reduced by 50%
-- Signals with health >= 0.7 get full weight
-- Health scores calculated from 90-day rolling accuracy
+Weight Adjustments (applied in order):
+1. Static REGIME_WEIGHTS (per-regime allocation)
+2. Adaptive ensemble weighting (v6.09, from attribution data)
+3. Health-adjusted weighting (v3.12, from signal health scores)
+4. Turnover-aware validation (v8.01, with basis-pursuit + regret-weighted)
 
 Consensus threshold: 2/3 weighted signals agree for action
 
@@ -158,100 +153,6 @@ REGIME_WEIGHTS = {
 }
 
 
-# ── Epsilon-Greedy Contextual Bandit for Dynamic Signal Weighting ──
-
-class BanditWeighter:
-    """Epsilon-greedy contextual bandit for dynamic signal weight adaptation.
-
-    Tracks rolling Sharpe per (signal, regime_bin). With epsilon probability
-    explores a random signal; otherwise exploits the best-performing signal
-    for the current regime. Softmax converts Sharpe estimates to weights.
-
-    No external dependencies -- pure numpy.
-    """
-    def __init__(
-        self,
-        signals: list,
-        epsilon: float = 0.1,
-        window: int = 252,
-        temperature: float = 1.0,
-    ):
-        self.signals = list(signals)
-        self.epsilon = epsilon
-        self.window = window
-        self.temperature = temperature
-        self._history: dict = {}
-
-    def select(self, regime: str) -> str:
-        """Select a signal using epsilon-greedy strategy."""
-        import random
-        if random.random() < self.epsilon:
-            return random.choice(self.signals)
-        best_signal = self.signals[0]
-        best_sharpe = -float("inf")
-        for sig in self.signals:
-            sh = self._rolling_sharpe(sig, regime)
-            if sh > best_sharpe:
-                best_sharpe = sh
-                best_signal = sig
-        return best_signal
-
-    def update(self, signal: str, regime: str, daily_return: float):
-        """Record a daily return observation for a signal in a regime."""
-        if regime not in self._history:
-            self._history[regime] = {}
-        if signal not in self._history[regime]:
-            self._history[regime][signal] = []
-        self._history[regime][signal].append(daily_return)
-        if len(self._history[regime][signal]) > self.window:
-            self._history[regime][signal] = \
-                self._history[regime][signal][-self.window:]
-
-    def get_weights(self, regime: str):
-        """Get softmax-normalized weights for all signals in a regime.
-
-        Returns None if insufficient data for this regime (cold start).
-        Returns dict mapping signal_name -> weight (sums to 1.0).
-        """
-        if regime not in self._history:
-            return None
-        sharpes = {}
-        for sig in self.signals:
-            sharpes[sig] = self._rolling_sharpe(sig, regime)
-        # Check minimum history requirement
-        total_obs = sum(
-            len(self._history.get(regime, {}).get(s, []))
-            for s in self.signals
-        )
-        if total_obs < len(self.signals) * 21:
-            return None
-        return self._softmax(sharpes)
-
-    def _rolling_sharpe(self, signal: str, regime: str) -> float:
-        """Compute rolling Sharpe ratio for a signal in a regime."""
-        hist = self._history.get(regime, {}).get(signal, [])
-        if len(hist) < 21:
-            return 0.0
-        arr = np.array(hist[-self.window:])
-        mu = np.mean(arr)
-        sigma = np.std(arr)
-        if sigma < 1e-12:
-            return 0.0
-        return float(mu / sigma * np.sqrt(252))
-
-    def _softmax(self, sharpes: dict) -> dict:
-        """Convert Sharpe estimates to weights via softmax."""
-        values = np.array([sharpes[s] for s in self.signals])
-        values = values - np.max(values)  # numerical stability
-        if self.temperature > 0:
-            values = values / self.temperature
-        exp_values = np.exp(values)
-        total = np.sum(exp_values)
-        if total < 1e-12:
-            w = 1.0 / len(self.signals)
-            return {s: w for s in self.signals}
-        return {sig: float(exp_values[i] / total)
-                for i, sig in enumerate(self.signals)}
 
 
 class EnsembleVoter:
@@ -276,24 +177,6 @@ class EnsembleVoter:
         self.current_regime: Regime = Regime.NORMAL
         self.current_regime_confidence: float = 0.5
 
-        # Initialize bandit weighter for dynamic weight adaptation
-        survivor_values = [
-            s.value for s in [
-                SignalSource.MULTI_SPEED_MOM,
-                SignalSource.CROSS_ASSET_RV,
-                SignalSource.INTERNATIONAL_MOMENTUM,
-                SignalSource.ALTERNATIVE_DATA,
-                SignalSource.CROSS_ASSET_REGIME_ARB,
-                SignalSource.UNIFIED_OVERLAY,
-            ]
-        ]
-        self.bandit = BanditWeighter(
-            signals=survivor_values,
-            epsilon=0.1,
-            window=252,
-        )
-        self._bandit_blend = 0.0
-        self._bandit_observations = 0
     
     def _init_db(self):
         """Initialize signal history database."""
@@ -635,31 +518,14 @@ class EnsembleVoter:
         self.current_readings = readings
         return readings
 
-    def get_blended_weights(self, regime_name: str) -> dict:
-        """Get regime weights blended between static REGIME_WEIGHTS and bandit.
+    def get_regime_weights(self, regime_name: str) -> dict:
+        """Get static regime weights.
 
-        Cold start: 100% static. After 252 observations: 30% static, 70% bandit.
+        Note: BanditWeighter was removed (v9.35) — update_bandit() was never
+        called, so dynamic blending always returned 100% static weights.
         """
-        # Get static weights for this regime
         regime_enum = getattr(Regime, regime_name, Regime.NORMAL)
-        static = dict(REGIME_WEIGHTS.get(regime_enum, {}))
-
-        # Get bandit weights
-        bandit = self.bandit.get_weights(regime_name)
-
-        if bandit is None:
-            return static  # Cold start: 100% static
-
-        # Blend: shifts from 100/0 to 30/70 static/bandit over 252 observations
-        blend = min(0.7, self._bandit_observations / 252 * 0.7)
-
-        blended = {}
-        for sig_enum, static_w in static.items():
-            sig_value = sig_enum.value
-            bandit_w = bandit.get(sig_value, static_w)
-            blended[sig_enum] = static_w * (1 - blend) + bandit_w * blend
-
-        return blended
+        return dict(REGIME_WEIGHTS.get(regime_enum, {}))
 
     def apply_goal_risk_budget(self, base_allocation: dict) -> dict:
         """Scale allocation weights based on investment goals from goals.json.
@@ -705,16 +571,6 @@ class EnsembleVoter:
             return base_allocation
         return {k: v / new_total * total for k, v in shifted.items()}
 
-    def update_bandit(self, signal_returns: dict, regime_name: str):
-        """Update bandit with observed returns for each signal."""
-        for sig_value, daily_return in signal_returns.items():
-            self.bandit.update(
-                signal=sig_value,
-                regime=regime_name,
-                daily_return=daily_return,
-            )
-        self._bandit_observations += 1
-
     def compute_vote(
         self,
         readings: Optional[Dict[SignalSource, SignalReading]] = None,
@@ -740,7 +596,7 @@ class EnsembleVoter:
         self.current_regime_confidence = regime_confidence
         
         # Get weights for regime (blended with bandit if available)
-        weights = self.get_blended_weights(regime.name)
+        weights = self.get_regime_weights(regime.name)
         
         # Apply adaptive ensemble weighting (v6.09) if available
         try:
