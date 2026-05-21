@@ -39,11 +39,14 @@
 
 ## Recent Implementation Updates (2026-05-21)
 
-### v9.41 Overlay Backtest Production Code Import - COMPLETED
+### v9.41 Backtest Production Code Import - COMPLETED
 - **Collar backtest**: replaced embedded `_get_regime()`/`_get_collar_shifts()` with `CollarSignalGenerator.classify_regime()` from `src/signals/collar_signal.py`
 - **Bond duration backtest**: replaced `_classify_momentum()`/`_get_bond_sleeve_allocation()` with `BondDurationCalculator.compute_duration_allocation()` via momentum-to-yield context mapping from `src/signals/bond_duration_signal.py`
 - **Crypto allocation backtest**: replaced `_compute_spy_momentum_6m()`/`_compute_crypto_vol()`/`_is_vol_extreme()`/`_compute_crypto_allocation()` with `CryptoMomentumCalculator` methods from `src/signals/crypto_momentum.py`
-- **Impact**: backtest results now validate production strategy code — previously embedded logic could silently diverge
+- **Cross-asset RV backtest**: replaced embedded z-score computation with `CrossAssetRVScanner._compute_z_score()` from `src/signals/cross_asset_relative_value.py`; uses production `ZSCORE_ENTRY` threshold
+- **International momentum backtest**: replaced embedded EFA/SPY momentum with `InternationalMomentumGenerator._determine_signal_type()` from `src/signals/international_momentum.py`
+- **Alternative data backtest**: replaced embedded regime thresholds with `AlternativeDataSignalGenerator._determine_regime()` from `src/signals/alternative_data_signal.py`
+- **Impact**: all 6 signal/overlay backtests now validate production code — previously embedded logic could silently diverge
 - **Test count**: 6501 safe (0 failures, 10 skipped)
 - **Status**: All phases complete
 
