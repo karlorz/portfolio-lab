@@ -39,6 +39,13 @@
 
 ## Recent Implementation Updates (2026-05-22)
 
+### v9.43 Untested Module Coverage Round 3 - COMPLETED
+- **Tests**: 131 new tests across 2 previously untested modules:
+  - `tests/test_bond_momentum_backtest.py` (65 tests): BondMomentumResult dataclass, load_price_data, calculate_momentum_signal, backtest_bond_momentum, run_sensitivity_analysis, analyze_correlation_with_duration_overlay, main(), edge cases
+  - `tests/test_macro_regime_cli.py` (66 tests): parse_signal_arg, parse_allocation_arg, cmd_classify/overlay/history/simulate, main(), JSON output, error handling, edge cases
+- **Test count**: 6579 → 6710 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.42 Predictive Model Test Coverage - COMPLETED
 - **Tests**: 78 new tests for `src/agents/predictive_model.py` (541 lines, previously 0 coverage):
   - `tests/test_predictive_model.py` (78 tests): PredictionResult dataclass, CandidateTrajectory dataclass, PredictiveModel (init, update_prices, fit, predict, _empty_result, get_state/load_state, clear_history), TrajectoryOptimizer (init, constraints, generate_trajectories, select_optimal, scoring, default trajectories), edge cases (single asset, large n_assets, constant prices, zero cov, multiple fits, state round-trip)
@@ -631,7 +638,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6579 safe** passed (0 failures, 10 skipped)
+- **6710 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
