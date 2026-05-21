@@ -39,6 +39,21 @@
 
 ## Recent Implementation Updates (2026-05-21)
 
+### v9.40 Signal Quality + Error Handling + Base Allocation Centralization + Backtest Tests - COMPLETED
+- **Signal quality**: REGIME_ARB continuous passthrough (9 discrete → np.clip scaled by confidence×momentum)
+- **ALTERNATIVE_DATA backtest**: fixed stale discrete REGIME_SIGNAL_MAP → continuous np.clip signal
+- **combined_strategy.py**: guarded unconditional HMM import crash (conditional import + None-safe _get_hmm_regime)
+- **Error handling**: 30 except Exception: pass blocks hardened across 18 files (0 remaining in src/)
+- **Base allocation centralization**: BASE_ALLOCATION + BASE_ALLOCATION_STR in src/paths.py; 23 inline dicts replaced across 20+ files
+- **Tests**: 255 new tests across 5 signal backtest engines (previously 0 coverage):
+  - `tests/test_multi_speed_momentum_backtest.py` (53 tests) + source bug fix: missing _returns_from_equity()
+  - `tests/test_cross_asset_regime_arb_backtest.py` (67 tests) + source bug fix: dead code reorder in _detect_divergence_signal()
+  - `tests/test_alternative_data_backtest.py` (66 tests)
+  - `tests/test_international_momentum_backtest.py` (36 tests)
+  - `tests/test_cross_asset_rv_backtest.py` (33 tests)
+- **Test count**: 6501 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.39 Coverage Expansion + Path Migration + Stale Ref Cleanup - COMPLETED
 - **Tests**: 90 new tests across 3 previously untested modules:
   - `tests/test_behavioral_sentiment_fetcher.py` (42 tests): OptionsSentiment, RetailFlow, SocialIntensity, BehavioralSentimentSnapshot dataclasses, cache ops, composite score, signal recommendation, historical sentiment
@@ -598,7 +613,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6241 safe** passed (0 failures, 10 skipped)
+- **6501 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
