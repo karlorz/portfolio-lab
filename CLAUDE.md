@@ -39,6 +39,16 @@
 
 ## Recent Implementation Updates (2026-05-21)
 
+### v9.39 Coverage Expansion + Path Migration + Stale Ref Cleanup - COMPLETED
+- **Tests**: 90 new tests across 3 previously untested modules:
+  - `tests/test_behavioral_sentiment_fetcher.py` (42 tests): OptionsSentiment, RetailFlow, SocialIntensity, BehavioralSentimentSnapshot dataclasses, cache ops, composite score, signal recommendation, historical sentiment
+  - `tests/test_international_fetcher.py` (29 tests): MomentumMetrics, RelativeMomentum, InternationalData dataclasses, cache TTL, momentum calc, relative momentum signals, fetch_all, save_snapshot
+  - `tests/test_rebalancing_integration.py` (19 tests): RebalanceGateResult, SmartRebalanceGate init/VPIN/evaluate/record_execution/get_status/to_json
+- **Path migration**: 5 files migrated from hardcoded paths to src/paths.py constants (wiki_sync.py, agent.py, alternative_data_signal.py, multi_speed_momentum_backtest.py, signal_execution_bridge.py)
+- **Stale signal cleanup**: 4 files cleaned of dead signal references (performance_attribution.py SIGNAL_SOURCE_META 16→6, portfolio_explainability.py, macro_regime.py, dashboard/generator.py)
+- **Test count**: 6241 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.35 BanditWeighter Removal + Weight Rebalancing + Coverage Expansion - COMPLETED
 - **BanditWeighter removed**: 266 lines of dead code deleted
   - update_bandit() had zero callers — bandit never received observations
@@ -588,7 +598,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6423 safe** passed (0 failures, 10 skipped)
+- **6241 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
