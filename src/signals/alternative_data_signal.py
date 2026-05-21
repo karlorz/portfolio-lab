@@ -23,11 +23,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.paths import PRICES_JSON
 
-# ---------------------------------------------------------------------------
-# Data sources
-# ---------------------------------------------------------------------------
-PRICES_PATH = Path("public/data/prices.json")
+PRICES_PATH = PRICES_JSON
 
 # Symbols needed for each component
 SYMBOLS_REQUIRED = ["SPY", "TLT", "SHY", "XLF", "XLY", "AGG", "IEF"]

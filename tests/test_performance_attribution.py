@@ -405,7 +405,7 @@ class TestPerformanceAttribution:
 
     def test_signal_source_meta(self):
         """Verify signal source metadata is complete."""
-        assert len(SIGNAL_SOURCE_META) >= 10
+        assert len(SIGNAL_SOURCE_META) >= 6
         for key, meta in SIGNAL_SOURCE_META.items():
             assert "name" in meta
             assert "category" in meta

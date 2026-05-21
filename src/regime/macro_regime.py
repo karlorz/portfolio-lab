@@ -100,24 +100,6 @@ class MacroRegimeSynthesizer:
             "max_weight": 0.20,
             "min_weight": 0.05,
         },
-        "fx_carry": {
-            "display_name": "FX Carry",
-            "mapping": {"safe": 1, "unwind_risk": -1},
-            "max_weight": 0.15,
-            "min_weight": 0.05,
-        },
-        "commodity_curve": {
-            "display_name": "Commodity Curve",
-            "mapping": {"backwardation": 1, "contango": -1},
-            "max_weight": 0.10,
-            "min_weight": 0.05,
-        },
-        "bond_momentum": {
-            "display_name": "Bond Momentum",
-            "mapping": {"shy": -1, "ief": 0, "tlt": 1},
-            "max_weight": 0.15,
-            "min_weight": 0.05,
-        },
         "intl_equity": {
             "display_name": "International Equity",
             "mapping": {"downtrend": -1, "mixed": 0, "uptrend": 1},

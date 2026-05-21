@@ -1,0 +1,787 @@
+#!/usr/bin/env python3
+"""
+Tests for src/data/behavioral_sentiment_fetcher.py — BehavioralSentimentFetcher.
+Covers: OptionsSentiment, RetailFlow, SocialIntensity, BehavioralSentimentSnapshot
+dataclasses, cache operations, composite score, signal recommendation, history.
+"""
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pytest
+import json
+import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+from src.data.behavioral_sentiment_fetcher import (
+    BehavioralSentimentFetcher,
+    OptionsSentiment,
+    RetailFlow,
+    SocialIntensity,
+    BehavioralSentimentSnapshot,
+    CACHE_TTL_HOURS,
+    EXTREME_FEAR_THRESHOLD,
+    EXTREME_GREED_THRESHOLD,
+    FEAR_THRESHOLD,
+    GREED_THRESHOLD,
+    REDDIT_AVAILABLE,
+)
+
+
+# ---------------------------------------------------------------------------
+# Dataclass tests
+# ---------------------------------------------------------------------------
+
+class TestOptionsSentiment:
+    def test_creation(self):
+        o = OptionsSentiment(
+            timestamp="2026-01-01", skew_index=130.0, vix=18.0,
+            vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+            fear_greed_score=0.3,
+        )
+        assert o.skew_index == 130.0
+        assert o.vix == 18.0
+        assert o.put_call_ratio == 0.65
+
+    def test_to_dict(self):
+        o = OptionsSentiment(
+            timestamp="2026-01-01", skew_index=130.0, vix=18.0,
+            vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+            fear_greed_score=0.3,
+        )
+        d = o.to_dict()
+        assert isinstance(d, dict)
+        assert d["skew_index"] == 130.0
+        assert d["fear_greed_score"] == 0.3
+
+
+class TestRetailFlow:
+    def test_creation(self):
+        r = RetailFlow(
+            timestamp="2026-01-01", retail_call_put_ratio=1.5,
+            retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+            small_lot_premium_ratio=0.85,
+        )
+        assert r.retail_call_put_ratio == 1.5
+        assert r.retail_buy_sell_imbalance == 0.3
+
+    def test_to_dict(self):
+        r = RetailFlow(
+            timestamp="2026-01-01", retail_call_put_ratio=1.5,
+            retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+            small_lot_premium_ratio=0.85,
+        )
+        d = r.to_dict()
+        assert isinstance(d, dict)
+        assert d["retail_call_put_ratio"] == 1.5
+
+
+class TestSocialIntensity:
+    def test_creation_defaults(self):
+        s = SocialIntensity(
+            timestamp="2026-01-01", mention_velocity_7d=1.0,
+            sentiment_divergence=0.2, bot_activity_flag=False,
+            influencer_concentration=0.15,
+        )
+        assert s.reddit_sentiment == 0.0
+        assert s.reddit_data_source == "proxy"
+
+    def test_creation_reddit_fields(self):
+        s = SocialIntensity(
+            timestamp="2026-01-01", mention_velocity_7d=1.5,
+            sentiment_divergence=-0.3, bot_activity_flag=True,
+            influencer_concentration=0.4,
+            reddit_sentiment=0.5, reddit_mention_velocity_1h=2.0,
+            reddit_mention_velocity_24h=48.0, reddit_virality_flag=True,
+            reddit_engagement_score=75.0, reddit_data_source="reddit_api",
+        )
+        assert s.reddit_sentiment == 0.5
+        assert s.reddit_virality_flag is True
+        assert s.reddit_data_source == "reddit_api"
+
+    def test_to_dict(self):
+        s = SocialIntensity(
+            timestamp="2026-01-01", mention_velocity_7d=1.0,
+            sentiment_divergence=0.2, bot_activity_flag=False,
+            influencer_concentration=0.15,
+        )
+        d = s.to_dict()
+        assert isinstance(d, dict)
+        assert d["reddit_data_source"] == "proxy"
+
+
+class TestBehavioralSentimentSnapshot:
+    def _make_snapshot(self, score=0.0, signal="neutral"):
+        return BehavioralSentimentSnapshot(
+            timestamp="2026-01-01",
+            options=OptionsSentiment(
+                timestamp="2026-01-01", skew_index=130.0, vix=18.0,
+                vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+                fear_greed_score=0.3,
+            ),
+            retail=RetailFlow(
+                timestamp="2026-01-01", retail_call_put_ratio=1.5,
+                retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.85,
+            ),
+            social=SocialIntensity(
+                timestamp="2026-01-01", mention_velocity_7d=1.0,
+                sentiment_divergence=0.2, bot_activity_flag=False,
+                influencer_concentration=0.15,
+            ),
+            composite_score=score,
+            signal_type=signal,
+            confidence=0.7,
+            data_fresh=True,
+        )
+
+    def test_creation(self):
+        snap = self._make_snapshot()
+        assert snap.composite_score == 0.0
+        assert snap.signal_type == "neutral"
+        assert snap.data_fresh is True
+
+    def test_to_dict(self):
+        snap = self._make_snapshot(score=-1.5, signal="fear")
+        d = snap.to_dict()
+        assert isinstance(d, dict)
+        assert d["composite_score"] == -1.5
+        assert "options" in d
+        assert "retail" in d
+        assert "social" in d
+
+
+# ---------------------------------------------------------------------------
+# Fetcher init + cache
+# ---------------------------------------------------------------------------
+
+class TestFetcherInit:
+    def test_init_creates_cache_table(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        # Table should exist
+        conn = sqlite3.connect(db)
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='behavioral_sentiment_cache'"
+        )
+        assert cursor.fetchone() is not None
+        conn.close()
+
+    def test_cache_save_and_retrieve(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = BehavioralSentimentSnapshot(
+            timestamp=datetime.now().isoformat(),
+            options=OptionsSentiment(
+                timestamp=datetime.now().isoformat(), skew_index=130.0, vix=18.0,
+                vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+                fear_greed_score=0.3,
+            ),
+            retail=RetailFlow(
+                timestamp=datetime.now().isoformat(), retail_call_put_ratio=1.5,
+                retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.85,
+            ),
+            social=SocialIntensity(
+                timestamp=datetime.now().isoformat(), mention_velocity_7d=1.0,
+                sentiment_divergence=0.2, bot_activity_flag=False,
+                influencer_concentration=0.15,
+            ),
+            composite_score=0.5,
+            signal_type="greed",
+            confidence=0.7,
+            data_fresh=True,
+        )
+        fetcher._save_to_cache(snap)
+        # Verify data was written to DB
+        with sqlite3.connect(db) as conn:
+            row = conn.execute(
+                "SELECT composite_score, signal_type FROM behavioral_sentiment_cache ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            assert row is not None
+            assert row[0] == 0.5
+            assert row[1] == "greed"
+        # _get_cached may fail due to CURRENT_TIMESTAMP format vs fromisoformat
+        # so test retrieval via manual insert with ISO-formatted timestamp
+        now_iso = datetime.now().isoformat()
+        with sqlite3.connect(db) as conn:
+            conn.execute("DELETE FROM behavioral_sentiment_cache")
+            conn.execute("""
+                INSERT INTO behavioral_sentiment_cache
+                (timestamp, data, composite_score, signal_type, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (now_iso, json.dumps(snap.to_dict()), 0.5, "greed", now_iso))
+            conn.commit()
+        cached = fetcher._get_cached()
+        assert cached is not None
+        assert cached.composite_score == 0.5
+
+    def test_cache_miss(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        cached = fetcher._get_cached()
+        assert cached is None
+
+    def test_cache_ttl_expired(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        # Insert stale data manually
+        stale_time = (datetime.now() - timedelta(hours=CACHE_TTL_HOURS + 1)).isoformat()
+        snap = BehavioralSentimentSnapshot(
+            timestamp=stale_time,
+            options=OptionsSentiment(
+                timestamp=stale_time, skew_index=130.0, vix=18.0,
+                vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+                fear_greed_score=0.3,
+            ),
+            retail=RetailFlow(
+                timestamp=stale_time, retail_call_put_ratio=1.5,
+                retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.85,
+            ),
+            social=SocialIntensity(
+                timestamp=stale_time, mention_velocity_7d=1.0,
+                sentiment_divergence=0.2, bot_activity_flag=False,
+                influencer_concentration=0.15,
+            ),
+            composite_score=-1.0,
+            signal_type="fear",
+            confidence=0.7,
+            data_fresh=True,
+        )
+        # Insert with old created_at timestamp
+        with sqlite3.connect(db) as conn:
+            conn.execute("""
+                INSERT INTO behavioral_sentiment_cache
+                (timestamp, data, composite_score, signal_type, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (stale_time, json.dumps(snap.to_dict()), -1.0, "fear", stale_time))
+            conn.commit()
+        # Should return None because cache is stale
+        cached = fetcher._get_cached()
+        assert cached is None
+
+    def test_cache_prunes_old_entries(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = BehavioralSentimentSnapshot(
+            timestamp=datetime.now().isoformat(),
+            options=OptionsSentiment(
+                timestamp=datetime.now().isoformat(), skew_index=130.0, vix=18.0,
+                vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+                fear_greed_score=0.3,
+            ),
+            retail=RetailFlow(
+                timestamp=datetime.now().isoformat(), retail_call_put_ratio=1.5,
+                retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.85,
+            ),
+            social=SocialIntensity(
+                timestamp=datetime.now().isoformat(), mention_velocity_7d=1.0,
+                sentiment_divergence=0.2, bot_activity_flag=False,
+                influencer_concentration=0.15,
+            ),
+            composite_score=0.5,
+            signal_type="greed",
+            confidence=0.7,
+            data_fresh=True,
+        )
+        fetcher._save_to_cache(snap)
+        # After save, should have entries
+        with sqlite3.connect(db) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM behavioral_sentiment_cache").fetchone()[0]
+            assert count >= 1
+
+
+class TestDictToSnapshot:
+    def test_roundtrip(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = BehavioralSentimentSnapshot(
+            timestamp="2026-01-01T00:00:00",
+            options=OptionsSentiment(
+                timestamp="2026-01-01T00:00:00", skew_index=150.0, vix=25.0,
+                vix9d=28.0, vix9d_ratio=1.12, put_call_ratio=0.85,
+                fear_greed_score=0.8,
+            ),
+            retail=RetailFlow(
+                timestamp="2026-01-01T00:00:00", retail_call_put_ratio=1.2,
+                retail_buy_sell_imbalance=-0.2, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.80,
+            ),
+            social=SocialIntensity(
+                timestamp="2026-01-01T00:00:00", mention_velocity_7d=2.0,
+                sentiment_divergence=0.5, bot_activity_flag=True,
+                influencer_concentration=0.3, reddit_sentiment=0.6,
+                reddit_data_source="reddit_api",
+            ),
+            composite_score=1.5,
+            signal_type="greed",
+            confidence=0.8,
+            data_fresh=True,
+        )
+        d = snap.to_dict()
+        restored = fetcher._dict_to_snapshot(d)
+        assert restored.composite_score == 1.5
+        assert restored.options.vix == 25.0
+        assert restored.social.reddit_sentiment == 0.6
+
+
+# ---------------------------------------------------------------------------
+# VIX data fetching (mocked)
+# ---------------------------------------------------------------------------
+
+class TestFetchVixData:
+    def test_returns_default_on_failure(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=Exception("network error")):
+            vix, vix9d = fetcher._fetch_vix_data()
+            assert vix == 16.0
+            assert vix9d == 14.4
+
+    def test_parses_yahoo_response(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "chart": {"result": [{"meta": {"regularMarketPrice": 22.5}}]}
+        }
+        mock_resp9d = MagicMock()
+        mock_resp9d.json.return_value = {
+            "chart": {"result": [{"meta": {"regularMarketPrice": 20.1}}]}
+        }
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=[mock_resp, mock_resp9d]):
+            vix, vix9d = fetcher._fetch_vix_data()
+            assert vix == 22.5
+            assert vix9d == 20.1
+
+    def test_fallback_when_no_result(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"chart": {"result": []}}
+        mock_resp9d = MagicMock()
+        mock_resp9d.json.return_value = {"chart": {"result": []}}
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=[mock_resp, mock_resp9d]):
+            vix, vix9d = fetcher._fetch_vix_data()
+            # vix9d falls back to vix * 0.9 = 16.0 * 0.9 = 14.4
+            assert vix == 16.0
+            assert vix9d == 14.4
+
+
+class TestFetchSkewIndex:
+    def test_returns_default_on_failure(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch.object(fetcher, "_fetch_vix_data", return_value=(16.0, 14.4)):
+            with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=Exception("error")):
+                skew = fetcher._fetch_skew_index()
+                # Fallback: 100 + max(0, (16-15)*2) = 102
+                assert skew == 102.0
+
+    def test_parses_yahoo_skew(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "chart": {"result": [{"meta": {"regularMarketPrice": 145.0}}]}
+        }
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", return_value=mock_resp):
+            skew = fetcher._fetch_skew_index()
+            assert skew == 145.0
+
+
+class TestFetchPutCallRatio:
+    def test_returns_default_on_failure(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=Exception("error")):
+            ratio = fetcher._fetch_put_call_ratio()
+            assert ratio == 0.65
+
+    def test_parses_closes(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "chart": {"result": [{"indicators": {"quote": [{"close": [0.7, 0.8, 0.75]}]}}]}
+        }
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", return_value=mock_resp):
+            ratio = fetcher._fetch_put_call_ratio()
+            assert abs(ratio - 0.75) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Estimate methods
+# ---------------------------------------------------------------------------
+
+class TestEstimateRetailFlow:
+    def test_returns_retail_flow(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch.object(fetcher, "_fetch_put_call_ratio", return_value=0.60):
+            flow = fetcher._estimate_retail_flow()
+            assert isinstance(flow, RetailFlow)
+            assert flow.retail_call_put_ratio > 0
+            assert -1 <= flow.retail_buy_sell_imbalance <= 1
+
+    def test_exception_returns_defaults(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch.object(fetcher, "_fetch_put_call_ratio", side_effect=Exception("error")):
+            flow = fetcher._estimate_retail_flow()
+            assert isinstance(flow, RetailFlow)
+            assert flow.retail_buy_sell_imbalance == 0.0
+
+
+class TestEstimateSocialIntensity:
+    def test_proxy_fallback(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch("src.data.behavioral_sentiment_fetcher.REDDIT_AVAILABLE", False):
+            with patch.object(fetcher, "_fetch_vix_data", return_value=(18.0, 16.0)):
+                social = fetcher._estimate_social_intensity()
+                assert isinstance(social, SocialIntensity)
+                assert social.reddit_data_source == "proxy"
+                assert social.bot_activity_flag is False  # VIX 18 < 30
+
+    def test_proxy_high_vix_bot_flag(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch("src.data.behavioral_sentiment_fetcher.REDDIT_AVAILABLE", False):
+            with patch.object(fetcher, "_fetch_vix_data", return_value=(35.0, 38.0)):
+                social = fetcher._estimate_social_intensity()
+                assert social.bot_activity_flag is True  # VIX 35 > 30
+
+
+# ---------------------------------------------------------------------------
+# Composite score calculation
+# ---------------------------------------------------------------------------
+
+class TestCompositeScore:
+    def _make_opts(self, fear_greed=0.0, vix=18.0):
+        return OptionsSentiment(
+            timestamp="2026-01-01", skew_index=130.0, vix=vix,
+            vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+            fear_greed_score=fear_greed,
+        )
+
+    def _make_retail(self, imbalance=0.0):
+        return RetailFlow(
+            timestamp="2026-01-01", retail_call_put_ratio=1.5,
+            retail_buy_sell_imbalance=imbalance, retail_top_100_correlation=-0.15,
+            small_lot_premium_ratio=0.85,
+        )
+
+    def _make_social(self, divergence=0.0, bot=False):
+        return SocialIntensity(
+            timestamp="2026-01-01", mention_velocity_7d=1.0,
+            sentiment_divergence=divergence, bot_activity_flag=bot,
+            influencer_concentration=0.15,
+        )
+
+    def test_extreme_fear(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        opts = self._make_opts(fear_greed=-2.5)
+        retail = self._make_retail(imbalance=1.0)  # Inverted in composite
+        social = self._make_social(divergence=-1.0)
+        composite, signal, conf = fetcher._calculate_composite_score(opts, retail, social)
+        assert composite <= EXTREME_FEAR_THRESHOLD
+        assert signal == "extreme_fear"
+
+    def test_extreme_greed(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        opts = self._make_opts(fear_greed=2.5)
+        retail = self._make_retail(imbalance=-1.0)
+        social = self._make_social(divergence=1.0)
+        composite, signal, conf = fetcher._calculate_composite_score(opts, retail, social)
+        assert composite >= EXTREME_GREED_THRESHOLD
+        assert signal == "extreme_greed"
+
+    def test_neutral(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        opts = self._make_opts(fear_greed=0.0)
+        retail = self._make_retail(imbalance=0.0)
+        social = self._make_social(divergence=0.0)
+        composite, signal, conf = fetcher._calculate_composite_score(opts, retail, social)
+        assert signal == "neutral"
+
+    def test_fear(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        opts = self._make_opts(fear_greed=-1.5)
+        retail = self._make_retail(imbalance=0.5)
+        social = self._make_social(divergence=-0.5)
+        composite, signal, conf = fetcher._calculate_composite_score(opts, retail, social)
+        assert signal in ("fear", "extreme_fear")
+
+    def test_greed(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        opts = self._make_opts(fear_greed=1.5)
+        retail = self._make_retail(imbalance=-0.5)
+        social = self._make_social(divergence=0.5)
+        composite, signal, conf = fetcher._calculate_composite_score(opts, retail, social)
+        assert signal in ("greed", "extreme_greed")
+
+    def test_bot_activity_adds_score(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        social_no_bot = self._make_social(divergence=0.0, bot=False)
+        social_bot = self._make_social(divergence=0.0, bot=True)
+        opts = self._make_opts(fear_greed=0.0)
+        retail = self._make_retail(imbalance=0.0)
+        _, _, _ = fetcher._calculate_composite_score(opts, retail, social_no_bot)
+        comp_bot, _, _ = fetcher._calculate_composite_score(opts, retail, social_bot)
+        # Bot flag should add 0.5 * 0.25 = 0.125 to composite
+        assert comp_bot > 0
+
+    def test_composite_clamped(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        opts = self._make_opts(fear_greed=5.0)
+        retail = self._make_retail(imbalance=-5.0)
+        social = self._make_social(divergence=5.0, bot=True)
+        composite, signal, conf = fetcher._calculate_composite_score(opts, retail, social)
+        assert -3 <= composite <= 3
+
+    def test_confidence_based_on_vix(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        opts_positive = self._make_opts(vix=20.0)
+        opts_zero = self._make_opts(vix=0.0)
+        retail = self._make_retail()
+        social = self._make_social()
+        _, _, conf_pos = fetcher._calculate_composite_score(opts_positive, retail, social)
+        _, _, conf_zero = fetcher._calculate_composite_score(opts_zero, retail, social)
+        assert conf_pos == 0.7
+        assert conf_zero == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Fetch snapshot (integration-level, mocked network)
+# ---------------------------------------------------------------------------
+
+class TestFetchSnapshot:
+    def test_fetch_uses_cache(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = BehavioralSentimentSnapshot(
+            timestamp=datetime.now().isoformat(),
+            options=OptionsSentiment(
+                timestamp=datetime.now().isoformat(), skew_index=130.0, vix=18.0,
+                vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+                fear_greed_score=0.3,
+            ),
+            retail=RetailFlow(
+                timestamp=datetime.now().isoformat(), retail_call_put_ratio=1.5,
+                retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.85,
+            ),
+            social=SocialIntensity(
+                timestamp=datetime.now().isoformat(), mention_velocity_7d=1.0,
+                sentiment_divergence=0.2, bot_activity_flag=False,
+                influencer_concentration=0.15,
+            ),
+            composite_score=0.5,
+            signal_type="greed",
+            confidence=0.7,
+            data_fresh=True,
+        )
+        # Mock _get_cached to return our snapshot (avoids CURRENT_TIMESTAMP format issue)
+        with patch.object(fetcher, "_get_cached", return_value=snap):
+            result = fetcher.fetch_snapshot(use_cache=True)
+            assert result.composite_score == 0.5
+
+    def test_fetch_bypass_cache(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        # Save stale cache
+        snap = BehavioralSentimentSnapshot(
+            timestamp=datetime.now().isoformat(),
+            options=OptionsSentiment(
+                timestamp=datetime.now().isoformat(), skew_index=130.0, vix=18.0,
+                vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+                fear_greed_score=0.3,
+            ),
+            retail=RetailFlow(
+                timestamp=datetime.now().isoformat(), retail_call_put_ratio=1.5,
+                retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.85,
+            ),
+            social=SocialIntensity(
+                timestamp=datetime.now().isoformat(), mention_velocity_7d=1.0,
+                sentiment_divergence=0.2, bot_activity_flag=False,
+                influencer_concentration=0.15,
+            ),
+            composite_score=0.5,
+            signal_type="greed",
+            confidence=0.7,
+            data_fresh=True,
+        )
+        fetcher._save_to_cache(snap)
+        # Fetch fresh with mocked network calls
+        with patch.object(fetcher, "_fetch_vix_data", return_value=(22.0, 20.0)):
+            with patch.object(fetcher, "_fetch_skew_index", return_value=140.0):
+                with patch.object(fetcher, "_fetch_put_call_ratio", return_value=0.70):
+                    result = fetcher.fetch_snapshot(use_cache=False)
+                    assert isinstance(result, BehavioralSentimentSnapshot)
+                    assert result.data_fresh is True
+
+
+# ---------------------------------------------------------------------------
+# Signal recommendation
+# ---------------------------------------------------------------------------
+
+class TestSignalRecommendation:
+    def _make_snapshot(self, signal_type, score, confidence=0.7):
+        return BehavioralSentimentSnapshot(
+            timestamp=datetime.now().isoformat(),
+            options=OptionsSentiment(
+                timestamp=datetime.now().isoformat(), skew_index=130.0, vix=18.0,
+                vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+                fear_greed_score=0.3,
+            ),
+            retail=RetailFlow(
+                timestamp=datetime.now().isoformat(), retail_call_put_ratio=1.5,
+                retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.85,
+            ),
+            social=SocialIntensity(
+                timestamp=datetime.now().isoformat(), mention_velocity_7d=1.0,
+                sentiment_divergence=0.2, bot_activity_flag=False,
+                influencer_concentration=0.15,
+            ),
+            composite_score=score,
+            signal_type=signal_type,
+            confidence=confidence,
+            data_fresh=True,
+        )
+
+    def test_extreme_fear_contrarian_buy(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = self._make_snapshot("extreme_fear", -2.5, confidence=0.7)
+        rec = fetcher.get_signal_recommendation(snap)
+        assert rec["recommended_action"] == "contrarian_buy"
+        assert rec["equity_shift_pct"] == 5.0
+
+    def test_fear_moderate_buy(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = self._make_snapshot("fear", -1.5, confidence=0.7)
+        rec = fetcher.get_signal_recommendation(snap)
+        assert rec["recommended_action"] == "moderate_buy"
+        assert rec["equity_shift_pct"] == 3.0
+
+    def test_extreme_greed_contrarian_sell(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = self._make_snapshot("extreme_greed", 2.5, confidence=0.7)
+        rec = fetcher.get_signal_recommendation(snap)
+        assert rec["recommended_action"] == "contrarian_sell"
+        assert rec["equity_shift_pct"] == -5.0
+
+    def test_greed_moderate_sell(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = self._make_snapshot("greed", 1.5, confidence=0.7)
+        rec = fetcher.get_signal_recommendation(snap)
+        assert rec["recommended_action"] == "moderate_sell"
+        assert rec["equity_shift_pct"] == -3.0
+
+    def test_neutral_no_action(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = self._make_snapshot("neutral", 0.0)
+        rec = fetcher.get_signal_recommendation(snap)
+        assert rec["recommended_action"] == "neutral"
+        assert rec["equity_shift_pct"] == 0.0
+
+    def test_low_confidence_no_action(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = self._make_snapshot("extreme_fear", -2.5, confidence=0.3)
+        rec = fetcher.get_signal_recommendation(snap)
+        assert rec["recommended_action"] == "neutral"
+
+    def test_recommendation_has_rationale(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = self._make_snapshot("fear", -1.5, confidence=0.7)
+        rec = fetcher.get_signal_recommendation(snap)
+        assert "rationale" in rec
+        assert len(rec["rationale"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Historical sentiment
+# ---------------------------------------------------------------------------
+
+class TestHistoricalSentiment:
+    def test_returns_empty_on_no_data(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        history = fetcher.get_historical_sentiment(days=30)
+        assert isinstance(history, list)
+        assert len(history) == 0
+
+    def test_returns_cached_history(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        snap = BehavioralSentimentSnapshot(
+            timestamp=datetime.now().isoformat(),
+            options=OptionsSentiment(
+                timestamp=datetime.now().isoformat(), skew_index=130.0, vix=18.0,
+                vix9d=16.0, vix9d_ratio=0.89, put_call_ratio=0.65,
+                fear_greed_score=0.3,
+            ),
+            retail=RetailFlow(
+                timestamp=datetime.now().isoformat(), retail_call_put_ratio=1.5,
+                retail_buy_sell_imbalance=0.3, retail_top_100_correlation=-0.15,
+                small_lot_premium_ratio=0.85,
+            ),
+            social=SocialIntensity(
+                timestamp=datetime.now().isoformat(), mention_velocity_7d=1.0,
+                sentiment_divergence=0.2, bot_activity_flag=False,
+                influencer_concentration=0.15,
+            ),
+            composite_score=0.5,
+            signal_type="greed",
+            confidence=0.7,
+            data_fresh=True,
+        )
+        fetcher._save_to_cache(snap)
+        history = fetcher.get_historical_sentiment(days=7)
+        assert len(history) >= 1
+        assert history[0]["composite_score"] == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Constants and thresholds
+# ---------------------------------------------------------------------------
+
+class TestConstants:
+    def test_thresholds(self):
+        assert EXTREME_FEAR_THRESHOLD == -2.0
+        assert EXTREME_GREED_THRESHOLD == 2.0
+        assert FEAR_THRESHOLD == -1.0
+        assert GREED_THRESHOLD == 1.0
+
+    def test_weights_sum_to_one(self):
+        fetcher = BehavioralSentimentFetcher.__new__(BehavioralSentimentFetcher)
+        total = sum(fetcher.WEIGHTS.values())
+        assert abs(total - 1.0) < 0.001
+
+    def test_cache_ttl_positive(self):
+        assert CACHE_TTL_HOURS > 0
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

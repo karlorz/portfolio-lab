@@ -12,11 +12,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.paths import DATA_DIR as _DATA_DIR
+from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, WORK_DIR as _WORK_DIR
 
 DATA_DIR = _DATA_DIR
-WIKI_DIR = Path("~/wiki/projects/portfolio-lab").expanduser()
-WORK_DIR = Path("~/projects/portfolio-lab/work").expanduser()
+WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
+WORK_DIR = _WORK_DIR
 DB_PATH = DATA_DIR / "market.db"
 
 class ResearchAgent:

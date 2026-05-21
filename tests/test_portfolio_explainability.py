@@ -300,25 +300,25 @@ class TestPortfolioExplainability:
     def test_signal_deep_dive_known_no_data(self, mock_readings, temp_data_dir):
         mock_readings.return_value = {}
         explainer = PortfolioExplainability(data_dir=temp_data_dir)
-        result = explainer.signal_deep_dive("macro_momentum")
-        # Should match "macro_momentum" from SIGNAL_SOURCE_META key check
+        result = explainer.signal_deep_dive("multi_speed_momentum")
+        # Should match "multi_speed_momentum" from SIGNAL_SOURCE_META key check
         # but find no readings
         assert result is None
 
     @patch("src.monitor.portfolio_explainability._get_all_source_readings")
     def test_signal_deep_dive_with_data(self, mock_readings, temp_data_dir, sample_reading):
-        sample_reading["source"] = "macro_momentum"
+        sample_reading["source"] = "multi_speed_momentum"
         # 25 readings — enough for >=20 threshold, all same value → "stable" trend
         readings = [dict(sample_reading) for _ in range(25)]
         for i, r in enumerate(readings):
             r["timestamp"] = f"2026-05-{1 + i:02d}T00:00:00"
-        mock_readings.return_value = {"macro_momentum": readings}
+        mock_readings.return_value = {"multi_speed_momentum": readings}
 
         explainer = PortfolioExplainability(data_dir=temp_data_dir)
-        dive = explainer.signal_deep_dive("macro_momentum")
+        dive = explainer.signal_deep_dive("multi_speed_momentum")
 
         assert dive is not None
-        assert dive.source == "macro_momentum"
+        assert dive.source == "multi_speed_momentum"
         assert dive.total_observations == 25
         assert dive.avg_value == pytest.approx(0.34, abs=0.01)
         assert dive.recent_trend == "stable"

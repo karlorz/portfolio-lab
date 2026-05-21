@@ -47,7 +47,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 from decimal import Decimal, ROUND_DOWN
 
-from src.paths import MARKET_DB
+from src.paths import MARKET_DB, DATA_DIR
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -186,7 +186,7 @@ class SignalExecutionBridge:
     
     def _get_tca_feedback_path(self) -> Path:
         """Get path to TCA feedback state file."""
-        return Path(__file__).parent.parent.parent / "data" / "tca_feedback_state.json"
+        return DATA_DIR / "tca_feedback_state.json"
     
     def _load_tca_feedback(self) -> Optional[Dict[str, Any]]:
         """

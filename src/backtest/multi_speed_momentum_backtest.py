@@ -130,9 +130,7 @@ class MultiSpeedMomentumBacktester:
         try:
             prices_path = PRICES_JSON
             if not prices_path.exists():
-                prices_path = Path("public/data/prices.json")
-            if not prices_path.exists():
-                logger.error("Price data not found at %s or public/data/prices.json", PRICES_JSON)
+                logger.error("Price data not found at %s", PRICES_JSON)
                 return False
 
             with open(prices_path) as f:

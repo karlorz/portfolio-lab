@@ -38,22 +38,12 @@ PAPER_TRADING_DB = DATA_DIR / "paper_trading.db"
 
 # All known signal sources with display names
 SIGNAL_SOURCE_META = {
-    "tsfm_momentum": {"name": "TSFM Factor Momentum", "category": "trend", "weight_tier": "primary"},
-    "hmm_regime": {"name": "HMM Regime Detector", "category": "regime", "weight_tier": "secondary"},
-    "cta_trend": {"name": "CTA Trend Overlay", "category": "trend", "weight_tier": "primary"},
-    "macro_momentum": {"name": "Macro Momentum", "category": "macro", "weight_tier": "secondary"},
     "multi_speed_momentum": {"name": "Multi-Speed Momentum", "category": "trend", "weight_tier": "primary"},
-    "duration_regime": {"name": "Duration/Yield Curve", "category": "rates", "weight_tier": "secondary"},
-    "circuit_breaker": {"name": "Circuit Breaker", "category": "risk", "weight_tier": "defensive"},
-    "factor_rotation": {"name": "Factor Rotation", "category": "factor", "weight_tier": "secondary"},
-    "closing_auction": {"name": "Closing Auction MOC", "category": "execution", "weight_tier": "tactical"},
-    "unified_overlay": {"name": "Unified Overlay", "category": "orchestration", "weight_tier": "tactical"},
-    "mean_reversion": {"name": "Mean Reversion", "category": "meanrev", "weight_tier": "tactical"},
-    "transformer_regime": {"name": "Transformer Regime", "category": "regime", "weight_tier": "secondary"},
-    "transient_factors": {"name": "Transient Factors", "category": "factor", "weight_tier": "tactical"},
-    "visibility_graph": {"name": "Visibility Graph (VGRSI)", "category": "network", "weight_tier": "tactical"},
-    "vp_macd": {"name": "VP-MACD", "category": "momentum", "weight_tier": "tactical"},
     "cross_asset_rv": {"name": "Cross-Asset RV", "category": "meanrev", "weight_tier": "tactical"},
+    "international_momentum": {"name": "International Momentum", "category": "trend", "weight_tier": "primary"},
+    "alternative_data": {"name": "Alternative Data", "category": "fundamental", "weight_tier": "primary"},
+    "cross_asset_regime_arb": {"name": "Cross-Asset Regime Arb", "category": "regime", "weight_tier": "tactical"},
+    "unified_overlay": {"name": "Unified Overlay", "category": "orchestration", "weight_tier": "tactical"},
 }
 
 

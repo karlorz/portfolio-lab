@@ -398,17 +398,11 @@ class DashboardGenerator:
         # Load broker data (Phase 4: live trading prep)
         broker_data = self._load_broker_data()
 
-        # Add closing auction signals (v3.17 Phase 4)
-        closing_auction_data = self._load_closing_auction_data()
-
         # Add GARCH-CVaR metrics (v3.21)
         garch_cvar_data = self._load_garch_cvar_data()
 
         # Add entropy diversification metrics (v3.22)
         entropy_data = self._load_entropy_data()
-
-        # Add bond momentum signals (v3.30)
-        bond_momentum_data = self._load_bond_momentum_data()
 
         # Behavioral sentiment data (v2.70)
         behavioral_sentiment_data = None
@@ -540,10 +534,9 @@ class DashboardGenerator:
             "factor_rotation_dashboard": factor_rotation_dashboard,
             "smart_rebalance": smart_rebalance_data,
             "broker": broker_data,
-            "closing_auction": closing_auction_data,
             "garch_cvar": garch_cvar_data,
             "entropy": entropy_data,
-            "bond_momentum": bond_momentum_data,
+            "bond_momentum": {},
         }
         
         out_path = PUBLIC_DIR / "signals.json"
@@ -601,38 +594,6 @@ class DashboardGenerator:
                 pass
 
         return broker
-
-    def _load_closing_auction_data(self) -> Dict:
-        """Load closing auction MOC signals for dashboard (v3.17 Phase 4)."""
-        closing_auction = {
-            "signals": [],
-            "last_update": None,
-            "market_open": False,
-        }
-        
-        try:
-            # Check for closing auction signal file
-            signal_file = DATA_DIR / "closing_auction_latest.json"
-            if signal_file.exists():
-                with open(signal_file) as f:
-                    data = json.load(f)
-                    closing_auction["signals"] = data.get("signals", [])
-                    closing_auction["last_update"] = data.get("timestamp")
-            
-            # Check market hours (simplified: 9:30-16:00 ET)
-            from datetime import datetime, time
-            now = datetime.now()
-            et_offset = timedelta(hours=0)  # Server is ET
-            et_time = (now + et_offset).time()
-            market_open_time = time(9, 30)
-            market_close_time = time(16, 0)
-            closing_auction["market_open"] = market_open_time <= et_time <= market_close_time
-            
-        except Exception as e:
-            # Closing auction data not available
-            pass
-        
-        return closing_auction
 
     def _load_garch_cvar_data(self) -> Dict:
         """Load GARCH-filtered CVaR metrics for dashboard (v3.21)."""
@@ -710,57 +671,6 @@ class DashboardGenerator:
             pass
         
         return entropy
-
-    def _load_bond_momentum_data(self) -> Dict:
-        """Load bond momentum signals for dashboard (v3.30)."""
-        bond_momentum = {
-            "signals": [],
-            "timestamp": datetime.now().isoformat(),
-            "ensemble": {
-                "weight": 2.5,
-                "confidence": "low",
-                "action": "neutral",
-                "recommendation": "Burn-in period (30 days) - signal monitoring only"
-            }
-        }
-        
-        try:
-            # Import bond momentum module
-            sys.path.insert(0, str(Path(__file__).parent.parent / 'signals'))
-            from bond_momentum import BondMomentumCalculator
-            
-            # Create calculator and load prices
-            calc = BondMomentumCalculator()
-            if calc.load_prices_from_file():
-                signals = calc.get_all_signals()
-                
-                # Convert signals to JSON-serializable format
-                bond_momentum["signals"] = [
-                    {
-                        "etf": s.etf,
-                        "timestamp": s.timestamp.isoformat() if s.timestamp else None,
-                        "signal": s.signal,
-                        "position_size": s.position_size,
-                        "formation_return": s.formation_return,
-                        "realized_vol": s.realized_vol,
-                        "formation_months": s.formation_months,
-                        "volatility_target": s.volatility_target,
-                        "confidence": s.confidence,
-                        "action": s.action,
-                        "weight_delta": s.weight_delta
-                    }
-                    for s in signals
-                ]
-                
-                # Get ensemble recommendation
-                ensemble = calc.get_ensemble_recommendation(signals)
-                bond_momentum["ensemble"] = ensemble
-                bond_momentum["timestamp"] = datetime.now().isoformat()
-        except Exception as e:
-            # Use default values
-            pass
-        
-        return bond_momentum
 
     def _generate_ml_signals(self) -> Dict:
         """Generate ML-based signals from features data."""
