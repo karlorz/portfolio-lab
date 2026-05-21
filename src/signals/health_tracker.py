@@ -33,15 +33,12 @@ STATE_PATH = DATA_DIR / ".signal_health_state.json"
 
 class SignalSource(Enum):
     """Signal sources tracked for health monitoring."""
-    HMM = "hmm"  # HMM-LSTM Regime Detector
-    CTA = "cta"  # CTA Trend Overlay (technical signals)
-    MACRO_MOMENTUM = "macro_momentum"  # Macro/economic signals
-    ALT_DATA = "alt_data"  # Alternative Data NLP
-    FED_POLICY = "fed_policy"  # Fed Policy Overlay
-    SENTIMENT = "sentiment"  # LLM Sentiment
-    TAIL_HEDGE = "tail_hedge"  # Tail Risk Hedge
-    VIX_SIGNAL = "vix"  # VIX-based signals
-    DURATION = "duration"  # Duration/Yield Overlay
+    MULTI_SPEED_MOM = "multi_speed_momentum"
+    CROSS_ASSET_RV = "cross_asset_rv"
+    INTERNATIONAL_MOMENTUM = "international_momentum"
+    ALT_DATA = "alternative_data"
+    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"
+    UNIFIED_OVERLAY = "unified_overlay"
 
 
 class SignalHealthStatus(Enum):

@@ -304,15 +304,35 @@ class OptionsChainFetcher:
     async def _generate_simulated_chain(self, underlying: str) -> OptionsChain:
         """
         Generate realistic simulated options chain for testing.
-        
+
         Used when API is not available or for paper trading validation.
         """
-        from src.data.price_fetcher import PriceFetcher
-        
-        # Get underlying price
-        fetcher = PriceFetcher()
-        spot_data = await fetcher.fetch_latest(underlying)
-        spot = spot_data.get("price", 550.0)  # Default SPY price
+        # Get underlying price from market DB
+        import sqlite3
+        spot = 550.0  # Default SPY price
+        vix = 16.0    # Default VIX
+        try:
+            from src.paths import DATA_DIR
+            db_path = DATA_DIR / "market.db"
+            if db_path.exists():
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+                    (underlying,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    spot = float(row[0])
+                cursor.execute(
+                    "SELECT close FROM prices WHERE symbol = 'VIX' ORDER BY date DESC LIMIT 1"
+                )
+                vix_row = cursor.fetchone()
+                if vix_row:
+                    vix = float(vix_row[0])
+                conn.close()
+        except Exception:
+            pass
         
         today = date.today()
         quotes = []
@@ -321,13 +341,6 @@ class OptionsChainFetcher:
         strike_step = 5.0  # $5 increments for SPY
         atm_strike = round(spot / strike_step) * strike_step
         strikes = [atm_strike + (i * strike_step) for i in range(-10, 11)]
-        
-        # Get VIX for volatility estimation
-        try:
-            vix_data = await fetcher.fetch_latest("VIX")
-            vix = vix_data.get("price", 16.0)
-        except:
-            vix = 16.0
         
         # Time to expiration in years (0DTE = very small)
         tte = 1 / 365  # One day

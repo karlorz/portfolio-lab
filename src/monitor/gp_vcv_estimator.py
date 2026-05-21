@@ -351,7 +351,9 @@ def main():
         print("Set PORTFOLIO_LAB_ENABLE_ML=1 to enable GP estimation.")
         return 1
 
-    from src.data.fetcher import PriceFetcher
+    # Fetch price data from market DB
+    import sqlite3
+    from src.paths import DATA_DIR
 
     assets = args.assets.split(",") if args.assets else ["SPY", "GLD", "TLT"]
     estimator = GaussianProcessVCV(lookback=args.lookback)
@@ -364,16 +366,29 @@ def main():
             print("No previous GP-VCV state found.")
         return 0
 
-    # Fetch price data
-    fetcher = PriceFetcher()
-    prices = fetcher.fetch_prices(assets, period="2y")
+    # Fetch price data from SQLite
+    db_path = DATA_DIR / "market.db"
+    if not db_path.exists():
+        print("No market.db found. Run data pipeline first.")
+        return 1
+
+    conn = sqlite3.connect(db_path)
+    prices = {}
+    for sym in assets:
+        rows = conn.execute(
+            "SELECT date, close FROM prices WHERE symbol = ? ORDER BY date",
+            (sym,),
+        ).fetchall()
+        if rows:
+            prices[sym] = [r[1] for r in rows]
+    conn.close()
 
     # Convert to log returns
     log_returns_list = []
     valid_assets = []
     for sym in assets:
         if sym in prices and len(prices[sym]) > 2:
-            p = np.array(prices[sym])
+            p = np.array(prices[sym], dtype=float)
             r = np.diff(np.log(p))
             log_returns_list.append(r)
             valid_assets.append(sym)

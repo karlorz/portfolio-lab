@@ -110,9 +110,8 @@ SIGNAL_TIMEFRAMES = {
     "regime_classifier": Timeframe.MEDIUM,
     "factor_timing": Timeframe.MEDIUM,
     "risk_budget": Timeframe.LONG,
-    "llm_narrative": Timeframe.MEDIUM,
+    "unified_overlay": Timeframe.MEDIUM,
     "tax_aware": Timeframe.LONG,
-    "vixy_hedge": Timeframe.SHORT,
 }
 
 
@@ -412,7 +411,7 @@ class MultiTimeframeFusion:
         - Equity signals: tsfm_momentum, multi_speed_momentum, cta_trend,
           mean_reversion, factor_rotation, cross_asset_rv, factor_timing
         - Duration signals: duration_regime, macro_momentum, risk_budget, tax_aware
-        - Gold signals: unified_overlay, llm_narrative, vixy_hedge
+        - Gold signals: unified_overlay
         """
         equity_sources = {
             "tsfm_momentum", "multi_speed_momentum", "cta_trend",
@@ -425,7 +424,7 @@ class MultiTimeframeFusion:
             "tax_aware", "unified_overlay",
         }
         gold_sources = {
-            "unified_overlay", "llm_narrative", "vixy_hedge",
+            "unified_overlay",
         }
         
         if asset_type == "equity":
@@ -588,9 +587,8 @@ def main():
             "regime_classifier": 0.05,
             "factor_timing": 0.10,
             "risk_budget": 0.05,
-            "llm_narrative": 0.12,
+            "unified_overlay": 0.12,
             "tax_aware": 0.03,
-            "vixy_hedge": 0.05,
         }
         confidences = {k: 0.5 + abs(v) * 0.3 for k, v in signals.items()}
     

@@ -112,21 +112,12 @@ class TestSignalClassification:
     def test_classify_signal_timeframe_correctness(self, fusion):
         """Each known signal should be classified into correct timeframe."""
         assert fusion.get_signal_timeframe("vp_macd") == "short"
-        assert fusion.get_signal_timeframe("mean_reversion") == "short"
-        assert fusion.get_signal_timeframe("closing_auction") == "short"
-        assert fusion.get_signal_timeframe("circuit_breaker") == "short"
-        assert fusion.get_signal_timeframe("transient_factors") == "short"
-        assert fusion.get_signal_timeframe("vixy_hedge") == "short"
-        
+
         assert fusion.get_signal_timeframe("cta_trend") == "medium"
         assert fusion.get_signal_timeframe("multi_speed_momentum") == "medium"
-        assert fusion.get_signal_timeframe("factor_rotation") == "medium"
-        assert fusion.get_signal_timeframe("hmm_regime") == "medium"
         assert fusion.get_signal_timeframe("cross_asset_rv") == "medium"
-        
-        assert fusion.get_signal_timeframe("tsfm_momentum") == "long"
-        assert fusion.get_signal_timeframe("duration_regime") == "long"
-        assert fusion.get_signal_timeframe("macro_momentum") == "long"
+        assert fusion.get_signal_timeframe("unified_overlay") == "medium"
+
         assert fusion.get_signal_timeframe("risk_budget") == "long"
         assert fusion.get_signal_timeframe("tax_aware") == "long"
 

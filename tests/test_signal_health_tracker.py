@@ -65,7 +65,7 @@ class TestPredictionLogging:
             
             prediction = SignalPrediction(
                 timestamp="2026-05-14T10:00:00",
-                source="hmm",
+                source="multi_speed_momentum",
                 signal_value=0.8,
                 confidence=0.75,
                 predicted_direction=1,
@@ -77,7 +77,7 @@ class TestPredictionLogging:
             # Verify in database
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM signal_predictions WHERE source = 'hmm'")
+            cursor.execute("SELECT COUNT(*) FROM signal_predictions WHERE source = 'multi_speed_momentum'")
             assert cursor.fetchone()[0] == 1
             conn.close()
     
@@ -87,7 +87,7 @@ class TestPredictionLogging:
             tracker = SignalHealthTracker(db_path)
             
             tracker.log_prediction_simple(
-                source="cta",
+                source="cross_asset_rv",
                 signal_value=-0.5,
                 confidence=0.6,
                 timestamp="2026-05-14T10:00:00",
@@ -97,7 +97,7 @@ class TestPredictionLogging:
             # Verify direction was calculated correctly
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-            cursor.execute("SELECT predicted_direction FROM signal_predictions WHERE source = 'cta'")
+            cursor.execute("SELECT predicted_direction FROM signal_predictions WHERE source = 'cross_asset_rv'")
             direction = cursor.fetchone()[0]
             assert direction == -1  # Negative signal = bearish
             conn.close()
@@ -107,7 +107,7 @@ class TestPredictionLogging:
             db_path = Path(tmp) / "test.db"
             tracker = SignalHealthTracker(db_path)
             
-            sources = ["hmm", "cta", "alt_data", "vix"]
+            sources = ["multi_speed_momentum", "cross_asset_rv", "alternative_data", "unified_overlay"]
             for i, source in enumerate(sources):
                 tracker.log_prediction_simple(
                     source=source,
@@ -159,12 +159,12 @@ class TestHealthScoreCalculation:
             tracker = SignalHealthTracker(db_path)
             
             # Setup 90 days of 70% accurate predictions
-            self.setup_predictions(tracker, "hmm", 100, 0.7)
-            
-            score = tracker.calculate_health_score("hmm", "2026-05-14")
-            
+            self.setup_predictions(tracker, "multi_speed_momentum", 100, 0.7)
+
+            score = tracker.calculate_health_score("multi_speed_momentum", "2026-05-14")
+
             assert score is not None
-            assert score.source == "hmm"
+            assert score.source == "multi_speed_momentum"
             assert 0.5 < score.health_score < 0.9  # Should be around 0.7
             assert score.accuracy_30d > 0  # Should have 30d accuracy
             assert score.predictions_count >= 90
@@ -196,9 +196,9 @@ class TestHealthScoreCalculation:
             tracker = SignalHealthTracker(db_path)
             
             # Only 5 predictions - not enough for 90d calculation
-            self.setup_predictions(tracker, "hmm", 5, 0.7)
-            
-            score = tracker.calculate_health_score("hmm", "2026-05-14")
+            self.setup_predictions(tracker, "multi_speed_momentum", 5, 0.7)
+
+            score = tracker.calculate_health_score("multi_speed_momentum", "2026-05-14")
             assert score is None
     
     def test_decay_rate_calculation(self):
@@ -262,7 +262,7 @@ class TestDecayDetection:
             conn = sqlite3.connect(tracker.db_path)
             cursor = conn.cursor()
             
-            # Use "hmm" which is in SignalSource enum
+            # Use "multi_speed_momentum" which is in SignalSource enum
             # Old health score (high) - 45 days ago
             cursor.execute("""
                 INSERT INTO signal_health_scores
@@ -270,7 +270,7 @@ class TestDecayDetection:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 (base_date - timedelta(days=45)).isoformat(),
-                "hmm",  # Valid SignalSource enum value
+                "multi_speed_momentum",  # Valid SignalSource enum value
                 0.80,
                 0.80, 0.75, 0.70,
                 0.0,
@@ -285,7 +285,7 @@ class TestDecayDetection:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 (base_date - timedelta(days=15)).isoformat(),
-                "hmm",
+                "multi_speed_momentum",
                 0.70,
                 0.70, 0.65, 0.68,
                 0.0,
@@ -300,7 +300,7 @@ class TestDecayDetection:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 base_date.isoformat(),
-                "hmm",
+                "multi_speed_momentum",
                 0.55,  # 0.80 -> 0.55 = 31% drop
                 0.55, 0.60, 0.65,
                 -0.01,
@@ -320,7 +320,7 @@ class TestDecayDetection:
             # 0.80 -> 0.55 = 31.25% drop = should trigger alert
             assert len(alerts) >= 1
             if alerts:
-                assert alerts[0].source == "hmm"
+                assert alerts[0].source == "multi_speed_momentum"
                 assert alerts[0].severity in ["warning", "critical"]
     
     def test_no_alerts_for_stable_signals(self):
@@ -373,8 +373,8 @@ class TestWeightAdjustment:
             
             # Create predictions with known sources from SignalSource enum
             sources = [
-                ("hmm", 0.85, "healthy"),  # Use valid enum value
-                ("cta", 0.35, "unhealthy"),  # Use valid enum value
+                ("multi_speed_momentum", 0.85, "healthy"),
+                ("cross_asset_rv", 0.35, "unhealthy"),
             ]
             
             for source, health, status in sources:
@@ -396,28 +396,28 @@ class TestWeightAdjustment:
             conn.close()
             
             # Get individual health scores
-            hmm_score = tracker.calculate_health_score("hmm", "2026-05-14")
-            cta_score = tracker.calculate_health_score("cta", "2026-05-14")
-            
+            msm_score = tracker.calculate_health_score("multi_speed_momentum", "2026-05-14")
+            crv_score = tracker.calculate_health_score("cross_asset_rv", "2026-05-14")
+
             # If we have valid scores, test weight adjustment
-            if hmm_score and cta_score:
+            if msm_score and crv_score:
                 # Calculate adjusted weights for just these two
                 base_weights = {
-                    "hmm": 0.5,
-                    "cta": 0.5,
+                    "multi_speed_momentum": 0.5,
+                    "cross_asset_rv": 0.5,
                 }
-                
+
                 # Calculate what weights should be based on health scores
-                hmm_weight = 0.5 * max(0.2, hmm_score.health_score)
-                cta_weight = 0.5 * max(0.2, cta_score.health_score)
-                total = hmm_weight + cta_weight
-                
+                msm_weight = 0.5 * max(0.2, msm_score.health_score)
+                crv_weight = 0.5 * max(0.2, crv_score.health_score)
+                total = msm_weight + crv_weight
+
                 # Normalize
-                expected_hmm = hmm_weight / total
-                expected_cta = cta_weight / total
-                
-                # Healthy (hmm) should have higher weight than unhealthy (cta)
-                assert expected_hmm > expected_cta
+                expected_msm = msm_weight / total
+                expected_crv = crv_weight / total
+
+                # Healthy (msm) should have higher weight than unhealthy (crv)
+                assert expected_msm > expected_crv
     
     def test_minimum_weight_floor(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -465,8 +465,8 @@ class TestHealthReport:
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             
-            # Insert directly using hmm and cta (valid sources)
-            for source in ["hmm", "cta"]:
+            # Insert directly using active source names
+            for source in ["multi_speed_momentum", "cross_asset_rv"]:
                 cursor.execute("""
                     INSERT INTO signal_health_scores
                     (timestamp, source, health_score, accuracy_30d, accuracy_60d, accuracy_90d, decay_rate, predictions_count, status)
@@ -501,8 +501,8 @@ class TestEnumCoverage:
     
     def test_all_sources_defined(self):
         sources = list(SignalSource)
-        expected = ["hmm", "cta", "alt_data", "fed_policy", "sentiment", "tail_hedge", "vix", "duration"]
-        
+        expected = ["multi_speed_momentum", "cross_asset_rv", "international_momentum", "alternative_data", "cross_asset_regime_arb", "unified_overlay"]
+
         for exp in expected:
             assert any(s.value == exp for s in sources)
     
@@ -520,7 +520,7 @@ class TestDataStructures:
     def test_prediction_to_dict(self):
         pred = SignalPrediction(
             timestamp="2026-05-14T10:00:00",
-            source="hmm",
+            source="multi_speed_momentum",
             signal_value=0.8,
             confidence=0.75,
             predicted_direction=1,
@@ -528,13 +528,13 @@ class TestDataStructures:
         )
         
         d = pred.to_dict()
-        assert d["source"] == "hmm"
+        assert d["source"] == "multi_speed_momentum"
         assert d["signal_value"] == 0.8
         assert json.loads(d["metadata"]) == {"key": "value"}
     
     def test_health_score_to_dict(self):
         score = HealthScore(
-            source="hmm",
+            source="multi_speed_momentum",
             timestamp="2026-05-14",
             health_score=0.75,
             accuracy_30d=0.80,
@@ -546,12 +546,12 @@ class TestDataStructures:
         )
         
         d = score.to_dict()
-        assert d["source"] == "hmm"
+        assert d["source"] == "multi_speed_momentum"
         assert d["health_score"] == 0.75
     
     def test_decay_alert_to_dict(self):
         alert = DecayAlert(
-            source="hmm",
+            source="multi_speed_momentum",
             alert_timestamp="2026-05-14T10:00:00",
             previous_health=0.80,
             current_health=0.55,
@@ -561,7 +561,7 @@ class TestDataStructures:
         )
         
         d = alert.to_dict()
-        assert d["source"] == "hmm"
+        assert d["source"] == "multi_speed_momentum"
         assert d["severity"] == "warning"
 
 

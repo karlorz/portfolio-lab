@@ -2,11 +2,11 @@
 """
 Portfolio-Lab v3.10 Phase 1: Stacking Feature Engineering
 
-Generates 102-dimensional feature vectors for XGBoost meta-learner from base signals:
-- 8 base signal values
-- 84 pairwise interaction features (28 pairs × 3 types: multiplicative, disagreement, average)
+Generates 59-dimensional feature vectors for XGBoost meta-learner from base signals:
+- 6 base signal values
+- 45 pairwise interaction features (15 pairs × 3 types: multiplicative, disagreement, average)
 - 2 regime context features (VIX normalized, trend strength)
-- 8 historical accuracy features (90-day rolling)
+- 6 historical accuracy features (90-day rolling)
 
 Usage:
     from src.signals.stacking_feature_engine import StackingFeatureEngine
@@ -18,8 +18,8 @@ Usage:
     python -m src.signals.stacking_feature_engine --test
 
 Performance:
-- Feature generation latency: <10ms for 8 signals
-- Memory footprint: ~50KB per feature vector
+- Feature generation latency: <10ms for 6 signals
+- Memory footprint: ~35KB per feature vector
 """
 
 import json
@@ -38,14 +38,12 @@ sys.path.insert(0, str(project_root))
 
 class SignalSource(Enum):
     """Signal source identifiers for stacking features."""
-    TSFM_MOMENTUM = "tsfm_momentum"
-    HMM_REGIME = "hmm_regime"
-    CTA_TREND = "cta_trend"
-    MACRO_MOMENTUM = "macro_momentum"
     MULTI_SPEED_MOM = "multi_speed_momentum"
-    DURATION_REGIME = "duration_regime"
-    CIRCUIT_BREAKER = "circuit_breaker"
-    FACTOR_ROTATION = "factor_rotation"
+    CROSS_ASSET_RV = "cross_asset_rv"
+    INTERNATIONAL_MOMENTUM = "international_momentum"
+    ALTERNATIVE_DATA = "alternative_data"
+    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"
+    UNIFIED_OVERLAY = "unified_overlay"
 
 
 @dataclass
@@ -76,47 +74,47 @@ class HistoricalAccuracy:
 
 @dataclass  
 class FeatureVector:
-    """Complete 102-dimensional feature vector."""
-    # Base signals (8)
+    """Complete 59-dimensional feature vector."""
+    # Base signals (6)
     base_values: Dict[SignalSource, float]
     
-    # Pairwise interactions (84)
-    multiplicative: Dict[Tuple[SignalSource, SignalSource], float]  # 28
-    disagreement: Dict[Tuple[SignalSource, SignalSource], float]     # 28
-    averages: Dict[Tuple[SignalSource, SignalSource], float]        # 28
+    # Pairwise interactions (45)
+    multiplicative: Dict[Tuple[SignalSource, SignalSource], float]  # 15
+    disagreement: Dict[Tuple[SignalSource, SignalSource], float]     # 15
+    averages: Dict[Tuple[SignalSource, SignalSource], float]        # 15
     
     # Regime context (2)
     vix_normalized: float
     trend_strength: float
     
-    # Historical accuracy (8)
+    # Historical accuracy (6)
     accuracy_values: Dict[SignalSource, float]
-    
+
     # Metadata
     timestamp: datetime
-    dimension_count: int = 102
+    dimension_count: int = 59
 
 
 class StackingFeatureEngine:
     """
-    Generate 102-dimensional feature vectors for XGBoost meta-learner.
-    
+    Generate 59-dimensional feature vectors for XGBoost meta-learner.
+
     Features:
-    - Base signal values (8)
-    - Pairwise multiplicative interactions (28)
-    - Pairwise disagreement features (28)
-    - Pairwise average features (28)
+    - Base signal values (6)
+    - Pairwise multiplicative interactions (15)
+    - Pairwise disagreement features (15)
+    - Pairwise average features (15)
     - Regime context (2)
-    - Historical accuracy (8)
-    
-    Total: 102 features
+    - Historical accuracy (6)
+
+    Total: 59 features
     """
-    
-    NUM_BASE_SIGNALS = 8
-    NUM_PAIRWISE_COMBINATIONS = 28  # C(8,2) = 28
+
+    NUM_BASE_SIGNALS = 6
+    NUM_PAIRWISE_COMBINATIONS = 15  # C(6,2) = 15
     NUM_REGIME_FEATURES = 2
-    NUM_ACCURACY_FEATURES = 8
-    TOTAL_DIMENSIONS = 102
+    NUM_ACCURACY_FEATURES = 6
+    TOTAL_DIMENSIONS = 59
     
     def __init__(self, vix_normalization_factor: float = 30.0):
         """
@@ -141,32 +139,32 @@ class StackingFeatureEngine:
         historical_accuracy: Dict[SignalSource, HistoricalAccuracy]
     ) -> FeatureVector:
         """
-        Generate complete 102-dimensional feature vector.
-        
+        Generate complete 59-dimensional feature vector.
+
         Args:
             signals: Dictionary of Signal objects keyed by SignalSource
             regime_context: Current market regime context
             historical_accuracy: Dictionary of HistoricalAccuracy by SignalSource
-            
+
         Returns:
-            FeatureVector with all 102 features computed
-            
+            FeatureVector with all 59 features computed
+
         Raises:
-            ValueError: If not all 8 signal sources are provided
+            ValueError: If not all 6 signal sources are provided
         """
         # Validate input
         if len(signals) != self.NUM_BASE_SIGNALS:
             missing = set(SignalSource) - set(signals.keys())
             raise ValueError(f"Expected {self.NUM_BASE_SIGNALS} signals, got {len(signals)}. Missing: {missing}")
         
-        # Base signal values (8 features)
+        # Base signal values (6 features)
         base_values = {source: signal.value for source, signal in signals.items()}
         
         # Pairwise combinations
         sources = list(signals.keys())
         pairs = self._get_pairwise_combinations(sources)
         
-        # Pairwise interaction features (84 features = 28 pairs × 3 types)
+        # Pairwise interaction features (45 features = 15 pairs × 3 types)
         multiplicative = {}
         disagreement = {}
         averages = {}
@@ -188,7 +186,7 @@ class StackingFeatureEngine:
         vix_normalized = regime_context.vix_level / self.vix_normalization_factor
         trend_strength = regime_context.trend_strength
         
-        # Historical accuracy features (8 features)
+        # Historical accuracy features (6 features)
         accuracy_values = {
             source: hist.accuracy_90d 
             for source, hist in historical_accuracy.items()
@@ -210,9 +208,9 @@ class StackingFeatureEngine:
         Convert FeatureVector to numpy array for XGBoost inference.
         
         Returns:
-            numpy array of shape (102,) with all features concatenated
-            Order: base (8) + multiplicative (28) + disagreement (28) + 
-                   averages (28) + regime (2) + accuracy (8)
+            numpy array of shape (59,) with all features concatenated
+            Order: base (6) + multiplicative (15) + disagreement (15) +
+                   averages (15) + regime (2) + accuracy (6)
         """
         features = []
         
@@ -265,7 +263,7 @@ class StackingFeatureEngine:
         Get ordered list of feature names matching numpy array order.
         
         Returns:
-            List of 102 feature name strings
+            List of 59 feature name strings
         """
         names = []
         
@@ -496,6 +494,12 @@ def demo():
             timestamp=datetime.now(),
             confidence=0.71
         ),
+        SignalSource.UNIFIED_OVERLAY: Signal(
+            source=SignalSource.UNIFIED_OVERLAY,
+            value=0.40,
+            timestamp=datetime.now(),
+            confidence=0.75
+        ),
     }
     
     # Add some mock historical accuracy data
@@ -533,12 +537,12 @@ def demo():
     print(f"   ✓ Memory: {features_np.nbytes} bytes")
     
     print("\n3. Feature Breakdown:")
-    print(f"   - Base signals (8): mean={np.mean(list(feature_vector.base_values.values())):.3f}")
-    print(f"   - Multiplicative interactions (28): range [{min(feature_vector.multiplicative.values()):.3f}, {max(feature_vector.multiplicative.values()):.3f}]")
-    print(f"   - Disagreement features (28): range [{min(feature_vector.disagreement.values()):.3f}, {max(feature_vector.disagreement.values()):.3f}]")
-    print(f"   - Average features (28): range [{min(feature_vector.averages.values()):.3f}, {max(feature_vector.averages.values()):.3f}]")
+    print(f"   - Base signals (6): mean={np.mean(list(feature_vector.base_values.values())):.3f}")
+    print(f"   - Multiplicative interactions (15): range [{min(feature_vector.multiplicative.values()):.3f}, {max(feature_vector.multiplicative.values()):.3f}]")
+    print(f"   - Disagreement features (15): range [{min(feature_vector.disagreement.values()):.3f}, {max(feature_vector.disagreement.values()):.3f}]")
+    print(f"   - Average features (15): range [{min(feature_vector.averages.values()):.3f}, {max(feature_vector.averages.values()):.3f}]")
     print(f"   - Regime context (2): VIX={feature_vector.vix_normalized:.3f}, trend={feature_vector.trend_strength:.3f}")
-    print(f"   - Historical accuracy (8): mean={np.mean(list(feature_vector.accuracy_values.values())):.3f}")
+    print(f"   - Historical accuracy (6): mean={np.mean(list(feature_vector.accuracy_values.values())):.3f}")
     
     print("\n4. Feature Names Sample (first 20):")
     names = engine.get_feature_names()

@@ -219,14 +219,14 @@ def _get_overlays_section() -> Dict[str, Any]:
         overlays["bond_duration"] = {"active": False}
 
     # VIX term structure overlay
-    vix = _read_json("vix_overlay_state.json")
-    if vix:
+    # vix_overlay.py was removed in v9.31 — read from VIXY hedge state instead
+    vixy = _read_json("vixy_hedge_state.json")
+    if vixy:
         overlays["vix_term_structure"] = {
-            "active": vix.get("disabled_until") is None,
-            "allocation": vix.get("allocation"),
-            "last_shift_date": vix.get("last_shift_date"),
-            "disabled_until": vix.get("disabled_until"),
-            "shift_count": len(vix.get("shift_history", [])),
+            "active": vixy.get("current_allocation", 0) > 0,
+            "allocation": vixy.get("current_allocation"),
+            "last_shift_date": vixy.get("last_signal_date"),
+            "regime": vixy.get("regime"),
         }
     else:
         overlays["vix_term_structure"] = {"active": False}

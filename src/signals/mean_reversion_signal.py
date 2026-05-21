@@ -301,13 +301,14 @@ class VIXMeanReversionCalculator:
         return vpin_estimate, vpin_estimate < VPIN_THRESHOLD
 
     def _load_vpin_state(self) -> float:
-        """Load VPIN level from vix_overlay state or compute fresh."""
-        vpin_path = DATA_DIR / "vix_overlay_state.json"
+        """Load VPIN level from VPIN signal state or compute fresh."""
+        # Try VPIN signal output first, then fall back to computing
+        vpin_path = DATA_DIR / "signals" / "vpin_latest.json"
         if vpin_path.exists():
             try:
                 with open(vpin_path) as f:
-                    state = json.load(f)
-                return state.get("vpin_level", 0.5)
+                    data = json.load(f)
+                return data.get("vpin_level", 0.5)
             except (json.JSONDecodeError, KeyError):
                 pass
         vpin, _ = self.compute_vpin()

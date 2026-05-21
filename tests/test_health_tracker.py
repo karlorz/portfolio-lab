@@ -30,13 +30,13 @@ from src.signals.health_tracker import (
 class TestSignalSource:
     def test_all_sources(self):
         sources = {s.value for s in SignalSource}
-        assert "hmm" in sources
-        assert "cta" in sources
-        assert "sentiment" in sources
-        assert "vix" in sources
+        assert "multi_speed_momentum" in sources
+        assert "cross_asset_rv" in sources
+        assert "alternative_data" in sources
+        assert "unified_overlay" in sources
 
     def test_count(self):
-        assert len(SignalSource) == 9
+        assert len(SignalSource) == 6
 
 
 # ---------------------------------------------------------------------------
