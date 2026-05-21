@@ -112,43 +112,45 @@ class EnsembleVote:
     source_votes: List[SignalReading]
 
 
-# Regime-dependent weights (5 active signals, renormalized per regime)
+# Regime-dependent weights (6 active signals, renormalized per regime)
 # v9.19: Removed TSFM_MOMENTUM and DURATION_REGIME (no data feeds in collect_signals).
 # v9.23: Capped MULTI_SPEED_MOM at 50% to reduce single-point-of-failure.
-#        Excess redistributed proportionally to other active signals per regime.
-# RECOVERY unchanged (already 43%). Weights sum=1.0 per regime.
+# v9.26: Reduced MSM from 50% to 25%, redistributed to ALT_DATA and INTL_MOM.
+# v9.35: Reduced MSM from 21% to 10% (net-negative -0.012 Sharpe per v9.24).
+#        Redistributed excess to ALT_DATA (+0.015 Sharpe) and INTL_MOM (+0.02 Sharpe).
+# Weights sum=1.0 per regime.
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.MULTI_SPEED_MOM: 0.2100,
+        SignalSource.MULTI_SPEED_MOM: 0.1000,
         SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.ALTERNATIVE_DATA: 0.2100,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.1700,
+        SignalSource.ALTERNATIVE_DATA: 0.2600,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.2100,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1500,
+        SignalSource.UNIFIED_OVERLAY: 0.1700,
     },
     Regime.HIGH_VOL: {
-        SignalSource.MULTI_SPEED_MOM: 0.2100,
+        SignalSource.MULTI_SPEED_MOM: 0.1000,
         SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.1300,
-        SignalSource.ALTERNATIVE_DATA: 0.2500,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.1800,
+        SignalSource.ALTERNATIVE_DATA: 0.2800,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1500,
+        SignalSource.UNIFIED_OVERLAY: 0.1800,
     },
     Regime.CRISIS: {
-        SignalSource.MULTI_SPEED_MOM: 0.2100,
+        SignalSource.MULTI_SPEED_MOM: 0.1000,
         SignalSource.CROSS_ASSET_RV: 0.3400,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1700,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
-        SignalSource.ALTERNATIVE_DATA: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1500,
+        SignalSource.ALTERNATIVE_DATA: 0.1800,
+        SignalSource.UNIFIED_OVERLAY: 0.2100,
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.2100,
-        SignalSource.ALTERNATIVE_DATA: 0.2100,
+        SignalSource.MULTI_SPEED_MOM: 0.1000,
+        SignalSource.ALTERNATIVE_DATA: 0.2600,
         SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.1700,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.2100,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1500,
+        SignalSource.UNIFIED_OVERLAY: 0.1700,
     }
 }
 

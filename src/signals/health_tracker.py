@@ -38,7 +38,7 @@ class SignalSource(Enum):
     MULTI_SPEED_MOM = "multi_speed_momentum"
     CROSS_ASSET_RV = "cross_asset_rv"
     INTERNATIONAL_MOMENTUM = "international_momentum"
-    ALT_DATA = "alternative_data"
+    ALTERNATIVE_DATA = "alternative_data"
     CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"
     UNIFIED_OVERLAY = "unified_overlay"
 

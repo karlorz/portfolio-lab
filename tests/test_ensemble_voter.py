@@ -152,13 +152,13 @@ class TestRegimeWeights:
             for source, weight in weights.items():
                 assert weight <= 0.50, f"{source.value} exceeds 50% in {regime.value}: {weight:.4f}"
 
-    def test_normal_multi_speed_mom_at_least_20(self):
-        """v9.31: MSM reduced to 21% after UNIFIED_OVERLAY integration."""
-        assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.MULTI_SPEED_MOM] >= 0.20
+    def test_normal_multi_speed_mom_reduced(self):
+        """v9.35: MSM reduced to 10% (net-negative -0.012 Sharpe per v9.24)."""
+        assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.MULTI_SPEED_MOM] <= 0.15
 
     def test_high_vol_alternative_data_dominant(self):
-        """v9.26: ALT_DATA is the dominant signal in HIGH_VOL regime (only positive alpha)."""
-        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.20
+        """v9.35: ALT_DATA is the dominant signal in HIGH_VOL regime (only positive alpha)."""
+        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.25
 
     def test_unified_overlay_has_weight_in_all_regimes(self):
         """v9.31: UNIFIED_OVERLAY has 15% weight in all regimes (was dead code at 0%)."""
