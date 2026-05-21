@@ -39,6 +39,20 @@
 
 ## Recent Implementation Updates (2026-05-20)
 
+### v9.31 UNIFIED_OVERLAY Activation + Dead Code Removal - COMPLETED
+- **UNIFIED_OVERLAY activated**: Added 15% weight to all 4 regime weights (was dead code at 0%)
+  - The orchestrator_ensemble_bridge.py was generating SignalReadings that compute_vote() silently discarded
+  - UNIFIED_OVERLAY collection added to collect_signals() via bridge import
+  - Weights redistributed proportionally from other signals (MSM 25→21%, ALT_DATA 25→21%, etc.)
+  - Added to BanditWeighter survivor list for dynamic weight adaptation
+- **vix_overlay.py removed**: 2000 lines of dead code (module + backtest + tests)
+  - No production caller anywhere in src/ — fully disconnected from portfolio system
+  - Removed: src/strategy/vix_overlay.py (570L), src/backtest/vix_overlay_backtest.py (590L), tests/test_vix_overlay.py (466L), tests/test_vix_overlay_backtest.py (374L)
+- **Bug fix**: ResearchAgent.delegate_to_claude() returned `str(work_file)` instead of `Path` — broke create_claude_prompt() calling `.with_suffix()` on string
+- **Tests**: 56 new for strategy/factor_rotation.py (1038L, largest untested non-ML module), 31 new for research/agent.py (328L), 14 backtest validation tests for vixy_hedge + unified_orchestrator
+- **Test count**: 6189 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.18 Crypto Institutional Test Suite - COMPLETED
 - **Tests**: 58 new tests for `src/crypto/institutional.py` (902-line module, previously 0 tests):
   - `tests/test_crypto_institutional.py` (58 tests): 4 dataclasses, init_database, TokenizedTreasuryStrategy (allocation + rebalance + circuit breaker + product performance + yield), CryptoRiskManager (risk assessment + compliance + rebalance deltas), CLI (4 commands), constants, edge cases
@@ -94,7 +108,7 @@
   - CROSS_ASSET_RV: Sharpe ~0.94 (-0.00x) — marginal, near-zero contribution
 - **Implication**: The dominant signal (MULTI_SPEED_MOM at 50% weight) is actually a net-negative overlay. The ensemble performs well because the baseline allocation (46/38/16) is already strong, not because the signal adds value. This mirrors the earlier finding that TSMOM alone beats combined signals.
 - **CLI**: Each backtest has `run` and `--save` commands
-- **Test count**: 6508 safe (0 failures)
+- **Test count**: 6189 safe (0 failures, 10 skipped)
 - **Status**: All phases complete
 
 ### v9.26 Signal Weight Rebalancing - COMPLETED
@@ -555,7 +569,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6135 safe** passed (0 failures, 10 skipped)
+- **6189 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
