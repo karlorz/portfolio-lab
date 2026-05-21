@@ -37,7 +37,14 @@
   - Inference latency: 4.7ms (target: <50ms) ✓
   - Integrates with v2.24 signal integrator (5% weight in composite)
 
-## Recent Implementation Updates (2026-05-21)
+## Recent Implementation Updates (2026-05-22)
+
+### v9.42 Predictive Model Test Coverage - COMPLETED
+- **Tests**: 78 new tests for `src/agents/predictive_model.py` (541 lines, previously 0 coverage):
+  - `tests/test_predictive_model.py` (78 tests): PredictionResult dataclass, CandidateTrajectory dataclass, PredictiveModel (init, update_prices, fit, predict, _empty_result, get_state/load_state, clear_history), TrajectoryOptimizer (init, constraints, generate_trajectories, select_optimal, scoring, default trajectories), edge cases (single asset, large n_assets, constant prices, zero cov, multiple fits, state round-trip)
+  - No ML dependencies — module uses numpy-only VAR(1) + CEM, safe for standard test suite
+- **Test count**: 6501 → 6579 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
 
 ### v9.41 Backtest Production Code Import - COMPLETED
 - **Collar backtest**: replaced embedded `_get_regime()`/`_get_collar_shifts()` with `CollarSignalGenerator.classify_regime()` from `src/signals/collar_signal.py`
@@ -47,7 +54,7 @@
 - **International momentum backtest**: replaced embedded EFA/SPY momentum with `InternationalMomentumGenerator._determine_signal_type()` from `src/signals/international_momentum.py`
 - **Alternative data backtest**: replaced embedded regime thresholds with `AlternativeDataSignalGenerator._determine_regime()` from `src/signals/alternative_data_signal.py`
 - **Impact**: all 6 signal/overlay backtests now validate production code — previously embedded logic could silently diverge
-- **Test count**: 6501 safe (0 failures, 10 skipped)
+- **Test count**: 6579 safe (0 failures, 10 skipped)
 - **Status**: All phases complete
 
 ### v9.40 Signal Quality + Error Handling + Base Allocation Centralization + Backtest Tests - COMPLETED
@@ -62,7 +69,7 @@
   - `tests/test_alternative_data_backtest.py` (66 tests)
   - `tests/test_international_momentum_backtest.py` (36 tests)
   - `tests/test_cross_asset_rv_backtest.py` (33 tests)
-- **Test count**: 6501 safe (0 failures, 10 skipped)
+- **Test count**: 6579 safe (0 failures, 10 skipped)
 - **Status**: All phases complete
 
 ### v9.39 Coverage Expansion + Path Migration + Stale Ref Cleanup - COMPLETED
@@ -624,7 +631,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6501 safe** passed (0 failures, 10 skipped)
+- **6579 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
