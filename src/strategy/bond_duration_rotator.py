@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import numpy as np
 
+from src.paths import DATA_DIR
 from src.signals.bond_duration_signal import (
     BondDurationSignalGenerator,
     BondDurationCalculator,
@@ -77,7 +78,7 @@ class BondDurationRotator:
     - SHY: short duration (~2 years) — defensive, low sensitivity
     """
 
-    STATE_FILE = Path(__file__).parent.parent.parent / "data" / "bond_duration_state.json"
+    STATE_FILE = DATA_DIR / "bond_duration_state.json"
     BOND_SLEEVE_WEIGHT = 0.16  # 16% in 46/38/16
 
     ENSEMBLE_WEIGHT = 0.08  # 8% in ensemble voter

@@ -20,11 +20,13 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
 from collections import deque
 
+from src.paths import PROJECT_ROOT
+
 logger = logging.getLogger(__name__)
 import numpy as np
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.paths import DATA_DIR
 

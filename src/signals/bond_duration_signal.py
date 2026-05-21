@@ -28,6 +28,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
+from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -217,8 +219,8 @@ class BondDurationSignalGenerator:
     Main signal generator for bond duration rotation.
     """
 
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
-    OUTPUT_PATH = DATA_DIR / "signals" / "bond_duration_signal.json"
+    DATA_DIR = DATA_DIR
+    OUTPUT_PATH = SIGNALS_DIR / "bond_duration_signal.json"
 
     def __init__(self):
         self.calculator = BondDurationCalculator()
@@ -226,11 +228,11 @@ class BondDurationSignalGenerator:
 
     def _ensure_dirs(self):
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (self.DATA_DIR / "signals").mkdir(parents=True, exist_ok=True)
+        SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
 
     def _fetch_yield_data(self) -> Dict:
         """Fetch current yield curve data."""
-        db_path = self.DATA_DIR / "market.db"
+        db_path = MARKET_DB
         if db_path.exists():
             try:
                 import sqlite3

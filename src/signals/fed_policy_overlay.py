@@ -51,12 +51,10 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from collections import defaultdict
 
+from src.paths import DATA_DIR, BASE_ALLOCATION, PROJECT_ROOT
+
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-
-# FRED Series IDs
+sys.path.insert(0, str(PROJECT_ROOT))
 FRED_SERIES = {
     'FEDFUNDS': 'Federal Funds Effective Rate',
     'CPIAUCSL': 'Consumer Price Index (All Urban)', 
@@ -71,8 +69,6 @@ FRED_SERIES = {
     'PAYEMS': 'Total Nonfarm Payrolls',
     'INDPRO': 'Industrial Production',
 }
-
-from src.paths import DATA_DIR, BASE_ALLOCATION
 
 # Cache directory
 FRED_CACHE = DATA_DIR / "fred_data.json"

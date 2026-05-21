@@ -20,10 +20,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Any, Tuple
 from enum import Enum
+
+from src.paths import PROJECT_ROOT
+
 import numpy as np
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.paths import DATA_DIR, BASE_ALLOCATION
 

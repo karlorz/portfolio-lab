@@ -38,10 +38,9 @@ from enum import Enum
 import sys
 import logging
 
-from src.paths import DATA_DIR, PRICES_JSON, SIGNALS_DIR, ATTRIBUTION_DIR, BASE_ALLOCATION
+from src.paths import DATA_DIR, PRICES_JSON, SIGNALS_DIR, ATTRIBUTION_DIR, BASE_ALLOCATION, PROJECT_ROOT
 
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 logger = logging.getLogger(__name__)
 

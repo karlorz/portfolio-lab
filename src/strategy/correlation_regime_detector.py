@@ -26,7 +26,9 @@ import sys
 from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import squareform
 
-project_root = Path(__file__).parent.parent.parent
+from src.paths import PROJECT_ROOT
+
+project_root = PROJECT_ROOT
 sys.path.insert(0, str(project_root))
 
 
@@ -113,7 +115,7 @@ class CorrelationRegimeDetector:
         self.lookback_window = lookback_window
         self.min_observations = min_observations
         
-        self.db_path = Path(project_root) / db_path
+        self.db_path = project_root / db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         

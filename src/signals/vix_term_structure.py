@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
+
+from src.paths import DATA_DIR, SIGNALS_DIR
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
@@ -277,9 +279,9 @@ class VIXTermStructureSignalGenerator:
     Fetches data, calculates signals, and generates portfolio recommendations.
     """
     
-    DATA_DIR = Path(__file__).parent.parent.parent / 'data'
+    DATA_DIR = DATA_DIR
     VIX_DATA_PATH = DATA_DIR / 'vix_term_structure.json'
-    OUTPUT_PATH = DATA_DIR / 'signals' / 'vix_term_structure_signal.json'
+    OUTPUT_PATH = SIGNALS_DIR / 'vix_term_structure_signal.json'
     
     def __init__(self):
         self.calculator = VIXTermStructureCalculator()
@@ -288,7 +290,7 @@ class VIXTermStructureSignalGenerator:
     def _ensure_dirs(self):
         """Ensure output directories exist."""
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (self.DATA_DIR / 'signals').mkdir(parents=True, exist_ok=True)
+        SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
     
     def load_vix_data(self) -> Dict:
         """Load VIX term structure data from storage."""

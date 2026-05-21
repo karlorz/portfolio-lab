@@ -28,15 +28,13 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from src.paths import BASE_ALLOCATION
+from src.paths import BASE_ALLOCATION, PROJECT_ROOT, DATA_DIR, PRICES_JSON
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
 STATE_PATH = DATA_DIR / "risk_budget_state.json"
-PRICES_PATH = PROJECT_ROOT / "public" / "data" / "prices.json"
+PRICES_PATH = PRICES_JSON
 
 # ── Asset Universe ──────────────────────────────────────────────────────────
 

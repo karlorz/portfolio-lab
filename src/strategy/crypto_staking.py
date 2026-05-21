@@ -29,11 +29,11 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 from enum import Enum
 
+from src.paths import DATA_DIR
+
 
 logger = logging.getLogger(__name__)
 
-project_root = Path(__file__).parent.parent.parent
-DATA_DIR = project_root / "data"
 STATE_FILE = DATA_DIR / "crypto_staking_state.json"
 
 

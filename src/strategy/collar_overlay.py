@@ -19,6 +19,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
+from src.paths import DATA_DIR, ATTRIBUTION_DIR, MARKET_DB
+
 import numpy as np
 
 from src.signals.collar_signal import (
@@ -80,8 +82,8 @@ class CollarOverlay:
     4. Track P&L attribution
     """
 
-    STATE_FILE = Path(__file__).parent.parent.parent / "data" / "collar_overlay_state.json"
-    ATTRIBUTION_FILE = Path(__file__).parent.parent.parent / "data" / "collar_attribution.json"
+    STATE_FILE = DATA_DIR / "collar_overlay_state.json"
+    ATTRIBUTION_FILE = ATTRIBUTION_DIR / "collar_attribution.json"
 
     # Collar parameters
     ROLL_DAYS_BEFORE = 5       # Start rolling 5 days before expiry
@@ -412,7 +414,7 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "backtest":
         print("Backtest mode — loading price data...")
         # Quick backtest using real data if available
-        db_path = Path(__file__).parent.parent.parent / "data" / "market.db"
+        db_path = MARKET_DB
         if db_path.exists():
             import sqlite3
             conn = sqlite3.connect(str(db_path))

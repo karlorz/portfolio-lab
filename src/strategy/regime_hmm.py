@@ -20,7 +20,9 @@ from collections import deque
 import asyncio
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent
+from src.paths import DATA_DIR, PROJECT_ROOT
+
+project_root = PROJECT_ROOT
 sys.path.insert(0, str(project_root))
 
 _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
@@ -32,8 +34,6 @@ if _ML_ENABLED:
         HMM_AVAILABLE = False
 else:
     HMM_AVAILABLE = False
-
-from src.paths import DATA_DIR
 
 # Database path
 DB_PATH = DATA_DIR / "market.db"
@@ -476,7 +476,7 @@ class WassersteinHMMDetector:
     def save_state(self, filepath: Optional[str] = None):
         """Save detector state to file."""
         if filepath is None:
-            filepath = project_root / 'data' / 'hmm_state.json'
+            filepath = DATA_DIR / 'hmm_state.json'
         
         state = {
             'n_states': self.n_states,
@@ -502,7 +502,7 @@ class WassersteinHMMDetector:
     def load_state(self, filepath: Optional[str] = None):
         """Load detector state from file."""
         if filepath is None:
-            filepath = project_root / 'data' / 'hmm_state.json'
+            filepath = DATA_DIR / 'hmm_state.json'
         
         if not Path(filepath).exists():
             return False

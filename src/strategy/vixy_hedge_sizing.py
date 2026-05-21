@@ -22,6 +22,8 @@ from typing import Optional, Dict, List, Tuple
 
 import numpy as np
 
+from src.paths import DATA_DIR
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -137,8 +139,11 @@ class VIXYHedgeSizer:
             ensemble_weight_normal=cfg["ensemble_weight_normal"],
             ensemble_weight_stress=cfg["ensemble_weight_stress"],
         )
-        self._project_root = project_root or Path(__file__).resolve().parent.parent.parent
-        self._state_file = self._project_root / cfg["state_file"]
+        self._project_root = project_root or DATA_DIR.parent
+        if project_root:
+            self._state_file = self._project_root / cfg["state_file"]
+        else:
+            self._state_file = DATA_DIR / "vixy_hedge_state.json"
         self._state: Optional[VIXYHedgeState] = None
 
     # ── Regime Classification ──────────────────────────────────────────

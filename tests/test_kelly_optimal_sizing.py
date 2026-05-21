@@ -270,20 +270,18 @@ class TestKellyOptimizer:
         """Missing prices file returns None without crashing."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            with patch('src.strategy.kelly_optimal_sizing.PROJECT_ROOT', tmp_path):
+            with patch('src.strategy.kelly_optimal_sizing.PRICES_JSON', tmp_path / "prices.json"):
                 opt = KellyOptimizer(data_dir=tmp_path)
                 result = opt.load_prices()
                 assert result is None
 
-    @patch("src.strategy.kelly_optimal_sizing.PROJECT_ROOT")
-    def test_load_prices_from_project(self, mock_root):
+    def test_load_prices_from_project(self):
         """Prices loaded from project path."""
-        mock_root.__str__ = lambda self: "/tmp"
-        mock_root.__truediv__ = lambda self, other: Path(f"/tmp/{other}")
-        opt = KellyOptimizer(data_dir=Path("/tmp"))
-        # Will fail because file doesn't exist, but should handle gracefully
-        result = opt.load_prices()
-        assert result is None or isinstance(result, dict)
+        with patch("src.strategy.kelly_optimal_sizing.PRICES_JSON", Path("/tmp/public/data/prices.json")):
+            opt = KellyOptimizer(data_dir=Path("/tmp"))
+            # Will fail because file doesn't exist, but should handle gracefully
+            result = opt.load_prices()
+            assert result is None or isinstance(result, dict)
 
     @patch.object(KellyOptimizer, 'load_prices')
     @patch.object(KellyOptimizer, 'get_series')

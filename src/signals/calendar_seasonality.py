@@ -22,8 +22,9 @@ import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime, date, timedelta
 from enum import Enum
-from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Set
+
+from src.paths import SIGNALS_DIR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -529,7 +530,7 @@ class CalendarSeasonalitySignalGenerator:
     execution timing based on calendar effects.
     """
 
-    OUTPUT_PATH = Path(__file__).parent.parent.parent / "data" / "signals" / "calendar_seasonality.json"
+    OUTPUT_PATH = SIGNALS_DIR / "calendar_seasonality.json"
 
     def __init__(self):
         self.detector = CalendarSeasonalityDetector()

@@ -20,6 +20,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, Tuple
 
+from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -233,8 +235,8 @@ class CollarSignalGenerator:
     RISK_FREE_RATE = 0.045     # ~4.5% current
     CASHLESS_TOLERANCE = 0.15  # |net premium| / spot < 0.15% considered cashless
 
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
-    OUTPUT_PATH = DATA_DIR / "signals" / "collar_signal.json"
+    DATA_DIR = DATA_DIR
+    OUTPUT_PATH = SIGNALS_DIR / "collar_signal.json"
 
     def __init__(self):
         self.pricer = BlackScholesPricer()
@@ -242,7 +244,7 @@ class CollarSignalGenerator:
 
     def _ensure_dirs(self):
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (self.DATA_DIR / "signals").mkdir(parents=True, exist_ok=True)
+        SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
 
     def classify_regime(self, vix: float) -> CollarRegime:
         if vix >= self.VIX_CRISIS:
@@ -382,7 +384,7 @@ class CollarSignalGenerator:
 
     def _fetch_spot_price(self) -> float:
         """Fetch current SPY price from market data."""
-        db_path = self.DATA_DIR / "market.db"
+        db_path = MARKET_DB
         if db_path.exists():
             try:
                 import sqlite3
@@ -401,7 +403,7 @@ class CollarSignalGenerator:
 
     def _fetch_vix_level(self) -> float:
         """Fetch current VIX level."""
-        db_path = self.DATA_DIR / "market.db"
+        db_path = MARKET_DB
         if db_path.exists():
             try:
                 import sqlite3
@@ -418,7 +420,7 @@ class CollarSignalGenerator:
                 logger.warning(f"Failed to fetch VIX level from DB: {e}")
 
         # Try alternative data sources
-        vix_path = self.DATA_DIR / "vix_term_structure.json"
+        vix_path = DATA_DIR / "vix_term_structure.json"
         if vix_path.exists():
             try:
                 with open(vix_path) as f:

@@ -38,11 +38,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import math
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+from src.paths import DATA_DIR, BASE_ALLOCATION, PROJECT_ROOT
 
-from src.paths import DATA_DIR, BASE_ALLOCATION
+# Add project root to path
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # ---------------------------------------------------------------------------
 # Constants and Configuration

@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import numpy as np
 
+from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -215,8 +217,8 @@ class CryptoMomentumSignalGenerator:
     Main signal generator for crypto tactical allocation.
     """
 
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
-    OUTPUT_PATH = DATA_DIR / "signals" / "crypto_momentum_signal.json"
+    DATA_DIR = DATA_DIR
+    OUTPUT_PATH = SIGNALS_DIR / "crypto_momentum_signal.json"
 
     def __init__(self):
         self.calculator = CryptoMomentumCalculator()
@@ -224,11 +226,11 @@ class CryptoMomentumSignalGenerator:
 
     def _ensure_dirs(self):
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (self.DATA_DIR / "signals").mkdir(parents=True, exist_ok=True)
+        SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
 
     def _fetch_crypto_prices(self, symbol: str, days: int = 200) -> Tuple[List[float], List[float]]:
         """Fetch crypto price history. Returns (prices, returns)."""
-        db_path = self.DATA_DIR / "market.db"
+        db_path = MARKET_DB
         if db_path.exists():
             try:
                 import sqlite3

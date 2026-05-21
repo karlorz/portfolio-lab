@@ -43,11 +43,10 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 import sqlite3
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT
 
-from src.paths import DATA_DIR, PRICES_JSON
+# Add project root to path
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"

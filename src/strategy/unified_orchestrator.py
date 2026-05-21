@@ -35,6 +35,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
+from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB
 from src.signals.calendar_seasonality import get_calendar_modifier
 from src.signals.bond_duration_signal import generate_bond_duration_signal
 from src.signals.collar_signal import generate_collar_signal
@@ -177,14 +178,14 @@ class UnifiedOrchestrator:
     VIX_VIXY_MIN = 20.0           # VIXY hedge starts at VIX 20
     VIX_CRISIS = 40.0             # Collar freeze threshold
 
-    STATE_FILE = Path(__file__).parent.parent.parent / "data" / "unified_orchestrator_state.json"
+    STATE_FILE = DATA_DIR / "unified_orchestrator_state.json"
 
     def __init__(self):
         self._state = self._load_state()
         self._ensure_dirs()
 
     def _ensure_dirs(self):
-        sig_dir = Path(__file__).parent.parent.parent / "data" / "signals"
+        sig_dir = SIGNALS_DIR
         sig_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_state(self) -> Dict:
@@ -203,7 +204,7 @@ class UnifiedOrchestrator:
 
     def _fetch_vix_level(self) -> float:
         """Fetch VIX level from market DB for overlay gating."""
-        db_path = Path(__file__).parent.parent.parent / "data" / "market.db"
+        db_path = MARKET_DB
         if not db_path.exists():
             return 16.0  # default fallback (normal VIX)
         try:

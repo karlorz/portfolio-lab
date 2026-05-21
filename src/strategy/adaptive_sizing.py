@@ -30,13 +30,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+from src.paths import PROJECT_ROOT, DATA_DIR, PRICES_JSON
+
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
 STATE_PATH = DATA_DIR / "adaptive_sizing_state.json"
 
 # ── Base Allocation ──────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ class AdaptiveSizer:
 
     def _load_prices(self) -> Optional[Dict]:
         """Load price data from JSON."""
-        prices_path = PROJECT_ROOT / "public" / "data" / "prices.json"
+        prices_path = PRICES_JSON
         if not prices_path.exists():
             prices_path = self.data_dir / "prices.json"
         if not prices_path.exists():

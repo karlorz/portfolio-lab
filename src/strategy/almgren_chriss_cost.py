@@ -39,10 +39,12 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from src.paths import DATA_DIR
+
 logger = logging.getLogger(__name__)
 
 # Default data directory
-DEFAULT_DATA_DIR = Path(__file__).parent.parent.parent / "data"
+DEFAULT_DATA_DIR = DATA_DIR
 
 # Default spread costs in bps per 1% turnover (half-spread + fees)
 # Calibrated from typical ETF spreads

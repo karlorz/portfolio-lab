@@ -35,10 +35,9 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR, PROJECT_ROOT
 
-project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 STATE_DIR = DATA_DIR / "regime_arb"
 

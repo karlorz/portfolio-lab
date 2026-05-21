@@ -25,11 +25,11 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.paths import PROJECT_ROOT, DATA_DIR, PRICES_JSON
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
 STATE_PATH = DATA_DIR / "kelly_sizing_state.json"
 
 # Base allocation (matching adaptive_sizing.py)
@@ -184,7 +184,7 @@ class KellyOptimizer:
     
     def load_prices(self) -> Optional[Dict]:
         """Load price data from JSON."""
-        prices_path = PROJECT_ROOT / "public" / "data" / "prices.json"
+        prices_path = PRICES_JSON
         if not prices_path.exists():
             prices_path = self.data_dir / "prices.json"
         if not prices_path.exists():

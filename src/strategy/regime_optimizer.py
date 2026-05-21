@@ -47,13 +47,13 @@ except ImportError:
     AlmgrenChrissCostModel = None
     compute_cost_penalty = None
 
-from src.paths import BASE_ALLOCATION
+from src.paths import BASE_ALLOCATION, PROJECT_ROOT, DATA_DIR, PRICES_JSON
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
+PROJECT_ROOT = PROJECT_ROOT
+DATA_DIR = DATA_DIR
 STATE_PATH = DATA_DIR / "regime_optimizer_state.json"
 REGIME_STATE_PATH = DATA_DIR / "regime_classifier_state.json"
-PRICES_PATH = PROJECT_ROOT / "public" / "data" / "prices.json"
+PRICES_PATH = PRICES_JSON
 
 # ── Asset Universe ──────────────────────────────────────────────────────────
 

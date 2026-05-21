@@ -27,6 +27,7 @@ import numpy as np
 from src.signals.crypto_momentum import (
     CryptoMomentumSignalGenerator,
 )
+from src.paths import DATA_DIR
 from src.strategy.crypto_staking import (
     ETHStakingModel,
 )
@@ -84,7 +85,7 @@ class CryptoAllocationOverlay:
     Not a standalone portfolio — always used within the 46/38/16 framework.
     """
 
-    STATE_FILE = Path(__file__).parent.parent.parent / "data" / "crypto_allocation_state.json"
+    STATE_FILE = DATA_DIR / "crypto_allocation_state.json"
 
     # Integration weight
     ENSEMBLE_WEIGHT = 0.05    # 5% weight (lower — crypto is satellite)

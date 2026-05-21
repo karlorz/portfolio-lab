@@ -17,9 +17,11 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Set
+
 import numpy as np
 
+from src.paths import DATA_DIR, SIGNALS_DIR
 from .unified_orchestrator import UnifiedOrchestrator, UnifiedRecommendation
 from .ensemble_voter import SignalSource, SignalReading, Regime
 
@@ -108,14 +110,14 @@ class OrchestratorEnsembleBridge:
 
     RECOMMENDED_ENSEMBLE_WEIGHT = 0.20
 
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
-    OUTPUT_PATH = DATA_DIR / "signals" / "unified_ensemble_signal.json"
+    DATA_DIR = DATA_DIR
+    OUTPUT_PATH = SIGNALS_DIR / "unified_ensemble_signal.json"
 
     def __init__(self):
         self._orch = UnifiedOrchestrator()
 
     def _ensure_dirs(self):
-        sig_dir = self.DATA_DIR / "signals"
+        sig_dir = SIGNALS_DIR
         sig_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_signal(self) -> UnifiedSignalReading:

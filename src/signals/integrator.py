@@ -50,11 +50,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, NamedTuple
 
-# Add project root to path
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, PROJECT_ROOT
 
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+# Add project root to path
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Existing module imports
 from src.data.alternative_data import AlternativeDataClient

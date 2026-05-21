@@ -11,6 +11,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 
+from src.paths import MARKET_DB
 from src.data.behavioral_sentiment_fetcher import (
     BehavioralSentimentFetcher,
     BehavioralSentimentSnapshot,
@@ -34,7 +35,7 @@ def _resolve_cache_db() -> Path:
     """Resolve the default cache DB path lazily to avoid module-level hardcoding."""
     global _DEFAULT_CACHE_DB
     if _DEFAULT_CACHE_DB is None:
-        _DEFAULT_CACHE_DB = Path(__file__).resolve().parent.parent.parent / "data" / "market.db"
+        _DEFAULT_CACHE_DB = MARKET_DB
     return _DEFAULT_CACHE_DB
 
 
