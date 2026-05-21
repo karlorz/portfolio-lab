@@ -49,13 +49,23 @@ from src.backtest.metrics import (
 )
 
 # Add project root
-from src.paths import DATA_DIR, PRICES_JSON as PRICES_PATH
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON as PRICES_PATH
 
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.signals.tsmom_overlay import TSMOMOverlay, TSMOMBacktester, DEFAULT_BASE_ALLOCATION
-from src.agents.risk_agent_hmm import HMMRegimeDetector, PortfolioRegimeManager, MarketRegime
+
+# Conditional import — HMMRegimeDetector requires hmmlearn/sklearn (ML-gated)
+try:
+    from src.agents.risk_agent_hmm import HMMRegimeDetector, PortfolioRegimeManager, MarketRegime
+    _HMM_AVAILABLE = True
+except ImportError:
+    _HMM_AVAILABLE = False
+    HMMRegimeDetector = None  # type: ignore
+    PortfolioRegimeManager = None  # type: ignore
+    MarketRegime = None  # type: ignore
+
 from src.signals.fed_policy_overlay import FedPolicyOverlay, classify_fed_regime
 
 
@@ -171,11 +181,15 @@ class CombinedStrategyBacktester:
 
         # Initialize signal modules
         self.tsmom = TSMOMOverlay(max_deviation=0.10)
-        self.hmm_manager = PortfolioRegimeManager(base_allocation=self.base_allocation)
+        self.hmm_manager = None
+        if _HMM_AVAILABLE and PortfolioRegimeManager is not None:
+            try:
+                self.hmm_manager = PortfolioRegimeManager(base_allocation=self.base_allocation)
+                self.hmm_manager.detector.load()
+            except Exception as e:
+                logging.warning(f"HMM regime detector unavailable: {e}")
+                self.hmm_manager = None
         self.fed_overlay = FedPolicyOverlay()
-
-        # Load trained HMM model
-        self.hmm_manager.detector.load()
 
         # Price data cache
         self.prices_df: Optional[pd.DataFrame] = None
@@ -271,6 +285,8 @@ class CombinedStrategyBacktester:
         current_idx: int
     ) -> Tuple[Optional[str], Dict[str, float]]:
         """Get HMM regime and deltas at a specific date index."""
+        if self.hmm_manager is None:
+            return None, {t: 0.0 for t in self.tickers}
         if not self.hmm_manager.detector.is_fitted:
             return None, {t: 0.0 for t in self.tickers}
 
@@ -626,7 +642,7 @@ class CombinedStrategyBacktester:
         initial_value: float
     ) -> Dict:
         """Run baseline 46/38/16 buy-and-hold backtest."""
-        baseline_weights = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
+        baseline_weights = BASE_ALLOCATION
 
         daily_returns = []
         portfolio_value = initial_value
@@ -783,7 +799,8 @@ def main():
         print()
         print("Modules:")
         print(f"  TSMOM: ready")
-        print(f"  HMM: {backtester.hmm_manager.detector.is_fitted}")
+        hmm_status = backtester.hmm_manager.detector.is_fitted if backtester.hmm_manager else "unavailable"
+        print(f"  HMM: {hmm_status}")
         print(f"  Fed Policy: heuristic-based for backtest")
 
     else:

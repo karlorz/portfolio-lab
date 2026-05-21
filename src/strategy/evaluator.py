@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
 import numpy as np
 
-from src.paths import DATA_DIR, MARKET_DB
+from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB
 
 # Config
 DB_PATH = MARKET_DB
@@ -29,8 +29,6 @@ PAPER_CONFIG = {
 }
 
 # Core strategy: SPY/GLD/TLT 46/38/16 with regime overrides
-BASE_ALLOCATION = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
-
 REGIME_OVERRIDES = {
     "crisis": {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30},  # Risk-off
     "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},  # Defensive

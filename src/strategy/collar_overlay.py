@@ -103,8 +103,8 @@ class CollarOverlay:
             try:
                 with open(self.state_file) as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"Failed to load collar state file {self.state_file}: {e}")
         return self._default_state()
 
     def _default_state(self) -> Dict:
@@ -423,8 +423,8 @@ def main():
                     "SELECT date, symbol, close FROM prices WHERE symbol IN ('SPY', 'VIX') ORDER BY date",
                     conn
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"Failed to load price data from {db_path}: {e}")
             conn.close()
 
             if df is not None and not df.empty:

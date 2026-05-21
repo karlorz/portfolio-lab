@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections import defaultdict
 
-from src.paths import MARKET_DB
+from src.paths import MARKET_DB, BASE_ALLOCATION
 
 
 @dataclass
@@ -407,7 +407,7 @@ class AlternativeRiskPremiaEngine:
         
         # Default to All-Season 46/38/16
         if base_allocation is None:
-            base_allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+            base_allocation = BASE_ALLOCATION
         
         # Calculate individual premia
         value_signal = self.calculate_value_premium()

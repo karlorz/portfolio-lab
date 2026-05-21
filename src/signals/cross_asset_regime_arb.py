@@ -94,7 +94,9 @@ class DivergencePattern(Enum):
     UNKNOWN = "unknown"                         # Unclassified
 
 
-# Divergence pattern → signal value, explanation
+# Divergence pattern → baseline signal value, explanation
+# NOTE: Baseline values below are reference points; actual signal values
+# are continuous (scaled by per-asset momentum/confidence) in _classify_divergence().
 DIVERGENCE_SIGNALS: Dict[DivergencePattern, Tuple[float, str]] = {
     DivergencePattern.FULL_RISK_ON: (0.4, "All asset classes bullish — full risk appetite"),
     DivergencePattern.RISK_OFF: (-0.5, "All asset classes bearish — broad risk aversion"),
@@ -361,58 +363,75 @@ class CrossAssetRegimeArbDetector:
         """Classify the cross-asset divergence pattern.
 
         Uses a decision matrix of equity × bond × gold regimes to identify
-        known divergence patterns.
+        known divergence patterns. Signal values are continuous (scaled by
+        per-asset momentum strength) instead of discrete, preserving the
+        magnitude of the underlying regime divergence.
         """
         eq = equity.asset_regime
         bd = bonds.regime
         gd = gold.regime
+
+        # Continuous signal strength: scale by per-asset confidence and
+        # momentum magnitude.  The direction (sign) comes from the pattern;
+        # the magnitude comes from how strong each asset's regime reading is.
+        eq_str = equity.confidence * np.clip(abs(equity.momentum_60d) / STRONG_MOMENTUM_THRESHOLD, 0.0, 1.0)
+        gd_str = gold.confidence * np.clip(abs(gold.momentum_60d) / STRONG_MOMENTUM_THRESHOLD, 0.0, 1.0)
+        bond_str = bonds.confidence
 
         # --- Full agreement patterns ---
         # All bullish
         if eq in (AssetRegime.BULL, AssetRegime.NEUTRAL) and \
            bd == BondRegime.FALLING and \
            gd == GoldRegime.STRONG:
-            return (DivergencePattern.FULL_RISK_ON, 0.4,
+            sig = np.clip(0.4 * max(eq_str, gd_str), 0.1, 0.8)
+            return (DivergencePattern.FULL_RISK_ON, sig,
                     "SPY bullish/bull-neutral, TLT yields falling, GLD strong — full risk-on environment")
 
         # All bearish
         if eq == AssetRegime.BEAR and \
            bd == BondRegime.RISING and \
            gd == GoldRegime.WEAK:
-            return (DivergencePattern.RISK_OFF, -0.5,
+            sig = np.clip(-0.5 * max(eq_str, bond_str), -0.8, -0.1)
+            return (DivergencePattern.RISK_OFF, sig,
                     "SPY bearish, TLT yields rising, GLD weak — broad risk-off across all asset classes")
 
         # --- Specific divergence patterns (narrowest conditions first) ---
         # Bond bull (yields falling) + Equity bear → flight to safety
         # Check BEFORE generic equity-gold divergence
         if bd == BondRegime.FALLING and eq == AssetRegime.BEAR:
-            return (DivergencePattern.FLIGHT_TO_SAFETY, -0.3,
+            sig = np.clip(-0.3 * max(eq_str, bond_str), -0.6, -0.05)
+            return (DivergencePattern.FLIGHT_TO_SAFETY, sig,
                     f"Bonds rallying (yields {bd.value}) while equities ({eq.value}) — flight to safety")
 
         # Bond bear (yields rising) + Gold strong → inflation fear
         if bd == BondRegime.RISING and gd == GoldRegime.STRONG:
-            return (DivergencePattern.INFLATION_FEAR, -0.1,
+            sig = np.clip(-0.1 * max(bond_str, gd_str), -0.3, -0.02)
+            return (DivergencePattern.INFLATION_FEAR, sig,
                     f"Bonds selling off (yields {bd.value}) while gold ({gd.value}) — inflation concerns")
 
         # Equity bear + Gold strong → rotation to safe havens
         # (Checked after FLIGHT_TO_SAFETY and INFLATION_FEAR so those narrower patterns win)
         if eq == AssetRegime.BEAR and gd == GoldRegime.STRONG:
-            return (DivergencePattern.RISK_ROTATION, 0.2,
+            sig = np.clip(0.2 * max(eq_str, gd_str), 0.02, 0.5)
+            return (DivergencePattern.RISK_ROTATION, sig,
                     f"Equity ({eq.value}) diverging from gold ({gd.value}) — capital rotating from risk to safe havens")
 
         # Equity neutral + Gold strong → cautious optimism
         if eq == AssetRegime.NEUTRAL and gd == GoldRegime.STRONG:
-            return (DivergencePattern.CAUTIOUS_OPTIMISM, 0.1,
+            sig = np.clip(0.1 * gd_str, 0.02, 0.3)
+            return (DivergencePattern.CAUTIOUS_OPTIMISM, sig,
                     f"Equity neutral while gold strong ({gd.value}) — cautious optimism")
 
         # Gold weak + Equity recovering (only NEUTRAL equity, not BULL)
         if gd == GoldRegime.WEAK and eq == AssetRegime.NEUTRAL:
-            return (DivergencePattern.RECOVERY_BEGINNING, 0.25,
+            sig = np.clip(0.25 * eq_str, 0.02, 0.4)
+            return (DivergencePattern.RECOVERY_BEGINNING, sig,
                     f"Gold weakening ({gd.value}) while equity neutral — early recovery pattern")
 
         # Equity diverging from bonds/gold (broad catch-all for remaining active divergences)
         if eq != AssetRegime.NEUTRAL:
-            return (DivergencePattern.EQUITY_ROTATION, 0.15,
+            sig = np.clip(0.15 * eq_str, 0.02, 0.3)
+            return (DivergencePattern.EQUITY_ROTATION, sig,
                     f"Equity ({eq.value}) diverging from bonds ({bd.value}) and gold ({gd.value}) — sector rotation")
 
         return (DivergencePattern.NO_DIVERGENCE, 0.0, "No significant divergence pattern detected")

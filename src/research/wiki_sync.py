@@ -9,11 +9,14 @@ import os
 import json
 import sqlite3
 import hashlib
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = _DATA_DIR
 WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
@@ -49,8 +52,8 @@ class WikiSync:
                 existing = raw_path.read_text()
                 if f"sha256: {hash_val}" in existing:
                     return raw_path  # Unchanged — skip write
-            except Exception:
-                pass  # If read fails, overwrite
+            except Exception as e:
+                logger.warning(f"Failed to read existing raw file {raw_path}: {e}")
 
         frontmatter = f"""---
 type: raw

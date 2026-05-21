@@ -293,6 +293,14 @@ class MultiSpeedMomentumBacktester:
         }
 
     @staticmethod
+    def _returns_from_equity(equity: List[float]) -> List[float]:
+        """Derive daily returns from equity curve."""
+        rets = []
+        for i in range(1, len(equity)):
+            rets.append((equity[i] - equity[i - 1]) / equity[i - 1])
+        return rets
+
+    @staticmethod
     def _annualize(returns: List[float]) -> float:
         if not returns:
             return 0.0

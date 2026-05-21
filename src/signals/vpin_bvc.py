@@ -15,12 +15,15 @@ This provides a zero-cost approximation of order flow toxicity.
 
 import numpy as np
 import pandas as pd
+import logging
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 import json
 import sqlite3
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -464,8 +467,8 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
                     df = df.dropna(subset=['close', 'volume'])
                     df['volume'] = df['volume'].fillna(0)
                     return df[['open', 'high', 'low', 'close', 'volume']]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to fetch OHLCV for {symbol} from DB: {e}")
         finally:
             conn.close()
 
@@ -503,7 +506,8 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
         df['volume'] = df['volume'].fillna(0)
 
         return df.tail(days)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to fetch OHLCV for {symbol} from Yahoo Finance: {e}")
         return pd.DataFrame()
 
 

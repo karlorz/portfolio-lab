@@ -93,8 +93,8 @@ class BondDurationRotator:
             try:
                 with open(self.state_file) as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"Failed to load bond duration state file {self.state_file}: {e}")
         return self._default_state()
 
     def _default_state(self) -> Dict:

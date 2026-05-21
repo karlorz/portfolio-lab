@@ -42,7 +42,7 @@ import math
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, BASE_ALLOCATION
 
 # ---------------------------------------------------------------------------
 # Constants and Configuration
@@ -804,7 +804,7 @@ def main():
             vol_regime = args.regime
         
         # Calculate overlay
-        base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        base = BASE_ALLOCATION
         allocation = strategy.calculate_overlay(
             portfolio_value=args.portfolio,
             base_allocation=base,

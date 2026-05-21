@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
+from src.paths import BASE_ALLOCATION
 
 # ML-gated imports — prevented during test collection by conftest.py's
 # import hook. Only loaded when PORTFOLIO_LAB_ENABLE_ML=1 AND libs are installed.
@@ -460,7 +461,7 @@ def main():
         elif cmd == "grid":
             # Run grid search
             grid = WeeklyGridSearch()
-            base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}  # Champion allocation
+            base = BASE_ALLOCATION  # Champion allocation
             results = grid.run_search(
                 symbols=["SPY", "GLD", "TLT"],
                 base_allocations=base,

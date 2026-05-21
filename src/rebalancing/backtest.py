@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
 from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION as BASE_WEIGHTS
 
 from .smart_rebalancer import (
     SmartRebalancingController,
@@ -51,10 +52,6 @@ class StrategyResult:
     cagr: float
     sharpe: float
     events: List[RebalanceEvent]
-
-
-# Base portfolio: SPY/GLD/TLT 46/38/16
-BASE_WEIGHTS = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
 
 
 def load_price_data(filepath: str) -> Dict[str, List[Dict]]:

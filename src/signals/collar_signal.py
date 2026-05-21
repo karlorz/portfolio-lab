@@ -395,8 +395,8 @@ class CollarSignalGenerator:
                 conn.close()
                 if row:
                     return float(row[0])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to fetch SPY spot price from DB: {e}")
         return 550.0  # fallback
 
     def _fetch_vix_level(self) -> float:
@@ -414,8 +414,8 @@ class CollarSignalGenerator:
                 conn.close()
                 if row:
                     return float(row[0])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to fetch VIX level from DB: {e}")
 
         # Try alternative data sources
         vix_path = self.DATA_DIR / "vix_term_structure.json"
@@ -426,8 +426,8 @@ class CollarSignalGenerator:
                 if data:
                     latest = max(data.keys())
                     return data[latest].get("vix_spot", 16.0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to parse VIX term structure file: {e}")
         return 16.0
 
     def save_signal(self, signal: CollarSignal):

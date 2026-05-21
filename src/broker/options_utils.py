@@ -331,12 +331,12 @@ class OptionsChainFetcher:
                 if vix_row:
                     vix = float(vix_row[0])
                 conn.close()
-        except Exception:
-            pass
-        
+        except Exception as e:
+            logger.warning(f"Failed to load SPY/VIX prices from DB: {e}")
+
         today = date.today()
         quotes = []
-        
+
         # Generate strikes around current price (±5%)
         strike_step = 5.0  # $5 increments for SPY
         atm_strike = round(spot / strike_step) * strike_step

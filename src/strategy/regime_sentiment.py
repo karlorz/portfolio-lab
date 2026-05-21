@@ -25,7 +25,7 @@ import numpy as np
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, BASE_ALLOCATION
 
 from src.strategy.sentiment_analyzer import (
     AggregatedSentiment,
@@ -378,7 +378,7 @@ class RegimeSentimentPipeline:
             Adjusted allocation dict
         """
         if base_allocation is None:
-            base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+            base = BASE_ALLOCATION
         else:
             base = base_allocation.copy()
         

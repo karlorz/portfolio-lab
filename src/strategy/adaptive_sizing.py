@@ -179,8 +179,8 @@ class AdaptiveSizer:
             if cb_path.exists():
                 state = json.loads(cb_path.read_text())
                 return state.get("severity", "ok")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to load circuit breaker state: {e}")
         return "ok"
 
     def _load_ensemble_signal(self) -> Tuple[float, float]:
@@ -192,8 +192,8 @@ class AdaptiveSizer:
                 signal = float(state.get("composite_signal", state.get("weighted_consensus", 0.0)))
                 agreement = float(state.get("agreement_ratio", 0.5))
                 return signal, agreement
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to load ensemble signal from {ev_path}: {e}")
         return 0.0, 0.5
 
     def _compute_vol_adjustment(self, vol_20d: float) -> Dict[str, float]:

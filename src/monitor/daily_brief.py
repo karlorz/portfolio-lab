@@ -285,8 +285,8 @@ def main():
                     [BriefSection(**s) for s in brief["sections"]], narrative
                 )
                 brief["has_narrative"] = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to generate unified dashboard narrative: {e}")
 
     print(brief["full_text"])
 

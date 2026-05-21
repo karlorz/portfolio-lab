@@ -306,11 +306,7 @@ class CrossAssetRegimeArbBacktester:
         gld_regime = self._classify_asset_regime(gld_mom)
         tlt_regime = self._classify_asset_regime(tlt_mom)
 
-        # --- All same regime -> no divergence ---
-        if spy_regime == gld_regime == tlt_regime:
-            return DivergencePattern.NO_DIVERGENCE, 0.0
-
-        # --- Full agreement patterns ---
+        # --- Full agreement patterns (check before all-same-regime) ---
         all_bullish = (
             spy_regime == "bullish"
             and gld_regime == "bullish"
@@ -326,6 +322,10 @@ class CrossAssetRegimeArbBacktester:
         )
         if all_bearish:
             return DivergencePattern.RISK_OFF, -0.5
+
+        # --- All same neutral regime -> no divergence ---
+        if spy_regime == gld_regime == tlt_regime:
+            return DivergencePattern.NO_DIVERGENCE, 0.0
 
         # --- Flight to safety: bonds up, equities down ---
         if tlt_regime == "bullish" and spy_regime == "bearish":

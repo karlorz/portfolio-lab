@@ -192,8 +192,8 @@ class UnifiedOrchestrator:
             try:
                 with open(self.STATE_FILE) as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"Failed to load state file {self.STATE_FILE}: {e}")
         return {"last_unified": None, "conflict_history": []}
 
     def _save_state(self):

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 
-from src.paths import DATA_DIR, MARKET_DB
+from src.paths import DATA_DIR, MARKET_DB, BASE_ALLOCATION
 
 RISK_METRICS_PATH = DATA_DIR / "risk_metrics.json"
 RISK_HISTORY_PATH = DATA_DIR / "risk_metrics_history.json"
@@ -83,7 +83,7 @@ def fetch_portfolio_returns(days: int = 252) -> Tuple[np.ndarray, float, float]:
     cursor = conn.cursor()
     
     # Get portfolio assets - SPY, GLD, TLT (46/38/16 allocation)
-    allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+    allocation = BASE_ALLOCATION
     
     prices = {}
     for symbol in allocation.keys():

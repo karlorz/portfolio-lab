@@ -783,3 +783,71 @@ class TestEdgeCases:
         assert d["gold_regime"] == "strong"
         assert d["signal_value"] == -0.3
         assert d["persistence_days"] == 3
+
+
+class TestContinuousSignalPassthrough:
+    """Verify that _classify_divergence returns continuous signal values
+    scaled by per-asset momentum/confidence, not discrete constants."""
+
+    def test_full_risk_on_scales_with_confidence(self):
+        """Higher confidence → stronger signal."""
+        detector = CrossAssetRegimeArbDetector()
+        equity_low = AssetRegimeReading("SPY", 0.08, 0.12, AssetRegime.BULL, 0.3)
+        equity_high = AssetRegimeReading("SPY", 0.08, 0.12, AssetRegime.BULL, 0.9)
+        bonds = BondRegimeReading("TLT", 0.06, BondRegime.FALLING, 0.7)
+        gold = GoldRegimeReading("GLD", 0.05, GoldRegime.STRONG, 0.6)
+
+        _, val_low, _ = detector._classify_divergence(equity_low, bonds, gold)
+        _, val_high, _ = detector._classify_divergence(equity_high, bonds, gold)
+        assert val_high > val_low
+
+    def test_risk_off_scales_with_momentum(self):
+        """Stronger bearish momentum → more negative signal."""
+        detector = CrossAssetRegimeArbDetector()
+        equity_mild = AssetRegimeReading("SPY", -0.06, 0.15, AssetRegime.BEAR, 0.5)
+        equity_severe = AssetRegimeReading("SPY", -0.20, 0.30, AssetRegime.BEAR, 0.9)
+        bonds = BondRegimeReading("TLT", -0.05, BondRegime.RISING, 0.7)
+        gold = GoldRegimeReading("GLD", -0.08, GoldRegime.WEAK, 0.6)
+
+        _, val_mild, _ = detector._classify_divergence(equity_mild, bonds, gold)
+        _, val_severe, _ = detector._classify_divergence(equity_severe, bonds, gold)
+        assert val_severe < val_mild  # More negative
+
+    def test_signal_value_not_discrete(self):
+        """Signal values should vary continuously, not jump between fixed steps."""
+        detector = CrossAssetRegimeArbDetector()
+        bonds = BondRegimeReading("TLT", 0.06, BondRegime.FALLING, 0.7)
+        gold = GoldRegimeReading("GLD", 0.05, GoldRegime.STRONG, 0.6)
+        values = set()
+        for conf in [0.2, 0.4, 0.6, 0.8, 1.0]:
+            equity = AssetRegimeReading("SPY", 0.08, 0.12, AssetRegime.BULL, conf)
+            _, val, _ = detector._classify_divergence(equity, bonds, gold)
+            values.add(round(val, 4))
+        # Should get at least 3 distinct values across 5 confidence levels
+        assert len(values) >= 3
+
+    def test_signal_bounded(self):
+        """All continuous signal values should be in [-1, 1]."""
+        detector = CrossAssetRegimeArbDetector()
+        test_cases = [
+            (AssetRegimeReading("SPY", 0.15, 0.12, AssetRegime.BULL, 1.0),
+             BondRegimeReading("TLT", 0.06, BondRegime.FALLING, 1.0),
+             GoldRegimeReading("GLD", 0.12, GoldRegime.STRONG, 1.0)),
+            (AssetRegimeReading("SPY", -0.20, 0.30, AssetRegime.BEAR, 1.0),
+             BondRegimeReading("TLT", -0.05, BondRegime.RISING, 1.0),
+             GoldRegimeReading("GLD", -0.15, GoldRegime.WEAK, 1.0)),
+        ]
+        for equity, bonds, gold in test_cases:
+            _, val, _ = detector._classify_divergence(equity, bonds, gold)
+            assert -1.0 <= val <= 1.0, f"Signal value {val} out of range"
+
+    def test_no_divergence_returns_zero(self):
+        """NO_DIVERGENCE pattern still returns 0.0."""
+        detector = CrossAssetRegimeArbDetector()
+        equity = AssetRegimeReading("SPY", 0.01, 0.10, AssetRegime.NEUTRAL, 0.5)
+        bonds = BondRegimeReading("TLT", 0.01, BondRegime.STABLE, 0.5)
+        gold = GoldRegimeReading("GLD", 0.01, GoldRegime.SIDEWAYS, 0.5)
+
+        pattern, value, _ = detector._classify_divergence(equity, bonds, gold)
+        assert pattern == DivergencePattern.NO_DIVERGENCE
+        assert value == 0.0

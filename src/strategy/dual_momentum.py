@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.paths import MARKET_DB
+from src.paths import MARKET_DB, BASE_ALLOCATION
 
 
 @dataclass
@@ -85,7 +85,7 @@ class DualMomentumEngine:
         self.universe = ["SPY", "GLD", "TLT", "IEF", "QQQ", "EFA", "VXUS"]
         
         # Base allocation (All-Season champion)
-        self.base_allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        self.base_allocation = BASE_ALLOCATION
     
     def _fetch_price_data(self, symbol: str, days: int = 252) -> List[Dict]:
         """Fetch historical price data from SQLite"""

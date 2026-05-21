@@ -28,6 +28,7 @@ import json
 import sys
 import warnings
 import logging
+from src.paths import BASE_ALLOCATION as DEFAULT_WEIGHTS
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -84,8 +85,6 @@ FACTOR_DEFINITIONS: Dict[str, Dict] = {
 }
 
 # Default portfolio weights (champion 46/38/16)
-DEFAULT_WEIGHTS: Dict[str, float] = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
-
 # Default rolling window for regression
 DEFAULT_WINDOW: int = 60
 

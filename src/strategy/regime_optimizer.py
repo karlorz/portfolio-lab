@@ -47,6 +47,8 @@ except ImportError:
     AlmgrenChrissCostModel = None
     compute_cost_penalty = None
 
+from src.paths import BASE_ALLOCATION
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 STATE_PATH = DATA_DIR / "regime_optimizer_state.json"
@@ -67,9 +69,6 @@ HARD_BOUNDS = {
     "BTC":  (0.00, 0.04),
     "ETH":  (0.00, 0.03),
 }
-
-# Base allocation (champion allocation 46/38/16)
-BASE_ALLOCATION = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
 
 # Core 3-asset set for optimization (SPY/GLD/TLT)
 CORE_ASSETS = ["SPY", "GLD", "TLT"]

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
-from src.paths import PRICES_JSON, SIGNALS_DIR
+from src.paths import PRICES_JSON, SIGNALS_DIR, BASE_ALLOCATION as WEIGHTS
 
 
 @dataclass
@@ -83,8 +83,7 @@ class FullBacktestResult:
     target_met: bool  # +0.03 Sharpe
 
 
-# Base portfolio weights: SPY/GLD/TLT 46/38/16
-WEIGHTS = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
+# Base portfolio weights: SPY/GLD/TLT 46/38/16 (imported as WEIGHTS)
 
 # Alt-data regime allocation shifts
 REGIME_SHIFTS = {

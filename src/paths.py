@@ -11,6 +11,7 @@ Usage:
 """
 
 from pathlib import Path
+from typing import Dict
 
 # Repository root (3 levels up from this file: paths.py -> src/ -> repo_root/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -43,3 +44,9 @@ ATTRIBUTION_DIR = DATA_DIR / "attribution"
 HOME = Path.home()
 WIKI_DIR = HOME / "wiki"
 WORK_DIR = HOME / "projects" / "portfolio-lab" / "work"
+
+# ── Champion allocation ──────────────────────────────────────────────
+# Grid-search winner: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026)
+# Single source of truth — import this instead of repeating the dict.
+BASE_ALLOCATION: Dict[str, float] = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+BASE_ALLOCATION_STR = "46/38/16"  # CLI shorthand

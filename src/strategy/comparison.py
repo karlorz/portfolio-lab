@@ -7,6 +7,7 @@ import json
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
+from src.paths import BASE_ALLOCATION
 
 
 @dataclass
@@ -41,7 +42,7 @@ class StrategyComparisonEngine:
             "all_season_static": StrategyPerformance(
                 name="All-Season Static",
                 description="SPY/GLD/TLT 46/38/16 - Fixed allocation, drift-based rebalancing",
-                allocation={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+                allocation=BASE_ALLOCATION,
                 expected_return=0.106,
                 expected_volatility=0.111,
                 sharpe_estimate=0.79,
@@ -59,7 +60,7 @@ class StrategyComparisonEngine:
             "all_season_trend": StrategyPerformance(
                 name="All-Season + Trend",
                 description="Base 46/38/16 with 10-month SMA overlay per asset",
-                allocation={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},  # Base
+                allocation=BASE_ALLOCATION,  # Base
                 expected_return=0.095,
                 expected_volatility=0.105,
                 sharpe_estimate=0.75,

@@ -41,6 +41,7 @@ import json
 import sqlite3
 import argparse
 import sys
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -48,6 +49,8 @@ from dataclasses import dataclass, asdict
 from decimal import Decimal, ROUND_DOWN
 
 from src.paths import MARKET_DB, DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -268,8 +271,8 @@ class SignalExecutionBridge:
                     combined = apply_urgency_adjustment(
                         abs_score, confidence, symbol, feedback, regime
                     )
-            except Exception:
-                pass  # Fall through to default if TCA feedback unavailable
+            except Exception as e:
+                logger.error(f"Failed to apply TCA feedback adjustment: {e}")
         
         # Apply thresholds
         if combined >= 0.70 or (abs_score >= 0.75 and confidence >= 0.70):
@@ -380,8 +383,8 @@ class SignalExecutionBridge:
                     min_trade = apply_min_trade_adjustment(
                         self.MIN_TRADE_VALUE, delta.symbol, feedback
                     )
-                except Exception:
-                    pass  # Fall through to default
+                except Exception as e:
+                    logger.error(f"Failed to apply min trade adjustment: {e}")
             
             # Skip if below minimum trade value
             if delta.estimated_value < min_trade:

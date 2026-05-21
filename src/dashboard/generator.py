@@ -6,12 +6,15 @@ Creates static dashboard from SQLite data for Vite/React app consumption.
 
 import json
 import sqlite3
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
 
-from src.paths import YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB
+from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB
+
+logger = logging.getLogger(__name__)
 
 PUBLIC_DIR = PUBLIC_DATA_DIR
 DB_PATH = MARKET_DB
@@ -67,8 +70,8 @@ class DashboardGenerator:
                             "v": entry.get("total_value", 0),
                             "r": entry.get("daily_return", 0)
                         })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to parse performance log entry: {e}")
 
         output = {
             "prices": prices,
@@ -173,7 +176,7 @@ class DashboardGenerator:
             cash = 100000
         
         # Target allocation based on regime
-        base_alloc = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        base_alloc = BASE_ALLOCATION
         regime_overrides = {
             "crisis": {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30},
             "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},
@@ -196,8 +199,8 @@ class DashboardGenerator:
                             "shares": round(order.get("shares", 0), 2),
                             "value": round(order.get("fill_value", 0), 2)
                         })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to parse order log entry: {e}")
 
         # Add factor rotation signals if engine available
         factor_rotation_signal = None
@@ -567,8 +570,8 @@ class DashboardGenerator:
                     broker["last_sync"] = last.get("timestamp")
                     broker["positions"] = last.get("broker_positions", [])
                     broker["drift"] = last.get("drift", [])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load position sync log: {e}")
 
         # Check broker orders log
         orders_log = DATA_DIR / "broker_orders.jsonl"
@@ -580,8 +583,8 @@ class DashboardGenerator:
                     if line.strip():
                         recent.append(json.loads(line))
                 broker["recent_orders"] = list(reversed(recent))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load broker orders log: {e}")
 
         # Check kill switch
         kill_file = DATA_DIR / "kill_switch.json"
@@ -590,8 +593,8 @@ class DashboardGenerator:
                 with open(kill_file) as f:
                     ks = json.load(f)
                 broker["kill_switch"] = ks.get("enabled", False)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load kill switch state: {e}")
 
         return broker
 
@@ -760,8 +763,8 @@ class DashboardGenerator:
                             "sharpe": latest.get("sharpe"),
                             "volatility": latest.get("volatility"),
                         }
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load grid search results: {e}")
 
         return signals
     
@@ -1058,8 +1061,8 @@ class DashboardGenerator:
                         "days_stale": days_stale,
                         "status": "fresh" if days_stale <= 1 else "stale" if days_stale <= 3 else "critical"
                     }
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to parse data freshness date '{last_date}': {e}")
 
         # Get signal health from SignalHealthTracker
         try:
@@ -1112,8 +1115,8 @@ class DashboardGenerator:
                 row = cursor.fetchone()
                 if row:
                     vix = row[0]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to fetch VIX level for sector momentum: {e}")
 
             signals = generate_sector_signals(historical_path, vix=vix)
             return signals

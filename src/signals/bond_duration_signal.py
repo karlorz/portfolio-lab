@@ -254,8 +254,8 @@ class BondDurationSignalGenerator:
                 y10 = yields.get("^TNX", 45) / 10 if yields.get("^TNX", 0) > 1 else yields.get("^TNX", 4.5)
 
                 return {"yield_10y": y10, "yield_2y": yields.get("2Y", y10 - 0.5)}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to fetch yields from DB: {e}")
 
         # Default: current market ~4.5% 10Y, ~4.0% 2Y
         return {"yield_10y": 4.50, "yield_2y": 4.00}

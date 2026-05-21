@@ -11,6 +11,8 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from src.paths import BASE_ALLOCATION
+
 
 @dataclass
 class BacktestMetrics:
@@ -119,7 +121,7 @@ def compute_crisis_returns(
     if crisis_years is None:
         crisis_years = ['2008', '2020', '2022']
     if base_weights is None:
-        base_weights = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
+        base_weights = BASE_ALLOCATION
 
     result = {}
     for year in crisis_years:

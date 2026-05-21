@@ -250,8 +250,8 @@ class CryptoMomentumSignalGenerator:
                         conn.close()
                         return prices, returns
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to fetch price history for {symbol} from DB: {e}")
 
         # Fallback: generate realistic simulated data
         rng = np.random.RandomState(hash(symbol) % 2**31)

@@ -168,8 +168,8 @@ class CollarOptionsBridge:
                 if data:
                     latest = max(data.keys())
                     return data[latest].get("vix_spot", 16.0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load VIX term structure: {e}")
         return 16.0
 
     def _find_from_chain(

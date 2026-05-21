@@ -96,8 +96,8 @@ class CreditFetcher:
             hist = ticker.history(period="1d")
             if not hist.empty:
                 return float(hist["Close"].iloc[-1])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to fetch price for {symbol} via yfinance: {e}")
         try:
             import requests
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d"
@@ -105,8 +105,8 @@ class CreditFetcher:
             data = resp.json()
             if "chart" in data and data["chart"]["result"]:
                 return float(data["chart"]["result"][0]["meta"]["regularMarketPrice"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to fetch price for {symbol} via REST API: {e}")
         return self._get_latest_cached_price(symbol)
 
     def _get_latest_cached_price(self, symbol: str) -> float:
@@ -119,8 +119,8 @@ class CreditFetcher:
                 row = cursor.fetchone()
                 if row:
                     return float(row[0])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to get cached price for {symbol}: {e}")
         return 0.0
 
     def _fetch_30d_return(self, symbol: str) -> float:
@@ -133,8 +133,8 @@ class CreditFetcher:
                 end = float(hist["Close"].iloc[-1])
                 if start > 0:
                     return (end - start) / start * 100
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to fetch 30d return for {symbol}: {e}")
         return 0.0
 
     def _compute_spread(self, lqd_return: float, hyg_return: float) -> float:
@@ -157,7 +157,8 @@ class CreditFetcher:
                 if std < 0.01:
                     return 0.0
                 return (spread - mean) / std
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to compute z-score: {e}")
             return spread / 2.0
 
     def _classify_trend(self, spread: float) -> str:
@@ -187,8 +188,8 @@ class CreditFetcher:
                     cached_ts = datetime.fromisoformat(data.get("timestamp", ""))
                     if datetime.now() - cached_ts < timedelta(hours=CACHE_TTL_HOURS):
                         return CreditMetrics(**data)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to read cached credit metrics: {e}")
         return None
 
     def _save_cache(self, metrics: CreditMetrics):

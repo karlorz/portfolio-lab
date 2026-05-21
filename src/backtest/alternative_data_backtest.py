@@ -114,12 +114,17 @@ class AlternativeDataBacktester:
     """
     Walk-forward backtest for the ALTERNATIVE_DATA ensemble signal.
 
-    Simulates the hardcoded regime->signal mappings used in the ensemble
-    voter to determine whether they add or subtract alpha over the
+    Simulates the continuous composite_score signal used in the ensemble
+    voter to determine whether it adds or subtracts alpha over the
     46/38/16 baseline across 2006-2026.
+
+    Signal computation: np.clip(spy_60d_return * 2.0, -1, 1) — a
+    continuous passthrough that mirrors the production code path
+    (ensemble_voter.py reads composite_score and clips to [-1, 1]).
+    The old discrete REGIME_SIGNAL_MAP is kept only as a reference.
     """
 
-    # Hardcoded regime->signal mapping from ensemble_voter.py line 581
+    # Legacy regime->signal mapping (kept for reference; NOT used for signal computation)
     REGIME_SIGNAL_MAP = {
         "bull": 0.4,
         "bear": -0.4,
@@ -228,8 +233,13 @@ class AlternativeDataBacktester:
         """Compute regime and signal value for a given day.
 
         Infers the regime using SPY 60-day return as proxy (VIX data
-        is not available in the price dataset), then maps the regime to
-        the hardcoded signal value used by the ensemble voter.
+        is not available in the price dataset), then computes a continuous
+        signal value that mirrors the production code path:
+        np.clip(spy_60d_return * 2.0, -1, 1).
+
+        This replaces the old discrete REGIME_SIGNAL_MAP which quantized
+        the signal into 4 fixed values, losing information about the
+        strength of the underlying regime.
 
         Returns:
             (regime_name, signal_value)
@@ -241,7 +251,8 @@ class AlternativeDataBacktester:
         )
 
         regime = self.infer_regime_from_spy_return(spy_60d_return)
-        signal = self.REGIME_SIGNAL_MAP.get(regime, 0.0)
+        # Continuous signal: scale 60d return to [-1, 1] range
+        signal = float(np.clip(spy_60d_return * 2.0, -1.0, 1.0))
         return regime, signal
 
     # ------------------------------------------------------------------

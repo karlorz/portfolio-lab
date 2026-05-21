@@ -38,7 +38,7 @@ from enum import Enum
 import sys
 import logging
 
-from src.paths import DATA_DIR, PRICES_JSON, SIGNALS_DIR, ATTRIBUTION_DIR
+from src.paths import DATA_DIR, PRICES_JSON, SIGNALS_DIR, ATTRIBUTION_DIR, BASE_ALLOCATION
 
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -939,7 +939,7 @@ class EnsembleVoter:
         Returns shifts from base allocation for each asset.
         """
         if base_allocation is None:
-            base_allocation = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
+            base_allocation = BASE_ALLOCATION
         
         if vote is None:
             vote = self.compute_vote()

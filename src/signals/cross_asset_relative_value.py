@@ -447,8 +447,8 @@ class CrossAssetRVScanner:
             try:
                 with open(self.state_path) as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load relative value state: {e}")
         return {}
 
     def _save_state(self, state: Dict) -> None:

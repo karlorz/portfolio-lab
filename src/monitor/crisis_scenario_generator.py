@@ -32,6 +32,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.paths import BASE_ALLOCATION
+
 # ---------------------------------------------------------------------------
 # project root
 # ---------------------------------------------------------------------------
@@ -49,8 +51,6 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 # 7-asset model matching the unified orchestrator
 ASSETS = ["SPY", "GLD", "TLT", "IEF", "SHY", "BTC", "ETH"]
-
-BASE_ALLOCATION = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
 
 # Crisis templates: {asset: {mean_daily_return, vol_multiplier, correlation_regime}}
 # All returns are daily decimal (e.g. -0.02 = -2%)

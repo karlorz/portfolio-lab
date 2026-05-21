@@ -21,7 +21,7 @@ from src.backtest.metrics import (
     compute_crisis_returns,
     save_results_json,
 )
-from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
+from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR, BASE_ALLOCATION
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ class InternationalMomentumBacktester:
         crisis_returns = compute_crisis_returns(
             self.prices, trading_days,
             crisis_years=['2008', '2020', '2022'],
-            base_weights={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
+            base_weights=BASE_ALLOCATION,
         )
 
         return BacktestResult(

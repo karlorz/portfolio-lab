@@ -28,6 +28,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.paths import BASE_ALLOCATION
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -50,9 +52,6 @@ HARD_BOUNDS: Dict[str, Tuple[float, float]] = {
     "BTC": (0.00, 0.04),
     "ETH": (0.00, 0.03),
 }
-
-# Base champion allocation
-BASE_ALLOCATION: Dict[str, float] = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
 
 # ── Default Factor Risk Budgets ─────────────────────────────────────────────
 # These represent reasonable target ranges for the 5-factor risk decomposition.

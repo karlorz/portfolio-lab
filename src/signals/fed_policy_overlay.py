@@ -72,7 +72,7 @@ FRED_SERIES = {
     'INDPRO': 'Industrial Production',
 }
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, BASE_ALLOCATION
 
 # Cache directory
 FRED_CACHE = DATA_DIR / "fred_data.json"
@@ -481,7 +481,7 @@ class FedPolicyOverlay:
         if self.current_regime is None:
             return {"error": "Unable to detect regime"}
         
-        base = base_allocation or {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
+        base = base_allocation or BASE_ALLOCATION
         shifts = self.current_regime.get_allocation_shift()
         
         # Apply shifts
