@@ -39,6 +39,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
+from src.signals.crypto_momentum import CryptoMomentumCalculator, CryptoVolRegime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,11 +54,6 @@ MONTHLY_TRADING_DAYS = 21
 # Crisis years to evaluate
 CRISIS_YEARS = ["2008", "2020", "2022"]
 
-# Momentum lookback
-LOOKBACK_6M = 180  # ~6 months of trading days
-
-# Vol regime thresholds (annualized)
-VOL_EXTREME = 1.00  # >100% = extreme
 
 # Symbols
 BASE_SYMBOLS = ["SPY", "GLD", "TLT"]
@@ -358,29 +354,28 @@ class WalkForwardCryptoBacktester:
         logger.info("Generated %d synthetic trading days with crypto data", n)
 
     def _compute_spy_momentum_6m(self, idx: int) -> float:
-        """Compute SPY 6-month momentum (simple return over ~180 days).
+        """Compute SPY 6-month momentum using production CryptoMomentumCalculator.
 
         Returns 0.0 if insufficient history.
         """
-        if idx < LOOKBACK_6M:
+        if idx < 180:
             return 0.0
 
-        p0 = self._daily_prices[idx - LOOKBACK_6M].spy
-        p1 = self._daily_prices[idx].spy
-
-        if p0 <= 0:
-            return 0.0
-
-        return (p1 / p0) - 1
+        calc = CryptoMomentumCalculator()
+        spy_prices = [dp.spy for dp in self._daily_prices[:idx + 1]]
+        return calc.compute_momentum(spy_prices, 180)
 
     def _compute_crypto_vol(
         self, idx: int, lookback: int = 21
     ) -> Tuple[float, float]:
-        """Compute annualized volatility for BTC and ETH.
+        """Compute annualized volatility for BTC and ETH using production code.
+
+        Delegates to CryptoMomentumCalculator.compute_volatility().
 
         Returns (btc_vol, eth_vol) as decimal fractions (e.g., 0.75 = 75%).
         Returns 0.0 for an asset with insufficient data.
         """
+        calc = CryptoMomentumCalculator()
         btc_vol = 0.0
         eth_vol = 0.0
 
@@ -391,7 +386,7 @@ class WalkForwardCryptoBacktester:
             if len(btc_prices) >= 5:
                 btc_rets = [btc_prices[j] / btc_prices[j - 1] - 1 for j in range(1, len(btc_prices))]
                 if btc_rets:
-                    btc_vol = np.std(btc_rets) * math.sqrt(CRYPTO_TRADING_DAYS)
+                    btc_vol = calc.compute_volatility(btc_rets, len(btc_rets))
 
             # ETH vol
             eth_prices = [self._daily_prices[j].eth for j in range(idx - lookback, idx + 1)]
@@ -399,18 +394,25 @@ class WalkForwardCryptoBacktester:
             if len(eth_prices) >= 5:
                 eth_rets = [eth_prices[j] / eth_prices[j - 1] - 1 for j in range(1, len(eth_prices))]
                 if eth_rets:
-                    eth_vol = np.std(eth_rets) * math.sqrt(CRYPTO_TRADING_DAYS)
+                    eth_vol = calc.compute_volatility(eth_rets, len(eth_rets))
 
         return btc_vol, eth_vol
 
     def _is_vol_extreme(self, btc_vol: float, eth_vol: float) -> bool:
-        """Check if either crypto asset has extreme vol (>100% annualized)."""
-        return btc_vol > VOL_EXTREME or eth_vol > VOL_EXTREME
+        """Check if either crypto asset has extreme vol using production constant.
+
+        Uses CryptoMomentumCalculator.VOL_EXTREME for the threshold with strict
+        greater-than comparison (>1.00), matching the original backtest boundary.
+        """
+        return btc_vol > CryptoMomentumCalculator.VOL_EXTREME or eth_vol > CryptoMomentumCalculator.VOL_EXTREME
 
     def _compute_crypto_allocation(
         self, idx: int, gld_sleeve: float
     ) -> Tuple[float, float, float]:
-        """Compute crypto allocation at a rebalance point.
+        """Compute crypto allocation using production CryptoMomentumCalculator.
+
+        Uses assess_asset_signal() for vol regime classification, momentum
+        computation, and vol scaling instead of the backtest's own logic.
 
         Entry: SPY 6m momentum positive AND no extreme crypto vol
         Exit: SPY momentum negative OR extreme crypto vol
@@ -418,20 +420,48 @@ class WalkForwardCryptoBacktester:
         Returns (btc_weight, eth_weight, total_crypto_weight) as portfolio
         fractions (e.g., 0.03 = 3% of portfolio).
         """
-        spy_mom_6m = self._compute_spy_momentum_6m(idx)
-        btc_vol, eth_vol = self._compute_crypto_vol(idx)
-
-        # Exit conditions
-        if spy_mom_6m <= 0 or self._is_vol_extreme(btc_vol, eth_vol):
+        if idx < 180:
             return 0.0, 0.0, 0.0
 
-        # Entry: compute proportional allocation
+        calc = CryptoMomentumCalculator()
+
+        # SPY momentum
+        spy_prices = [dp.spy for dp in self._daily_prices[:idx + 1]]
+        spy_mom_6m = calc.compute_momentum(spy_prices, 180)
+
+        # Exit if SPY momentum negative
+        if spy_mom_6m <= 0:
+            return 0.0, 0.0, 0.0
+
+        # BTC/ETH signals
+        btc_prices = [dp.btc for dp in self._daily_prices[:idx + 1] if dp.btc is not None]
+        eth_prices = [dp.eth for dp in self._daily_prices[:idx + 1] if dp.eth is not None]
+
+        if len(btc_prices) < 30 or len(eth_prices) < 30:
+            return 0.0, 0.0, 0.0
+
+        btc_rets = [(btc_prices[j] / btc_prices[j - 1] - 1) for j in range(1, len(btc_prices))]
+        eth_rets = [(eth_prices[j] / eth_prices[j - 1] - 1) for j in range(1, len(eth_prices))]
+
+        btc_signal = calc.assess_asset_signal("BTC", btc_prices[-1], btc_prices, btc_rets)
+        eth_signal = calc.assess_asset_signal("ETH", eth_prices[-1], eth_prices, eth_rets)
+
+        # Exit if extreme vol
+        if btc_signal.vol_regime == "extreme" or eth_signal.vol_regime == "extreme":
+            return 0.0, 0.0, 0.0
+
+        # Compute allocation
         max_crypto = self.config.max_crypto_pct / 100.0
         crypto_target = min(max_crypto, gld_sleeve * 0.15)
 
-        # Split BTC 60% / ETH 40%
-        btc_w = crypto_target * 0.60
-        eth_w = crypto_target * 0.40
+        # Use vol scale from production code
+        avg_vol = (btc_signal.vol_30d + eth_signal.vol_30d) / 2
+        vol_scale = calc.compute_vol_scale(avg_vol)
+        crypto_target *= vol_scale
+        crypto_target = min(crypto_target, max_crypto)
+
+        btc_w = crypto_target * calc.BTC_WEIGHT
+        eth_w = crypto_target * calc.ETH_WEIGHT
 
         return btc_w, eth_w, crypto_target
 
@@ -477,7 +507,7 @@ class WalkForwardCryptoBacktester:
         config = self.config
 
         # Need enough warmup for 6-month momentum
-        if len(prices) < LOOKBACK_6M + 1:
+        if len(prices) < 180 + 1:
             logger.error("Insufficient data for 6-month momentum")
             return self._empty_result()
 

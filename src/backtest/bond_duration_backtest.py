@@ -4,15 +4,13 @@ Bond Duration Rotation Walk-Forward Backtest - v9.33 Implementation
 Validates the bond duration rotation overlay on the baseline 46/38/16
 (SPY/GLD/TLT) portfolio. The rotation dynamically allocates the 16% bond
 sleeve across TLT (16yr), IEF (7yr), and SHY (2yr) based on TLT 60-day
-momentum.
+momentum mapped to yield curve context for the production
+BondDurationCalculator.
 
-Strategy:
-- TLT momentum positive (rising bonds / falling yields) -> extend duration
-    TLT 70%, IEF 20%, SHY 10% of bond sleeve
-- TLT momentum negative (falling bonds / rising yields) -> shorten duration
-    TLT 10%, IEF 30%, SHY 60% of bond sleeve
-- Neutral momentum:
-    TLT 40%, IEF 40%, SHY 20% of bond sleeve
+Strategy (via src/signals/bond_duration_signal.BondDurationCalculator):
+- TLT 60-day momentum -> approximate yield curve context (spread, rate_chg)
+- BondDurationCalculator.classify_curve()/classify_rate_direction()
+- BondDurationCalculator.compute_duration_allocation() -> 4x3 regime matrix
 
 Key questions:
   1. Does dynamic duration rotation improve Sharpe vs static TLT allocation?
@@ -38,6 +36,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
+from src.signals.bond_duration_signal import BondDurationCalculator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -350,6 +349,38 @@ class WalkForwardBondDurationBacktester:
             return FALLING_ALLOCATION
         return NEUTRAL_ALLOCATION
 
+    def _momentum_to_yield_context(self, tlt_momentum: float) -> Tuple[float, float, float]:
+        """Map TLT 60-day momentum to approximate yield curve context.
+
+        TLT price up -> yields falling -> curve steep/normal, rates falling
+        TLT price down -> yields rising -> curve flat/inverted, rates rising
+
+        Returns (spread, real_rate, rate_chg) for BondDurationCalculator.
+        real_rate is set to 1.5 (neutral) since we lack CPI data in the backtest.
+        """
+        if tlt_momentum > 0.05:
+            # Strong positive: yields falling sharply, curve likely steep
+            spread = 0.8
+            rate_chg = -0.5
+        elif tlt_momentum > 0.01:
+            # Moderate positive: yields falling, curve normal
+            spread = 0.5
+            rate_chg = -0.2
+        elif tlt_momentum >= -0.01:
+            # Neutral: yields stable, curve normal/flat border
+            spread = 0.3
+            rate_chg = 0.0
+        elif tlt_momentum >= -0.05:
+            # Moderate negative: yields rising, curve flat
+            spread = 0.1
+            rate_chg = 0.3
+        else:
+            # Strong negative: yields rising sharply, curve inverted
+            spread = -0.2
+            rate_chg = 0.6
+
+        return spread, 1.5, rate_chg
+
     def _compute_effective_duration(self, tlt_w: float, ief_w: float, shy_w: float) -> float:
         """Compute weighted average effective duration in years."""
         return (
@@ -480,11 +511,7 @@ class WalkForwardBondDurationBacktester:
                     "GLD": config.base_gld_weight,
                     "Bonds": config.base_bond_weight,
                 },
-                "bond_sleeve_allocation": {
-                    "rising": list(RISING_ALLOCATION[:3]),
-                    "falling": list(FALLING_ALLOCATION[:3]),
-                    "neutral": list(NEUTRAL_ALLOCATION[:3]),
-                },
+                "bond_sleeve_allocation": "BondDurationCalculator.compute_duration_allocation() via _momentum_to_yield_context()",
             },
         )
 
@@ -544,10 +571,14 @@ class WalkForwardBondDurationBacktester:
             # Rebalance on initial day (i == 1) and then monthly
             if days_since_rebalance >= rebalance_freq or i == 1:
                 tlt_momentum = self._compute_tlt_60d_momentum(i)
-                momentum_regime = self._classify_momentum(tlt_momentum)
 
-                new_tlt_s, new_ief_s, new_shy_s, label = self._get_bond_sleeve_allocation(
-                    momentum_regime
+                # Use production BondDurationCalculator via momentum-to-yield-context mapping
+                spread, real_rate, rate_chg = self._momentum_to_yield_context(tlt_momentum)
+                calc = BondDurationCalculator()
+                curve_regime = calc.classify_curve(spread)
+                rate_direction = calc.classify_rate_direction(rate_chg)
+                new_tlt_s, new_ief_s, new_shy_s, label = calc.compute_duration_allocation(
+                    spread, real_rate, rate_direction, curve_regime
                 )
 
                 # Transaction cost: proportional to absolute weight change in the bond sleeve
@@ -573,7 +604,7 @@ class WalkForwardBondDurationBacktester:
                 regime_tracker.append({
                     "date": date,
                     "tlt_momentum": round(tlt_momentum, 4),
-                    "momentum_regime": momentum_regime,
+                    "momentum_regime": label,
                     "tlt_sleeve": tlt_sleeve,
                     "ief_sleeve": ief_sleeve,
                     "shy_sleeve": shy_sleeve,

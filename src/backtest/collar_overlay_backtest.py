@@ -30,6 +30,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
+from src.signals.collar_signal import CollarSignalGenerator, CollarRegime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,10 +44,8 @@ MONTHLY_TRADING_DAYS = 21
 # Crisis years to evaluate
 CRISIS_YEARS = ["2008", "2020", "2022"]
 
-# VIX thresholds matching CollarRegime in collar_signal.py
-VIX_ELEVATED = 20.0
-VIX_STRESS = 30.0
-VIX_CRISIS = 40.0
+# VIX thresholds come from CollarRegime enum in collar_signal.py:
+#   CollarRegime.NORMAL (VIX < 20), ELEVATED (< 30), STRESS (< 40), CRISIS (>= 40)
 
 # Symbols needed
 BASE_SYMBOLS = ["SPY", "GLD", "TLT"]
@@ -145,45 +144,6 @@ class BacktestResult:
             "total_transaction_costs": self.total_transaction_costs,
             "config_snapshot": self.config_snapshot,
         }
-
-
-# ---------------------------------------------------------------------------
-# Collar allocation logic
-# ---------------------------------------------------------------------------
-
-
-def _get_regime(vix: float) -> str:
-    """Classify VIX level into collar regime."""
-    if vix >= VIX_CRISIS:
-        return "crisis"
-    elif vix >= VIX_STRESS:
-        return "stress"
-    elif vix >= VIX_ELEVATED:
-        return "elevated"
-    return "normal"
-
-
-def _get_collar_shifts(vix: float) -> Tuple[float, float, float]:
-    """Get allocation shifts for collar overlay based on VIX level.
-
-    Returns (spy_shift, gld_shift, tlt_shift) where negative means
-    reduce the allocation and positive means increase. In CRISIS mode,
-    the collar is frozen (no shift) because put options are too expensive.
-
-    Shifts are applied additively to the base weights:
-      - NORMAL (VIX < 20):   moderate defense, SPY -3%,   GLD +1%,  TLT +2%
-      - ELEVATED (VIX 20-30): stronger defense, SPY -4%,  GLD +1.5%, TLT +2.5%
-      - STRESS (VIX 30-40):  heavy defense,  SPY -5%,     GLD +2%,  TLT +3%
-      - CRISIS (VIX > 40):   frozen, no shifts
-    """
-    if vix >= VIX_CRISIS:
-        return (0.0, 0.0, 0.0)
-    elif vix >= VIX_STRESS:
-        return (-0.05, 0.02, 0.03)
-    elif vix >= VIX_ELEVATED:
-        return (-0.04, 0.015, 0.025)
-    else:
-        return (-0.03, 0.01, 0.02)
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +299,28 @@ class WalkForwardCollarBacktester:
         if dp.vix is not None and dp.vix > 0:
             return dp.vix
         return self._compute_vix_proxy(idx)
+
+    @staticmethod
+    def _get_collar_shifts_from_regime(regime: CollarRegime) -> Tuple[float, float, float]:
+        """Get allocation shifts for collar overlay based on CollarRegime.
+
+        Returns (spy_shift, gld_shift, tlt_shift) where negative means
+        reduce the allocation and positive means increase. In CRISIS mode,
+        the collar is frozen (no shift) because put options are too expensive.
+
+        Shifts are applied additively to the base weights:
+          - NORMAL (VIX < 20):   moderate defense, SPY -3%,   GLD +1%,  TLT +2%
+          - ELEVATED (VIX 20-30): stronger defense, SPY -4%,  GLD +1.5%, TLT +2.5%
+          - STRESS (VIX 30-40):  heavy defense,  SPY -5%,     GLD +2%,  TLT +3%
+          - CRISIS (VIX > 40):   frozen, no shifts
+        """
+        shifts = {
+            CollarRegime.NORMAL: (-0.03, 0.01, 0.02),
+            CollarRegime.ELEVATED: (-0.04, 0.015, 0.025),
+            CollarRegime.STRESS: (-0.05, 0.02, 0.03),
+            CollarRegime.CRISIS: (0.0, 0.0, 0.0),
+        }
+        return shifts.get(regime, (-0.03, 0.01, 0.02))
 
     def _compute_portfolio_return(
         self,
@@ -502,7 +484,8 @@ class WalkForwardCollarBacktester:
             # Rebalance on initial day (i == 1) and then monthly
             if days_since_rebalance >= rebalance_freq or i == 1:
                 vix_level = self._get_vix_level(i)
-                spy_shift, gld_shift, tlt_shift = _get_collar_shifts(vix_level)
+                regime = CollarSignalGenerator().classify_regime(vix_level)
+                spy_shift, gld_shift, tlt_shift = self._get_collar_shifts_from_regime(regime)
 
                 # New weights = base weights + collar shifts
                 new_spy_w = config.base_spy_weight + spy_shift
@@ -538,16 +521,15 @@ class WalkForwardCollarBacktester:
                 collar_tracker["total_costs"] += cost
                 days_since_rebalance = 0
 
-                # Track regime
-                regime = _get_regime(vix_level)
-                current_regime = regime
-                collar_tracker["regime_counts"][regime] = (
-                    collar_tracker["regime_counts"].get(regime, 0) + 1
+                # Track regime (regime is already classified above via CollarSignalGenerator)
+                current_regime = regime.value
+                collar_tracker["regime_counts"][regime.value] = (
+                    collar_tracker["regime_counts"].get(regime.value, 0) + 1
                 )
                 regime_tracker.append({
                     "date": date,
                     "vix_level": vix_level,
-                    "regime": regime,
+                    "regime": regime.value,
                     "spy_reduction_pct": spy_reduction_pct,
                 })
 

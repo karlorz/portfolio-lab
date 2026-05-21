@@ -18,78 +18,87 @@ from src.backtest.collar_overlay_backtest import (
     BacktestResult,
     DailyPrices,
     WalkForwardCollarBacktester,
-    _get_regime,
-    _get_collar_shifts,
-    VIX_CRISIS,
-    VIX_ELEVATED,
-    VIX_STRESS,
 )
+from src.signals.collar_signal import CollarRegime, CollarSignalGenerator
+
+
+# ── Helper ─────────────────────────────────────────────────────────────────
+
+
+def _shifts_from_vix(vix: float):
+    """Map a VIX level to allocation shifts using production code."""
+    regime = CollarSignalGenerator().classify_regime(vix)
+    return WalkForwardCollarBacktester._get_collar_shifts_from_regime(regime)
 
 
 # ── Helper Tests ────────────────────────────────────────────────────────────
 
 
 class TestCollarHelpers:
-    """Test the standalone collar helper functions."""
+    """Test regime classification and shift computation.
 
-    def test_get_regime_normal(self):
-        assert _get_regime(10.0) == "normal"
-        assert _get_regime(15.0) == "normal"
-        assert _get_regime(19.9) == "normal"
+    Uses production CollarSignalGenerator.classify_regime() and the
+    backtest's _get_collar_shifts_from_regime() helper.
+    """
 
-    def test_get_regime_elevated(self):
-        assert _get_regime(20.0) == "elevated"
-        assert _get_regime(25.0) == "elevated"
-        assert _get_regime(29.9) == "elevated"
+    def test_classify_regime_normal(self):
+        assert CollarSignalGenerator().classify_regime(10.0) == CollarRegime.NORMAL
+        assert CollarSignalGenerator().classify_regime(15.0) == CollarRegime.NORMAL
+        assert CollarSignalGenerator().classify_regime(19.9) == CollarRegime.NORMAL
 
-    def test_get_regime_stress(self):
-        assert _get_regime(30.0) == "stress"
-        assert _get_regime(35.0) == "stress"
-        assert _get_regime(39.9) == "stress"
+    def test_classify_regime_elevated(self):
+        assert CollarSignalGenerator().classify_regime(20.0) == CollarRegime.ELEVATED
+        assert CollarSignalGenerator().classify_regime(25.0) == CollarRegime.ELEVATED
+        assert CollarSignalGenerator().classify_regime(29.9) == CollarRegime.ELEVATED
 
-    def test_get_regime_crisis(self):
-        assert _get_regime(40.0) == "crisis"
-        assert _get_regime(45.0) == "crisis"
-        assert _get_regime(100.0) == "crisis"
+    def test_classify_regime_stress(self):
+        assert CollarSignalGenerator().classify_regime(30.0) == CollarRegime.STRESS
+        assert CollarSignalGenerator().classify_regime(35.0) == CollarRegime.STRESS
+        assert CollarSignalGenerator().classify_regime(39.9) == CollarRegime.STRESS
+
+    def test_classify_regime_crisis(self):
+        assert CollarSignalGenerator().classify_regime(40.0) == CollarRegime.CRISIS
+        assert CollarSignalGenerator().classify_regime(45.0) == CollarRegime.CRISIS
+        assert CollarSignalGenerator().classify_regime(100.0) == CollarRegime.CRISIS
 
     def test_get_collar_shifts_normal(self):
-        spy_s, gld_s, tlt_s = _get_collar_shifts(15.0)
+        spy_s, gld_s, tlt_s = _shifts_from_vix(15.0)
         assert spy_s == -0.03
         assert gld_s == 0.01
         assert tlt_s == 0.02
 
     def test_get_collar_shifts_elevated(self):
-        spy_s, gld_s, tlt_s = _get_collar_shifts(25.0)
+        spy_s, gld_s, tlt_s = _shifts_from_vix(25.0)
         assert spy_s == -0.04
         assert gld_s == 0.015
         assert tlt_s == 0.025
 
     def test_get_collar_shifts_stress(self):
-        spy_s, gld_s, tlt_s = _get_collar_shifts(35.0)
+        spy_s, gld_s, tlt_s = _shifts_from_vix(35.0)
         assert spy_s == -0.05
         assert gld_s == 0.02
         assert tlt_s == 0.03
 
     def test_get_collar_shifts_crisis(self):
         """CRISIS regime freezes the collar -- no shifts."""
-        spy_s, gld_s, tlt_s = _get_collar_shifts(45.0)
+        spy_s, gld_s, tlt_s = _shifts_from_vix(45.0)
         assert spy_s == 0.0
         assert gld_s == 0.0
         assert tlt_s == 0.0
 
     def test_get_collar_shifts_boundary_elevated(self):
         """Boundary at VIX=20 should be elevated."""
-        spy_s, _, _ = _get_collar_shifts(VIX_ELEVATED)
+        spy_s, _, _ = _shifts_from_vix(CollarSignalGenerator.VIX_ELEVATED)
         assert spy_s == -0.04
 
     def test_get_collar_shifts_boundary_stress(self):
         """Boundary at VIX=30 should be stress."""
-        spy_s, _, _ = _get_collar_shifts(VIX_STRESS)
+        spy_s, _, _ = _shifts_from_vix(CollarSignalGenerator.VIX_STRESS)
         assert spy_s == -0.05
 
     def test_get_collar_shifts_boundary_crisis(self):
         """Boundary at VIX=40 should be crisis (frozen)."""
-        spy_s, _, _ = _get_collar_shifts(VIX_CRISIS)
+        spy_s, _, _ = _shifts_from_vix(CollarSignalGenerator.VIX_CRISIS)
         assert spy_s == 0.0
 
 
@@ -269,7 +278,7 @@ class TestWalkForwardCollarBacktester:
 
         for i in range(1, len(prices)):
             vix = bt._get_vix_level(i)
-            spy_s, gld_s, tlt_s = _get_collar_shifts(vix)
+            spy_s, gld_s, tlt_s = _shifts_from_vix(vix)
             spy_w = config.base_spy_weight + spy_s
             spy_w = max(0.36, min(0.56, spy_w))
             assert 0.36 <= spy_w <= 0.56
@@ -281,19 +290,19 @@ class TestWalkForwardCollarBacktester:
         config = bt.config
 
         for vix in [10.0, 25.0, 35.0, 45.0]:
-            _, gld_s, _ = _get_collar_shifts(vix)
+            _, gld_s, _ = _shifts_from_vix(vix)
             gld_w = config.base_gld_weight + gld_s
             gld_w = max(0.28, min(0.48, gld_w))
             assert 0.28 <= gld_w <= 0.48
 
     def test_collar_active_in_normal_vix(self):
         """Collar should shift SPY (be active) in normal VIX."""
-        spy_s, _, _ = _get_collar_shifts(15.0)
+        spy_s, _, _ = _shifts_from_vix(15.0)
         assert spy_s < 0  # SPY is reduced
 
     def test_collar_inactive_in_crisis_vix(self):
         """Collar should be frozen (no shift) in crisis mode."""
-        spy_s, _, _ = _get_collar_shifts(45.0)
+        spy_s, _, _ = _shifts_from_vix(45.0)
         assert spy_s == 0.0
 
     def test_empty_data_returns_zero_metrics(self, monkeypatch):
@@ -401,7 +410,7 @@ class TestWalkForwardCollarBacktester:
 
         for i in range(1, len(prices)):
             vix = bt._get_vix_level(i)
-            spy_s, gld_s, tlt_s = _get_collar_shifts(vix)
+            spy_s, gld_s, tlt_s = _shifts_from_vix(vix)
             spy_w = max(0.36, min(0.56, config.base_spy_weight + spy_s))
             gld_w = max(0.28, min(0.48, config.base_gld_weight + gld_s))
             tlt_w = max(0.06, min(0.26, config.base_tlt_weight + tlt_s))
@@ -470,13 +479,13 @@ class TestEdgeCases:
 
     def test_crisis_freeze_preserves_base_allocation(self):
         """During crisis, the frozen collar should keep base allocation."""
-        spy_s, gld_s, tlt_s = _get_collar_shifts(50.0)
+        spy_s, gld_s, tlt_s = _shifts_from_vix(50.0)
         assert spy_s == 0.0
         assert gld_s == 0.0
         assert tlt_s == 0.0
 
     def test_regime_based_allocation_elevated_vs_normal(self):
         """Elevated VIX should produce larger SPY reduction than normal."""
-        spy_s_normal, _, _ = _get_collar_shifts(15.0)
-        spy_s_elevated, _, _ = _get_collar_shifts(25.0)
+        spy_s_normal, _, _ = _shifts_from_vix(15.0)
+        spy_s_elevated, _, _ = _shifts_from_vix(25.0)
         assert abs(spy_s_elevated) > abs(spy_s_normal)
