@@ -269,7 +269,7 @@ def get_all_strategy_signals(
     
     Returns dict mapping strategy name to ticker->signal mapping.
     """
-    tickers = tickers or ["SPY", "GLD", "TLT"]
+    tickers = ["SPY", "GLD", "TLT"] if tickers is None else tickers
     
     multi_speed = MultiSpeedSignalAdapter()
     risk_parity = RiskParitySignalAdapter()

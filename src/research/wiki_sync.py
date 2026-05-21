@@ -86,10 +86,11 @@ created: {datetime.now().isoformat()}
         page_path = WIKI_DIR / "compound" / f"regime-changes-{timestamp}.md"
         
         # Build table
-        rows = "\n".join(
-            f"| {r['detected_at'][:10]} | {r['regime']} | {r['vix_level']:.2f if r['vix_level'] else 'N/A'} | {r['trend_strength']:.3f if r['trend_strength'] else 'N/A'} |"
-            for r in regimes[:10]
-        )
+        def _fmt_regime_row(r):
+            vix = f"{r['vix_level']:.2f}" if r.get('vix_level') else 'N/A'
+            ts = f"{r['trend_strength']:.3f}" if r.get('trend_strength') else 'N/A'
+            return f"| {r['detected_at'][:10]} | {r['regime']} | {vix} | {ts} |"
+        rows = "\n".join(_fmt_regime_row(r) for r in regimes[:10])
         
         content = f"""---
 type: query
@@ -132,7 +133,7 @@ Based on recent regime patterns:
 
 ## Sources
 
-- ^{[raw/market/{raw_path.name}]}
+- {{[raw/market/{raw_path.name}]}}
 """
         
         with open(page_path, 'w') as f:
@@ -241,7 +242,7 @@ created: {timestamp}
 
 - Positive days: {sum(1 for r in returns if r > 0)}
 - Negative days: {sum(1 for r in returns if r < 0)}
-- Win rate: {sum(1 for r in returns if r > 0) / len(returns):.1%}
+- Win rate: {(sum(1 for r in returns if r > 0) / len(returns) if returns else 0):.1%}
 
 ## Notes
 
@@ -251,7 +252,7 @@ created: {timestamp}
 
 ## Sources
 
-- ^{[{raw_citation}]}
+- {{[{raw_citation}]}}
 - [[compound/grid-search-results]] — original backtest validation
 - [[compound/decision-framework]] — allocation rationale
 """

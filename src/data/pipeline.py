@@ -122,18 +122,18 @@ def detect_regime(conn: sqlite3.Connection) -> Optional[str]:
     
     # Get recent VIX and SPY data
     cursor.execute("""
-        SELECT date, close FROM prices 
-        WHERE symbol IN ('VIX', 'SPY') 
+        SELECT symbol, date, close FROM prices
+        WHERE symbol IN ('VIX', 'SPY')
         AND date >= date('now', '-63 days')
         ORDER BY date
     """)
     rows = cursor.fetchall()
-    
+
     if len(rows) < 20:
         return None
-    
-    vix_prices = [r[1] for r in rows if r[0] == 'VIX']
-    spy_prices = [r[1] for r in rows if r[0] == 'SPY']
+
+    vix_prices = [r[2] for r in rows if r[0] == 'VIX']
+    spy_prices = [r[2] for r in rows if r[0] == 'SPY']
     
     if not vix_prices or not spy_prices:
         return None
