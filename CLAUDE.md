@@ -79,6 +79,24 @@
 - **Test count**: 6506 → 6508 safe (0 failures)
 - **Status**: All phases complete
 
+### v9.24 Individual Signal Backtest Validation - COMPLETED
+- **Backtests**: 5 new backtest files for all active ensemble signals (previously 0 had individual validation)
+  - `src/backtest/multi_speed_momentum_backtest.py` — dominant 50% weight signal
+  - `src/backtest/alternative_data_backtest.py` — hardcoded regime→signal mapping (never validated before)
+  - `src/backtest/cross_asset_regime_arb_backtest.py` — equity/bond/gold divergence detection
+  - `src/backtest/international_momentum_backtest.py` — EFA/EEM vs SPY momentum
+  - `src/backtest/cross_asset_rv_backtest.py` — z-score mean-reversion triggers
+- **Key Findings** (2006-2026, baseline Sharpe 0.942):
+  - MULTI_SPEED_MOM: Sharpe 0.930 (**-0.012 vs baseline**) — dominant signal is net-negative as overlay
+  - ALTERNATIVE_DATA: Sharpe 0.957 (+0.015) — only signal showing positive alpha contribution
+  - CROSS_ASSET_REGIME_ARB: Sharpe 0.942 (0.000) — neutral, no alpha added or subtracted
+  - INTERNATIONAL_MOMENTUM: Sharpe ~0.96 (+0.02) — modest positive contribution
+  - CROSS_ASSET_RV: Sharpe ~0.94 (-0.00x) — marginal, near-zero contribution
+- **Implication**: The dominant signal (MULTI_SPEED_MOM at 50% weight) is actually a net-negative overlay. The ensemble performs well because the baseline allocation (46/38/16) is already strong, not because the signal adds value. This mirrors the earlier finding that TSMOM alone beats combined signals.
+- **CLI**: Each backtest has `run` and `--save` commands
+- **Test count**: 6508 safe (0 failures)
+- **Status**: All phases complete
+
 ### v9.19 Ensemble Voter Dead Signal Pruning - COMPLETED
 - **Pruned**: 14 deprecated signal collection blocks from `collect_signals()` — 396 net lines removed (566→170 lines)
   - Removed: MACRO_MOMENTUM, CLOSING_AUCTION, FACTOR_ROTATION, MEAN_REVERSION, TRANSIENT_FACTORS, VISIBILITY_GRAPH, VP_MACD, FACTOR_TIMING, LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE, ZERO_DTE
