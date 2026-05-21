@@ -51,24 +51,17 @@ def fusion():
 def sample_signals():
     """Realistic signal values across all timeframes."""
     return {
-        "tsfm_momentum": 0.35,           # LONG
         "hmm_regime": 0.10,              # MEDIUM
         "cta_trend": 0.25,               # MEDIUM
         "macro_momentum": 0.20,          # LONG
         "multi_speed_momentum": 0.15,    # MEDIUM
-        "duration_regime": -0.10,        # LONG
         "circuit_breaker": 0.0,          # SHORT
         "factor_rotation": 0.05,         # MEDIUM
-        "closing_auction": 0.02,         # SHORT
         "unified_overlay": 0.08,         # LONG
         "mean_reversion": -0.03,         # SHORT
         "transformer_regime": 0.12,      # MEDIUM
-        "transient_factors": 0.05,       # SHORT
-        "visibility_graph": 0.08,        # MEDIUM
-        "vp_macd": 0.10,                 # SHORT
         "cross_asset_rv": 0.15,          # MEDIUM
         "regime_classifier": 0.05,       # MEDIUM
-        "factor_timing": 0.10,           # MEDIUM
         "risk_budget": 0.05,            # LONG
         "llm_narrative": 0.12,          # MEDIUM
         "tax_aware": 0.03,              # LONG
@@ -80,24 +73,17 @@ def sample_signals():
 def sample_confidences():
     """Confidence values for sample signals."""
     return {
-        "tsfm_momentum": 0.80,
         "hmm_regime": 0.60,
         "cta_trend": 0.75,
         "macro_momentum": 0.70,
         "multi_speed_momentum": 0.65,
-        "duration_regime": 0.55,
         "circuit_breaker": 0.50,
         "factor_rotation": 0.60,
-        "closing_auction": 0.40,
         "unified_overlay": 0.70,
         "mean_reversion": 0.45,
         "transformer_regime": 0.65,
-        "transient_factors": 0.50,
-        "visibility_graph": 0.55,
-        "vp_macd": 0.60,
         "cross_asset_rv": 0.65,
         "regime_classifier": 0.55,
-        "factor_timing": 0.60,
         "risk_budget": 0.50,
         "llm_narrative": 0.65,
         "tax_aware": 0.40,
@@ -111,7 +97,7 @@ class TestSignalClassification:
 
     def test_classify_signal_timeframe_correctness(self, fusion):
         """Each known signal should be classified into correct timeframe."""
-        assert fusion.get_signal_timeframe("vp_macd") == "short"
+        assert fusion.get_signal_timeframe("mean_reversion") == "short"
 
         assert fusion.get_signal_timeframe("cta_trend") == "medium"
         assert fusion.get_signal_timeframe("multi_speed_momentum") == "medium"
@@ -135,12 +121,12 @@ class TestSignalClassification:
     def test_classify_single_signal(self, fusion):
         """Single signal should classify and bucket correctly."""
         buckets, explanation = fusion.classify_signals(
-            {"vp_macd": 0.5},
-            {"vp_macd": 0.8}
+            {"mean_reversion": 0.5},
+            {"mean_reversion": 0.8}
         )
         short_bucket = buckets["short"]
         assert short_bucket.active_count == 1
-        assert short_bucket.signals[0].source == "vp_macd"
+        assert short_bucket.signals[0].source == "mean_reversion"
         assert short_bucket.signals[0].value == 0.5
         assert short_bucket.signals[0].confidence == 0.8
         assert short_bucket.consensus == 0.5
@@ -148,12 +134,11 @@ class TestSignalClassification:
     def test_classify_mixed_directions(self, fusion):
         """Conflicting signals within a bucket should produce moderate consensus."""
         buckets, explanation = fusion.classify_signals({
-            "vp_macd": 0.8,
+            "circuit_breaker": 0.8,
             "mean_reversion": -0.6,
-            "closing_auction": 0.4,
         })
         short_bucket = buckets["short"]
-        assert short_bucket.active_count == 3
+        assert short_bucket.active_count == 2
         # Consensus should be positive but reduced
         assert -0.5 < short_bucket.consensus < 0.8
         # Agreement should be < 100%
@@ -162,19 +147,16 @@ class TestSignalClassification:
     def test_agreement_calculation(self, fusion):
         """All same-direction signals should give 100% agreement."""
         buckets, explanation = fusion.classify_signals({
-            "vp_macd": 0.5,
-            "mean_reversion": 0.3,
-            "closing_auction": 0.4,
+            "mean_reversion": 0.5,
+            "circuit_breaker": 0.3,
         })
         assert buckets["short"].agreement == 1.0
 
     def test_agreement_split(self, fusion):
         """Evenly split signals should give 50% agreement."""
         buckets, explanation = fusion.classify_signals({
-            "vp_macd": 0.5,
-            "mean_reversion": -0.3,
-            "closing_auction": 0.4,
-            "circuit_breaker": -0.2,
+            "mean_reversion": 0.5,
+            "circuit_breaker": -0.3,
         })
         assert buckets["short"].agreement == 0.5
 
@@ -283,19 +265,17 @@ class TestFusion:
         """Equity bias should be influenced by equity-relevant signals."""
         # Strongly bullish equity signals
         equity_bullish = {
-            "tsfm_momentum": 0.9,
             "multi_speed_momentum": 0.9,
             "cta_trend": 0.8,
             "mean_reversion": 0.0,
             "factor_rotation": 0.7,
             "cross_asset_rv": 0.6,
-            "factor_timing": 0.8,
         }
         # Add placeholder zeros for other signals
         for k in SIGNAL_TIMEFRAMES:
             if k not in equity_bullish:
                 equity_bullish[k] = 0.0
-        
+
         result = fusion.fuse(equity_bullish)
         assert result.equity_bias > 0.3
 
@@ -303,7 +283,6 @@ class TestFusion:
         """Duration bias should be influenced by rate-relevant signals."""
         # Bearish duration signals (expecting rates to rise)
         duration_bearish = {
-            "duration_regime": -0.8,
             "macro_momentum": -0.6,
             "risk_budget": -0.5,
             "tax_aware": -0.3,
@@ -361,7 +340,7 @@ class TestEdgeCases:
 
     def test_fuse_with_single_signal(self, fusion):
         """Single signal should still produce valid fusion."""
-        result = fusion.fuse({"vp_macd": 0.5}, {"vp_macd": 0.9})
+        result = fusion.fuse({"mean_reversion": 0.5}, {"mean_reversion": 0.9})
         assert result.overall_signal != 0.0
         assert result.short_term_signal == 0.5
         # Other buckets should be 0
@@ -371,11 +350,8 @@ class TestEdgeCases:
     def test_fuse_with_only_short_signals(self, fusion):
         """Only short-term signals should produce valid fusion."""
         only_short = {
-            "vp_macd": 0.5,
             "mean_reversion": -0.3,
-            "closing_auction": 0.4,
             "circuit_breaker": 0.0,
-            "transient_factors": 0.2,
             "vixy_hedge": 0.1,
         }
         result = fusion.fuse(only_short)
@@ -419,7 +395,7 @@ class TestEdgeCases:
     def test_timeframe_bucket_weight_assignment(self, fusion):
         """Bucket weights should reflect regime configuration."""
         buckets, _ = fusion.classify_signals(
-            {"vp_macd": 0.5}, regime="crisis"
+            {"mean_reversion": 0.5}, regime="crisis"
         )
         # Crisis: short=0.40, medium=0.40, long=0.20
         # But classify_signals doesn't set total_weight — just classifies
@@ -432,13 +408,9 @@ class TestEdgeCases:
         assert fusion.state["last_fusion"] is None
         assert len(fusion.state["history"]) == 0
 
-    def test_vp_macd_is_short_term(self):
-        """VP-MACD should be classified as short-term."""
-        assert SIGNAL_TIMEFRAMES["vp_macd"] == Timeframe.SHORT
-
-    def test_tsfm_momentum_is_long_term(self):
-        """TSFM momentum should be classified as long-term."""
-        assert SIGNAL_TIMEFRAMES["tsfm_momentum"] == Timeframe.LONG
+    def test_mean_reversion_is_short_term(self):
+        """Mean reversion should be classified as short-term."""
+        assert SIGNAL_TIMEFRAMES["mean_reversion"] == Timeframe.SHORT
 
     def test_cta_trend_is_medium_term(self):
         """CTA trend should be classified as medium-term."""

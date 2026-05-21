@@ -59,7 +59,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.signals.tsmom_overlay import TSMOMOverlay
-from src.agents.risk_agent_hmm import PortfolioRegimeManager, MarketRegime
+from src.agents.risk_agent_hmm import PortfolioRegimeManager
 from src.signals.fed_policy_overlay import FedPolicyOverlay
 
 # Guarded import for AI Controller (MARL v2.51)

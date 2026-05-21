@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
 import numpy as np
 
-from src.paths import DATA_DIR, CONFIG_DIR, MARKET_DB
+from src.paths import DATA_DIR, MARKET_DB
 
 # Config
 DB_PATH = MARKET_DB

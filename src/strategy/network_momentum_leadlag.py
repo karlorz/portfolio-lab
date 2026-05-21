@@ -48,7 +48,6 @@ from typing import Dict, List, Optional, Tuple, NamedTuple
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from collections import defaultdict
-import sqlite3
 from itertools import combinations
 
 # Add project root to path

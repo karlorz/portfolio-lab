@@ -22,7 +22,6 @@ from typing import Optional, Dict, List, Tuple
 
 import numpy as np
 
-from src.signals.vix_term_structure import VIXTermStructureSignal, VIXRegime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

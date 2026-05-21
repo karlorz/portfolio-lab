@@ -4,7 +4,6 @@ Compares multiple allocation strategies and provides recommendation
 """
 
 import json
-import numpy as np
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path

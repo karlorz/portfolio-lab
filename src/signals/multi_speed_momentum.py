@@ -52,7 +52,6 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.paths import DATA_DIR, PRICES_JSON
-from src.signals.integrator import SignalIntegrator, CompositeSignal, SignalSourceResult
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"

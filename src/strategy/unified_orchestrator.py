@@ -34,7 +34,6 @@ from datetime import datetime, date
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
-import numpy as np
 
 from src.signals.calendar_seasonality import get_calendar_modifier
 from src.signals.bond_duration_signal import generate_bond_duration_signal

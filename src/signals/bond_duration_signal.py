@@ -27,7 +27,6 @@ from datetime import datetime, date, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
-import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

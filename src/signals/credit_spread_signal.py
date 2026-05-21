@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Optional
 
 from src.data.credit_fetcher import (
-    CreditFetcher, CreditMetrics, CreditSignal, 
+    CreditFetcher,
     SPREAD_WIDENING_THRESHOLD, SPREAD_TIGHTENING_THRESHOLD
 )
 

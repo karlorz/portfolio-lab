@@ -28,8 +28,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
 import logging
 
-import pandas as pd
-import numpy as np
 
 # Import regime classifier
 from src.signals.yield_curve_regime import (

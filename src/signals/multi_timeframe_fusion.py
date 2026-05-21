@@ -91,24 +91,17 @@ class FusedResult:
 # Based on empirical observation of signal construction and historical lookback
 SIGNAL_TIMEFRAMES = {
     # Short-term (<1 month)
-    "tsfm_momentum": Timeframe.LONG,
     "hmm_regime": Timeframe.MEDIUM,
     "cta_trend": Timeframe.MEDIUM,
     "macro_momentum": Timeframe.LONG,
     "multi_speed_momentum": Timeframe.MEDIUM,
-    "duration_regime": Timeframe.LONG,
     "circuit_breaker": Timeframe.SHORT,
     "factor_rotation": Timeframe.MEDIUM,
-    "closing_auction": Timeframe.SHORT,
     "unified_overlay": Timeframe.LONG,
     "mean_reversion": Timeframe.SHORT,
     "transformer_regime": Timeframe.MEDIUM,
-    "transient_factors": Timeframe.SHORT,
-    "visibility_graph": Timeframe.MEDIUM,
-    "vp_macd": Timeframe.SHORT,
     "cross_asset_rv": Timeframe.MEDIUM,
     "regime_classifier": Timeframe.MEDIUM,
-    "factor_timing": Timeframe.MEDIUM,
     "risk_budget": Timeframe.LONG,
     "unified_overlay": Timeframe.MEDIUM,
     "tax_aware": Timeframe.LONG,
@@ -408,19 +401,18 @@ class MultiTimeframeFusion:
         Compute per-asset bias from signal buckets.
         
         Uses signal assignment heuristics:
-        - Equity signals: tsfm_momentum, multi_speed_momentum, cta_trend,
-          mean_reversion, factor_rotation, cross_asset_rv, factor_timing
-        - Duration signals: duration_regime, macro_momentum, risk_budget, tax_aware
+        - Equity signals: multi_speed_momentum, cta_trend,
+          mean_reversion, factor_rotation, cross_asset_rv
+        - Duration signals: macro_momentum, risk_budget, tax_aware
         - Gold signals: unified_overlay
         """
         equity_sources = {
-            "tsfm_momentum", "multi_speed_momentum", "cta_trend",
+            "multi_speed_momentum", "cta_trend",
             "mean_reversion", "factor_rotation", "cross_asset_rv",
-            "factor_timing", "transformer_regime", "transient_factors",
-            "vp_macd", "closing_auction", "visibility_graph",
+            "transformer_regime",
         }
         duration_sources = {
-            "duration_regime", "macro_momentum", "risk_budget",
+            "macro_momentum", "risk_budget",
             "tax_aware", "unified_overlay",
         }
         gold_sources = {
@@ -568,24 +560,17 @@ def main():
         print("No signal data available. Using synthetic demo data...")
         # Generate synthetic demo for CLI demo
         signals = {
-            "tsfm_momentum": 0.35,
             "hmm_regime": 0.10,
             "cta_trend": 0.25,
             "macro_momentum": 0.20,
             "multi_speed_momentum": 0.15,
-            "duration_regime": -0.10,
             "circuit_breaker": 0.0,
             "factor_rotation": 0.05,
-            "closing_auction": 0.02,
             "unified_overlay": 0.08,
             "mean_reversion": -0.03,
             "transformer_regime": 0.12,
-            "transient_factors": 0.05,
-            "visibility_graph": 0.08,
-            "vp_macd": 0.10,
             "cross_asset_rv": 0.15,
             "regime_classifier": 0.05,
-            "factor_timing": 0.10,
             "risk_budget": 0.05,
             "unified_overlay": 0.12,
             "tax_aware": 0.03,

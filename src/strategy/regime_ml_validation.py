@@ -18,7 +18,7 @@ from src.paths import MARKET_DB
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.strategy.regime_ml import RegimeConditionalEngine, RegimeDetector, RegimeMLScorer
+from src.strategy.regime_ml import RegimeConditionalEngine
 from src.strategy.factor_rotation import FactorMomentumEngine
 
 

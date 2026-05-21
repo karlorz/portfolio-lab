@@ -7,7 +7,7 @@ Bridges v6.03 Risk Factor Decomposition with v6.01 Regime-Constrained Optimizer:
 2. Computes gaps between current factor risk contributions and target budgets
 3. Runs stress scenarios (equity crash, rate spike, gold rally, stagflation)
 4. Adjusts optimizer constraints to meet factor budgets
-5. RISK_BUDGET signal source for EnsembleVoter integration
+5. Risk budget signal generation (not integrated into EnsembleVoter)
 
 No ML dependencies — pure numpy + scipy.
 
@@ -335,7 +335,7 @@ class RiskBudgetOptimizer:
     Integrates with:
     - v6.03 RiskDecomposer (risk factor betas + contributions)
     - v6.01 RegimeOptimizer (weight constraints)
-    - EnsembleVoter (RISK_BUDGET signal source)
+    - Standalone signal generation (not integrated into EnsembleVoter)
     """
 
     def __init__(
@@ -690,7 +690,7 @@ class RiskBudgetOptimizer:
         # ── Optimization via RegimeOptimizer ──────────────────────────
         # Try regime optimizer first, then adjust to meet budgets
         try:
-            from src.strategy.regime_optimizer import RegimeConstrainedOptimizer, ASSETS as RO_ASSETS
+            from src.strategy.regime_optimizer import RegimeConstrainedOptimizer
 
             optimizer = RegimeConstrainedOptimizer()
             result = optimizer.optimize(method=method)
@@ -925,7 +925,7 @@ class RiskBudgetOptimizer:
         - Positive: factor budgets are within range (risk-on)
         - Magnitude reflects severity of breaches
 
-        This is consumed by the EnsembleVoter as a RISK_BUDGET signal source.
+        This generates a risk budget signal (not integrated into EnsembleVoter).
         """
         gaps = self.compute_risk_budget_gaps()
         if not gaps:
@@ -1041,7 +1041,7 @@ class RiskBudgetOptimizer:
 
 
 def create_risk_budget_signal() -> float:
-    """One-shot risk budget signal for EnsembleVoter integration.
+    """One-shot risk budget signal (standalone, not integrated into EnsembleVoter).
 
     Returns:
         Signal value (-1 to +1) indicating risk budget health.

@@ -24,9 +24,7 @@ import numpy as np
 from src.signals.collar_signal import (
     CollarSignalGenerator,
     CollarSignal,
-    CollarStrikes,
     CollarRegime,
-    CollarState,
     BlackScholesPricer,
 )
 

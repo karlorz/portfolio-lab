@@ -32,11 +32,6 @@ TRADES_PATH = DATA_DIR / "mean_reversion_trades.json"
 sys.path.insert(0, str(PROJECT_ROOT))
 from src.signals.mean_reversion_signal import (
     VIXMeanReversionCalculator,
-    MeanReversionSignal,
-    MeanReversionTrade,
-    BASE_ALLOC_PCT,
-    MAX_ALLOC_PCT,
-    MAX_HOLD_DAYS,
     DATA_DIR,
     STATE_PATH,
 )

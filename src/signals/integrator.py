@@ -57,7 +57,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # Existing module imports
-from src.data.alternative_data import AlternativeDataClient, AlternativeDataSignal
+from src.data.alternative_data import AlternativeDataClient
 
 # New strategy adapters (v2.52-v2.58) - lazy import to avoid circular dependency
 # These are imported in SignalIntegrator.__init__()

@@ -28,7 +28,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.paths import DATA_DIR
 
 from src.strategy.sentiment_analyzer import (
-    SentimentAggregator, 
     AggregatedSentiment,
     SentimentAnalyzerPipeline
 )

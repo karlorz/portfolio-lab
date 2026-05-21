@@ -26,12 +26,11 @@ Usage:
     python -m src.strategy.ensemble_voter explain
 """
 
-import os
 import json
 import sqlite3
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple, NamedTuple
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -331,8 +330,8 @@ class EnsembleVoter:
                     if sig is not None:
                         msm_signals[ticker] = sig["value"]
                         msm_confidences.append(sig["confidence"])
-                except Exception:
-                    pass
+                except (ValueError, KeyError, TypeError) as e:
+                    logger.debug(f"MSM ticker {ticker} failed: {e}")
 
             if msm_signals:
                 avg_signal = sum(msm_signals.values()) / len(msm_signals)

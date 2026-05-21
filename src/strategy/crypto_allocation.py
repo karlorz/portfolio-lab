@@ -26,13 +26,9 @@ import numpy as np
 
 from src.signals.crypto_momentum import (
     CryptoMomentumSignalGenerator,
-    CryptoCompositeSignal,
-    CryptoSignalState,
-    CryptoVolRegime,
 )
 from src.strategy.crypto_staking import (
     ETHStakingModel,
-    StakingAllocationInfluence,
 )
 
 logging.basicConfig(level=logging.INFO)

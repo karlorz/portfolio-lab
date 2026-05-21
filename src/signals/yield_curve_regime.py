@@ -23,8 +23,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import logging
 
-import pandas as pd
-import numpy as np
 
 from src.paths import DATA_DIR, MARKET_DB
 

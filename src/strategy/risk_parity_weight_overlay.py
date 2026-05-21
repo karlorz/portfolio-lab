@@ -29,7 +29,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
-import sqlite3
 
 from src.paths import DATA_DIR, PRICES_JSON
 

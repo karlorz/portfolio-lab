@@ -21,11 +21,7 @@ import numpy as np
 
 from src.signals.bond_duration_signal import (
     BondDurationSignalGenerator,
-    BondDurationSignal,
     BondDurationCalculator,
-    YieldCurveRegime,
-    RateDirection,
-    DurationPosition,
 )
 
 logging.basicConfig(level=logging.INFO)
