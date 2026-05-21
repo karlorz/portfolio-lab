@@ -39,6 +39,17 @@
 
 ## Recent Implementation Updates (2026-05-22)
 
+### v9.44 Regime Classifier Test Coverage - COMPLETED
+- **Tests**: 83 new tests for `src/research/regime_classifier.py` (484 lines, previously 0 coverage):
+  - `tests/test_regime_classifier.py` (83 tests): Regime enum, RegimePrediction dataclass (to_dict, JSON serialization),
+    RegimeClassifier non-ML methods (_get_feature_vector with 12 feature ordering, prepare_data validation),
+    WeeklyGridSearch (run_search, normalization, file I/O append mode, sorted results, min_weight clamp),
+    main() CLI (unknown command, missing model, grid search), edge cases (string labels, None values crash doc)
+  - ML-dependent methods tested for correct error raising (ImportError/RuntimeError) — no sklearn stubs needed
+  - Also fixed arp_overlay.py CLI dead `or True` clause that bypassed argparse help fallback
+- **Test count**: 6710 → 6793 safe (0 failures, 10 skipped)
+- **Status**: All 5 items from code health scan (2026-05-22) now addressed ✅
+
 ### v9.43 Untested Module Coverage Round 3 - COMPLETED
 - **Tests**: 131 new tests across 2 previously untested modules:
   - `tests/test_bond_momentum_backtest.py` (65 tests): BondMomentumResult dataclass, load_price_data, calculate_momentum_signal, backtest_bond_momentum, run_sensitivity_analysis, analyze_correlation_with_duration_overlay, main(), edge cases
@@ -638,7 +649,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6710 safe** passed (0 failures, 10 skipped)
+- **6793 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
