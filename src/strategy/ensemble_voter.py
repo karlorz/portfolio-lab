@@ -124,32 +124,36 @@ class EnsembleVote:
 # RECOVERY unchanged (already 43%). Weights sum=1.0 per regime.
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.MULTI_SPEED_MOM: 0.2500,
-        SignalSource.CROSS_ASSET_RV: 0.1500,
-        SignalSource.ALTERNATIVE_DATA: 0.2500,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.2000,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1500,
+        SignalSource.MULTI_SPEED_MOM: 0.2100,
+        SignalSource.CROSS_ASSET_RV: 0.1300,
+        SignalSource.ALTERNATIVE_DATA: 0.2100,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.1700,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
+        SignalSource.UNIFIED_OVERLAY: 0.1500,
     },
     Regime.HIGH_VOL: {
-        SignalSource.MULTI_SPEED_MOM: 0.2500,
-        SignalSource.CROSS_ASSET_RV: 0.1500,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.1500,
-        SignalSource.ALTERNATIVE_DATA: 0.3000,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1500,
+        SignalSource.MULTI_SPEED_MOM: 0.2100,
+        SignalSource.CROSS_ASSET_RV: 0.1300,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.1300,
+        SignalSource.ALTERNATIVE_DATA: 0.2500,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
+        SignalSource.UNIFIED_OVERLAY: 0.1500,
     },
     Regime.CRISIS: {
-        SignalSource.MULTI_SPEED_MOM: 0.2500,
-        SignalSource.CROSS_ASSET_RV: 0.4000,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.2000,
+        SignalSource.MULTI_SPEED_MOM: 0.2100,
+        SignalSource.CROSS_ASSET_RV: 0.3400,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1700,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
-        SignalSource.ALTERNATIVE_DATA: 0.1500,
+        SignalSource.ALTERNATIVE_DATA: 0.1300,
+        SignalSource.UNIFIED_OVERLAY: 0.1500,
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.2500,
-        SignalSource.ALTERNATIVE_DATA: 0.2500,
-        SignalSource.CROSS_ASSET_RV: 0.1500,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.2000,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1500,
+        SignalSource.MULTI_SPEED_MOM: 0.2100,
+        SignalSource.ALTERNATIVE_DATA: 0.2100,
+        SignalSource.CROSS_ASSET_RV: 0.1300,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.1700,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
+        SignalSource.UNIFIED_OVERLAY: 0.1500,
     }
 }
 
@@ -280,6 +284,7 @@ class EnsembleVoter:
                 SignalSource.INTERNATIONAL_MOMENTUM,
                 SignalSource.ALTERNATIVE_DATA,
                 SignalSource.CROSS_ASSET_REGIME_ARB,
+                SignalSource.UNIFIED_OVERLAY,
             ]
         ]
         self.bandit = BanditWeighter(
@@ -599,6 +604,22 @@ class EnsembleVoter:
             pass
         except Exception as e:
             logger.debug(f"Cross-asset regime arb unavailable: {e}")
+
+
+        # 6. Unified Overlay (v4.90) — collar + bond_duration + crypto + calendar
+        # Skip if zero weight for current regime
+        if active_sources is not None and SignalSource.UNIFIED_OVERLAY not in active_sources:
+            logger.debug(f"Skipping UNIFIED_OVERLAY: zero weight for regime={regime.value if regime else '?' }")
+        else:
+            try:
+                from .orchestrator_ensemble_bridge import OrchestratorEnsembleBridge
+                bridge = OrchestratorEnsembleBridge()
+                unified_reading = bridge.get_ensemble_reading()
+                readings[SignalSource.UNIFIED_OVERLAY] = unified_reading
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.debug(f"Unified overlay unavailable: {e}")
 
         self.current_readings = readings
         return readings

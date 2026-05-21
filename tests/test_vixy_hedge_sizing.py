@@ -315,3 +315,72 @@ class TestCLI:
         assert "VIX" in output
         assert "allocation" in output.lower()
         assert "efficiency" in output.lower()
+
+
+class TestBacktestValidation:
+    """Validate the VIXY hedge backtest logic with simulated data."""
+
+    def test_backtest_allocations_bounded(self):
+        """Backtest over simulated VIX data should produce bounded allocations."""
+        sizer = VIXYHedgeSizer()
+        np.random.seed(42)
+        vix_levels = np.random.lognormal(mean=2.8, sigma=0.4, size=2520)
+
+        allocations = [sizer.compute_allocation(float(v)) for v in vix_levels]
+        assert all(0 <= a <= 10.0 for a in allocations), "Allocations exceed 10% cap"
+
+    def test_backtest_average_allocation_reasonable(self):
+        """Average allocation over typical VIX distribution should be 1-4%."""
+        sizer = VIXYHedgeSizer()
+        np.random.seed(42)
+        vix_levels = np.random.lognormal(mean=2.8, sigma=0.4, size=2520)
+
+        allocations = [sizer.compute_allocation(float(v)) for v in vix_levels]
+        avg = np.mean(allocations)
+        assert 0.5 <= avg <= 5.0, f"Average allocation {avg:.2f}% outside expected range"
+
+    def test_backtest_costs_bounded(self):
+        """Annual hedge costs should be positive and finite."""
+        sizer = VIXYHedgeSizer()
+        np.random.seed(42)
+        vix_levels = np.random.lognormal(mean=2.8, sigma=0.4, size=2520)
+
+        costs = [sizer.estimate_annual_cost(sizer.compute_allocation(float(v)))
+                 for v in vix_levels]
+        assert all(c >= 0 for c in costs)
+        assert all(np.isfinite(c) for c in costs)
+
+    def test_backtest_hedge_efficiency(self):
+        """Hedge efficiency should be >=0 for typical allocation."""
+        sizer = VIXYHedgeSizer()
+        alloc = sizer.compute_allocation(25.0)  # Elevated VIX
+        eff = sizer.compute_hedge_efficiency(alloc, vix_level=25.0)
+        assert eff >= 0
+
+    def test_backtest_regime_coverage(self):
+        """All regimes should be encountered in long backtest."""
+        sizer = VIXYHedgeSizer()
+        np.random.seed(42)
+        # Mix of VIX levels to ensure all regimes hit
+        vix_levels = list(np.random.lognormal(mean=2.8, sigma=0.4, size=1000))
+        vix_levels += [12.0] * 50 + [25.0] * 50 + [35.0] * 50 + [45.0] * 50
+
+        regimes = set()
+        for v in vix_levels:
+            regimes.add(VIXYHedgeSizer.classify_regime(float(v)))
+
+        assert HedgeRegime.NORMAL in regimes
+        assert HedgeRegime.ELEVATED in regimes
+        assert HedgeRegime.STRESS in regimes
+        assert HedgeRegime.CRISIS in regimes
+
+    def test_backtest_days_hedged(self):
+        """With lognormal VIX, there should be hedged days."""
+        sizer = VIXYHedgeSizer()
+        np.random.seed(42)
+        vix_levels = np.random.lognormal(mean=2.8, sigma=0.4, size=2520)
+
+        allocations = [sizer.compute_allocation(float(v)) for v in vix_levels]
+        days_hedged = sum(1 for a in allocations if a > 0)
+
+        assert days_hedged > 0, "No hedged days in backtest"

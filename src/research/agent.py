@@ -145,7 +145,7 @@ class ResearchAgent:
         with open(work_file, 'w') as f:
             json.dump(work_item, f, indent=2)
         
-        return str(work_file)
+        return work_file
     
     def crystallize_to_wiki(self, analysis: Dict) -> Path:
         """Save research findings to wiki compound page."""

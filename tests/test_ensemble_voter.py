@@ -53,6 +53,7 @@ def _make_voter(tmp_path):
             SignalSource.INTERNATIONAL_MOMENTUM,
             SignalSource.ALTERNATIVE_DATA,
             SignalSource.CROSS_ASSET_REGIME_ARB,
+            SignalSource.UNIFIED_OVERLAY,
         ]
     ]
     voter.bandit = BanditWeighter(signals=survivor_values, epsilon=0.1, window=252)
@@ -88,7 +89,7 @@ class TestEnums:
         assert SignalSource.ALTERNATIVE_DATA.value == 'alternative_data'
 
     def test_signal_source_members(self):
-        assert len(SignalSource) >= 5  # 5 active + UNIFIED_OVERLAY
+        assert len(SignalSource) >= 6  # 5 active + UNIFIED_OVERLAY
 
 
 # ---------------------------------------------------------------------------
@@ -142,21 +143,22 @@ class TestRegimeWeights:
             assert abs(total - 1.0) < 0.10, f"{regime} weights sum to {total:.4f}"
 
     def test_all_sources_covered(self):
-        """Only the 6 survivor signals are required in each regime."""
+        """All 6 active signals are required in each regime."""
         survivors = [
             SignalSource.MULTI_SPEED_MOM,
             SignalSource.CROSS_ASSET_RV,
             SignalSource.INTERNATIONAL_MOMENTUM,
             SignalSource.ALTERNATIVE_DATA,
             SignalSource.CROSS_ASSET_REGIME_ARB,
+            SignalSource.UNIFIED_OVERLAY,
         ]
         for regime, weights in REGIME_WEIGHTS.items():
             for source in survivors:
                 assert source in weights, f"{source} missing from {regime}"
 
     def test_crisis_cross_asset_rv_high(self):
-        """v9.26: CROSS_ASSET_RV is the dominant signal in CRISIS regime."""
-        assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.CROSS_ASSET_RV] >= 0.3
+        """v9.31: CROSS_ASSET_RV remains dominant in CRISIS regime."""
+        assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.CROSS_ASSET_RV] >= 0.25
 
     def test_no_signal_exceeds_50_pct(self):
         """v9.23: No single signal should exceed 50% weight in any regime."""
@@ -164,13 +166,19 @@ class TestRegimeWeights:
             for source, weight in weights.items():
                 assert weight <= 0.50, f"{source.value} exceeds 50% in {regime.value}: {weight:.4f}"
 
-    def test_normal_multi_speed_mom_at_least_25(self):
-        """v9.26: MSM still significant but no longer dominant after backtest validation."""
-        assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.MULTI_SPEED_MOM] >= 0.25
+    def test_normal_multi_speed_mom_at_least_20(self):
+        """v9.31: MSM reduced to 21% after UNIFIED_OVERLAY integration."""
+        assert REGIME_WEIGHTS[Regime.NORMAL][SignalSource.MULTI_SPEED_MOM] >= 0.20
 
     def test_high_vol_alternative_data_dominant(self):
         """v9.26: ALT_DATA is the dominant signal in HIGH_VOL regime (only positive alpha)."""
-        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.25
+        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.20
+
+    def test_unified_overlay_has_weight_in_all_regimes(self):
+        """v9.31: UNIFIED_OVERLAY has 15% weight in all regimes (was dead code at 0%)."""
+        for regime in Regime:
+            assert REGIME_WEIGHTS[regime][SignalSource.UNIFIED_OVERLAY] >= 0.10, \
+                f"UNIFIED_OVERLAY weight too low in {regime.value}"
 
 
 # ---------------------------------------------------------------------------

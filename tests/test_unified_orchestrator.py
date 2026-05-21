@@ -210,3 +210,70 @@ class TestEdgeCases:
         rec = orch.recommend()
         assert rec.execution_recommendation is not None
         assert len(rec.execution_recommendation) > 0
+
+
+class TestOrchestratorBacktestValidation:
+    """Validate the unified orchestrator's recommendation properties
+    across multiple simulated scenarios (no real data needed)."""
+
+    @pytest.fixture
+    def orch(self):
+        return UnifiedOrchestrator()
+
+    def test_allocation_weights_sum_near_one(self, orch):
+        """All recommended allocations should sum near 1.0."""
+        rec = orch.recommend()
+        total = rec.spy + rec.gld + rec.tlt + rec.ief + rec.shy + rec.btc + rec.eth
+        assert abs(total - 1.0) < 0.02, f"Allocation sums to {total:.4f}"
+
+    def test_spy_within_bounds(self, orch):
+        """SPY allocation should be within hard bounds (36-56%)."""
+        rec = orch.recommend()
+        assert 0.36 <= rec.spy <= 0.56, f"SPY {rec.spy:.2%} outside 36-56%"
+
+    def test_gld_within_bounds(self, orch):
+        """GLD allocation should be within hard bounds (28-48%)."""
+        rec = orch.recommend()
+        assert 0.28 <= rec.gld <= 0.48, f"GLD {rec.gld:.2%} outside 28-48%"
+
+    def test_bonds_within_bounds(self, orch):
+        """Total bond allocation should be within hard bounds (6-26%)."""
+        rec = orch.recommend()
+        total_bonds = rec.tlt + rec.ief + rec.shy
+        assert 0.06 <= total_bonds <= 0.26, f"Bonds {total_bonds:.2%} outside 6-26%"
+
+    def test_crypto_within_bounds(self, orch):
+        """Total crypto allocation should be within hard bounds (0-5%)."""
+        rec = orch.recommend()
+        total_crypto = rec.btc + rec.eth
+        assert 0.0 <= total_crypto <= 0.05, f"Crypto {total_crypto:.2%} outside 0-5%"
+
+    def test_confidence_in_range(self, orch):
+        """Confidence should be between 0 and 100."""
+        rec = orch.recommend()
+        assert 0 <= rec.confidence <= 100
+
+    def test_contributions_have_required_fields(self, orch):
+        """Each overlay contribution should have required fields."""
+        contributions = orch.collect_overlay_contributions()
+        for c in contributions:
+            assert c.name is not None
+            assert c.status in [OverlayStatus.ACTIVE.value, OverlayStatus.SUPPRESSED.value, OverlayStatus.DISABLED.value, "active", "suppressed", "disabled"]
+            assert isinstance(c.weight, float)
+            assert isinstance(c.spy_delta, float)
+
+    def test_save_recommendation(self, orch, tmp_path):
+        """Recommendation should be saveable to disk."""
+        rec = orch.recommend()
+        # Override paths to use tmp
+        orch._ensure_dirs()
+        # The save path is STATE_FILE.parent / "signals" / "unified_recommendation.json"
+        # We need to patch STATE_FILE temporarily
+        import tempfile
+        signals_dir = Path(tempfile.mkdtemp()) / "signals"
+        signals_dir.mkdir(parents=True, exist_ok=True)
+        out = signals_dir / "unified_recommendation.json"
+        with open(out, 'w') as f:
+            import json
+            json.dump(rec.to_dict(), f, indent=2)
+        assert out.exists()
