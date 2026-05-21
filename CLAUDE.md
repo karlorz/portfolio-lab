@@ -97,6 +97,13 @@
 - **Test count**: 6508 safe (0 failures)
 - **Status**: All phases complete
 
+### v9.26 Signal Weight Rebalancing - COMPLETED
+- **Root cause**: v9.24 backtesting revealed MULTI_SPEED_MOM (50% weight) is net-negative (Sharpe -0.012 vs baseline 0.942)
+- **Changes**: Reduced MSM from 50% to 25% across all regimes. Increased ALTERNATIVE_DATA (only positive alpha +0.015) and INTERNATIONAL_MOMENTUM (+0.02)
+- **New weights** (NORMAL): MSM 0.25, ALT_DATA 0.25, INTL_MOM 0.20, CROSS_RV 0.15, REGIME_ARB 0.15
+- **Tests**: Updated regime dominance assertions, 5839/5839 passing
+- **Status**: All phases complete
+
 ### v9.25 Dead Code Purge - COMPLETED
 - **Removed**: 49 files (22,695 lines) — v9.19 pruning follow-through
   - 26 source files (12,917 lines): 12 signal modules, 4 data fetchers, 2 feature pipelines, 1 execution module, 1 monitor module, 5 backtest engines, 1 signal infrastructure
