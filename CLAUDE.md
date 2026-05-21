@@ -39,6 +39,14 @@
 
 ## Recent Implementation Updates (2026-05-21)
 
+### v9.41 Overlay Backtest Production Code Import - COMPLETED
+- **Collar backtest**: replaced embedded `_get_regime()`/`_get_collar_shifts()` with `CollarSignalGenerator.classify_regime()` from `src/signals/collar_signal.py`
+- **Bond duration backtest**: replaced `_classify_momentum()`/`_get_bond_sleeve_allocation()` with `BondDurationCalculator.compute_duration_allocation()` via momentum-to-yield context mapping from `src/signals/bond_duration_signal.py`
+- **Crypto allocation backtest**: replaced `_compute_spy_momentum_6m()`/`_compute_crypto_vol()`/`_is_vol_extreme()`/`_compute_crypto_allocation()` with `CryptoMomentumCalculator` methods from `src/signals/crypto_momentum.py`
+- **Impact**: backtest results now validate production strategy code — previously embedded logic could silently diverge
+- **Test count**: 6501 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.40 Signal Quality + Error Handling + Base Allocation Centralization + Backtest Tests - COMPLETED
 - **Signal quality**: REGIME_ARB continuous passthrough (9 discrete → np.clip scaled by confidence×momentum)
 - **ALTERNATIVE_DATA backtest**: fixed stale discrete REGIME_SIGNAL_MAP → continuous np.clip signal
