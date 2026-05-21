@@ -24,6 +24,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.paths import DATA_DIR
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -55,7 +57,7 @@ SPARSITY_ALERT_THRESHOLD = 0.3
 DEFAULT_LAMBDA = 0.01
 
 # State file paths
-STATE_FILE = "data/basis_pursuit_state.json"
+STATE_FILE = "basis_pursuit_state.json"
 PERFORMANCE_FILE = "data/basis_pursuit_performance.json"
 
 # Number of top signals to report
@@ -139,7 +141,7 @@ class BasisPursuitSelector:
         state_path: Optional[Path] = None,
         rolling_window: int = DEFAULT_ROLLING_WINDOW,
     ):
-        self.state_path = state_path or Path.home() / "projects" / "portfolio-lab" / STATE_FILE
+        self.state_path = state_path or DATA_DIR / STATE_FILE
         self.rolling_window = rolling_window
         self.state = self._load_state()
 
@@ -538,8 +540,8 @@ class BasisPursuitSelector:
             logger.warning(f"Failed to save basis pursuit state: {e}")
 
     def _resolve_path(self) -> Path:
-        """Resolve state path with expansion."""
-        return Path(str(self.state_path)).expanduser()
+        """Resolve state path."""
+        return Path(str(self.state_path))
 
     def _resolve_perf_path(self) -> Path:
         """Resolve performance tracking path."""

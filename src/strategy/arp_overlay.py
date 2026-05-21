@@ -89,7 +89,7 @@ class AlternativeRiskPremiaEngine:
         if db_path is None:
             self.db_path = MARKET_DB
         else:
-            self.db_path = Path(db_path).expanduser()
+            self.db_path = Path(db_path)
         self.data_cache: Dict[str, List[Tuple[str, float]]] = {}
     
     def _get_connection(self) -> sqlite3.Connection:

@@ -30,6 +30,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.paths import DATA_DIR
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -54,7 +56,7 @@ REGRET_HIGH_THRESHOLD = 0.6   # Above this: high regret, significant penalty
 REGRET_MAX_PENALTY = 0.5      # Maximum weight reduction factor
 
 # State file paths
-STATE_FILE = "data/regret_weighted_state.json"
+STATE_FILE = "regret_weighted_state.json"
 PERFORMANCE_FILE = "data/regret_weighted_performance.json"
 
 
@@ -138,7 +140,7 @@ class RegretWeightedSelector:
         rolling_window: int = DEFAULT_ROLLING_WINDOW,
         regret_lambda: float = DEFAULT_REGRET_LAMBDA,
     ):
-        self.state_path = state_path or Path.home() / "projects" / "portfolio-lab" / STATE_FILE
+        self.state_path = state_path or DATA_DIR / STATE_FILE
         self.rolling_window = rolling_window
         self.regret_lambda = regret_lambda
         self.state = self._load_state()
@@ -476,8 +478,8 @@ class RegretWeightedSelector:
             logger.warning(f"Failed to save regret-weighted state: {e}")
 
     def _resolve_path(self) -> Path:
-        """Resolve state path with expansion."""
-        return Path(str(self.state_path)).expanduser()
+        """Resolve state path."""
+        return Path(str(self.state_path))
 
     def _resolve_perf_path(self) -> Path:
         """Resolve performance tracking path."""

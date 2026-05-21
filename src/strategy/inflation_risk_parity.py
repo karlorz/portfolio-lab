@@ -92,7 +92,7 @@ class InflationRiskParityEngine:
         if db_path is None:
             self.db_path = MARKET_DB
         else:
-            self.db_path = Path(db_path).expanduser()
+            self.db_path = Path(db_path)
         self.vol_lookback = 60  # 60-day volatility
         
     def _fetch_data(self, symbol: str, days: int = 100) -> List[Dict]:

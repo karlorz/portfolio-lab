@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, WIKI_DIR, WORK_DIR
 
 LOG_DIR = DATA_DIR  # cron logs stored directly in data/
 
@@ -563,7 +563,7 @@ class HealthMonitor:
     
     def check_wiki_sync(self) -> bool:
         """Check if wiki is being synced."""
-        wiki_dir = Path("~/wiki/projects/portfolio-lab/compound").expanduser()
+        wiki_dir = WIKI_DIR / "projects" / "portfolio-lab" / "compound"
         
         if not wiki_dir.exists():
             self.checks.append({"name": "wiki_sync", "status": "not_configured", "ok": True})
@@ -631,7 +631,7 @@ class HealthMonitor:
             }
         }
         
-        with open(REPORT_PATH, 'w') as f:
+        with open(DATA_DIR / "health_report.json", 'w') as f:
             json.dump(report, f, indent=2)
         
         # Print summary
@@ -656,7 +656,7 @@ class HealthMonitor:
     
     def _escalate_critical(self):
         """Escalate critical issues to Claude Code work item."""
-        work_dir = Path("~/projects/portfolio-lab/work").expanduser()
+        work_dir = WORK_DIR
         work_dir.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

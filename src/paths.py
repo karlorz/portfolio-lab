@@ -38,3 +38,8 @@ BACKTEST_RESULTS_DIR = DATA_DIR / "backtest_results"
 FEATURES_DIR = DATA_DIR / "features"
 LLM_COSTS_DIR = DATA_DIR / "llm_costs"
 ATTRIBUTION_DIR = DATA_DIR / "attribution"
+
+# External directories (user home-based)
+HOME = Path.home()
+WIKI_DIR = HOME / "wiki"
+WORK_DIR = HOME / "projects" / "portfolio-lab" / "work"
