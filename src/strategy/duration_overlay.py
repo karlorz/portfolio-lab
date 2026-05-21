@@ -285,7 +285,7 @@ class DurationOverlay:
             ts = datetime.fromisoformat(classification.timestamp.replace('Z', '+00:00'))
             age = datetime.now() - ts
             return age.days < self.DATA_STALE_DAYS
-        except:
+        except (ValueError, TypeError):
             return False
     
     def _apply_transition_constraints(
