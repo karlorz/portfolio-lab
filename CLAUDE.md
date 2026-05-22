@@ -18,9 +18,11 @@
 
 ### Active Ensemble Signals (6)
 MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB, UNIFIED_OVERLAY (all 6 active)
+- **MULTI_SPEED_MOM health: 0.55** (below 0.60 viability floor) — reduced to 0.05 weight, effectively disabled pending recovery
 
 ### Current Weights (NORMAL regime)
-MSM 0.25, ALT_DATA 0.25, INTL_MOM 0.20, CROSS_RV 0.15, REGIME_ARB 0.15
+ALT_DATA 0.25, INTL_MOM 0.20, CROSS_RV 0.15, REGIME_ARB 0.15
+MSM 0.05 (health-degraded, was 0.25)
 Max per-signal cap: 50%
 
 ## Strategies Implemented (16 portfolios)
