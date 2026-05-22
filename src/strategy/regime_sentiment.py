@@ -53,7 +53,7 @@ class CombinedRegimeSignal:
     timestamp: str
     
     # Component signals
-    technical_regime: str  # From regime_ml.py
+    technical_regime: str  # From regime detection
     technical_confidence: float
     sentiment_regime: str  # From sentiment_analyzer.py
     sentiment_confidence: float
@@ -145,7 +145,7 @@ class RegimeSentimentIntegrator:
     
     def map_technical_to_score(self, technical_regime: str) -> float:
         """Map technical regime to numeric score (-1 to 1)."""
-        # Based on v2.20 regime_ml.py regime labels
+        # Based on v2.20 regime labels
         mapping = {
             "bullish_momentum": 0.7,
             "neutral_trending": 0.2,
@@ -259,7 +259,7 @@ class RegimeSentimentIntegrator:
         Combine technical and sentiment signals into unified regime signal.
         
         Args:
-            technical_regime: Regime label from regime_ml.py
+            technical_regime: Regime label from regime detection
             technical_confidence: Confidence score 0-1 from technical model
             sentiment: Aggregated sentiment from sentiment_analyzer.py
         """

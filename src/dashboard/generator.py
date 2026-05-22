@@ -217,10 +217,7 @@ class DashboardGenerator:
                 }
         except Exception:
             pass  # Factor rotation not available
-        
-        # Volatility targeting removed v982 — module deleted
-        vol_targeting_signal = None
-        
+
         # Add yield curve data from yields.json
         yield_curve_data = self._get_yield_curve_data()
         
@@ -514,7 +511,6 @@ class DashboardGenerator:
             "recent_orders": list(reversed(orders)),
             "ml_signals": self._generate_ml_signals(),
             "factor_rotation": factor_rotation_signal,
-            "volatility_targeting": vol_targeting_signal,
             "yield_curve": yield_curve_data.get("yield_curve"),
             "duration_allocation": yield_curve_data.get("duration_allocation"),
             "convexity_harvest": convexity_signal,

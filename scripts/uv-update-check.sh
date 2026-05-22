@@ -104,7 +104,6 @@ check_ml_flag() {
 SMOKE_TEST_FILES=(
     "tests/test_behavioral_sentiment.py"
     "tests/test_combined_orchestrator.py"
-    "tests/test_dual_momentum.py"
     "tests/test_evaluator.py"
 )
 

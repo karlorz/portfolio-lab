@@ -45,7 +45,6 @@ _HEAVY_TEST_FILES = [
     "test_marl_trainer.py",
     "test_risk_agent_hmm.py",
     "test_stacking_trainer.py",
-    "test_regime_ml.py",
     "test_transformer_regime.py",
     "test_base_agent.py",
 ]
