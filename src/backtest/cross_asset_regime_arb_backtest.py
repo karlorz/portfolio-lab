@@ -24,7 +24,6 @@ import json
 import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -188,8 +187,6 @@ class CrossAssetRegimeArbBacktester:
         """
         try:
             prices_path = PRICES_JSON
-            if not prices_path.exists():
-                prices_path = Path("public/data/prices.json")
 
             if prices_path.exists():
                 with open(prices_path) as f:

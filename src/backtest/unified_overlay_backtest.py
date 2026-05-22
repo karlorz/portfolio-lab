@@ -128,8 +128,6 @@ class UnifiedOverlayBacktester:
         try:
             prices_path = PRICES_JSON
             if not prices_path.exists():
-                prices_path = Path("public/data/prices.json")
-            if not prices_path.exists():
                 logger.error("Price data not found")
                 return False
 
