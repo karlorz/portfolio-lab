@@ -44,7 +44,7 @@ class PositionSync:
     ):
         self.db_path = db_path or str(MARKET_DB)
         self.data_dir = data_dir or str(DATA_DIR)
-        self.sync_log_path = os.path.join(data_dir, "position_sync.jsonl")
+        self.sync_log_path = os.path.join(self.data_dir, "position_sync.jsonl")
         self.client = AlpacaClient(paper=paper)
         
     def is_ready(self) -> bool:

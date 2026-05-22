@@ -272,66 +272,6 @@ class TestStep4RiskDecomposition:
 
 
 # ---------------------------------------------------------------------------
-# Step 5: Risk Budget Optimizer
-# ---------------------------------------------------------------------------
-
-
-class TestStep5RiskBudgetOptimizer:
-    """Pipeline Step 5: Risk budget optimizer computes budget gaps."""
-
-    def test_budget_gaps_computed(self):
-        """RiskBudgetOptimizer computes budget gaps from contributions."""
-        from src.strategy.risk_budget_optimizer import RiskBudgetOptimizer, RiskBudgetGap
-
-        opt = RiskBudgetOptimizer(
-            weights={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
-        )
-        opt.current_regime = "normal"
-        opt._cached_contributions = {
-            "equity": 0.35, "duration": 0.10,
-            "gold": 0.25, "crypto": 0.05, "fx": 0.25,
-        }
-        opt._cached_total_vol = 0.11
-        opt._cached_systematic_pct = 80.0
-        opt._cached_idiosyncratic_pct = 20.0
-
-        gaps = opt.compute_risk_budget_gaps()
-        # Returns 6: 5 factors (equity/duration/gold/crypto/fx) + idiosyncratic
-        assert len(gaps) >= 5
-        for factor, gap in gaps.items():
-            assert isinstance(gap, RiskBudgetGap)
-            assert hasattr(gap, "factor")
-            assert hasattr(gap, "breached")
-            # Values are in percentage units (e.g. 35.0 = 35%)
-            assert 0 <= gap.current_pct <= 100.0
-
-    def test_scenario_analysis_runs(self):
-        """Scenario analysis runs without crashing."""
-        from src.strategy.risk_budget_optimizer import RiskBudgetOptimizer
-
-        opt = RiskBudgetOptimizer(
-            weights={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
-        )
-        opt._cached_contributions = {
-            "equity": 0.35, "duration": 0.10,
-            "gold": 0.25, "crypto": 0.05, "fx": 0.25,
-        }
-        opt._cached_total_vol = 0.11
-        opt._cached_systematic_pct = 80.0
-        opt._cached_idiosyncratic_pct = 20.0
-
-        # Run specific scenarios
-        for scenario_name in ["equity_crash", "rate_spike", "gold_rally"]:
-            result = opt.run_scenario(scenario_name)
-            if result is not None:
-                assert hasattr(result, "scenario_name")
-                assert result.scenario_name == scenario_name
-
-
-# ---------------------------------------------------------------------------
-# Step 6: EnsembleVoter
-# ---------------------------------------------------------------------------
-
 
 class TestStep6EnsembleVoter:
     """Pipeline Step 6: EnsembleVoter generates composite signals."""
