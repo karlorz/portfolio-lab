@@ -23,10 +23,9 @@ Usage:
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, Tuple
 
 from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR
 

@@ -13,12 +13,11 @@ import json
 import sqlite3
 import numpy as np
 import argparse
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Tuple
 from dataclasses import dataclass, asdict
 
-from src.paths import DATA_DIR, MARKET_DB, BASE_ALLOCATION
+from src.paths import DATA_DIR, BASE_ALLOCATION
 
 RISK_METRICS_PATH = DATA_DIR / "risk_metrics.json"
 RISK_HISTORY_PATH = DATA_DIR / "risk_metrics_history.json"
@@ -274,7 +273,7 @@ def main():
     
     # Export if requested
     if args.export:
-        data = export_metrics(metrics)
+        export_metrics(metrics)
         print(f"\n✓ Exported to:")
         print(f"  - {RISK_METRICS_PATH}")
         print(f"  - {RISK_HISTORY_PATH}")

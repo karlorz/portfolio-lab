@@ -26,13 +26,11 @@ CLI:
 
 import json
 import sys
-import warnings
 import logging
 from src.paths import BASE_ALLOCATION as DEFAULT_WEIGHTS
-from dataclasses import dataclass, asdict, field
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -435,7 +433,7 @@ class RiskDecomposer:
             logger.warning(f"Insufficient aligned data for {symbol}")
             return {}
 
-        n_obs = len(aligned_asset)
+        len(aligned_asset)
         betas: Dict[str, FactorBeta] = {}
 
         for i, fkey in enumerate(self.factor_keys):

@@ -15,7 +15,7 @@ Usage:
 """
 
 import numpy as np
-from typing import Optional, Tuple, NamedTuple
+from typing import Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime, time
@@ -244,7 +244,7 @@ class ZeroDTECalculator:
         
         # For OTM calls (delta < 0.5), strike > spot
         # Start with OTM by default (selling calls above current price)
-        delta_sign = 1 if target_delta > 0 else -1
+        1 if target_delta > 0 else -1
         
         # Binary search for target delta
         low_strike = spot * 0.95

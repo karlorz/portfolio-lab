@@ -10,11 +10,10 @@ AGG = iShares Core US Aggregate Bond ETF (broad bond benchmark)
 
 import sqlite3
 import json
-import os
 import logging
-from datetime import datetime, timedelta, timezone
-from dataclasses import dataclass, asdict, field
-from typing import Dict, Optional, List, Tuple
+from datetime import datetime, timedelta
+from dataclasses import dataclass, asdict
+from typing import Dict, Optional, List
 from pathlib import Path
 from src.paths import MARKET_DB
 

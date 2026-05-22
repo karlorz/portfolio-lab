@@ -16,10 +16,9 @@ import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import logging
-import numpy as np
 
 from src.paths import DATA_DIR, MARKET_DB
 

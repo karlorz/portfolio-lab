@@ -13,11 +13,10 @@ Usage:
 """
 
 import json
-import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from typing import Dict, Optional, NamedTuple
 
 import numpy as np
 
@@ -430,7 +429,7 @@ class GraduationChecklist:
         cb = state.get("circuit_breaker", {})
         
         status = cb.get("status", "green" if isinstance(cb, dict) else "unknown")
-        trips = cb.get("trips", 0) if isinstance(cb, dict) else 0
+        cb.get("trips", 0) if isinstance(cb, dict) else 0
         consecutive_ok = cb.get("consecutive_ok", 0) if isinstance(cb, dict) else 0
         
         required = int(self.criteria["circuit_breaker_confidence"]["value"])

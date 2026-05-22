@@ -33,7 +33,7 @@ from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, Age
 # FPILOT inference-time planning (numpy-only, no ML deps)
 _INFERENCE_TIME_PLANNING = os.environ.get("INFERENCE_TIME_PLANNING", "0") == "1"
 if _INFERENCE_TIME_PLANNING:
-    from .predictive_model import PredictiveModel, TrajectoryOptimizer, PredictionResult
+    from .predictive_model import PredictiveModel, TrajectoryOptimizer
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
@@ -339,9 +339,9 @@ class ControllerAgent(BaseAgent):
             # Fit model
             if len(model._price_history) >= model.window + 2:
                 price_array = np.array(model._price_history)
-                fit_ok = model.fit(price_array)
+                model.fit(price_array)
             else:
-                fit_ok = False
+                pass
 
             # Generate prediction
             prediction = model.predict(horizon=5)

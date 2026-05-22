@@ -21,7 +21,7 @@ import json
 import numpy as np
 import sqlite3
 import argparse
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 import sys

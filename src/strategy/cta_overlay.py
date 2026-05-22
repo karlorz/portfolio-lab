@@ -14,12 +14,11 @@ Implementation:
 - Ensemble trend scoring
 """
 
-import os
 import json
 import sqlite3
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -449,7 +448,7 @@ class CTATrendEngine:
             return {}
         
         spy_prices = np.array([d["close"] for d in spy_data])
-        spy_return = (spy_prices[-1] / spy_prices[0]) - 1
+        (spy_prices[-1] / spy_prices[0]) - 1
         
         crisis_signals = {}
         

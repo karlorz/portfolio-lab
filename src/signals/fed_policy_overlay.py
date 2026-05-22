@@ -39,17 +39,15 @@ Reference:
     Target Sharpe improvement: 0.96 -> 1.05 (combined with TSMOM + HMM)
 """
 
-import numpy as np
 import pandas as pd
 import json
 import argparse
 import sys
 import requests
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-from collections import defaultdict
 
 from src.paths import DATA_DIR, BASE_ALLOCATION, PROJECT_ROOT
 

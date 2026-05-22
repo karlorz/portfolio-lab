@@ -39,9 +39,9 @@ import json
 import argparse
 import sys
 import pickle
-from typing import Dict, List, Optional, Tuple, NamedTuple
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+from datetime import datetime
 from collections import defaultdict, deque
 from enum import Enum
 
@@ -65,7 +65,6 @@ else:
     HMM_AVAILABLE = False
 
 # Import existing modules
-from src.signals.tsmom_overlay import TSMOMOverlay
 
 
 # Paths

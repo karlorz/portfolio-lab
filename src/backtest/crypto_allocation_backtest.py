@@ -24,22 +24,19 @@ Period: 2006-2026 (20+ years including GFC, COVID, 2022 rate hikes)
 
 import json
 import logging
-import math
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
     compute_crisis_returns,
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
-from src.signals.crypto_momentum import CryptoMomentumCalculator, CryptoVolRegime
+from src.signals.crypto_momentum import CryptoMomentumCalculator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

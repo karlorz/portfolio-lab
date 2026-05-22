@@ -15,16 +15,14 @@ Usage:
     print(f"Annual tax alpha: {result.annual_tax_alpha_bps} bps")
 """
 
-import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
-from pathlib import Path
 
 from src.paths import PROJECT_ROOT
 from .tax_lot_tracker import TaxLotTracker
-from .tax_aware_rebalancer import TaxAwareRebalancer, RebalancePlan
+from .tax_aware_rebalancer import TaxAwareRebalancer
 import random
 
 logger = logging.getLogger(__name__)
@@ -144,7 +142,6 @@ class TaxSimulator:
         self.tracker.reset()
         
         # Create initial lots for each holding
-        initial_lots = {}
         for symbol, value in holdings.items():
             price = prices.get(symbol, 100.0)
             shares = value / price

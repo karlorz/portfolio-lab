@@ -7,11 +7,84 @@ functions that were previously copy-pasted across 11+ backtest files.
 
 import json
 import numpy as np
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.paths import BASE_ALLOCATION
+
+# ── Shared Dataclass Consolidation (v953) ───────────────────────────
+# These replace duplicated definitions across 14+ backtest files.
+# Backtest-specific extras use the 'extras' dict to avoid field clashes.
+
+
+@dataclass
+class BacktestConfig:
+    """Canonical backtest configuration shared across all backtest files.
+
+    Backtest-specific parameters go in ``extras`` (e.g. ``extras=dict(max_shift=0.05)``).
+    """
+
+    start_date: str = "2006-01-01"
+    end_date: str = "2026-05-15"
+    initial_capital: float = 100000.0
+
+    # Base allocation (default: 46/38/16 SPY/GLD/TLT)
+    base_weights: Dict[str, float] = field(default_factory=lambda: dict(BASE_ALLOCATION))
+
+    # Rebalancing
+    rebalance_frequency_days: int = 21  # monthly (21 trading days)
+    transaction_cost_bps: float = 10.0
+
+    # Backtest-specific extras (shift limits, thresholds, lookbacks, etc.)
+    extras: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DailyPrices:
+    """Canonical daily price snapshot shared across backtest files.
+
+    Core fields (date / spy / gld / tlt) are required; additional symbols
+    use Optional fields or go in ``extras``.
+    """
+
+    date: str
+    spy: float
+    gld: float
+    tlt: float
+    vix: Optional[float] = None
+    ief: Optional[float] = None
+    shy: Optional[float] = None
+    btc: Optional[float] = None
+    eth: Optional[float] = None
+    extras: Dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class BacktestResult:
+    """Canonical backtest result shared across all backtest files.
+
+    Core metrics mirror ``BacktestMetrics``; overlay-specific and
+    file-specific fields go in ``extras``.
+    """
+
+    total_return: float
+    cagr: float
+    volatility: float
+    sharpe_ratio: float
+    max_drawdown: float
+
+    # Trade / cost stats
+    total_rebalances: int = 0
+    total_transaction_costs: float = 0.0
+    avg_turnover: float = 0.0
+
+    # Overlay comparison (optional)
+    baseline_sharpe: Optional[float] = None
+    sharpe_improvement: Optional[float] = None
+
+    # Extras for backtest-specific fields
+    extras: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

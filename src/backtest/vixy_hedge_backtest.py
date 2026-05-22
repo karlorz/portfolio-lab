@@ -17,21 +17,20 @@ Period: 2006-2026 (20+ years including GFC, COVID, 2022 rate hikes)
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
+    DailyPrices,
     compute_metrics,
     compute_crisis_returns,
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
-from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer, HedgeRegime
+from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -69,17 +68,6 @@ class BacktestConfig:
 
     # VIXY hedge constraints
     max_hedge_pct: float = 6.0  # Hard cap on VIXY allocation
-
-
-@dataclass
-class DailyPrices:
-    """Daily price data for a single date."""
-
-    date: str
-    spy: float
-    gld: float
-    tlt: float
-    vix: Optional[float] = None
 
 
 @dataclass
@@ -429,8 +417,6 @@ class WalkForwardVIXYBacktester:
         tlt_w = config.base_tlt_weight
 
         equity = [config.initial_capital]
-        rebalance_count = 0
-        total_cost = 0.0
 
         for i in range(1, len(prices)):
             ret = self._compute_portfolio_return(

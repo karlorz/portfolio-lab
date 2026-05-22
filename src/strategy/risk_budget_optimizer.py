@@ -21,14 +21,13 @@ Usage:
 import json
 import logging
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from src.paths import BASE_ALLOCATION, PROJECT_ROOT, DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -932,7 +931,7 @@ class RiskBudgetOptimizer:
 
         # Count breaches and their severity
         breach_score = 0.0
-        total_factors = len(gaps)
+        len(gaps)
 
         for gap in gaps.values():
             if gap.breached:

@@ -6,7 +6,7 @@ Generates momentum-based signals for EFA/EEM overlay strategy
 import json
 import sqlite3
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple

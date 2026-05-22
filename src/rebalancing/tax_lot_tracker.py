@@ -16,7 +16,7 @@ Usage:
 """
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path

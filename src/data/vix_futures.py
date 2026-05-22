@@ -6,11 +6,9 @@ Based on CBOE VIX futures methodology and multi-asset volatility parity research
 """
 
 import json
-import os
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
-from pathlib import Path
 
 
 @dataclass

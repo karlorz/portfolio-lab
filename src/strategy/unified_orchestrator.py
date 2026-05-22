@@ -29,11 +29,10 @@ Usage:
 import json
 import logging
 import sqlite3
-from dataclasses import dataclass, asdict, field
-from datetime import datetime, date
+from dataclasses import dataclass, asdict
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB
 from src.signals.calendar_seasonality import get_calendar_modifier
@@ -228,7 +227,7 @@ class UnifiedOrchestrator:
 
         # ── Premium-cost overlay conflict reduction (v9.15) ────────
         # Determine which hedges are appropriate based on VIX level
-        collar_active = vix_level < self.VIX_COLLAR_MAX
+        vix_level < self.VIX_COLLAR_MAX
         collar_crisis = vix_level >= self.VIX_CRISIS
         vixy_active = vix_level >= self.VIX_VIXY_MIN
 

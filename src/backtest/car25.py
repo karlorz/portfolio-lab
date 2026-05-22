@@ -12,7 +12,6 @@ Companion metric: Correlation to SPY benchmark
 """
 
 import json
-import math
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple

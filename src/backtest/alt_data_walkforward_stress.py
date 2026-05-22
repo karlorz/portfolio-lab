@@ -10,10 +10,9 @@ Integrates alternative data signals with price data for backtest.
 
 import json
 import math
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
-from pathlib import Path
+from datetime import datetime
+from dataclasses import dataclass
+from typing import Dict, List
 
 from src.paths import PRICES_JSON, SIGNALS_DIR, BASE_ALLOCATION as WEIGHTS
 

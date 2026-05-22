@@ -14,9 +14,8 @@ import logging
 import math
 import sqlite3
 from dataclasses import dataclass, asdict
-from datetime import datetime, date
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from datetime import datetime
+from typing import Dict, List, Tuple
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
@@ -67,7 +66,7 @@ class RealDataBacktestResult:
     def to_dict(self) -> dict:
         return asdict(self)
 
-from src.paths import DATA_DIR, MARKET_DB
+from src.paths import DATA_DIR
 
 class RealDataBacktest:
     """
@@ -198,9 +197,6 @@ class RealDataBacktest:
 
         base_val = 1.0
         comb_val = 1.0
-        collar_val = 1.0
-        crypto_val = 1.0
-        bond_val = 1.0
 
         peak_base = 1.0
         peak_comb = 1.0

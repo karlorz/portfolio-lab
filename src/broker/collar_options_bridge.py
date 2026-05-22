@@ -14,18 +14,15 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict
 
-import numpy as np
 
 from src.paths import DATA_DIR
-from .options_utils import OptionsChainFetcher, OptionsChain, OptionQuote, OptionType
+from .options_utils import OptionsChainFetcher, OptionsChain, OptionQuote
 from ..signals.collar_signal import (
-    CollarSignalGenerator, CollarStrikes, CollarSignal,
-    BlackScholesPricer, CollarRegime,
+    CollarSignalGenerator, BlackScholesPricer,
 )
 
 logging.basicConfig(level=logging.INFO)

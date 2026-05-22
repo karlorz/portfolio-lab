@@ -45,8 +45,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, asdict
-from decimal import Decimal, ROUND_DOWN
+from dataclasses import dataclass
 
 from src.paths import MARKET_DB, DATA_DIR
 
@@ -57,7 +56,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.signals.integrator import SignalIntegrator, CompositeSignal
 from src.execution.rebalance_scheduler import (
-    RebalanceScheduler, ScheduledOrder, OrderUrgency, ExecutionWindow
+    RebalanceScheduler, ScheduledOrder, OrderUrgency
 )
 
 
@@ -307,7 +306,7 @@ class SignalExecutionBridge:
                 if signal.detected_regime != "neutral" and detected_regime == "neutral":
                     detected_regime = signal.detected_regime
                     
-            except Exception as e:
+            except Exception:
                 # Fallback to neutral signal
                 signal = CompositeSignal(
                     ticker=symbol,
@@ -470,7 +469,6 @@ class SignalExecutionBridge:
         """Persist scheduled orders to execution database"""
         # Placeholder for order persistence
         # Would write to execution/orders table
-        pass
     
     def check_signal_health(self) -> Dict[str, Any]:
         """Check health of all signal sources"""

@@ -12,12 +12,11 @@ Implements:
 
 import json
 import logging
-import os
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any
 from collections import deque
 
 from src.paths import PROJECT_ROOT
@@ -96,7 +95,7 @@ class SentimentAggregator:
             self.analyzer = SentimentAnalyzer()
             if self.analyzer.disabled:
                 self.analyzer = None
-        except Exception as e:
+        except Exception:
             self.analyzer = None
         
     def calculate_ema(self, values: List[float], alpha: Optional[float] = None) -> float:
@@ -274,7 +273,7 @@ class SentimentAnalyzerPipeline:
             self.analyzer = SentimentAnalyzer()
             if self.analyzer.disabled:
                 self.analyzer = None
-        except Exception as e:
+        except Exception:
             self.analyzer = None
         
     def analyze_text(self, text: str, source_type: str = "news") -> Optional[SentimentResult]:
@@ -313,7 +312,6 @@ class SentimentAnalyzerPipeline:
         else:
             # Mock results for demo without API keys
             from src.llm.sentiment_client import SentimentResult
-            from datetime import datetime
             
             def mock_result(text: str, sentiment: str) -> SentimentResult:
                 return SentimentResult(

@@ -4,13 +4,11 @@ Portfolio-Lab Alpha: Research Agent (Hermes + Claude Code Bridge)
 Triggered by regime changes or manual request. Uses Claude Code for complex analysis.
 """
 
-import os
 import json
 import sqlite3
-import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, WORK_DIR as _WORK_DIR
 

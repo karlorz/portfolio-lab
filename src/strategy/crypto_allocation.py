@@ -17,7 +17,7 @@ Usage:
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, date
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict
@@ -358,7 +358,6 @@ def get_crypto_summary() -> Dict:
 
 
 def main():
-    import sys
     overlay = CryptoAllocationOverlay()
     decision = overlay.recommend()
 

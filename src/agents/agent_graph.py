@@ -20,7 +20,7 @@ Communication Patterns:
 - Consensus: Controller aggregates signals
 """
 
-from typing import Dict, List, Optional, Any, Callable, Set, Tuple
+from typing import Dict, List, Optional, Any, Callable, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import deque

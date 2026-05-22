@@ -133,7 +133,6 @@ def compute_features(
         primary_return = overnight_gap
         # Return vol ratio computed from daily returns
         all_returns = np.diff(closes) / closes[:-1]
-        all_abs_returns = np.abs(all_returns)
     else:
         # Close-only mode: prices[:, 0] is the close
         closes = prices[:, 0]
@@ -144,7 +143,6 @@ def compute_features(
         primary_return = daily_return
 
         all_returns = np.diff(closes) / closes[:-1]
-        all_abs_returns = np.abs(all_returns)
 
     # 2. Volume Anomaly (always 1.0 for close-only data)
     volume_anomaly = 1.0

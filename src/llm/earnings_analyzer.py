@@ -26,11 +26,10 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
-from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
-from src.llm.sentiment_client import SentimentAnalyzer, SentimentResult
+from src.llm.sentiment_client import SentimentResult
 
 # ---------------------------------------------------------------------------
 # Data Classes
@@ -560,7 +559,6 @@ class EarningsAnalyzer:
         # Analyze each aspect
         aspects = []
         total_cost = 0.0
-        model_used = ""
         
         for aspect_name in self.ASPECTS:
             aspect_result = self._analyze_aspect(

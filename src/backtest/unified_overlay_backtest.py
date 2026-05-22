@@ -23,16 +23,13 @@ Target: Validate that UNIFIED_OVERLAY adds alpha (Sharpe >= baseline).
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
-    save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 

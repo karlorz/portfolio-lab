@@ -19,11 +19,8 @@ Usage:
 import argparse
 import json
 import logging
-import sys
-from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional
 import numpy as np
 
 from src.paths import PROJECT_ROOT, DATA_DIR
@@ -110,7 +107,6 @@ def get_execution_adjustment(
             compute_features,
             classify_day,
             ClassifierConfig,
-            DayRegime,
         )
     except ImportError:
         logger.warning("Vol-Volume-Gap module not available")

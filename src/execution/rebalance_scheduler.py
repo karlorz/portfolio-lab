@@ -238,11 +238,11 @@ class RebalanceScheduler:
             OrderUrgency.HIGH: self.config.max_delay_high
         }.get(urgency, timedelta(hours=2))
         
-        latest_time = current_time + max_delay
+        current_time + max_delay
         
         # Find the next optimal window
         current_date = current_time.date()
-        current_hour = current_time.hour
+        current_time.hour
         
         # Check if we're already in or can reach optimal window today
         optimal_start_dt = datetime.combine(current_date, self.config.optimal_start)

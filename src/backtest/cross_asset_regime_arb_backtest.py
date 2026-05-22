@@ -23,14 +23,13 @@ Period: 2006-2026
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
     save_results_json,
 )
@@ -262,8 +261,8 @@ class CrossAssetRegimeArbBacktester:
             return 0.0, 0.0, 0.0
 
         start = day_index - lookback
-        spy_start = self.data[start].spy_return
-        spy_end = self.data[day_index - 1].spy_return
+        self.data[start].spy_return
+        self.data[day_index - 1].spy_return
 
         # Use price level approximation: sum of log returns
         spy_mom = sum(

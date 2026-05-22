@@ -11,7 +11,7 @@ Usage:
 """
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, time
 from typing import Optional, Dict, List
 from enum import Enum
@@ -351,7 +351,7 @@ class ZeroDTEPerformance:
 
 if __name__ == "__main__":
     # Example usage
-    from datetime import timedelta
+    pass
     
     print("=== 0DTE Position Dataclasses ===")
     print()

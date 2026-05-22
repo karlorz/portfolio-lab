@@ -7,7 +7,7 @@ Runs continuously to evaluate signals, generate orders, route to paper or live.
 import os
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
 import numpy as np
@@ -160,7 +160,7 @@ class Portfolio:
             else:
                 if symbol in self.positions and self.positions[symbol].shares >= fill_shares:
                     p = self.positions[symbol]
-                    realized = (fill_price - p.avg_price) * fill_shares
+                    (fill_price - p.avg_price) * fill_shares
                     new_shares = p.shares - fill_shares
                     
                     if new_shares > 0:

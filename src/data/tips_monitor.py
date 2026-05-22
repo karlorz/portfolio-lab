@@ -14,7 +14,7 @@ import argparse
 import json
 import logging
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -23,7 +23,6 @@ from src.paths import DATA_DIR
 
 import requests
 import pandas as pd
-import numpy as np
 
 # Setup logging
 logging.basicConfig(
@@ -260,7 +259,7 @@ class TIPSMonitor:
         prices = self.fetch_yahoo_prices(list(self.TIPS_ETFS.keys()))
         
         # Get nominal yields from Treasury data
-        nominal_prices = self.fetch_yahoo_prices(list(self.NOMINAL_ETFS.keys()))
+        self.fetch_yahoo_prices(list(self.NOMINAL_ETFS.keys()))
         
         tips_data = {}
         now = datetime.now()

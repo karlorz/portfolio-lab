@@ -21,15 +21,13 @@ Usage:
         print(f"Tax cost: {result.tax_cost_bps} bps, TLH benefit: {result.tlh_benefit_bps} bps")
 """
 
-import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Dict, List, Optional, Tuple
-from pathlib import Path
 
 from src.paths import PROJECT_ROOT
-from .tax_lot_tracker import TaxLotTracker, LotSelectionMethod, HoldingPeriod
+from .tax_lot_tracker import TaxLotTracker
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +266,7 @@ class TaxAwareRebalancer:
                 ),
             )
         
-        current_allocs = self._compute_current_allocation(current_holdings, total_value)
+        self._compute_current_allocation(current_holdings, total_value)
         target_values = self._compute_target_values(current_holdings, target_allocations, total_value)
         
         actions = []
@@ -289,7 +287,7 @@ class TaxAwareRebalancer:
             if delta > 0:
                 # Buy — track as new lot
                 if price > 0:
-                    shares_to_buy = delta / price
+                    delta / price
                     action = RebalanceAction(
                         symbol=symbol, action="buy",
                         current_value=current_value,

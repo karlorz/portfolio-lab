@@ -17,13 +17,12 @@ Usage:
 """
 
 import argparse
-import json
 import math
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 from src.paths import PROJECT_ROOT
 

@@ -22,7 +22,6 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
     save_results_json,
 )

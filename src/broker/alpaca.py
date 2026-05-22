@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 try:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
-    from alpaca.trading.enums import OrderSide as AlpacaOrderSide, TimeInForce, OrderClass
+    from alpaca.trading.enums import OrderSide as AlpacaOrderSide, TimeInForce
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame

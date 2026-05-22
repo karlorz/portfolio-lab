@@ -7,9 +7,8 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Optional, Dict, List
 
 from src.paths import VIX_OPTIONS_DB, SIGNALS_DIR

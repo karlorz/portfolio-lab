@@ -16,7 +16,6 @@ Target: +0.03 Sharpe improvement through improved regime detection (78% → 85%+
 """
 
 import numpy as np
-import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta

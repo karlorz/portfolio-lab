@@ -11,13 +11,12 @@ Strategy Rules:
 This is applied as an overlay on the All-Season 46/38/16 base allocation.
 """
 
-import os
 import json
 import sqlite3
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -213,7 +212,7 @@ class DualMomentumEngine:
         
         # Calculate signal strength (confidence metric)
         if qualifying:
-            avg_score = np.mean([s.score for s in qualifying.values()])
+            np.mean([s.score for s in qualifying.values()])
             best_score = sorted_assets[0][1].score if sorted_assets else 0
             signal_strength = min(1.0, max(0.0, (best_score - 0.05) * 5))  # Normalize
         else:

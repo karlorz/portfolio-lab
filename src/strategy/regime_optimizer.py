@@ -666,7 +666,7 @@ class RegimeConstrainedOptimizer:
 
         # Convert to numpy
         assets = ASSETS
-        n = len(assets)
+        len(assets)
         cov = RegimeCovarianceBuilder.cov_to_numpy(regime_cov.matrix, assets)
 
         # Build bounds (clamp to core assets, zero out crypto for non-crypto modes)

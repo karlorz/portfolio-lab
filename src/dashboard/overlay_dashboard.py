@@ -18,9 +18,8 @@ Usage:
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
-from pathlib import Path
-from typing import Optional, Dict, List, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Any, Tuple
 
 from src.paths import DATA_DIR
 

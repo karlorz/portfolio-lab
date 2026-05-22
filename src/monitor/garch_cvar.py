@@ -23,8 +23,7 @@ import logging
 import numpy as np
 import warnings
 from typing import Optional, Tuple, Dict, Literal
-from dataclasses import dataclass, asdict
-from pathlib import Path
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,6 @@ except ImportError:
     warnings.warn("arch library not available. GARCH-CVaR will fallback to historical CVaR.")
 
 import sys
-from pathlib import Path
 
 from src.paths import PROJECT_ROOT as project_root
 # Add project root to path for imports

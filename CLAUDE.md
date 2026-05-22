@@ -39,6 +39,14 @@
 
 ## Recent Implementation Updates (2026-05-22)
 
+### v9.50 Unused Import Cleanup — 172 Files Cleaned - COMPLETED
+- **Cleanup**: Removed 191 net lines of unused imports across 172 source files via autoflake
+  - Most common removed: `timedelta` (~45 files), `Tuple` (~28), `Path` (~30), `asdict` (~16), `Optional` (~12), `List` (~10)
+  - Worst files: `src/crypto/institutional.py` (9 unused), `src/backtest/combined_strategy.py` (8 unused), `src/strategy/regime_ml.py` (7 unused), `src/strategy/orchestrator_ensemble_bridge.py` (7 unused)
+  - Dead expressions removed: `np.abs(all_returns)` in `src/regime/vol_volume_gap.py` (result discarded after autoflake removed assignment)
+- **Test count**: 6663 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.49 Dead Module Purge — 9 Modules Removed - COMPLETED
 - **Removed**: 9 source modules (~4,209 lines) + 9 test files (~2,294 lines) = 6,503 total lines deleted
   - `src/strategy/trend_integration.py` (867L) — zero callers, research-only

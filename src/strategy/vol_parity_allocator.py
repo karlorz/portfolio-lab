@@ -10,12 +10,12 @@ import json
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.vix_futures import VIXDataManager, fetch_vix_futures_data
+from data.vix_futures import VIXDataManager
 from strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition
 
 

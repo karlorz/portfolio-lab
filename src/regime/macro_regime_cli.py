@@ -20,15 +20,11 @@ Usage:
 import argparse
 import json
 import sys
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict
 
 from src.regime.macro_regime import (
     MacroRegimeSynthesizer,
     MacroRegime,
-    SignalState,
-    SignalInput,
     classify_current_regime,
 )
 

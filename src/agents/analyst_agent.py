@@ -21,8 +21,7 @@ Actions:
 
 import os
 import numpy as np
-from typing import Dict, List, Optional, Any
-from pathlib import Path
+from typing import Dict, List
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 # Set PORTFOLIO_LAB_ENABLE_ML=1 to load real torch.
@@ -33,7 +32,7 @@ if _ML_ENABLED:
 else:
     from .base_agent import torch, nn
 
-from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
+from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, MessageType
 
 
 class AnalystNetwork(nn.Module):

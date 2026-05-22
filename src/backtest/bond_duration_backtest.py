@@ -22,15 +22,14 @@ Period: 2006-2026 (20+ years including GFC, 2013 taper tantrum, 2022 rate hikes)
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
+    DailyPrices,
     compute_metrics,
     compute_crisis_returns,
     save_results_json,
@@ -91,18 +90,6 @@ class BacktestConfig:
 
     # Momentum lookback
     momentum_lookback_days: int = MOMENTUM_LOOKBACK
-
-
-@dataclass
-class DailyPrices:
-    """Daily price data for a single date."""
-
-    date: str
-    spy: float
-    gld: float
-    tlt: float
-    ief: float
-    shy: float
 
 
 @dataclass

@@ -15,10 +15,9 @@ import json
 import logging
 import math
 from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict
 
 from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR
 

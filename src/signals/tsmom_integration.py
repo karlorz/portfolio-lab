@@ -20,9 +20,7 @@ Usage:
 """
 
 import sys
-from pathlib import Path
 from typing import Dict, List, Optional
-from dataclasses import dataclass, field
 
 from src.paths import PROJECT_ROOT
 

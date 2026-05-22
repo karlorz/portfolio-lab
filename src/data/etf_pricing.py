@@ -10,11 +10,9 @@ Usage:
 """
 
 import json
-import sqlite3
 import argparse
 import requests
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 import time

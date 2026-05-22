@@ -26,7 +26,7 @@ from enum import Enum
 import asyncio
 
 from src.broker.options_utils import (
-    OptionsChainFetcher, OptionQuote, get_best_0dte_call
+    OptionsChainFetcher, OptionQuote
 )
 from src.options.odte_yield_calculator import (
     ZeroDTECalculator, ZeroDTEConfig
@@ -289,11 +289,11 @@ class ODTEExecutor:
         
         Returns ExitReason if exit triggered, None otherwise.
         """
-        calculator = ZeroDTECalculator(self.config)
+        ZeroDTECalculator(self.config)
         
         # 1. Time-based exit (close to expiration)
         now = datetime.now().time()
-        market_close = time(16, 0)
+        time(16, 0)
         
         if now.hour >= 15 and now.minute >= 30:  # After 3:30 PM
             return ExitReason.EXPIRATION
@@ -402,7 +402,6 @@ class ODTEExecutor:
         """Execute exit order."""
         if self.paper_mode:
             # Simulate exit fill at ask
-            import random
             fill_price = request.limit_price or 0.5
             return ODTEExecutionResult(
                 success=True,

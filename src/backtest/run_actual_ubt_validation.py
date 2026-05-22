@@ -7,7 +7,6 @@ Uses real historical UBT/TMF data to validate synthetic simulation accuracy.
 """
 
 import json
-import os
 from datetime import datetime
 from math import sqrt, pow
 import numpy as np
@@ -73,7 +72,7 @@ def calculate_metrics(returns, dates, scenario, base_returns=None, expected_mult
     years = len(returns) / 252
     cagr = pow(1 + total_return, 1/years) - 1 if years > 0 else 0
     
-    mean_return = np.mean(returns)
+    np.mean(returns)
     daily_vol = np.std(returns, ddof=1)
     annualized_vol = daily_vol * sqrt(252)
     
@@ -217,8 +216,8 @@ def main():
     # Calculate synthetic comparison
     print('\n[INFO] Calculating synthetic returns for comparison...')
     tlt_for_syn = tlt_returns[:min(len(tlt_returns), 2520)]  # 10 years
-    synthetic_ubt = [r * 2 - 0.0080/252 for r in tlt_for_syn]
-    synthetic_tmf = [r * 3 - 0.0091/252 for r in tlt_for_syn]
+    [r * 2 - 0.0080/252 for r in tlt_for_syn]
+    [r * 3 - 0.0091/252 for r in tlt_for_syn]
     
     ubt_result = next((r for r in results if r['scenario'] == 'Actual_UBT'), None)
     tmf_result = next((r for r in results if r['scenario'] == 'Actual_TMF'), None)

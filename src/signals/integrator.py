@@ -45,10 +45,8 @@ import statistics
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
-from enum import Enum
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, NamedTuple
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 
 from src.paths import DATA_DIR, PROJECT_ROOT
 
@@ -350,12 +348,10 @@ class SignalSource(ABC):
     @abstractmethod
     def generate_signal(self, ticker: str) -> Optional[SignalSourceResult]:
         """Generate a signal for the given ticker."""
-        pass
     
     @abstractmethod
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical prediction accuracy for this source."""
-        pass
     
     def _normalize_signal(self, raw_score: float, 
                           min_expected: float = -1.0, 
@@ -784,7 +780,7 @@ class AlternativeDataSignalAdapter(SignalSource):
             self._store_signal(ticker, result)
             return result
             
-        except Exception as e:
+        except Exception:
             return None
     
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
@@ -851,7 +847,7 @@ class LLMSentimentSignalAdapter(SignalSource):
                 }
             )
             
-        except Exception as e:
+        except Exception:
             return None
     
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
@@ -982,7 +978,7 @@ class SignalIntegrator:
         # Determine signal agreement
         bullish_count = sum(1 for s in component_signals if s.signal > 0.3)
         bearish_count = sum(1 for s in component_signals if s.signal < -0.3)
-        neutral_count = len(component_signals) - bullish_count - bearish_count
+        len(component_signals) - bullish_count - bearish_count
         
         if bullish_count >= len(component_signals) * 0.6:
             agreement = "aligned_bullish"

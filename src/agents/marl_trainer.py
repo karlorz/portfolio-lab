@@ -16,9 +16,8 @@ Training Architecture:
 
 import os
 import numpy as np
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 import json
 from collections import deque
@@ -26,18 +25,12 @@ from collections import deque
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
-    import torch
-    import torch.nn as nn
+    pass
 else:
-    from .base_agent import torch, nn
+    pass
 
-from .base_agent import BaseAgent, AgentObservation, AgentAction
+from .base_agent import AgentObservation, AgentAction
 from .agent_graph import AgentGraph
-from .analyst_agent import AnalystAgent
-from .sentiment_agent import SentimentAgent
-from .risk_agent import RiskAgent
-from .execution_agent import ExecutionAgent
-from .controller_agent import ControllerAgent
 
 
 @dataclass
@@ -259,7 +252,7 @@ class MarketEnvironment:
         portfolio_return += self.allocation.get('CASH', 0) * 0.0
         
         # Update portfolio value
-        old_value = self.portfolio_value
+        self.portfolio_value
         self.portfolio_value *= (1 + portfolio_return - rebalance_cost)
         
         # Calculate reward (Sharpe-like)

@@ -40,7 +40,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
 import sqlite3
 
 from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT
@@ -480,7 +479,7 @@ class RiskParityBacktester:
         end_val = float(df_values['value'].iloc[-1])
         years = len(df_values) / 252
         
-        total_return = (end_val / start_val) - 1 if start_val > 0 else 0
+        (end_val / start_val) - 1 if start_val > 0 else 0
         cagr = ((end_val / start_val) ** (1/years)) - 1 if start_val > 0 and years > 0 else 0
         volatility = float(returns.std()) * np.sqrt(252)
         sharpe = cagr / volatility if volatility > 0 else 0
@@ -528,7 +527,7 @@ class RiskParityBacktester:
                 new_value = baseline_values[-1]
             baseline_values.append(new_value)
         
-        baseline_total_return = (baseline_values[-1] / baseline_values[0]) - 1 if baseline_values[0] > 0 else 0
+        (baseline_values[-1] / baseline_values[0]) - 1 if baseline_values[0] > 0 else 0
         baseline_cagr = ((baseline_values[-1] / baseline_values[0]) ** (1/years)) - 1 if baseline_values[0] > 0 and years > 0 else 0
         baseline_returns = pd.Series(baseline_values).pct_change().dropna()
         baseline_vol = float(baseline_returns.std()) * np.sqrt(252)

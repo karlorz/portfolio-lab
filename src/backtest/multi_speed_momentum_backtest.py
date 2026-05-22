@@ -13,16 +13,13 @@ Period: 2006-2026 (20+ years including GFC, COVID, 2022 rate hikes)
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional
 
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
-    compute_crisis_returns,
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
@@ -348,7 +345,7 @@ class MultiSpeedMomentumBacktester:
 
         for idx, day in enumerate(bt_data):
             day_date = datetime.strptime(day.date, "%Y-%m-%d")
-            year = day_date.year
+            day_date.year
 
             # -- Baseline return --
             base_ret = (
@@ -434,7 +431,7 @@ class MultiSpeedMomentumBacktester:
             if not period:
                 return None
             eq_val = self.config.initial_capital / self.config.initial_capital  # start at 1
-            values = [eq_val]
+            [eq_val]
             # We need overlay weights for each day in the crisis. Simpler
             # approximation: use the average overlay return per day.
             rets = [

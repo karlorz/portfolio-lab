@@ -68,7 +68,6 @@ def active_backend() -> str:
 
 def cron_status_path() -> str:
     """Return the path to the cron status file (backend-agnostic)."""
-    import sys
     from pathlib import Path
     # Resolve relative to project root regardless of cwd
     this_dir = Path(__file__).resolve().parent.parent

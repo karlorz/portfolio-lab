@@ -44,10 +44,8 @@ import json
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from collections import defaultdict
 from itertools import combinations
 
 from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT
@@ -801,7 +799,7 @@ class NetworkMomentumBacktester:
         end_val = float(df_values['value'].iloc[-1])
         years = len(df_values) / 252
         
-        total_return = (end_val / start_val) - 1 if start_val > 0 else 0
+        (end_val / start_val) - 1 if start_val > 0 else 0
         cagr = ((end_val / start_val) ** (1/years)) - 1 if start_val > 0 and years > 0 else 0
         volatility = float(returns.std()) * np.sqrt(252)
         sharpe = cagr / volatility if volatility > 0 else 0

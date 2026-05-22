@@ -14,10 +14,8 @@ Usage:
 import json
 import logging
 import os
-import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.paths import DATA_DIR

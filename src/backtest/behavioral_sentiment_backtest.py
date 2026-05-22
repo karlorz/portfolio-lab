@@ -25,7 +25,6 @@ import json
 import logging
 import math
 import sqlite3
-import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path

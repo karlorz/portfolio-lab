@@ -9,9 +9,8 @@ Based on research: VIX term structure slope predicts equity returns better than 
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
 from src.paths import DATA_DIR, SIGNALS_DIR

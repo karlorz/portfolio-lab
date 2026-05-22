@@ -4,13 +4,10 @@ Portfolio-Lab Alpha: Data Pipeline
 Fetch market data, detect regime changes, trigger research if needed.
 """
 
-import os
 import json
 import sqlite3
-import hashlib
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional
 import asyncio
 import aiohttp
 

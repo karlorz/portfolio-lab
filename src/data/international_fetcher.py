@@ -8,10 +8,9 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional
 from pathlib import Path
 import logging
-import math
 
 from src.paths import MARKET_DB, DATA_DIR
 

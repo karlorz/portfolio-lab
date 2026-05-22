@@ -36,12 +36,9 @@ import pandas as pd
 import json
 import argparse
 import sys
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from collections import defaultdict
-import sqlite3
+from datetime import datetime
 
 # Add project root to path
 from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT

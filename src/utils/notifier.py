@@ -10,7 +10,6 @@ import json
 import asyncio
 import aiohttp
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional, List, Dict
 from dataclasses import dataclass, asdict
 import hashlib

@@ -35,7 +35,6 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
-from collections import defaultdict
 import statistics
 
 from src.paths import DATA_DIR
@@ -248,12 +247,10 @@ class AlternativeDataAdapter(ABC):
     @abstractmethod
     def fetch_data(self, ticker: str, days: int = 90) -> list[dict]:
         """Fetch raw data for ticker."""
-        pass
     
     @abstractmethod
     def calculate_signal(self, ticker: str, days: int = 30) -> AlternativeDataSignal:
         """Calculate signal from stored data."""
-        pass
     
     def _get_db_connection(self) -> sqlite3.Connection:
         """Get database connection."""

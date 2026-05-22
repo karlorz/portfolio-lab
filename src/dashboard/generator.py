@@ -7,9 +7,9 @@ Creates static dashboard from SQLite data for Vite/React app consumption.
 import json
 import sqlite3
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB
@@ -94,11 +94,9 @@ class DashboardGenerator:
         import sys
         sys.path.insert(0, str(Path(__file__).parent.parent / 'strategy'))
         try:
-            from dual_momentum import DualMomentumEngine
-            from comparison import StrategyComparisonEngine
-            dual_momentum_available = True
+            pass
         except ImportError:
-            dual_momentum_available = False
+            pass
         
         # Get latest VIX level directly from prices table
         cursor.execute("""
@@ -217,7 +215,7 @@ class DashboardGenerator:
                     "confidence": ensemble_out.get("confidence"),
                     "equity_adjustment": ensemble_out.get("equity_adjustment"),
                 }
-        except Exception as e:
+        except Exception:
             pass  # Factor rotation not available
         
         # Add volatility targeting if engine available
@@ -226,7 +224,7 @@ class DashboardGenerator:
             from vol_targeting import VolatilityTargetingEngine
             vol_engine = VolatilityTargetingEngine(db_path=DB_PATH)
             vol_targeting_signal = vol_engine.evaluate(target_alloc)
-        except Exception as e:
+        except Exception:
             pass  # Vol targeting not available
         
         # Add yield curve data from yields.json
@@ -248,7 +246,7 @@ class DashboardGenerator:
             vol_parity_data = vol_allocator.get_current_allocation()
             if vol_parity_data:
                 vol_parity_signal = vol_parity_data.get('allocation')
-        except Exception as e:
+        except Exception:
             # Convexity harvest / vol parity not available yet
             pass
         
@@ -271,7 +269,7 @@ class DashboardGenerator:
                 macro_texts=[],
             )
             sentiment_signal = sentiment_signal.to_dict()
-        except Exception as e:
+        except Exception:
             # LLM sentiment not available yet
             pass
         
@@ -292,7 +290,7 @@ class DashboardGenerator:
                     "position_scaling": ensemble_result.position_scaling,
                     "disagreement_sources": ensemble_result.disagreement_sources
                 }
-        except Exception as e:
+        except Exception:
             # Ensemble voting not available yet
             pass
         
@@ -300,7 +298,7 @@ class DashboardGenerator:
         sector_momentum_signal = None
         try:
             sector_momentum_signal = self._generate_sector_momentum_signals()
-        except Exception as e:
+        except Exception:
             # Sector momentum not available yet
             pass
         
@@ -350,10 +348,9 @@ class DashboardGenerator:
                     'remaining_budget_pct': 100,
                     'status': gate.get_status(),
                 }
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
-            pass
 
         # Add alternative data signals (v2.60 Phase 3)
         alternative_data_signal = None
@@ -394,7 +391,7 @@ class DashboardGenerator:
                         "sources_count": alt_data_raw.get("raw_data", {}).get("sources_count"),
                         "data_freshness_hours": alt_data_raw.get("raw_data", {}).get("data_freshness_hours")
                     }
-        except Exception as e:
+        except Exception:
             # Alternative data signal not available yet
             pass
         
@@ -450,7 +447,7 @@ class DashboardGenerator:
                     "Real-time SKEW/PCR data needed for behavioral alpha."
                 ),
             }
-        except Exception as e:
+        except Exception:
             pass  # Behavioral sentiment not available
 
         # Stacking ensemble dashboard data (v3.10)
@@ -480,7 +477,7 @@ class DashboardGenerator:
                     "Signal frequency and shift magnitude are binding constraints."
                 ),
             }
-        except Exception as e:
+        except Exception:
             pass  # Stacking ensemble not available (ML-gated)
 
         # Factor rotation dashboard data (v3.00)
@@ -509,7 +506,7 @@ class DashboardGenerator:
                         "Defensive tool — best in high-vol regimes (Sharpe 1.474)."
                     ),
                 }
-        except Exception as e:
+        except Exception:
             pass  # Factor rotation dashboard not available
 
         output = {
@@ -624,7 +621,7 @@ class DashboardGenerator:
                         garch_cvar["var_95"] = cvar_check.get("var_95", -0.0127)
                         garch_cvar["cvar_ratio"] = cvar_check.get("cvar_ratio", 1.51)
                         garch_cvar["garch_active"] = cvar_check.get("garch_active", True)
-        except Exception as e:
+        except Exception:
             # Use default values
             pass
         
@@ -669,7 +666,7 @@ class DashboardGenerator:
                             entropy["concentration_risk"] = "high"
                         else:
                             entropy["concentration_risk"] = "critical"
-        except Exception as e:
+        except Exception:
             # Use default values
             pass
         
@@ -1011,8 +1008,6 @@ class DashboardGenerator:
     
     def generate_health_json(self) -> Path:
         """Generate system health status for dashboard."""
-        import subprocess
-        import os
         
         health_data = {
             "cron_jobs": [],

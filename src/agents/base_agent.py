@@ -13,7 +13,7 @@ Architecture:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, NamedTuple
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from enum import Enum
 import numpy as np
@@ -192,22 +192,18 @@ class BaseAgent(ABC, nn.Module):
     @abstractmethod
     def build_network(self) -> nn.ModuleDict:
         """Build the neural network architecture."""
-        pass
     
     @abstractmethod
     def extract_features(self, obs: AgentObservation) -> torch.Tensor:
         """Extract agent-specific features from observation."""
-        pass
     
     @abstractmethod
     def act(self, obs: AgentObservation, deterministic: bool = False) -> AgentAction:
         """Generate action from observation."""
-        pass
     
     @abstractmethod
     def compute_value(self, obs: AgentObservation) -> float:
         """Compute state value estimate (for critic)."""
-        pass
     
     def receive_message(self, msg: AgentMessage):
         """Receive message from another agent."""

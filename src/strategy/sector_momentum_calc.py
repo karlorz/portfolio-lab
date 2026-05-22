@@ -6,8 +6,8 @@ Calculates momentum signals for SPDR sector ETFs
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+from datetime import datetime
 import numpy as np
 
 from src.paths import HISTORICAL_JSON

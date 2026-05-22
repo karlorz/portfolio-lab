@@ -27,7 +27,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Optional, Any
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from src.paths import PROJECT_ROOT
 from src.rebalancing.integration import SmartRebalanceGate, RebalanceGateResult
 from src.strategy.adaptive_sizing import AdaptiveSizer, BASE_ALLOCATION

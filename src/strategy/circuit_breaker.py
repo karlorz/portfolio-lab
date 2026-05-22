@@ -14,9 +14,7 @@ Reference: CME Group (2024). "Quantifying CTA Risk Management."
 
 import json
 import sqlite3
-import sys
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 from typing import Dict, Optional, Tuple
 
 from src.paths import DATA_DIR, MARKET_DB

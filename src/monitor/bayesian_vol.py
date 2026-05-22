@@ -19,9 +19,8 @@ import json
 import logging
 import math
 from dataclasses import dataclass, asdict
-from datetime import datetime, date
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from datetime import datetime
+from typing import Optional, List, Tuple
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
@@ -135,7 +134,7 @@ class BayesianVolModel:
 
         # Likelihood: mean of recent vols
         likelihood_vol = float(np.mean(recent_vols))
-        likelihood_var = float(np.var(recent_vols)) if n > 1 else likelihood_vol**2
+        float(np.var(recent_vols)) if n > 1 else likelihood_vol**2
 
         # Posterior: precision-weighted average
         alpha_post = alpha_eff + n

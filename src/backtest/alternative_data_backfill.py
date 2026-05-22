@@ -10,7 +10,7 @@ import json
 import random
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
-from typing import List, Dict, Optional
+from typing import List, Dict
 import os
 
 from src.paths import SIGNALS_DIR

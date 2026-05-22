@@ -21,11 +21,11 @@ import math
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from src.paths import PROJECT_ROOT, DATA_DIR, PRICES_JSON
+from src.paths import DATA_DIR, PRICES_JSON
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ def multivariate_kelly(mean_returns: np.ndarray, cov_matrix: np.ndarray,
     
     f* = \u03a3\u207b\u00b9 (\u03bc - r_f \u00b7 1)
     """
-    n = len(mean_returns)
+    len(mean_returns)
     excess = mean_returns - risk_free
     
     try:
@@ -238,7 +238,7 @@ class KellyOptimizer:
         
         returns_array = np.column_stack(returns_list)  # (T, 3)
         
-        n = returns_array.shape[0]
+        returns_array.shape[0]
         means = np.mean(returns_array, axis=0) * 252
         cov = np.cov(returns_array, rowvar=False) * 252
         vols = np.sqrt(np.diag(cov))

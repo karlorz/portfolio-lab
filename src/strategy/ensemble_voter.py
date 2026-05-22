@@ -31,8 +31,8 @@ import sqlite3
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, NamedTuple
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 from pathlib import Path
 from enum import Enum
 import sys

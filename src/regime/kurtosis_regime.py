@@ -18,12 +18,10 @@ Usage:
 
 import json
 import logging
-import math
 from dataclasses import dataclass, asdict
-from datetime import datetime, date
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, List, Tuple
 import numpy as np
 
 from src.paths import SIGNALS_DIR

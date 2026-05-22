@@ -22,9 +22,8 @@ Performance:
 - Memory footprint: ~35KB per feature vector
 """
 
-import json
 import numpy as np
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import combinations

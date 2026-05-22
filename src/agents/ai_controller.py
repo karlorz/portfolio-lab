@@ -29,8 +29,8 @@ import json
 import sqlite3
 import argparse
 import sys
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ from src.agents.base_agent import AgentObservation
 
 # Try to import signal integrator
 try:
-    from src.signals.integrator import SignalIntegrator, CompositeSignal
+    from src.signals.integrator import SignalIntegrator
     SIGNAL_INTEGRATOR_AVAILABLE = True
 except ImportError:
     SIGNAL_INTEGRATOR_AVAILABLE = False
@@ -74,7 +74,7 @@ def load_price_data(tickers: List[str] = None) -> Dict[str, np.ndarray]:
         tickers = ['SPY', 'GLD', 'TLT', 'CASH']
     
     # Try to load from public data
-    data_file = DATA_DIR / "prices.json"
+    DATA_DIR / "prices.json"
     
     prices = {}
     for ticker in tickers:
@@ -203,7 +203,7 @@ class AIController:
         
         try:
             # Get composite signal
-            signal = self.signal_integrator.get_composite_signal(ticker)
+            self.signal_integrator.get_composite_signal(ticker)
             
             # Extract features from signal
             # Fetch real price history from market.db

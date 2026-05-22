@@ -5,7 +5,6 @@ Crystallizes research findings to ~/wiki/projects/portfolio-lab/ compound pages.
 Follows wiki schema: frontmatter, citations, typed knowledge.
 """
 
-import os
 import json
 import sqlite3
 import hashlib

@@ -26,8 +26,6 @@ Usage:
 
 import json
 import logging
-import os
-import sys
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
@@ -36,7 +34,7 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-from src.paths import PROJECT_ROOT, DATA_DIR
+from src.paths import DATA_DIR
 
 # Paths
 EVAL_LOG_PATH = DATA_DIR / "agent_evaluation.jsonl"

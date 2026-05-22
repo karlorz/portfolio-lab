@@ -39,11 +39,9 @@ CLI:
 
 import argparse
 import json
-import math
 import sys
-from collections import defaultdict
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -788,7 +786,7 @@ def main():
         print(f"Cost Calibration: {len(feedback['cost_calibration_factors'])} symbols")
 
     elif args.command == "adjust":
-        state = loop.generate_feedback()
+        loop.generate_feedback()
         print(loop.print_summary())
 
     elif args.command == "status":

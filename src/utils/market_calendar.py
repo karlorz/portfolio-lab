@@ -4,7 +4,6 @@ Falls back to manual calendar if pandas_market_calendars not available.
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

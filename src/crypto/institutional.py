@@ -29,13 +29,9 @@ import json
 import sqlite3
 import sys
 import argparse
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
-from enum import Enum
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Union
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 import statistics
 
 # Add project root to path
@@ -435,8 +431,8 @@ class TokenizedTreasuryStrategy:
         
         # Allocate by group
         group_1_usd = total_crypto_usd * target_group_1
-        group_2a_usd = total_crypto_usd * target_group_2a
-        group_2b_usd = total_crypto_usd * target_group_2b
+        total_crypto_usd * target_group_2a
+        total_crypto_usd * target_group_2b
         
         # Build tokenized treasury allocation
         tokenized_allocs = self._allocate_tokenized_treasuries(

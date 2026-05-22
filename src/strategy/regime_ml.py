@@ -6,27 +6,23 @@ Based on AQR's "Virtue of Complexity" research showing 50-100% improvement
 when models are trained conditionally on regime rather than globally.
 """
 
-import os
 import json
-import numpy as np
-from typing import Dict, List, Optional, Any, Tuple, NamedTuple
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from enum import Enum
-import sqlite3
 
 from src.paths import MARKET_DB
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.research.regime_classifier import RegimeClassifier, Regime
-from src.research.features import FeaturePipeline, Features
+from src.research.features import FeaturePipeline
 from src.strategy.factor_rotation import FactorMomentumEngine, FactorScore
 
 # Phase 3C: Ensemble voting integration
-from src.strategy.ensemble_voter import EnsembleVoter, Regime as EnsembleRegime
+from src.strategy.ensemble_voter import EnsembleVoter
 
 
 class VolatilityRegime(Enum):
@@ -247,24 +243,19 @@ class RegimeMLScorer:
         if regime.vol_regime == VolatilityRegime.HIGH:
             # In high vol: focus on mean reversion, reduce momentum
             vol_adjusted = base_momentum * 0.5 + factor_score.momentum_acceleration * 0.5
-            vol_confidence = 0.7
         elif regime.vol_regime == VolatilityRegime.LOW:
             # In low vol: momentum works well
             vol_adjusted = base_momentum * 1.2
-            vol_confidence = 0.85
         else:
             vol_adjusted = base_momentum
-            vol_confidence = 0.75
         
         # Correlation regime adjustment
         if regime.corr_regime == CorrelationRegime.HIGH:
             # In high correlation: diversification premium
             corr_adjusted = vol_adjusted * 0.8
-            corr_confidence = 0.6
         else:
             # In low correlation: selection skill matters
             corr_adjusted = vol_adjusted * 1.1
-            corr_confidence = 0.9
         
         # Regime multiplier based on risk score
         # Higher risk = more defensive positioning

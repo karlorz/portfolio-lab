@@ -20,9 +20,8 @@ import json
 import logging
 import math
 from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from datetime import datetime
+from typing import Dict, List, Tuple
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
@@ -201,7 +200,7 @@ class DBCWeightSweep:
                 # Crisis proxy: worst 5% of daily returns
                 n = min(len(spy_rets), len(gld_rets), len(tlt_rets), len(dbc_rets))
                 combined = []
-                base_spy = self.BASELINE["spy"]
+                self.BASELINE["spy"]
                 base_gld = self.BASELINE["gld"] - weight if source == "gld" else self.BASELINE["gld"]
                 base_spy_adj = self.BASELINE["spy"] - weight if source == "spy" else self.BASELINE["spy"]
                 base_tlt = self.BASELINE["tlt"] - weight if source == "tlt" else self.BASELINE["tlt"]

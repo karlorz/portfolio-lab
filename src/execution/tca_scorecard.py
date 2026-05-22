@@ -16,13 +16,13 @@ Usage:
 
 import json
 from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional
 
 from src.paths import DATA_DIR
-from .tca_engine import TCAEngine, TCAOrderResult, TCAAggregate
+from .tca_engine import TCAEngine, TCAOrderResult
 
 
 @dataclass

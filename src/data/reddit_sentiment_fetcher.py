@@ -13,7 +13,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, asdict
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List
 from pathlib import Path
 import logging
 

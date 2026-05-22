@@ -21,7 +21,6 @@ from src.paths import MARKET_DB
 try:
     from src.data.reddit_sentiment_fetcher import (
         RedditSentimentFetcher,
-        RedditSentimentSnapshot,
     )
     REDDIT_AVAILABLE = True
 except ImportError:

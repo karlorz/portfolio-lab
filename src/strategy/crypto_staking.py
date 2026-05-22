@@ -24,9 +24,8 @@ Usage:
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, Optional, Tuple
+from datetime import datetime
+from typing import Dict, Optional
 from enum import Enum
 
 from src.paths import DATA_DIR

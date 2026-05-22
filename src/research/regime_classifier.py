@@ -6,7 +6,7 @@ import os
 import json
 import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from src.paths import BASE_ALLOCATION
@@ -20,7 +20,7 @@ if _ML_ENABLED:
         from sklearn.linear_model import LogisticRegression
         from sklearn.preprocessing import StandardScaler
         from sklearn.model_selection import train_test_split
-        from sklearn.metrics import classification_report, accuracy_score
+        from sklearn.metrics import accuracy_score
         SKLEARN_AVAILABLE = True
     except ImportError:
         SKLEARN_AVAILABLE = False

@@ -15,21 +15,18 @@ Usage:
     python -m src.backtest.combined_overlay_backtest run --output results.json
 """
 
-import json
 import logging
 import math
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from src.paths import DATA_DIR, MARKET_DB
+from src.paths import DATA_DIR
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
-    compute_metrics,
     save_results_json,
 )
 
@@ -266,7 +263,7 @@ class CombinedOverlayBacktest:
         dates = data["SPY"]["dates"]
 
         n = len(spy_prices)
-        n_prices = len(spy_prices)
+        len(spy_prices)
 
         # Returns
         spy_rets = self._compute_returns(spy_prices)
@@ -278,7 +275,7 @@ class CombinedOverlayBacktest:
         eth_rets = self._compute_returns(eth_prices)
 
         # Rolling vols
-        spy_vol = self._compute_rolling_vol(spy_rets, 60)
+        self._compute_rolling_vol(spy_rets, 60)
         btc_vol = self._compute_rolling_vol(btc_rets, 30)
         eth_vol = self._compute_rolling_vol(eth_rets, 30)
 

@@ -8,10 +8,8 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 from typing import Optional, List, Dict, Tuple
-import aiohttp
 import yfinance as yf
 
 from src.paths import VIX_OPTIONS_DB, SIGNALS_DIR
@@ -237,7 +235,7 @@ class VIXDataPipeline:
                 return None
             
             vix_spot, vix_9d, vix_3m = await self.fetch_vix_spot()
-            futures = await self.fetch_vix_futures()
+            await self.fetch_vix_futures()
             
             all_calls = []
             all_puts = []

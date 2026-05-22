@@ -17,7 +17,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 from collections import deque
-import asyncio
 
 # Add project root to path
 from src.paths import DATA_DIR, PROJECT_ROOT

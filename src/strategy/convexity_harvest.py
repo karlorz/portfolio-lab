@@ -148,7 +148,6 @@ class ConvexityHarvestStrategy:
                 return True, f"Circuit breaker triggered ({cb_status['status']})"
         except ImportError:
             logger.warning("Circuit breaker module not available, continuing without it")
-            pass
         
         return False, None
     
@@ -246,7 +245,6 @@ class ConvexityHarvestStrategy:
         
         positions = []
         capital = initial_capital
-        allocated_capital = 0.0
         
         # Generate daily signals
         current = datetime.strptime(start_date, '%Y-%m-%d')

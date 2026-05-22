@@ -4,13 +4,11 @@ Implements backtesting, regime-specific analysis, and performance comparison
 between regime-conditional ML and baseline factor rotation.
 """
 
-import os
-import json
 import numpy as np
 import sqlite3
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -214,7 +212,7 @@ class RegimeMLValidator:
         
         current_date_idx = 0
         while current_date_idx < len(dates):
-            date = dates[current_date_idx]
+            dates[current_date_idx]
             
             # Get allocations from both engines
             try:
@@ -242,7 +240,7 @@ class RegimeMLValidator:
                 
                 current_date_idx = hold_end
                 
-            except Exception as e:
+            except Exception:
                 # If evaluation fails, skip this period
                 current_date_idx += rebalance_freq_days
                 continue

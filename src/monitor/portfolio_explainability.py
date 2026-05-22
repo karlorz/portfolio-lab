@@ -22,12 +22,11 @@ Usage:
 import json
 import logging
 import sqlite3
-import sys
 from collections import defaultdict
 from dataclasses import dataclass, asdict, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 

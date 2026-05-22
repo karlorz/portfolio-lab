@@ -14,14 +14,12 @@ Usage:
 """
 
 import os
-import json
 import logging
 import asyncio
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
-from datetime import datetime, date, time
+from datetime import datetime, date
 from enum import Enum
-from decimal import Decimal
 import aiohttp
 import sqlite3
 from pathlib import Path

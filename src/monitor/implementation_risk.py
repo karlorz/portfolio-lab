@@ -19,9 +19,8 @@ Usage:
 
 import json
 import logging
-import os
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -31,7 +30,7 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-from src.paths import PROJECT_ROOT, DATA_DIR, BACKTEST_RESULTS_DIR
+from src.paths import DATA_DIR, BACKTEST_RESULTS_DIR
 
 # Paths
 PERFORMANCE_LOG = DATA_DIR / "performance.jsonl"
@@ -173,13 +172,13 @@ def load_paper_trading_data(
     Returns tracked metrics computed from actual returns.
     """
     returns = _extract_returns(days)
-    state = _load_portfolio_state()
+    _load_portfolio_state()
 
     if len(returns) < 2:
         return {"sharpe": 0.0, "cagr": 0.0, "max_drawdown": 0.0, "volatility": 0.0}
 
-    n = len(returns)
-    mean_ret = float(np.mean(returns))
+    len(returns)
+    float(np.mean(returns))
     std_ret = float(max(np.std(returns, ddof=1), 1e-6))
 
     # Annualize (assuming daily returns)

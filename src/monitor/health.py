@@ -9,9 +9,8 @@ import logging
 import os
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from src.paths import DATA_DIR, WIKI_DIR, WORK_DIR
 
@@ -21,7 +20,7 @@ LOG_DIR = DATA_DIR  # cron logs stored directly in data/
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.market_calendar import MarketCalendar, format_stale_status, is_weekend_stale
+from utils.market_calendar import MarketCalendar
 
 # v6.10: Graduation checklist import (used in check_graduation_candidate)
 try:
@@ -32,13 +31,13 @@ except ImportError:
 
 # GARCH-CVaR integration (v3.21)
 try:
-    from cvar_metrics import fetch_portfolio_returns, calculate_volatility
-    from garch_cvar import calculate_garch_cvar, GARCHCVaRMetrics
+    from cvar_metrics import fetch_portfolio_returns
+    from garch_cvar import calculate_garch_cvar
     GARCH_CVAR_AVAILABLE = True
 except ImportError:
     try:
-        from .cvar_metrics import fetch_portfolio_returns, calculate_volatility
-        from .garch_cvar import calculate_garch_cvar, GARCHCVaRMetrics
+        from .cvar_metrics import fetch_portfolio_returns
+        from .garch_cvar import calculate_garch_cvar
         GARCH_CVAR_AVAILABLE = True
     except ImportError:
         GARCH_CVAR_AVAILABLE = False

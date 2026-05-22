@@ -23,9 +23,9 @@ import json
 import sqlite3
 import argparse
 import numpy as np
-from datetime import datetime, timedelta, time
+from datetime import datetime, time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -350,7 +350,7 @@ class GEXCalculator:
         for strike in strikes:
             # Estimate gamma using Black-Scholes approximation
             # Simplified: gamma peaks ATM and decreases away
-            distance = abs(strike - spot) / spot
+            abs(strike - spot) / spot
             
             # Typical 0DTE: high gamma near ATM, creates magnetic effect
             atm_gamma = self._estimate_strike_gamma(strike, spot, underlying)

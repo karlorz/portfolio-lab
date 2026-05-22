@@ -3,9 +3,9 @@ Performance analytics calculations: drawdown, rolling metrics, benchmarks.
 """
 import json
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 
@@ -137,7 +137,6 @@ class AnalyticsCalculator:
             # Update peak if new high
             if value > peak_value:
                 peak_value = value
-                peak_date = date
                 days_since_peak = 0
             else:
                 days_since_peak += 1

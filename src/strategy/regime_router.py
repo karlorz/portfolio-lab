@@ -12,17 +12,14 @@ Usage:
     python -m src.strategy.regime_router status
 """
 
-import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, date
-from typing import Optional, Dict, List, Tuple
+from datetime import datetime
+from typing import Optional, Dict, List
 import numpy as np
 
 from ..regime.kurtosis_regime import (
     KurtosisRegimeSignalGenerator,
-    KurtosisRegime,
-    StrategyPreference,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -146,7 +143,6 @@ def route_regime(returns: Optional[List[float]] = None) -> RouterDecision:
 
 
 def main():
-    import sys
     router = RegimeRouter()
 
     # Generate test returns with regime shifts

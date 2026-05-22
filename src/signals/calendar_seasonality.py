@@ -20,7 +20,7 @@ Usage:
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 from enum import Enum
 from typing import Optional, Dict, List, Tuple, Set
 

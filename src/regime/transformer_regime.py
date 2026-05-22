@@ -21,7 +21,6 @@ Usage:
     PORTFOLIO_LAB_ENABLE_ML=1 python -m src.regime.transformer_regime train
 """
 
-import json
 import logging
 import math
 import os

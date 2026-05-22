@@ -9,10 +9,8 @@ once Alpha Vantage API key is configured.
 """
 
 import sqlite3
-import json
-from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 import logging
 
 logging.basicConfig(level=logging.INFO)

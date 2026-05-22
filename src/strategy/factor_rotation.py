@@ -17,13 +17,12 @@ Strategy Logic:
 5. Rebalance monthly or on significant momentum shifts
 """
 
-import os
 import json
 import sqlite3
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 

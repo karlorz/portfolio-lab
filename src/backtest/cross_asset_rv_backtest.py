@@ -10,13 +10,11 @@ add alpha over the baseline 46/38/16 portfolio. Signal weight: 12-33% in ensembl
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
     compute_crisis_returns,
     save_results_json,
@@ -133,7 +131,7 @@ class CrossAssetRVBacktester:
         gld_z = z_scores.get('GLD', 0.0)
         tlt_z = z_scores.get('TLT', 0.0)
 
-        avg_z = (abs(spy_z) + abs(gld_z) + abs(tlt_z)) / 3
+        (abs(spy_z) + abs(gld_z) + abs(tlt_z)) / 3
 
         # SPY mean-reversion signal (negative z = oversold = buy)
         if abs(spy_z) > ZSCORE_ENTRY:
@@ -171,7 +169,6 @@ class CrossAssetRVBacktester:
         equity_curve = [capital]
         signal_counts = {"spy_reversion": 0, "gld_reversion": 0, "neutral": 0}
         crisis_returns = {}
-        z_scores_list = []
         diverged_count = 0
 
         prev_month = trading_days[0][:7]

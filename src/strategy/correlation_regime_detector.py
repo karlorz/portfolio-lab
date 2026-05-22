@@ -12,15 +12,13 @@ Key Features:
 - Integration with risk parity allocation engine
 """
 
-import os
 import json
 import sqlite3
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 import sys
 from scipy.cluster.hierarchy import linkage, leaves_list
@@ -536,7 +534,7 @@ class CorrelationRegimeDetector:
             raise ValueError(f"No matching assets found in regime matrix")
         
         # Extract sub-matrices
-        corr_subset = regime_matrix.correlation_matrix[np.ix_(asset_indices, asset_indices)]
+        regime_matrix.correlation_matrix[np.ix_(asset_indices, asset_indices)]
         cov_subset = regime_matrix.covariance_matrix[np.ix_(asset_indices, asset_indices)]
         
         # Calculate risk parity weights

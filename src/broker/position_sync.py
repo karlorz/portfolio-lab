@@ -5,7 +5,7 @@ import os
 import sys
 import json
 import sqlite3
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any
 from datetime import datetime
 from dataclasses import dataclass
 

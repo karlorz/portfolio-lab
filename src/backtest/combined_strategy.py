@@ -35,15 +35,10 @@ import pandas as pd
 import json
 import argparse
 import sys
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, NamedTuple
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from collections import defaultdict
-import pickle
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
     save_results_json,
 )
@@ -53,7 +48,7 @@ from src.paths import BASE_ALLOCATION, DATA_DIR, PROJECT_ROOT, PRICES_JSON as PR
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.signals.tsmom_overlay import TSMOMOverlay, TSMOMBacktester, DEFAULT_BASE_ALLOCATION
+from src.signals.tsmom_overlay import TSMOMOverlay, DEFAULT_BASE_ALLOCATION
 
 # Conditional import — HMMRegimeDetector requires hmmlearn/sklearn (ML-gated)
 try:
@@ -65,7 +60,7 @@ except ImportError:
     PortfolioRegimeManager = None  # type: ignore
     MarketRegime = None  # type: ignore
 
-from src.signals.fed_policy_overlay import FedPolicyOverlay, classify_fed_regime
+from src.signals.fed_policy_overlay import FedPolicyOverlay
 
 
 # Paths
@@ -345,9 +340,9 @@ class CombinedStrategyBacktester:
         # Gold/SPY ratio change (proxy for inflation expectations)
         if gld_prices is not None:
             gld_return = (gld_prices.iloc[-1] / gld_prices.iloc[0]) - 1
-            inflation_proxy = gld_return - spy_return
+            gld_return - spy_return
         else:
-            inflation_proxy = 0.0
+            pass
 
         # Classify regime based on heuristics
         if tlt_return > 0.05 and spy_return > 0.05:
@@ -576,10 +571,10 @@ class CombinedStrategyBacktester:
             daily_values.append(portfolio_value)
 
         # Calculate metrics
-        returns_series = pd.Series(daily_returns)
+        pd.Series(daily_returns)
 
         days = len(daily_returns)
-        years = days / 252
+        days / 252
 
         metrics = compute_metrics(daily_values, initial_value)
         cagr = metrics.cagr

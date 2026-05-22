@@ -32,8 +32,6 @@ from .smart_rebalancer import (
     PortfolioSnapshot,
     MarketConditions,
     RebalanceDecision,
-    RebalanceDecisionResult,
-    UrgencyLevel,
 )
 
 # VPIN integration (v2.65)

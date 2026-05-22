@@ -18,9 +18,9 @@ import sqlite3
 import numpy as np
 import argparse
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 
@@ -217,7 +217,7 @@ class EnsembleBacktestEngine:
                     "regime": composite.regime,
                     "sources": composite.sources
                 }
-            except Exception as e:
+            except Exception:
                 # Fallback to neutral signal
                 signals[asset] = {
                     "score": 0.0,
@@ -329,7 +329,7 @@ class EnsembleBacktestEngine:
         
         # Backtest loop
         for i, date in enumerate(dates[1:], 1):
-            prev_date = dates[i-1]
+            dates[i-1]
             
             # Calculate daily portfolio return
             daily_ret = 0.0
@@ -586,7 +586,7 @@ def main():
         print("\nRunning static allocation comparison...")
         static_engine = EnsembleBacktestEngine()
         # Override signal generation to return neutral
-        original_generate = static_engine._generate_daily_signals
+        static_engine._generate_daily_signals
         static_engine._generate_daily_signals = lambda date, port: {
             asset: {"score": 0, "confidence": 0, "regime": "neutral", "sources": []}
             for asset in port.keys()

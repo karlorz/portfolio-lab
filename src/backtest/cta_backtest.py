@@ -6,25 +6,22 @@ Research: CME Group 2024, Graham Capital, Quantica Capital Q1 2025
 Acceptance criteria from work item v2.10 CTA Trend Overlay
 """
 
-import json
 import sqlite3
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List
 from dataclasses import dataclass
 import sys
 
 from src.backtest.metrics import (
-    BacktestMetrics,
-    compute_metrics,
     save_results_json,
 )
 from src.paths import MARKET_DB, DATA_DIR
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from strategy.cta_overlay import CTATrendEngine, CTAPosition
+from strategy.cta_overlay import CTATrendEngine
 
 
 @dataclass
@@ -145,7 +142,7 @@ class CTABacktestEngine:
         current_positions: Dict[str, dict] = {}
 
         for i, date_str in enumerate(trading_dates):
-            current_date = datetime.strptime(date_str, "%Y-%m-%d")
+            datetime.strptime(date_str, "%Y-%m-%d")
 
             # Weekly rebalancing (every 5 trading days)
             if last_rebalance is None or (i - last_rebalance) >= 5:
@@ -156,7 +153,7 @@ class CTABacktestEngine:
                         pos = self.cta_engine.analyze_symbol(symbol)
                         if pos:
                             new_positions[symbol] = pos
-                except Exception as e:
+                except Exception:
                     # Silently continue if data unavailable for date
                     continue
 

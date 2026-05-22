@@ -15,7 +15,7 @@ Target: 40%+ cost reduction vs calendar rebalancing.
 import json
 import yaml
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from enum import Enum
@@ -254,7 +254,7 @@ class SmartRebalancingController:
 
         # Step 1: Drift check
         max_drift, drift_details = self.calculate_drift(portfolio)
-        min_drift = self.config['safety']['min_drift_override']
+        self.config['safety']['min_drift_override']
 
         if max_drift < self.config['drift_threshold']:
             return RebalanceDecisionResult(

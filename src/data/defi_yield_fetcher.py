@@ -28,7 +28,6 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Dict, List
 from pathlib import Path
 import argparse
-import sys
 
 # Default timeout for HTTP requests
 DEFAULT_TIMEOUT = ClientTimeout(total=30)

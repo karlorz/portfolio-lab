@@ -17,11 +17,10 @@ Usage:
         print(f"Selected strike: {candidate.strike} @ {candidate.premium:.2f}")
 """
 
-import json
 import logging
 from typing import List, Optional, Dict, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import datetime
 from enum import Enum
 
 from src.options.odte_yield_calculator import (

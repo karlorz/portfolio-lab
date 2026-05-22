@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from src.paths import PROJECT_ROOT, DATA_DIR, PRICES_JSON
+from src.paths import DATA_DIR, PRICES_JSON
 
 import numpy as np
 
@@ -500,8 +500,6 @@ def main():
         print(f"  Evaluating {len(sample_indices)} rebalance points over {len(sample_indices) * 21} trading days")
         print()
         
-        static_returns = []
-        dynamic_returns = []
         
         for i, idx in enumerate(sample_indices):
             # We'd need a proper backtest engine for rigorous comparison

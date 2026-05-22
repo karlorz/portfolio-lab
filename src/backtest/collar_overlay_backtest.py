@@ -17,14 +17,14 @@ Period: 2006-2026 (20+ years including GFC, COVID, 2022 rate hikes)
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
-    BacktestMetrics,
+    DailyPrices,
     compute_metrics,
     compute_crisis_returns,
     save_results_json,
@@ -67,17 +67,6 @@ class BacktestConfig:
     # Rebalancing
     rebalance_frequency_days: int = MONTHLY_TRADING_DAYS
     transaction_cost_bps: float = 10.0  # 10 bps per rebalance
-
-
-@dataclass
-class DailyPrices:
-    """Daily price data for a single date."""
-
-    date: str
-    spy: float
-    gld: float
-    tlt: float
-    vix: Optional[float] = None
 
 
 @dataclass
@@ -474,7 +463,6 @@ class WalkForwardCollarBacktester:
         rebalance_freq = config.rebalance_frequency_days
         cost_per_trade = config.transaction_cost_bps / 10000.0  # Convert bps to decimal
 
-        current_regime = "normal"
         spy_reduction_pct = 0.0
 
         for i in range(1, len(prices)):
@@ -522,7 +510,7 @@ class WalkForwardCollarBacktester:
                 days_since_rebalance = 0
 
                 # Track regime (regime is already classified above via CollarSignalGenerator)
-                current_regime = regime.value
+                regime.value
                 collar_tracker["regime_counts"][regime.value] = (
                     collar_tracker["regime_counts"].get(regime.value, 0) + 1
                 )

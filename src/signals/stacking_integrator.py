@@ -437,8 +437,8 @@ class StackingIntegrator:
         
         # Compare recent accuracy to training
         # Note: This requires realized returns tracking
-        train_acc = self.metadata.accuracy_train
-        val_acc = self.metadata.accuracy_val
+        self.metadata.accuracy_train
+        self.metadata.accuracy_val
         
         # If we had actual accuracy tracking:
         # recent_acc = stats['accuracy']

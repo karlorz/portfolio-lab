@@ -9,9 +9,8 @@ Value: Buy cheap assets (high yield/book-to-price), sell expensive
 """
 
 import numpy as np
-import pandas as pd
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
 import json
 
@@ -66,7 +65,7 @@ class CarryCalculator:
         Higher real yield = higher carry = buy signal
         """
         real_yield = yield_to_maturity - inflation_expectation
-        carry_spread = real_yield - self.risk_free_rate
+        real_yield - self.risk_free_rate
         
         # Store for percentile calculation
         if symbol not in self.carry_history:
