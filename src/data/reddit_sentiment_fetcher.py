@@ -11,7 +11,7 @@ import sqlite3
 import json
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
@@ -266,7 +266,7 @@ class RedditSentimentFetcher:
             total_engagement += post['score'] + post['num_comments']
         
         # Calculate ticker metrics
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         one_hour_ago = now - timedelta(hours=1)
         one_day_ago = now - timedelta(days=1)
         
@@ -276,7 +276,7 @@ class RedditSentimentFetcher:
             
             # Time-bucketed counts
             mentions_1h = sum(1 for p in posts 
-                            if datetime.utcfromtimestamp(p['created_utc']) > one_hour_ago)
+                            if datetime.fromtimestamp(p['created_utc'], tz=timezone.utc) > one_hour_ago)
             mentions_24h = len(posts)
             
             # Aggregate sentiment
@@ -354,10 +354,13 @@ class RedditSentimentFetcher:
                 
                 if row:
                     data_json, created_at = row
-                    created_time = datetime.fromisoformat(created_at.replace('Z', '+00:00').replace('+00:00', ''))
+                    created_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                    # Ensure timezone-aware for comparison with datetime.now(timezone.utc)
+                    if created_time.tzinfo is None:
+                        created_time = created_time.replace(tzinfo=timezone.utc)
                     
                     # Check freshness
-                    if datetime.utcnow() - created_time < timedelta(minutes=CACHE_TTL_MINUTES):
+                    if datetime.now(timezone.utc) - created_time < timedelta(minutes=CACHE_TTL_MINUTES):
                         data = json.loads(data_json)
                         
                         # Reconstruct ticker metrics
@@ -424,7 +427,7 @@ class RedditSentimentFetcher:
                             post.get('sentiment', 0.0),
                             post['score'],
                             post['num_comments'],
-                            datetime.utcfromtimestamp(post['created_utc']).isoformat()
+                            datetime.fromtimestamp(post['created_utc'], tz=timezone.utc).isoformat()
                         ))
                 
                 conn.commit()

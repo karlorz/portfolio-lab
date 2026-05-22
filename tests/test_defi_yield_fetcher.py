@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.data.defi_yield_fetcher import (
@@ -36,7 +36,7 @@ def _make_yield_data(**overrides):
         asset="stETH",
         yield_apy=0.035,
         tvl_usd=1e9,
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(timezone.utc).isoformat(),
         source="lido",
     )
     defaults.update(overrides)
@@ -52,7 +52,7 @@ def _make_yield_spread(**overrides):
         spread=-0.015,
         correlation_30d=None,
         signal="monitor",
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(timezone.utc).isoformat(),
     )
     defaults.update(overrides)
     return YieldSpread(**defaults)
@@ -155,10 +155,10 @@ class TestDeFiYieldDatabase:
         db_path = tmp_path / "test.db"
         db = DeFiYieldDatabase(str(db_path))
         # Store an old yield (30 hours ago)
-        old_ts = (datetime.utcnow() - timedelta(hours=30)).isoformat()
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
         db.store_yield(_make_yield_data(timestamp=old_ts))
         # Store a recent yield
-        db.store_yield(_make_yield_data(protocol="Aave", timestamp=datetime.utcnow().isoformat()))
+        db.store_yield(_make_yield_data(protocol="Aave", timestamp=datetime.now(timezone.utc).isoformat()))
         results = db.get_latest_yields(hours=24)
         assert len(results) == 1
         assert results[0]["protocol"] == "Aave"

@@ -27,7 +27,7 @@ No ML dependencies. Pure numpy implementation.
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict
@@ -313,7 +313,7 @@ def detect_regime(
     result = {
         "status": "ok",
         "symbol": symbol,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "features": classified.to_dict(),
         "state": _build_state(classified, prices),
     }

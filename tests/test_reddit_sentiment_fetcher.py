@@ -6,7 +6,7 @@ Tests for Reddit Sentiment Fetcher v2.70 Phase 4
 import pytest
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import io
@@ -255,7 +255,7 @@ class TestCacheOperations:
         
         # Insert stale cache entry manually
         with sqlite3.connect(db_path) as conn:
-            stale_time = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+            stale_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
             conn.execute("""
                 INSERT INTO reddit_sentiment_cache (timestamp, data_json, created_at)
                 VALUES (?, ?, ?)
@@ -293,7 +293,7 @@ class TestFetchSentimentMocked:
                             'score': 150,
                             'upvote_ratio': 0.85,
                             'num_comments': 45,
-                            'created_utc': datetime.utcnow().timestamp(),
+                            'created_utc': datetime.now(timezone.utc).timestamp(),
                             'total_awards_received': 5
                         }
                     },
@@ -304,7 +304,7 @@ class TestFetchSentimentMocked:
                             'score': 80,
                             'upvote_ratio': 0.75,
                             'num_comments': 20,
-                            'created_utc': datetime.utcnow().timestamp(),
+                            'created_utc': datetime.now(timezone.utc).timestamp(),
                             'total_awards_received': 2
                         }
                     }

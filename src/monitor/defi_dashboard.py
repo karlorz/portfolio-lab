@@ -8,7 +8,7 @@ Part of v2.95 DeFi Yield Monitor infrastructure.
 import json
 import sqlite3
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 import argparse
 
@@ -148,7 +148,7 @@ class DeFiDashboard:
     
     def _get_spread_history(self, protocol: str, days: int) -> List[Dict]:
         """Get spread history from database"""
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row

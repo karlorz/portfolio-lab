@@ -39,6 +39,20 @@
 
 ## Recent Implementation Updates (2026-05-22)
 
+### v9.48 Dashboard Crash Fix + datetime.utcnow() Deprecation Removal - COMPLETED
+- **Bug fix**: `src/monitor/unified_dashboard.py` crash when VIXY hedge has active allocation
+  - Root cause: `vix_term_structure` overlay stored `allocation` as float but `print_summary()` called `.get("SPY")` on it (dict API on float)
+  - Fixed: display shows `alloc=X%` for float allocations, preserves dict path for per-asset allocations
+  - This was a live production crash — dashboard always failed when VIXY hedge allocation > 0
+- **Deprecation removal**: 12 `datetime.utcnow()` + 2 `utcfromtimestamp()` → `datetime.now(timezone.utc)` / `datetime.fromtimestamp(..., tz=timezone.utc)`
+  - `src/data/defi_yield_fetcher.py` (9 occurrences), `src/data/reddit_sentiment_fetcher.py` (4), `src/monitor/defi_dashboard.py` (1), `src/regime/vol_volume_gap.py` (1)
+  - Test files also migrated: `test_reddit_sentiment_fetcher.py`, `test_defi_yield_fetcher.py`
+  - Timezone-aware comparison fix in `reddit_sentiment_fetcher.py:_get_cached_sentiment()` — naive cached timestamps now get `tzinfo=timezone.utc`
+  - Warnings per test run: 76 → 7 (eliminated 69 `DeprecationWarning`s)
+- **Test fix**: `test_implementation_risk.py::test_filters_by_days` — two entries on same UTC day were deduplicated to one; changed to different days
+- **Test count**: 6895 safe (0 failures, 10 skipped)
+- **Status**: All phases complete
+
 ### v9.47 Path Centralization — 81 Files Migrated to src.paths - COMPLETED
 - **Migration**: 87 `Path(__file__).parent.parent.parent` occurrences across 81 files → zero remaining
   - All hardcoded `PROJECT_ROOT`, `DATA_DIR`, `MARKET_DB`, `PRICES_JSON`, `SIGNALS_DIR` definitions replaced with imports from `src.paths`

@@ -197,9 +197,9 @@ class TestExtractReturns:
                 "timestamp": (now - timedelta(days=60)).isoformat(),
                 "daily_return": 0.01,
             }) + "\n")
-            # Recent entries
+            # Recent entries on different days (to avoid deduplication)
             f.write(json.dumps({
-                "timestamp": (now - timedelta(days=1)).isoformat(),
+                "timestamp": (now - timedelta(days=2)).isoformat(),
                 "daily_return": 0.02,
             }) + "\n")
             f.write(json.dumps({
@@ -210,7 +210,7 @@ class TestExtractReturns:
         with patch("src.monitor.implementation_risk.PERFORMANCE_LOG", path):
             result = _extract_returns(days=30)
 
-        assert len(result) == 2  # Only recent 2 entries
+        assert len(result) == 2  # Only recent 2 entries (on different days)
 
     def test_handles_malformed_lines(self, tmp_path):
         """Should skip malformed JSON lines gracefully."""

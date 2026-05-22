@@ -579,8 +579,11 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
         elif name == "bond_duration" and active:
             detail = f" pos={data.get('position')}"
         elif name == "vix_term_structure" and active:
-            alloc = data.get("allocation", {})
-            detail = f" SPY={_fmt_pct(alloc.get('SPY', 0) * 100)} GLD={_fmt_pct(alloc.get('GLD', 0) * 100)}"
+            alloc = data.get("allocation", 0)
+            if isinstance(alloc, dict):
+                detail = f" SPY={_fmt_pct(alloc.get('SPY', 0) * 100)} GLD={_fmt_pct(alloc.get('GLD', 0) * 100)}"
+            else:
+                detail = f" alloc={_fmt_pct(alloc * 100)}"
         elif name == "mean_reversion" and active:
             detail = f" {data.get('allocation_pct')}% alloc"
         print(f"       {badge} {name:<20} {status_text}{detail}")

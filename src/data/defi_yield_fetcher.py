@@ -23,7 +23,7 @@ from aiohttp import ClientTimeout
 import json
 import sqlite3
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, List
 from pathlib import Path
@@ -89,7 +89,7 @@ class DeFiYieldFetcher:
                         asset="stETH",
                         yield_apy=float(data.get('data', {}).get('smaApr', 0)) / 100,
                         tvl_usd=0,  # Will fetch from DeFiLlama
-                        timestamp=datetime.utcnow().isoformat(),
+                        timestamp=datetime.now(timezone.utc).isoformat(),
                         source="lido"
                     )
         except Exception as e:
@@ -112,7 +112,7 @@ class DeFiYieldFetcher:
                             asset="JitoSOL",
                             yield_apy=float(jito_pool.get('apy', 0)) / 100,
                             tvl_usd=float(jito_pool.get('total_deposits', 0)),
-                            timestamp=datetime.utcnow().isoformat(),
+                            timestamp=datetime.now(timezone.utc).isoformat(),
                             source="jito"
                         )
         except Exception as e:
@@ -136,7 +136,7 @@ class DeFiYieldFetcher:
                             asset="USDC",
                             yield_apy=float(usdc_market.get('liquidityRate', 0)),
                             tvl_usd=float(usdc_market.get('totalLiquidityUSD', 0)),
-                            timestamp=datetime.utcnow().isoformat(),
+                            timestamp=datetime.now(timezone.utc).isoformat(),
                             source="aave"
                         )
         except Exception as e:
@@ -290,7 +290,7 @@ class DeFiYieldDatabase:
     
     def get_latest_yields(self, hours: int = 24) -> List[Dict]:
         """Get yields from last N hours"""
-        cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
@@ -303,7 +303,7 @@ class DeFiYieldDatabase:
     
     def get_spread_history(self, protocol: str, days: int = 30) -> List[Dict]:
         """Get spread history for a protocol"""
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
@@ -354,7 +354,7 @@ class DeFiYieldMonitor:
             
             # Generate status output
             status = {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "treasury_yield_3m": treasury_yield,
                 "yields": [asdict(y) for y in defi_yields],
                 "spreads": spreads,
@@ -390,7 +390,7 @@ class DeFiYieldMonitor:
             spread=spread,
             correlation_30d=None,  # To be implemented with price data correlation
             signal=signal,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat()
         )
     
     def _check_alerts(self, yields: List[YieldData], spreads: List[Dict]) -> List[Dict]:
@@ -443,7 +443,7 @@ class DeFiYieldMonitor:
         return {
             "period_days": days,
             "protocols": history,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     
     async def run_daemon(self, interval_seconds: int = 3600):
