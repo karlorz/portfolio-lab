@@ -123,7 +123,7 @@ MAX_DELTA_PCT = 0.05  # +/- 5%
 class SignalSourceResult:
     """Result from a single signal source."""
     source_type: str  # e.g., 'momentum', 'macro', 'sentiment'
-    source_name: str  # e.g., 'dual_momentum', 'fed_analyzer', 'llm_sentiment'
+    source_name: str  # e.g., 'multi_speed_momentum', 'fed_analyzer', 'llm_sentiment'
     
     # Signal value (-1.0 to +1.0)
     signal: float

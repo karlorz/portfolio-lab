@@ -193,17 +193,15 @@ class DashboardGenerator:
         # Add factor rotation signals if engine available
         factor_rotation_signal = None
         try:
-            from signals.factor_rotation import FactorRotationIntegrator
-            integrator = FactorRotationIntegrator()
-            ensemble_out = integrator.get_signal_for_ensemble()
-            if ensemble_out:
+            from src.strategy.factor_rotation import FactorMomentumEngine
+            engine = FactorMomentumEngine()
+            result = engine.evaluate()
+            if result and "error" not in result:
                 factor_rotation_signal = {
-                    "source": ensemble_out.get("source"),
-                    "direction": ensemble_out.get("direction"),
-                    "strength": ensemble_out.get("strength"),
-                    "signal_value": ensemble_out.get("signal_value"),
-                    "confidence": ensemble_out.get("confidence"),
-                    "equity_adjustment": ensemble_out.get("equity_adjustment"),
+                    "selected_factors": result.get("selected_factors", []),
+                    "allocation": result.get("allocation", {}),
+                    "signal_strength": result.get("signal_strength", 0.0),
+                    "recommendation": result.get("recommendation", {}),
                 }
         except Exception:
             pass  # Factor rotation not available
@@ -215,8 +213,8 @@ class DashboardGenerator:
         convexity_signal = None
         vol_parity_signal = None
         try:
-            from strategy.convexity_harvest import ConvexityHarvestStrategy
-            from strategy.vol_parity_allocator import VolatilityParityAllocator
+            from src.strategy.convexity_harvest import ConvexityHarvestStrategy
+            from src.strategy.vol_parity_allocator import VolatilityParityAllocator
             
             # Get convexity harvest signal
             convexity_engine = ConvexityHarvestStrategy()
@@ -234,7 +232,7 @@ class DashboardGenerator:
         # Add LLM sentiment signals (v2.30 Phase 5)
         sentiment_signal = None
         try:
-            from strategy.regime_sentiment import RegimeSentimentPipeline
+            from src.strategy.regime_sentiment import RegimeSentimentPipeline
             
             sentiment_pipeline = RegimeSentimentPipeline()
             # Get current technical regime for combination
@@ -257,19 +255,18 @@ class DashboardGenerator:
         # Add ensemble voting signals (v2.20 Phase 3)
         ensemble_signal = None
         try:
-            from strategy.ensemble_voter import EnsembleVotingEngine
-            
-            ensemble_engine = EnsembleVotingEngine()
-            ensemble_result = ensemble_engine.evaluate()
+            from src.strategy.ensemble_voter import EnsembleVoter
+
+            ensemble_engine = EnsembleVoter()
+            ensemble_result = ensemble_engine.compute_vote()
             if ensemble_result:
                 ensemble_signal = {
-                    "regime": ensemble_result.regime,
-                    "confidence": ensemble_result.confidence,
-                    "agreement_score": ensemble_result.agreement_score,
-                    "probabilities": ensemble_result.ensemble_probs,
+                    "regime": ensemble_result.regime.value,
+                    "regime_confidence": ensemble_result.regime_confidence,
+                    "weighted_consensus": ensemble_result.weighted_consensus,
+                    "agreement_ratio": ensemble_result.agreement_ratio,
                     "action": ensemble_result.action,
-                    "position_scaling": ensemble_result.position_scaling,
-                    "disagreement_sources": ensemble_result.disagreement_sources
+                    "confidence": ensemble_result.confidence,
                 }
         except Exception:
             # Ensemble voting not available yet
@@ -464,24 +461,17 @@ class DashboardGenerator:
         # Factor rotation dashboard data (v3.00)
         factor_rotation_dashboard = None
         try:
-            from signals.factor_rotation import FactorRotationIntegrator
+            from src.strategy.factor_rotation import FactorMomentumEngine
 
-            integrator = FactorRotationIntegrator()
-            ensemble_signal = integrator.get_signal_for_ensemble()
-            if ensemble_signal:
-                allocations = ensemble_signal.get("factor_allocations", {})
+            engine = FactorMomentumEngine()
+            result = engine.evaluate()
+            if result and "error" not in result:
+                allocations = result.get("allocation", {})
                 factor_rotation_dashboard = {
                     "active": True,
-                    "regime": ensemble_signal.get("direction", "neutral"),
-                    "quality_momentum_score": round(ensemble_signal.get("signal_value", 0.0), 2),
-                    "confidence": round(ensemble_signal.get("confidence", 0.5), 2),
-                    "factor_allocations": {
-                        "mtum_pct": allocations.get("MTUM", 35),
-                        "qual_pct": allocations.get("QUAL", 35),
-                        "usmv_pct": allocations.get("USMV", 20),
-                        "vlue_pct": allocations.get("VLUE", 10),
-                    },
-                    "equity_adjustment": round(ensemble_signal.get("equity_adjustment", 0.0), 1),
+                    "selected_factors": result.get("selected_factors", []),
+                    "signal_strength": round(result.get("signal_strength", 0.0), 2),
+                    "factor_allocations": allocations,
                     "backtest_finding": (
                         "Factor rotation reduces MaxDD by 5.8pp (2021-2026). "
                         "Defensive tool — best in high-vol regimes (Sharpe 1.474)."
@@ -1042,7 +1032,7 @@ class DashboardGenerator:
 
         # Get signal health from SignalHealthTracker
         try:
-            from signals.health_tracker import SignalHealthTracker
+            from src.signals.health_tracker import SignalHealthTracker
             tracker = SignalHealthTracker()
             signal_health_report = tracker.get_health_report()
             health_data["signal_health"] = {
@@ -1076,10 +1066,7 @@ class DashboardGenerator:
     def _generate_sector_momentum_signals(self) -> Optional[Dict]:
         """Generate sector rotation momentum signals from historical data."""
         try:
-            import sys
-            sys.path.insert(0, str(Path(__file__).parent.parent / 'strategy'))
-            
-            from sector_momentum_calc import generate_sector_signals
+            from src.strategy.sector_momentum_calc import generate_sector_signals
             
             historical_path = PUBLIC_DIR.parent / "data" / "historical.json"
             

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.vix_futures import VIXDataManager, fetch_vix_futures_data
+from src.data.vix_futures import VIXDataManager, fetch_vix_futures_data
 
 
 @dataclass

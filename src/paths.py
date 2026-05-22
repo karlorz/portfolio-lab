@@ -23,7 +23,6 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 
 # Common database paths
 MARKET_DB = DATA_DIR / "market.db"
-VIX_OPTIONS_DB = DATA_DIR / "vix_options.db"
 CRYPTO_DB = DATA_DIR / "crypto_allocation.db"
 ENSEMBLE_DB = DATA_DIR / "ensemble_signals.db"
 PORTFOLIO_DB = DATA_DIR / "portfolio.db"
