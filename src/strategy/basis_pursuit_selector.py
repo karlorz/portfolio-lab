@@ -58,7 +58,7 @@ DEFAULT_LAMBDA = 0.01
 
 # State file paths
 STATE_FILE = "basis_pursuit_state.json"
-PERFORMANCE_FILE = "data/basis_pursuit_performance.json"
+PERFORMANCE_FILE = DATA_DIR / "basis_pursuit_performance.json"
 
 # Number of top signals to report
 TOP_PRUNED_REPORT_COUNT = 3
@@ -545,7 +545,7 @@ class BasisPursuitSelector:
 
     def _resolve_perf_path(self) -> Path:
         """Resolve performance tracking path."""
-        return Path.home() / "projects" / "portfolio-lab" / PERFORMANCE_FILE
+        return Path(str(PERFORMANCE_FILE))
 
 
 # ---------------------------------------------------------------------------

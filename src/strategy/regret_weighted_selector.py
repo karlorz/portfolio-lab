@@ -57,7 +57,7 @@ REGRET_MAX_PENALTY = 0.5      # Maximum weight reduction factor
 
 # State file paths
 STATE_FILE = "regret_weighted_state.json"
-PERFORMANCE_FILE = "data/regret_weighted_performance.json"
+PERFORMANCE_FILE = DATA_DIR / "regret_weighted_performance.json"
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +483,7 @@ class RegretWeightedSelector:
 
     def _resolve_perf_path(self) -> Path:
         """Resolve performance tracking path."""
-        return Path.home() / "projects" / "portfolio-lab" / PERFORMANCE_FILE
+        return Path(str(PERFORMANCE_FILE))
 
 
 # ---------------------------------------------------------------------------

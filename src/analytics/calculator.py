@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from src.paths import DATA_DIR, MARKET_DB
+
 
 @dataclass
 class DrawdownPoint:
@@ -86,8 +88,8 @@ class AnalyticsCalculator:
         ),
     ]
     
-    def __init__(self, data_dir: str = "~/projects/portfolio-lab/data"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: str = None):
+        self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.performance_file = self.data_dir / "performance.jsonl"
     
     def load_performance_data(self) -> List[Dict]:
@@ -281,7 +283,7 @@ class AnalyticsCalculator:
     def calculate_benchmark_comparison(
         self,
         performance_data: Optional[List[Dict]] = None,
-        db_path: str = "~/projects/portfolio-lab/data/market.db"
+        db_path: str = None  # uses MARKET_DB when None
     ) -> Dict[str, Dict]:
         """
         Compare portfolio performance to benchmarks.

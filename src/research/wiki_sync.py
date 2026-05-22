@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = _DATA_DIR
 WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
-RAW_DIR = Path("~/projects/portfolio-lab/raw").expanduser() / "market"
+RAW_DIR = _DATA_DIR.parent / "raw" / "market"
 DB_PATH = DATA_DIR / "market.db"
 
 class WikiSync:

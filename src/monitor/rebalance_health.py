@@ -12,9 +12,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path.home() / "projects" / "portfolio-lab" / "data"
 ORDERS_DIR = DATA_DIR / "historical_orders"
 OUTPUT_PATH = DATA_DIR / "rebalance_health.json"
 
@@ -143,7 +144,7 @@ def main():
         json.dump(data, f, indent=2)
 
     # Also copy to public/data/ for dashboard fetch
-    public_dir = Path.home() / "projects" / "portfolio-lab" / "public" / "data"
+    public_dir = PUBLIC_DATA_DIR
     public_dir.mkdir(parents=True, exist_ok=True)
     with open(public_dir / "rebalance_health.json", "w") as f:
         json.dump(data, f, indent=2)
