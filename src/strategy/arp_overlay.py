@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from collections import defaultdict
 
-from src.paths import MARKET_DB, BASE_ALLOCATION
+from src.paths import MARKET_DB, BASE_ALLOCATION, PORTFOLIO_DB
 
 
 @dataclass
@@ -513,7 +513,7 @@ if __name__ == "__main__":
     parser.add_argument("--overlay", action="store_true", help="Get ARP overlay for default portfolio")
     parser.add_argument("--correlation", action="store_true", help="Calculate ARP-SPY correlation")
     parser.add_argument("--base", type=str, help="Base allocation JSON (e.g., '{\"SPY\":0.46,\"GLD\":0.38,\"TLT\":0.16}')")
-    parser.add_argument("--db", type=str, default="data/portfolio.db", help="Database path")
+    parser.add_argument("--db", type=str, default=str(PORTFOLIO_DB), help="Database path")
     
     args = parser.parse_args()
     

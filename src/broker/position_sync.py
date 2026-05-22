@@ -15,6 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from broker.alpaca import AlpacaClient
 from broker.alpaca import Position as AlpacaPosition
 
+from src.paths import MARKET_DB, DATA_DIR
+
 
 @dataclass
 class PositionDrift:
@@ -35,13 +37,13 @@ class PositionSync:
     """
     
     def __init__(
-        self, 
-        db_path: str = "data/market.db",
-        data_dir: str = "data",
+        self,
+        db_path: str = None,
+        data_dir: str = None,
         paper: bool = True
     ):
-        self.db_path = db_path
-        self.data_dir = data_dir
+        self.db_path = db_path or str(MARKET_DB)
+        self.data_dir = data_dir or str(DATA_DIR)
         self.sync_log_path = os.path.join(data_dir, "position_sync.jsonl")
         self.client = AlpacaClient(paper=paper)
         

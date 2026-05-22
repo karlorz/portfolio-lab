@@ -11,6 +11,8 @@ from datetime import datetime
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+from src.paths import MARKET_DB
+
 logger = logging.getLogger(__name__)
 
 # Alpaca SDK - optional dependency
@@ -128,8 +130,10 @@ class AlpacaClient:
         """Check if API credentials are available."""
         return bool(self.api_key and self.api_secret)
 
-    def _fetch_price(self, symbol: str, db_path: str = "data/market.db") -> float:
+    def _fetch_price(self, symbol: str, db_path: str = None) -> float:
         """Fetch latest price from market.db. Returns 0 if unavailable."""
+        if db_path is None:
+            db_path = str(MARKET_DB)
         try:
             if not os.path.exists(db_path):
                 return 0.0

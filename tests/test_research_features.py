@@ -206,9 +206,10 @@ class TestFeaturePipelineCore:
     """Test FeaturePipeline init and pure-computation helpers."""
 
     def test_default_db_path(self):
-        """Default db_path is 'data/market.db'."""
+        """Default db_path resolves to MARKET_DB from src.paths."""
+        from src.paths import MARKET_DB
         pipeline = FeaturePipeline()
-        assert pipeline.db_path == "data/market.db"
+        assert pipeline.db_path == str(MARKET_DB)
 
     def test_custom_db_path(self):
         """Custom db_path is honored."""

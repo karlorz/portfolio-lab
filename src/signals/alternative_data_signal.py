@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.paths import PRICES_JSON
+from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
 
 PRICES_PATH = PRICES_JSON
 
@@ -89,9 +89,9 @@ class AlternativeDataSignalGenerator:
 
     def __init__(self, prices_path: Path = PRICES_PATH):
         self.prices_path = prices_path
-        self.signals_dir = Path("data/signals")
+        self.signals_dir = SIGNALS_DIR
         self.signals_dir.mkdir(parents=True, exist_ok=True)
-        self.state_dir = Path("data")
+        self.state_dir = DATA_DIR
         self._prices: Optional[Dict[str, List[Dict]]] = None
         self.weights = dict(COMPONENT_WEIGHTS)
 

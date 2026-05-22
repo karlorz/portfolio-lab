@@ -22,6 +22,7 @@ import json
 import sys
 from typing import Dict
 
+from src.paths import MACRO_REGIME_DB
 from src.regime.macro_regime import (
     MacroRegimeSynthesizer,
     MacroRegime,
@@ -226,7 +227,7 @@ Examples:
     
     parser.add_argument(
         "--db-path",
-        default="data/macro_regime_history.db",
+        default=str(MACRO_REGIME_DB),
         help="Path to regime history database"
     )
     parser.add_argument(

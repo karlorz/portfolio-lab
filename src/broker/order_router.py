@@ -21,6 +21,8 @@ from broker.alpaca import (
     PaperTradingManager
 )
 
+from src.paths import MARKET_DB, SIGNALS_JSON, DATA_DIR
+
 
 @dataclass
 class Signal:
@@ -49,15 +51,15 @@ class OrderRouter:
     
     def __init__(
         self,
-        signals_file: str = "public/data/signals.json",
-        db_path: str = "data/market.db",
-        data_dir: str = "data",
+        signals_file: str = None,
+        db_path: str = None,
+        data_dir: str = None,
         paper: bool = True,
         min_order_value: float = 10.0,  # Minimum $10 order
     ):
-        self.signals_file = signals_file
-        self.db_path = db_path
-        self.data_dir = data_dir
+        self.signals_file = signals_file or str(SIGNALS_JSON)
+        self.db_path = db_path or str(MARKET_DB)
+        self.data_dir = data_dir or str(DATA_DIR)
         self.paper = paper
         self.min_order_value = min_order_value
         self.client = AlpacaClient(paper=paper)

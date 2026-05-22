@@ -58,7 +58,10 @@ class FeaturePipeline:
     for regime classification and signal generation.
     """
     
-    def __init__(self, db_path: str = "data/market.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            from src.paths import MARKET_DB
+            db_path = str(MARKET_DB)
         self.db_path = db_path
         self.features_cache: Dict[str, List[Features]] = {}
         

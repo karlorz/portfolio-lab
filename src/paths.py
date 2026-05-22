@@ -26,9 +26,13 @@ MARKET_DB = DATA_DIR / "market.db"
 VIX_OPTIONS_DB = DATA_DIR / "vix_options.db"
 CRYPTO_DB = DATA_DIR / "crypto_allocation.db"
 ENSEMBLE_DB = DATA_DIR / "ensemble_signals.db"
+PORTFOLIO_DB = DATA_DIR / "portfolio.db"
+CORRELATION_DB = DATA_DIR / "correlation_regimes.db"
+MACRO_REGIME_DB = DATA_DIR / "macro_regime_history.db"
 
 # Common data files
 PRICES_JSON = PUBLIC_DATA_DIR / "prices.json"
+SIGNALS_JSON = PUBLIC_DATA_DIR / "signals.json"
 HISTORICAL_JSON = PUBLIC_DATA_DIR / "historical.json"
 YIELDS_JSON = PUBLIC_DATA_DIR / "yields.json"
 
@@ -38,6 +42,9 @@ SIGNALS_DIR = DATA_DIR / "signals"
 POSITIONS_DIR = DATA_DIR / "positions"
 BACKTEST_RESULTS_DIR = DATA_DIR / "backtest_results"
 FEATURES_DIR = DATA_DIR / "features"
+FACTORS_DIR = DATA_DIR / "factors"
+CACHE_DIR = DATA_DIR / "cache"
+OPTIONS_CACHE_DIR = DATA_DIR / "cache" / "options"
 LLM_COSTS_DIR = DATA_DIR / "llm_costs"
 ATTRIBUTION_DIR = DATA_DIR / "attribution"
 

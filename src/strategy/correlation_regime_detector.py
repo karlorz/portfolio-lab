@@ -24,7 +24,7 @@ import sys
 from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import squareform
 
-from src.paths import PROJECT_ROOT
+from src.paths import PROJECT_ROOT, CORRELATION_DB
 
 project_root = PROJECT_ROOT
 sys.path.insert(0, str(project_root))
@@ -99,8 +99,10 @@ class CorrelationRegimeDetector:
         assets: List[str] = None,
         lookback_window: int = 252,
         min_observations: int = 63,
-        db_path: str = "data/correlation_regimes.db"
+        db_path: str = None
     ):
+        if db_path is None:
+            db_path = str(CORRELATION_DB)
         self.assets = assets or [
             'SPY', 'QQQ', 'IWM',  # US Equity
             'EFA', 'EEM',  # International

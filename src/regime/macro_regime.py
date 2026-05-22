@@ -24,6 +24,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from src.paths import MACRO_REGIME_DB
+
 
 class MacroRegime(Enum):
     """Six-state macro regime classification."""
@@ -191,7 +193,7 @@ class MacroRegimeSynthesizer:
             db_path: Path to SQLite DB for storing history
             weights: Optional custom signal weights (recalculated if None)
         """
-        self.db_path = db_path or "data/macro_regime_history.db"
+        self.db_path = db_path or str(MACRO_REGIME_DB)
         self.weights = weights or self._calculate_default_weights()
         self.current_regime: Optional[MacroRegime] = None
         self.regime_start_date: Optional[datetime] = None

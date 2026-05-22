@@ -24,6 +24,8 @@ import aiohttp
 import sqlite3
 from pathlib import Path
 
+from src.paths import OPTIONS_CACHE_DIR, MARKET_DB
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -199,7 +201,7 @@ class OptionsChainFetcher:
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
         self.secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY")
         self.paper_mode = os.getenv("ALPACA_PAPER", "true").lower() == "true"
-        self.cache_dir = Path("data/cache/options")
+        self.cache_dir = OPTIONS_CACHE_DIR
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         # Determine if we have live API access
@@ -310,8 +312,7 @@ class OptionsChainFetcher:
         spot = 550.0  # Default SPY price
         vix = 16.0    # Default VIX
         try:
-            from src.paths import DATA_DIR
-            db_path = DATA_DIR / "market.db"
+            db_path = MARKET_DB
             if db_path.exists():
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()

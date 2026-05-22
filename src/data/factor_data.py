@@ -15,6 +15,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from src.paths import FACTORS_DIR
 from dataclasses import dataclass, asdict
 import logging
 
@@ -57,7 +58,7 @@ class FactorDataManager:
     """Manages factor ETF price data and quality scores."""
     
     def __init__(self, data_dir: Optional[Path] = None):
-        self.data_dir = data_dir or Path("data/factors")
+        self.data_dir = data_dir or FACTORS_DIR
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / "factor_data.db"
         self.metadata_path = self.data_dir / "factor_metadata.json"
