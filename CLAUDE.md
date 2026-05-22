@@ -9,14 +9,15 @@
 - Test count: **3797 safe** (0 failures, 5 skipped)
 
 ### Key Findings
-- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
-- **MULTI_SPEED_MOM is net-negative as overlay** (-0.012 Sharpe vs baseline) — ensemble works because 46/38/16 base is strong
-- **DBC at 4% rejected**: Sharpe -0.057, hurts 2008/2020, marginal help 2022
-- **Factor rotation is defensive only**: reduces drawdowns, not an alpha generator
-- **Behavioral sentiment (VIX-proxy) is net-negative**: -0.216 Sharpe, 65.8% false positive rate
+|- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
+|- **MULTI_SPEED_MOM is net-negative as overlay** (-0.012 Sharpe vs baseline) — ensemble works because 46/38/16 base is strong
+|- **DBC at 4% rejected**: Sharpe -0.057, hurts 2008/2020, marginal help 2022
+|- **Factor rotation is defensive only**: reduces drawdowns, not an alpha generator
+|- **Behavioral sentiment (VIX-proxy) is net-negative**: -0.216 Sharpe, 65.8% false positive rate
+|- **UNIFIED_OVERLAY validated: +0.014 Sharpe vs baseline** — keep current weight (17-21%)
 
-### Active Ensemble Signals (5)
-MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB + UNIFIED_OVERLAY (6 enum entries)
+### Active Ensemble Signals (6)
+MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB, UNIFIED_OVERLAY (all 6 active)
 
 ### Current Weights (NORMAL regime)
 MSM 0.25, ALT_DATA 0.25, INTL_MOM 0.20, CROSS_RV 0.15, REGIME_ARB 0.15
