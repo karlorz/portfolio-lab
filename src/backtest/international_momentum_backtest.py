@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from src.backtest.metrics import (
+    BacktestConfig as _BaseConfig,
     compute_metrics,
     compute_crisis_returns,
     save_results_json,
@@ -26,15 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class BacktestConfig:
-    start_date: str = "2006-01-01"
-    end_date: str = "2026-05-15"
-    initial_capital: float = 100000.0
-    base_spy_weight: float = 0.46
-    base_gld_weight: float = 0.38
-    base_tlt_weight: float = 0.16
-    rebalance_frequency: str = "monthly"
-    transaction_cost_bps: float = 10.0
+class BacktestConfig(_BaseConfig):
+    """International momentum backtest config — inherits core fields from metrics.BacktestConfig."""
     lookback_days: int = 126  # 6-month momentum
     max_shift: float = 0.05
 
@@ -138,9 +132,9 @@ class InternationalMomentumBacktester:
 
         capital = self.config.initial_capital
         weights = {
-            'SPY': self.config.base_spy_weight,
-            'GLD': self.config.base_gld_weight,
-            'TLT': self.config.base_tlt_weight,
+            'SPY': self.config.base_weights['SPY'],
+            'GLD': self.config.base_weights['GLD'],
+            'TLT': self.config.base_weights['TLT'],
         }
 
         rebalance_count = 0
@@ -176,9 +170,9 @@ class InternationalMomentumBacktester:
                 # Shift allocation based on signal
                 shift = signal_value * self.config.max_shift
                 new_weights = {
-                    'SPY': self.config.base_spy_weight + shift,
-                    'GLD': self.config.base_gld_weight - shift * 0.5,
-                    'TLT': self.config.base_tlt_weight - shift * 0.5,
+                    'SPY': self.config.base_weights['SPY'] + shift,
+                    'GLD': self.config.base_weights['GLD'] - shift * 0.5,
+                    'TLT': self.config.base_weights['TLT'] - shift * 0.5,
                 }
                 # Clamp
                 for sym in new_weights:

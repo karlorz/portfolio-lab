@@ -33,9 +33,9 @@ class TestBacktestConfig:
         assert config.start_date == "2006-01-01"
         assert config.end_date == "2026-05-15"
         assert config.initial_capital == 100000.0
-        assert config.base_spy_weight == 0.46
-        assert config.base_gld_weight == 0.38
-        assert config.base_tlt_weight == 0.16
+        assert config.base_weights['SPY'] == 0.46
+        assert config.base_weights['GLD'] == 0.38
+        assert config.base_weights['TLT'] == 0.16
         assert config.max_hedge_pct == 6.0
         assert config.rebalance_frequency_days == 21
         assert config.transaction_cost_bps == 10.0
@@ -57,7 +57,7 @@ class TestBacktestConfig:
     def test_base_weights_sum(self):
         """Baseline weights should sum to 1.0."""
         config = BacktestConfig()
-        total = config.base_spy_weight + config.base_gld_weight + config.base_tlt_weight
+        total = sum(config.base_weights.values())
         assert abs(total - 1.0) < 0.01
 
 

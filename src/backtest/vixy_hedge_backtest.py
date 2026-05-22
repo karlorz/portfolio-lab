@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
+    BacktestConfig as _BaseConfig,
     DailyPrices,
     compute_metrics,
     compute_crisis_returns,
@@ -50,21 +51,8 @@ VIX_SYMBOL = "^VIX"
 
 
 @dataclass
-class BacktestConfig:
-    """Configuration for VIXY hedge walk-forward backtest."""
-
-    start_date: str = "2006-01-01"
-    end_date: str = "2026-05-15"
-    initial_capital: float = 100000.0
-
-    # Baseline allocation (46/38/16)
-    base_spy_weight: float = 0.46
-    base_gld_weight: float = 0.38
-    base_tlt_weight: float = 0.16
-
-    # Rebalancing
-    rebalance_frequency_days: int = MONTHLY_TRADING_DAYS
-    transaction_cost_bps: float = 10.0  # 10 bps per rebalance
+class BacktestConfig(_BaseConfig):
+    """VIXY hedge backtest config — inherits core fields from metrics.BacktestConfig."""
 
     # VIXY hedge constraints
     max_hedge_pct: float = 6.0  # Hard cap on VIXY allocation
@@ -401,9 +389,9 @@ class WalkForwardVIXYBacktester:
                 "rebalance_frequency_days": config.rebalance_frequency_days,
                 "transaction_cost_bps": config.transaction_cost_bps,
                 "base_allocation": {
-                    "SPY": config.base_spy_weight,
-                    "GLD": config.base_gld_weight,
-                    "TLT": config.base_tlt_weight,
+                    "SPY": config.base_weights['SPY'],
+                    "GLD": config.base_weights['GLD'],
+                    "TLT": config.base_weights['TLT'],
                 },
             },
         )
@@ -412,9 +400,9 @@ class WalkForwardVIXYBacktester:
         self, prices: List[DailyPrices], config: BacktestConfig
     ) -> List[float]:
         """Run baseline buy-and-hold 46/38/16 portfolio."""
-        spy_w = config.base_spy_weight
-        gld_w = config.base_gld_weight
-        tlt_w = config.base_tlt_weight
+        spy_w = config.base_weights['SPY']
+        gld_w = config.base_weights['GLD']
+        tlt_w = config.base_weights['TLT']
 
         equity = [config.initial_capital]
 
@@ -434,9 +422,9 @@ class WalkForwardVIXYBacktester:
 
         Returns (equity_curve, hedge_stats, regime_tracker).
         """
-        spy_w = config.base_spy_weight
-        gld_w = config.base_gld_weight
-        tlt_w = config.base_tlt_weight
+        spy_w = config.base_weights['SPY']
+        gld_w = config.base_weights['GLD']
+        tlt_w = config.base_weights['TLT']
         vixy_w = 0.0
 
         equity = [config.initial_capital]
@@ -627,9 +615,9 @@ class WalkForwardVIXYBacktester:
 
         print(f"\n  Period: {self.config.start_date} to {self.config.end_date}")
         print(f"  Capital: ${self.config.initial_capital:,.0f}")
-        print(f"  Baseline: SPY {self.config.base_spy_weight*100:.0f}% / "
-              f"GLD {self.config.base_gld_weight*100:.0f}% / "
-              f"TLT {self.config.base_tlt_weight*100:.0f}%")
+        print(f"  Baseline: SPY {self.config.base_weights['SPY']*100:.0f}% / "
+              f"GLD {self.config.base_weights['GLD']*100:.0f}% / "
+              f"TLT {self.config.base_weights['TLT']*100:.0f}%")
 
         print(f"\n  {'Metric':<30} {'Baseline':>10} {'Hedged':>10} {'Delta':>10}")
         print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")
