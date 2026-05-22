@@ -31,6 +31,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
+    DailyPrices,
     compute_metrics,
     compute_crisis_returns,
     save_results_json,
@@ -78,18 +79,9 @@ class BacktestConfig:
     transaction_cost_bps: float = 10.0  # 10 bps per rebalance
 
 
-@dataclass
-class DailyPrices:
-    """Daily price data for a single date."""
-
-    date: str
-    spy: float
-    gld: float
-    tlt: float
-    btc: Optional[float] = None
-    eth: Optional[float] = None
-
-
+# DailyPrices imported from src.backtest.metrics (canonical version).
+# Local fields: date, spy, gld, tlt, btc (Optional), eth (Optional)
+# Canonical adds: vix, ief, shy (Optional), extras (dict) — all with defaults.
 @dataclass
 class BacktestResult:
     """Complete backtest results comparing baseline vs crypto overlay."""
