@@ -208,11 +208,7 @@ class GraduationChecklist:
                             continue
             state["performance"] = perf_entries
 
-        # TCA scorecard
-        tca_file = DATA_DIR / "tca_scorecard.json"
-        if tca_file.exists():
-            with open(tca_file) as f:
-                state["tca"] = json.load(f)
+        # TCA scorecard (producer removed v977)
 
         # Circuit breaker
         cb_file = DATA_DIR / ".circuit_breaker.json"

@@ -155,7 +155,12 @@ class AdaptiveSizer:
         return np.array([p["p"] for p in self.prices[symbol]])
 
     def _load_regime_state(self) -> Tuple[str, float]:
-        """Load current regime from regime classifier state."""
+        """Load current regime from regime classifier state.
+
+        Note: regime_classifier.py was removed v977. This reads the last
+        state file written before removal. If no state file exists, returns
+        unknown with low confidence.
+        """
         regime_state_path = self.data_dir / "regime_classifier_state.json"
         try:
             if regime_state_path.exists():
@@ -163,7 +168,7 @@ class AdaptiveSizer:
                 regime = state.get("current_regime", "unknown")
                 last = state.get("last_reading", {})
                 conf = last.get("confidence", 0.5)
-                
+
                 # Validate that the regime is valid
                 if regime not in REGIME_ADJUSTMENTS:
                     return "unknown", 0.3

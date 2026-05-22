@@ -43,14 +43,8 @@ if _ML_ENABLED:
 else:
     from .base_agent import torch, nn
 
-# v2.71: Import scheduler components
-try:
-    sys.path.insert(0, str(Path(__file__).parent.parent / 'execution'))
-    from rebalance_scheduler import RebalanceScheduler, OrderUrgency, ScheduledOrder
-    from intraday_cost_model import IntradayExecutionCostModel
-    SCHEDULER_AVAILABLE = True
-except ImportError:
-    SCHEDULER_AVAILABLE = False
+# v2.71: Scheduler components (src/execution/ removed v977)
+SCHEDULER_AVAILABLE = False
 
 
 class ExecutionStyle(Enum):

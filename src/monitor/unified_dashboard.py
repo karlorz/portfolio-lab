@@ -128,97 +128,15 @@ def _get_risk_section() -> Dict[str, Any]:
 
 
 def _get_tca_section() -> Dict[str, Any]:
-    """TCA execution quality from scorecard + feedback state."""
-    scorecard = _read_json("tca_scorecard.json")
-    feedback = _read_json("tca_feedback_state.json")
-
-    section: Dict[str, Any] = {"available": False}
-
-    if scorecard:
-        section["available"] = True
-        section["scorecard"] = {
-            "generated": scorecard.get("generated"),
-            "total_orders": scorecard.get("total_orders", 0),
-            "total_notional": scorecard.get("total_notional", 0),
-            "avg_slippage_bps": scorecard.get("avg_slippage_bps"),
-            "avg_quality_score": scorecard.get("avg_quality_score"),
-            "weighted_slippage_bps": scorecard.get("weighted_slippage_bps"),
-            "by_symbol": scorecard.get("by_symbol", {}),
-        }
-
-    if feedback:
-        section["available"] = True
-        section["feedback"] = {
-            "overall_quality": feedback.get("overall_quality"),
-            "quality_label": (
-                "poor"
-                if feedback.get("overall_quality", 0) < 50
-                else "fair"
-                if feedback.get("overall_quality", 0) < 70
-                else "good"
-            ),
-            "urgency_global_offset": feedback.get("urgency_global_offset"),
-            "min_trade_global_multiplier": feedback.get("min_trade_global_multiplier"),
-            "cost_calibration_global": feedback.get("cost_calibration_global"),
-            "symbols": feedback.get("symbols", {}),
-        }
-
-    return section
+    """TCA execution quality — producers removed v977."""
+    return {"available": False}
 
 
 def _get_overlays_section() -> Dict[str, Any]:
     """All tactical overlay states."""
     overlays: Dict[str, Any] = {}
 
-    # Collar overlay
-    collar = _read_json("collar_overlay_state.json")
-    if collar:
-        overlays["collar"] = {
-            "active": collar.get("status") == "active",
-            "status": collar.get("status"),
-            "call_strike": collar.get("current_call_strike"),
-            "put_strike": collar.get("current_put_strike"),
-            "ytd_premium_collected": collar.get("ytd_premium_collected"),
-            "ytd_premium_paid": collar.get("ytd_premium_paid"),
-            "total_rolls": collar.get("total_rolls"),
-            "last_roll_date": collar.get("last_roll_date"),
-        }
-    else:
-        overlays["collar"] = {"active": False}
-
-    # Crypto allocation
-    crypto = _read_json("crypto_allocation_state.json")
-    if crypto:
-        overlays["crypto"] = {
-            "active": crypto.get("status") == "active",
-            "status": crypto.get("status"),
-            "btc_weight": crypto.get("btc_weight"),
-            "eth_weight": crypto.get("eth_weight"),
-            "total_crypto": crypto.get("total_crypto"),
-            "gld_reduction": crypto.get("gld_reduction"),
-            "entry_date": crypto.get("entry_date"),
-            "exit_date": crypto.get("exit_date"),
-        }
-    else:
-        overlays["crypto"] = {"active": False}
-
-    # Bond duration rotation
-    bond = _read_json("bond_duration_state.json")
-    if bond:
-        overlays["bond_duration"] = {
-            "active": bond.get("status") == "active",
-            "status": bond.get("status"),
-            "position": bond.get("current_position"),
-            "tlt_weight": bond.get("tlt_weight"),
-            "ief_weight": bond.get("ief_weight"),
-            "shy_weight": bond.get("shy_weight"),
-            "last_rotation_date": bond.get("last_rotation_date"),
-        }
-    else:
-        overlays["bond_duration"] = {"active": False}
-
-    # VIX term structure overlay
-    # vix_overlay.py was removed in v9.31 — read from VIXY hedge state instead
+    # VIX term structure overlay — read from VIXY hedge state
     vixy = _read_json("vixy_hedge_state.json")
     if vixy:
         overlays["vix_term_structure"] = {
@@ -230,17 +148,7 @@ def _get_overlays_section() -> Dict[str, Any]:
     else:
         overlays["vix_term_structure"] = {"active": False}
 
-    # Mean reversion
-    mr = _read_json("mean_reversion_state.json")
-    if mr:
-        overlays["mean_reversion"] = {
-            "active": mr.get("active", False),
-            "allocation_pct": mr.get("allocation_pct"),
-            "entry_vix": mr.get("entry_vix"),
-            "hold_days": mr.get("hold_days"),
-        }
-    else:
-        overlays["mean_reversion"] = {"active": False}
+    # Collar, crypto, bond duration, mean reversion overlays removed v938-v980
 
     # Count active overlays
     active_count = sum(1 for o in overlays.values() if o.get("active"))
@@ -254,48 +162,8 @@ def _get_overlays_section() -> Dict[str, Any]:
 
 
 def _get_regime_section() -> Dict[str, Any]:
-    """Regime classifier + optimizer states."""
-    section: Dict[str, Any] = {"available": False}
-
-    classifier = _read_json("regime_classifier_state.json")
-    optimizer = _read_json("regime_optimizer_state.json")
-    risk_budget = _read_json("risk_budget_state.json")
-
-    if classifier:
-        section["available"] = True
-        section["classifier"] = {
-            "current_regime": classifier.get("current_regime"),
-            "previous_regime": classifier.get("previous_regime"),
-            "confidence": classifier.get("last_reading", {}).get("confidence"),
-            "last_updated": classifier.get("last_updated"),
-            "history_length": len(classifier.get("history", [])),
-        }
-
-    if optimizer:
-        section["available"] = True
-        section["optimizer"] = {
-            "current_regime": optimizer.get("current_regime"),
-            "regime_confidence": optimizer.get("regime_confidence"),
-            "method": optimizer.get("method"),
-            "weights": optimizer.get("weights"),
-            "expected_return": optimizer.get("expected_return"),
-            "expected_volatility": optimizer.get("expected_volatility"),
-            "expected_sharpe": optimizer.get("expected_sharpe"),
-            "solver_status": optimizer.get("solver_status"),
-            "constraints_satisfied": optimizer.get("constraints_satisfied"),
-        }
-
-    if risk_budget:
-        section["available"] = True
-        section["risk_budget"] = {
-            "regime": risk_budget.get("regime"),
-            "weights": risk_budget.get("weights"),
-            "all_budgets_met": risk_budget.get("all_budgets_met"),
-            "portfolio_vol_before": risk_budget.get("portfolio_vol_before"),
-            "portfolio_vol_after": risk_budget.get("portfolio_vol_after"),
-        }
-
-    return section
+    """Regime classifier + optimizer states — producers removed v974-v977."""
+    return {"available": False}
 
 
 def _get_attribution_section() -> Dict[str, Any]:
@@ -570,20 +438,12 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
         badge = "✅" if active else "⏹"
         status_text = "active" if active else "inactive"
         detail = ""
-        if name == "collar" and active:
-            detail = f" call={data.get('call_strike')} put={data.get('put_strike')}"
-        elif name == "crypto" and active:
-            detail = f" {_fmt(data.get('total_crypto', 0) * 100, '%')} portfolio"
-        elif name == "bond_duration" and active:
-            detail = f" pos={data.get('position')}"
-        elif name == "vix_term_structure" and active:
+        if name == "vix_term_structure" and active:
             alloc = data.get("allocation", 0)
             if isinstance(alloc, dict):
                 detail = f" SPY={_fmt_pct(alloc.get('SPY', 0) * 100)} GLD={_fmt_pct(alloc.get('GLD', 0) * 100)}"
             else:
                 detail = f" alloc={_fmt_pct(alloc * 100)}"
-        elif name == "mean_reversion" and active:
-            detail = f" {data.get('allocation_pct')}% alloc"
         print(f"       {badge} {name:<20} {status_text}{detail}")
 
     print()

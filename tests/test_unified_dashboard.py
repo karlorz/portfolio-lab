@@ -291,31 +291,7 @@ class TestRiskSection:
 
 
 class TestTCASection:
-    def test_returns_scorecard(self, tmp_path, sample_tca_scorecard):
-        f = tmp_path / "tca_scorecard.json"
-        f.write_text(json.dumps(sample_tca_scorecard))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
-            section = _get_tca_section()
-            assert section["available"] is True
-            assert section["scorecard"]["total_orders"] == 3
-            assert section["scorecard"]["avg_slippage_bps"] == -10.0
-
-    def test_returns_feedback(self, tmp_path, sample_tca_feedback):
-        f = tmp_path / "tca_feedback_state.json"
-        f.write_text(json.dumps(sample_tca_feedback))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
-            section = _get_tca_section()
-            assert section["available"] is True
-            assert section["feedback"]["overall_quality"] == 43.3
-            assert section["feedback"]["quality_label"] == "poor"
-
-    def test_returns_both(self, tmp_path, sample_tca_scorecard, sample_tca_feedback):
-        (tmp_path / "tca_scorecard.json").write_text(json.dumps(sample_tca_scorecard))
-        (tmp_path / "tca_feedback_state.json").write_text(json.dumps(sample_tca_feedback))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
-            section = _get_tca_section()
-            assert section["scorecard"]["total_orders"] == 3
-            assert section["feedback"]["overall_quality"] == 43.3
+    """TCA section always unavailable — producer removed v977."""
 
     def test_returns_not_available(self, tmp_path):
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
@@ -324,37 +300,25 @@ class TestTCASection:
 
 
 class TestOverlaysSection:
-    def test_all_overlays_present(self, tmp_path):
+    def test_vix_term_structure_present(self, tmp_path):
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             section = _get_overlays_section()
-            # Even without state files, all overlay keys should exist
-            for key in ["collar", "crypto", "bond_duration", "vix_term_structure", "mean_reversion"]:
-                assert key in section
+            assert "vix_term_structure" in section
             assert "_meta" in section
 
     def test_counts_active_overlays(self, tmp_path):
-        # Create bond_duration state as active
-        bond = tmp_path / "bond_duration_state.json"
-        bond.write_text(json.dumps({"status": "active", "current_position": "long", "tlt_weight": 1.0}))
+        # Create vixy hedge state as active
+        vixy = tmp_path / "vixy_hedge_state.json"
+        vixy.write_text(json.dumps({"current_allocation": 0.05, "last_signal_date": "2026-01-01", "regime": "contango"}))
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             section = _get_overlays_section()
             assert section["_meta"]["active_count"] == 1
-            assert section["_meta"]["total_count"] == 5
-            assert section["bond_duration"]["active"] is True
-            assert section["collar"]["active"] is False
+            assert section["_meta"]["total_count"] == 1
+            assert section["vix_term_structure"]["active"] is True
 
 
 class TestRegimeSection:
-    def test_returns_all_components(self, tmp_path, sample_regime_classifier, sample_regime_optimizer, sample_risk_budget):
-        (tmp_path / "regime_classifier_state.json").write_text(json.dumps(sample_regime_classifier))
-        (tmp_path / "regime_optimizer_state.json").write_text(json.dumps(sample_regime_optimizer))
-        (tmp_path / "risk_budget_state.json").write_text(json.dumps(sample_risk_budget))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
-            section = _get_regime_section()
-            assert section["available"] is True
-            assert section["classifier"]["current_regime"] == "normal"
-            assert section["optimizer"]["method"] == "cost_aware"
-            assert section["risk_budget"]["regime"] == "normal"
+    """Regime section always unavailable — producers removed v974-v977."""
 
     def test_not_available(self, tmp_path):
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):

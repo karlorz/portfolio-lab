@@ -411,7 +411,7 @@ def main():
             print(json.dumps(signal.to_dict(), indent=2))
         except FileNotFoundError:
             print(f"Error: Data file not found: {args.data_file}", file=sys.stderr)
-            print("Run data fetcher first: python -m src.data.international_fetcher --fetch --save", file=sys.stderr)
+            print("Run data fetcher first: bun run fetch-data", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
             print(f"Error generating signal: {e}", file=sys.stderr)

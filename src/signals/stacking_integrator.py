@@ -265,8 +265,8 @@ class StackingIntegrator:
         direction_map = {'bearish': -1, 'neutral': 0, 'bullish': 1}
         
         # Extract from common signal sources
-        for source in ['tsmom', 'hmm_regime', 'fed_policy', 'ai_agent', 
-                       'duration_overlay', 'base']:
+        for source in ['tsmom', 'hmm_regime', 'fed_policy', 'ai_agent',
+                       'base']:
             signal = base_signals.get(source, {})
             
             # Direction as numeric
@@ -315,8 +315,7 @@ class StackingIntegrator:
             'hmm_regime': 0.25,
             'fed_policy': 0.20,
             'ai_agent': 0.10,
-            'duration_overlay': 0.05,
-            'base': 0.10
+            'base': 0.15
         }
         
         # Calculate weighted vote
