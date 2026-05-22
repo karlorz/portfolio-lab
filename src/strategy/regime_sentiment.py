@@ -333,7 +333,7 @@ class RegimeSentimentPipeline:
         Get combined regime signal from technical and sentiment inputs.
         
         Args:
-            technical_regime: Current regime from regime_ml.py
+            technical_regime: Current regime from regime detection
             technical_confidence: Model confidence 0-1
             news_texts: Optional news headlines/articles
             earnings_texts: Optional earnings transcripts

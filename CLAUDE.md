@@ -103,7 +103,7 @@ grid-search, rolling-window, correlation-regime, recovery-analysis, withdrawal-s
 Safe: `base_agent.py` (uses torch stubs), `execution_agent.py` (conditional imports)
 
 ### Preferred dev targets (no ML, safe to test anytime)
-- `src/strategy/` — comparison, evaluator, dual_momentum, etc.
+- `src/strategy/` — unified_orchestrator, vixy_hedge_sizing, evaluator
 - `src/signals/` — credit_spread, commodity_curve, etc.
 - `src/broker/` — options_utils, order_router, position_sync
 - `src/monitor/` — garch_cvar, etc.

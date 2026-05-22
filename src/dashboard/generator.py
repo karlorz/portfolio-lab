@@ -19,9 +19,7 @@ logger = logging.getLogger(__name__)
 PUBLIC_DIR = PUBLIC_DATA_DIR
 DB_PATH = MARKET_DB
 
-# Add src to path for importing signal health tracker
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 class DashboardGenerator:
     def __init__(self):
@@ -89,14 +87,6 @@ class DashboardGenerator:
     def generate_signals_json(self) -> Path:
         """Generate current signals and allocations."""
         cursor = self.conn.cursor()
-        
-        # Import strategy engines
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'strategy'))
-        try:
-            pass
-        except ImportError:
-            pass
         
         # Get latest VIX level directly from prices table
         cursor.execute("""
