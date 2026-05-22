@@ -39,6 +39,20 @@
 
 ## Recent Implementation Updates (2026-05-22)
 
+### v9.49 Dead Module Purge — 9 Modules Removed - COMPLETED
+- **Removed**: 9 source modules (~4,209 lines) + 9 test files (~2,294 lines) = 6,503 total lines deleted
+  - `src/strategy/trend_integration.py` (867L) — zero callers, research-only
+  - `src/optimization/quantum_hybrid.py` (689L) — zero callers, speculative research
+  - `src/analytics/esg_integration.py` (661L) — zero callers, marked "Deferred"
+  - `src/options/vix_position_manager.py` (605L) — zero callers, replaced by vixy_hedge
+  - `src/strategy/inflation_risk_parity.py` (403L) — zero callers, research-only
+  - `src/trading/liquidity_checks.py` (292L) — zero callers, never integrated
+  - `src/broker/paper_trading_sim.py` (488L) — zero callers, never integrated
+  - `src/monitor/etf_premium_display.py` (165L) — zero callers, display-only module
+  - `src/utils/symbol_lookup.py` (39L) — zero callers, trivial utility
+- **Test count**: 6895 → 6663 safe (0 failures, 10 skipped, 232 dead tests removed)
+- **Status**: All phases complete
+
 ### v9.48 Dashboard Crash Fix + datetime.utcnow() Deprecation Removal - COMPLETED
 - **Bug fix**: `src/monitor/unified_dashboard.py` crash when VIXY hedge has active allocation
   - Root cause: `vix_term_structure` overlay stored `allocation` as float but `print_summary()` called `.get("SPY")` on it (dict API on float)
@@ -696,7 +710,7 @@ suite on low-resource hosts (sg01). A 4-layer defense guarantees this never happ
 listing. New heavy test files MUST be added to this list.
 
 ### Python (tests/)
-- **6894 safe** passed (0 failures, 10 skipped)
+- **6663 safe** passed (0 failures, 10 skipped)
 - **6561 total** collected when `PORTFOLIO_LAB_ENABLE_ML=1 --include-heavy` (6549 passed, 12 failed)
 - ~4500+ passing, pre-existing failures in yield curve and a few other suites
 - 190 test files + 4 new dashboard components covering signals, strategy, backtest, dashboard, broker, agents, data, research, chat, execution
