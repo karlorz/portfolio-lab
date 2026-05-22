@@ -1,0 +1,1 @@
+DONE — Calendar Seasonality Overlay v3.50 fully implemented. Signal module at src/signals/calendar_seasonality.py (671 lines, complete). Integrated into unified_orchestrator.py with get_calendar_modifier(). No further implementation needed.
