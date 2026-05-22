@@ -7,8 +7,8 @@ Implements weighted regime score:
     regime_score = 0.7 * technical_regime + 0.3 * sentiment_regime
 
 Integrates with:
-- regime_ml.py (v2.20) for technical regime detection
-- circuit_breaker.py (v2.14) for risk management
+- regime detection (internal technical regime classification)
+- circuit_breaker (internal risk level classification)
 - sentiment_analyzer.py (v2.30 Phase 2) for sentiment signals
 """
 

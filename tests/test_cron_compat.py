@@ -64,9 +64,9 @@ class TestCRONTargets:
         from src.cron_compat import CRON_TARGETS
         assert isinstance(CRON_TARGETS, list)
 
-    def test_twelve_default_targets(self):
+    def test_eleven_default_targets(self):
         from src.cron_compat import CRON_TARGETS
-        assert len(CRON_TARGETS) == 12
+        assert len(CRON_TARGETS) == 11
 
     def test_all_targets_have_prefix(self):
         from src.cron_compat import CRON_TARGETS
@@ -82,7 +82,6 @@ class TestCRONTargets:
         required = [
             "portfolio-lab-data",
             "portfolio-lab-dashboard",
-            "portfolio-lab-health",
             "portfolio-lab-eval",
         ]
         for name in required:

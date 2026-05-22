@@ -138,17 +138,8 @@ class ConvexityHarvestStrategy:
         else:
             self.consecutive_backwardation_days = 0
         
-        # Trigger 4: Circuit breaker integration
-        # Check if portfolio circuit breaker is triggered
-        try:
-            from circuit_breaker import DrawdownCircuitBreaker
-            cb = DrawdownCircuitBreaker()
-            cb_status = cb.get_status()
-            if cb_status.get("status") in ["red", "black"]:
-                return True, f"Circuit breaker triggered ({cb_status['status']})"
-        except ImportError:
-            logger.warning("Circuit breaker module not available, continuing without it")
-        
+        # Trigger 4: Circuit breaker (removed v977 — module deleted)
+
         return False, None
     
     def generate_signal(self, date: str) -> ConvexityPosition:

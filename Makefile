@@ -112,7 +112,7 @@ test-ml:
 data:
 	@echo "=== Data Pipeline: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 python3 -m src.data.pipeline 2>&1 | tee -a $(DATA_DIR)/cron.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 bun run fetch-data 2>&1 | tee -a $(DATA_DIR)/cron.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -138,22 +138,6 @@ dashboard:
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR
-
-# ── Health Monitor ───────────────────────────────────────────────────
-
-.PHONY: health
-health:
-	@echo "=== Health Monitor: $$(date) ==="; \
-	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 1048576 && timeout 60 python3 -m src.monitor.health 2>&1 | tee -a $(DATA_DIR)/health.log; \
-	EXIT=$${PIPESTATUS[0]}; \
-	END=$$(date +%s); \
-	DUR=$$((END - START)); \
-	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
-	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
-	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR
 
 # ── Strategy Evaluator ───────────────────────────────────────────────
 
@@ -323,7 +307,7 @@ ask:
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
-all: data dashboard health eval research wiki-sync sync build overlay-signals overlay-dashboard attribution unified-dashboard
+all: data dashboard eval research wiki-sync sync build overlay-signals overlay-dashboard attribution unified-dashboard
 	@echo "=== All tasks complete: $$(date) ==="
 
 # ── Cron Status Management ───────────────────────────────────────────
@@ -333,7 +317,7 @@ cron-reset:
 	@mkdir -p $(DATA_DIR)
 	@python3 $(CRON_UPDATE) portfolio-lab-data pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-dashboard pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-health pending 0 manual
+
 	@python3 $(CRON_UPDATE) portfolio-lab-eval pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-research pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-wiki-sync pending 0 manual

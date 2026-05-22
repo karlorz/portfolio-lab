@@ -26,7 +26,6 @@ IS_MANUAL: bool = BACKEND == "manual" or BACKEND == "claude-code"
 CRON_TARGETS = [
     "portfolio-lab-data",
     "portfolio-lab-dashboard",
-    "portfolio-lab-health",
     "portfolio-lab-eval",
     "portfolio-lab-research",
     "portfolio-lab-wiki-sync",
@@ -40,9 +39,8 @@ CRON_TARGETS = [
 
 # Expected max duration per job (seconds). Exceeding 2x this triggers alerts.
 CRON_EXPECTED_DURATIONS = {
-    "portfolio-lab-data": 300,      # 5 min — API calls + processing
+    "portfolio-lab-data": 300,      # 5 min — bun fetch-data
     "portfolio-lab-dashboard": 120, # 2 min — static generation
-    "portfolio-lab-health": 60,     # 1 min — lightweight check
     "portfolio-lab-eval": 600,      # 10 min — iterates all portfolios
     "portfolio-lab-research": 300,  # 5 min — research loops
     "portfolio-lab-wiki-sync": 120, # 2 min — git operations
