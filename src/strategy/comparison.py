@@ -73,25 +73,7 @@ class StrategyComparisonEngine:
                 complexity="medium",
                 signal_required=True
             ),
-            
-            "dual_momentum": StrategyPerformance(
-                name="Dual Momentum",
-                description="Gary Antonacci's GEM: Absolute + Relative momentum",
-                allocation={"SPY": 0.50, "QQQ": 0.30, "TLT": 0.10, "GLD": 0.10},  # Example
-                expected_return=0.140,
-                expected_volatility=0.125,
-                sharpe_estimate=0.90,
-                max_drawdown_estimate=-0.180,
-                crisis_performance={
-                    "2008": -0.050,  # TLT saved it
-                    "2020": -0.120,
-                    "2022": -0.150
-                },
-                rebalance_frequency="Monthly",
-                complexity="high",
-                signal_required=True
-            ),
-            
+
             "risk_parity": StrategyPerformance(
                 name="Risk Parity",
                 description="Inverse volatility weighting, ~2x leverage on bonds",

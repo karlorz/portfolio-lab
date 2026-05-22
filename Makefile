@@ -76,7 +76,7 @@ test:
 test-isolation:
 	@echo "=== Test Isolation Mode ===\n  Runs top-failing files individually to bypass test pollution.\n  Each file runs in a fresh process, so global-state leakage (DB,\n  singletons, module-level mocks) between unrelated test suites\n  is isolated.\n"
 	@total=0; passed=0; failed=0; \
-	ISOLATION_FILES="test_sentiment_client.py test_network_momentum_leadlag.py test_macro_features.py test_factor_data_fetcher.py test_tsmom_overlay.py test_correlation_regime_detector.py test_factor_timing_pipeline.py test_risk_parity_weight_overlay.py test_risk_parity_overlay.py test_duration_yield_backtest.py test_fed_policy_overlay.py test_combined_strategy.py test_sentiment_analyzer.py test_macro_momentum.py test_ensemble_voter.py test_dual_momentum.py test_multi_speed_momentum.py test_international_momentum.py test_garch_cvar.py test_factor_premia.py"; \
+	ISOLATION_FILES="test_sentiment_client.py test_network_momentum_leadlag.py test_macro_features.py test_factor_data_fetcher.py test_tsmom_overlay.py test_factor_timing_pipeline.py test_risk_parity_weight_overlay.py test_duration_yield_backtest.py test_fed_policy_overlay.py test_combined_strategy.py test_sentiment_analyzer.py test_macro_momentum.py test_ensemble_voter.py test_multi_speed_momentum.py test_international_momentum.py test_garch_cvar.py test_factor_premia.py"; \
 	for f in $$ISOLATION_FILES; do \
 		echo "  Running $$f..."; \
 		if PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest "tests/$$f" -q --tb=line -p no:cacheprovider --no-header 2>/dev/null; then \

@@ -4,7 +4,7 @@ v5.74: Adaptive Position Sizing Overlay
 
 Adjusts base 46/38/16 (SPY/GLD/TLT) allocation based on:
 - Regime (from ML-Light Regime Classifier)
-- Volatility regime (from vol_targeting)
+- Volatility regime (internal volatility classification)
 - Signal conviction (from ensemble voter)
 - Drawdown state (from circuit breaker)
 

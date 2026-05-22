@@ -218,14 +218,8 @@ class DashboardGenerator:
         except Exception:
             pass  # Factor rotation not available
         
-        # Add volatility targeting if engine available
+        # Volatility targeting removed v982 — module deleted
         vol_targeting_signal = None
-        try:
-            from vol_targeting import VolatilityTargetingEngine
-            vol_engine = VolatilityTargetingEngine(db_path=DB_PATH)
-            vol_targeting_signal = vol_engine.evaluate(target_alloc)
-        except Exception:
-            pass  # Vol targeting not available
         
         # Add yield curve data from yields.json
         yield_curve_data = self._get_yield_curve_data()

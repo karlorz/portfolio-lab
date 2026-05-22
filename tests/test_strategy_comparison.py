@@ -59,9 +59,9 @@ class TestStrategyPerformance:
 class TestStrategyComparisonEngineInit:
     """Engine initialization with pre-loaded strategies."""
 
-    def test_engine_has_six_strategies(self):
+    def test_engine_has_five_strategies(self):
         engine = StrategyComparisonEngine()
-        assert len(engine.strategies) == 6
+        assert len(engine.strategies) == 5
 
     def test_engine_contains_all_season_static(self):
         engine = StrategyComparisonEngine()
@@ -86,9 +86,9 @@ class TestStrategyComparisonEngineInit:
         assert s.sharpe_estimate == 0.55
         assert s.max_drawdown_estimate == -0.350
 
-    def test_engine_contains_dual_momentum(self):
+    def test_engine_contains_risk_parity(self):
         engine = StrategyComparisonEngine()
-        s = engine.strategies["dual_momentum"]
+        s = engine.strategies["risk_parity"]
         assert s.complexity == "high"
         assert s.signal_required is True
 
@@ -125,10 +125,10 @@ class TestCompareStrategies:
         result = engine.compare_strategies(["return", "volatility"])
         assert result["criteria"] == ["return", "volatility"]
 
-    def test_compare_returns_all_six_rankings(self):
+    def test_compare_returns_all_five_rankings(self):
         engine = StrategyComparisonEngine()
         result = engine.compare_strategies()
-        assert len(result["rankings"]) == 6
+        assert len(result["rankings"]) == 5
 
     def test_compare_rankings_sorted_descending(self):
         engine = StrategyComparisonEngine()
@@ -155,7 +155,7 @@ class TestCompareStrategies:
         engine = StrategyComparisonEngine()
         result = engine.compare_strategies(["sharpe"])
         best = result["rankings"][0]
-        assert best["key"] == "dual_momentum"  # Sharpe 0.90 is highest
+        assert best["key"] == "risk_parity"  # Sharpe 0.85 is highest after dual_momentum removed v982
 
     def test_compare_with_simplicity_scores_low_complexity_higher(self):
         engine = StrategyComparisonEngine()
@@ -377,7 +377,7 @@ class TestRecommendForUserProfile:
         result = engine.recommend_for_user_profile("conservative", "long", "low")
         assert result["recommendation"] is not None
         assert len(result["alternatives"]) == 2
-        assert len(result["all_ranked"]) == 6
+        assert len(result["all_ranked"]) == 5
         assert result["profile"]["risk_tolerance"] == "conservative"
 
     def test_conservative_long_high(self):
@@ -409,7 +409,7 @@ class TestRecommendForUserProfile:
         engine = StrategyComparisonEngine()
         result = engine.recommend_for_user_profile("unknown", "unknown", "unknown")
         assert result["recommendation"] is not None
-        assert len(result["all_ranked"]) == 6
+        assert len(result["all_ranked"]) == 5
 
     def test_rankings_sorted_descending(self):
         engine = StrategyComparisonEngine()
@@ -515,7 +515,7 @@ class TestEdgeCases:
         engine = StrategyComparisonEngine()
         result = engine.compare_strategies([])
         # All scores are 0 (no criteria), ties broken by sort stability
-        assert len(result["rankings"]) == 6
+        assert len(result["rankings"]) == 5
 
     def test_best_overall_none_when_no_rankings(self):
         """When rankings list is empty, best_overall is None."""
