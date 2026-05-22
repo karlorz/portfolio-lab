@@ -67,20 +67,18 @@ DB_PATH = DATA_DIR / "signals.db"
 
 # Base signal weights (adjusted dynamically by regime) - sum = 1.0
 BASE_WEIGHTS = {
-    "momentum": 0.11,         # Slightly reduced for ARP
-    "value": 0.07,            # Reduced for ARP
-    "macro": 0.09,            # Slightly reduced
-    "quality": 0.07,          # Reduced
-    "sentiment": 0.07,        # Reduced
-    "ai_agent": 0.04,        # v2.51 MARL controller weight
-    "tsmom": 0.07,           # Slightly reduced
-    "fed_policy": 0.07,      # Slightly reduced
-    "hmm_regime": 0.04,      # v2.53 HMM regime weight
-    "multi_speed": 0.09,     # Slightly reduced
-    "risk_parity": 0.07,     # Slightly reduced
-    "network_momentum": 0.06, # Slightly reduced
-    "carry_arp": 0.08,       # v2.60 AQR-style carry signals
-    "value_arp": 0.07,       # v2.60 AQR-style value signals
+    "momentum": 0.13,
+    "value": 0.08,
+    "macro": 0.11,
+    "quality": 0.08,
+    "sentiment": 0.08,
+    "ai_agent": 0.05,        # v2.51 MARL controller weight
+    "tsmom": 0.08,
+    "fed_policy": 0.08,
+    "hmm_regime": 0.05,      # v2.53 HMM regime weight
+    "multi_speed": 0.11,
+    "risk_parity": 0.08,
+    "network_momentum": 0.07,
 }
 
 # Regime-specific weight adjustments
@@ -876,8 +874,6 @@ class SignalIntegrator:
             RiskParitySignalAdapter,
             NetworkMomentumSignalAdapter
         )
-        from src.signals.arp_overlay import CarrySignalAdapter, ValueSignalAdapter
-        
         self.sources: Dict[str, SignalSource] = {
             "technical": TechnicalSignal(),
             "macro": MacroSignal(),
@@ -887,8 +883,6 @@ class SignalIntegrator:
             "multi_speed": MultiSpeedSignalAdapter(),
             "risk_parity": RiskParitySignalAdapter(),
             "network_momentum": NetworkMomentumSignalAdapter(),
-            "carry_arp": CarrySignalAdapter(),
-            "value_arp": ValueSignalAdapter(),
         }
         
         self.db_path = DB_PATH
