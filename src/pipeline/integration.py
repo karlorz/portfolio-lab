@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import numpy as np
 
-from src.paths import PROJECT_ROOT, DATA_DIR
+from src.paths import PROJECT_ROOT, DATA_DIR, PRICES_JSON
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -227,7 +227,7 @@ def get_vol_normalized_signal(
 
 def _load_prices(symbol: str) -> Optional[np.ndarray]:
     """Load prices from the project price file."""
-    prices_path = PROJECT_ROOT / "public/data/prices.json"
+    prices_path = PRICES_JSON
     if not prices_path.exists():
         return None
     try:

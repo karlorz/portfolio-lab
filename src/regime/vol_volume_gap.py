@@ -225,11 +225,8 @@ def load_prices(symbol: str = "SPY") -> Optional[np.ndarray]:
     """
     # Try multiple possible locations
     candidates = [
-        DATA_DIR / "prices.json",
-        DATA_DIR / ".." / "public" / "data" / "prices.json",
         PRICES_JSON,
-        Path("data/prices.json"),
-        Path("public/data/prices.json"),
+        DATA_DIR / "prices.json",
     ]
     price_file = None
     for p in candidates:

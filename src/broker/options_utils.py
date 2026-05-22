@@ -459,7 +459,9 @@ class OptionsChainFetcher:
 class OptionsChainCache:
     """Cache manager for options chain history."""
     
-    def __init__(self, cache_dir: str = "data/cache/options"):
+    def __init__(self, cache_dir: str = None):
+        if cache_dir is None:
+            cache_dir = str(OPTIONS_CACHE_DIR)
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
     

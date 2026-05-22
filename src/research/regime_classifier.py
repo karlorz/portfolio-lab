@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from src.paths import BASE_ALLOCATION
+from src.paths import BASE_ALLOCATION, DATA_DIR
 
 # ML-gated imports — prevented during test collection by conftest.py's
 # import hook. Only loaded when PORTFOLIO_LAB_ENABLE_ML=1 AND libs are installed.
@@ -80,7 +80,7 @@ class RegimeClassifier:
     (bull/neutral/bear) based on technical and VIX features.
     """
     
-    MODEL_FILE = "data/regime_model.json"
+    MODEL_FILE = str(DATA_DIR / "regime_model.json")
     
     def __init__(self, model_type: str = "logistic"):
         """
@@ -408,7 +408,7 @@ def main():
         
         if cmd == "train":
             # Load features from file
-            features_file = sys.argv[2] if len(sys.argv) > 2 else "data/features.jsonl"
+            features_file = sys.argv[2] if len(sys.argv) > 2 else str(DATA_DIR / "features.jsonl")
             
             if not os.path.exists(features_file):
                 print(f"Features file not found: {features_file}")
@@ -439,7 +439,7 @@ def main():
                 
         elif cmd == "predict":
             # Load model and predict
-            features_file = sys.argv[2] if len(sys.argv) > 2 else "data/features.jsonl"
+            features_file = sys.argv[2] if len(sys.argv) > 2 else str(DATA_DIR / "features.jsonl")
             
             try:
                 classifier.load()
