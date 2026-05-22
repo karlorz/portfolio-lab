@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-- Test count: **6795 safe** (0 failures, 10 skipped)
+- Test count: **6815 safe** (0 failures, 10 skipped)
 
 ### Key Findings
 - **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
@@ -86,7 +86,7 @@ grid-search, rolling-window, correlation-regime, recovery-analysis, withdrawal-s
 | 2 | `builtins.__import__` hook | Blocks torch/sklearn/xgboost/hmmlearn |
 | 3 | Post-collection leak check | Warns if real ML libs evaded guards |
 
-- **Python**: 6795 safe (0 failures, 10 skipped), 191 test files
+- **Python**: 6815 safe (0 failures, 10 skipped), 192 test files
 - **TypeScript**: 191 tests across 10 files (`bun test tests/ts/`)
 - **Safe run**: `make test` (ML disabled, 3GB ulimit cap)
 - **ML run**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
