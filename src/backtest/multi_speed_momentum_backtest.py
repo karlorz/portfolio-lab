@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from src.backtest.metrics import (
+    BacktestConfig as _BaseConfig,
     compute_metrics,
     save_results_json,
 )
@@ -45,21 +46,13 @@ except ImportError as exc:
 
 
 @dataclass
-class BacktestConfig:
-    """Configuration for multi-speed momentum overlay backtest."""
+class BacktestConfig(_BaseConfig):
+    """Configuration for multi-speed momentum overlay backtest.
 
-    start_date: str = "2006-01-01"
-    end_date: str = "2026-05-15"
-    initial_capital: float = 100000.0
-
-    # Baseline allocation (46/38/16)
-    base_spy_weight: float = 0.46
-    base_gld_weight: float = 0.38
-    base_tlt_weight: float = 0.16
-
-    # Rebalancing
-    rebalance_frequency: str = "monthly"  # monthly (21 trading days)
-    transaction_cost_bps: float = 10.0  # 10 bps per trade
+    Inherits canonical fields (start_date, end_date, initial_capital,
+    base_weights, rebalance_frequency, transaction_cost_bps) from
+    _BaseConfig. Only backtest-specific fields are defined here.
+    """
 
     # Overlay constraints
     max_spy_shift: float = 0.05  # SPY +/-5%
@@ -250,9 +243,9 @@ class MultiSpeedMomentumBacktester:
     # ------------------------------------------------------------------
     def _get_base_weights(self) -> Dict[str, float]:
         return {
-            "SPY": self.config.base_spy_weight,
-            "GLD": self.config.base_gld_weight,
-            "TLT": self.config.base_tlt_weight,
+            "SPY": self.config.base_weights["SPY"],
+            "GLD": self.config.base_weights["GLD"],
+            "TLT": self.config.base_weights["TLT"],
         }
 
     def _get_overlay_shifts(self, signal_spy: float, signal_gld: float, signal_tlt: float) -> Dict[str, float]:
@@ -338,7 +331,7 @@ class MultiSpeedMomentumBacktester:
         total_costs = 0.0
 
         # Determine rebalance step in trading days
-        reb_step = 21  # monthly
+        reb_step = self.config.rebalance_frequency_days
 
         # Date-indexed rebalancing: track the date of last rebalance
         last_rebalance_date: Optional[str] = None
@@ -391,9 +384,9 @@ class MultiSpeedMomentumBacktester:
                     shifts = self._get_overlay_shifts(sig_spy, sig_gld, sig_tlt)
 
                     new_w = {
-                        "SPY": self.config.base_spy_weight + shifts["SPY"],
-                        "GLD": self.config.base_gld_weight + shifts["GLD"],
-                        "TLT": self.config.base_tlt_weight + shifts["TLT"],
+                        "SPY": self.config.base_weights["SPY"] + shifts["SPY"],
+                        "GLD": self.config.base_weights["GLD"] + shifts["GLD"],
+                        "TLT": self.config.base_weights["TLT"] + shifts["TLT"],
                     }
                 else:
                     new_w = self._get_base_weights()
@@ -486,9 +479,9 @@ class MultiSpeedMomentumBacktester:
         print("=" * 62)
         print(f"  Period:           {self.config.start_date}  to  {self.config.end_date}")
         print(f"  Initial Capital:  ${self.config.initial_capital:>10,.2f}")
-        print(f"  Baseline:         SPY {self.config.base_spy_weight*100:.0f} / "
-              f"GLD {self.config.base_gld_weight*100:.0f} / "
-              f"TLT {self.config.base_tlt_weight*100:.0f}")
+        print(f"  Baseline:         SPY {self.config.base_weights['SPY']*100:.0f} / "
+              f"GLD {self.config.base_weights['GLD']*100:.0f} / "
+              f"TLT {self.config.base_weights['TLT']*100:.0f}")
         print(f"  Max shifts:       SPY {self.config.max_spy_shift*100:.0f}% / "
               f"GLD {self.config.max_gld_shift*100:.0f}% / "
               f"TLT {self.config.max_tlt_shift*100:.0f}%")

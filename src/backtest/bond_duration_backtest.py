@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
+    BacktestConfig as _BaseConfig,
     DailyPrices,
     compute_metrics,
     compute_crisis_returns,
@@ -72,23 +73,15 @@ BOND_SLEEVE = 0.16
 
 
 @dataclass
-class BacktestConfig:
-    """Configuration for bond duration walk-forward backtest."""
+class BacktestConfig(_BaseConfig):
+    """Configuration for bond duration walk-forward backtest.
 
-    start_date: str = "2006-01-01"
-    end_date: str = "2026-05-15"
-    initial_capital: float = 100000.0
+    Inherits canonical fields (start_date, end_date, initial_capital,
+    base_weights, rebalance_frequency_days, transaction_cost_bps) from
+    BacktestConfig in metrics.py.
+    """
 
-    # Baseline allocation (46/38/16)
-    base_spy_weight: float = 0.46
-    base_gld_weight: float = 0.38
-    base_bond_weight: float = 0.16
-
-    # Rebalancing
-    rebalance_frequency_days: int = MONTHLY_TRADING_DAYS
-    transaction_cost_bps: float = 10.0  # 10 bps per rebalance
-
-    # Momentum lookback
+    # Backtest-specific: momentum lookback
     momentum_lookback_days: int = MOMENTUM_LOOKBACK
 
 
@@ -494,9 +487,9 @@ class WalkForwardBondDurationBacktester:
                 "transaction_cost_bps": config.transaction_cost_bps,
                 "momentum_lookback_days": config.momentum_lookback_days,
                 "base_allocation": {
-                    "SPY": config.base_spy_weight,
-                    "GLD": config.base_gld_weight,
-                    "Bonds": config.base_bond_weight,
+                    "SPY": config.base_weights['SPY'],
+                    "GLD": config.base_weights['GLD'],
+                    "TLT": config.base_weights['TLT'],
                 },
                 "bond_sleeve_allocation": "BondDurationCalculator.compute_duration_allocation() via _momentum_to_yield_context()",
             },
@@ -506,9 +499,9 @@ class WalkForwardBondDurationBacktester:
         self, prices: List[DailyPrices], config: BacktestConfig
     ) -> List[float]:
         """Run baseline buy-and-hold 46/38/16 portfolio (all bonds in TLT)."""
-        spy_w = config.base_spy_weight
-        gld_w = config.base_gld_weight
-        tlt_w = config.base_bond_weight
+        spy_w = config.base_weights['SPY']
+        gld_w = config.base_weights['GLD']
+        tlt_w = config.base_weights['TLT']
 
         equity = [config.initial_capital]
 
@@ -529,9 +522,9 @@ class WalkForwardBondDurationBacktester:
 
         Returns (equity_curve, rotation_stats, regime_tracker).
         """
-        spy_w = config.base_spy_weight
-        gld_w = config.base_gld_weight
-        bond_w = config.base_bond_weight
+        spy_w = config.base_weights['SPY']
+        gld_w = config.base_weights['GLD']
+        bond_w = config.base_weights['TLT']
 
         # Sleeve weights within the bond sleeve
         tlt_sleeve = 1.0
@@ -752,9 +745,9 @@ class WalkForwardBondDurationBacktester:
 
         print(f"\n  Period: {self.config.start_date} to {self.config.end_date}")
         print(f"  Capital: ${self.config.initial_capital:,.0f}")
-        print(f"  Baseline: SPY {self.config.base_spy_weight*100:.0f}% / "
-              f"GLD {self.config.base_gld_weight*100:.0f}% / "
-              f"Bonds {self.config.base_bond_weight*100:.0f}%")
+        print(f"  Baseline: SPY {self.config.base_weights['SPY']*100:.0f}% / "
+              f"GLD {self.config.base_weights['GLD']*100:.0f}% / "
+              f"Bonds {self.config.base_weights['TLT']*100:.0f}%")
 
         print(f"\n  {'Metric':<30} {'Baseline':>10} {'Rotated':>10} {'Delta':>10}")
         print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")

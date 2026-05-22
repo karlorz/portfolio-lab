@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
+    BacktestConfig as _BaseConfig,
     compute_metrics,
     save_results_json,
 )
@@ -32,21 +33,13 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class BacktestConfig:
-    """Configuration for alternative data signal backtest."""
+class BacktestConfig(_BaseConfig):
+    """Configuration for alternative data signal backtest.
 
-    start_date: str = "2006-01-01"
-    end_date: str = "2026-05-15"
-    initial_capital: float = 100000.0
-
-    # Baseline allocation (46/38/16 champion)
-    base_spy_weight: float = 0.46
-    base_gld_weight: float = 0.38
-    base_tlt_weight: float = 0.16
-
-    # Rebalancing
-    rebalance_frequency: str = "monthly"
-    transaction_cost_bps: float = 10.0
+    Inherits from the canonical BacktestConfig (start_date, end_date,
+    initial_capital, base_weights, rebalance_frequency, transaction_cost_bps).
+    Backtest-specific fields are defined below.
+    """
 
     # Overlay constraints
     max_signal_shift: float = 0.05  # 5% max shift per rebalance beyond target
@@ -322,9 +315,9 @@ class AlternativeDataBacktester:
         overlay_capital = self.config.initial_capital
 
         base_weights = {
-            "spy": self.config.base_spy_weight,
-            "gld": self.config.base_gld_weight,
-            "tlt": self.config.base_tlt_weight,
+            "spy": self.config.base_weights["SPY"],
+            "gld": self.config.base_weights["GLD"],
+            "tlt": self.config.base_weights["TLT"],
         }
 
         overlay_weights = dict(base_weights)
@@ -403,13 +396,13 @@ class AlternativeDataBacktester:
                     monthly_signals_applied += 1
 
                 target_spy = (
-                    self.config.base_spy_weight + spy_shift
+                    self.config.base_weights["SPY"] + spy_shift
                 )
                 target_gld = (
-                    self.config.base_gld_weight + gld_shift
+                    self.config.base_weights["GLD"] + gld_shift
                 )
                 target_tlt = (
-                    self.config.base_tlt_weight + tlt_shift
+                    self.config.base_weights["TLT"] + tlt_shift
                 )
 
                 # Calculate turnover and costs

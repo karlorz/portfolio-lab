@@ -40,9 +40,9 @@ class TestBacktestConfig:
         assert config.start_date == "2006-01-01"
         assert config.end_date == "2026-05-15"
         assert config.initial_capital == 100000.0
-        assert config.base_spy_weight == 0.46
-        assert config.base_gld_weight == 0.38
-        assert config.base_bond_weight == 0.16
+        assert config.base_weights['SPY'] == 0.46
+        assert config.base_weights['GLD'] == 0.38
+        assert config.base_weights['TLT'] == 0.16
         assert config.rebalance_frequency_days == 21
         assert config.transaction_cost_bps == 10.0
         assert config.momentum_lookback_days == 60
@@ -64,13 +64,13 @@ class TestBacktestConfig:
     def test_base_weights_sum(self):
         """Baseline weights should sum to 1.0."""
         config = BacktestConfig()
-        total = config.base_spy_weight + config.base_gld_weight + config.base_bond_weight
+        total = config.base_weights['SPY'] + config.base_weights['GLD'] + config.base_weights['TLT']
         assert abs(total - 1.0) < 0.01
 
     def test_config_bond_sleeve_constant(self):
         """BOND_SLEEVE constant should match the config."""
         config = BacktestConfig()
-        assert config.base_bond_weight == BOND_SLEEVE
+        assert config.base_weights['TLT'] == BOND_SLEEVE
 
 
 # ── BacktestResult Tests ────────────────────────────────────────────────────

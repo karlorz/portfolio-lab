@@ -34,9 +34,9 @@ class TestBacktestConfig:
         assert config.start_date == "2006-01-01"
         assert config.end_date == "2026-05-15"
         assert config.initial_capital == 100000.0
-        assert config.base_spy_weight == 0.46
-        assert config.base_gld_weight == 0.38
-        assert config.base_tlt_weight == 0.16
+        assert config.base_weights["SPY"] == 0.46
+        assert config.base_weights["GLD"] == 0.38
+        assert config.base_weights["TLT"] == 0.16
         assert config.rebalance_frequency == "monthly"
         assert config.transaction_cost_bps == 10.0
         assert config.max_spy_shift == 0.05
@@ -61,7 +61,7 @@ class TestBacktestConfig:
     def test_base_weights_sum(self):
         """Baseline weights should sum to 1.0."""
         config = BacktestConfig()
-        total = config.base_spy_weight + config.base_gld_weight + config.base_tlt_weight
+        total = config.base_weights["SPY"] + config.base_weights["GLD"] + config.base_weights["TLT"]
         assert abs(total - 1.0) < 0.01
 
 
@@ -328,9 +328,9 @@ class TestMultiSpeedMomentumBacktester:
     def test_get_base_weights(self):
         bt = MultiSpeedMomentumBacktester()
         w = bt._get_base_weights()
-        assert w["SPY"] == bt.config.base_spy_weight
-        assert w["GLD"] == bt.config.base_gld_weight
-        assert w["TLT"] == bt.config.base_tlt_weight
+        assert w["SPY"] == bt.config.base_weights["SPY"]
+        assert w["GLD"] == bt.config.base_weights["GLD"]
+        assert w["TLT"] == bt.config.base_weights["TLT"]
         assert abs(sum(w.values()) - 1.0) < 0.01
 
     def test_get_overlay_shifts_positive(self):
