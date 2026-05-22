@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
+    BacktestConfig as _BaseConfig,
     compute_metrics,
     save_results_json,
 )
@@ -86,20 +87,13 @@ MAX_SIGNAL_STRENGTH = 0.5
 
 
 @dataclass
-class BacktestConfig:
-    """Configuration for cross-asset regime arb backtest."""
-    start_date: str = "2006-01-01"
-    end_date: str = "2026-05-15"
-    initial_capital: float = 100000.0
+class BacktestConfig(_BaseConfig):
+    """Configuration for cross-asset regime arb backtest.
 
-    # Baseline allocation (46/38/16)
-    base_spy_weight: float = 0.46
-    base_gld_weight: float = 0.38
-    base_tlt_weight: float = 0.16
-
-    # Rebalancing
-    rebalance_frequency: str = "monthly"
-    transaction_cost_bps: float = 10.0
+    Inherits canonical fields (start_date, end_date, initial_capital,
+    base_weights, rebalance_frequency, transaction_cost_bps, etc.) from
+    _BaseConfig. Only backtest-specific fields are defined here.
+    """
 
     # Overlay constraints
     max_single_shift: float = 0.05  # Max 5pp shift on any single asset per rebalance
@@ -417,9 +411,9 @@ class CrossAssetRegimeArbBacktester:
         overlay_capital = self.config.initial_capital
 
         base_weights = {
-            "spy": self.config.base_spy_weight,
-            "gld": self.config.base_gld_weight,
-            "tlt": self.config.base_tlt_weight,
+            "spy": self.config.base_weights["SPY"],
+            "gld": self.config.base_weights["GLD"],
+            "tlt": self.config.base_weights["TLT"],
         }
 
         overlay_weights = dict(base_weights)
@@ -484,9 +478,9 @@ class CrossAssetRegimeArbBacktester:
                     )
 
                     # Calculate new target weights
-                    new_spy = self.config.base_spy_weight + spy_shift
-                    new_gld = self.config.base_gld_weight + gld_shift
-                    new_tlt = self.config.base_tlt_weight + tlt_shift
+                    new_spy = self.config.base_weights["SPY"] + spy_shift
+                    new_gld = self.config.base_weights["GLD"] + gld_shift
+                    new_tlt = self.config.base_weights["TLT"] + tlt_shift
 
                     # Compute turnover and apply costs
                     turnover = (

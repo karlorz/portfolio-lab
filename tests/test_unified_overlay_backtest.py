@@ -177,9 +177,9 @@ class TestCryptoSignal:
 class TestBacktestConfig:
     def test_default_config(self):
         cfg = BacktestConfig()
-        assert cfg.base_spy == 0.46
-        assert cfg.base_gld == 0.38
-        assert cfg.base_tlt == 0.16
+        assert cfg.base_weights['SPY'] == 0.46
+        assert cfg.base_weights['GLD'] == 0.38
+        assert cfg.base_weights['TLT'] == 0.16
         assert cfg.max_crypto == 0.05
 
     def test_custom_config(self):
@@ -253,12 +253,12 @@ class TestBacktestResult:
 class TestHardConstraints:
     def test_spy_bounds_enforced(self):
         """SPY must stay within 36-56% range."""
-        cfg = BacktestConfig(base_spy=0.46, max_spy_shift=0.10)
+        cfg = BacktestConfig(max_spy_shift=0.10)
         import numpy as np
         # Extreme negative shift
-        assert float(np.clip(cfg.base_spy - 0.20, 0.36, 0.56)) == 0.36
+        assert float(np.clip(cfg.base_weights['SPY'] - 0.20, 0.36, 0.56)) == 0.36
         # Extreme positive shift
-        assert float(np.clip(cfg.base_spy + 0.20, 0.36, 0.56)) == 0.56
+        assert float(np.clip(cfg.base_weights['SPY'] + 0.20, 0.36, 0.56)) == 0.56
 
     def test_gld_bounds_enforced(self):
         """GLD must stay within 28-48% range."""
@@ -275,7 +275,7 @@ class TestHardConstraints:
     def test_weights_sum_to_one(self):
         """With no crypto, weights should sum to ~1.0."""
         cfg = BacktestConfig()
-        base_sum = cfg.base_spy + cfg.base_gld + cfg.base_tlt
+        base_sum = cfg.base_weights['SPY'] + cfg.base_weights['GLD'] + cfg.base_weights['TLT']
         assert abs(base_sum - 1.0) < 0.001
 
 

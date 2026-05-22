@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
+    BacktestConfig as _BaseConfig,
     compute_metrics,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
@@ -38,21 +39,13 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class BacktestConfig:
-    """Configuration for unified overlay backtest."""
+class BacktestConfig(_BaseConfig):
+    """Configuration for unified overlay backtest.
 
-    start_date: str = "2006-01-01"
-    end_date: str = "2026-05-15"
-    initial_capital: float = 100000.0
-
-    # Baseline allocation (46/38/16)
-    base_spy: float = 0.46
-    base_gld: float = 0.38
-    base_tlt: float = 0.16
-
-    # Rebalancing
-    rebalance_frequency: int = 21  # monthly (21 trading days)
-    transaction_cost_bps: float = 10.0
+    Inherits canonical fields (start_date, end_date, initial_capital,
+    base_weights, rebalance_frequency_days, transaction_cost_bps) from
+    :class:`_BaseConfig`.  Backtest-specific fields are defined here.
+    """
 
     # Overlay shift limits (from UnifiedOrchestrator hard bounds)
     max_spy_shift: float = 0.10
@@ -273,7 +266,7 @@ class UnifiedOverlayBacktester:
         baseline_curve = [cfg.initial_capital]
         overlay_curve = [cfg.initial_capital]
 
-        baseline_weights = {"SPY": cfg.base_spy, "GLD": cfg.base_gld, "TLT": cfg.base_tlt}
+        baseline_weights = dict(cfg.base_weights)
         overlay_weights = dict(baseline_weights)
 
         # Overlay stats
@@ -346,9 +339,9 @@ class UnifiedOverlayBacktester:
                 overlay_active_days += 1
 
             # --- Apply hard constraints ---
-            new_spy = float(np.clip(cfg.base_spy + spy_delta, 0.36, 0.56))
-            new_gld = float(np.clip(cfg.base_gld + gld_delta, 0.28, 0.48))
-            new_tlt = float(np.clip(cfg.base_tlt + tlt_delta, 0.0, 0.20))
+            new_spy = float(np.clip(cfg.base_weights['SPY'] + spy_delta, 0.36, 0.56))
+            new_gld = float(np.clip(cfg.base_weights['GLD'] + gld_delta, 0.28, 0.48))
+            new_tlt = float(np.clip(cfg.base_weights['TLT'] + tlt_delta, 0.0, 0.20))
             crypto_alloc = min(crypto_alloc, cfg.max_crypto)
 
             # Renormalize
@@ -360,14 +353,14 @@ class UnifiedOverlayBacktester:
                 new_gld *= scale
                 new_tlt *= scale
             else:
-                new_spy = cfg.base_spy * non_crypto
-                new_gld = cfg.base_gld * non_crypto
-                new_tlt = cfg.base_tlt * non_crypto
+                new_spy = cfg.base_weights['SPY'] * non_crypto
+                new_gld = cfg.base_weights['GLD'] * non_crypto
+                new_tlt = cfg.base_weights['TLT'] * non_crypto
 
             overlay_weights = {"SPY": new_spy, "GLD": new_gld, "TLT": new_tlt}
 
             # --- Rebalance on schedule ---
-            if i % cfg.rebalance_frequency == 0:
+            if i % cfg.rebalance_frequency_days == 0:
                 total_rebalances += 1
                 for key in overlay_weights:
                     delta_w = abs(overlay_weights[key] - baseline_weights[key])
