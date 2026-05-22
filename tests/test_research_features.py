@@ -762,9 +762,10 @@ class TestFeatureStore:
     """Tests for persistent feature storage."""
 
     def test_default_data_dir(self):
-        """Default data_dir is 'data'."""
+        """Default data_dir resolves from src.paths."""
+        from src.paths import DATA_DIR
         store = FeatureStore()
-        assert store.data_dir == "data"
+        assert store.data_dir == str(DATA_DIR)
 
     def test_custom_data_dir(self, tmp_path):
         """Custom data_dir is honored."""

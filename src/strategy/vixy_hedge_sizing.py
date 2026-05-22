@@ -37,7 +37,7 @@ DEFAULT_CONFIG = {
     "vixy_expense_ratio": 0.0085,  # VIXY ETF annual expense ratio
     "monthly_decay_pct": 0.05,    # Monthly premium decay estimate
     "spy_shock_pct": -15.0,       # Standard stress scenario
-    "state_file": "data/vixy_hedge_state.json",
+    "state_file": str(DATA_DIR / "vixy_hedge_state.json"),
     "ensemble_weight_normal": 0.05,   # 5% in normal regime
     "ensemble_weight_stress": 0.10,   # 10% in stress/crisis
 }

@@ -11,7 +11,7 @@ from datetime import datetime
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from src.paths import MARKET_DB
+from src.paths import MARKET_DB, DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -346,7 +346,9 @@ class PaperTradingManager:
     Handles order routing from local signals to Alpaca paper account.
     """
     
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = None):
+        if data_dir is None:
+            data_dir = str(DATA_DIR)
         self.client = AlpacaClient(paper=True)
         self.data_dir = data_dir
         self.orders_file = os.path.join(data_dir, "broker_orders.jsonl")

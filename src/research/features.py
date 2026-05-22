@@ -361,7 +361,10 @@ class FeatureStore:
     Allows features to be cached and reused across pipeline runs.
     """
     
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = None):
+        if data_dir is None:
+            from src.paths import DATA_DIR as _DATA_DIR
+            data_dir = str(_DATA_DIR)
         self.data_dir = data_dir
         self.features_file = os.path.join(data_dir, "features.jsonl")
         

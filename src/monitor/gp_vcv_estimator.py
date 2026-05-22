@@ -16,6 +16,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from src.paths import DATA_DIR as _DATA_DIR
+
 logger = logging.getLogger(__name__)
 
 # ── ML Gate ────────────────────────────────────────────────────────────────
@@ -100,7 +102,7 @@ class GaussianProcessVCV:
     """
 
     DEFAULT_LOOKBACK = 504  # ~2 years of trading data
-    DATA_DIR = Path("data")
+    DATA_DIR = _DATA_DIR
     STATE_FILE = "gp_vcv_state.json"
 
     def __init__(
@@ -353,7 +355,6 @@ def main():
 
     # Fetch price data from market DB
     import sqlite3
-    from src.paths import DATA_DIR
 
     assets = args.assets.split(",") if args.assets else ["SPY", "GLD", "TLT"]
     estimator = GaussianProcessVCV(lookback=args.lookback)

@@ -799,9 +799,10 @@ class TestWeeklyGridSearchEdgeCases:
         assert sharps1 != sharps2  # near-certain with random uniforms
 
     def test_grid_search_data_dir_default(self):
-        """Default data_dir should be 'data'."""
+        """Default data_dir should resolve from src.paths."""
+        from src.paths import DATA_DIR
         g = WeeklyGridSearch()
-        assert g.data_dir == "data"
+        assert g.data_dir == str(DATA_DIR)
         assert "grid_search_results" in g.results_file
 
     def test_regime_prediction_hashable(self):

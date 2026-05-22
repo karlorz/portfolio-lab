@@ -323,7 +323,9 @@ class WeeklyGridSearch:
     Runs weekly to find optimal allocations near current holdings.
     """
     
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = None):
+        if data_dir is None:
+            data_dir = str(DATA_DIR)
         self.data_dir = data_dir
         self.results_file = os.path.join(data_dir, "grid_search_results.jsonl")
         
