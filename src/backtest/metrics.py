@@ -34,6 +34,7 @@ class BacktestConfig:
 
     # Rebalancing
     rebalance_frequency_days: int = 21  # monthly (21 trading days)
+    rebalance_frequency: str = "monthly"  # string alias for compatibility
     transaction_cost_bps: float = 10.0
 
     # Backtest-specific extras (shift limits, thresholds, lookbacks, etc.)
@@ -85,6 +86,9 @@ class BacktestResult:
 
     # Extras for backtest-specific fields
     extras: Dict[str, Any] = field(default_factory=dict)
+
+    # Crisis year returns (optional — populated by compute_crisis_returns)
+    crisis_returns: Optional[Dict[str, float]] = None
 
 
 @dataclass
