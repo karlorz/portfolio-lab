@@ -157,3 +157,4 @@ uv.lock
 raw/market/
 .claude/scheduled_tasks.json
 .claude/scheduled_tasks.json
+.claude/dev-loop-debug/

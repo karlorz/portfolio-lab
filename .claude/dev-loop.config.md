@@ -106,7 +106,7 @@ cli_entry_override:
 - `src/crypto/`, `src/options/`, `src/broker/`, `src/trading/` — asset
   class specific + broker abstraction + live trading prep
 
-Python tests live in `tests/` (currently only `test_sentiment_client.py`).
+Python tests live in `tests/` (currently `test_sentiment_client.py`).
 TypeScript has no formal test harness yet — vite/vitest is not wired.
 
 ## E2E
@@ -179,6 +179,131 @@ ci_workflow: .github/workflows/ci.yml
 required_checks: []
 ```
 
+## Critical paths
+
+Three hot-spots derived from CLAUDE.md and project structure. The dev-loop
+engine biases vault search, work-item priority, and research coverage gaps
+toward these paths.
+
+```yaml
+critical_paths:
+  signals-engine:
+    code:
+      - src/signals/**
+    vault:
+      - signal-architecture
+      - ensemble-voting
+    history_pins:
+      - "UNIFIED_OVERLAY validated +0.014 Sharpe (v952)"
+      - "6 active ensemble signals, 50% per-signal cap"
+      - "behavioral_sentiment rejected: -0.216 Sharpe, 65.8% false positive rate"
+  backtest-engine:
+    code:
+      - src/backtest/**
+    vault:
+      - backtest-architecture
+    history_pins:
+      - "Champion: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)"
+      - "Shared metrics module at src/backtest/metrics.py — use for new backtests"
+  marl-agents:
+    code:
+      - src/agents/**
+    vault:
+      - marl-architecture
+    history_pins:
+      - "v2.51 ML-gated — never import without PORTFOLIO_LAB_ENABLE_ML=1"
+      - "base_agent.py uses torch stubs (safe); execution_agent.py conditional imports"
+```
+
+## Fact-check tier
+
+No web search MCP detected. Fact-checking limited to local repo, context7
+library docs, and vault queries. Specs/plans cite sources when consulting
+external docs.
+
+```yaml
+fact_check:
+  enabled: true
+  source_order:
+    - local_repo
+    - context7
+    - vault
+  evidence_contract:
+    require_sources_used_section: true
+  triggers:
+    - "version "
+    - "deprecat"
+    - "CVE-"
+```
+
+## Idle deep-research
+
+When idle cycles find no claimable work, rotate through research topics
+derived from critical paths. Cooldown: every 3rd idle cycle, max 4/day.
+
+```yaml
+idle_deep_research:
+  enabled: true
+  topic_seeds:
+    - "portfolio-lab signal ensemble optimization techniques"
+    - "multi-agent RL for portfolio allocation latest research"
+    - "tail-risk hedging with VIX derivatives latest approaches"
+    - "cross-asset momentum signal construction methods"
+    - "volatility regime detection improvements"
+  bias_toward: critical_paths
+  cooldown_cycles: 3
+  max_per_day: 4
+  skip_if_recent_query_page_exists: 7
+  budget:
+    web_searches: 3
+    deep_fetches: 3
+    context7_calls: 3
+```
+
+## Browser verification
+
+React + Vite dashboard detected but playwright-cli not installed. Skip
+browser gate for now — rely on manual verification. Install playwright-cli
+and re-run setup to enable.
+
+```yaml
+browser_verification:
+  enabled: false
+```
+
+## Reactive debugging
+
+Cap retries at 2, capture evidence on failure, escalate after 3 consecutive
+idle cycles with the same error signature. No fact_check_tool (no web MCP
+available).
+
+```yaml
+reactive_debugging:
+  enabled: true
+  auto_retry_attempts: 2
+  evidence_dir: .claude/dev-loop-debug/
+  evidence_capture:
+    - "make check 2>&1 | tee {evidence_dir}/{cycle}-check.log"
+    - "git diff > {evidence_dir}/{cycle}-diff.patch"
+  escalate_after:
+    consecutive_idle_cycles: 3
+    same_error_signature: true
+```
+
+## Code review
+
+simplify-worker (sonnet) is the base reviewer. Codex is installed and ready
+but disabled by default — opt-in per intensity.
+
+```yaml
+code_review:
+  parallel: true
+  codex:
+    enabled_in_normal: false
+    enabled_in_high: false
+    agent: dev-loop:codex-review-worker
+```
+
 ## Notes
 
 ```yaml
@@ -216,5 +341,10 @@ notes:
 
 ## Gitignore
 
-Not required — `knowledge_layer: skillwiki` keeps work items in the
-vault, not the repo. No `.claude/dev-loop-work/` will be created.
+```yaml
+gitignore:
+  - .claude/dev-loop-debug/
+```
+
+`knowledge_layer: skillwiki` keeps work items in the vault, not the repo.
+Only `.claude/dev-loop-debug/` (reactive debugging evidence) needs gitignore.
