@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-- Test count: **4396 safe** (0 failures, 9 skipped)
+- Test count: **4055 safe** (0 failures, 5 skipped)
 
 ### Key Findings
 - **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
@@ -59,7 +59,6 @@ Max per-signal cap: 50%
 - `src/broker/` — broker integration (order_router, position_sync, collar_options_bridge, options_utils)
 - `src/monitor/` — monitoring (garch_cvar, hedge_efficiency)
 - `src/agents/` — MARL system (ML-gated, see below)
-- `src/execution/` — TCA engine, order execution
 - `src/data/` — data fetchers (Yahoo Finance, behavioral sentiment, international)
 - `src/research/` — research tools (agent, features, wiki_sync)
 
@@ -86,7 +85,7 @@ grid-search, rolling-window, correlation-regime, recovery-analysis, withdrawal-s
 | 2 | `builtins.__import__` hook | Blocks torch/sklearn/xgboost/hmmlearn |
 | 3 | Post-collection leak check | Warns if real ML libs evaded guards |
 
-- **Python**: 4396 safe (0 failures, 9 skipped), 128 test files
+- **Python**: 4055 safe (0 failures, 5 skipped), 117 test files
 - **TypeScript**: 191 tests across 10 files (`bun test tests/ts/`)
 - **Safe run**: `make test` (ML disabled, 3GB ulimit cap)
 - **ML run**: `make test-ml` or `PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ --include-heavy`
@@ -111,7 +110,7 @@ Safe: `base_agent.py` (uses torch stubs), `execution_agent.py` (conditional impo
 
 ## Quick Start
 ```bash
-make test            # safe test suite (ML disabled, 3GB cap, 4396 passing)
+make test            # safe test suite (ML disabled, 3GB cap, 4055 passing)
 make test-ml         # full suite including ML (needs >3GB RAM)
 bash scripts/run-tests-safe           # standalone safe runner
 PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/  # manual safe run

@@ -254,7 +254,7 @@ Review the current strategy implementation and make necessary adjustments.
 
 - `~/projects/portfolio-lab/src/strategy/evaluator.py` - Main strategy logic
 - `~/projects/portfolio-lab/config/paper.yaml` - Paper trading config
-- `~/projects/portfolio-lab/src/data/pipeline.py` - Data pipeline
+- `~/projects/portfolio-lab/scripts/fetch-data.ts` - Data pipeline (bun run fetch-data)
 
 ### Suggested Changes
 

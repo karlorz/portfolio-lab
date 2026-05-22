@@ -191,21 +191,8 @@ class OverlayDashboardGenerator:
             return {"active": False, "error": str(e)}
 
     def _get_mean_reversion_data(self) -> Dict[str, Any]:
-        """Collect mean reversion data."""
-        try:
-            from src.strategy.mean_reversion_overlay import get_mean_reversion_status
-            status = get_mean_reversion_status()
-            return {
-                "active": status.get("active", False),
-                "allocation_pct": status.get("allocation_pct", 0),
-                "vix_level": status.get("vix_level", 0),
-                "vix_regime": status.get("vix_regime", "N/A"),
-                "rationale": status.get("rationale", ""),
-                "status_text": f"MR: {status.get('allocation_pct', 0):.1f}% alloc, "
-                               f"VIX={status.get('vix_level', 0):.1f}",
-            }
-        except Exception as e:
-            return {"active": False, "error": str(e)}
+        """Mean reversion overlay removed v9.38."""
+        return {"active": False, "status_text": "MR: disabled"}
 
     def _get_unified_data(self) -> Dict[str, Any]:
         """Collect unified orchestrator data."""
