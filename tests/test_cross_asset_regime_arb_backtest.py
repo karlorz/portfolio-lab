@@ -670,14 +670,10 @@ class TestEdgeCases:
 
     def test_load_data_missing_file(self, monkeypatch):
         """load_data should return False when no price data is found."""
+        from src.paths import PRICES_JSON as _real
         monkeypatch.setattr(
             "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
-            Path("/nonexistent/prices.json"),
-        )
-        # Also ensure fallback path doesn't exist
-        monkeypatch.setattr(
-            "src.backtest.cross_asset_regime_arb_backtest.Path.exists",
-            lambda p: False,
+            _real.parent / "nonexistent_prices.json",
         )
         bt = CrossAssetRegimeArbBacktester()
         success = bt.load_data()
@@ -759,16 +755,12 @@ class TestCLI:
 
     def test_main_no_data_returns_1(self, monkeypatch):
         """main should return 1 when no data is available."""
+        from src.paths import PRICES_JSON as _real
         monkeypatch.setattr(
             "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
-            Path("/nonexistent/prices.json"),
+            _real.parent / "nonexistent_prices.json",
         )
         monkeypatch.setattr("sys.argv", ["cross_asset_regime_arb_backtest.py"])
-        # Ensure fallback path does not exist either
-        monkeypatch.setattr(
-            "src.backtest.cross_asset_regime_arb_backtest.Path.exists",
-            lambda p: False,
-        )
         rc = main()
         assert rc == 1
 
@@ -778,13 +770,10 @@ class TestCLI:
             "sys.argv",
             ["cross_asset_regime_arb_backtest.py", "--save"],
         )
+        from src.paths import PRICES_JSON as _real
         monkeypatch.setattr(
             "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
-            Path("/nonexistent/prices.json"),
-        )
-        monkeypatch.setattr(
-            "src.backtest.cross_asset_regime_arb_backtest.Path.exists",
-            lambda p: False,
+            _real.parent / "nonexistent_prices.json",
         )
         rc = main()
         assert rc == 1  # Still fails due to no data, but parsing works

@@ -14,49 +14,28 @@ from datetime import datetime
 class TestSignalToStrategyPipeline:
     """Test that signals flow correctly into strategy modules."""
 
-    def test_collar_signal_to_overlay(self):
-        """v4.60: collar signal → collar overlay decision."""
+    def test_collar_signal_generates(self):
+        """v4.60: collar signal generation (standalone)."""
         from src.signals.collar_signal import generate_collar_signal
-        from src.strategy.collar_overlay import CollarOverlay
 
         signal = generate_collar_signal(spot=550.0, vix=16.0)
         assert signal.is_valid
 
-        overlay = CollarOverlay()
-        decision = overlay.recommend(spot=550.0, vix=16.0)
-        assert decision.call_strike > 550.0
-        assert decision.put_strike < 550.0
-        assert decision.max_upside > 0
-
-    def test_crypto_signal_to_allocation(self):
-        """v4.70: crypto signal → allocation decision."""
+    def test_crypto_signal_generates(self):
+        """v4.70: crypto signal generation (standalone)."""
         from src.signals.crypto_momentum import generate_crypto_signal
-        from src.strategy.crypto_allocation import CryptoAllocationOverlay
 
         signal = generate_crypto_signal()
         assert signal.timestamp is not None
 
-        overlay = CryptoAllocationOverlay()
-        decision = overlay.recommend()
-        assert decision.total_crypto <= 0.05
-        assert decision.total_crypto == decision.btc_weight + decision.eth_weight
-
-    def test_bond_signal_to_rotation(self):
-        """v4.80: bond duration signal → rotation decision."""
+    def test_bond_signal_generates(self):
+        """v4.80: bond duration signal generation (standalone)."""
         from src.signals.bond_duration_signal import generate_bond_duration_signal
-        from src.strategy.bond_duration_rotator import BondDurationRotator
 
         signal = generate_bond_duration_signal(
             yield_10y=4.5, yield_2y=4.0, real_rate=2.0, rate_change_6m=-0.5
         )
         assert signal.is_valid
-
-        rotator = BondDurationRotator()
-        decision = rotator.recommend(
-            yield_10y=4.5, yield_2y=4.0, real_rate=2.0, rate_change_6m=-0.5
-        )
-        assert decision.curve_regime is not None
-        assert abs(decision.tlt_sleeve + decision.ief_sleeve + decision.shy_sleeve - 1.0) < 0.01
 
     def test_calendar_signal(self):
         """v3.50: calendar seasonality signal."""
@@ -111,17 +90,6 @@ class TestOrchestratorPipeline:
         reading = bridge.get_ensemble_reading()
         assert reading.asset_signals is not None
         assert "SPY" in reading.asset_signals
-
-    def test_regime_router(self):
-        """v4.91: regime router routes between TSMOM and MR."""
-        from src.strategy.regime_router import RegimeRouter
-
-        rng = np.random.RandomState(42)
-        returns = list(rng.normal(0, 0.01, 200))
-        router = RegimeRouter()
-        decision = router.route(returns)
-        assert decision.strategy_preference is not None
-        assert abs(decision.tsom_weight + decision.mr_weight + decision.cash_weight - 1.0) < 0.01
 
 
 class TestDashboardPipeline:
@@ -200,7 +168,7 @@ class TestEndToEndFlow:
     """Complete end-to-end: signal → strategy → orchestrator → dashboard."""
 
     def test_full_pipeline(self):
-        """All modules import and work together without errors."""
+        """All modules import and work together without errors (skips purged strategy modules)."""
         # 1. Generate all signals
         from src.signals.collar_signal import generate_collar_signal
         from src.signals.crypto_momentum import generate_crypto_signal
@@ -218,31 +186,18 @@ class TestEndToEndFlow:
         assert bond.is_valid
         assert kurt is not None
 
-        # 2. Strategies generate decisions
-        from src.strategy.collar_overlay import CollarOverlay
-        from src.strategy.crypto_allocation import CryptoAllocationOverlay
-        from src.strategy.bond_duration_rotator import BondDurationRotator
-
-        coll_dec = CollarOverlay().recommend(spot=550.0, vix=16.0)
-        cryp_dec = CryptoAllocationOverlay().recommend()
-        bond_dec = BondDurationRotator().recommend()
-
-        assert coll_dec is not None
-        assert cryp_dec is not None
-        assert bond_dec is not None
-
-        # 3. Orchestrator aggregates
+        # 2. Orchestrator aggregates (direct — strategy modules consolidated)
         from src.strategy.unified_orchestrator import UnifiedOrchestrator
         orch = UnifiedOrchestrator()
         rec = orch.recommend()
         assert rec.spy > 0
 
-        # 4. Dashboard collects
+        # 3. Dashboard collects
         from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
         dash = OverlayDashboardGenerator().generate()
         assert dash.active_overlays >= 1
 
-        # 5. Bridge exports to ensemble voter
+        # 4. Bridge exports to ensemble voter
         from src.strategy.orchestrator_ensemble_bridge import OrchestratorEnsembleBridge
         bridge = OrchestratorEnsembleBridge()
         reading = bridge.get_ensemble_reading()
