@@ -458,11 +458,19 @@ class SignalHealthTracker:
                 )
                 
                 alerts.append(alert)
-                
-                # Save to state
+
+                # Save to state (dedup: skip if same source + same health already recorded)
                 if "decay_alerts" not in self.state:
                     self.state["decay_alerts"] = []
-                self.state["decay_alerts"].append(alert.to_dict())
+                existing = self.state["decay_alerts"]
+                is_duplicate = any(
+                    a.get("source") == source.value
+                    and abs(a.get("current_health", 0) - current_health) < 0.001
+                    and abs(a.get("previous_health", 0) - previous_health) < 0.001
+                    for a in existing[-20:]  # check last 20 for this source
+                )
+                if not is_duplicate:
+                    self.state["decay_alerts"].append(alert.to_dict())
                 # Keep only last 100 alerts
                 self.state["decay_alerts"] = self.state["decay_alerts"][-100:]
         
