@@ -73,19 +73,19 @@ BASE_WEIGHTS = {
     "quality": 0.08,
     "sentiment": 0.08,
     "ai_agent": 0.05,        # v2.51 MARL controller weight
-    "tsmom": 0.08,
+    "tsmom": 0.10,
     "fed_policy": 0.08,
     "hmm_regime": 0.05,      # v2.53 HMM regime weight
-    "multi_speed": 0.11,
-    "risk_parity": 0.08,
-    "network_momentum": 0.07,
+    "multi_speed": 0.05,     # health 0.55 — reduced from 0.11 (below viability)
+    "risk_parity": 0.10,
+    "network_momentum": 0.09,
 }
 
 # Regime-specific weight adjustments
 REGIME_WEIGHTS = {
     "bull": {
-        "momentum": 0.30, "multi_speed": 0.25, "network_momentum": 0.15,
-        "tsmom": 0.12, "value": 0.08, "macro": 0.05, "quality": 0.05
+        "momentum": 0.38, "multi_speed": 0.05, "network_momentum": 0.21,
+        "tsmom": 0.18, "value": 0.08, "macro": 0.05, "quality": 0.05
     },
     "bear": {
         "risk_parity": 0.20, "macro": 0.20, "tsmom": 0.15, "hmm_regime": 0.15,
@@ -97,8 +97,8 @@ REGIME_WEIGHTS = {
         "value": 0.15, "quality": 0.10, "sentiment": 0.05
     },
     "high_vol": {
-        "risk_parity": 0.20, "tsmom": 0.15, "hmm_regime": 0.15, "multi_speed": 0.15,
-        "macro": 0.15, "quality": 0.15, "value": 0.05
+        "risk_parity": 0.20, "tsmom": 0.20, "hmm_regime": 0.15, "multi_speed": 0.05,
+        "macro": 0.20, "quality": 0.15, "value": 0.05
     },
 }
 
