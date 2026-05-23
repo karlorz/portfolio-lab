@@ -295,6 +295,7 @@ class EnsembleVoter:
         """Initialize signal history database."""
         self.data_path.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS ensemble_votes (
                     timestamp TEXT PRIMARY KEY,
