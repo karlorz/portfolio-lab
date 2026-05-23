@@ -19,15 +19,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Primary data directories
 DATA_DIR = PROJECT_ROOT / "data"
 PUBLIC_DATA_DIR = PROJECT_ROOT / "public" / "data"
-CONFIG_DIR = PROJECT_ROOT / "config"
-
 # Common database paths
 MARKET_DB = DATA_DIR / "market.db"
-CRYPTO_DB = DATA_DIR / "crypto_allocation.db"
-ENSEMBLE_DB = DATA_DIR / "ensemble_signals.db"
-PORTFOLIO_DB = DATA_DIR / "portfolio.db"
-CORRELATION_DB = DATA_DIR / "correlation_regimes.db"
-MACRO_REGIME_DB = DATA_DIR / "macro_regime_history.db"
 
 # Common data files
 PRICES_JSON = PUBLIC_DATA_DIR / "prices.json"
@@ -36,11 +29,8 @@ HISTORICAL_JSON = PUBLIC_DATA_DIR / "historical.json"
 YIELDS_JSON = PUBLIC_DATA_DIR / "yields.json"
 
 # Subdirectories
-RESEARCH_DIR = PROJECT_ROOT / "research"
 SIGNALS_DIR = DATA_DIR / "signals"
-POSITIONS_DIR = DATA_DIR / "positions"
 BACKTEST_RESULTS_DIR = DATA_DIR / "backtest_results"
-FEATURES_DIR = DATA_DIR / "features"
 FACTORS_DIR = DATA_DIR / "factors"
 CACHE_DIR = DATA_DIR / "cache"
 OPTIONS_CACHE_DIR = DATA_DIR / "cache" / "options"
@@ -56,4 +46,3 @@ WORK_DIR = HOME / "projects" / "portfolio-lab" / "work"
 # Grid-search winner: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026)
 # Single source of truth — import this instead of repeating the dict.
 BASE_ALLOCATION: Dict[str, float] = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
-BASE_ALLOCATION_STR = "46/38/16"  # CLI shorthand
