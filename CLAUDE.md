@@ -21,8 +21,8 @@ MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS
 - **MULTI_SPEED_MOM health: 0.55** (below 0.60 viability floor) — reduced to 0.05 weight, effectively disabled pending recovery
 
 ### Current Weights (NORMAL regime)
-ALT_DATA 0.25, INTL_MOM 0.20, CROSS_RV 0.15, REGIME_ARB 0.15
-MSM 0.05 (health-degraded, was 0.25)
+ALT_DATA 0.305, INTL_MOM 0.245, CROSS_RV 0.13, REGIME_ARB 0.13, UNIFIED 0.19
+MSM 0.00 (disabled — net-negative -0.012 Sharpe, health 0.55)
 Max per-signal cap: 50%
 
 ## Strategies Implemented (16 portfolios)
