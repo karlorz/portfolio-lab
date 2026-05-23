@@ -10,6 +10,8 @@ import sqlite3
 import json
 from datetime import datetime, timedelta, timezone
 
+import math
+
 import yfinance as yf
 from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List, Tuple
@@ -221,7 +223,9 @@ class BehavioralSentimentFetcher:
             ticker = yf.Ticker("^VIX")
             hist = ticker.history(period="1d")
             if not hist.empty:
-                vix = float(hist["Close"].iloc[-1])
+                raw = float(hist["Close"].iloc[-1])
+                if not math.isnan(raw):
+                    vix = raw
         except Exception as e:
             logger.warning("yfinance fetch failed for ^VIX: %s", e)
 
@@ -230,7 +234,9 @@ class BehavioralSentimentFetcher:
             ticker9d = yf.Ticker("^VIX9D")
             hist9d = ticker9d.history(period="1d")
             if not hist9d.empty:
-                vix9d = float(hist9d["Close"].iloc[-1])
+                raw9d = float(hist9d["Close"].iloc[-1])
+                if not math.isnan(raw9d):
+                    vix9d = raw9d
             else:
                 vix9d = vix * 0.9  # Estimate as 90% of VIX
         except Exception as e:
@@ -245,7 +251,9 @@ class BehavioralSentimentFetcher:
             ticker = yf.Ticker("^SKEW")
             hist = ticker.history(period="1d")
             if not hist.empty:
-                return float(hist["Close"].iloc[-1])
+                raw = float(hist["Close"].iloc[-1])
+                if not math.isnan(raw):
+                    return raw
         except Exception as e:
             logger.warning("yfinance fetch failed for ^SKEW: %s", e)
 
