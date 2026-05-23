@@ -277,6 +277,12 @@ class EnsembleVoter:
         )
         self.bandit_observations: int = 0
 
+        # Regime gate — disables signals in regimes where they are net-negative
+        from src.signals.regime_gate import RegimeGate
+        self.regime_gate = RegimeGate()
+        self._prev_regime: Optional[str] = None
+        self._days_in_regime: int = 999  # Start assuming stable regime
+
     
     def _init_db(self):
         """Initialize signal history database."""
@@ -741,9 +747,17 @@ class EnsembleVoter:
         
         self.current_regime = regime
         self.current_regime_confidence = regime_confidence
-        
+
         # Get weights for regime (blended with bandit if available)
         weights = self.get_blended_weights(regime.name)
+
+        # Apply regime gating — zero out signals that are net-negative in this regime
+        if hasattr(self, 'regime_gate') and self.regime_gate is not None:
+            weights = self.regime_gate.filter_weights(weights, regime.name)
+            # Renormalize so weights sum to 1.0
+            total = sum(weights.values())
+            if total > 0:
+                weights = {k: v / total for k, v in weights.items()}
         
         # Apply adaptive ensemble weighting (v6.09) if available
         try:
