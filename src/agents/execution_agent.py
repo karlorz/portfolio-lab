@@ -26,10 +26,13 @@ Actions:
 """
 
 import os
+import logging
 import numpy as np
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, MessageType
 
@@ -173,9 +176,9 @@ class ExecutionAgent(BaseAgent):
             try:
                 self.cost_model = IntradayExecutionCostModel()
                 self.scheduler = RebalanceScheduler(self.cost_model)
-                print(f"[ExecutionAgent] RebalanceScheduler initialized")
+                logger.info("RebalanceScheduler initialized")
             except Exception as e:
-                print(f"[ExecutionAgent] Scheduler init failed: {e}")
+                logger.warning("Scheduler init failed: %s", e)
                 self.use_scheduler = False
         
         # Feature metadata
@@ -469,7 +472,7 @@ class ExecutionAgent(BaseAgent):
                 return scheduled.scheduled_time, max(0.0, improvement)
             
         except Exception as e:
-            print(f"[ExecutionAgent] Scheduling error: {e}")
+            logger.warning("Scheduling error: %s", e)
         
         return None, 0.0
     
