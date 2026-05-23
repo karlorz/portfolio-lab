@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Portfolio-Lab v2.82: 8-Source Ensemble Backtest Engine
+Ensemble Backtest Engine — 6-Source Validation
 
-Validates the integrated SignalIntegrator with all 8 signal sources:
+Validates the integrated SignalIntegrator with all 6 signal sources:
 - technical, macro, alternative_data, llm_sentiment (legacy 4)
 - tsmom (v2.52), multi_speed (v2.56), risk_parity (v2.57), network_momentum (v2.58)
 
@@ -202,7 +202,7 @@ class EnsembleBacktestEngine:
                 for asset, s in signals.items()
             }
         else:
-            weights = {asset: 1.0/len(signals) for asset in signals}
+            weights = {asset: 1.0/len(signals) for asset in signals} if signals else {}
         
         # Calculate target based on signal strength and direction
         for asset, signal in signals.items():

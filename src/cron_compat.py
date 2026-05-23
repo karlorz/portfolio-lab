@@ -13,6 +13,7 @@ Hermes and non-Hermes environments.
 """
 
 import os
+from src.paths import LOCK_DIR
 
 BACKEND: str = os.getenv("CRON_BACKEND", "hermes")
 IS_HERMES: bool = BACKEND == "hermes"
@@ -64,7 +65,7 @@ CRON_GUARD_CONFIG = {
     "max_load": 5,              # Defer if 1-min loadavg exceeds this
     "default_timeout": 600,     # Hard kill after N seconds
     "memory_mb": 3072,          # ulimit -v in MB (3GB)
-    "lock_dir": "/tmp/portfolio-lab-locks",
+    "lock_dir": str(LOCK_DIR),
 }
 
 def active_backend() -> str:

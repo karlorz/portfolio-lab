@@ -18,6 +18,7 @@ Performance Targets:
 """
 
 import json
+import pickle
 import numpy as np
 import sqlite3
 import argparse
@@ -453,7 +454,6 @@ class StackingTrainer:
             logger.info(f"  {name}: {imp:.3f}")
         
         # Save model using pickle for XGBClassifier
-        import pickle
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         model_version = f"v{timestamp}"
         model_path = self.model_dir / f"signal_stacker_{model_version}.pkl"
@@ -518,7 +518,6 @@ class StackingTrainer:
     
     def load_model(self, model_path: str) -> bool:
         """Load a trained model from disk."""
-        import pickle
         path = Path(model_path)
         if not path.exists():
             logger.error(f"Model not found: {model_path}")

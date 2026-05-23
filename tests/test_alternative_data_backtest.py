@@ -479,16 +479,21 @@ class TestRunBacktest:
     """Test run_backtest with synthetic data."""
 
     def _make_synthetic_data(self, n_days=252, spy_trend=0.001, gld_trend=0.0005, tlt_trend=0.0003, start_date="2020-01-01"):
-        """Generate synthetic DailyReturn list."""
+        """Generate synthetic DailyReturn list.
+
+        Uses a local RandomState with a fixed seed so the test is deterministic
+        and immune to global numpy random state pollution from other tests.
+        """
+        rng = np.random.RandomState(42)
         data = []
         from datetime import timedelta
         start = datetime.strptime(start_date, "%Y-%m-%d")
         for i in range(n_days):
             d = start + timedelta(days=i)
             date_str = d.strftime("%Y-%m-%d")
-            spy_ret = spy_trend + np.random.normal(0, 0.01)
-            gld_ret = gld_trend + np.random.normal(0, 0.008)
-            tlt_ret = tlt_trend + np.random.normal(0, 0.006)
+            spy_ret = spy_trend + rng.normal(0, 0.01)
+            gld_ret = gld_trend + rng.normal(0, 0.008)
+            tlt_ret = tlt_trend + rng.normal(0, 0.006)
             data.append(DailyReturn(date=date_str, spy_return=spy_ret, gld_return=gld_ret, tlt_return=tlt_ret))
         return data
 
