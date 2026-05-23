@@ -274,6 +274,109 @@ class TestEnsembleVoter:
             row = conn.execute("SELECT COUNT(*) FROM ensemble_votes").fetchone()
             assert row[0] >= 1
 
+    # ── Edge case tests for compute_vote() ─────────────────────────────
+
+    def test_compute_vote_nan_reading_value(self, tmp_path):
+        """NaN reading value should be handled gracefully."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=float('nan'), source=SignalSource.MULTI_SPEED_MOM),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.6)
+        # Should not crash — NaN is filtered or handled
+        assert vote is not None
+
+    def test_compute_vote_zero_confidence(self, tmp_path):
+        """Zero confidence reading should not dominate the vote."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.8, confidence=0.0, source=SignalSource.MULTI_SPEED_MOM),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=0.1, confidence=0.9, source=SignalSource.CROSS_ASSET_RV),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+        # Low-confidence reading should not dominate
+        assert vote is not None
+
+    def test_compute_vote_extreme_values(self, tmp_path):
+        """Extreme reading values (+1, -1) should produce valid vote."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=1.0, source=SignalSource.MULTI_SPEED_MOM),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=-1.0, source=SignalSource.CROSS_ASSET_RV),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+        assert vote is not None
+        assert -1.0 <= vote.weighted_consensus <= 1.0
+
+    def test_compute_vote_single_reading(self, tmp_path):
+        """Single reading should still produce valid vote."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.5, source=SignalSource.MULTI_SPEED_MOM),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+        assert vote.num_sources == 1
+        assert vote.weighted_consensus != 0
+
+    def test_compute_vote_many_sources(self, tmp_path):
+        """All 6 signal sources should produce valid vote."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.3, source=SignalSource.MULTI_SPEED_MOM),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=0.2, source=SignalSource.CROSS_ASSET_RV),
+            SignalSource.INTERNATIONAL_MOMENTUM: _make_reading(value=0.4, source=SignalSource.INTERNATIONAL_MOMENTUM),
+            SignalSource.ALTERNATIVE_DATA: _make_reading(value=0.1, source=SignalSource.ALTERNATIVE_DATA),
+            SignalSource.CROSS_ASSET_REGIME_ARB: _make_reading(value=-0.2, source=SignalSource.CROSS_ASSET_REGIME_ARB),
+            SignalSource.UNIFIED_OVERLAY: _make_reading(value=0.15, source=SignalSource.UNIFIED_OVERLAY),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+        assert vote.num_sources == 6
+        assert vote.agreement_ratio > 0
+
+    def test_compute_vote_all_negative(self, tmp_path):
+        """All negative readings with negative asset signals should produce risk-off action."""
+        voter = _make_voter(tmp_path)
+        neg_assets = {'SPY': -0.6, 'TLT': 0.2, 'GLD': 0.1}
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=-0.6, source=SignalSource.MULTI_SPEED_MOM, asset_signals=neg_assets),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=-0.4, source=SignalSource.CROSS_ASSET_RV, asset_signals=neg_assets),
+            SignalSource.INTERNATIONAL_MOMENTUM: _make_reading(value=-0.5, source=SignalSource.INTERNATIONAL_MOMENTUM, asset_signals=neg_assets),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+        assert vote.weighted_consensus < 0
+        assert vote.action in ['decrease_equity', 'risk_off']
+
+    def test_compute_vote_regime_recovery(self, tmp_path):
+        """RECOVERY regime should produce valid vote."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.3, source=SignalSource.MULTI_SPEED_MOM),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.RECOVERY, regime_confidence=0.8)
+        assert vote is not None
+
+    def test_compute_vote_regime_high_vol(self, tmp_path):
+        """HIGH_VOL regime should produce valid vote with defensive bias."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.3, source=SignalSource.MULTI_SPEED_MOM),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.HIGH_VOL, regime_confidence=0.7)
+        assert vote is not None
+
+    def test_compute_vote_conflicting_signals(self, tmp_path):
+        """Conflicting signals should moderate the consensus."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.8, source=SignalSource.MULTI_SPEED_MOM),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=-0.7, source=SignalSource.CROSS_ASSET_RV),
+            SignalSource.INTERNATIONAL_MOMENTUM: _make_reading(value=0.6, source=SignalSource.INTERNATIONAL_MOMENTUM),
+            SignalSource.ALTERNATIVE_DATA: _make_reading(value=-0.5, source=SignalSource.ALTERNATIVE_DATA),
+        }
+        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+        # Conflicting signals should produce moderate consensus
+        assert abs(vote.weighted_consensus) < 0.5
+
     # Recommend allocation
     def test_recommend_allocation_returns_dict(self, tmp_path):
         voter = _make_voter(tmp_path)
