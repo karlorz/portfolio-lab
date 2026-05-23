@@ -21,7 +21,7 @@ from src.backtest.metrics import (
     compute_crisis_returns,
     save_results_json,
 )
-from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR, BASE_ALLOCATION
+from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 from src.signals.cross_asset_relative_value import CrossAssetRVScanner, ZSCORE_ENTRY
 
 logging.basicConfig(level=logging.INFO)
@@ -191,11 +191,12 @@ class CrossAssetRVBacktester:
         # Compute metrics using shared module
         metrics = compute_metrics(equity_curve, self.config.initial_capital)
 
-        # Crisis year returns using shared module
+        # Crisis year returns using the overlay equity curve
+        # (NOT base_weights — overlay has time-varying allocations)
         crisis_returns = compute_crisis_returns(
             self.prices, trading_days,
             crisis_years=['2008', '2020', '2022'],
-            base_weights=BASE_ALLOCATION,
+            equity_curve=equity_curve,
         )
 
         total_rebalances = max(rebalance_count, 1)

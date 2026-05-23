@@ -469,7 +469,8 @@ class MultiSpeedMomentum:
                     "confidence": signal.ensemble_confidence,
                 }
             return {"value": 0.0, "confidence": 0.0}
-        except Exception:
+        except Exception as e:
+            logger.warning("get_signal_for_ticker(%s) failed: %s", ticker, e)
             return None
 
     def get_signal_snapshot(self, tickers: list = None, date: Optional[str] = None):

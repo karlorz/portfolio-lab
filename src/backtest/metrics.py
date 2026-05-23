@@ -183,6 +183,7 @@ def compute_crisis_returns(
     trading_days: List[str],
     crisis_years: List[str] = None,
     base_weights: Dict[str, float] = None,
+    equity_curve: Optional[List[float]] = None,
 ) -> Dict[str, float]:
     """Compute maximum drawdown during crisis years.
 
@@ -190,11 +191,19 @@ def compute_crisis_returns(
     simple first-day/last-day price change, which misses intra-year
     drawdowns like the 2020 crash-then-recovery pattern.
 
+    When ``equity_curve`` is provided, portfolio values are read from
+    it directly (one value per ``trading_days`` entry), which correctly
+    reflects dynamic overlay weights.  When omitted, the function falls
+    back to computing a static-weight buy-and-hold portfolio from
+    ``prices`` and ``base_weights``.
+
     Args:
         prices: {date: {symbol: price}} lookup.
         trading_days: Sorted list of trading dates.
         crisis_years: Years to compute (default: ['2008', '2020', '2022']).
-        base_weights: Asset weights (default: SPY 0.46, GLD 0.38, TLT 0.16).
+        base_weights: Static asset weights for fallback (default: 46/38/16).
+        equity_curve: Portfolio values aligned 1:1 with trading_days.
+            When set, ``prices`` and ``base_weights`` are ignored.
 
     Returns:
         {year: max_drawdown_pct} dict (negative values = losses).
@@ -204,6 +213,10 @@ def compute_crisis_returns(
     if base_weights is None:
         base_weights = BASE_ALLOCATION
 
+    # Pre-map trading day to equity curve index for O(1) lookups
+    if equity_curve is not None:
+        day_to_idx = {d: i for i, d in enumerate(trading_days)}
+
     result = {}
     for year in crisis_years:
         year_days = [d for d in trading_days if d.startswith(year)]
@@ -211,11 +224,17 @@ def compute_crisis_returns(
             continue
 
         # Build daily portfolio values for the year
-        portfolio_values = []
-        for day in year_days:
-            day_prices = prices.get(day, {})
-            pv = sum(w * day_prices.get(sym, 0) for sym, w in base_weights.items())
-            portfolio_values.append(pv)
+        portfolio_values: List[float] = []
+        if equity_curve is not None:
+            for day in year_days:
+                idx = day_to_idx.get(day)
+                if idx is not None and idx < len(equity_curve):
+                    portfolio_values.append(equity_curve[idx])
+        else:
+            for day in year_days:
+                day_prices = prices.get(day, {})
+                pv = sum(w * day_prices.get(sym, 0) for sym, w in base_weights.items())
+                portfolio_values.append(pv)
 
         if not portfolio_values or portfolio_values[0] == 0:
             continue
@@ -230,7 +249,7 @@ def compute_crisis_returns(
             if dd > max_dd:
                 max_dd = dd
 
-        result[year] = round(-max_dd * 100, 2)  # Negative = loss
+        result[year] = round(float(-max_dd * 100), 2)  # Negative = loss
 
     return result
 
