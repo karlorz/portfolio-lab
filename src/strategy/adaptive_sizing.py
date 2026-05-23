@@ -147,12 +147,13 @@ class AdaptiveSizer:
         return np.array([p["p"] for p in self.prices[symbol]])
 
     def _load_regime_state(self) -> Tuple[str, float]:
-        """Load current regime from regime classifier state.
+        """Load current regime — uses state file when available, VIX-based detection as fallback.
 
-        Note: regime_classifier.py was removed v977. This reads the last
-        state file written before removal. If no state file exists, returns
-        unknown with low confidence.
+        If a regime_classifier_state.json exists (from test fixtures or legacy writes),
+        use it directly. Otherwise, fall back to VIX-based live detection from
+        the market database. Returns unknown with low confidence if neither works.
         """
+        # Primary: state file (supports test fixtures and legacy writes)
         regime_state_path = self.data_dir / "regime_classifier_state.json"
         try:
             if regime_state_path.exists():
@@ -166,7 +167,21 @@ class AdaptiveSizer:
                     return "unknown", 0.3
                 return regime, float(conf)
         except Exception as e:
-            logger.warning(f"Failed to load regime state: {e}")
+            logger.warning("Failed to load regime state: %s", e)
+
+        # Fallback: VIX-based live detection (no stale state file available)
+        try:
+            from src.paths import MARKET_DB
+            import sqlite3
+            if MARKET_DB.exists():
+                from src.strategy.evaluator import get_current_regime
+                with sqlite3.connect(str(MARKET_DB)) as conn:
+                    regime = get_current_regime(conn)
+                if regime in REGIME_ADJUSTMENTS:
+                    return regime, 0.8
+        except Exception as e:
+            logger.debug("VIX-based regime detection unavailable: %s", e)
+
         return "unknown", 0.3
 
     def _load_circuit_breaker(self) -> str:

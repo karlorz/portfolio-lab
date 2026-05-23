@@ -74,11 +74,12 @@ class TestUnifiedOrchestrator:
         total = rec.spy + rec.gld + rec.tlt + rec.ief + rec.shy + rec.btc + rec.eth
         assert abs(total - 1.0) < 0.02
 
-    def test_baseline_is_46_38_16(self, orch):
+    def test_baseline_matches_base_allocation(self, orch):
+        from src.paths import BASE_ALLOCATION
         rec = orch.recommend()
-        assert rec.baseline_spy == 0.46
-        assert rec.baseline_gld == 0.38
-        assert rec.baseline_tlt == 0.16
+        assert rec.baseline_spy == BASE_ALLOCATION["SPY"]
+        assert rec.baseline_gld == BASE_ALLOCATION["GLD"]
+        assert rec.baseline_tlt == BASE_ALLOCATION["TLT"]
 
     def test_recommendation_is_string(self, orch):
         rec = orch.recommend()
