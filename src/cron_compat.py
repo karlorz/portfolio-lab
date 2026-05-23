@@ -30,7 +30,6 @@ CRON_TARGETS = [
     "portfolio-lab-eval",
     "portfolio-lab-research",
     "portfolio-lab-wiki-sync",
-    "portfolio-lab-build",
     "portfolio-lab-position-sync",
     "portfolio-lab-overlay-signals",
     "portfolio-lab-overlay-dashboard",
@@ -49,7 +48,6 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-eval": 600,      # 10 min — iterates all portfolios
     "portfolio-lab-research": 300,  # 5 min — research loops
     "portfolio-lab-wiki-sync": 120, # 2 min — git operations
-    "portfolio-lab-build": 600,     # 10 min — tsc + bun build
     "portfolio-lab-position-sync": 60,   # 1 min — placeholder/no-op
     "portfolio-lab-overlay-signals": 600,  # 10 min — 5 sequential modules
     "portfolio-lab-overlay-dashboard": 120,  # 2 min — JSON serialization
@@ -58,6 +56,7 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-daily-pnl": 30,   # 30 sec — snapshot from portfolio state
     "portfolio-lab-attribution": 300,  # 5 min — attribution + adaptive weights
     "portfolio-lab-unified-dashboard": 120,  # 2 min — JSON serialization
+    "portfolio-lab-health": 30,  # 30 sec — rebalance health check
 }
 
 # Guard configuration (applied by scripts/cron_guard.sh)

@@ -145,10 +145,10 @@ class MarketEnvironment:
         self.n_assets = len(self.tickers)
         self.transaction_cost = transaction_cost
         
-        # Default allocation (46/38/16/0 for SPY/GLD/TLT/CASH)
-        self.default_allocation = allocations or {
-            'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0
-        }
+        # Default allocation — import from canonical source
+        from src.paths import BASE_ALLOCATION
+        _base = allocations or {**BASE_ALLOCATION, 'CASH': 0.0}
+        self.default_allocation = _base
         
         # Episode state
         self.current_step = 0
