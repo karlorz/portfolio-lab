@@ -3,10 +3,7 @@
 Tests for sector_momentum_calc.py — constants, SectorMomentumCalculator,
 momentum calculation, regime adjustment, allocation generation.
 """
-import sys
-import os
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from pathlib import Path

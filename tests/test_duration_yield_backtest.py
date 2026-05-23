@@ -4,10 +4,7 @@ Tests for duration_yield_backtest.py — BacktestResult dataclass,
 classify_regime_from_spread, calculate_returns/Sharpe/max_drawdown/CAGR,
 run_backtest with synthetic data, save_results, print_results, and CLI.
 """
-import sys
-import os
 import json
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import pandas as pd

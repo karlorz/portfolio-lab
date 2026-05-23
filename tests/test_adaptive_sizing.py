@@ -3,13 +3,11 @@
 Tests for Adaptive Position Sizing (v5.74).
 """
 import sys
-import os
 import json
 import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
@@ -523,7 +521,6 @@ class TestCLI:
 
     def test_status_command(self, temp_data_dir, monkeypatch, capsys):
         """`status` command should print state."""
-        import sys
         monkeypatch.setattr(sys, "argv", ["adaptive_sizing.py", "status"])
         
         from src.strategy import adaptive_sizing as mod

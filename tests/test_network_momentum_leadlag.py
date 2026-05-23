@@ -4,11 +4,8 @@ Tests for Network Momentum Lead-Lag Module — constants, data classes,
 DTW distance, Lévy area signatures, graph learning, lead-lag matrix,
 window signals, ensemble signals, portfolio recommendation, and backtest.
 """
-import sys
-import os
 import json
 import math
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import numpy as np

@@ -4,12 +4,9 @@ import pytest; pytestmark = pytest.mark.heavy
 Tests for HMM-LSTM regime detector — data classes, regime definitions,
 feature extraction, allocation shifts, and portfolio regime management.
 """
-import sys
-import os
 import json
 import numpy as np
 import pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime

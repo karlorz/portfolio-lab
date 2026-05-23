@@ -22,11 +22,7 @@ from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 import tempfile
 
-# Add src to path
-import sys
-sys.path.insert(0, '/root/projects/portfolio-lab/src')
-
-from signals.stacking_integrator import (
+from src.signals.stacking_integrator import (
     StackingIntegrator,
     StackingPrediction,
     ModelMetadata,

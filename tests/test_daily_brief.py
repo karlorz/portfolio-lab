@@ -4,12 +4,10 @@ Covers: section generation, severity thresholds, LLM narrative fallback,
 save/load roundtrip, template rendering.
 """
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from src.monitor.daily_brief import (
     generate_brief_sections,

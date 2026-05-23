@@ -4,9 +4,6 @@ Tests for rebalancing/integration.py — SmartRebalanceGate.
 Covers: RebalanceGateResult, SmartRebalanceGate init, evaluate, VPIN,
 record_execution, get_status, create_gate_from_config.
 """
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime

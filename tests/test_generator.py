@@ -3,12 +3,9 @@
 Tests for dashboard generator — VIX regime detection, data freshness,
 health status, alerts, broker data, and stats calculation.
 """
-import sys
-import os
 import json
 import sqlite3
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime, timedelta

@@ -21,9 +21,6 @@ from datetime import datetime, timedelta
 import pytest
 import numpy as np
 
-# Ensure we can import from src
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.strategy.adaptive_ensemble_weights import (
     AdaptiveEnsembleWeights,
     DEFAULT_CONFIG,

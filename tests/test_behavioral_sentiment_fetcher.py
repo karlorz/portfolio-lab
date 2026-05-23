@@ -4,9 +4,6 @@ Tests for src/data/behavioral_sentiment_fetcher.py — BehavioralSentimentFetche
 Covers: OptionsSentiment, RetailFlow, SocialIntensity, BehavioralSentimentSnapshot
 dataclasses, cache operations, composite score, signal recommendation, history.
 """
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import json

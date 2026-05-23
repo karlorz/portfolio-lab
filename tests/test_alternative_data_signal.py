@@ -6,7 +6,6 @@ Tests the refactored signal generator that uses only existing pipeline data.
 
 import json
 import math
-import os
 import sys
 import tempfile
 from datetime import datetime, timedelta
@@ -15,7 +14,6 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.signals.alternative_data_signal import (
     AlternativeDataSignalGenerator,

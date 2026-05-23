@@ -3,11 +3,8 @@
 Tests for evaluator.py — constants, Position/Portfolio classes, order generation,
 order execution, risk limits, performance calculation, and graduation criteria.
 """
-import sys
-import os
 import json
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from pathlib import Path

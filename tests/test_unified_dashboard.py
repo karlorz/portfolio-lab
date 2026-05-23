@@ -9,7 +9,6 @@ Covers:
 """
 
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -18,7 +17,6 @@ from unittest.mock import patch, MagicMock, mock_open
 import pytest
 
 # Ensure src is on path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from src.monitor.unified_dashboard import (
     _read_json,

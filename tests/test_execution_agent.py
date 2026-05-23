@@ -5,9 +5,7 @@ Tests for execution_agent.py — ExecutionStyle enum, ExecutionNetwork architect
 ExecutionAgent (extract_features, estimate_market_impact, _check_scheduling,
 get_scheduler_status, act, compute_value, train_step).
 """
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import numpy as np

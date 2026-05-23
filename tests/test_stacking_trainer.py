@@ -16,11 +16,6 @@ import json
 import tempfile
 from pathlib import Path
 from datetime import datetime
-import sys
-
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
 
 from src.ml.stacking_trainer import (
     StackingTrainer, TrainingConfig, TrainingResult, PredictionResult

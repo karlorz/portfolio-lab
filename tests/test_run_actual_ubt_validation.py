@@ -3,10 +3,7 @@
 Tests for run_actual_ubt_validation.py — extract_prices, calculate_returns,
 find_overlap, align_series, calculate_metrics, calculate_correlation.
 """
-import sys
-import os
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import patch, MagicMock

@@ -4,11 +4,8 @@ Tests for Alternative Data Walk-Forward & Stress Test Engine —
 data classes, constants, compute_metrics, build_daily_returns,
 walk_forward_test, and stress_test.
 """
-import sys
-import os
 import math
 import json
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime, timedelta

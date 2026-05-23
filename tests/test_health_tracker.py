@@ -4,10 +4,7 @@ Tests for health_tracker.py — SignalSource/SignalHealthStatus enums,
 SignalPrediction/HealthScore/DecayAlert dataclasses, and
 SignalHealthTracker with temp SQLite.
 """
-import sys
-import os
 import json
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime, timedelta

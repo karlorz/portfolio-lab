@@ -4,11 +4,8 @@ Tests for Fed Policy Overlay — FRED series constants, inflation YoY,
 real rate calculation, FedPolicyRegime data class, regime classification,
 and FedPolicyOverlay allocation recommendation.
 """
-import sys
-import os
 import numpy as np
 import pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from pathlib import Path

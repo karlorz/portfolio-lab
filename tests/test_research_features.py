@@ -6,12 +6,11 @@ Tests Features dataclass, FeaturePipeline (connection, price data, returns,
 volatility, SMA, correlation, generate_features, generate_all_features,
 to_dataframe), FeatureStore (save/load), and CLI main().
 """
-import sys
 import os
+import sys
 import json
 import math
 import sqlite3
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import numpy as np

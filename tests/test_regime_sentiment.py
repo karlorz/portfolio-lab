@@ -4,10 +4,7 @@ Tests for regime_sentiment.py — RegimeSentiment enum, CombinedRegimeSignal dat
 RegimeSentimentIntegrator (score mapping, weight adjustment, regime classification,
 circuit breaker, position scaling, allocation tilts), and RegimeSentimentPipeline.
 """
-import sys
-import os
 import json
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from pathlib import Path

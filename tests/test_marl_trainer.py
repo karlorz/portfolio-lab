@@ -5,10 +5,8 @@ Tests for MARL Trainer — Transition/RolloutBuffer data classes,
 GAE computation, MarketEnvironment simulation, and trainer lifecycle.
 """
 import sys
-import os
 import json
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import patch, MagicMock, PropertyMock

@@ -3,11 +3,9 @@
 Tests for Alpaca Broker Client — data classes, order/position construction,
 client status checks, price fetching, and paper trading manager.
 """
-import sys
 import os
 import json
 import sqlite3
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import patch, MagicMock

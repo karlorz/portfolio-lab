@@ -4,10 +4,8 @@ Tests for cvar_metrics.py — CVaRMetrics dataclass, VaR/CVaR calculation,
 tail severity classification, volatility, and metric computation.
 """
 import sys
-import os
 import json
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from pathlib import Path

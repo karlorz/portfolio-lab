@@ -7,17 +7,12 @@ Tests skew ratio computation, regime classification, and vol target adjustment.
 
 import json
 import math
-import os
-import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
 import numpy as np
 import pytest
-
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.monitor.skew_engineering import (
     SkewEngine,

@@ -7,10 +7,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import sys
-sys.path.insert(0, '/root/projects/portfolio-lab/src')
 
-from signals.international_momentum import (
+from src.signals.international_momentum import (
     SignalType,
     ConfidenceLevel,
     InternationalMomentumSignal,

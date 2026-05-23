@@ -3,11 +3,8 @@
 Tests for signal integrator — data structures, normalization, composite signal
 aggregation, allocation deltas, regime detection, signal agreement.
 """
-import sys
-import os
 import json
 import sqlite3
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime

@@ -3,10 +3,7 @@
 Tests for ensemble backtest engine — data class, returns calculation,
 max drawdown, crisis alpha, allocation deltas, and target validation.
 """
-import sys
-import os
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from pathlib import Path

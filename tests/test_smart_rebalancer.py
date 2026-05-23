@@ -4,9 +4,6 @@ Tests for smart_rebalancer.py — enums, data classes, drift calculation, urgenc
 classification, cost estimation, rebalance decision engine, cost budget tracking,
 and status reporting.
 """
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime

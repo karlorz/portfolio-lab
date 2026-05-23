@@ -4,14 +4,10 @@ Target: 40+ tests for comprehensive coverage.
 """
 
 import pytest
-import sys
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import json
 from datetime import datetime, timedelta
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'src'))
 
 from src.signals.vix_term_structure import (
     VIXRegime,

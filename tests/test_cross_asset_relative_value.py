@@ -3,15 +3,12 @@
 Tests for Cross-Asset Relative Value Scanner (v5.71).
 """
 
-import sys
-import os
 import json
 import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 

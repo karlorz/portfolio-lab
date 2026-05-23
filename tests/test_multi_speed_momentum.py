@@ -3,12 +3,9 @@
 Tests for multi-speed momentum ensemble — data classes, speed tier signals,
 ensemble aggregation, confidence calculation, and portfolio construction.
 """
-import sys
-import os
 import json
 import numpy as np
 import pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime, timedelta

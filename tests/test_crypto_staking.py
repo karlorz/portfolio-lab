@@ -6,14 +6,10 @@ No ML dependencies — safe to run anytime.
 """
 
 import json
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
-
-# Add project root
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.strategy.crypto_staking import (
     ETHStakingModel,

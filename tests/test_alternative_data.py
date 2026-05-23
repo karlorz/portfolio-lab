@@ -3,11 +3,8 @@
 Tests for alternative data module — data classes, adapters, composite signals,
 earnings predictions.
 """
-import sys
-import os
 import json
 import sqlite3
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime, timedelta

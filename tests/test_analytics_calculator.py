@@ -3,10 +3,7 @@
 Tests for analytics calculator — data classes, drawdown series, rolling metrics,
 benchmark comparison, and analytics report generation.
 """
-import sys
-import os
 import json
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import numpy as np

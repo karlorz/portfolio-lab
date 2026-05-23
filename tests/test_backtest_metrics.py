@@ -2,11 +2,9 @@
 """
 Tests for src/backtest/metrics.py — shared backtest metrics module.
 """
-import sys
 import os
 import json
 import tempfile
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import numpy as np

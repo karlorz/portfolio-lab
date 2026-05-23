@@ -4,10 +4,8 @@ Tests for combined strategy backtest — data classes, signal combination,
 Fed regime classification, baseline backtest, and crisis return calculation.
 """
 import sys
-import os
 import numpy as np
 import pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import patch, MagicMock

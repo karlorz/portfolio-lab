@@ -7,17 +7,12 @@ state persistence, and ensemble-facing API.
 
 import json
 import os
-import sys
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Add project root to path
-project_root = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(project_root))
 
 from src.signals.cross_asset_regime_arb import (
     AssetRegime,

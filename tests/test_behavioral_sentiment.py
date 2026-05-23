@@ -2,15 +2,12 @@
 Tests for Behavioral Sentiment Signal Generator — v2.70 Phase 2
 """
 
-import sys
-import os
 import pytest
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock, PropertyMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.data.behavioral_sentiment_fetcher import (
     BehavioralSentimentSnapshot,

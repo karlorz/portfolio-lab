@@ -10,12 +10,9 @@ Validates:
 - Breach rate validation
 - GARCH parameter validation
 """
-import sys
-import os
 import numpy as np
 import warnings
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import patch, MagicMock

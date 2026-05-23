@@ -4,8 +4,6 @@ Tests for vol_parity_allocator.py — VolParityAllocation dataclass, constants,
 core allocation calculation, VIX allocation calculation, and CLI.
 """
 import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import patch, MagicMock, PropertyMock

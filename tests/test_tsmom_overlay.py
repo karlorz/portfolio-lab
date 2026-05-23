@@ -3,12 +3,9 @@
 Tests for TSMOM overlay — data classes, formation returns, volatility scaling,
 signal computation, portfolio construction, and backtester.
 """
-import sys
-import os
 import json
 import numpy as np
 import pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from datetime import datetime, timedelta

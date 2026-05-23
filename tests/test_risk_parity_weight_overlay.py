@@ -4,11 +4,9 @@ Tests for risk_parity_weight_overlay.py — constants, RPWeightOverlay dataclass
 realized volatility calculation, risk parity overlay calculation, and CLI.
 """
 import sys
-import os
 import json
 import numpy as np
 import pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from pathlib import Path

@@ -4,8 +4,6 @@ Tests for tsmom_integration.py — TSMOMSignalAdapter confidence calculation,
 signal generation, portfolio signals, allocation deltas, and convenience function.
 """
 import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import patch, MagicMock

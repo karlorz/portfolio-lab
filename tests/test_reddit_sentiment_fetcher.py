@@ -12,8 +12,6 @@ from unittest.mock import Mock, patch, MagicMock
 import io
 
 # Import module under test
-import sys
-sys.path.insert(0, '/root/projects/portfolio-lab')
 from src.data.reddit_sentiment_fetcher import (
     RedditSentimentFetcher,
     RedditTickerMetrics,
