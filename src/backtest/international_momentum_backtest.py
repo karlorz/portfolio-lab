@@ -94,7 +94,9 @@ class InternationalMomentumBacktester:
 
         # Use production InternationalMomentumGenerator.determine_signal_type
         # (static method) for the core signal logic (thresholds, confidence).
-        signal_type, confidence = InternationalMomentumGenerator.determine_signal_type(efa_vs_spy, 0.0)
+        # NOTE: EEM data is not available in prices.json, so eem_vs_spy=0.0
+        # disables the EEM_LEAD branch. This backtest only validates EFA signals.
+        signal_type, confidence = InternationalMomentumGenerator.determine_signal_type(efa_vs_spy, eem_vs_spy=0.0)
 
         # Map SignalType to backtest return format
         if signal_type in (SignalType.EFA_LEAD, SignalType.EEM_LEAD):

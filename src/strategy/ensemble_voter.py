@@ -66,12 +66,12 @@ class Regime(Enum):
 
 class SignalSource(Enum):
     """Available signal sources."""
-    MULTI_SPEED_MOM = "multi_speed_momentum"  # v2.56 Multi-speed
-    CROSS_ASSET_RV = "cross_asset_rv"         # v5.71 Cross-asset relative value
-    INTERNATIONAL_MOMENTUM = "international_momentum"  # v3.13 International equity momentum
-    ALTERNATIVE_DATA = "alternative_data"  # v9.00 Alternative data signal (SEC EDGAR, NewsAPI, jobs)
-    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # v8.09 Cross-asset regime arbitrage
-    UNIFIED_OVERLAY = "unified_overlay"       # v4.90 (ref'd by orchestrator_ensemble_bridge)
+    MULTI_SPEED_MOM = "multi_speed_momentum"  # Multi-speed momentum
+    CROSS_ASSET_RV = "cross_asset_rv"         # Cross-asset relative value
+    INTERNATIONAL_MOMENTUM = "international_momentum"  # International equity momentum
+    ALTERNATIVE_DATA = "alternative_data"  # Alternative data signal (SEC EDGAR, NewsAPI, jobs)
+    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # Cross-asset regime arbitrage
+    UNIFIED_OVERLAY = "unified_overlay"       # Unified overlay (ref'd by orchestrator_ensemble_bridge)
 
 
 @dataclass
@@ -122,11 +122,7 @@ class EnsembleVote:
 
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
-# v9.19: Removed TSFM_MOMENTUM and DURATION_REGIME (no data feeds in collect_signals).
-# v9.23: Capped MULTI_SPEED_MOM at 50% to reduce single-point-of-failure.
-# v9.26: Reduced MSM from 50% to 25%, redistributed to ALT_DATA and INTL_MOM.
-# v9.35: Reduced MSM from 21% to 10% (net-negative -0.012 Sharpe per v9.24).
-#        Redistributed excess to ALT_DATA (+0.015 Sharpe) and INTL_MOM (+0.02 Sharpe).
+# MSM disabled (net-negative -0.012 Sharpe), weight redistributed to ALT_DATA and INTL_MOM.
 # Weights sum=1.0 per regime.
 REGIME_WEIGHTS = {
     Regime.NORMAL: {

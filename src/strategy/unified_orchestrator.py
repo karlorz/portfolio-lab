@@ -162,7 +162,7 @@ class UnifiedOrchestrator:
         "eth": (0.0, 0.02),
     }
 
-    # v9.15: Overlay weights — vixy added, collar & vixy share hedge budget
+    # Overlay weights — vixy added, collar & vixy share hedge budget
     OVERLAY_WEIGHTS = {
         "collar": 0.20,
         "crypto": 0.15,
@@ -172,7 +172,7 @@ class UnifiedOrchestrator:
         # Remaining 25% is base passive allocation
     }
 
-    # v9.15: VIX thresholds for overlay activation
+    # VIX thresholds for overlay activation
     VIX_COLLAR_MAX = 30.0         # Collar disabled above VIX 30 (cost prohibitive)
     VIX_VIXY_MIN = 20.0           # VIXY hedge starts at VIX 20
     VIX_CRISIS = 40.0             # Collar freeze threshold
@@ -224,7 +224,7 @@ class UnifiedOrchestrator:
         contributions = []
         vix_level = self._fetch_vix_level()
 
-        # ── Premium-cost overlay conflict reduction (v9.15) ────────
+        # ── Premium-cost overlay conflict reduction ────────
         # Determine which hedges are appropriate based on VIX level
         collar_crisis = vix_level >= self.VIX_CRISIS
         vixy_active = vix_level >= self.VIX_VIXY_MIN
@@ -255,7 +255,7 @@ class UnifiedOrchestrator:
 
         # 1. Collar Overlay (v4.60)
         try:
-            # v9.15: Use live data instead of hardcoded spot/vix
+            # Use live data instead of hardcoded spot/vix
             collar = generate_collar_signal(spot=None, vix=None)
             if collar.is_valid and collar_status != "disabled":
                 spy_shift = -(collar.strikes.net_premium / collar.underlying_price) if collar.underlying_price > 0 else 0
@@ -275,7 +275,7 @@ class UnifiedOrchestrator:
         except Exception as e:
             logger.warning(f"Collar overlay unavailable: {e}")
 
-        # 2. VIXY Hedge Overlay (v7.04) — v9.15: integrated into orchestrator
+        # 2. VIXY Hedge Overlay — integrated into orchestrator
         if _HAS_VIXY and vixy_status != "disabled":
             try:
                 assert VIXYHedgeSizer is not None  # _HAS_VIXY guarantees this
@@ -302,11 +302,11 @@ class UnifiedOrchestrator:
             except Exception as e:
                 logger.warning(f"VIXY overlay unavailable: {e}")
 
-        # 3. Crypto Tactical (v4.70) — v9.15: momentum threshold check
+        # 3. Crypto Tactical — momentum threshold check
         try:
             crypto = generate_crypto_signal()
             if crypto.is_valid:
-                # v9.15: Only activate when 6m momentum > 0%
+                # Only activate when 6m momentum > 0%
                 btc_mom = getattr(crypto.btc_signal, 'momentum_6m', 0)
                 crypto_has_momentum = btc_mom > 0.0 if btc_mom is not None else False
                 crypto_status = "active" if (crypto.confidence > 50 and crypto_has_momentum) else "suppressed"
@@ -485,7 +485,7 @@ class UnifiedOrchestrator:
             if c.status != "disabled"
         )
 
-        # v9.15: Include VIX info in recommendation
+        # Include VIX info in recommendation
         vix_level = self._fetch_vix_level()
 
         return UnifiedRecommendation(

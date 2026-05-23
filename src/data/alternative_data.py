@@ -223,9 +223,8 @@ def init_database():
             UNIQUE(ticker, quarter)
         )
     """)
-    
-    conn.commit()
-    conn.close()
+
+    # Context manager handles commit and close
 
 # ---------------------------------------------------------------------------
 # Base Adapter
@@ -247,10 +246,6 @@ class AlternativeDataAdapter(ABC):
     def calculate_signal(self, ticker: str, days: int = 30) -> AlternativeDataSignal:
         """Calculate signal from stored data."""
     
-    def _get_db_connection(self) -> sqlite3.Connection:
-        """Get database connection."""
-        return sqlite3.connect(self.db_path)
-
 # ---------------------------------------------------------------------------
 # Satellite Data Adapter
 # ---------------------------------------------------------------------------
@@ -287,28 +282,27 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
         if ticker not in self.RETAIL_TICKERS:
             return []  # No satellite data for non-retail
         
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        # Check if we have recent data
-        cursor.execute("""
-            SELECT ticker, date, parking_occupancy_pct, occupancy_vs_last_year_pct,
-                   store_count, data_quality_score, source
-            FROM satellite_data
-            WHERE ticker = ?
-            AND date >= date('now', ?)
-            ORDER BY date DESC
-        """, (ticker, f'-{days} days'))
+            # Check if we have recent data
+            cursor.execute("""
+                SELECT ticker, date, parking_occupancy_pct, occupancy_vs_last_year_pct,
+                       store_count, data_quality_score, source
+                FROM satellite_data
+                WHERE ticker = ?
+                AND date >= date('now', ?)
+                ORDER BY date DESC
+            """, (ticker, f'-{days} days'))
         
-        rows = cursor.fetchall()
+            rows = cursor.fetchall()
         
-        if not rows:
-            # Generate synthetic data for testing
-            # In production, this would fetch from API
-            rows = self._generate_synthetic_data(ticker, days)
-            self._store_data(rows)
+            if not rows:
+                # Generate synthetic data for testing
+                # In production, this would fetch from API
+                rows = self._generate_synthetic_data(ticker, days)
+                self._store_data(rows)
         
-        conn.close()
         
         return [{
             "ticker": row[0],
@@ -355,18 +349,17 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
     
     def _store_data(self, rows: list[tuple]):
         """Store data in database."""
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.executemany("""
-            INSERT OR REPLACE INTO satellite_data 
-            (ticker, date, parking_occupancy_pct, occupancy_vs_last_year_pct, 
-             store_count, data_quality_score, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, rows)
+            cursor.executemany("""
+                INSERT OR REPLACE INTO satellite_data 
+                (ticker, date, parking_occupancy_pct, occupancy_vs_last_year_pct, 
+                 store_count, data_quality_score, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, rows)
         
-        conn.commit()
-        conn.close()
+            conn.commit()
     
     def calculate_signal(self, ticker: str, days: int = 30) -> AlternativeDataSignal:
         """Calculate satellite-based revenue signal."""
@@ -470,23 +463,22 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
     
     def _store_signal(self, signal: AlternativeDataSignal):
         """Store signal in database."""
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.execute("""
-            INSERT INTO alt_data_signals 
-            (ticker, source, signal_type, score, confidence, raw_value, 
-             period_days, z_score, percentile, trend_direction, data_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            signal.ticker, signal.source, signal.signal_type,
-            signal.score, signal.confidence, signal.raw_value,
-            signal.period_days, signal.z_score, signal.percentile,
-            signal.trend_direction, signal.data_timestamp
-        ))
+            cursor.execute("""
+                INSERT INTO alt_data_signals 
+                (ticker, source, signal_type, score, confidence, raw_value, 
+                 period_days, z_score, percentile, trend_direction, data_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                signal.ticker, signal.source, signal.signal_type,
+                signal.score, signal.confidence, signal.raw_value,
+                signal.period_days, signal.z_score, signal.percentile,
+                signal.trend_direction, signal.data_timestamp
+            ))
         
-        conn.commit()
-        conn.close()
+            conn.commit()
 
 # ---------------------------------------------------------------------------
 # Credit Card Data Adapter
@@ -515,26 +507,25 @@ class CreditCardAdapter(AlternativeDataAdapter):
         if ticker not in self.CONSUMER_TICKERS:
             return []
         
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT ticker, date, spending_growth_yoy, spending_growth_mom,
-                   transaction_volume_index, avg_ticket_size, category_rank_pct,
-                   data_quality_score, source
-            FROM credit_card_data
-            WHERE ticker = ?
-            AND date >= date('now', ?)
-            ORDER BY date DESC
-        """, (ticker, f'-{days} days'))
+            cursor.execute("""
+                SELECT ticker, date, spending_growth_yoy, spending_growth_mom,
+                       transaction_volume_index, avg_ticket_size, category_rank_pct,
+                       data_quality_score, source
+                FROM credit_card_data
+                WHERE ticker = ?
+                AND date >= date('now', ?)
+                ORDER BY date DESC
+            """, (ticker, f'-{days} days'))
         
-        rows = cursor.fetchall()
+            rows = cursor.fetchall()
         
-        if not rows:
-            rows = self._generate_synthetic_data(ticker, days)
-            self._store_data(rows)
+            if not rows:
+                rows = self._generate_synthetic_data(ticker, days)
+                self._store_data(rows)
         
-        conn.close()
         
         return [{
             "ticker": row[0],
@@ -582,19 +573,18 @@ class CreditCardAdapter(AlternativeDataAdapter):
     
     def _store_data(self, rows: list[tuple]):
         """Store credit card data."""
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.executemany("""
-            INSERT OR REPLACE INTO credit_card_data 
-            (ticker, date, spending_growth_yoy, spending_growth_mom,
-             transaction_volume_index, avg_ticket_size, category_rank_pct,
-             data_quality_score, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
+            cursor.executemany("""
+                INSERT OR REPLACE INTO credit_card_data 
+                (ticker, date, spending_growth_yoy, spending_growth_mom,
+                 transaction_volume_index, avg_ticket_size, category_rank_pct,
+                 data_quality_score, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
         
-        conn.commit()
-        conn.close()
+            conn.commit()
     
     def calculate_signal(self, ticker: str, days: int = 30) -> AlternativeDataSignal:
         """Calculate credit card spending signal."""
@@ -694,23 +684,22 @@ class CreditCardAdapter(AlternativeDataAdapter):
     
     def _store_signal(self, signal: AlternativeDataSignal):
         """Store signal."""
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.execute("""
-            INSERT INTO alt_data_signals 
-            (ticker, source, signal_type, score, confidence, raw_value, 
-             period_days, z_score, percentile, trend_direction, data_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            signal.ticker, signal.source, signal.signal_type,
-            signal.score, signal.confidence, signal.raw_value,
-            signal.period_days, signal.z_score, signal.percentile,
-            signal.trend_direction, signal.data_timestamp
-        ))
+            cursor.execute("""
+                INSERT INTO alt_data_signals 
+                (ticker, source, signal_type, score, confidence, raw_value, 
+                 period_days, z_score, percentile, trend_direction, data_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                signal.ticker, signal.source, signal.signal_type,
+                signal.score, signal.confidence, signal.raw_value,
+                signal.period_days, signal.z_score, signal.percentile,
+                signal.trend_direction, signal.data_timestamp
+            ))
         
-        conn.commit()
-        conn.close()
+            conn.commit()
 
 # ---------------------------------------------------------------------------
 # Supply Chain Adapter
@@ -739,25 +728,24 @@ class SupplyChainAdapter(AlternativeDataAdapter):
         if ticker not in self.SUPPLY_CHAIN_TICKERS:
             return []
         
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT ticker, date, container_throughput_index, inventory_days_coverage,
-                   supplier_lead_time_days, shipping_cost_index, data_quality_score, source
-            FROM supply_chain_data
-            WHERE ticker = ?
-            AND date >= date('now', ?)
-            ORDER BY date DESC
-        """, (ticker, f'-{days} days'))
+            cursor.execute("""
+                SELECT ticker, date, container_throughput_index, inventory_days_coverage,
+                       supplier_lead_time_days, shipping_cost_index, data_quality_score, source
+                FROM supply_chain_data
+                WHERE ticker = ?
+                AND date >= date('now', ?)
+                ORDER BY date DESC
+            """, (ticker, f'-{days} days'))
         
-        rows = cursor.fetchall()
+            rows = cursor.fetchall()
         
-        if not rows:
-            rows = self._generate_synthetic_data(ticker, days)
-            self._store_data(rows)
+            if not rows:
+                rows = self._generate_synthetic_data(ticker, days)
+                self._store_data(rows)
         
-        conn.close()
         
         return [{
             "ticker": row[0],
@@ -795,18 +783,17 @@ class SupplyChainAdapter(AlternativeDataAdapter):
     
     def _store_data(self, rows: list[tuple]):
         """Store supply chain data."""
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.executemany("""
-            INSERT OR REPLACE INTO supply_chain_data 
-            (ticker, date, container_throughput_index, inventory_days_coverage,
-             supplier_lead_time_days, shipping_cost_index, data_quality_score, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
+            cursor.executemany("""
+                INSERT OR REPLACE INTO supply_chain_data 
+                (ticker, date, container_throughput_index, inventory_days_coverage,
+                 supplier_lead_time_days, shipping_cost_index, data_quality_score, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
         
-        conn.commit()
-        conn.close()
+            conn.commit()
     
     def calculate_signal(self, ticker: str, days: int = 30) -> AlternativeDataSignal:
         """Calculate supply chain signal."""
@@ -903,23 +890,22 @@ class SupplyChainAdapter(AlternativeDataAdapter):
     
     def _store_signal(self, signal: AlternativeDataSignal):
         """Store signal."""
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.execute("""
-            INSERT INTO alt_data_signals 
-            (ticker, source, signal_type, score, confidence, raw_value, 
-             period_days, z_score, percentile, trend_direction, data_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            signal.ticker, signal.source, signal.signal_type,
-            signal.score, signal.confidence, signal.raw_value,
-            signal.period_days, signal.z_score, signal.percentile,
-            signal.trend_direction, signal.data_timestamp
-        ))
+            cursor.execute("""
+                INSERT INTO alt_data_signals 
+                (ticker, source, signal_type, score, confidence, raw_value, 
+                 period_days, z_score, percentile, trend_direction, data_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                signal.ticker, signal.source, signal.signal_type,
+                signal.score, signal.confidence, signal.raw_value,
+                signal.period_days, signal.z_score, signal.percentile,
+                signal.trend_direction, signal.data_timestamp
+            ))
         
-        conn.commit()
-        conn.close()
+            conn.commit()
 
 # ---------------------------------------------------------------------------
 # Main Client

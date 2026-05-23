@@ -41,7 +41,7 @@ if _ML_ENABLED:
 else:
     from .base_agent import torch, nn
 
-# v2.71: Scheduler components (src/execution/ removed v977)
+# Scheduler components
 SCHEDULER_AVAILABLE = False
 
 
@@ -163,7 +163,7 @@ class ExecutionAgent(BaseAgent):
         self.network = ExecutionNetwork(obs_dim, action_dim, hidden_dim).to(device)
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=3e-4)
         
-        # v2.71: Initialize scheduler components
+        # Initialize scheduler components
         self.use_scheduler = use_scheduler and SCHEDULER_AVAILABLE
         self.scheduler = None
         self.cost_model = None
@@ -310,7 +310,7 @@ class ExecutionAgent(BaseAgent):
             urgency = torch.clamp(urgency + noise, 0, 1)
             confidence = torch.clamp(confidence + torch.randn_like(confidence) * 0.05, 0, 1)
         
-        # v2.71: Check for scheduled execution opportunity
+        # Check for scheduled execution opportunity
         scheduled_time = None
         cost_improvement = 0.0
         if self.use_scheduler and self.scheduler:
@@ -330,7 +330,7 @@ class ExecutionAgent(BaseAgent):
                 'style_value': style_value,
                 'spread_proxy': float(features[self.PRICE_HISTORY_LEN]),
                 'liquidity_score': float(features[self.PRICE_HISTORY_LEN + 5]),
-                # v2.71 additions
+                # Scheduled execution additions
                 'scheduled_time': scheduled_time.isoformat() if scheduled_time else None,
                 'cost_improvement_bps': cost_improvement,
                 'scheduler_active': self.use_scheduler
@@ -351,7 +351,7 @@ class ExecutionAgent(BaseAgent):
                 'style_value': style_value,
                 'confidence': float(confidence.squeeze()),
                 'liquidity': float(features[self.PRICE_HISTORY_LEN + 5]),
-                # v2.71 additions
+                # Scheduled execution additions
                 'scheduled_time': scheduled_time.isoformat() if scheduled_time else None,
                 'cost_improvement_bps': cost_improvement,
                 'scheduler_active': self.use_scheduler
@@ -429,7 +429,7 @@ class ExecutionAgent(BaseAgent):
             'mean_slice': float(torch.mean(0.1 + slice_frac * 0.4))
         }
     
-    # v2.71: Scheduling methods for intraday seasonality optimization
+    # Scheduling methods for intraday seasonality optimization
     def _check_scheduling(
         self, 
         urgency: float, 

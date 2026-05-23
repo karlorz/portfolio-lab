@@ -53,7 +53,7 @@ from src.paths import DATA_DIR
 # Existing module imports
 from src.data.alternative_data import AlternativeDataClient
 
-# New strategy adapters (v2.52-v2.58) - lazy import to avoid circular dependency
+# New strategy adapters - lazy import to avoid circular dependency
 # These are imported in SignalIntegrator.__init__()
 
 # ---------------------------------------------------------------------------
@@ -69,10 +69,10 @@ BASE_WEIGHTS = {
     "macro": 0.11,
     "quality": 0.08,
     "sentiment": 0.08,
-    "ai_agent": 0.05,        # v2.51 MARL controller weight
+    "ai_agent": 0.05,        # MARL controller weight
     "tsmom": 0.10,
     "fed_policy": 0.08,
-    "hmm_regime": 0.05,      # v2.53 HMM regime weight
+    "hmm_regime": 0.05,      # HMM regime weight
     "multi_speed": 0.05,     # health 0.55 — reduced from 0.11 (below viability)
     "risk_parity": 0.10,
     "network_momentum": 0.09,
