@@ -82,15 +82,15 @@ class SmartRebalanceGate:
             if df.empty:
                 return 0.30
 
-            for idx, row in df.iterrows():
+            for row in df.itertuples():
                 self._vpin_engine.process_bar(
                     symbol=symbol,
-                    timestamp=idx if isinstance(idx, datetime) else datetime.now(),
-                    o=row.get('open', 0),
-                    h=row.get('high', 0),
-                    l=row.get('low', 0),
-                    c=row.get('close', 0),
-                    v=row.get('volume', 0),
+                    timestamp=row.Index if isinstance(row.Index, datetime) else datetime.now(),
+                    o=getattr(row, 'open', 0),
+                    h=getattr(row, 'high', 0),
+                    l=getattr(row, 'low', 0),
+                    c=getattr(row, 'close', 0),
+                    v=getattr(row, 'volume', 0),
                 )
 
             vpin = self._vpin_engine.calculate_vpin(symbol)

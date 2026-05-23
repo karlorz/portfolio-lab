@@ -554,21 +554,21 @@ def backtest_vpin(symbols: List[str], days: int = 30) -> Dict[str, Any]:
         if len(df) == 0:
             continue
         
-        for idx, row in df.iterrows():
+        for row in df.itertuples():
             engine.process_bar(
                 symbol=symbol,
-                timestamp=idx if isinstance(idx, datetime) else datetime.now(),
-                o=row.get('open', 0),
-                h=row.get('high', 0),
-                l=row.get('low', 0),
-                c=row.get('close', 0),
-                v=row.get('volume', 0)
+                timestamp=row.Index if isinstance(row.Index, datetime) else datetime.now(),
+                o=getattr(row, 'open', 0),
+                h=getattr(row, 'high', 0),
+                l=getattr(row, 'low', 0),
+                c=getattr(row, 'close', 0),
+                v=getattr(row, 'volume', 0)
             )
-            
+
             vpin = engine.calculate_vpin(symbol)
             if vpin:
                 results[symbol]['vpins'].append(vpin)
-                results[symbol]['timestamps'].append(idx)
+                results[symbol]['timestamps'].append(row.Index)
     
     # Calculate statistics
     stats = {}
