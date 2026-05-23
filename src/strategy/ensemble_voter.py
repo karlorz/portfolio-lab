@@ -638,116 +638,179 @@ class EnsembleVoter:
         regime: Optional[Regime] = None,
         regime_confidence: Optional[float] = None
     ) -> EnsembleVote:
+        """Compute ensemble vote with regime-dependent weighting.
+
+        Delegates to sub-methods for each weighting phase:
+        1. _resolve_inputs — resolve readings/regime/confidence defaults
+        2. _apply_regime_gating — zero out signals net-negative in this regime
+        3. _apply_adaptive_weights — attribution-based weight adjustment
+        4. _apply_health_weights — reduce weight for poor health scores
+        5. _apply_turnover_validation — turnover + basis-pursuit + regret-weighted
+        6. _compute_consensus — weighted consensus, agreement, asset biases, action
+        7. _persist_vote — save vote and persist regret state
         """
-        Compute ensemble vote with regime-dependent weighting.
-        """
+        readings, regime, regime_confidence = self._resolve_inputs(
+            readings, regime, regime_confidence
+        )
+
+        weights = self.get_blended_weights(regime.name)
+        weights = self._apply_regime_gating(weights, regime.name)
+        weights = self._apply_adaptive_weights(weights, regime)
+        weights = self._apply_health_weights(weights)
+        weights = self._apply_turnover_validation(weights, readings, regime)
+
+        # Apply weights to readings
+        weighted_signals = self._apply_weights_to_readings(readings, weights)
+
+        if not weighted_signals:
+            return EnsembleVote(
+                timestamp=str(datetime.now()),
+                regime=regime,
+                regime_confidence=regime_confidence,
+                num_sources=0,
+                weighted_consensus=0.0,
+                agreement_ratio=0.0,
+                equity_bias=0.0,
+                duration_bias=0.0,
+                gold_bias=0.0,
+                action="neutral",
+                confidence=0.0,
+                reasoning="No signals available",
+                source_votes=[]
+            )
+
+        consensus_result = self._compute_consensus(weighted_signals, regime, regime_confidence)
+        vote = self._build_vote(weighted_signals, consensus_result, regime, regime_confidence)
+        self._persist_vote(vote, consensus_result.weighted_consensus)
+
+        return vote
+
+    def _resolve_inputs(
+        self,
+        readings: Optional[Dict[SignalSource, SignalReading]],
+        regime: Optional[Regime],
+        regime_confidence: Optional[float],
+    ) -> Tuple[Dict[SignalSource, SignalReading], Regime, float]:
+        """Resolve default readings, regime, and confidence."""
         if readings is None:
-            # Detect regime first so collect_signals can skip zero-weight sources
             if regime is None:
                 regime, regime_confidence = self.detect_regime()
             readings = self.current_readings or self.collect_signals(regime=regime)
 
         if regime is None:
             regime, regime_confidence = self.detect_regime()
-        
+
         if regime_confidence is None:
             regime_confidence = 0.5
-        
+
         self.current_regime = regime
         self.current_regime_confidence = regime_confidence
+        return readings, regime, regime_confidence
 
-        # Get weights for regime (blended with bandit if available)
-        weights = self.get_blended_weights(regime.name)
-
-        # Apply regime gating — zero out signals that are net-negative in this regime
+    def _apply_regime_gating(
+        self, weights: Dict, regime_name: str
+    ) -> Dict:
+        """Apply regime gating — zero out signals that are net-negative in this regime."""
         if hasattr(self, 'regime_gate') and self.regime_gate is not None:
-            weights = self.regime_gate.filter_weights(weights, regime.name)
-            # Renormalize so weights sum to 1.0
+            weights = self.regime_gate.filter_weights(weights, regime_name)
             total = sum(weights.values())
             if total > 0:
                 weights = {k: v / total for k, v in weights.items()}
-        
-        # Apply adaptive ensemble weighting (v6.09) if available
+        return weights
+
+    def _apply_adaptive_weights(
+        self, weights: Dict, regime: Regime
+    ) -> Dict:
+        """Apply adaptive ensemble weighting (v6.09) if attribution data is fresh enough."""
         try:
             from src.strategy.adaptive_ensemble_weights import AdaptiveEnsembleWeights
-            
-            # Try to load latest attribution data
+
             attribution_dir = ATTRIBUTION_DIR
             attribution_files = sorted(attribution_dir.glob("attribution_*.json"), reverse=True)
-            
-            if attribution_files:
-                with open(attribution_files[0]) as f:
-                    attribution_data = json.load(f)
-                
-                # Check if attribution is stale (>7 days old)
-                attr_timestamp = attribution_data.get("timestamp", "")
-                if attr_timestamp:
-                    attr_date = attr_timestamp[:10]
-                    days_stale = (datetime.now() - datetime.strptime(attr_date, "%Y-%m-%d")).days
-                else:
-                    days_stale = 999
-                
-                if days_stale <= 7:
-                    # Check if we have enough data points
-                    sources = attribution_data.get("sources", {})
-                    total_readings = sum(s.get("total_readings", 0) for s in sources.values())
-                    num_sources = len(sources)
-                    avg_readings = total_readings / max(num_sources, 1)
-                    
-                    if avg_readings >= 5:  # Minimum average readings to enable adaptive
-                        # Build base weights in string-keyed format
-                        base_str = {k.value: v for k, v in weights.items()}
-                        
-                        adaptive = AdaptiveEnsembleWeights(base_weights=base_str)
-                        adapted = adaptive.update_weights(attribution_data, regime.value)
-                        
-                        # Convert back to enum-keyed dict for EnsembleVoter
-                        adaptive_weights_enum = {}
-                        for source_enum in weights:
-                            source_str = source_enum.value
-                            if source_str in adapted:
-                                adaptive_weights_enum[source_enum] = adapted[source_str]
-                        
-                        if adaptive_weights_enum:
-                            logger.info("Using adaptive ensemble weights for regime=%s", regime.value)
-                            weights = adaptive_weights_enum
+
+            if not attribution_files:
+                return weights
+
+            with open(attribution_files[0]) as f:
+                attribution_data = json.load(f)
+
+            # Check if attribution is stale (>7 days old)
+            attr_timestamp = attribution_data.get("timestamp", "")
+            if attr_timestamp:
+                attr_date = attr_timestamp[:10]
+                days_stale = (datetime.now() - datetime.strptime(attr_date, "%Y-%m-%d")).days
+            else:
+                days_stale = 999
+
+            if days_stale > 7:
+                return weights
+
+            # Check if we have enough data points
+            sources = attribution_data.get("sources", {})
+            total_readings = sum(s.get("total_readings", 0) for s in sources.values())
+            num_sources = len(sources)
+            avg_readings = total_readings / max(num_sources, 1)
+
+            if avg_readings < 5:
+                return weights
+
+            # Build base weights in string-keyed format
+            base_str = {k.value: v for k, v in weights.items()}
+
+            adaptive = AdaptiveEnsembleWeights(base_weights=base_str)
+            adapted = adaptive.update_weights(attribution_data, regime.value)
+
+            # Convert back to enum-keyed dict
+            adaptive_weights_enum = {}
+            for source_enum in weights:
+                source_str = source_enum.value
+                if source_str in adapted:
+                    adaptive_weights_enum[source_enum] = adapted[source_str]
+
+            if adaptive_weights_enum:
+                logger.info("Using adaptive ensemble weights for regime=%s", regime.value)
+                return adaptive_weights_enum
         except Exception as e:
             logger.warning("Could not apply adaptive ensemble weights: %s", e)
-        
-        # Apply health-adjusted weighting (v3.12)
-        # Reduce weight for signals with poor health scores
+        return weights
+
+    def _apply_health_weights(self, weights: Dict) -> Dict:
+        """Apply health-adjusted weighting (v3.12) — reduce weight for poor health scores."""
         try:
             from src.signals.health_tracker import SignalHealthTracker
             health_tracker = SignalHealthTracker()
             health_scores = health_tracker.calculate_all_health_scores()
-            
-            if health_scores:
-                adjusted_weights = {}
-                for source_enum, base_weight in weights.items():
-                    source_str = source_enum.value
-                    if source_str in health_scores:
-                        health = health_scores[source_str]
-                        # Health multiplier: min 0.2, full weight at health >= 0.7
-                        multiplier = max(0.2, min(1.0, health.health_score))
-                        adjusted_weights[source_enum] = base_weight * multiplier
-                        if health.health_score < 0.5:
-                            logger.info("Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f)", source_str, base_weight * 100, adjusted_weights[source_enum] * 100, health.health_score)
-                    else:
-                        adjusted_weights[source_enum] = base_weight  # No health data, use full weight
-                
-                # Normalize to sum to 1.0
-                total = sum(adjusted_weights.values())
-                if total > 0:
-                    weights = {k: v / total for k, v in adjusted_weights.items()}
+
+            if not health_scores:
+                return weights
+
+            adjusted_weights = {}
+            for source_enum, base_weight in weights.items():
+                source_str = source_enum.value
+                if source_str in health_scores:
+                    health = health_scores[source_str]
+                    multiplier = max(0.2, min(1.0, health.health_score))
+                    adjusted_weights[source_enum] = base_weight * multiplier
+                    if health.health_score < 0.5:
+                        logger.info("Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f)", source_str, base_weight * 100, adjusted_weights[source_enum] * 100, health.health_score)
+                else:
+                    adjusted_weights[source_enum] = base_weight
+
+            total = sum(adjusted_weights.values())
+            if total > 0:
+                weights = {k: v / total for k, v in adjusted_weights.items()}
         except Exception as e:
             logger.warning("Could not apply health-adjusted weights: %s", e)
-        
-        # Apply turnover-aware weight validation (v8.01)
-        # Penalizes signals that cause excessive rebalancing
+        return weights
+
+    def _apply_turnover_validation(
+        self, weights: Dict, readings: Dict, regime: Regime
+    ) -> Dict:
+        """Apply turnover-aware weight validation (v8.01) with basis-pursuit and regret-weighted."""
         try:
             from src.strategy.turnover_validator import TurnoverValidator
             turnover_validator = TurnoverValidator()
-            
+
             # Build signal_values dict from current readings
             signal_values = {}
             for source_enum in readings:
@@ -755,80 +818,83 @@ class EnsembleVoter:
                 reading = readings[source_enum]
                 if not np.isnan(reading.value):
                     signal_values[source_str] = reading.value
-            
-            if signal_values:
-                # Build base weights dict from regime weights (string-keyed)
-                base_weights_str = {}
-                for source_enum, w in weights.items():
-                    base_weights_str[source_enum.value] = w
-                
-                # --- v8.02: Basis-Pursuit Signal Selection ---
-                # Prune redundant and near-zero signals via L1 regularization
-                try:
-                    from src.strategy.basis_pursuit_selector import BasisPursuitSelector
-                    bp_selector = BasisPursuitSelector()
-                    bp_result = bp_selector.select_signals(
-                        signal_values, base_weights_str, regime=regime.value
-                    )
-                    base_weights_str = bp_result.active_signals
-                    sparsity_msg = (
-                        f" (sparsity={bp_result.sparsity_ratio:.2f}, "
-                        f"{bp_result.num_pruned} pruned)"
-                        if bp_result.num_pruned > 0
-                        else ""
-                    )
-                    logger.debug("Basis-pursuit selection applied%s", sparsity_msg)
-                except Exception as bp_e:
-                    logger.warning("Could not apply basis-pursuit selection: %s", bp_e)
-                
-                # --- v8.03: Regret-Weighted Adjustment ---
-                # Penalize signals with high regret (covariance with ensemble decision)
-                try:
-                    from src.strategy.regret_weighted_selector import RegretWeightedSelector
-                    rw_selector = RegretWeightedSelector()
-                    # Use persisted previous ensemble decision, defaulting to 0.0
-                    prev_decision = getattr(rw_selector.state, 'last_ensemble_decision', 0.0)
-                    rw_result = rw_selector.adjust_weights(
-                        signal_values, prev_decision, base_weights_str, regime=regime.value
-                    )
-                    base_weights_str = rw_result.adjusted_weights
-                    if rw_result.signals_with_high_regret:
-                        logger.info(
-                            "Regret-adjusted weights: penalized %s (avg_regret=%.3f)",
-                            ', '.join(rw_result.signals_with_high_regret),
-                            rw_result.avg_regret
-                        )
-                except Exception as rw_e:
-                    logger.warning("Could not apply regret-weighted adjustment: %s", rw_e)
-                
-                # Apply turnover adjustment
-                adjusted_str = turnover_validator.get_adjusted_weights(
-                    base_weights_str, signal_values
+
+            if not signal_values:
+                return weights
+
+            # Build base weights dict from regime weights (string-keyed)
+            base_weights_str = {source_enum.value: w for source_enum, w in weights.items()}
+
+            # --- v8.02: Basis-Pursuit Signal Selection ---
+            try:
+                from src.strategy.basis_pursuit_selector import BasisPursuitSelector
+                bp_selector = BasisPursuitSelector()
+                bp_result = bp_selector.select_signals(
+                    signal_values, base_weights_str, regime=regime.value
                 )
-                
-                # Convert back to enum-keyed dict
-                turnover_adjusted = {}
-                for source_enum in weights:
-                    source_str = source_enum.value
-                    if source_str in adjusted_str:
-                        turnover_adjusted[source_enum] = adjusted_str[source_str]
-                    else:
-                        turnover_adjusted[source_enum] = weights[source_enum]
-                
-                # Re-normalize to sum to 1.0
-                total = sum(turnover_adjusted.values())
-                if total > 0:
-                    weights = {k: v / total for k, v in turnover_adjusted.items()}
-                    
-                logger.debug(
-                    "Turnover-adjusted %d signals: %s",
-                    len(signal_values),
-                    ', '.join(f'{s}={turnover_adjusted.get(enum, 0):.4f}' for enum, s in [(e, e.value) for e in weights])
+                base_weights_str = bp_result.active_signals
+                sparsity_msg = (
+                    f" (sparsity={bp_result.sparsity_ratio:.2f}, "
+                    f"{bp_result.num_pruned} pruned)"
+                    if bp_result.num_pruned > 0
+                    else ""
                 )
+                logger.debug("Basis-pursuit selection applied%s", sparsity_msg)
+            except Exception as bp_e:
+                logger.warning("Could not apply basis-pursuit selection: %s", bp_e)
+
+            # --- v8.03: Regret-Weighted Adjustment ---
+            try:
+                from src.strategy.regret_weighted_selector import RegretWeightedSelector
+                rw_selector = RegretWeightedSelector()
+                prev_decision = getattr(rw_selector.state, 'last_ensemble_decision', 0.0)
+                rw_result = rw_selector.adjust_weights(
+                    signal_values, prev_decision, base_weights_str, regime=regime.value
+                )
+                base_weights_str = rw_result.adjusted_weights
+                if rw_result.signals_with_high_regret:
+                    logger.info(
+                        "Regret-adjusted weights: penalized %s (avg_regret=%.3f)",
+                        ', '.join(rw_result.signals_with_high_regret),
+                        rw_result.avg_regret
+                    )
+            except Exception as rw_e:
+                logger.warning("Could not apply regret-weighted adjustment: %s", rw_e)
+
+            # Apply turnover adjustment
+            adjusted_str = turnover_validator.get_adjusted_weights(
+                base_weights_str, signal_values
+            )
+
+            # Convert back to enum-keyed dict
+            turnover_adjusted = {}
+            for source_enum in weights:
+                source_str = source_enum.value
+                if source_str in adjusted_str:
+                    turnover_adjusted[source_enum] = adjusted_str[source_str]
+                else:
+                    turnover_adjusted[source_enum] = weights[source_enum]
+
+            # Re-normalize to sum to 1.0
+            total = sum(turnover_adjusted.values())
+            if total > 0:
+                weights = {k: v / total for k, v in turnover_adjusted.items()}
+
+            logger.debug(
+                "Turnover-adjusted %d signals: %s",
+                len(signal_values),
+                ', '.join(f'{s}={turnover_adjusted.get(enum, 0):.4f}' for enum, s in [(e, e.value) for e in weights])
+            )
         except Exception as e:
             logger.warning("Could not apply turnover-aware weights: %s", e)
-        
-        # Apply weights to readings
+        return weights
+
+    def _apply_weights_to_readings(
+        self,
+        readings: Dict[SignalSource, SignalReading],
+        weights: Dict,
+    ) -> List[SignalReading]:
+        """Assign weights to readings and log predictions for health tracking."""
         weighted_signals = []
         for source, reading in readings.items():
             if source in weights:
@@ -848,30 +914,33 @@ class EnsembleVoter:
         except Exception as e:
             logger.debug("Health tracking log failed: %s", e)
 
-        if not weighted_signals:
-            return EnsembleVote(
-                timestamp=str(datetime.now()),
-                regime=regime,
-                regime_confidence=regime_confidence,
-                num_sources=0,
-                weighted_consensus=0.0,
-                agreement_ratio=0.0,
-                equity_bias=0.0,
-                duration_bias=0.0,
-                gold_bias=0.0,
-                action="neutral",
-                confidence=0.0,
-                reasoning="No signals available",
-                source_votes=[]
-            )
-        
-        # Compute consensus - handle NaN values
+        return weighted_signals
+
+    @dataclass
+    class _ConsensusResult:
+        """Internal intermediate result from consensus computation."""
+        weighted_consensus: float
+        agreement: float
+        equity_bias: float
+        duration_bias: float
+        gold_bias: float
+        action: str
+        action_confidence: float
+
+    def _compute_consensus(
+        self,
+        weighted_signals: List[SignalReading],
+        regime: Regime,
+        regime_confidence: float,
+    ) -> '_ConsensusResult':
+        """Compute weighted consensus, agreement ratio, and asset biases."""
+        # Weighted consensus — handle NaN values
         valid_signals = [
-            (r.value, r.weight) 
-            for r in weighted_signals 
+            (r.value, r.weight)
+            for r in weighted_signals
             if not np.isnan(r.value)
         ]
-        
+
         if valid_signals:
             total_weight = sum(w for _, w in valid_signals)
             if total_weight == 0:
@@ -880,35 +949,35 @@ class EnsembleVoter:
         else:
             weighted_consensus = 0.0
             total_weight = 1.0
-        
+
         # Agreement ratio: % of weighted signals agreeing with consensus
         agreement = sum(
             r.weight for r in weighted_signals
             if np.sign(r.value) == np.sign(weighted_consensus) or abs(r.value) < 0.1
         ) / total_weight
-        
+
         # Asset-specific consensus
         assets = ['SPY', 'TLT', 'GLD']
         asset_biases = {}
-        
+
         for asset in assets:
             asset_signals = [
                 (r.asset_signals.get(asset, 0), r.weight)
                 for r in weighted_signals
                 if r.asset_signals and asset in r.asset_signals and not np.isnan(r.asset_signals.get(asset, np.nan))
             ]
-            
+
             if asset_signals:
                 total_w = sum(w for _, w in asset_signals) or 1.0
                 asset_biases[asset] = sum(v * w for v, w in asset_signals) / total_w
             else:
                 asset_biases[asset] = weighted_consensus  # Fallback
-        
+
         # Determine action
         equity_bias = asset_biases.get('SPY', weighted_consensus)
         duration_bias = asset_biases.get('TLT', 0)
         gold_bias = asset_biases.get('GLD', 0)
-        
+
         if regime == Regime.CRISIS:
             action = "risk_off"
             action_confidence = regime_confidence
@@ -921,34 +990,53 @@ class EnsembleVoter:
         else:
             action = "neutral"
             action_confidence = 0.5
-        
-        # Build reasoning
-        reasons = [
-            f"Regime: {regime.value} (confidence: {regime_confidence:.1%})",
-            f"Sources: {len(weighted_signals)}, Consensus: {weighted_consensus:+.3f}",
-            f"Agreement: {agreement:.1%}",
-            f"Equity bias: {equity_bias:+.3f}, Duration: {duration_bias:+.3f}, Gold: {gold_bias:+.3f}"
-        ]
-        
-        for r in weighted_signals[:3]:
-            reasons.append(f"  {r.source.value}: {r.value:+.3f} (w={r.weight:.2f}, conf={r.confidence:.1%})")
-        
-        vote = EnsembleVote(
-            timestamp=str(datetime.now()),
-            regime=regime,
-            regime_confidence=regime_confidence,
-            num_sources=len(weighted_signals),
+
+        return self._ConsensusResult(
             weighted_consensus=weighted_consensus,
-            agreement_ratio=agreement,
+            agreement=agreement,
             equity_bias=equity_bias,
             duration_bias=duration_bias,
             gold_bias=gold_bias,
             action=action,
-            confidence=action_confidence,
+            action_confidence=action_confidence,
+        )
+
+    def _build_vote(
+        self,
+        weighted_signals: List[SignalReading],
+        consensus: '_ConsensusResult',
+        regime: Regime,
+        regime_confidence: float,
+    ) -> EnsembleVote:
+        """Build EnsembleVote from weighted signals and consensus result."""
+        reasons = [
+            f"Regime: {regime.value} (confidence: {regime_confidence:.1%})",
+            f"Sources: {len(weighted_signals)}, Consensus: {consensus.weighted_consensus:+.3f}",
+            f"Agreement: {consensus.agreement:.1%}",
+            f"Equity bias: {consensus.equity_bias:+.3f}, Duration: {consensus.duration_bias:+.3f}, Gold: {consensus.gold_bias:+.3f}"
+        ]
+
+        for r in weighted_signals[:3]:
+            reasons.append(f"  {r.source.value}: {r.value:+.3f} (w={r.weight:.2f}, conf={r.confidence:.1%})")
+
+        return EnsembleVote(
+            timestamp=str(datetime.now()),
+            regime=regime,
+            regime_confidence=regime_confidence,
+            num_sources=len(weighted_signals),
+            weighted_consensus=consensus.weighted_consensus,
+            agreement_ratio=consensus.agreement,
+            equity_bias=consensus.equity_bias,
+            duration_bias=consensus.duration_bias,
+            gold_bias=consensus.gold_bias,
+            action=consensus.action,
+            confidence=consensus.action_confidence,
             reasoning="\n".join(reasons),
             source_votes=weighted_signals
         )
-        
+
+    def _persist_vote(self, vote: EnsembleVote, weighted_consensus: float) -> None:
+        """Persist ensemble decision for regret-weighted cycle and save vote to DB."""
         # Persist ensemble decision for next regret-weighted cycle (v8.03)
         try:
             from src.strategy.regret_weighted_selector import RegretWeightedSelector
@@ -957,11 +1045,9 @@ class EnsembleVoter:
             rw_selector._save_state()
         except Exception as rw_e:
             logger.debug("Could not persist ensemble decision to regret-weighted state: %s", rw_e)
-        
+
         # Save to DB
         self._save_vote(vote)
-        
-        return vote
     
     def _save_vote(self, vote: EnsembleVote):
         """Save vote to database, including per-source readings (v5.70)."""
