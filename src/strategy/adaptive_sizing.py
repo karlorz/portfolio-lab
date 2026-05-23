@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
 
 import numpy as np
 
@@ -38,14 +38,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 STATE_PATH = DATA_DIR / "adaptive_sizing_state.json"
-
-# ── Base Allocation ──────────────────────────────────────────────────────────
-
-BASE_ALLOCATION = {
-    "SPY": 0.46,
-    "GLD": 0.38,
-    "TLT": 0.16,
-}
 
 # Hard bounds
 HARD_BOUNDS = {

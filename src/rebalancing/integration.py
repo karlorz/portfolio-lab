@@ -11,7 +11,7 @@ Usage:
     gate = SmartRebalanceGate()
     decision = gate.evaluate(
         current_holdings={'SPY': 46000, 'GLD': 38000, 'TLT': 16000},
-        target_allocations={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
+        target_allocations=dict(BASE_ALLOCATION),
         total_value=100000,
     )
     if decision.should_execute:
@@ -21,6 +21,8 @@ Usage:
 
 import json
 import logging
+
+from src.paths import BASE_ALLOCATION
 from datetime import datetime
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
@@ -192,7 +194,7 @@ if __name__ == '__main__':
         # Example check
         result = gate.evaluate(
             current_holdings={'SPY': 52000, 'GLD': 33000, 'TLT': 15000},
-            target_allocations={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
+            target_allocations=dict(BASE_ALLOCATION),
             total_value=100000,
         )
         print(f"Decision: {result.decision}")

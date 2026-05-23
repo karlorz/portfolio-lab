@@ -34,7 +34,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Tuple
 
-from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB
+from src.paths import BASE_ALLOCATION, DATA_DIR, SIGNALS_DIR, MARKET_DB
 from src.signals.calendar_seasonality import get_calendar_modifier
 from src.signals.bond_duration_signal import generate_bond_duration_signal
 from src.signals.collar_signal import generate_collar_signal
@@ -148,8 +148,8 @@ class UnifiedOrchestrator:
     - No negative weights
     """
 
-    BASELINE = {"spy": 0.46, "gld": 0.38, "tlt": 0.16, "ief": 0.0,
-                 "shy": 0.0, "btc": 0.0, "eth": 0.0}
+    BASELINE = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
+    BASELINE.update({"ief": 0.0, "shy": 0.0, "btc": 0.0, "eth": 0.0})
 
     # Hard bounds
     BOUNDS = {
