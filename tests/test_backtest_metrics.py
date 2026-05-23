@@ -13,10 +13,153 @@ import numpy as np
 from pathlib import Path
 
 from src.backtest.metrics import (
+    BacktestConfig, BacktestResult, DailyPrices,
     BacktestMetrics, OverlayMetrics, CrisisReturns,
     compute_metrics, compute_crisis_returns,
     print_metrics_report, save_results_json,
 )
+
+
+class TestBacktestConfig:
+    """Tests for the canonical BacktestConfig dataclass."""
+
+    def test_defaults(self):
+        cfg = BacktestConfig()
+        assert cfg.start_date == "2006-01-01"
+        assert cfg.end_date == "2026-05-15"
+        assert cfg.initial_capital == 100000.0
+        assert cfg.rebalance_frequency_days == 21
+        assert cfg.rebalance_frequency == "monthly"
+        assert cfg.transaction_cost_bps == 10.0
+        assert cfg.extras == {}
+
+    def test_base_weights_are_canonical(self):
+        """Base weights must match BASE_ALLOCATION from src.paths."""
+        cfg = BacktestConfig()
+        from src.paths import BASE_ALLOCATION
+        for key, val in BASE_ALLOCATION.items():
+            assert cfg.base_weights[key] == val
+
+    def test_custom_start_end(self):
+        cfg = BacktestConfig(start_date="2020-01-01", end_date="2024-12-31")
+        assert cfg.start_date == "2020-01-01"
+        assert cfg.end_date == "2024-12-31"
+
+    def test_custom_base_weights(self):
+        cfg = BacktestConfig(base_weights={"SPY": 0.5, "GLD": 0.3, "TLT": 0.2})
+        assert cfg.base_weights["SPY"] == 0.5
+        assert cfg.base_weights["GLD"] == 0.3
+        assert cfg.base_weights["TLT"] == 0.2
+
+    def test_extras_dict(self):
+        cfg = BacktestConfig(extras={"max_shift": 0.05, "lookback": 130})
+        assert cfg.extras["max_shift"] == 0.05
+        assert cfg.extras["lookback"] == 130
+
+    def test_default_extras_is_empty_and_independent(self):
+        """Each instance should get its own extras dict."""
+        cfg1 = BacktestConfig()
+        cfg2 = BacktestConfig()
+        cfg1.extras["foo"] = "bar"
+        assert "foo" not in cfg2.extras
+
+
+class TestDailyPrices:
+    """Tests for the canonical DailyPrices dataclass."""
+
+    def test_required_fields(self):
+        dp = DailyPrices(date="2024-01-01", spy=500.0, gld=180.0, tlt=130.0)
+        assert dp.date == "2024-01-01"
+        assert dp.spy == 500.0
+        assert dp.gld == 180.0
+        assert dp.tlt == 130.0
+        assert dp.vix is None  # Optional
+
+    def test_optional_vix(self):
+        dp = DailyPrices(date="2024-01-01", spy=500, gld=180, tlt=130, vix=18.5)
+        assert dp.vix == 18.5
+
+    def test_optional_crypto(self):
+        dp = DailyPrices(date="2024-01-01", spy=500, gld=180, tlt=130,
+                         btc=42000.0, eth=2200.0)
+        assert dp.btc == 42000.0
+        assert dp.eth == 2200.0
+
+    def test_optional_ief_shy(self):
+        dp = DailyPrices(date="2024-01-01", spy=500, gld=180, tlt=130,
+                         ief=95.0, shy=82.0)
+        assert dp.ief == 95.0
+        assert dp.shy == 82.0
+
+    def test_extras_default_empty(self):
+        dp = DailyPrices(date="2024-01-01", spy=500, gld=180, tlt=130)
+        assert dp.extras == {}
+
+    def test_extras_custom(self):
+        dp = DailyPrices(date="2024-01-01", spy=500, gld=180, tlt=130,
+                         extras={"DBC": 18.5, "VIXY": 12.3})
+        assert dp.extras["DBC"] == 18.5
+
+    def test_all_none_optional_fields(self):
+        dp = DailyPrices(date="2024-01-01", spy=500, gld=180, tlt=130)
+        assert dp.vix is None
+        assert dp.ief is None
+        assert dp.shy is None
+        assert dp.btc is None
+        assert dp.eth is None
+
+
+class TestBacktestResult:
+    """Tests for the canonical BacktestResult dataclass."""
+
+    def test_required_fields_only(self):
+        r = BacktestResult(total_return=10.0, cagr=5.0, volatility=12.0,
+                           sharpe_ratio=0.5, max_drawdown=-15.0)
+        assert r.total_rebalances == 0
+        assert r.total_transaction_costs == 0.0
+        assert r.avg_turnover == 0.0
+        assert r.baseline_sharpe is None
+        assert r.sharpe_improvement is None
+        assert r.extras == {}
+        assert r.crisis_returns is None
+
+    def test_all_fields(self):
+        r = BacktestResult(
+            total_return=50.0, cagr=8.0, volatility=10.0,
+            sharpe_ratio=0.8, max_drawdown=-20.0,
+            total_rebalances=120, total_transaction_costs=500.0,
+            avg_turnover=0.03,
+            baseline_sharpe=0.7, sharpe_improvement=0.1,
+            extras={"custom": "value"},
+            crisis_returns={"2008": -12.0},
+        )
+        assert r.total_rebalances == 120
+        assert r.baseline_sharpe == 0.7
+        assert r.extras["custom"] == "value"
+        assert r.crisis_returns["2008"] == -12.0
+
+    def test_extras_independent_per_instance(self):
+        r1 = BacktestResult(total_return=0, cagr=0, volatility=0,
+                            sharpe_ratio=0, max_drawdown=0)
+        r2 = BacktestResult(total_return=0, cagr=0, volatility=0,
+                            sharpe_ratio=0, max_drawdown=0)
+        r1.extras["key"] = "val"
+        assert "key" not in r2.extras
+
+    def test_crisis_returns_none_vs_empty(self):
+        r_none = BacktestResult(total_return=0, cagr=0, volatility=0,
+                                sharpe_ratio=0, max_drawdown=0)
+        r_empty = BacktestResult(total_return=0, cagr=0, volatility=0,
+                                 sharpe_ratio=0, max_drawdown=0,
+                                 crisis_returns={})
+        assert r_none.crisis_returns is None
+        assert r_empty.crisis_returns == {}
+
+    def test_negative_sharpe_improvement(self):
+        r = BacktestResult(total_return=5.0, cagr=3.0, volatility=12.0,
+                           sharpe_ratio=0.3, max_drawdown=-10.0,
+                           baseline_sharpe=0.5, sharpe_improvement=-0.2)
+        assert r.sharpe_improvement < 0
 
 
 class TestBacktestMetrics:
