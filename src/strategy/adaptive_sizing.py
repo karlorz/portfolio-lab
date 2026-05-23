@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, sqlite_connect
 
 import numpy as np
 
@@ -175,7 +175,7 @@ class AdaptiveSizer:
             import sqlite3
             if MARKET_DB.exists():
                 from src.strategy.evaluator import get_current_regime
-                with sqlite3.connect(str(MARKET_DB)) as conn:
+                with sqlite_connect(str(MARKET_DB)) as conn:
                     regime = get_current_regime(conn)
                 if regime in REGIME_ADJUSTMENTS:
                     return regime, 0.8

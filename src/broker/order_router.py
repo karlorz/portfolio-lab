@@ -18,7 +18,7 @@ from src.broker.alpaca import (
     PaperTradingManager
 )
 
-from src.paths import MARKET_DB, SIGNALS_JSON, DATA_DIR
+from src.paths import MARKET_DB, SIGNALS_JSON, DATA_DIR, sqlite_connect
 
 
 @dataclass
@@ -72,7 +72,7 @@ class OrderRouter:
         try:
             if not os.path.exists(self.db_path):
                 return 0.0
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite_connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",

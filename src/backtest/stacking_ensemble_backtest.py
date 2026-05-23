@@ -51,7 +51,7 @@ MIN_HOLDING_DAYS = 5
 # Monte Carlo trials
 MC_TRIALS = 200
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, sqlite_connect
 
 DEFAULT_CACHE_DB = DATA_DIR / "market.db"
 
@@ -131,7 +131,7 @@ class StackingEnsembleBacktest:
     ) -> Dict[str, Dict[str, float]]:
         prices: Dict[str, Dict[str, float]] = {s: {} for s in symbols}
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 placeholders = ",".join("?" for _ in symbols)
                 cursor = conn.execute(
                     f"""SELECT symbol, date, close FROM prices

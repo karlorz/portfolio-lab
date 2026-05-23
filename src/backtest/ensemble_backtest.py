@@ -25,7 +25,7 @@ from dataclasses import asdict
 from collections import defaultdict
 
 from src.backtest.metrics import BacktestResult
-from src.paths import MARKET_DB
+from src.paths import MARKET_DB, sqlite_connect
 
 from src.signals.integrator import SignalIntegrator
 
@@ -78,7 +78,7 @@ class EnsembleBacktestEngine:
         if not self.db_path.exists():
             return []
             
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""

@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
-from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, WORK_DIR as _WORK_DIR
+from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, WORK_DIR as _WORK_DIR, sqlite_connect
 
 DATA_DIR = _DATA_DIR
 WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
@@ -19,7 +19,7 @@ DB_PATH = DATA_DIR / "market.db"
 
 class ResearchAgent:
     def __init__(self):
-        self.conn = sqlite3.connect(DB_PATH)
+        self.conn = sqlite_connect(DB_PATH)
         self.conn.row_factory = sqlite3.Row
         WORK_DIR.mkdir(parents=True, exist_ok=True)
     

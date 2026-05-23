@@ -33,7 +33,7 @@ from typing import Optional, Dict, List, Tuple
 import numpy as np
 
 from src.backtest.metrics import BacktestResult
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, sqlite_connect
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class BehavioralSentimentBacktest:
         """Load daily close prices for given symbols, indexed by date."""
         prices: Dict[str, Dict[str, float]] = {s: {} for s in symbols}
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 placeholders = ",".join("?" for _ in symbols)
                 cursor = conn.execute(
                     f"""SELECT symbol, date, close FROM prices
@@ -413,7 +413,7 @@ class BehavioralSentimentBacktest:
         buckets = {k: [] for k in ["low", "normal", "elevated", "high", "crisis"]}
 
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 cursor = conn.execute(
                     """SELECT date, close FROM prices
                        WHERE symbol = '^VIX'

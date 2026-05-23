@@ -22,6 +22,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional, List, Tuple
 import numpy as np
+from src.paths import sqlite_connect
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -261,7 +262,7 @@ class BayesianVolPipeline:
         if db_path.exists():
             try:
                 import sqlite3
-                with sqlite3.connect(str(db_path)) as conn:
+                with sqlite_connect(str(db_path)) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         "SELECT close FROM prices WHERE symbol=? ORDER BY date",

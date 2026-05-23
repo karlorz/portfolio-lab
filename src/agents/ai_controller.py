@@ -39,7 +39,7 @@ _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
     import torch
 
-from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION
+from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION, sqlite_connect
 
 from src.agents.agent_graph import AgentGraph
 from src.agents.marl_trainer import MARLTrainer, MarketEnvironment
@@ -171,7 +171,7 @@ class AIController:
         try:
             if not self.db_path.exists():
                 return np.ones(days)
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite_connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT ?",

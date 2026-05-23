@@ -55,7 +55,7 @@ else:
     import sys as _sys
     _sys.modules.setdefault("xgboost", _stub_xgb)
 
-from src.paths import PROJECT_ROOT
+from src.paths import PROJECT_ROOT, sqlite_connect
 
 from src.signals.stacking_feature_engine import StackingFeatureEngine, SignalSource, Signal, RegimeContext, HistoricalAccuracy
 
@@ -176,7 +176,7 @@ class StackingTrainer:
             logger.warning("Database not found at %s, using synthetic data", db_path)
             return self._generate_synthetic_data()
         
-        with sqlite3.connect(db_path) as conn:
+        with sqlite_connect(db_path) as conn:
             cursor = conn.cursor()
 
             # Check if signal_predictions table exists
@@ -651,7 +651,7 @@ class StackingTrainer:
         db_path = Path(PROJECT_ROOT) / self.config.db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         
-        with sqlite3.connect(db_path) as conn:
+        with sqlite_connect(db_path) as conn:
             cursor = conn.cursor()
 
             # Create table if not exists

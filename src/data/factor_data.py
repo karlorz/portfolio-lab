@@ -15,7 +15,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from src.paths import FACTORS_DIR
+from src.paths import FACTORS_DIR, sqlite_connect
 from dataclasses import dataclass, asdict
 import logging
 
@@ -67,7 +67,7 @@ class FactorDataManager:
     
     def _init_database(self):
         """Initialize SQLite database for factor data."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             # Price data table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS factor_prices (
@@ -143,7 +143,7 @@ class FactorDataManager:
             raise ValueError(f"Unknown factor ETF: {symbol}")
         
         count = 0
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             for p in prices:
                 try:
                     conn.execute("""
@@ -173,7 +173,7 @@ class FactorDataManager:
         Returns:
             List of price records
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT * FROM factor_prices 
@@ -238,7 +238,7 @@ class FactorDataManager:
             metrics.get("profitability", 0.5)
         )
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO quality_scores
                 (symbol, date, roe, debt_equity, earnings_stability, profitability, composite_score)
@@ -257,7 +257,7 @@ class FactorDataManager:
     
     def get_quality_scores(self, symbol: str, days: int = 90) -> List[Dict]:
         """Get quality score history for a factor ETF."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT * FROM quality_scores 
@@ -307,7 +307,7 @@ class FactorDataManager:
         if not returns:
             return False
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO factor_performance
                 (symbol, date, return_1d, return_1m, return_3m, return_6m, return_12m, vol_20d)
@@ -418,7 +418,7 @@ def main():
         logger.info("Metadata: %s", manager.metadata_path)
         
     elif args.command == "status":
-        with sqlite3.connect(manager.db_path) as conn:
+        with sqlite_connect(manager.db_path) as conn:
             # Count records
             counts = {}
             for table in ["factor_prices", "quality_scores", "factor_performance"]:

@@ -11,6 +11,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from src.paths import sqlite_connect
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,7 +72,7 @@ class FeaturePipeline:
         
     def _get_connection(self):
         """Get SQLite connection."""
-        return sqlite3.connect(self.db_path)
+        return sqlite_connect(self.db_path)
     
     def _get_price_data(
         self, 

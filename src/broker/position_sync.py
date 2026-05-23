@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from src.broker.alpaca import AlpacaClient
 from src.broker.alpaca import Position as AlpacaPosition
 
-from src.paths import MARKET_DB, DATA_DIR
+from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class PositionSync:
         if not os.path.exists(self.db_path):
             return {}
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             # Check if positions table exists
@@ -236,7 +236,7 @@ class PositionSync:
             broker_positions = self.get_broker_positions()
             
             # Ensure positions table exists
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite_connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("""

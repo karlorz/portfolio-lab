@@ -17,7 +17,7 @@ from typing import Dict, Optional, List
 from pathlib import Path
 import logging
 
-from src.paths import MARKET_DB
+from src.paths import MARKET_DB, sqlite_connect
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -92,7 +92,7 @@ class RedditSentimentFetcher:
     
     def _init_db(self):
         """Initialize SQLite cache tables"""
-        with sqlite3.connect(self.cache_db) as conn:
+        with sqlite_connect(self.cache_db) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS reddit_sentiment_cache (
                     id INTEGER PRIMARY KEY,
@@ -343,7 +343,7 @@ class RedditSentimentFetcher:
     def _get_cached_sentiment(self) -> Optional[RedditSentimentSnapshot]:
         """Get cached sentiment if fresh"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 cursor = conn.execute("""
                     SELECT data_json, created_at 
                     FROM reddit_sentiment_cache 
@@ -387,7 +387,7 @@ class RedditSentimentFetcher:
     def _cache_sentiment(self, snapshot: RedditSentimentSnapshot):
         """Cache sentiment snapshot"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 conn.execute("""
                     INSERT INTO reddit_sentiment_cache (timestamp, data_json)
                     VALUES (?, ?)
@@ -409,7 +409,7 @@ class RedditSentimentFetcher:
     def _store_mentions(self, posts: List[Dict]):
         """Store individual mentions for historical analysis"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 for post in posts:
                     text = f"{post['title']} {post['selftext']}"
                     tickers = self._extract_tickers(text)
@@ -437,7 +437,7 @@ class RedditSentimentFetcher:
     def get_history(self, days: int = 7) -> List[Dict]:
         """Get historical sentiment data"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 cursor = conn.execute("""
                     SELECT timestamp, data_json
                     FROM reddit_sentiment_cache
@@ -459,7 +459,7 @@ class RedditSentimentFetcher:
     def get_ticker_history(self, ticker: str, days: int = 7) -> List[Dict]:
         """Get historical mentions for a specific ticker"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 cursor = conn.execute("""
                     SELECT ticker, subreddit, post_title, sentiment_score,
                            upvotes, comment_count, created_utc, fetched_at

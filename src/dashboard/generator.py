@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import numpy as np
 
-from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB
+from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ DB_PATH = MARKET_DB
 class DashboardGenerator:
     def __init__(self):
         PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(DB_PATH)
+        self.conn = sqlite_connect(DB_PATH)
         self.conn.row_factory = sqlite3.Row
     
     def generate_performance_json(self) -> Path:

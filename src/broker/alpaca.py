@@ -11,7 +11,7 @@ from datetime import datetime
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from src.paths import MARKET_DB, DATA_DIR
+from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ class AlpacaClient:
         try:
             if not os.path.exists(db_path):
                 return 0.0
-            with sqlite3.connect(db_path) as conn:
+            with sqlite_connect(db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",

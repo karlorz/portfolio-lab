@@ -18,7 +18,7 @@ from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 import logging
 
-from src.paths import MARKET_DB
+from src.paths import MARKET_DB, sqlite_connect
 
 # Import Reddit sentiment fetcher (v2.70 Phase 4)
 try:
@@ -145,7 +145,7 @@ class BehavioralSentimentFetcher:
     
     def _init_cache(self):
         """Initialize SQLite cache table"""
-        with sqlite3.connect(self.cache_db) as conn:
+        with sqlite_connect(self.cache_db) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS behavioral_sentiment_cache (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,7 +161,7 @@ class BehavioralSentimentFetcher:
     def _get_cached(self) -> Optional[BehavioralSentimentSnapshot]:
         """Retrieve cached sentiment data"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 cursor = conn.execute(
                     """SELECT data, created_at FROM behavioral_sentiment_cache 
                        ORDER BY created_at DESC LIMIT 1"""
@@ -183,7 +183,7 @@ class BehavioralSentimentFetcher:
     def _save_to_cache(self, snapshot: BehavioralSentimentSnapshot):
         """Save sentiment data to cache"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 conn.execute("""
                     INSERT INTO behavioral_sentiment_cache 
                     (timestamp, data, composite_score, signal_type)
@@ -553,7 +553,7 @@ class BehavioralSentimentFetcher:
     def get_historical_sentiment(self, days: int = 30) -> List[Dict]:
         """Retrieve historical sentiment data"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 cursor = conn.execute(
                     """SELECT data, created_at FROM behavioral_sentiment_cache
                        WHERE created_at >= date('now', ?)

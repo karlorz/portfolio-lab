@@ -20,7 +20,7 @@ import math
 import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from src.paths import BASE_ALLOCATION, DATA_DIR
+from src.paths import BASE_ALLOCATION, DATA_DIR, sqlite_connect
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
@@ -62,7 +62,7 @@ class CombinedOverlayBacktest:
             try:
                 import sqlite3
                 import pandas as pd
-                with sqlite3.connect(str(db_path)) as conn:
+                with sqlite_connect(str(db_path)) as conn:
                     df = pd.read_sql_query(
                         "SELECT date, symbol, close FROM prices ORDER BY date",
                         conn

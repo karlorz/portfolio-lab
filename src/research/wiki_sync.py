@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR
+from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, sqlite_connect
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class WikiSync:
     def __init__(self):
         RAW_DIR.mkdir(parents=True, exist_ok=True)
         (WIKI_DIR / "compound").mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(DB_PATH)
+        self.conn = sqlite_connect(DB_PATH)
         self.conn.row_factory = sqlite3.Row
     
     def hash_file(self, content: str) -> str:

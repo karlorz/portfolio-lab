@@ -28,7 +28,7 @@ from src.backtest.metrics import (
     BacktestResult,
     save_results_json,
 )
-from src.paths import DATA_DIR, MARKET_DB
+from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -148,7 +148,7 @@ def load_yield_spread_history() -> pd.DataFrame:
 
     # Try database first
     if MARKET_DB.exists():
-        with sqlite3.connect(MARKET_DB) as conn:
+        with sqlite_connect(MARKET_DB) as conn:
             cursor = conn.cursor()
 
             # Check if we have yield data

@@ -24,7 +24,7 @@ import aiohttp
 import sqlite3
 from pathlib import Path
 
-from src.paths import OPTIONS_CACHE_DIR, MARKET_DB
+from src.paths import OPTIONS_CACHE_DIR, MARKET_DB, sqlite_connect
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -314,7 +314,7 @@ class OptionsChainFetcher:
         try:
             db_path = MARKET_DB
             if db_path.exists():
-                with sqlite3.connect(db_path) as conn:
+                with sqlite_connect(db_path) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
@@ -411,7 +411,7 @@ class OptionsChainFetcher:
         """Cache chain to SQLite for historical analysis."""
         cache_file = self.cache_dir / f"{chain.underlying}_options.db"
         
-        with sqlite3.connect(str(cache_file)) as conn:
+        with sqlite_connect(str(cache_file)) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -470,7 +470,7 @@ class OptionsChainCache:
         if not cache_file.exists():
             return []
         
-        with sqlite3.connect(str(cache_file)) as conn:
+        with sqlite_connect(str(cache_file)) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
