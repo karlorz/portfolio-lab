@@ -15,6 +15,7 @@
 |- **Factor rotation is defensive only**: reduces drawdowns, not an alpha generator
 |- **Behavioral sentiment (VIX-proxy) is net-negative**: -0.216 Sharpe, 65.8% false positive rate
 |- **UNIFIED_OVERLAY validated: +0.014 Sharpe vs baseline** — keep current weight (17-21%)
+|- **PyPortfolioOpt finds higher theoretical Sharpe**: Max Sharpe 0.87 (weights 40/34/26), HRP 0.93 (weights 29/28/43) vs champion 0.79 (46/38/16)
 
 ### Active Ensemble Signals (6)
 MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB, UNIFIED_OVERLAY (all 6 active)
