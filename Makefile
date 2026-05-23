@@ -108,12 +108,22 @@ test-ml:
 
 # ── Data Pipeline ────────────────────────────────────────────────────
 
+# Retry up to 2x on bun SIGTRAP/SIGABRT (intermittent crash in cron context)
 .PHONY: data
 data:
 	@echo "=== Data Pipeline: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && export PATH="$$HOME/.bun/bin:$$PATH" && ulimit -v 3145728 && timeout 300 bun run fetch-data 2>&1 | tee -a $(DATA_DIR)/cron.log; \
-	EXIT=$${PIPESTATUS[0]}; \
+	retries=0; max_retries=2; \
+	while [ $$retries -le $$max_retries ]; do \
+		cd $(PROJECT_DIR) && export PATH="$$HOME/.bun/bin:$$PATH" && timeout 300 bun scripts/fetch-data.ts 2>&1 | tee -a $(DATA_DIR)/cron.log; \
+		EXIT=$${PIPESTATUS[0]}; \
+		if [ $$EXIT -eq 0 ]; then break; fi; \
+		if [ $$EXIT -eq 133 ] || [ $$EXIT -eq 134 ]; then \
+			retries=$$((retries + 1)); \
+			echo "bun SIGTRAP/SIGABRT (exit $$EXIT), retry $$retries/$$max_retries" >> $(DATA_DIR)/cron.log; \
+			sleep 5; \
+		else break; fi; \
+	done; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
