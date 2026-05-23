@@ -102,6 +102,33 @@ class TSMOMSignal:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        value = float(self.vol_scaled_position)
+        is_active = self.signal != 0
+
+        return SignalSnapshot(
+            source="tsmom_overlay",
+            timestamp=self.timestamp,
+            value=value,
+            confidence=min(1.0, abs(self.lookback_return) / 0.15) if self.lookback_return != 0 else 0.0,
+            asset_signals={self.ticker: self.adjustment},
+            regime_fit="all",
+            is_active=is_active,
+            explanation=f"TSMOM: {self.ticker} signal={self.signal}, "
+                        f"adj={self.adjustment:+.1%}, "
+                        f"vol={self.realized_vol:.1%}",
+            metadata={
+                "ticker": self.ticker,
+                "signal": self.signal,
+                "adjustment": self.adjustment,
+                "realized_vol": self.realized_vol,
+                "lookback_return": self.lookback_return,
+            },
+        )
+
 
 @dataclass
 class TSMOMPortfolio:

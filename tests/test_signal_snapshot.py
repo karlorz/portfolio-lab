@@ -758,3 +758,79 @@ class TestAdditionalSignalSnapshots:
         snap = signal.to_signal_snapshot()
         assert snap.value == -0.4  # "avoid"
         assert snap.is_active is True
+
+
+class TestTSMOMSignalSnapshots:
+    """Test to_signal_snapshot() for TSMOM overlay and integration."""
+
+    def test_tsmom_overlay_signal_snapshot(self):
+        """TSMOMSignal.to_signal_snapshot() converts correctly."""
+        from src.signals.tsmom_overlay import TSMOMSignal
+        signal = TSMOMSignal(
+            ticker="SPY", timestamp="2026-05-23T12:00:00",
+            lookback_return=0.12, recent_return=0.02, signal=1,
+            realized_vol=0.15, vol_scaled_position=6.67,
+            base_weight=0.46, adjustment=0.04, target_weight=0.50,
+            lookback_start_price=530.0, lookback_end_price=593.6,
+            formation_days=252,
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "tsmom_overlay"
+        assert snap.value == pytest.approx(6.67)
+        assert snap.is_active is True
+        assert snap.asset_signals["SPY"] == 0.04
+
+    def test_tsmom_overlay_signal_zero(self):
+        """Zero TSMOM signal → inactive."""
+        from src.signals.tsmom_overlay import TSMOMSignal
+        signal = TSMOMSignal(
+            ticker="TLT", timestamp="2026-05-23T12:00:00",
+            lookback_return=-0.01, recent_return=0.0, signal=0,
+            realized_vol=0.12, vol_scaled_position=0.0,
+            base_weight=0.16, adjustment=0.0, target_weight=0.16,
+            lookback_start_price=95.0, lookback_end_price=94.0,
+            formation_days=252,
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.is_active is False
+
+    def test_tsmom_integration_get_signal_snapshot(self):
+        """TSMOMSignalAdapter.get_signal_snapshot() aggregates correctly."""
+        from src.signals.tsmom_integration import TSMOMSignalAdapter
+        from unittest.mock import patch, MagicMock
+
+        # Mock the overlay to return controlled signals
+        mock_spy = MagicMock()
+        mock_spy.adjustment = 0.04
+        mock_spy.signal = 1
+
+        mock_gld = MagicMock()
+        mock_gld.adjustment = -0.02
+        mock_gld.signal = -1
+
+        mock_tlt = MagicMock()
+        mock_tlt.adjustment = 0.0
+        mock_tlt.signal = 0
+
+        adapter = TSMOMSignalAdapter()
+        with patch.object(adapter.overlay, 'compute_signal') as mock_compute, \
+             patch.object(adapter, '_compute_confidence', return_value=0.7):
+            mock_compute.side_effect = lambda t: {
+                "SPY": mock_spy, "GLD": mock_gld, "TLT": mock_tlt,
+            }.get(t)
+            snap = adapter.get_signal_snapshot(tickers=["SPY", "GLD", "TLT"])
+
+        assert snap.source == "tsmom_integration"
+        assert snap.is_active is True
+        assert "SPY" in snap.asset_signals
+
+    def test_tsmom_integration_no_signals(self):
+        """TSMOM integration with no data → inactive snapshot."""
+        from src.signals.tsmom_integration import TSMOMSignalAdapter
+        from unittest.mock import patch
+
+        adapter = TSMOMSignalAdapter()
+        with patch.object(adapter.overlay, 'compute_signal', return_value=None):
+            snap = adapter.get_signal_snapshot(tickers=["SPY", "GLD", "TLT"])
+
+        assert snap.is_active is False

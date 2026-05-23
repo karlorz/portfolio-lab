@@ -20,7 +20,10 @@ Usage:
 """
 
 import sys
+from datetime import datetime
 from typing import Dict, List, Optional
+
+import numpy as np
 
 from src.paths import PROJECT_ROOT
 
@@ -143,6 +146,47 @@ class TSMOMSignalAdapter:
             confidence += clarity * 0.10
         
         return min(1.0, confidence)
+
+    def get_signal_snapshot(self, tickers: List[str] = None):
+        """Generate aggregated SignalSnapshot for ensemble voter consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        tickers = tickers or ["SPY", "GLD", "TLT"]
+        deltas = self.get_allocation_deltas(tickers)
+        signals = {}
+        confidences = []
+        for ticker in tickers:
+            tsmom_signal = self.overlay.compute_signal(ticker)
+            if tsmom_signal is not None:
+                signals[ticker] = tsmom_signal.adjustment
+                confidences.append(self._compute_confidence(tsmom_signal))
+
+        if not signals:
+            return SignalSnapshot(
+                source="tsmom_integration",
+                timestamp=str(datetime.now()),
+                value=0.0,
+                confidence=0.0,
+                is_active=False,
+                explanation="TSMOM: no signals available",
+            )
+
+        avg_value = sum(signals.values()) / len(signals)
+        avg_conf = sum(confidences) / len(confidences) if confidences else 0.5
+
+        return SignalSnapshot(
+            source="tsmom_integration",
+            timestamp=str(datetime.now()),
+            value=float(np.clip(avg_value * 10, -1, 1)),  # Scale adjustments to signal range
+            confidence=avg_conf,
+            asset_signals=deltas,
+            regime_fit="all",
+            is_active=any(v != 0 for v in deltas.values()),
+            explanation=f"TSMOM: avg_adj={avg_value:+.3f}, "
+                        f"assets={list(signals.keys())}, "
+                        f"avg_conf={avg_conf:.3f}",
+            metadata={"deltas": deltas},
+        )
 
 
 def get_tsmom_integrator_result(
