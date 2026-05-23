@@ -39,7 +39,7 @@ from enum import Enum
 import sys
 import logging
 
-from src.paths import DATA_DIR, PRICES_JSON, SIGNALS_DIR, ATTRIBUTION_DIR, BASE_ALLOCATION, PROJECT_ROOT
+from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, PROJECT_ROOT
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -421,60 +421,31 @@ class EnsembleVoter:
 
         readings = {}
 
-        # 1. Multi-Speed Momentum (v2.56)
+        # 1. Multi-Speed Momentum (v2.56) — typed SignalSnapshot bridge
         try:
             from src.signals.multi_speed_momentum import MultiSpeedMomentum
             msm = MultiSpeedMomentum()
-
-            # Get ensemble signals for each asset
-            msm_signals = {}
-            msm_confidences = []
-            for ticker in ['SPY', 'TLT', 'GLD']:
-                try:
-                    sig = msm.get_signal_for_ticker(ticker, date)
-                    if sig is not None:
-                        msm_signals[ticker] = sig["value"]
-                        msm_confidences.append(sig["confidence"])
-                except (ValueError, KeyError, TypeError) as e:
-                    logger.debug(f"MSM ticker {ticker} failed: {e}")
-
-            if msm_signals:
-                avg_signal = sum(msm_signals.values()) / len(msm_signals)
-                avg_confidence = sum(msm_confidences) / len(msm_confidences) if msm_confidences else 0.5
-                readings[SignalSource.MULTI_SPEED_MOM] = SignalReading(
-                    source=SignalSource.MULTI_SPEED_MOM,
-                    timestamp=str(datetime.now()),
-                    value=avg_signal,
-                    confidence=avg_confidence,
-                    weight=0.0,
-                    regime_fit="all",
-                    asset_signals=msm_signals,
-                    explanation=f"Multi-speed momentum: avg_signal={avg_signal:.3f}, avg_conf={avg_confidence:.3f}, assets={list(msm_signals.keys())}"
-                )
+            snapshot = msm.get_signal_snapshot(tickers=['SPY', 'TLT', 'GLD'], date=date)
+            if snapshot.is_active:
+                readings[SignalSource.MULTI_SPEED_MOM] = snapshot.to_signal_reading()
         except ImportError:
             pass
+        except Exception as e:
+            logger.debug(f"Multi-speed momentum unavailable: {e}")
 
-        # 2. Cross-Asset Relative Value (v5.71)
+        # 2. Cross-Asset Relative Value (v5.71) — typed SignalSnapshot bridge
         try:
             from src.signals.cross_asset_relative_value import CrossAssetRVScanner
             rv_scanner = CrossAssetRVScanner()
-            rv_signal = rv_scanner.get_ensemble_signal()
-
-            if rv_signal.get("signal_value") is not None:
-                readings[SignalSource.CROSS_ASSET_RV] = SignalReading(
-                    source=SignalSource.CROSS_ASSET_RV,
-                    timestamp=rv_signal.get("timestamp", str(datetime.now())),
-                    value=rv_signal["signal_value"],
-                    confidence=rv_signal.get("confidence", 0.5),
-                    weight=0.0,
-                    regime_fit="all",
-                    asset_signals=rv_signal.get("asset_signals", {}),
-                    explanation=f"Cross-asset RV: z={rv_signal.get('avg_z_score', 0):+.2f}, diverged={rv_signal.get('num_diverged', 0)}/{rv_signal.get('total_pairs', 0)} pairs"
-                )
+            snapshot = rv_scanner.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.CROSS_ASSET_RV] = snapshot.to_signal_reading()
         except ImportError:
             pass
+        except Exception as e:
+            logger.debug(f"Cross-asset RV unavailable: {e}")
 
-        # 3. International Equity Momentum (v3.13)
+        # 3. International Equity Momentum (v3.13) — typed SignalSnapshot bridge
         # Skip if zero weight for current regime
         if active_sources is not None and SignalSource.INTERNATIONAL_MOMENTUM not in active_sources:
             logger.debug(f"Skipping INTERNATIONAL_MOMENTUM: zero weight for regime={regime.value if regime else '?' }")
@@ -508,104 +479,39 @@ class EnsembleVoter:
 
                             intl_gen = InternationalMomentumGenerator()
                             intl_signal = intl_gen.generate_signal(data)
-
-                            # Use continuous momentum differential instead of
-                            # discrete 3-level mapping (0.0/0.3/0.4) to preserve
-                            # full alpha signal — same fix as ALTERNATIVE_DATA
-                            # composite_score passthrough
-                            efa_vs_spy = data['relative']['efa_vs_spy']
-                            eem_vs_spy = data['relative']['eem_vs_spy']
-                            if intl_signal.signal_type == "efa_lead":
-                                signal_value = float(np.clip(efa_vs_spy / 10.0, -0.5, 0.5))
-                            elif intl_signal.signal_type == "eem_lead":
-                                signal_value = float(np.clip(eem_vs_spy / 10.0, -0.5, 0.5))
-                            else:
-                                signal_value = 0.0
-
-                            readings[SignalSource.INTERNATIONAL_MOMENTUM] = SignalReading(
-                                source=SignalSource.INTERNATIONAL_MOMENTUM,
-                                timestamp=intl_signal.timestamp,
-                                value=signal_value,
-                                confidence=intl_signal.confidence,
-                                weight=0.0,
-                                regime_fit="all",
-                                asset_signals={
-                                    'SPY': intl_signal.spy_shift,
-                                    'EFA': intl_signal.efa_shift,
-                                    'EEM': intl_signal.eem_shift,
-                                },
-                                explanation=f"Intl Momentum: {intl_signal.signal_type}, "
-                                            f"conf={intl_signal.confidence_level}, "
-                                            f"EFA/SPY={efa_mom - spy_mom:+.2%}, "
-                                            f"EEM/SPY={eem_mom - spy_mom:+.2%}, "
-                                            f"VIX_filter={intl_signal.vix_filter_active}"
-                            )
+                            snapshot = intl_signal.to_signal_snapshot()
+                            if snapshot.is_active:
+                                readings[SignalSource.INTERNATIONAL_MOMENTUM] = snapshot.to_signal_reading()
             except ImportError:
                 pass
             except Exception as e:
                 logger.debug(f"International momentum unavailable: {e}")
 
 
-        # 4. Alternative Data (v9.00) — SEC EDGAR, NewsAPI, Jobs data
+        # 4. Alternative Data (v9.00) — typed SignalSnapshot bridge
         # Skip if zero weight for current regime
         if active_sources is not None and SignalSource.ALTERNATIVE_DATA not in active_sources:
             logger.debug(f"Skipping ALTERNATIVE_DATA: zero weight for regime={regime.value if regime else '?' }")
         else:
             try:
-                alt_data_file = SIGNALS_DIR / "alternative_data_latest.json"
-                if alt_data_file.exists():
-                    with open(alt_data_file) as f:
-                        alt_data = json.load(f)
-
-                    # Use continuous composite_score instead of discrete regime buckets
-                    # to preserve the full alpha signal (avoids quantization loss)
-                    composite_score = alt_data.get("raw_data", {}).get("composite_score")
-                    if composite_score is not None:
-                        signal_value = float(np.clip(composite_score, -1, 1))
-                    else:
-                        # Fallback to regime map for backward compatibility
-                        regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
-                        signal_value = regime_map.get(alt_data.get("regime", "neutral"), 0.0)
-
-                    readings[SignalSource.ALTERNATIVE_DATA] = SignalReading(
-                        source=SignalSource.ALTERNATIVE_DATA,
-                        timestamp=alt_data.get("timestamp", str(datetime.now())),
-                        value=signal_value,
-                        confidence=alt_data.get("confidence", 0.5),
-                        weight=0.0,
-                        regime_fit="all",
-                        asset_signals={"SPY": signal_value},
-                        explanation=f"Alt Data: regime={alt_data.get('regime')}, "
-                                    f"composite={composite_score:.4f}, "
-                                    f"prob={alt_data.get('probability', 0):.2f}, "
-                                    f"conf={alt_data.get('confidence', 0):.2f}"
-                    )
+                from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
+                alt_gen = AlternativeDataSignalGenerator()
+                snapshot = alt_gen.get_signal_snapshot()
+                if snapshot.is_active:
+                    readings[SignalSource.ALTERNATIVE_DATA] = snapshot.to_signal_reading()
+            except ImportError:
+                pass
             except Exception as e:
                 logger.debug(f"Alternative data unavailable: {e}")
 
 
-        # 5. Cross-Asset Regime Arbitrage (v8.09)
+        # 5. Cross-Asset Regime Arbitrage (v8.09) — typed SignalSnapshot bridge
         try:
             from src.signals.cross_asset_regime_arb import CrossAssetRegimeArbDetector
             arb_detector = CrossAssetRegimeArbDetector()
-            arb_signal = arb_detector.get_ensemble_signal()
-
-            if arb_signal.get("active") and arb_signal.get("signal_value") is not None:
-                readings[SignalSource.CROSS_ASSET_REGIME_ARB] = SignalReading(
-                    source=SignalSource.CROSS_ASSET_REGIME_ARB,
-                    timestamp=arb_signal.get("timestamp", str(datetime.now())),
-                    value=arb_signal["signal_value"],
-                    confidence=arb_signal.get("confidence", 0.5),
-                    weight=0.0,
-                    regime_fit="all",
-                    asset_signals=arb_signal.get("asset_signals", {}),
-                    explanation=f"Cross-asset regime arb: pattern={arb_signal.get('pattern', '?')}, "
-                                f"eq={arb_signal.get('equity_regime', '?')}, "
-                                f"bd={arb_signal.get('bond_regime', '?')}, "
-                                f"gd={arb_signal.get('gold_regime', '?')}, "
-                                f"persist={arb_signal.get('persistence_days', 0)}d, "
-                                f"{arb_signal.get('explanation', '')}"
-                )
+            snapshot = arb_detector.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.CROSS_ASSET_REGIME_ARB] = snapshot.to_signal_reading()
         except ImportError:
             pass
         except Exception as e:

@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
 import sqlite3
+from datetime import datetime
 
 from src.paths import PROJECT_ROOT
 
@@ -479,6 +480,51 @@ class MultiSpeedMomentum:
             return {"value": 0.0, "confidence": 0.0}
         except Exception:
             return None
+
+    def get_signal_snapshot(self, tickers: list = None, date: Optional[str] = None):
+        """Generate a SignalSnapshot for ensemble voter consumption.
+
+        Aggregates per-ticker signals into a single snapshot with
+        per-asset_signals and averaged value/confidence.
+        """
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        if tickers is None:
+            tickers = ['SPY', 'TLT', 'GLD']
+
+        signals = {}
+        confidences = []
+        for ticker in tickers:
+            sig = self.get_signal_for_ticker(ticker, date)
+            if sig is not None:
+                signals[ticker] = sig["value"]
+                confidences.append(sig["confidence"])
+
+        if not signals:
+            return SignalSnapshot(
+                source="multi_speed_momentum",
+                timestamp=str(datetime.now()),
+                value=0.0,
+                confidence=0.0,
+                regime_fit="all",
+                is_active=False,
+                explanation="Multi-speed momentum: no data available",
+            )
+
+        avg_value = sum(signals.values()) / len(signals)
+        avg_conf = sum(confidences) / len(confidences) if confidences else 0.5
+
+        return SignalSnapshot(
+            source="multi_speed_momentum",
+            timestamp=str(datetime.now()),
+            value=avg_value,
+            confidence=avg_conf,
+            asset_signals=signals,
+            regime_fit="all",
+            is_active=True,
+            explanation=f"Multi-speed momentum: avg_signal={avg_value:.3f}, "
+                        f"avg_conf={avg_conf:.3f}, assets={list(signals.keys())}",
+        )
 
     def save_to_db(self, portfolio: MultiSpeedPortfolio):
         """Save ensemble recommendation to signals database."""

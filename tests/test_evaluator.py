@@ -304,6 +304,22 @@ class TestRiskLimits:
         assert result is not None
         assert "max_drawdown" in result
 
+    def test_drawdown_always_nonpositive_when_total_above_peak(self, tmp_path):
+        """Regression: when total > historical peak, drawdown must still be <= 0.
+
+        Before the min(0.0, ...) fix, (total - peak) / peak could be positive
+        when cash additions push the portfolio above its recorded peak.
+        Financial convention: drawdown is always non-positive.
+        """
+        p = _make_portfolio(tmp_path, cash=150000)
+        # Historical peak was 100k, but current total (150k) is above peak
+        p.history = [{"total_value": 100000}] * 25
+        p.positions = {}
+        result = p.check_risk_limits({})
+        # Even though total > peak, drawdown should NOT trigger a breach
+        # because the portfolio is at a new high, not in drawdown
+        assert result is None or "max_drawdown" not in result
+
     def test_garch_cvar_no_breach(self, tmp_path):
         """GARCH-CVaR integration should not trigger on normal returns."""
         p = _make_portfolio(tmp_path, cash=100000)
