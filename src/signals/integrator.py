@@ -48,7 +48,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-from src.paths import DATA_DIR, PROJECT_ROOT
+from src.paths import DATA_DIR
 
 # Existing module imports
 from src.data.alternative_data import AlternativeDataClient

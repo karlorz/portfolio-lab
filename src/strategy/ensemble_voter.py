@@ -38,7 +38,7 @@ from pathlib import Path
 from enum import Enum
 import logging
 
-from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, PROJECT_ROOT
+from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION
 
 logger = logging.getLogger(__name__)
 

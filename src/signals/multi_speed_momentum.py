@@ -45,9 +45,7 @@ from dataclasses import dataclass, asdict
 import sqlite3
 from datetime import datetime
 
-from src.paths import PROJECT_ROOT, BASE_ALLOCATION
-
-from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"

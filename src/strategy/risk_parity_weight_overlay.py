@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
 
-from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT, BASE_ALLOCATION
+from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
 
 DB_PATH = DATA_DIR / "signals.db"
 PRICES_PATH = PRICES_JSON

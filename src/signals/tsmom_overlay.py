@@ -39,7 +39,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT, BASE_ALLOCATION
+from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"

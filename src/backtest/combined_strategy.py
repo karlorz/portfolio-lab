@@ -43,7 +43,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, PROJECT_ROOT, PRICES_JSON as PRICES_PATH
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON as PRICES_PATH
 
 from src.signals.tsmom_overlay import TSMOMOverlay, DEFAULT_BASE_ALLOCATION
 

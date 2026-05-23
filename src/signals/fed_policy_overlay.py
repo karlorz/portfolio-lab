@@ -48,7 +48,7 @@ from typing import Dict, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 
-from src.paths import DATA_DIR, BASE_ALLOCATION, PROJECT_ROOT
+from src.paths import DATA_DIR, BASE_ALLOCATION
 
 FRED_SERIES = {
     'FEDFUNDS': 'Federal Funds Effective Rate',

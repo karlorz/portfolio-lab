@@ -35,7 +35,7 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT
+from src.paths import DATA_DIR, PRICES_JSON
 
 # Cross-asset pairs with (symbol_a, symbol_b, interpretation)
 # Z-score positive means A outperforming B (A overvalued vs B)
