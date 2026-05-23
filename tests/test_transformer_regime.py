@@ -207,3 +207,16 @@ class TestConvenienceFunction:
         result = detect_transformer_regime(returns)
         assert result.regime is not None
         assert result.signal_value is not None
+
+
+class TestNumpyImport:
+    """Regression: transformer_regime.py was missing `import numpy as np` and typing imports."""
+
+    def test_numpy_importable(self):
+        """np should be available in transformer_regime (was NameError at runtime)."""
+        # When ML is disabled, the module-level nn.Module class def fails,
+        # so we verify the fix by checking the import block directly
+        with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'regime', 'transformer_regime.py')) as f:
+            content = f.read()
+        assert 'import numpy as np' in content, "numpy import missing from transformer_regime.py"
+        assert 'from typing import Dict, List, Optional, Tuple' in content, "typing imports missing"

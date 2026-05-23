@@ -341,9 +341,20 @@ class TestExecuteOrdersEdgeCases:
                 with open(os.path.join(d, "kill_switch.json"), "w") as f:
                     f.write("not valid json")
                 orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
-                # Should not crash on corrupt JSON
+                # Should not crash on corrupt JSON (dry run skips kill switch)
                 result = router.execute_orders(orders, dry_run=True)
                 assert result["status"] != "blocked"
+
+    def test_kill_switch_corrupt_json_blocks_live(self):
+        """Corrupt kill switch JSON must block live orders (fail-closed)."""
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(OrderRouter, 'is_ready', return_value=True):
+                router = OrderRouter(data_dir=d, paper=True)
+                with open(os.path.join(d, "kill_switch.json"), "w") as f:
+                    f.write("not valid json")
+                orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+                result = router.execute_orders(orders, dry_run=False)
+                assert result["status"] == "blocked"
 
 
 class TestMainCLI:

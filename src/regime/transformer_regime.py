@@ -27,6 +27,8 @@ import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
+from typing import Dict, List, Optional, Tuple
+import numpy as np
 from src.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)

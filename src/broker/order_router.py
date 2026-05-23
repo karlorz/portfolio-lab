@@ -245,8 +245,13 @@ class OrderRouter:
                             "message": "Kill switch is enabled - execution blocked",
                             "timestamp": datetime.now().isoformat(),
                         }
-                except (OSError, json.JSONDecodeError):
-                    pass
+                except (OSError, json.JSONDecodeError) as e:
+                    logger.warning(f"Kill switch file corrupt/unreadable, blocking orders for safety: {e}")
+                    return {
+                        "status": "blocked",
+                        "message": f"Kill switch file unreadable - execution blocked for safety: {e}",
+                        "timestamp": datetime.now().isoformat(),
+                    }
         
         executed = []
         failed = []
