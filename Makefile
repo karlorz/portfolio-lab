@@ -46,6 +46,7 @@ help:
 	@echo "  make cron-reset   Reset cron status file to defaults"
 	@echo "  make unified-dashboard  Generate unified system dashboard"
 	@echo "  make daily-pnl    Capture daily P&L snapshot"
+	@echo "  make mark-to-market  Update portfolio with current market prices"
 
 # ── Test Suite ────────────────────────────────────────────────────────
 
@@ -302,10 +303,26 @@ garch-risk:
 	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR
 
+# ── Mark-to-Market ──────────────────────────────────────────────────
+
+.PHONY: mark-to-market
+mark-to-market:
+	@echo "=== Mark-to-Market: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && python3 scripts/mark_to_market.py 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	python3 $(CRON_UPDATE) portfolio-lab-mark-to-market $$STATUS $$DUR
+
 # ── Daily P&L Capture ────────────────────────────────────────────────
 
 .PHONY: daily-pnl
-daily-pnl:
+daily-pnl: mark-to-market
 	@echo "=== Daily P&L Capture: $$(date) ==="; \
 	START=$$(date +%s); \
 	cd $(PROJECT_DIR) && python3 scripts/capture_daily_pnl.py 2>&1; \

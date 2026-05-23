@@ -6,9 +6,12 @@ Based on CBOE VIX futures methodology and multi-asset volatility parity research
 """
 
 import json
+import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,7 +70,7 @@ class VIXDataManager:
                     }
                 print(f"Loaded {len(self.data)} VIX term structure records")
             except Exception as e:
-                print(f"Error loading VIX cache: {e}")
+                logger.warning(f"Error loading VIX cache: {e}")
     
     def _save_cached_data(self):
         """Save VIX data to cache"""

@@ -34,6 +34,7 @@ CRON_TARGETS = [
     "portfolio-lab-overlay-signals",
     "portfolio-lab-overlay-dashboard",
     "portfolio-lab-garch-risk",
+    "portfolio-lab-mark-to-market",
     "portfolio-lab-daily-pnl",
     "portfolio-lab-attribution",
     "portfolio-lab-unified-dashboard",
@@ -52,6 +53,7 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-overlay-signals": 600,  # 10 min — 5 sequential modules
     "portfolio-lab-overlay-dashboard": 120,  # 2 min — JSON serialization
     "portfolio-lab-garch-risk": 120,  # 2 min — GARCH-CVaR computation
+    "portfolio-lab-mark-to-market": 15,   # 15 sec — price update from prices.json
     "portfolio-lab-daily-pnl": 30,   # 30 sec — snapshot from portfolio state
     "portfolio-lab-attribution": 300,  # 5 min — attribution + adaptive weights
     "portfolio-lab-unified-dashboard": 120,  # 2 min — JSON serialization
