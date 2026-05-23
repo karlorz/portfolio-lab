@@ -425,13 +425,23 @@ class GraduationChecklist:
         cb = state.get("circuit_breaker", {})
         
         status = cb.get("status", "green" if isinstance(cb, dict) else "unknown")
-        cb.get("trips", 0) if isinstance(cb, dict) else 0
+        trips = cb.get("trips", 0) if isinstance(cb, dict) else 0
         consecutive_ok = cb.get("consecutive_ok", 0) if isinstance(cb, dict) else 0
         
         required = int(self.criteria["circuit_breaker_confidence"]["value"])
         
         # Green status or no trips in recent history = pass
         if isinstance(status, str) and status.lower() in ("green", "ok", "normal"):
+            return CheckResult(
+                name="circuit_breaker_confidence",
+                passed=True,
+                value=consecutive_ok if consecutive_ok > 0 else 1,
+                required=required,
+                description=self.criteria["circuit_breaker_confidence"]["description"],
+            )
+
+        # If status isn't green but no recent trips, still pass
+        if trips == 0:
             return CheckResult(
                 name="circuit_breaker_confidence",
                 passed=True,

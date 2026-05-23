@@ -9,7 +9,7 @@ Allocates by volatility contribution rather than capital weight.
 import json
 import sys
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 from pathlib import Path
 
@@ -309,7 +309,7 @@ class VolatilityParityAllocator:
             date_str = current.strftime('%Y-%m-%d')
             allocation = self.generate_allocation(date_str)
             allocations.append(allocation)
-            current += datetime.timedelta(days=1)
+            current += timedelta(days=1)
         
         # Calculate summary statistics
         avg_spy = sum(a.spy_pct for a in allocations) / len(allocations)

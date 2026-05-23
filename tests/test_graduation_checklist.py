@@ -360,6 +360,24 @@ class TestCircuitBreaker:
         # Empty dict — status not found, passes with default
         assert result.passed is True  # Default: green/normal
 
+    def test_non_green_status_but_zero_trips_passes(self):
+        """Regression: non-green status with 0 trips should still pass."""
+        state = _make_state_file(None, {
+            "circuit_breaker": {"status": "yellow", "trips": 0, "consecutive_ok": 5}
+        })
+        checklist = GraduationChecklist()
+        result = checklist._check_circuit_breaker(state)
+        assert result.passed is True
+
+    def test_non_green_status_with_trips_fails(self):
+        """Non-green status with recent trips should fail."""
+        state = _make_state_file(None, {
+            "circuit_breaker": {"status": "yellow", "trips": 2, "consecutive_ok": 1}
+        })
+        checklist = GraduationChecklist()
+        result = checklist._check_circuit_breaker(state)
+        assert result.passed is False
+
 
 # ---------------------------------------------------------------------------
 # GraduationChecklist — Manual Approval

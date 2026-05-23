@@ -642,3 +642,20 @@ class TestRealData:
         for sym in SYMBOLS_REQUIRED:
             assert sym in prices, f"{sym} not found in prices.json"
             assert len(prices[sym]) > 200, f"{sym} has insufficient data"
+
+
+class TestSignalSnapshotBridge:
+    """Regression tests for get_signal_snapshot() — was missing numpy import."""
+
+    def test_get_signal_snapshot_returns_snapshot(self):
+        """get_signal_snapshot() should return a SignalSnapshot without NameError."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        gen = AlternativeDataSignalGenerator()
+        snapshot = gen.get_signal_snapshot()
+        assert isinstance(snapshot, SignalSnapshot)
+
+    def test_snapshot_value_clipped_to_range(self):
+        """Snapshot value should be clipped to [-1, 1] by np.clip."""
+        gen = AlternativeDataSignalGenerator()
+        snapshot = gen.get_signal_snapshot()
+        assert -1.0 <= snapshot.value <= 1.0

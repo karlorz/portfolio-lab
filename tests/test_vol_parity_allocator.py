@@ -228,3 +228,30 @@ class TestCalculateVixAllocation:
         short, tail, vol = allocator.calculate_vix_allocation(signal)
         # Short VIX contributes positive vol, tail subtracts
         assert isinstance(vol, float)
+
+
+class TestTimedeltaImport:
+    """Regression: vol_parity_allocator used datetime.timedelta instead of timedelta."""
+
+    def test_timedelta_importable(self):
+        """timedelta should be importable directly (was missing from import)."""
+        from src.strategy.vol_parity_allocator import timedelta
+        assert timedelta is not None
+
+    def test_run_backtest_uses_timedelta(self):
+        """run_backtest should iterate dates without AttributeError."""
+        allocator = VolatilityParityAllocator.__new__(VolatilityParityAllocator)
+        allocator.target_vol = 10.0
+        # Mock generate_allocation to avoid DB dependency
+        mock_alloc = VolParityAllocation(
+            date='2026-01-01', target_volatility=10.0,
+            spy_pct=0.50, gld_pct=0.30, tlt_pct=0.10,
+            core_vol_contribution=8.0,
+            vix_short_pct=0.05, vix_tail_pct=0.02, vix_vol_contribution=2.0,
+            cash_pct=0.03,
+            expected_portfolio_vol=10.0, expected_max_dd=15.0,
+            rebalance_triggered=False, rebalance_reason=None,
+        )
+        with patch.object(allocator, 'generate_allocation', return_value=mock_alloc):
+            result = allocator.run_backtest('2026-01-01', '2026-01-03')
+        assert 'days' in result and result['days'] == 3
