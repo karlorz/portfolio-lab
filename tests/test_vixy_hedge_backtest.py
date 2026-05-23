@@ -15,10 +15,10 @@ import pytest
 
 from src.backtest.vixy_hedge_backtest import (
     BacktestConfig,
-    BacktestResult,
     DailyPrices,
     WalkForwardVIXYBacktester,
 )
+from src.backtest.metrics import BacktestResult
 from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer
 
 
@@ -74,66 +74,76 @@ class TestBacktestResult:
             volatility=12.3,
             sharpe_ratio=0.85,
             max_drawdown=-15.4,
-            baseline_total_return=9.0,
-            baseline_cagr=7.5,
-            baseline_volatility=11.8,
             baseline_sharpe=0.78,
-            baseline_max_drawdown=-18.2,
             sharpe_improvement=0.07,
-            cagr_impact=0.7,
-            hedge_active_days=1200,
-            hedge_active_pct=50.0,
-            avg_hedge_pct=2.5,
-            max_hedge_pct=6.0,
-            crisis_returns_hedged={"2008": -10.2, "2020": 2.1},
-            crisis_returns_baseline={"2008": -12.3, "2020": 1.5},
-            regime_breakdown={
-                "normal": {"avg_hedge_pct": 1.2, "max_hedge_pct": 2.0, "count": 2000, "pct_of_time": 60.0},
-                "elevated": {"avg_hedge_pct": 2.8, "max_hedge_pct": 3.5, "count": 800, "pct_of_time": 24.0},
-            },
             total_rebalances=120,
             total_transaction_costs=45.50,
-            config_snapshot={"max_hedge_pct": 6.0},
+            extras={
+                "baseline_total_return": 9.0,
+                "baseline_cagr": 7.5,
+                "baseline_volatility": 11.8,
+                "baseline_sharpe": 0.78,
+                "baseline_max_drawdown": -18.2,
+                "cagr_impact": 0.7,
+                "hedge_active_days": 1200,
+                "hedge_active_pct": 50.0,
+                "avg_hedge_pct": 2.5,
+                "max_hedge_pct": 6.0,
+                "crisis_returns_hedged": {"2008": -10.2, "2020": 2.1},
+                "crisis_returns_baseline": {"2008": -12.3, "2020": 1.5},
+                "regime_breakdown": {
+                    "normal": {"avg_hedge_pct": 1.2, "max_hedge_pct": 2.0, "count": 2000, "pct_of_time": 60.0},
+                    "elevated": {"avg_hedge_pct": 2.8, "max_hedge_pct": 3.5, "count": 800, "pct_of_time": 24.0},
+                },
+                "config_snapshot": {"max_hedge_pct": 6.0},
+            },
         )
 
-        d = result.to_dict()
-        assert d["total_return"] == 10.5
-        assert d["sharpe_ratio"] == 0.85
-        assert d["sharpe_improvement"] == 0.07
-        assert d["hedge_active_days"] == 1200
-        assert d["crisis_returns_hedged"]["2008"] == -10.2
-        assert d["regime_breakdown"]["normal"]["avg_hedge_pct"] == 1.2
-        assert d["total_rebalances"] == 120
-        assert d["config_snapshot"]["max_hedge_pct"] == 6.0
+        assert result.total_return == 10.5
+        assert result.sharpe_ratio == 0.85
+        assert result.sharpe_improvement == 0.07
+        assert result.extras["hedge_active_days"] == 1200
+        assert result.extras["crisis_returns_hedged"]["2008"] == -10.2
+        assert result.extras["regime_breakdown"]["normal"]["avg_hedge_pct"] == 1.2
+        assert result.total_rebalances == 120
+        assert result.extras["config_snapshot"]["max_hedge_pct"] == 6.0
 
     def test_json_serializable(self):
-        """All fields in to_dict must be JSON-serializable."""
+        """All fields in extras must be JSON-serializable."""
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
-            max_drawdown=-10.0, baseline_total_return=4.0, baseline_cagr=2.5,
-            baseline_volatility=9.5, baseline_sharpe=0.45, baseline_max_drawdown=-12.0,
-            sharpe_improvement=0.05, cagr_impact=0.5, hedge_active_days=100,
-            hedge_active_pct=25.0, avg_hedge_pct=1.5, max_hedge_pct=4.0,
-            crisis_returns_hedged={"2008": -8.0}, crisis_returns_baseline={"2008": -10.0},
-            regime_breakdown={"normal": {"avg_hedge_pct": 1.0, "max_hedge_pct": 2.0, "count": 100, "pct_of_time": 50.0}},
+            max_drawdown=-10.0,
+            baseline_sharpe=0.45, sharpe_improvement=0.05,
             total_rebalances=30, total_transaction_costs=15.0,
-            config_snapshot={"start_date": "2006-01-01"},
+            extras={
+                "baseline_total_return": 4.0, "baseline_cagr": 2.5,
+                "baseline_volatility": 9.5, "baseline_sharpe": 0.45,
+                "baseline_max_drawdown": -12.0,
+                "cagr_impact": 0.5, "hedge_active_days": 100,
+                "hedge_active_pct": 25.0, "avg_hedge_pct": 1.5, "max_hedge_pct": 4.0,
+                "crisis_returns_hedged": {"2008": -8.0}, "crisis_returns_baseline": {"2008": -10.0},
+                "regime_breakdown": {"normal": {"avg_hedge_pct": 1.0, "max_hedge_pct": 2.0, "count": 100, "pct_of_time": 50.0}},
+                "config_snapshot": {"start_date": "2006-01-01"},
+            },
         )
-        json.dumps(result.to_dict())  # Should not raise
+        json.dumps(result.extras)  # Should not raise
 
     def test_empty_crisis_returns(self):
         """Crisis returns can be empty dict without errors."""
         result = BacktestResult(
             total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
-            max_drawdown=0.0, baseline_total_return=0.0, baseline_cagr=0.0,
-            baseline_volatility=0.0, baseline_sharpe=0.0, baseline_max_drawdown=0.0,
-            sharpe_improvement=0.0, cagr_impact=0.0, hedge_active_days=0,
-            hedge_active_pct=0.0, avg_hedge_pct=0.0, max_hedge_pct=0.0,
-            crisis_returns_hedged={}, crisis_returns_baseline={},
-            regime_breakdown={}, total_rebalances=0, total_transaction_costs=0.0,
-            config_snapshot={},
+            max_drawdown=0.0,
+            extras={
+                "baseline_total_return": 0.0, "baseline_cagr": 0.0,
+                "baseline_volatility": 0.0, "baseline_sharpe": 0.0,
+                "baseline_max_drawdown": 0.0,
+                "cagr_impact": 0.0, "hedge_active_days": 0,
+                "hedge_active_pct": 0.0, "avg_hedge_pct": 0.0, "max_hedge_pct": 0.0,
+                "crisis_returns_hedged": {}, "crisis_returns_baseline": {},
+                "regime_breakdown": {}, "config_snapshot": {},
+            },
         )
-        assert result.to_dict()["crisis_returns_hedged"] == {}
+        assert result.extras["crisis_returns_hedged"] == {}
 
 
 # ── Walk-Forward Backtester Tests ────────────────────────────────────────
@@ -232,9 +242,9 @@ class TestWalkForwardVIXYBacktester:
         result = bt._empty_result()
         assert result.total_return == 0.0
         assert result.sharpe_ratio == 0.0
-        assert result.hedge_active_days == 0
+        assert result.extras["hedge_active_days"] == 0
         assert result.total_rebalances == 0
-        assert result.crisis_returns_hedged == {}
+        assert result.extras["crisis_returns_hedged"] == {}
 
     def test_single_day_data_returns_zero_result(self):
         """Only one data point should return an empty result."""

@@ -25,6 +25,7 @@ import numpy as np
 
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
+    BacktestResult,
     DailyPrices,
     compute_metrics,
     compute_crisis_returns,
@@ -58,72 +59,26 @@ class BacktestConfig(_BaseConfig):
     max_hedge_pct: float = 6.0  # Hard cap on VIXY allocation
 
 
-@dataclass
-class BacktestResult:
-    """Complete backtest results comparing baseline vs VIXY hedge."""
 
-    # Core metrics
-    total_return: float
-    cagr: float
-    volatility: float
-    sharpe_ratio: float
-    max_drawdown: float
-
-    # Baseline comparison
-    baseline_total_return: float
-    baseline_cagr: float
-    baseline_volatility: float
-    baseline_sharpe: float
-    baseline_max_drawdown: float
-    sharpe_improvement: float
-    cagr_impact: float
-
-    # Hedge activity
-    hedge_active_days: int
-    hedge_active_pct: float
-    avg_hedge_pct: float
-    max_hedge_pct: float
-
-    # Crisis returns
-    crisis_returns_hedged: Dict[str, float]
-    crisis_returns_baseline: Dict[str, float]
-
-    # Regime breakdown
-    regime_breakdown: Dict[str, Dict[str, float]]
-
-    # Trade stats
-    total_rebalances: int
-    total_transaction_costs: float
-
-    # Config
-    config_snapshot: Dict
-
-    def to_dict(self) -> Dict:
-        """Serialize to dict for JSON output."""
-        return {
-            "total_return": self.total_return,
-            "cagr": self.cagr,
-            "volatility": self.volatility,
-            "sharpe_ratio": self.sharpe_ratio,
-            "max_drawdown": self.max_drawdown,
-            "baseline_total_return": self.baseline_total_return,
-            "baseline_cagr": self.baseline_cagr,
-            "baseline_volatility": self.baseline_volatility,
-            "baseline_sharpe": self.baseline_sharpe,
-            "baseline_max_drawdown": self.baseline_max_drawdown,
-            "sharpe_improvement": self.sharpe_improvement,
-            "cagr_impact": self.cagr_impact,
-            "hedge_active_days": self.hedge_active_days,
-            "hedge_active_pct": self.hedge_active_pct,
-            "avg_hedge_pct": self.avg_hedge_pct,
-            "max_hedge_pct": self.max_hedge_pct,
-            "crisis_returns_hedged": self.crisis_returns_hedged,
-            "crisis_returns_baseline": self.crisis_returns_baseline,
-            "regime_breakdown": self.regime_breakdown,
-            "total_rebalances": self.total_rebalances,
-            "total_transaction_costs": self.total_transaction_costs,
-            "config_snapshot": self.config_snapshot,
-        }
+def _result_to_dict(result: BacktestResult) -> Dict:
+    """Serialize BacktestResult (canonical + extras) to dict for JSON output."""
+    d = {
+        "total_return": result.total_return,
+        "cagr": result.cagr,
+        "volatility": result.volatility,
+        "sharpe_ratio": result.sharpe_ratio,
+        "max_drawdown": result.max_drawdown,
+        "total_rebalances": result.total_rebalances,
+        "total_transaction_costs": result.total_transaction_costs,
+    }
+    if result.baseline_sharpe is not None:
+        d["baseline_sharpe"] = result.baseline_sharpe
+    if result.sharpe_improvement is not None:
+        d["sharpe_improvement"] = result.sharpe_improvement
+    if result.crisis_returns is not None:
+        d["crisis_returns"] = result.crisis_returns
+    d.update(result.extras)
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -361,37 +316,41 @@ class WalkForwardVIXYBacktester:
             volatility=hedge_metrics.volatility,
             sharpe_ratio=hedge_metrics.sharpe_ratio,
             max_drawdown=hedge_metrics.max_drawdown,
-            baseline_total_return=baseline_metrics.total_return,
-            baseline_cagr=baseline_metrics.cagr,
-            baseline_volatility=baseline_metrics.volatility,
             baseline_sharpe=baseline_metrics.sharpe_ratio,
-            baseline_max_drawdown=baseline_metrics.max_drawdown,
             sharpe_improvement=round(
                 hedge_metrics.sharpe_ratio - baseline_metrics.sharpe_ratio, 4
             ),
-            cagr_impact=round(
-                hedge_metrics.cagr - baseline_metrics.cagr, 2
-            ),
-            hedge_active_days=hedge_active_days,
-            hedge_active_pct=hedge_active_pct,
-            avg_hedge_pct=avg_hedge_pct,
-            max_hedge_pct=max_hedge_pct,
-            crisis_returns_hedged=crisis_hedged,
-            crisis_returns_baseline=crisis_baseline,
-            regime_breakdown=regime_breakdown,
             total_rebalances=total_rebalances,
             total_transaction_costs=round(total_costs, 2),
-            config_snapshot={
-                "start_date": config.start_date,
-                "end_date": config.end_date,
-                "initial_capital": config.initial_capital,
-                "max_hedge_pct": config.max_hedge_pct,
-                "rebalance_frequency_days": config.rebalance_frequency_days,
-                "transaction_cost_bps": config.transaction_cost_bps,
-                "base_allocation": {
-                    "SPY": config.base_weights['SPY'],
-                    "GLD": config.base_weights['GLD'],
-                    "TLT": config.base_weights['TLT'],
+            crisis_returns=crisis_hedged,
+            extras={
+                "baseline_total_return": baseline_metrics.total_return,
+                "baseline_cagr": baseline_metrics.cagr,
+                "baseline_volatility": baseline_metrics.volatility,
+                "baseline_sharpe": baseline_metrics.sharpe_ratio,
+                "baseline_max_drawdown": baseline_metrics.max_drawdown,
+                "cagr_impact": round(
+                    hedge_metrics.cagr - baseline_metrics.cagr, 2
+                ),
+                "hedge_active_days": hedge_active_days,
+                "hedge_active_pct": hedge_active_pct,
+                "avg_hedge_pct": avg_hedge_pct,
+                "max_hedge_pct": max_hedge_pct,
+                "crisis_returns_hedged": crisis_hedged,
+                "crisis_returns_baseline": crisis_baseline,
+                "regime_breakdown": regime_breakdown,
+                "config_snapshot": {
+                    "start_date": config.start_date,
+                    "end_date": config.end_date,
+                    "initial_capital": config.initial_capital,
+                    "max_hedge_pct": config.max_hedge_pct,
+                    "rebalance_frequency_days": config.rebalance_frequency_days,
+                    "transaction_cost_bps": config.transaction_cost_bps,
+                    "base_allocation": {
+                        "SPY": config.base_weights['SPY'],
+                        "GLD": config.base_weights['GLD'],
+                        "TLT": config.base_weights['TLT'],
+                    },
                 },
             },
         )
@@ -588,23 +547,24 @@ class WalkForwardVIXYBacktester:
             volatility=0.0,
             sharpe_ratio=0.0,
             max_drawdown=0.0,
-            baseline_total_return=0.0,
-            baseline_cagr=0.0,
-            baseline_volatility=0.0,
-            baseline_sharpe=0.0,
-            baseline_max_drawdown=0.0,
-            sharpe_improvement=0.0,
-            cagr_impact=0.0,
-            hedge_active_days=0,
-            hedge_active_pct=0.0,
-            avg_hedge_pct=0.0,
-            max_hedge_pct=0.0,
-            crisis_returns_hedged={},
-            crisis_returns_baseline={},
-            regime_breakdown={},
             total_rebalances=0,
             total_transaction_costs=0.0,
-            config_snapshot={},
+            extras={
+                "baseline_total_return": 0.0,
+                "baseline_cagr": 0.0,
+                "baseline_volatility": 0.0,
+                "baseline_sharpe": 0.0,
+                "baseline_max_drawdown": 0.0,
+                "cagr_impact": 0.0,
+                "hedge_active_days": 0,
+                "hedge_active_pct": 0.0,
+                "avg_hedge_pct": 0.0,
+                "max_hedge_pct": 0.0,
+                "crisis_returns_hedged": {},
+                "crisis_returns_baseline": {},
+                "regime_breakdown": {},
+                "config_snapshot": {},
+            },
         )
 
     def print_results(self, result: BacktestResult) -> None:
@@ -621,39 +581,41 @@ class WalkForwardVIXYBacktester:
 
         print(f"\n  {'Metric':<30} {'Baseline':>10} {'Hedged':>10} {'Delta':>10}")
         print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")
-        print(f"  {'Total Return':<30} {result.baseline_total_return:>9.2f}% {result.total_return:>9.2f}% "
-              f"{result.total_return - result.baseline_total_return:>+9.2f}%")
-        print(f"  {'CAGR':<30} {result.baseline_cagr:>9.2f}% {result.cagr:>9.2f}% "
-              f"{result.cagr_impact:>+9.2f}%")
-        print(f"  {'Volatility':<30} {result.baseline_volatility:>9.2f}% {result.volatility:>9.2f}% "
-              f"{result.volatility - result.baseline_volatility:>+9.2f}%")
-        print(f"  {'Sharpe Ratio':<30} {result.baseline_sharpe:>10.4f} {result.sharpe_ratio:>10.4f} "
+        print(f"  {'Total Return':<30} {result.extras['baseline_total_return']:>9.2f}% {result.total_return:>9.2f}% "
+              f"{result.total_return - result.extras['baseline_total_return']:>+9.2f}%")
+        print(f"  {'CAGR':<30} {result.extras['baseline_cagr']:>9.2f}% {result.cagr:>9.2f}% "
+              f"{result.extras['cagr_impact']:>+9.2f}%")
+        print(f"  {'Volatility':<30} {result.extras['baseline_volatility']:>9.2f}% {result.volatility:>9.2f}% "
+              f"{result.volatility - result.extras['baseline_volatility']:>+9.2f}%")
+        print(f"  {'Sharpe Ratio':<30} {result.extras['baseline_sharpe']:>10.4f} {result.sharpe_ratio:>10.4f} "
               f"{result.sharpe_improvement:>+10.4f}")
-        print(f"  {'Max Drawdown':<30} {result.baseline_max_drawdown:>9.2f}% {result.max_drawdown:>9.2f}% "
-              f"{result.max_drawdown - result.baseline_max_drawdown:>+9.2f}%")
+        print(f"  {'Max Drawdown':<30} {result.extras['baseline_max_drawdown']:>9.2f}% {result.max_drawdown:>9.2f}% "
+              f"{result.max_drawdown - result.extras['baseline_max_drawdown']:>+9.2f}%")
 
         print(f"\n  ── Hedge Activity ──")
-        print(f"  Hedge active days:  {result.hedge_active_days} ({result.hedge_active_pct:.1f}%)")
-        print(f"  Avg hedge:          {result.avg_hedge_pct:.2f}%")
-        print(f"  Max hedge:          {result.max_hedge_pct:.2f}%")
+        print(f"  Hedge active days:  {result.extras['hedge_active_days']} ({result.extras['hedge_active_pct']:.1f}%)")
+        print(f"  Avg hedge:          {result.extras['avg_hedge_pct']:.2f}%")
+        print(f"  Max hedge:          {result.extras['max_hedge_pct']:.2f}%")
         print(f"  Rebalances:         {result.total_rebalances}")
         print(f"  Transaction costs:  ${result.total_transaction_costs:.2f}")
 
         print(f"\n  ── Crisis Returns (%) ──")
         print(f"  {'Year':<10} {'Baseline':>10} {'Hedged':>10}")
         print(f"  {'-'*10} {'-'*10} {'-'*10}")
+        crisis_baseline = result.extras.get('crisis_returns_baseline', {})
+        crisis_hedged = result.extras.get('crisis_returns_hedged', {})
         all_crisis_years = sorted(
-            set(list(result.crisis_returns_baseline.keys()) + list(result.crisis_returns_hedged.keys()))
+            set(list(crisis_baseline.keys()) + list(crisis_hedged.keys()))
         )
         for year in all_crisis_years:
-            b = result.crisis_returns_baseline.get(year, 0.0)
-            h = result.crisis_returns_hedged.get(year, 0.0)
+            b = crisis_baseline.get(year, 0.0)
+            h = crisis_hedged.get(year, 0.0)
             print(f"  {year:<10} {b:>10.2f} {h:>10.2f}")
 
         print(f"\n  ── Regime Breakdown ──")
         print(f"  {'Regime':<15} {'% Time':>8} {'Avg Hedge':>10} {'Max Hedge':>10}")
         print(f"  {'-'*15} {'-'*8} {'-'*10} {'-'*10}")
-        for reg_name, stats in sorted(result.regime_breakdown.items()):
+        for reg_name, stats in sorted(result.extras.get('regime_breakdown', {}).items()):
             print(f"  {reg_name:<15} {stats['pct_of_time']:>7.1f}% "
                   f"{stats['avg_hedge_pct']:>9.2f}% {stats['max_hedge_pct']:>9.2f}%")
 
@@ -661,7 +623,7 @@ class WalkForwardVIXYBacktester:
 
     def save_results(self, result: BacktestResult, output_path: Optional[str] = None) -> None:
         """Save backtest results to a JSON file."""
-        data = result.to_dict()
+        data = _result_to_dict(result)
         data["_metadata"] = {
             "strategy": "vixy_hedge",
             "generated": datetime.now().isoformat(),
