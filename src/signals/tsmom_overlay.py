@@ -34,12 +34,15 @@ Usage:
 import numpy as np
 import pandas as pd
 import json
+import logging
 import argparse
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
+
+logger = logging.getLogger(__name__)
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"
@@ -206,8 +209,8 @@ class TSMOMOverlay:
                         self.price_cache[ticker] = df
                         return df
             except Exception as e:
-                print(f"Error loading prices for {ticker}: {e}")
-        
+                logger.warning("Error loading prices for %s: %s", ticker, e)
+
         return None
     
     def calculate_formation_return(

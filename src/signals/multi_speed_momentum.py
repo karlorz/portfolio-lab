@@ -38,6 +38,7 @@ Usage:
 import numpy as np
 import pandas as pd
 import json
+import logging
 import argparse
 from pathlib import Path
 from typing import Dict, Optional
@@ -46,6 +47,8 @@ import sqlite3
 from datetime import datetime
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
+
+logger = logging.getLogger(__name__)
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"

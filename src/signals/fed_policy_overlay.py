@@ -41,6 +41,7 @@ Reference:
 
 import pandas as pd
 import json
+import logging
 import argparse
 import requests
 from pathlib import Path
@@ -49,6 +50,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 
 from src.paths import DATA_DIR, BASE_ALLOCATION
+
+logger = logging.getLogger(__name__)
 
 FRED_SERIES = {
     'FEDFUNDS': 'Federal Funds Effective Rate',
@@ -104,7 +107,7 @@ def fetch_fred_series(series_id: str, start_date: str = "2000-01-01") -> Optiona
         return df
         
     except Exception as e:
-        print(f"Error fetching {series_id}: {e}")
+        logger.error("Error fetching %s: %s", series_id, e)
         return None
 
 
@@ -125,7 +128,7 @@ def fetch_all_fred_data(cache_path: Path = FRED_CACHE, force_refresh: bool = Fal
         if cache_age < timedelta(hours=24):
             with open(cache_path) as f:
                 cached = json.load(f)
-            print(f"Using cached FRED data (age: {cache_age})")
+            logger.info("Using cached FRED data (age: %s)", cache_age)
             return {k: pd.DataFrame(v) for k, v in cached.items()}
     
     # Priority series to fetch
@@ -133,13 +136,13 @@ def fetch_all_fred_data(cache_path: Path = FRED_CACHE, force_refresh: bool = Fal
     
     data = {}
     for series_id in priority_series:
-        print(f"Fetching {series_id}...")
+        logger.info("Fetching %s...", series_id)
         df = fetch_fred_series(series_id)
         if df is not None and not df.empty:
             data[series_id] = df
-            print(f"  Got {len(df)} observations, latest: {df.iloc[-1]['date'].strftime('%Y-%m-%d')} = {df.iloc[-1]['value']:.2f}")
+            logger.info("  Got %d observations, latest: %s = %.2f", len(df), df.iloc[-1]['date'].strftime('%Y-%m-%d'), df.iloc[-1]['value'])
         else:
-            print(f"  Failed to fetch {series_id}")
+            logger.warning("  Failed to fetch %s", series_id)
     
     # Cache results
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -381,7 +384,7 @@ class FedPolicyOverlay:
         breakeven_df = self.data.get('T10YIE')
         
         if fed_funds_df is None or fed_funds_df.empty:
-            print("Error: No Fed Funds data available")
+            logger.error("No Fed Funds data available")
             return None
         
         # Latest Fed Funds

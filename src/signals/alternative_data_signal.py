@@ -16,6 +16,7 @@ which reads data/signals/alternative_data_latest.json.
 """
 
 import json
+import logging
 import math
 import statistics
 from dataclasses import dataclass, asdict
@@ -25,6 +26,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 PRICES_PATH = PRICES_JSON
 

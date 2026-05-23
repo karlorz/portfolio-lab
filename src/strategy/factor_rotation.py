@@ -18,6 +18,7 @@ Strategy Logic:
 """
 
 import json
+import logging
 import sqlite3
 import numpy as np
 import pandas as pd
@@ -27,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.paths import MARKET_DB
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

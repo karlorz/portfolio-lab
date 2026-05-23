@@ -41,6 +41,7 @@ Usage:
 import numpy as np
 import pandas as pd
 import json
+import logging
 import argparse
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -48,6 +49,8 @@ from dataclasses import dataclass, asdict
 from itertools import combinations
 
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
+
+logger = logging.getLogger(__name__)
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"
