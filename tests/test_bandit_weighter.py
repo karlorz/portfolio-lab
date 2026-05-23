@@ -275,27 +275,3 @@ class TestEnsembleVoterGoalRiskBudget:
         result = voter.apply_goal_risk_budget({"SPY": 0.0})
         # total=0 early return
         assert result == {"SPY": 0.0}
-
-
-class TestEnsembleVoterGetRegimeWeights:
-    """Tests for EnsembleVoter.get_regime_weights()."""
-
-    def test_normal_regime(self):
-        voter = EnsembleVoter()
-        weights = voter.get_regime_weights("NORMAL")
-        assert isinstance(weights, dict)
-        assert len(weights) > 0
-
-    def test_crisis_regime(self):
-        voter = EnsembleVoter()
-        weights = voter.get_regime_weights("CRISIS")
-        assert isinstance(weights, dict)
-        # Crisis should shift weight toward defensive signals
-        assert len(weights) > 0
-
-    def test_unknown_regime_falls_back_to_normal(self):
-        voter = EnsembleVoter()
-        weights = voter.get_regime_weights("NONEXISTENT")
-        # Falls back to NORMAL
-        normal_weights = voter.get_regime_weights("NORMAL")
-        assert weights == normal_weights

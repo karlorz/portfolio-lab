@@ -536,11 +536,6 @@ class EnsembleVoter:
         self.current_readings = readings
         return readings
 
-    def get_regime_weights(self, regime_name: str) -> dict:
-        """Get static regime weights."""
-        regime_enum = getattr(Regime, regime_name, Regime.NORMAL)
-        return dict(REGIME_WEIGHTS.get(regime_enum, {}))
-
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
 

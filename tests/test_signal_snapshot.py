@@ -460,3 +460,45 @@ class TestNewModuleSnapshots:
         assert reading.source == SignalSource.CROSS_ASSET_RV
         assert reading.value == 0.3
 
+    def test_multi_speed_momentum_get_signal_snapshot(self):
+        """MultiSpeedMomentum.get_signal_snapshot() produces valid snapshot."""
+        from src.signals.multi_speed_momentum import MultiSpeedMomentum
+        with patch.object(MultiSpeedMomentum, "get_signal_for_ticker") as mock_ticker:
+            mock_ticker.side_effect = lambda t, d=None: (
+                {"value": 0.3, "confidence": 0.8} if t == "SPY"
+                else {"value": -0.1, "confidence": 0.7} if t == "TLT"
+                else {"value": 0.2, "confidence": 0.75}
+            )
+            msm = MultiSpeedMomentum()
+            snap = msm.get_signal_snapshot(tickers=["SPY", "TLT", "GLD"])
+
+        assert snap.source == "multi_speed_momentum"
+        assert snap.is_active is True
+        assert "SPY" in snap.asset_signals
+        assert snap.asset_signals["SPY"] == 0.3
+        assert snap.asset_signals["TLT"] == -0.1
+        assert snap.confidence == pytest.approx(0.75, abs=0.05)
+
+    def test_multi_speed_momentum_snapshot_no_data(self):
+        """MSM snapshot with no data produces inactive snapshot."""
+        from src.signals.multi_speed_momentum import MultiSpeedMomentum
+        with patch.object(MultiSpeedMomentum, "get_signal_for_ticker", return_value=None):
+            msm = MultiSpeedMomentum()
+            snap = msm.get_signal_snapshot(tickers=["SPY", "TLT", "GLD"])
+
+        assert snap.is_active is False
+        assert snap.value == 0.0
+
+    def test_multi_speed_momentum_snapshot_to_reading(self):
+        """MSM snapshot converts to SignalReading via typed bridge."""
+        from src.signals.multi_speed_momentum import MultiSpeedMomentum
+        from src.strategy.ensemble_voter import SignalSource
+        with patch.object(MultiSpeedMomentum, "get_signal_for_ticker") as mock_ticker:
+            mock_ticker.return_value = {"value": 0.5, "confidence": 0.9}
+            msm = MultiSpeedMomentum()
+            snap = msm.get_signal_snapshot(tickers=["SPY"])
+            reading = snap.to_signal_reading()
+
+        assert reading.source == SignalSource.MULTI_SPEED_MOM
+        assert reading.value == 0.5
+
