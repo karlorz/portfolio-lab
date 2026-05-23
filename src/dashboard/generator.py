@@ -203,8 +203,8 @@ class DashboardGenerator:
                     "signal_strength": result.get("signal_strength", 0.0),
                     "recommendation": result.get("recommendation", {}),
                 }
-        except Exception:
-            pass  # Factor rotation not available
+        except Exception as e:
+            logger.debug("Factor rotation not available: %s", e)
 
         # Add yield curve data from yields.json
         yield_curve_data = self._get_yield_curve_data()
@@ -225,9 +225,8 @@ class DashboardGenerator:
             vol_parity_data = vol_allocator.get_current_allocation()
             if vol_parity_data:
                 vol_parity_signal = vol_parity_data.get('allocation')
-        except Exception:
-            # Convexity harvest / vol parity not available yet
-            pass
+        except Exception as e:
+            logger.debug("Convexity harvest / vol parity not available: %s", e)
         
         # Add LLM sentiment signals (v2.30 Phase 5)
         sentiment_signal = None
@@ -248,9 +247,8 @@ class DashboardGenerator:
                 macro_texts=[],
             )
             sentiment_signal = sentiment_signal.to_dict()
-        except Exception:
-            # LLM sentiment not available yet
-            pass
+        except Exception as e:
+            logger.debug("LLM sentiment not available: %s", e)
         
         # Add ensemble voting signals (v2.20 Phase 3)
         ensemble_signal = None
@@ -268,17 +266,16 @@ class DashboardGenerator:
                     "action": ensemble_result.action,
                     "confidence": ensemble_result.confidence,
                 }
-        except Exception:
-            # Ensemble voting not available yet
-            pass
+        except Exception as e:
+            logger.debug("Ensemble voting not available: %s", e)
         
         # Add sector rotation momentum signals (v2.40 Phase 5)
         sector_momentum_signal = None
         try:
             sector_momentum_signal = self._generate_sector_momentum_signals()
-        except Exception:
+        except Exception as e:
             # Sector momentum not available yet
-            pass
+            logger.debug("Sector momentum not available: %s", e)
         
         # Add smart rebalancing status (v2.90)
         smart_rebalance_data = None
@@ -326,9 +323,8 @@ class DashboardGenerator:
                     'remaining_budget_pct': 100,
                     'status': gate.get_status(),
                 }
-        except Exception:
-            import traceback
-            traceback.print_exc()
+        except Exception as e:
+            logger.warning("Dashboard generation error: %s", e)
 
         # Add alternative data signals (v2.60 Phase 3)
         alternative_data_signal = None
@@ -369,9 +365,8 @@ class DashboardGenerator:
                         "sources_count": alt_data_raw.get("raw_data", {}).get("sources_count"),
                         "data_freshness_hours": alt_data_raw.get("raw_data", {}).get("data_freshness_hours")
                     }
-        except Exception:
-            # Alternative data signal not available yet
-            pass
+        except Exception as e:
+            logger.debug("Alternative data signal not available: %s", e)
         
         # Load broker data (Phase 4: live trading prep)
         broker_data = self._load_broker_data()
@@ -425,8 +420,8 @@ class DashboardGenerator:
                     "Real-time SKEW/PCR data needed for behavioral alpha."
                 ),
             }
-        except Exception:
-            pass  # Behavioral sentiment not available
+        except Exception as e:
+            logger.debug("Behavioral sentiment not available: %s", e)
 
         # Stacking ensemble dashboard data (v3.10)
         stacking_ensemble_dashboard = None
@@ -455,8 +450,8 @@ class DashboardGenerator:
                     "Signal frequency and shift magnitude are binding constraints."
                 ),
             }
-        except Exception:
-            pass  # Stacking ensemble not available (ML-gated)
+        except Exception as e:
+            logger.debug("Stacking ensemble not available: %s", e)
 
         # Factor rotation dashboard data (v3.00)
         factor_rotation_dashboard = None
@@ -477,8 +472,8 @@ class DashboardGenerator:
                         "Defensive tool — best in high-vol regimes (Sharpe 1.474)."
                     ),
                 }
-        except Exception:
-            pass  # Factor rotation dashboard not available
+        except Exception as e:
+            logger.debug("Factor rotation dashboard not available: %s", e)
 
         output = {
             "timestamp": datetime.now().isoformat(),
@@ -604,9 +599,8 @@ class DashboardGenerator:
                     garch_cvar["var_95"] = cvar_check.get("var_95", -0.0127)
                     garch_cvar["cvar_ratio"] = cvar_check.get("cvar_ratio", 1.51)
                     garch_cvar["garch_active"] = cvar_check.get("garch_active", True)
-        except Exception:
-            # Use default values
-            pass
+        except Exception as e:
+            logger.debug("Using default values: %s", e)
 
         return garch_cvar
 
@@ -649,9 +643,8 @@ class DashboardGenerator:
                             entropy["concentration_risk"] = "high"
                         else:
                             entropy["concentration_risk"] = "critical"
-        except Exception:
-            # Use default values
-            pass
+        except Exception as e:
+            logger.debug("Using default values: %s", e)
         
         return entropy
 
