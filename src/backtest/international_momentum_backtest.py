@@ -92,12 +92,9 @@ class InternationalMomentumBacktester:
         efa_momentum_6m = efa_now / efa_then - 1
         efa_vs_spy = efa_momentum_6m - spy_momentum_6m
 
-        # Use production InternationalMomentumGenerator._determine_signal_type
-        # for the core signal logic (thresholds, confidence calculation).
-        # We skip __init__ because generate_signal() requires database access
-        # (VIX, correlation, save) that isn't available in the backtest context.
-        generator = object.__new__(InternationalMomentumGenerator)
-        signal_type, confidence = generator._determine_signal_type(efa_vs_spy, 0.0)
+        # Use production InternationalMomentumGenerator.determine_signal_type
+        # (static method) for the core signal logic (thresholds, confidence).
+        signal_type, confidence = InternationalMomentumGenerator.determine_signal_type(efa_vs_spy, 0.0)
 
         # Map SignalType to backtest return format
         if signal_type in (SignalType.EFA_LEAD, SignalType.EEM_LEAD):

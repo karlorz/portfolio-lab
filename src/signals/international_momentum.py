@@ -205,25 +205,44 @@ class InternationalMomentumGenerator:
             logger.warning(f"Could not fetch correlation: {e}")
         return 0.85  # Default normal correlation
     
-    def _determine_signal_type(
-        self, 
-        efa_vs_spy: float, 
-        eem_vs_spy: float
+    @staticmethod
+    def determine_signal_type(
+        efa_vs_spy: float,
+        eem_vs_spy: float,
+        efa_threshold: float = 0.05,
+        eem_threshold: float = 0.08,
     ) -> Tuple[SignalType, float]:
-        """Determine signal type and confidence"""
-        
+        """Determine signal type and confidence.
+
+        This is a pure function — it uses no instance state beyond class
+        constants.  Exposed as a static method so backtests can call it
+        without constructing an InternationalMomentumGenerator (which
+        requires SQLite setup).
+        """
         # Check EFA lead
-        if efa_vs_spy > self.EFA_THRESHOLD:
+        if efa_vs_spy > efa_threshold:
             confidence = min(efa_vs_spy / 0.10, 1.0)  # Max at 10% outperformance
             return SignalType.EFA_LEAD, confidence
-        
+
         # Check EEM lead
-        if eem_vs_spy > self.EEM_THRESHOLD:
+        if eem_vs_spy > eem_threshold:
             confidence = min(eem_vs_spy / 0.15, 1.0)  # Max at 15% outperformance
             return SignalType.EEM_LEAD, confidence
-        
+
         # Neutral
         return SignalType.NEUTRAL, 0.0
+
+    def _determine_signal_type(
+        self,
+        efa_vs_spy: float,
+        eem_vs_spy: float,
+    ) -> Tuple[SignalType, float]:
+        """Instance wrapper delegating to the static method."""
+        return self.determine_signal_type(
+            efa_vs_spy, eem_vs_spy,
+            efa_threshold=self.EFA_THRESHOLD,
+            eem_threshold=self.EEM_THRESHOLD,
+        )
     
     def _calculate_allocation_shifts(
         self, 
