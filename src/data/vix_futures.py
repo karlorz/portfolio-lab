@@ -68,7 +68,7 @@ class VIXDataManager:
                         date: VIXTermStructure.from_dict(ts)
                         for date, ts in raw_data.items()
                     }
-                print(f"Loaded {len(self.data)} VIX term structure records")
+                logger.info("Loaded %d VIX term structure records", len(self.data))
             except Exception as e:
                 logger.warning("Error loading VIX cache: %s", e)
     
