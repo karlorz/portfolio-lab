@@ -241,7 +241,7 @@ class EnsembleBacktestEngine:
             end_date: Backtest end
             rebalance_freq: monthly, weekly, or threshold (drift-based)
         """
-        assets = list(portfolio.keys())
+        assets = list(portfolio)
         
         # Fetch all price data
         price_data = {}

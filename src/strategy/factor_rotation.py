@@ -108,7 +108,7 @@ class FactorMomentumEngine:
         self.vol_lookback = vol_lookback
         
         # Universe symbols
-        self.universe = list(self.FACTORS.keys())
+        self.universe = list(self.FACTORS)
         
         # Factor categories for diversity constraint
         self.max_per_category = 1  # Max 1 per category in selection
@@ -276,7 +276,7 @@ class FactorMomentumEngine:
                 for symbol, score in factor_scores.items()
             },
             "diversity": {
-                "categories_used": list(category_counts.keys()),
+                "categories_used": list(category_counts),
                 "category_distribution": category_counts
             },
             "signal_strength": self._calculate_signal_strength(selected),
@@ -765,7 +765,7 @@ class FactorRotationBacktest:
             return {"error": f"Insufficient data: {len(dates)} days (need 252+)", "status": "failed"}
 
         # Get prices for all factor symbols
-        symbols = list(self.engine.FACTORS.keys())
+        symbols = list(self.engine.FACTORS)
         price_data = {}
         for sym in symbols:
             rows = pd.read_sql(

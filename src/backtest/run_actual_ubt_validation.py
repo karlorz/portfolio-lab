@@ -138,7 +138,7 @@ def main():
     print('[INFO] Loading historical data...')
     data = load_historical_data()
     
-    symbols = list(data.keys())
+    symbols = list(data)
     print(f'[INFO] Available symbols: {", ".join(symbols[:10])}...')
     
     has_ubt = 'UBT' in symbols

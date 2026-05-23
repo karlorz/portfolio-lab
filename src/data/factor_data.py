@@ -405,7 +405,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="Factor ETF Data Manager v3.00")
     parser.add_argument("command", choices=["init", "status", "fetch", "rank"])
-    parser.add_argument("--symbol", choices=list(FACTOR_ETFS.keys()))
+    parser.add_argument("--symbol", choices=list(FACTOR_ETFS))
     parser.add_argument("--days", type=int, default=252)
     
     args = parser.parse_args()

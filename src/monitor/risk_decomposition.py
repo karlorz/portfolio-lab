@@ -371,7 +371,7 @@ class RiskDecomposer:
         """
         self.window = window
         self.factor_defs = factor_definitions or FACTOR_DEFINITIONS
-        self.factor_keys = list(self.factor_defs.keys())
+        self.factor_keys = list(self.factor_defs)
         self.n_factors = len(self.factor_keys)
 
         # Load price data
@@ -791,7 +791,7 @@ def main():
             decomposer = RiskDecomposer()
             corr = decomposer.get_factor_correlations()
             print("Factor Correlation Matrix:\n")
-            factors = list(corr.keys())
+            factors = list(corr)
             # Header
             print(f"{'':20s}", end="")
             for f in factors:

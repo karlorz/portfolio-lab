@@ -156,7 +156,7 @@ class StackingFeatureEngine:
         base_values = {source: signal.value for source, signal in signals.items()}
         
         # Pairwise combinations
-        sources = list(signals.keys())
+        sources = list(signals)
         pairs = self._get_pairwise_combinations(sources)
         
         # Pairwise interaction features (45 features = 15 pairs × 3 types)

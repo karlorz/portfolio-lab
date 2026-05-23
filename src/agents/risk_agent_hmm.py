@@ -470,7 +470,7 @@ class PortfolioRegimeManager:
         """
         Detect regime for entire portfolio and generate allocation recommendation.
         """
-        tickers = tickers or list(self.base_allocation.keys())
+        tickers = tickers or list(self.base_allocation)
         timestamp = timestamp or datetime.now().isoformat()
         
         # Detect regime for each asset

@@ -413,7 +413,7 @@ class AIController:
         return {
             "version": self.version,
             "device": str(self.device),
-            "agents_loaded": list(self.graph.agents.keys()),
+            "agents_loaded": list(self.graph.agents),
             "signal_integrator_connected": self.signal_integrator is not None,
             "checkpoint_loaded": self.checkpoint_path is not None and self.checkpoint_path.exists(),
             "inference_count": len(self.action_history),

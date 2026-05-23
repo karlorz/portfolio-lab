@@ -177,7 +177,7 @@ class TSMOMSignalAdapter:
             regime_fit="all",
             is_active=any(v != 0 for v in deltas.values()),
             explanation=f"TSMOM: avg_adj={avg_value:+.3f}, "
-                        f"assets={list(signals.keys())}, "
+                        f"assets={list(signals)}, "
                         f"avg_conf={avg_conf:.3f}",
             metadata={"deltas": deltas},
         )

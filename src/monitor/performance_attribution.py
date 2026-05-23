@@ -365,7 +365,7 @@ class PerformanceAttribution:
     ) -> Dict[str, float]:
         """Compute average pairwise correlation for each source."""
         # Build aligned time series of signal values
-        sources = list(source_data.keys())
+        sources = list(source_data)
         if len(sources) < 2:
             return {s: 0.0 for s in sources}
 

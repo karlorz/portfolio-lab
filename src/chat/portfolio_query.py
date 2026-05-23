@@ -104,7 +104,7 @@ def build_query_context(dashboard: Dict[str, Any]) -> str:
         if alerts:
             parts.append(f"Alerts: {'; '.join(str(a) for a in alerts)}")
 
-    for k in list(dashboard.keys()):
+    for k in list(dashboard):
         v = dashboard[k]
         if isinstance(v, dict) and not v.get("available", True):
             parts.append(f"{k}: not available")

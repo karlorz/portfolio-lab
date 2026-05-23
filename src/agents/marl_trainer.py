@@ -141,7 +141,7 @@ class MarketEnvironment:
             transaction_cost: Cost per trade (0.001 = 10bps)
         """
         self.prices = prices
-        self.tickers = list(prices.keys())
+        self.tickers = list(prices)
         self.n_assets = len(self.tickers)
         self.transaction_cost = transaction_cost
         
@@ -472,7 +472,7 @@ class MARLTrainer:
         Returns final training stats.
         """
         print(f"Starting MARL training for {n_episodes} episodes...")
-        print(f"Agents: {list(self.agent_graph.agents.keys())}")
+        print(f"Agents: {list(self.agent_graph.agents)}")
         print(f"Environment: {self.env.n_assets} assets")
         
         all_stats = []

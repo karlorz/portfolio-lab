@@ -515,7 +515,7 @@ class MultiSpeedMomentum:
             regime_fit="all",
             is_active=True,
             explanation=f"Multi-speed momentum: avg_signal={avg_value:.3f}, "
-                        f"avg_conf={avg_conf:.3f}, assets={list(signals.keys())}",
+                        f"avg_conf={avg_conf:.3f}, assets={list(signals)}",
         )
 
     def save_to_db(self, portfolio: MultiSpeedPortfolio):
@@ -726,7 +726,7 @@ class MultiSpeedBacktester:
             'crisis_2022_return': crisis_returns.get('2022'),
             'tier_config': {k: {kk: vv for kk, vv in v.items() if kk != 'description'} 
                           for k, v in SPEED_TIERS.items()},
-            'speed_tiers': list(SPEED_TIERS.keys()),
+            'speed_tiers': list(SPEED_TIERS),
         }
 
 

@@ -82,7 +82,7 @@ class MultiSpeedSignalAdapter:
                 "slow_signal": ensemble_signal.slow_signal.signal,
                 "ensemble_confidence": ensemble_signal.ensemble_confidence,
                 "target_weight": ensemble_signal.target_weight,
-                "speed_tiers": list(SPEED_TIERS.keys())
+                "speed_tiers": list(SPEED_TIERS)
             }
         )
     

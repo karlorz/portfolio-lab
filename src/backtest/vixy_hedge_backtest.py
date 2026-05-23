@@ -605,7 +605,7 @@ class WalkForwardVIXYBacktester:
         crisis_baseline = result.extras.get('crisis_returns_baseline', {})
         crisis_hedged = result.extras.get('crisis_returns_hedged', {})
         all_crisis_years = sorted(
-            set(list(crisis_baseline.keys()) + list(crisis_hedged.keys()))
+            set(crisis_baseline) | set(crisis_hedged)
         )
         for year in all_crisis_years:
             b = crisis_baseline.get(year, 0.0)

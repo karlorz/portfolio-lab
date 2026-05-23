@@ -226,7 +226,7 @@ class CrossAssetRegimeArbDetector:
                     return False
 
             self.prices = {sym: all_prices[sym] for sym in required}
-            logger.debug(f"Loaded prices for {list(self.prices.keys())} "
+            logger.debug(f"Loaded prices for {list(self.prices)} "
                          f"({len(self.prices.get('SPY', []))} data points)")
             return True
         except (json.JSONDecodeError, KeyError) as e:

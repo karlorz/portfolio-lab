@@ -71,7 +71,7 @@ def backward_eliminate(
     if not returns:
         return []
 
-    signal_names = list(returns.keys())
+    signal_names = list(returns)
     if len(signal_names) <= target_n:
         return signal_names[:]
 

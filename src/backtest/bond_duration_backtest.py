@@ -703,7 +703,7 @@ class WalkForwardBondDurationBacktester:
         crisis_baseline = e.get("crisis_returns_baseline", {})
         crisis_rotated = e.get("crisis_returns_rotated", {})
         all_crisis_years = sorted(
-            set(list(crisis_baseline.keys()) + list(crisis_rotated.keys()))
+            set(crisis_baseline) | set(crisis_rotated)
         )
         for year in all_crisis_years:
             b = crisis_baseline.get(year, 0.0)

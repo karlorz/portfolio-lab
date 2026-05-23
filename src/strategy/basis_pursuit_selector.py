@@ -250,7 +250,7 @@ class BasisPursuitSelector:
     def get_state_diagnostics(self) -> Dict[str, dict]:
         """Return diagnostic info about tracked signals."""
         diag = {}
-        for source in set(list(self.state.signal_history.keys()) + list(self.state.full_weight_history.keys())):
+        for source in set(self.state.signal_history) | set(self.state.full_weight_history):
             info = {}
             if source in self.state.signal_history:
                 sh = self.state.signal_history[source]
@@ -278,7 +278,7 @@ class BasisPursuitSelector:
             Dict mapping redundant signal → retained signal
             (The one with lower marginal contribution is mapped to the one retained)
         """
-        signals = list(self.state.signal_history.keys())
+        signals = list(self.state.signal_history)
         if len(signals) < 2:
             return {}
 
