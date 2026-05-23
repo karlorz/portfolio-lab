@@ -9,12 +9,13 @@ Validates whether EFA/EEM relative momentum adds alpha over the baseline
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
+    BacktestResult,
     compute_metrics,
     compute_crisis_returns,
     save_results_json,
@@ -31,22 +32,6 @@ class BacktestConfig(_BaseConfig):
     """International momentum backtest config — inherits core fields from metrics.BacktestConfig."""
     lookback_days: int = 126  # 6-month momentum
     max_shift: float = 0.05
-
-
-@dataclass
-class BacktestResult:
-    strategy_name: str
-    start_date: str
-    end_date: str
-    initial_capital: float
-    final_value: float
-    cagr: float
-    sharpe: float
-    max_drawdown: float
-    total_rebalances: int
-    total_cost_bps: float
-    crisis_returns: Dict[str, float]
-    signal_distribution: Dict[str, int]
 
 
 class InternationalMomentumBacktester:
@@ -201,38 +186,44 @@ class InternationalMomentumBacktester:
         )
 
         return BacktestResult(
-            strategy_name="International Momentum Overlay",
-            start_date=trading_days[0],
-            end_date=trading_days[-1],
-            initial_capital=self.config.initial_capital,
-            final_value=round(capital, 2),
+            total_return=round((capital / self.config.initial_capital - 1) * 100, 2) if self.config.initial_capital else 0.0,
             cagr=round(metrics.cagr, 2),
-            sharpe=round(metrics.sharpe_ratio, 2),
+            volatility=round(metrics.volatility, 2),
+            sharpe_ratio=round(metrics.sharpe_ratio, 2),
             max_drawdown=round(metrics.max_drawdown, 2),
             total_rebalances=rebalance_count,
-            total_cost_bps=round(total_cost * 10000, 1),
+            total_transaction_costs=round(total_cost * 10000, 1),
             crisis_returns=crisis_returns,
-            signal_distribution=signal_counts,
+            extras={
+                "strategy_name": "International Momentum Overlay",
+                "start_date": trading_days[0],
+                "end_date": trading_days[-1],
+                "initial_capital": self.config.initial_capital,
+                "final_value": round(capital, 2),
+                "signal_distribution": signal_counts,
+            },
         )
 
     def print_report(self, result: BacktestResult):
+        ex = result.extras
         print(f"\n{'='*60}")
         print(f"International Momentum Signal Backtest")
         print(f"{'='*60}")
-        print(f"Period: {result.start_date} to {result.end_date}")
+        print(f"Period: {ex.get('start_date', '?')} to {ex.get('end_date', '?')}")
         print(f"CAGR: {result.cagr:.2f}%")
-        print(f"Sharpe: {result.sharpe:.2f}")
+        print(f"Sharpe: {result.sharpe_ratio:.2f}")
         print(f"Max Drawdown: {result.max_drawdown:.2f}%")
         print(f"Rebalances: {result.total_rebalances}")
-        print(f"Total Cost: {result.total_cost_bps:.1f} bps")
+        print(f"Total Cost: {result.total_transaction_costs:.1f} bps")
         print(f"\nCrisis Years:")
-        for year, ret in sorted(result.crisis_returns.items()):
+        for year, ret in sorted((result.crisis_returns or {}).items()):
             print(f"  {year}: {ret:+.2f}%")
         print(f"\nSignal Distribution:")
-        for sig, count in result.signal_distribution.items():
+        for sig, count in ex.get('signal_distribution', {}).items():
             print(f"  {sig}: {count}")
 
     def save_results(self, result: BacktestResult, output_path: str = None):
+        from dataclasses import asdict
         save_results_json(
             asdict(result),
             output_path=output_path or str(BACKTEST_RESULTS_DIR / "intl_momentum_backtest.json"),

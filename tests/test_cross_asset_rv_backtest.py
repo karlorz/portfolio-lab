@@ -17,9 +17,9 @@ import pytest
 
 from src.backtest.cross_asset_rv_backtest import (
     BacktestConfig,
-    BacktestResult,
     CrossAssetRVBacktester,
 )
+from src.backtest.metrics import BacktestResult
 
 
 # ── BacktestConfig Tests ─────────────────────────────────────────────────
@@ -70,45 +70,47 @@ class TestBacktestResult:
 
     def test_create(self):
         result = BacktestResult(
-            strategy_name="Cross-Asset Relative Value Overlay",
-            start_date="2020-01-01",
-            end_date="2020-12-31",
-            initial_capital=100000.0,
-            final_value=105000.0,
+            total_return=5.0,
             cagr=5.0,
-            sharpe=0.65,
+            volatility=7.7,
+            sharpe_ratio=0.65,
             max_drawdown=-12.0,
             total_rebalances=12,
-            total_cost_bps=10.5,
+            total_transaction_costs=10.5,
             crisis_returns={"2008": -10.0, "2020": 2.0},
-            signal_distribution={"spy_reversion": 3, "gld_reversion": 2, "neutral": 7},
-            avg_z_score=1.2,
-            diverged_pct=25.0,
+            extras={
+                "strategy_name": "Cross-Asset Relative Value Overlay",
+                "start_date": "2020-01-01",
+                "end_date": "2020-12-31",
+                "initial_capital": 100000.0,
+                "final_value": 105000.0,
+                "signal_distribution": {"spy_reversion": 3, "gld_reversion": 2, "neutral": 7},
+                "avg_z_score": 1.2,
+                "diverged_pct": 25.0,
+            },
         )
-        assert result.strategy_name == "Cross-Asset Relative Value Overlay"
-        assert result.final_value == 105000.0
-        assert result.sharpe == 0.65
+        assert result.extras["strategy_name"] == "Cross-Asset Relative Value Overlay"
+        assert result.extras["final_value"] == 105000.0
+        assert result.sharpe_ratio == 0.65
         assert result.total_rebalances == 12
-        assert result.avg_z_score == 1.2
-        assert result.diverged_pct == 25.0
+        assert result.extras["avg_z_score"] == 1.2
+        assert result.extras["diverged_pct"] == 25.0
 
     def test_json_serializable(self):
         result = BacktestResult(
-            strategy_name="Test", start_date="2020-01-01", end_date="2020-12-31",
-            initial_capital=100000.0, final_value=100000.0, cagr=0.0, sharpe=0.0,
-            max_drawdown=0.0, total_rebalances=0, total_cost_bps=0.0,
-            crisis_returns={}, signal_distribution={}, avg_z_score=0.0, diverged_pct=0.0,
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, total_rebalances=0, total_transaction_costs=0.0,
+            crisis_returns={}, extras={"strategy_name": "Test"},
         )
         json.dumps(result.__dict__)  # Should not raise
 
     def test_zero_diverged_pct(self):
         result = BacktestResult(
-            strategy_name="Test", start_date="2020-01-01", end_date="2020-12-31",
-            initial_capital=100000.0, final_value=100000.0, cagr=0.0, sharpe=0.0,
-            max_drawdown=0.0, total_rebalances=0, total_cost_bps=0.0,
-            crisis_returns={}, signal_distribution={}, avg_z_score=0.0, diverged_pct=0.0,
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, total_rebalances=0, total_transaction_costs=0.0,
+            crisis_returns={}, extras={"diverged_pct": 0.0},
         )
-        assert result.diverged_pct == 0.0
+        assert result.extras["diverged_pct"] == 0.0
 
 
 # ── Backtester Init Tests ────────────────────────────────────────────────
@@ -298,7 +300,7 @@ class TestRunBacktest:
         result = bt.run_backtest()
         assert result is not None
         assert isinstance(result, BacktestResult)
-        assert result.final_value > 0
+        assert result.extras["final_value"] > 0
         assert result.total_rebalances >= 0
 
     def test_run_bull_market(self):
@@ -334,15 +336,15 @@ class TestRunBacktest:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        assert result.strategy_name is not None
+        assert result.extras.get("strategy_name") is not None
         assert result.cagr is not None
-        assert result.sharpe is not None
+        assert result.sharpe_ratio is not None
         assert result.max_drawdown is not None
         assert result.total_rebalances >= 0
         assert isinstance(result.crisis_returns, dict)
-        assert isinstance(result.signal_distribution, dict)
-        assert isinstance(result.avg_z_score, float)
-        assert isinstance(result.diverged_pct, float)
+        assert isinstance(result.extras["signal_distribution"], dict)
+        assert isinstance(result.extras["avg_z_score"], float)
+        assert isinstance(result.extras["diverged_pct"], float)
 
     def test_signal_distribution_totals(self):
         dates, prices = self._make_synthetic_prices(n_days=300)
@@ -352,7 +354,7 @@ class TestRunBacktest:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        total = sum(result.signal_distribution.values())
+        total = sum(result.extras["signal_distribution"].values())
         assert total > 0
 
     def test_diverge_pct_between_0_and_100(self):
@@ -363,7 +365,7 @@ class TestRunBacktest:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        assert 0.0 <= result.diverged_pct <= 100.0
+        assert 0.0 <= result.extras["diverged_pct"] <= 100.0
 
 
 # ── Edge Cases ──────────────────────────────────────────────────────────
@@ -475,12 +477,13 @@ class TestEdgeCases:
         try:
             with open(output_path) as f:
                 saved = json.load(f)
-            assert "strategy_name" in saved
             assert "cagr" in saved
-            assert "sharpe" in saved
-            assert "signal_distribution" in saved
-            assert "avg_z_score" in saved
-            assert "diverged_pct" in saved
+            assert "sharpe_ratio" in saved
+            assert "extras" in saved
+            assert "strategy_name" in saved["extras"]
+            assert "signal_distribution" in saved["extras"]
+            assert "avg_z_score" in saved["extras"]
+            assert "diverged_pct" in saved["extras"]
         finally:
             Path(output_path).unlink()
 

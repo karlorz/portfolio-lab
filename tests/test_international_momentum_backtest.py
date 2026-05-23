@@ -15,9 +15,9 @@ import pytest
 
 from src.backtest.international_momentum_backtest import (
     BacktestConfig,
-    BacktestResult,
     InternationalMomentumBacktester,
 )
+from src.backtest.metrics import BacktestResult
 
 
 # ── BacktestConfig Tests ─────────────────────────────────────────────────
@@ -68,42 +68,44 @@ class TestBacktestResult:
 
     def test_create(self):
         result = BacktestResult(
-            strategy_name="International Momentum Overlay",
-            start_date="2020-01-01",
-            end_date="2020-12-31",
-            initial_capital=100000.0,
-            final_value=110000.0,
+            total_return=10.0,
             cagr=10.0,
-            sharpe=0.85,
+            volatility=11.8,
+            sharpe_ratio=0.85,
             max_drawdown=-15.0,
             total_rebalances=12,
-            total_cost_bps=15.5,
+            total_transaction_costs=15.5,
             crisis_returns={"2008": -10.0, "2020": 2.5},
-            signal_distribution={"efa_lead": 5, "spy_lead": 3, "neutral": 4},
+            extras={
+                "strategy_name": "International Momentum Overlay",
+                "start_date": "2020-01-01",
+                "end_date": "2020-12-31",
+                "initial_capital": 100000.0,
+                "final_value": 110000.0,
+                "signal_distribution": {"efa_lead": 5, "spy_lead": 3, "neutral": 4},
+            },
         )
-        assert result.strategy_name == "International Momentum Overlay"
-        assert result.final_value == 110000.0
-        assert result.sharpe == 0.85
+        assert result.extras["strategy_name"] == "International Momentum Overlay"
+        assert result.extras["final_value"] == 110000.0
+        assert result.sharpe_ratio == 0.85
         assert result.total_rebalances == 12
-        assert result.signal_distribution["efa_lead"] == 5
+        assert result.extras["signal_distribution"]["efa_lead"] == 5
 
     def test_json_serializable(self):
         result = BacktestResult(
-            strategy_name="Test", start_date="2020-01-01", end_date="2020-12-31",
-            initial_capital=100000.0, final_value=100000.0, cagr=0.0, sharpe=0.0,
-            max_drawdown=0.0, total_rebalances=0, total_cost_bps=0.0,
-            crisis_returns={}, signal_distribution={},
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, total_rebalances=0, total_transaction_costs=0.0,
+            crisis_returns={}, extras={"strategy_name": "Test"},
         )
         json.dumps(result.__dict__)  # Should not raise
 
     def test_empty_signal_distribution(self):
         result = BacktestResult(
-            strategy_name="Test", start_date="2020-01-01", end_date="2020-12-31",
-            initial_capital=100000.0, final_value=100000.0, cagr=0.0, sharpe=0.0,
-            max_drawdown=0.0, total_rebalances=0, total_cost_bps=0.0,
-            crisis_returns={}, signal_distribution={},
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, total_rebalances=0, total_transaction_costs=0.0,
+            crisis_returns={}, extras={"signal_distribution": {}},
         )
-        assert result.signal_distribution == {}
+        assert result.extras["signal_distribution"] == {}
 
 
 # ── Backtester Init Tests ────────────────────────────────────────────────
@@ -325,7 +327,7 @@ class TestRunBacktest:
         result = bt.run_backtest()
         assert result is not None
         assert isinstance(result, BacktestResult)
-        assert result.final_value > 0
+        assert result.extras["final_value"] > 0
         assert result.total_rebalances >= 0
 
     def test_run_bull_market(self):
@@ -360,13 +362,13 @@ class TestRunBacktest:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        assert result.strategy_name is not None
+        assert result.extras.get("strategy_name") is not None
         assert result.cagr is not None
-        assert result.sharpe is not None
+        assert result.sharpe_ratio is not None
         assert result.max_drawdown is not None
         assert result.total_rebalances >= 0
         assert isinstance(result.crisis_returns, dict)
-        assert isinstance(result.signal_distribution, dict)
+        assert isinstance(result.extras["signal_distribution"], dict)
 
     def test_signal_distribution_totals(self):
         dates, prices = self._make_synthetic_prices(n_days=300, efa_trend=0.001)
@@ -376,7 +378,7 @@ class TestRunBacktest:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        total = sum(result.signal_distribution.values())
+        total = sum(result.extras["signal_distribution"].values())
         assert total > 0
         assert total <= result.total_rebalances
 
@@ -399,8 +401,8 @@ class TestRunBacktest:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        initial = result.initial_capital
-        final = result.final_value
+        initial = result.extras["initial_capital"]
+        final = result.extras["final_value"]
         # Final value should be a reasonable number
         assert final > 0
         assert isinstance(final, float)
@@ -517,10 +519,11 @@ class TestEdgeCases:
         try:
             with open(output_path) as f:
                 saved = json.load(f)
-            assert "strategy_name" in saved
             assert "cagr" in saved
-            assert "sharpe" in saved
-            assert "signal_distribution" in saved
+            assert "sharpe_ratio" in saved
+            assert "extras" in saved
+            assert "strategy_name" in saved["extras"]
+            assert "signal_distribution" in saved["extras"]
         finally:
             Path(output_path).unlink()
 
