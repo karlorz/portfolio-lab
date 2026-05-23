@@ -302,7 +302,7 @@ class ConvexityHarvestStrategy:
             'initial_capital': initial_capital,
             'final_capital': capital,
             'total_return_pct': total_return,
-            'annualized_return_pct': total_return / ((datetime.strptime(end_date, '%Y-%m-%d') - datetime.strptime(start_date, '%Y-%m-%d')).days / 365),
+            'annualized_return_pct': total_return / max((datetime.strptime(end_date, '%Y-%m-%d') - datetime.strptime(start_date, '%Y-%m-%d')).days / 365, 1/365),
             'volatility_pct': volatility,
             'sharpe_ratio': sharpe,
             'max_drawdown_pct': max_dd,

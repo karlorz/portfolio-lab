@@ -455,8 +455,11 @@ class UnifiedOrchestrator:
         cal_mod = 1.0
         for c in contributions:
             if c.name == "calendar":
-                cal_mod = float(c.reason.split(":")[1].split("x")[0].strip()) \
-                    if ":" in c.reason else 1.0
+                try:
+                    cal_mod = float(c.reason.split(":")[1].split("x")[0].strip()) \
+                        if ":" in c.reason else 1.0
+                except (ValueError, IndexError):
+                    cal_mod = 1.0
                 break
 
         # Execution recommendation

@@ -135,7 +135,7 @@ def fetch_all_fred_data(cache_path: Path = FRED_CACHE, force_refresh: bool = Fal
     for series_id in priority_series:
         print(f"Fetching {series_id}...")
         df = fetch_fred_series(series_id)
-        if df is not None:
+        if df is not None and not df.empty:
             data[series_id] = df
             print(f"  Got {len(df)} observations, latest: {df.iloc[-1]['date'].strftime('%Y-%m-%d')} = {df.iloc[-1]['value']:.2f}")
         else:
@@ -542,7 +542,8 @@ def main():
         data = overlay.fetch_data(force_refresh=args.force)
         print(f"\nFetched {len(data)} series:")
         for series_id, df in data.items():
-            print(f"  {series_id}: {len(df)} obs, latest={df.iloc[-1]['date'].strftime('%Y-%m-%d')}")
+            latest = df.iloc[-1]['date'].strftime('%Y-%m-%d') if not df.empty else "N/A"
+            print(f"  {series_id}: {len(df)} obs, latest={latest}")
     
     elif args.command == 'regime':
         overlay = FedPolicyOverlay()

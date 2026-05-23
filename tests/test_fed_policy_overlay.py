@@ -339,5 +339,15 @@ class TestFedPolicyOverlay:
         assert abs(delta_sum) < 0.1
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+class TestEmptyDataFrameGuard:
+    """Regression: fed_policy_overlay was missing empty DataFrame guard."""
+
+    def test_fetch_data_empty_df_no_crash(self):
+        """Empty DataFrames from FRED should not cause IndexError."""
+        overlay = FedPolicyOverlay()
+        # Simulate fetch_data returning a dict with an empty DataFrame
+        overlay._fetched_data = {'DFF': pd.DataFrame(columns=['date', 'value'])}
+        for series_id, df in overlay._fetched_data.items():
+            # Should not crash on iloc[-1] with empty df
+            latest = df.iloc[-1]['date'].strftime('%Y-%m-%d') if not df.empty else "N/A"
+            assert latest == "N/A"

@@ -240,3 +240,20 @@ class TestGetCurrentSignal:
         ))
         result = strategy.get_current_signal()
         assert isinstance(result, dict)
+
+
+class TestZeroDayBacktestGuard:
+    """Regression: run_backtest used to ZeroDivisionError when start_date == end_date."""
+
+    def test_same_start_end_no_crash(self):
+        """run_backtest with identical start and end date should not crash."""
+        from src.strategy.convexity_harvest import ConvexityHarvestStrategy
+        mock_mgr = MagicMock()
+        mock_mgr.get_contango_signal.return_value = None  # flat positions, minimal logic
+        strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
+        result = strategy.run_backtest(start_date="2026-01-15", end_date="2026-01-15")
+        assert isinstance(result, dict)
+        assert "total_return_pct" in result
+        # annualized_return_pct should be finite (not inf or nan)
+        import math
+        assert math.isfinite(result["annualized_return_pct"])

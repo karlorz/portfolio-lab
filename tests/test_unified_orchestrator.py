@@ -426,3 +426,36 @@ class TestOrchestratorBacktestValidation:
             import json
             json.dump(rec.to_dict(), f, indent=2)
         assert out.exists()
+
+
+class TestCalendarModifierMalformedReason:
+    """Regression: calendar modifier float() parsing used to crash on malformed reason."""
+
+    @pytest.fixture
+    def orch(self):
+        return UnifiedOrchestrator()
+
+    def test_malformed_calendar_reason_no_crash(self, orch):
+        """Calendar contribution with unparseable reason should default to 1.0."""
+        contributions = [
+            OverlayContribution("calendar", "v1", "active", 0.1,
+                                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                0.0, 0.0, 50.0, "bad_reason_no_colon"),
+        ]
+        # Should not raise ValueError
+        weights, _ = orch.resolve_conflicts(contributions)
+        # With cal_mod defaulting to 1.0, weights should be near baseline
+        for k, v in orch.BASELINE.items():
+            assert abs(weights[k] - v) < 0.05
+
+    def test_calendar_reason_with_non_numeric_after_colon(self, orch):
+        """Calendar reason like 'mod:abcx' should default to 1.0 without crash."""
+        contributions = [
+            OverlayContribution("calendar", "v1", "active", 0.1,
+                                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                0.0, 0.0, 50.0, "mod:abcx"),
+        ]
+        weights, _ = orch.resolve_conflicts(contributions)
+        # Should not crash — cal_mod defaults to 1.0
+        for k, v in orch.BASELINE.items():
+            assert abs(weights[k] - v) < 0.05
