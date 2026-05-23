@@ -67,7 +67,7 @@ class DashboardGenerator:
                             "r": entry.get("daily_return", 0)
                         })
                     except Exception as e:
-                        logger.warning(f"Failed to parse performance log entry: {e}")
+                        logger.warning("Failed to parse performance log entry: %s", e)
 
         output = {
             "prices": prices,
@@ -186,7 +186,7 @@ class DashboardGenerator:
                             "value": round(order.get("fill_value", 0), 2)
                         })
                     except Exception as e:
-                        logger.warning(f"Failed to parse order log entry: {e}")
+                        logger.warning("Failed to parse order log entry: %s", e)
 
         # Add factor rotation signals if engine available
         factor_rotation_signal = None
@@ -531,7 +531,7 @@ class DashboardGenerator:
                     broker["positions"] = last.get("broker_positions", [])
                     broker["drift"] = last.get("drift", [])
             except Exception as e:
-                logger.warning(f"Failed to load position sync log: {e}")
+                logger.warning("Failed to load position sync log: %s", e)
 
         # Check broker orders log
         orders_log = DATA_DIR / "broker_orders.jsonl"
@@ -544,7 +544,7 @@ class DashboardGenerator:
                         recent.append(json.loads(line))
                 broker["recent_orders"] = list(reversed(recent))
             except Exception as e:
-                logger.warning(f"Failed to load broker orders log: {e}")
+                logger.warning("Failed to load broker orders log: %s", e)
 
         # Check kill switch
         kill_file = DATA_DIR / "kill_switch.json"
@@ -554,7 +554,7 @@ class DashboardGenerator:
                     ks = json.load(f)
                 broker["kill_switch"] = ks.get("enabled", False)
             except Exception as e:
-                logger.warning(f"Failed to load kill switch state: {e}")
+                logger.warning("Failed to load kill switch state: %s", e)
 
         return broker
 
@@ -736,7 +736,7 @@ class DashboardGenerator:
                             "volatility": latest.get("volatility"),
                         }
             except Exception as e:
-                logger.warning(f"Failed to load grid search results: {e}")
+                logger.warning("Failed to load grid search results: %s", e)
 
         return signals
     
@@ -1032,7 +1032,7 @@ class DashboardGenerator:
                         "status": "fresh" if days_stale <= 1 else "stale" if days_stale <= 3 else "critical"
                     }
                 except Exception as e:
-                    logger.warning(f"Failed to parse data freshness date '{last_date}': {e}")
+                    logger.warning("Failed to parse data freshness date '%s': %s", last_date, e)
 
         # Get signal health from SignalHealthTracker
         try:
@@ -1083,7 +1083,7 @@ class DashboardGenerator:
                 if row:
                     vix = row[0]
             except Exception as e:
-                logger.warning(f"Failed to fetch VIX level for sector momentum: {e}")
+                logger.warning("Failed to fetch VIX level for sector momentum: %s", e)
 
             signals = generate_sector_signals(historical_path, vix=vix)
             return signals

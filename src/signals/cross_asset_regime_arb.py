@@ -212,7 +212,7 @@ class CrossAssetRegimeArbDetector:
         """Load price data from public/data/prices.json."""
         prices_file = self.data_dir / "prices.json"
         if not prices_file.exists():
-            logger.warning(f"Prices file not found: {prices_file}")
+            logger.warning("Prices file not found: %s", prices_file)
             return False
 
         try:
@@ -222,15 +222,16 @@ class CrossAssetRegimeArbDetector:
             required = ["SPY", "TLT", "GLD"]
             for sym in required:
                 if sym not in all_prices:
-                    logger.warning(f"Required symbol {sym} not in price data")
+                    logger.warning("Required symbol %s not in price data", sym)
                     return False
 
             self.prices = {sym: all_prices[sym] for sym in required}
-            logger.debug(f"Loaded prices for {list(self.prices)} "
-                         f"({len(self.prices.get('SPY', []))} data points)")
+            price_keys = list(self.prices)
+            spy_count = len(self.prices.get('SPY', []))
+            logger.debug("Loaded prices for %s (%d data points)", price_keys, spy_count)
             return True
         except (json.JSONDecodeError, KeyError) as e:
-            logger.warning(f"Failed to load prices: {e}")
+            logger.warning("Failed to load prices: %s", e)
             return False
 
     def _get_returns(self, symbol: str, lookback: int) -> Optional[float]:
@@ -457,7 +458,7 @@ class CrossAssetRegimeArbDetector:
                 with open(STATE_FILE) as f:
                     return json.load(f)
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Could not load state: {e}")
+            logger.warning("Could not load state: %s", e)
         return {"previous_pattern": None, "persistence_days": 0, "last_date": None}
 
     def _save_state(self, pattern: DivergencePattern, date_str: str):
@@ -480,7 +481,7 @@ class CrossAssetRegimeArbDetector:
             with open(STATE_FILE, "w") as f:
                 json.dump(self.state, f, indent=2)
         except OSError as e:
-            logger.warning(f"Could not save state: {e}")
+            logger.warning("Could not save state: %s", e)
 
     # ---- Public API ----
 

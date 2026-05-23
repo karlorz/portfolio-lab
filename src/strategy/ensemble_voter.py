@@ -438,7 +438,7 @@ class EnsembleVoter:
         except ImportError:
             pass
         except Exception as e:
-            logger.debug(f"Multi-speed momentum unavailable: {e}")
+            logger.debug("Multi-speed momentum unavailable: %s", e)
 
         # 2. Cross-Asset Relative Value (v5.71) — typed SignalSnapshot bridge
         try:
@@ -450,12 +450,12 @@ class EnsembleVoter:
         except ImportError:
             pass
         except Exception as e:
-            logger.debug(f"Cross-asset RV unavailable: {e}")
+            logger.debug("Cross-asset RV unavailable: %s", e)
 
         # 3. International Equity Momentum (v3.13) — typed SignalSnapshot bridge
         # Skip if zero weight for current regime
         if active_sources is not None and SignalSource.INTERNATIONAL_MOMENTUM not in active_sources:
-            logger.debug(f"Skipping INTERNATIONAL_MOMENTUM: zero weight for regime={regime.value if regime else '?' }")
+            logger.debug("Skipping INTERNATIONAL_MOMENTUM: zero weight for regime=%s", regime.value if regime else '?')
         else:
             try:
                 from src.signals.international_momentum import InternationalMomentumGenerator
@@ -492,13 +492,13 @@ class EnsembleVoter:
             except ImportError:
                 pass
             except Exception as e:
-                logger.debug(f"International momentum unavailable: {e}")
+                logger.debug("International momentum unavailable: %s", e)
 
 
         # 4. Alternative Data (v9.00) — typed SignalSnapshot bridge
         # Skip if zero weight for current regime
         if active_sources is not None and SignalSource.ALTERNATIVE_DATA not in active_sources:
-            logger.debug(f"Skipping ALTERNATIVE_DATA: zero weight for regime={regime.value if regime else '?' }")
+            logger.debug("Skipping ALTERNATIVE_DATA: zero weight for regime=%s", regime.value if regime else '?')
         else:
             try:
                 from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
@@ -509,7 +509,7 @@ class EnsembleVoter:
             except ImportError:
                 pass
             except Exception as e:
-                logger.debug(f"Alternative data unavailable: {e}")
+                logger.debug("Alternative data unavailable: %s", e)
 
 
         # 5. Cross-Asset Regime Arbitrage (v8.09) — typed SignalSnapshot bridge
@@ -522,13 +522,13 @@ class EnsembleVoter:
         except ImportError:
             pass
         except Exception as e:
-            logger.debug(f"Cross-asset regime arb unavailable: {e}")
+            logger.debug("Cross-asset regime arb unavailable: %s", e)
 
 
         # 6. Unified Overlay (v4.90) — collar + bond_duration + crypto + calendar
         # Skip if zero weight for current regime
         if active_sources is not None and SignalSource.UNIFIED_OVERLAY not in active_sources:
-            logger.debug(f"Skipping UNIFIED_OVERLAY: zero weight for regime={regime.value if regime else '?' }")
+            logger.debug("Skipping UNIFIED_OVERLAY: zero weight for regime=%s", regime.value if regime else '?')
         else:
             try:
                 from .orchestrator_ensemble_bridge import OrchestratorEnsembleBridge
@@ -538,7 +538,7 @@ class EnsembleVoter:
             except ImportError:
                 pass
             except Exception as e:
-                logger.debug(f"Unified overlay unavailable: {e}")
+                logger.debug("Unified overlay unavailable: %s", e)
 
         self.current_readings = readings
         return readings
@@ -709,10 +709,10 @@ class EnsembleVoter:
                                 adaptive_weights_enum[source_enum] = adapted[source_str]
                         
                         if adaptive_weights_enum:
-                            logger.info(f"Using adaptive ensemble weights for regime={regime.value}")
+                            logger.info("Using adaptive ensemble weights for regime=%s", regime.value)
                             weights = adaptive_weights_enum
         except Exception as e:
-            logger.warning(f"Could not apply adaptive ensemble weights: {e}")
+            logger.warning("Could not apply adaptive ensemble weights: %s", e)
         
         # Apply health-adjusted weighting (v3.12)
         # Reduce weight for signals with poor health scores
@@ -731,7 +731,7 @@ class EnsembleVoter:
                         multiplier = max(0.2, min(1.0, health.health_score))
                         adjusted_weights[source_enum] = base_weight * multiplier
                         if health.health_score < 0.5:
-                            logger.info(f"Health-adjusted {source_str}: weight {base_weight:.2%} → {adjusted_weights[source_enum]:.2%} (health={health.health_score:.2f})")
+                            logger.info("Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f)", source_str, base_weight * 100, adjusted_weights[source_enum] * 100, health.health_score)
                     else:
                         adjusted_weights[source_enum] = base_weight  # No health data, use full weight
                 
@@ -740,7 +740,7 @@ class EnsembleVoter:
                 if total > 0:
                     weights = {k: v / total for k, v in adjusted_weights.items()}
         except Exception as e:
-            logger.warning(f"Could not apply health-adjusted weights: {e}")
+            logger.warning("Could not apply health-adjusted weights: %s", e)
         
         # Apply turnover-aware weight validation (v8.01)
         # Penalizes signals that cause excessive rebalancing
@@ -777,9 +777,9 @@ class EnsembleVoter:
                         if bp_result.num_pruned > 0
                         else ""
                     )
-                    logger.debug(f"Basis-pursuit selection applied{sparsity_msg}")
+                    logger.debug("Basis-pursuit selection applied%s", sparsity_msg)
                 except Exception as bp_e:
-                    logger.warning(f"Could not apply basis-pursuit selection: {bp_e}")
+                    logger.warning("Could not apply basis-pursuit selection: %s", bp_e)
                 
                 # --- v8.03: Regret-Weighted Adjustment ---
                 # Penalize signals with high regret (covariance with ensemble decision)
@@ -794,12 +794,12 @@ class EnsembleVoter:
                     base_weights_str = rw_result.adjusted_weights
                     if rw_result.signals_with_high_regret:
                         logger.info(
-                            f"Regret-adjusted weights: penalized "
-                            f"{', '.join(rw_result.signals_with_high_regret)}"
-                            f" (avg_regret={rw_result.avg_regret:.3f})"
+                            "Regret-adjusted weights: penalized %s (avg_regret=%.3f)",
+                            ', '.join(rw_result.signals_with_high_regret),
+                            rw_result.avg_regret
                         )
                 except Exception as rw_e:
-                    logger.warning(f"Could not apply regret-weighted adjustment: {rw_e}")
+                    logger.warning("Could not apply regret-weighted adjustment: %s", rw_e)
                 
                 # Apply turnover adjustment
                 adjusted_str = turnover_validator.get_adjusted_weights(
@@ -821,11 +821,12 @@ class EnsembleVoter:
                     weights = {k: v / total for k, v in turnover_adjusted.items()}
                     
                 logger.debug(
-                    f"Turnover-adjusted {len(signal_values)} signals: "
-                    f"{', '.join(f'{s}={turnover_adjusted.get(enum, 0):.4f}' for enum, s in [(e, e.value) for e in weights])}"
+                    "Turnover-adjusted %d signals: %s",
+                    len(signal_values),
+                    ', '.join(f'{s}={turnover_adjusted.get(enum, 0):.4f}' for enum, s in [(e, e.value) for e in weights])
                 )
         except Exception as e:
-            logger.warning(f"Could not apply turnover-aware weights: {e}")
+            logger.warning("Could not apply turnover-aware weights: %s", e)
         
         # Apply weights to readings
         weighted_signals = []
@@ -845,7 +846,7 @@ class EnsembleVoter:
                         confidence=reading.confidence,
                     )
         except Exception as e:
-            logger.debug(f"Health tracking log failed: {e}")
+            logger.debug("Health tracking log failed: %s", e)
 
         if not weighted_signals:
             return EnsembleVote(
@@ -955,7 +956,7 @@ class EnsembleVoter:
             rw_selector.state.last_ensemble_decision = weighted_consensus
             rw_selector._save_state()
         except Exception as rw_e:
-            logger.debug(f"Could not persist ensemble decision to regret-weighted state: {rw_e}")
+            logger.debug("Could not persist ensemble decision to regret-weighted state: %s", rw_e)
         
         # Save to DB
         self._save_vote(vote)
@@ -1000,7 +1001,7 @@ class EnsembleVoter:
                         (reading.explanation or "")[:500],
                     ))
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Failed to save source reading {reading.source}: {e}")
+                    logger.warning("Failed to save source reading %s: %s", reading.source, e)
     
     def recommend_allocation(
         self,

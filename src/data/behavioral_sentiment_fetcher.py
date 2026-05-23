@@ -177,7 +177,7 @@ class BehavioralSentimentFetcher:
                         return self._dict_to_snapshot(data)
             return None
         except Exception as e:
-            logger.warning(f"Cache retrieval failed: {e}")
+            logger.warning("Cache retrieval failed: %s", e)
             return None
     
     def _save_to_cache(self, snapshot: BehavioralSentimentSnapshot):
@@ -201,7 +201,7 @@ class BehavioralSentimentFetcher:
                 """)
                 conn.commit()
         except Exception as e:
-            logger.warning(f"Cache save failed: {e}")
+            logger.warning("Cache save failed: %s", e)
     
     def _dict_to_snapshot(self, data: Dict) -> BehavioralSentimentSnapshot:
         """Convert dict back to snapshot object"""
@@ -312,7 +312,7 @@ class BehavioralSentimentFetcher:
                 small_lot_premium_ratio=0.85  # Estimated retail share
             )
         except Exception as e:
-            logger.warning(f"Failed to estimate retail flow: {e}")
+            logger.warning("Failed to estimate retail flow: %s", e)
             return RetailFlow(
                 timestamp=datetime.now().isoformat(),
                 retail_call_put_ratio=1.0,
@@ -363,7 +363,7 @@ class BehavioralSentimentFetcher:
                     reddit_data_source="reddit_api"
                 )
             except Exception as e:
-                logger.warning(f"Reddit fetch failed, falling back to proxy: {e}")
+                logger.warning("Reddit fetch failed, falling back to proxy: %s", e)
         
         # Fallback: VIX-based proxy estimation
         vix, vix9d = self._fetch_vix_data()
@@ -562,7 +562,7 @@ class BehavioralSentimentFetcher:
                 rows = cursor.fetchall()
                 return [json.loads(row[0]) for row in rows]
         except Exception as e:
-            logger.warning(f"Failed to retrieve history: {e}")
+            logger.warning("Failed to retrieve history: %s", e)
             return []
 
 

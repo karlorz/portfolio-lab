@@ -130,7 +130,7 @@ class PerformanceAttribution:
     def _get_signal_history(self, days: int = 90) -> List[Dict]:
         """Extract signal reading history from ensemble database."""
         if not self.ensemble_db.exists():
-            logger.warning(f"Ensemble DB not found: {self.ensemble_db}")
+            logger.warning("Ensemble DB not found: %s", self.ensemble_db)
             return []
 
         history = []
@@ -183,7 +183,7 @@ class PerformanceAttribution:
                     })
 
         except Exception as e:
-            logger.error(f"Error reading signal history: {e}")
+            logger.error("Error reading signal history: %s", e)
 
         return history
 
@@ -209,7 +209,7 @@ class PerformanceAttribution:
                             "cumulative_return": row["cumulative_return"],
                         }
             except Exception as e:
-                logger.warning(f"Could not read paper trading DB: {e}")
+                logger.warning("Could not read paper trading DB: %s", e)
 
         # Fallback: check json reports
         if not daily_returns:
@@ -228,7 +228,7 @@ class PerformanceAttribution:
                                 "cumulative_return": dr["cumulative"],
                             }
                 except Exception as e:
-                    logger.warning(f"Could not read performance file: {e}")
+                    logger.warning("Could not read performance file: %s", e)
 
         return daily_returns
 
@@ -413,7 +413,7 @@ class PerformanceAttribution:
 
     def generate_report(self, days: int = 90) -> AttributionReport:
         """Generate complete performance attribution report."""
-        logger.info(f"Generating attribution report over {days} days...")
+        logger.info("Generating attribution report over %d days...", days)
 
         signal_history = self._get_signal_history(days)
         daily_returns = self._get_paper_trading_returns(days)
@@ -505,7 +505,7 @@ class PerformanceAttribution:
         path = self.attribution_dir / filename
         with open(path, "w") as f:
             json.dump(report.to_dict(), f, indent=2, default=str)
-        logger.info(f"Saved attribution report: {path}")
+        logger.info("Saved attribution report: %s", path)
         return path
 
     def load_latest_report(self) -> Optional[AttributionReport]:
@@ -522,7 +522,7 @@ class PerformanceAttribution:
             data["sources"] = sources
             return AttributionReport(**data)
         except Exception as e:
-            logger.error(f"Error loading report: {e}")
+            logger.error("Error loading report: %s", e)
             return None
 
 
@@ -616,7 +616,7 @@ def patch_save_vote():
                         reading.explanation[:500] if reading.explanation else "",
                     ))
         except Exception as e:
-            logger.warning(f"Failed to save source readings: {e}")
+            logger.warning("Failed to save source readings: %s", e)
 
     ev.EnsembleVoter._save_vote = patched_save
     logger.info("Patched EnsembleVoter._save_vote to log source readings")

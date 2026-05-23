@@ -226,8 +226,8 @@ class AdaptiveEnsembleWeights:
             mult = multipliers.get(source_name, 1.0)
             if abs(adj - base) > 0.005:
                 logger.info(
-                    f"Adaptive weight: {source_name:25s} "
-                    f"{base:.4f} → {adj:.4f} (×{mult:.2f})"
+                    "Adaptive weight: %25s %.4f → %.4f (×%.2f)",
+                    source_name, base, adj, mult,
                 )
 
         # Record adjustment in history
@@ -328,9 +328,9 @@ class AdaptiveEnsembleWeights:
             }
             with open(self.state_file, "w") as f:
                 json.dump(state, f, indent=2, default=str)
-            logger.debug(f"Saved adaptive weights state to {self.state_file}")
+            logger.debug("Saved adaptive weights state to %s", self.state_file)
         except Exception as e:
-            logger.warning(f"Failed to save adaptive weights state: {e}")
+            logger.warning("Failed to save adaptive weights state: %s", e)
 
     def _load_state(self) -> bool:
         """Load persisted state from disk."""
@@ -344,10 +344,10 @@ class AdaptiveEnsembleWeights:
             self.current_regime = state.get("regime", "normal")
             self.history = [WeightAdjustment(**h) for h in state.get("history", [])]
             self.base_weights = state.get("baseline_weights", self.base_weights)
-            logger.debug(f"Loaded adaptive weights state from {self.state_file}")
+            logger.debug("Loaded adaptive weights state from %s", self.state_file)
             return True
         except Exception as e:
-            logger.warning(f"Failed to load adaptive weights state: {e}")
+            logger.warning("Failed to load adaptive weights state: %s", e)
             return False
 
     def get_state_dict(self) -> Dict:
@@ -392,14 +392,14 @@ def _get_base_weights_from_voter() -> Dict[str, float]:
         weights = REGIME_WEIGHTS.get(Regime.NORMAL, {})
         return {k.value if hasattr(k, 'value') else str(k): v for k, v in weights.items()}
     except Exception as e:
-        logger.warning(f"Could not load base weights from voter: {e}")
+        logger.warning("Could not load base weights from voter: %s", e)
         return {}
 
 
 def _load_latest_attribution() -> Optional[Dict]:
     """Load the most recent attribution report JSON."""
     if not ATTRIBUTION_DIR.exists():
-        logger.warning(f"Attribution directory not found: {ATTRIBUTION_DIR}")
+        logger.warning("Attribution directory not found: %s", ATTRIBUTION_DIR)
         return None
 
     files = sorted(ATTRIBUTION_DIR.glob("attribution_*.json"), reverse=True)
@@ -411,7 +411,7 @@ def _load_latest_attribution() -> Optional[Dict]:
         with open(files[0]) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"Failed to load attribution file: {e}")
+        logger.warning("Failed to load attribution file: %s", e)
         return None
 
 

@@ -109,9 +109,8 @@ def compute_features(
 
     n = len(prices)
     if n < config.vol_lookback + 2:
-        logger.warning(
-            f"Insufficient data: need {config.vol_lookback + 2} days, got {n}"
-        )
+        need_days = config.vol_lookback + 2
+        logger.warning("Insufficient data: need %d days, got %d", need_days, n)
         return None
 
     # Extract close prices (last column if OHLCV, first/last column if close-only)
@@ -242,7 +241,7 @@ def load_prices(symbol: str = "SPY") -> Optional[np.ndarray]:
         with open(price_file) as f:
             raw = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.error(f"Failed to load price data: {e}")
+        logger.error("Failed to load price data: %s", e)
         return None
 
     # Find symbol data — format: {symbol: [{"d": ..., "p": ...}, ...]}
@@ -258,7 +257,7 @@ def load_prices(symbol: str = "SPY") -> Optional[np.ndarray]:
         symbol_data = None
 
     if symbol_data is None:
-        logger.error(f"Symbol {symbol} not found in price data")
+        logger.error("Symbol %s not found in price data", symbol)
         return None
 
     # Extract price points
@@ -267,12 +266,12 @@ def load_prices(symbol: str = "SPY") -> Optional[np.ndarray]:
         try:
             closes = np.array([item.get("p", item.get("close", 0)) for item in symbol_data], dtype=np.float64)
             if len(closes) == 0:
-                logger.error(f"No price data for {symbol}")
+                logger.error("No price data for %s", symbol)
                 return None
             # Ensure chronological order (earliest first)
             return closes.reshape(-1, 1)
         except (IndexError, TypeError, ValueError) as e:
-            logger.error(f"Error extracting {symbol} prices: {e}")
+            logger.error("Error extracting %s prices: %s", symbol, e)
             return None
     elif isinstance(symbol_data, dict):
         # Alternative format: {"t": [...], "c": [...]} or {"o": [...], "h": [...], ...}
@@ -280,10 +279,11 @@ def load_prices(symbol: str = "SPY") -> Optional[np.ndarray]:
         if closes_list:
             arr = np.array(closes_list, dtype=np.float64)
             return arr.reshape(-1, 1)
-        logger.error(f"Could not parse {symbol} data format")
+        logger.error("Could not parse %s data format", symbol)
         return None
     else:
-        logger.error(f"Unexpected data type for {symbol}: {type(symbol_data).__name__}")
+        data_type_name = type(symbol_data).__name__
+        logger.error("Unexpected data type for %s: %s", symbol, data_type_name)
         return None
 
 
@@ -342,9 +342,9 @@ def save_state(result: Dict, state_file: Optional[Path] = None) -> None:
     try:
         with open(state_file, "w") as f:
             json.dump(result, f, indent=2, default=str)
-        logger.info(f"State saved to {state_file}")
+        logger.info("State saved to %s", state_file)
     except OSError as e:
-        logger.error(f"Failed to save state: {e}")
+        logger.error("Failed to save state: %s", e)
 
 
 def load_state(state_file: Optional[Path] = None) -> Optional[Dict]:
@@ -357,7 +357,7 @@ def load_state(state_file: Optional[Path] = None) -> Optional[Dict]:
         with open(state_file) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"Failed to load state: {e}")
+        logger.warning("Failed to load state: %s", e)
         return None
 
 

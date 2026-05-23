@@ -124,7 +124,7 @@ class BehavioralSentimentSignal:
                 """)
                 conn.commit()
         except Exception as e:
-            logger.warning(f"Failed to init zscore table: {e}")
+            logger.warning("Failed to init zscore table: %s", e)
 
     def _get_zscore(self, composite_score: float) -> float:
         """Compute z-score of composite_score against 90-day rolling window"""
@@ -151,7 +151,7 @@ class BehavioralSentimentSignal:
 
                 return (composite_score - mean) / std
         except Exception as e:
-            logger.warning(f"Z-score computation failed: {e}")
+            logger.warning("Z-score computation failed: %s", e)
             return composite_score / 1.5
 
     def _record_score(self, composite_score: float, signal_type: str):
@@ -166,7 +166,7 @@ class BehavioralSentimentSignal:
                 )
                 conn.commit()
         except Exception as e:
-            logger.warning(f"Failed to record zscore: {e}")
+            logger.warning("Failed to record zscore: %s", e)
 
     def _regime_check(self, vix: float) -> Tuple[bool, str]:
         """Check if current regime should suppress behavioral signals"""
@@ -299,7 +299,7 @@ class BehavioralSentimentSignal:
     def trigger_pause(self, hours: int = 72, reason: str = ""):
         """Manually trigger a circuit breaker pause"""
         self._pause_until = datetime.now() + timedelta(hours=hours)
-        logger.info(f"Pause triggered for {hours}h: {reason}")
+        logger.info("Pause triggered for %dh: %s", hours, reason)
 
     def clear_pause(self):
         """Clear an active circuit breaker pause"""
@@ -394,7 +394,7 @@ class BehavioralSentimentSignal:
                         "regime_suppressed": regime_suppressed,
                     })
         except Exception as e:
-            logger.warning(f"Historical backfill failed: {e}")
+            logger.warning("Historical backfill failed: %s", e)
 
         return results
 

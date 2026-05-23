@@ -18,15 +18,11 @@ from src.backtest.bond_duration_backtest import (
     BacktestConfig,
     DailyPrices,
     WalkForwardBondDurationBacktester,
-    RISING_ALLOCATION,
-    FALLING_ALLOCATION,
-    NEUTRAL_ALLOCATION,
     BOND_SLEEVE,
-    RISING_THRESHOLD,
-    FALLING_THRESHOLD,
     MOMENTUM_LOOKBACK,
 )
 from src.backtest.metrics import BacktestResult
+from src.signals.bond_duration_signal import BondDurationCalculator
 
 
 # ── BacktestConfig Tests ────────────────────────────────────────────────────
@@ -188,41 +184,46 @@ class TestBacktestResult:
 
 
 class TestAllocationConstants:
-    """Test bond sleeve allocation constants."""
+    """Test bond sleeve allocation via BondDurationCalculator."""
 
-    def test_rising_allocation_sum(self):
-        """Rising allocation sleeve weights should sum to ~1.0."""
-        tlt, ief, shy, label = RISING_ALLOCATION
+    def test_steep_falling_allocation_sum(self):
+        """Steep curve + falling rates should sum to ~1.0."""
+        calc = BondDurationCalculator()
+        tlt, ief, shy, label = calc.compute_duration_allocation(
+            1.2, 1.5, calc.classify_rate_direction(-0.5), calc.classify_curve(1.2)
+        )
         assert abs(tlt + ief + shy - 1.0) < 0.01
-        assert label == "rising"
-        assert tlt > ief  # TLT should dominate in rising regime
+        assert tlt > ief  # TLT should dominate in steep+falling regime
 
-    def test_falling_allocation_sum(self):
-        """Falling allocation sleeve weights should sum to ~1.0."""
-        tlt, ief, shy, label = FALLING_ALLOCATION
+    def test_inverted_rising_allocation_sum(self):
+        """Inverted curve + rising rates should sum to ~1.0."""
+        calc = BondDurationCalculator()
+        tlt, ief, shy, label = calc.compute_duration_allocation(
+            -0.5, -1.0, calc.classify_rate_direction(0.5), calc.classify_curve(-0.5)
+        )
         assert abs(tlt + ief + shy - 1.0) < 0.01
-        assert label == "falling"
-        assert shy > tlt  # SHY should dominate in falling regime
+        assert shy > tlt  # SHY should dominate in inverted+rising regime
 
-    def test_neutral_allocation_sum(self):
-        """Neutral allocation sleeve weights should sum to ~1.0."""
-        tlt, ief, shy, label = NEUTRAL_ALLOCATION
+    def test_normal_stable_allocation_sum(self):
+        """Normal curve + stable rates should sum to ~1.0."""
+        calc = BondDurationCalculator()
+        tlt, ief, shy, label = calc.compute_duration_allocation(
+            0.5, 1.0, calc.classify_rate_direction(0.0), calc.classify_curve(0.5)
+        )
         assert abs(tlt + ief + shy - 1.0) < 0.01
-        assert label == "neutral"
 
     def test_rising_has_highest_duration(self):
-        """Rising regime should have the highest effective duration."""
-        tlt_r, ief_r, shy_r, _ = RISING_ALLOCATION
-        tlt_f, ief_f, shy_f, _ = FALLING_ALLOCATION
-        dur_rising = tlt_r * 16.0 + ief_r * 7.0 + shy_r * 2.0
-        dur_falling = tlt_f * 16.0 + ief_f * 7.0 + shy_f * 2.0
+        """Steep+failing regime should have higher duration than inverted+rising."""
+        calc = BondDurationCalculator()
+        tlt_r, ief_r, shy_r, _ = calc.compute_duration_allocation(
+            1.2, 1.5, calc.classify_rate_direction(-0.5), calc.classify_curve(1.2)
+        )
+        tlt_f, ief_f, shy_f, _ = calc.compute_duration_allocation(
+            -0.5, -1.0, calc.classify_rate_direction(0.5), calc.classify_curve(-0.5)
+        )
+        dur_rising = calc.compute_effective_duration(tlt_r, ief_r, shy_r)
+        dur_falling = calc.compute_effective_duration(tlt_f, ief_f, shy_f)
         assert dur_rising > dur_falling
-
-    def test_momentum_thresholds_symmetric(self):
-        """Rising threshold should be positive, falling negative."""
-        assert RISING_THRESHOLD > 0
-        assert FALLING_THRESHOLD < 0
-        assert MOMENTUM_LOOKBACK == 60
 
     def test_bond_sleeve_constant(self):
         """BOND_SLEEVE should be 16%."""
@@ -401,91 +402,84 @@ class TestTLTMomentum:
         mom = bt._compute_tlt_60d_momentum(5)  # Only 6 days of history
         assert mom == 0.0
 
-    def test_classify_momentum_rising(self):
-        """Momentum above RISING_THRESHOLD should be classified as rising."""
+    def test_momentum_to_yield_context_rising(self):
+        """Strong positive TLT momentum should map to falling rates, steep curve."""
         bt = WalkForwardBondDurationBacktester()
-        regime = bt._classify_momentum(RISING_THRESHOLD + 0.005)
-        assert regime == "rising"
+        spread, real_rate, rate_chg = bt._momentum_to_yield_context(0.06)
+        assert spread > 0.5  # Steep curve
+        assert rate_chg < -0.3  # Falling rates
 
-    def test_classify_momentum_falling(self):
-        """Momentum below FALLING_THRESHOLD should be classified as falling."""
+    def test_momentum_to_yield_context_falling(self):
+        """Strong negative TLT momentum should map to rising rates, inverted curve."""
         bt = WalkForwardBondDurationBacktester()
-        regime = bt._classify_momentum(FALLING_THRESHOLD - 0.005)
-        assert regime == "falling"
+        spread, real_rate, rate_chg = bt._momentum_to_yield_context(-0.06)
+        assert spread < 0  # Inverted curve
+        assert rate_chg > 0.3  # Rising rates
 
-    def test_classify_momentum_neutral(self):
-        """Momentum between thresholds should be classified as neutral."""
+    def test_momentum_to_yield_context_neutral(self):
+        """Near-zero TLT momentum should map to stable rates, normal curve."""
         bt = WalkForwardBondDurationBacktester()
-        regime = bt._classify_momentum(0.0)
-        assert regime == "neutral"
-
-    def test_classify_momentum_boundary_rising(self):
-        """Momentum exactly at rising threshold should be neutral."""
-        bt = WalkForwardBondDurationBacktester()
-        regime = bt._classify_momentum(RISING_THRESHOLD)
-        assert regime == "neutral"
+        spread, real_rate, rate_chg = bt._momentum_to_yield_context(0.0)
+        assert 0 < spread < 0.5  # Normal/flat curve
+        assert abs(rate_chg) < 0.1  # Stable rates
 
 
 # ── Bond Allocation Tests ───────────────────────────────────────────────────
 
 
 class TestBondAllocation:
-    """Test bond sleeve allocation by momentum regime."""
+    """Test bond sleeve allocation via BondDurationCalculator regime matrix."""
 
-    def test_rising_allocation(self):
-        """Rising momentum should return TLT-heavy allocation."""
-        bt = WalkForwardBondDurationBacktester()
-        tlt, ief, shy, label = bt._get_bond_sleeve_allocation("rising")
-        assert tlt == pytest.approx(0.70)
-        assert ief == pytest.approx(0.20)
-        assert shy == pytest.approx(0.10)
+    def test_steep_falling_allocation(self):
+        """Steep curve + falling rates should return TLT-heavy allocation."""
+        calc = BondDurationCalculator()
+        tlt, ief, shy, label = calc.compute_duration_allocation(
+            1.2, 1.5, calc.classify_rate_direction(-0.5), calc.classify_curve(1.2)
+        )
+        assert tlt > 0.5  # TLT-heavy
+        assert label == "long"
 
-    def test_falling_allocation(self):
-        """Falling momentum should return SHY-heavy allocation."""
-        bt = WalkForwardBondDurationBacktester()
-        tlt, ief, shy, label = bt._get_bond_sleeve_allocation("falling")
-        assert tlt == pytest.approx(0.10)
-        assert ief == pytest.approx(0.30)
-        assert shy == pytest.approx(0.60)
+    def test_inverted_rising_allocation(self):
+        """Inverted curve + rising rates should return SHY-heavy allocation."""
+        calc = BondDurationCalculator()
+        tlt, ief, shy, label = calc.compute_duration_allocation(
+            -0.5, -1.0, calc.classify_rate_direction(0.5), calc.classify_curve(-0.5)
+        )
+        assert shy > 0.5  # SHY-heavy
+        assert label == "short"
 
-    def test_neutral_allocation(self):
-        """Neutral momentum should return balanced allocation."""
-        bt = WalkForwardBondDurationBacktester()
-        tlt, ief, shy, label = bt._get_bond_sleeve_allocation("neutral")
-        assert tlt == pytest.approx(0.40)
-        assert ief == pytest.approx(0.40)
-        assert shy == pytest.approx(0.20)
-
-    def test_unknown_regime_falls_back_to_neutral(self):
-        """Unknown regime should default to neutral."""
-        bt = WalkForwardBondDurationBacktester()
-        tlt, ief, shy, label = bt._get_bond_sleeve_allocation("unknown")
-        assert label == "neutral" or label is not None
+    def test_normal_stable_allocation(self):
+        """Normal curve + stable rates should return balanced allocation."""
+        calc = BondDurationCalculator()
+        tlt, ief, shy, label = calc.compute_duration_allocation(
+            0.5, 1.0, calc.classify_rate_direction(0.0), calc.classify_curve(0.5)
+        )
+        assert abs(tlt + ief + shy - 1.0) < 0.01  # Weights sum to 1
 
 
 # ── Effective Duration Tests ────────────────────────────────────────────────
 
 
 class TestEffectiveDuration:
-    """Test effective duration computation."""
+    """Test effective duration computation via BondDurationCalculator."""
 
     def test_all_tlt(self):
         """100% TLT should give 16-year duration."""
-        bt = WalkForwardBondDurationBacktester()
-        dur = bt._compute_effective_duration(1.0, 0.0, 0.0)
+        calc = BondDurationCalculator()
+        dur = calc.compute_effective_duration(1.0, 0.0, 0.0)
         assert dur == pytest.approx(16.0)
 
     def test_all_shy(self):
         """100% SHY should give 2-year duration."""
-        bt = WalkForwardBondDurationBacktester()
-        dur = bt._compute_effective_duration(0.0, 0.0, 1.0)
+        calc = BondDurationCalculator()
+        dur = calc.compute_effective_duration(0.0, 0.0, 1.0)
         assert dur == pytest.approx(2.0)
 
     def test_mixed_allocation(self):
         """Mixed allocation should compute weighted average."""
-        bt = WalkForwardBondDurationBacktester()
+        calc = BondDurationCalculator()
         # 50% TLT, 30% IEF, 20% SHY
-        dur = bt._compute_effective_duration(0.5, 0.3, 0.2)
+        dur = calc.compute_effective_duration(0.5, 0.3, 0.2)
         expected = 0.5 * 16.0 + 0.3 * 7.0 + 0.2 * 2.0
         assert dur == pytest.approx(expected)
 
@@ -555,5 +549,11 @@ class TestEdgeCases:
         if idx < len(bt._daily_prices):
             bt._daily_prices[idx - MOMENTUM_LOOKBACK].tlt = 100.0
             bt._daily_prices[idx].tlt = 105.0
-            regime = bt._classify_momentum(bt._compute_tlt_60d_momentum(idx))
-            assert regime == "rising"
+            momentum = bt._compute_tlt_60d_momentum(idx)
+            # Rising TLT price maps to falling rates via _momentum_to_yield_context
+            spread, _, rate_chg = bt._momentum_to_yield_context(momentum)
+            calc = bt._calc
+            curve_regime = calc.classify_curve(spread)
+            rate_dir = calc.classify_rate_direction(rate_chg)
+            tlt, ief, shy, label = calc.compute_duration_allocation(spread, 1.5, rate_dir, curve_regime)
+            assert tlt > shy  # TLT should dominate when TLT is rising

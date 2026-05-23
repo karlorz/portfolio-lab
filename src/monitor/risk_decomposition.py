@@ -194,7 +194,7 @@ def _load_prices_from_pipeline() -> Dict[str, np.ndarray]:
         prices_path = project_root / "data" / "prices.json"
 
     if not prices_path.exists():
-        logger.warning(f"Prices file not found: {prices_path}")
+        logger.warning("Prices file not found: %s", prices_path)
         return {}
 
     with open(prices_path) as f:
@@ -287,7 +287,7 @@ def _build_factor_returns(
 
         for sym, weight in fdef["symbols"].items():
             if sym not in prices:
-                logger.warning(f"Factor {fkey}: missing price data for {sym}")
+                logger.warning("Factor %s: missing price data for %s", fkey, sym)
                 continue
             rets = _compute_returns(prices[sym])
             if len(rets) == 0:
@@ -297,7 +297,7 @@ def _build_factor_returns(
                 min_len = len(rets)
 
         if not components or min_len is None:
-            logger.warning(f"Factor {fkey}: no data available")
+            logger.warning("Factor %s: no data available", fkey)
             factor_returns[fkey] = np.array([])
             continue
 
@@ -386,8 +386,9 @@ class RiskDecomposer:
         )
 
         logger.info(
-            f"RiskDecomposer initialized: {self.n_factors} factors, "
-            f"window={window}d, {len(self.prices)} symbols available"
+            "RiskDecomposer initialized: %d factors, "
+            "window=%dd, %d symbols available",
+            self.n_factors, window, len(self.prices),
         )
 
     def estimate_asset_betas(
@@ -407,13 +408,14 @@ class RiskDecomposer:
         # Get asset returns
         if returns is None:
             if symbol not in self.prices:
-                logger.warning(f"No price data for {symbol}")
+                logger.warning("No price data for %s", symbol)
                 return {}
             returns = _compute_returns(self.prices[symbol])
 
         if len(returns) < self.window:
             logger.warning(
-                f"Not enough data for {symbol}: {len(returns)} obs < window={self.window}"
+                "Not enough data for %s: %d obs < window=%d",
+                symbol, len(returns), self.window,
             )
             # Use all available data
             window = len(returns)
@@ -429,7 +431,7 @@ class RiskDecomposer:
         )
 
         if len(aligned_asset) < 3:
-            logger.warning(f"Insufficient aligned data for {symbol}")
+            logger.warning("Insufficient aligned data for %s", symbol)
             return {}
 
         len(aligned_asset)
@@ -461,7 +463,7 @@ class RiskDecomposer:
             AssetRiskDecomposition or None if insufficient data
         """
         if symbol not in self.prices:
-            logger.warning(f"No price data for {symbol}, skipping")
+            logger.warning("No price data for %s, skipping", symbol)
             return None
 
         returns = _compute_returns(self.prices[symbol])
@@ -807,7 +809,7 @@ def main():
             parser.print_help()
 
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error("Error: %s", e)
         sys.exit(1)
 
 

@@ -173,7 +173,7 @@ class StackingTrainer:
         db_path = Path(PROJECT_ROOT) / self.config.db_path
         
         if not db_path.exists():
-            logger.warning(f"Database not found at {db_path}, using synthetic data")
+            logger.warning("Database not found at %s, using synthetic data", db_path)
             return self._generate_synthetic_data()
         
         with sqlite3.connect(db_path) as conn:
@@ -208,8 +208,9 @@ class StackingTrainer:
             cursor.execute(query, params)
             rows = cursor.fetchall()
         
-        if len(rows) < self.config.min_training_days:
-            logger.warning(f"Insufficient data ({len(rows)} rows), using synthetic data")
+        n_rows = len(rows)
+        if n_rows < self.config.min_training_days:
+            logger.warning("Insufficient data (%s rows), using synthetic data", n_rows)
             return self._generate_synthetic_data()
         
         # Organize by date
@@ -262,8 +263,9 @@ class StackingTrainer:
             y_list.append(target)
             dates.append(date)
         
-        if len(X_list) < self.config.min_training_days:
-            logger.warning(f"Insufficient valid samples ({len(X_list)}), using synthetic data")
+        n_valid = len(X_list)
+        if n_valid < self.config.min_training_days:
+            logger.warning("Insufficient valid samples (%s), using synthetic data", n_valid)
             return self._generate_synthetic_data()
         
         return np.array(X_list), np.array(y_list), dates
@@ -320,7 +322,7 @@ class StackingTrainer:
         n_samples: int = 1000
     ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
         """Generate synthetic training data for testing."""
-        logger.info(f"Generating {n_samples} synthetic samples")
+        logger.info("Generating %s synthetic samples", n_samples)
         
         np.random.seed(42)
         
@@ -358,10 +360,11 @@ class StackingTrainer:
         if end_date is None:
             end_date = datetime.now().strftime('%Y-%m-%d')
         
-        logger.info(f"Loading historical data from {start_date} to {end_date}")
+        logger.info("Loading historical data from %s to %s", start_date, end_date)
         X, y, dates = self._load_historical_data(start_date, end_date)
         
-        logger.info(f"Loaded {len(y)} samples")
+        n_loaded = len(y)
+        logger.info("Loaded %s samples", n_loaded)
         
         # Time-series cross-validation
         tscv = TimeSeriesSplit(n_splits=self.config.n_splits)
@@ -398,7 +401,8 @@ class StackingTrainer:
             cv_scores.append(acc)
             cv_aucs.append(auc)
             
-            logger.info(f"Fold {fold+1}: Accuracy={acc:.3f}, AUC={auc:.3f}")
+            fold_num = fold + 1
+            logger.info("Fold %s: Accuracy=%.3f, AUC=%.3f", fold_num, acc, auc)
         
         # Train final model on all data
         logger.info("Training final model on all data")
@@ -433,9 +437,9 @@ class StackingTrainer:
         val_accuracy = accuracy_score(y_val, y_val_pred)
         val_auc = roc_auc_score(y_val, y_val_prob)
         
-        logger.info(f"Final - Train Accuracy: {train_accuracy:.3f}")
-        logger.info(f"Final - Val Accuracy: {val_accuracy:.3f}")
-        logger.info(f"Final - Val AUC: {val_auc:.3f}")
+        logger.info("Final - Train Accuracy: %.3f", train_accuracy)
+        logger.info("Final - Val Accuracy: %.3f", val_accuracy)
+        logger.info("Final - Val AUC: %.3f", val_auc)
         
         # Extract feature importance
         importance = self.model.feature_importances_
@@ -449,7 +453,7 @@ class StackingTrainer:
         
         logger.info("Top 5 features:")
         for name, imp in top_features[:5]:
-            logger.info(f"  {name}: {imp:.3f}")
+            logger.info("  %s: %.3f", name, imp)
         
         # Save model using pickle for XGBClassifier
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -458,7 +462,7 @@ class StackingTrainer:
         
         with open(model_path, 'wb') as f:
             pickle.dump(self.model, f)
-        logger.info(f"Model saved to {model_path}")
+        logger.info("Model saved to %s", model_path)
         
         # Create result
         result = TrainingResult(
@@ -518,7 +522,7 @@ class StackingTrainer:
         """Load a trained model from disk."""
         path = Path(model_path)
         if not path.exists():
-            logger.error(f"Model not found: {model_path}")
+            logger.error("Model not found: %s", model_path)
             return False
         
         with open(path, 'rb') as f:
@@ -527,7 +531,7 @@ class StackingTrainer:
         # Extract version from filename
         self.model_version = path.stem.replace("signal_stacker_", "")
         
-        logger.info(f"Loaded model {self.model_version}")
+        logger.info("Loaded model %s", self.model_version)
         return True
     
     def predict(
@@ -593,7 +597,7 @@ class StackingTrainer:
         Returns:
             Statistics dict with counts and performance
         """
-        logger.info(f"Backfilling predictions from {start_date}")
+        logger.info("Backfilling predictions from %s", start_date)
         
         X, y, dates = self._load_historical_data(start_date)
         
@@ -623,12 +627,13 @@ class StackingTrainer:
                 'fallback': result.using_fallback
             })
         
-        accuracy = sum(p['correct'] for p in predictions) / len(predictions)
-        fallback_rate = fallback_count / len(predictions)
-        
-        logger.info(f"Backfill complete: {len(predictions)} predictions")
-        logger.info(f"  Accuracy: {accuracy:.3f}")
-        logger.info(f"  Fallback rate: {fallback_rate:.3f}")
+        n_predictions = len(predictions)
+        accuracy = sum(p['correct'] for p in predictions) / n_predictions
+        fallback_rate = fallback_count / n_predictions
+
+        logger.info("Backfill complete: %s predictions", n_predictions)
+        logger.info("  Accuracy: %.3f", accuracy)
+        logger.info("  Fallback rate: %.3f", fallback_rate)
         
         if not dry_run:
             self._save_backfill_predictions(predictions)
@@ -677,7 +682,8 @@ class StackingTrainer:
 
             conn.commit()
         
-        logger.info(f"Saved {len(predictions)} predictions to database")
+        n_preds = len(predictions)
+        logger.info("Saved %s predictions to database", n_preds)
 
 
 def main():

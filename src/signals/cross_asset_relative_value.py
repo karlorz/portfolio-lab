@@ -141,7 +141,7 @@ class CrossAssetRVScanner:
             prices_path = PRICES_JSON
 
         if not prices_path.exists():
-            logger.error(f"Price data not found: {prices_path}")
+            logger.error("Price data not found: %s", prices_path)
             return False
 
         try:
@@ -181,13 +181,13 @@ class CrossAssetRVScanner:
                         symbol_data[sym].get(d, np.nan) for d in sorted_dates
                     ])
                 else:
-                    logger.warning(f"Symbol {sym} not found in price data")
+                    logger.warning("Symbol %s not found in price data", sym)
                     self.prices[sym] = np.full(len(sorted_dates), np.nan)
 
             return True
 
         except Exception as e:
-            logger.error(f"Error loading price data: {e}")
+            logger.error("Error loading price data: %s", e)
             return False
 
     def _compute_returns(self, prices: np.ndarray, period: int = 60) -> np.ndarray:
@@ -228,7 +228,7 @@ class CrossAssetRVScanner:
     ) -> Optional[PairReading]:
         """Scan a single cross-asset pair for divergence."""
         if pair_name not in CROSS_ASSET_PAIRS:
-            logger.warning(f"Unknown pair: {pair_name}")
+            logger.warning("Unknown pair: %s", pair_name)
             return None
 
         sym_a, sym_b, interpretation = CROSS_ASSET_PAIRS[pair_name]
@@ -457,7 +457,7 @@ class CrossAssetRVScanner:
                 with open(self.state_path) as f:
                     return json.load(f)
             except Exception as e:
-                logger.warning(f"Failed to load relative value state: {e}")
+                logger.warning("Failed to load relative value state: %s", e)
         return {}
 
     def _save_state(self, state: Dict) -> None:
@@ -465,7 +465,7 @@ class CrossAssetRVScanner:
             with open(self.state_path, "w") as f:
                 json.dump(state, f, indent=2)
         except Exception as e:
-            logger.warning(f"Failed to save state: {e}")
+            logger.warning("Failed to save state: %s", e)
 
 
 def print_scan(signal: CrossAssetRVSignal):

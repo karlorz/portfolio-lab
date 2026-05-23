@@ -193,7 +193,7 @@ class UnifiedOrchestrator:
                 with open(self.STATE_FILE) as f:
                     return json.load(f)
             except Exception as e:
-                logger.error(f"Failed to load state file {self.STATE_FILE}: {e}")
+                logger.error("Failed to load state file %s: %s", self.STATE_FILE, e)
         return {"last_unified": None, "conflict_history": []}
 
     def _save_state(self):
@@ -216,7 +216,7 @@ class UnifiedOrchestrator:
             if row and len(row) > 0 and row[0] > 0:
                 return float(row[0])
         except Exception as e:
-            logger.debug(f"Could not fetch VIX from DB: {e}")
+            logger.debug("Could not fetch VIX from DB: %s", e)
         return 16.0  # fallback
 
     def collect_overlay_contributions(self) -> List[OverlayContribution]:
@@ -273,7 +273,7 @@ class UnifiedOrchestrator:
                            f"{'cashless' if collar.strikes.is_cashless else 'debit'}",
                 ))
         except Exception as e:
-            logger.warning(f"Collar overlay unavailable: {e}")
+            logger.warning("Collar overlay unavailable: %s", e)
 
         # 2. VIXY Hedge Overlay — integrated into orchestrator
         if _HAS_VIXY and vixy_status != "disabled":
@@ -300,7 +300,7 @@ class UnifiedOrchestrator:
                                f"efficiency {vixy_signal.hedge_efficiency:.2f}x",
                     ))
             except Exception as e:
-                logger.warning(f"VIXY overlay unavailable: {e}")
+                logger.warning("VIXY overlay unavailable: %s", e)
 
         # 3. Crypto Tactical — momentum threshold check
         try:
@@ -327,7 +327,7 @@ class UnifiedOrchestrator:
                            + (f", 6m mom={btc_mom:+.1%}" if btc_mom is not None else ""),
                 ))
         except Exception as e:
-            logger.warning(f"Crypto overlay unavailable: {e}")
+            logger.warning("Crypto overlay unavailable: %s", e)
 
         # 4. Bond Duration Rotation (v4.80)
         try:
@@ -351,7 +351,7 @@ class UnifiedOrchestrator:
                     reason=f"Bond: {bond.position} ({bond.curve_regime}/{bond.rate_direction})",
                 ))
         except Exception as e:
-            logger.warning(f"Bond duration overlay unavailable: {e}")
+            logger.warning("Bond duration overlay unavailable: %s", e)
 
         # 5. Calendar Seasonality (v3.50) — execution timing only
         try:
@@ -369,7 +369,7 @@ class UnifiedOrchestrator:
                 reason=f"Calendar: {mod:.2f}x urgency modifier",
             ))
         except Exception as e:
-            logger.warning(f"Calendar overlay unavailable: {e}")
+            logger.warning("Calendar overlay unavailable: %s", e)
 
         return contributions
 

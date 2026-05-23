@@ -166,7 +166,7 @@ def load_yield_spread_history() -> pd.DataFrame:
 
                 if len(df) > 0:
                     df["date"] = pd.to_datetime(df["date"])
-                    logger.info(f"Loaded {len(df)} regime records from database")
+                    logger.info("Loaded %d regime records from database", len(df))
                     return df
 
     # Use synthetic regime data based on known periods
@@ -216,7 +216,7 @@ def load_yield_spread_history() -> pd.DataFrame:
         })
 
     df = pd.DataFrame(regimes)
-    logger.info(f"Created synthetic regime data: {len(df)} days")
+    logger.info("Created synthetic regime data: %d days", len(df))
     return df
 
 
@@ -268,7 +268,7 @@ def run_backtest(
     end_date: str = "2026-05-14"
 ) -> BacktestResult:
     """Run backtest comparing static vs dynamic duration allocation."""
-    logger.info(f"Running backtest from {start_date} to {end_date}...")
+    logger.info("Running backtest from %s to %s...", start_date, end_date)
 
     # Filter to date range
     prices_df = prices_df[
@@ -288,7 +288,7 @@ def run_backtest(
         logger.error("No overlapping dates between prices and regimes")
         return None
 
-    logger.info(f"Backtesting on {len(merged)} days")
+    logger.info("Backtesting on %d days", len(merged))
 
     # Calculate daily returns for each asset
     for col in ["tlt", "ief", "shy", "spy", "gld"]:
@@ -546,7 +546,7 @@ def save_results(result: BacktestResult):
     """Save results to JSON file."""
     from dataclasses import asdict
     save_results_json(asdict(result), output_path=str(OUTPUT_PATH))
-    logger.info(f"Results saved to {OUTPUT_PATH}")
+    logger.info("Results saved to %s", OUTPUT_PATH)
 
 
 def main():

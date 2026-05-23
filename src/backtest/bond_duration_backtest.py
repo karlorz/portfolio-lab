@@ -55,20 +55,8 @@ CRISIS_YEARS = ["2008", "2020", "2022"]
 BASE_SYMBOLS = ["SPY", "GLD", "TLT"]
 BOND_SYMBOLS = ["TLT", "IEF", "SHY"]
 
-# Duration estimates (years)
-DURATION = {"TLT": 16.0, "IEF": 7.0, "SHY": 2.0}
-
-# Bond sleeve allocation by TLT momentum regime
-# (tlt_sleeve_pct, ief_sleeve_pct, shy_sleeve_pct, label)
-RISING_ALLOCATION = (0.70, 0.20, 0.10, "rising")
-FALLING_ALLOCATION = (0.10, 0.30, 0.60, "falling")
-NEUTRAL_ALLOCATION = (0.40, 0.40, 0.20, "neutral")
-
 # TLT 60-day momentum thresholds
 MOMENTUM_LOOKBACK = 60
-RISING_THRESHOLD = 0.01   # 1% gain = rising
-FALLING_THRESHOLD = -0.01  # -1% loss = falling
-
 # Bond sleeve fraction of total portfolio
 BOND_SLEEVE = 0.16
 
@@ -99,6 +87,7 @@ class WalkForwardBondDurationBacktester:
         self.config = config or BacktestConfig()
         self._daily_prices: List[DailyPrices] = []
         self._trading_dates: List[str] = []
+        self._calc = BondDurationCalculator()
 
     def load_data(self) -> None:
         """Load price data from PRICES_JSON and extract SPY/GLD/TLT/IEF/SHY.
@@ -235,22 +224,6 @@ class WalkForwardBondDurationBacktester:
 
         return p1 / p0 - 1
 
-    def _classify_momentum(self, momentum: float) -> str:
-        """Classify TLT momentum as rising, falling, or neutral."""
-        if momentum > RISING_THRESHOLD:
-            return "rising"
-        elif momentum < FALLING_THRESHOLD:
-            return "falling"
-        return "neutral"
-
-    def _get_bond_sleeve_allocation(self, momentum_regime: str) -> Tuple[float, float, float, str]:
-        """Get TLT/IEF/SHY sleeve weights for the given momentum regime."""
-        if momentum_regime == "rising":
-            return RISING_ALLOCATION
-        elif momentum_regime == "falling":
-            return FALLING_ALLOCATION
-        return NEUTRAL_ALLOCATION
-
     def _momentum_to_yield_context(self, tlt_momentum: float) -> Tuple[float, float, float]:
         """Map TLT 60-day momentum to approximate yield curve context.
 
@@ -282,14 +255,6 @@ class WalkForwardBondDurationBacktester:
             rate_chg = 0.6
 
         return spread, 1.5, rate_chg
-
-    def _compute_effective_duration(self, tlt_w: float, ief_w: float, shy_w: float) -> float:
-        """Compute weighted average effective duration in years."""
-        return (
-            tlt_w * DURATION["TLT"]
-            + ief_w * DURATION["IEF"]
-            + shy_w * DURATION["SHY"]
-        )
 
     def _compute_portfolio_return(
         self,
@@ -478,7 +443,7 @@ class WalkForwardBondDurationBacktester:
 
                 # Use production BondDurationCalculator via momentum-to-yield-context mapping
                 spread, real_rate, rate_chg = self._momentum_to_yield_context(tlt_momentum)
-                calc = BondDurationCalculator()
+                calc = self._calc
                 curve_regime = calc.classify_curve(spread)
                 rate_direction = calc.classify_rate_direction(rate_chg)
                 new_tlt_s, new_ief_s, new_shy_s, label = calc.compute_duration_allocation(
@@ -496,8 +461,8 @@ class WalkForwardBondDurationBacktester:
                 portfolio_turnover = sleeve_turnover * bond_w
                 cost = portfolio_turnover * cost_per_trade * equity[-1]
 
-                old_duration = self._compute_effective_duration(tlt_sleeve, ief_sleeve, shy_sleeve)
-                new_duration = self._compute_effective_duration(new_tlt_s, new_ief_s, new_shy_s)
+                old_duration = self._calc.compute_effective_duration(tlt_sleeve, ief_sleeve, shy_sleeve)
+                new_duration = self._calc.compute_effective_duration(new_tlt_s, new_ief_s, new_shy_s)
 
                 tlt_sleeve, ief_sleeve, shy_sleeve = new_tlt_s, new_ief_s, new_shy_s
 
@@ -517,7 +482,7 @@ class WalkForwardBondDurationBacktester:
                 })
 
             # Track daily stats
-            eff_dur = self._compute_effective_duration(tlt_sleeve, ief_sleeve, shy_sleeve)
+            eff_dur = self._calc.compute_effective_duration(tlt_sleeve, ief_sleeve, shy_sleeve)
             tracker["sleeve_weights"].append({
                 "tlt": tlt_sleeve,
                 "ief": ief_sleeve,

@@ -151,12 +151,12 @@ class RedditSentimentFetcher:
                 return data.get('data', {}).get('children', [])
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                logger.warning(f"Rate limited on r/{subreddit}, using cache")
+                logger.warning("Rate limited on r/%s, using cache", subreddit)
                 return []
-            logger.error(f"HTTP error fetching r/{subreddit}: {e}")
+            logger.error("HTTP error fetching r/%s: %s", subreddit, e)
             return []
         except Exception as e:
-            logger.error(f"Error fetching r/{subreddit}: {e}")
+            logger.error("Error fetching r/%s: %s", subreddit, e)
             return []
     
     def _extract_tickers(self, text: str) -> List[str]:
@@ -380,7 +380,7 @@ class RedditSentimentFetcher:
                             data_fresh=True
                         )
         except Exception as e:
-            logger.error(f"Error reading cache: {e}")
+            logger.error("Error reading cache: %s", e)
         
         return None
     
@@ -404,7 +404,7 @@ class RedditSentimentFetcher:
                 """)
                 conn.commit()
         except Exception as e:
-            logger.error(f"Error caching sentiment: {e}")
+            logger.error("Error caching sentiment: %s", e)
     
     def _store_mentions(self, posts: List[Dict]):
         """Store individual mentions for historical analysis"""
@@ -432,7 +432,7 @@ class RedditSentimentFetcher:
                 
                 conn.commit()
         except Exception as e:
-            logger.error(f"Error storing mentions: {e}")
+            logger.error("Error storing mentions: %s", e)
     
     def get_history(self, days: int = 7) -> List[Dict]:
         """Get historical sentiment data"""
@@ -453,7 +453,7 @@ class RedditSentimentFetcher:
                 
                 return history
         except Exception as e:
-            logger.error(f"Error fetching history: {e}")
+            logger.error("Error fetching history: %s", e)
             return []
     
     def get_ticker_history(self, ticker: str, days: int = 7) -> List[Dict]:
@@ -472,7 +472,7 @@ class RedditSentimentFetcher:
                 columns = [desc[0] for desc in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Error fetching ticker history: {e}")
+            logger.error("Error fetching ticker history: %s", e)
             return []
 
 
