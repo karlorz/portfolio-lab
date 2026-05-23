@@ -15,23 +15,16 @@ import json
 import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from enum import Enum
 from typing import Dict
 
 import numpy as np
 
-from src.paths import DATA_DIR, SIGNALS_DIR
+from src.paths import SIGNALS_DIR
 from .unified_orchestrator import UnifiedOrchestrator
 from .ensemble_voter import SignalSource, SignalReading
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-class BridgeSignalType(Enum):
-    ALLOCATION = "allocation"      # Portfolio weight recommendation
-    DIRECTION = "direction"        # Directional bias per asset
-    RISK = "risk"                  # Risk overlay signal
 
 
 @dataclass
@@ -109,7 +102,6 @@ class OrchestratorEnsembleBridge:
 
     RECOMMENDED_ENSEMBLE_WEIGHT = 0.20
 
-    DATA_DIR = DATA_DIR
     OUTPUT_PATH = SIGNALS_DIR / "unified_ensemble_signal.json"
 
     def __init__(self):

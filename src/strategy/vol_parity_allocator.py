@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.vix_futures import VIXDataManager
-from strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition
+from src.strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition
 
 
 @dataclass

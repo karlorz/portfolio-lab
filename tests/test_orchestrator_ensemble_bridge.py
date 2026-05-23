@@ -2,7 +2,7 @@
 Tests for Orchestrator-EnsembleVoter Bridge (v4.90).
 
 Covers: _weight_to_signal threshold boundaries, UnifiedSignalReading
-serialization (to_dict, to_signal_reading), BridgeSignalType enum values,
+serialization (to_dict, to_signal_reading),
 and compare_with_ensemble_source edge cases.
 """
 
@@ -12,27 +12,10 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 from src.strategy.orchestrator_ensemble_bridge import (
-    BridgeSignalType,
     UnifiedSignalReading,
     OrchestratorEnsembleBridge,
 )
 from src.strategy.ensemble_voter import SignalSource, SignalReading
-
-
-# ── BridgeSignalType Tests ────────────────────────────────────────────────
-
-
-class TestBridgeSignalType:
-    def test_values(self):
-        assert BridgeSignalType.ALLOCATION.value == "allocation"
-        assert BridgeSignalType.DIRECTION.value == "direction"
-        assert BridgeSignalType.RISK.value == "risk"
-
-    def test_membership(self):
-        values = {e.value for e in BridgeSignalType}
-        assert "allocation" in values
-        assert "direction" in values
-        assert "risk" in values
 
 
 # ── _weight_to_signal Tests ───────────────────────────────────────────────
