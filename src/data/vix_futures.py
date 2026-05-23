@@ -82,7 +82,7 @@ class VIXDataManager:
                     indent=2
                 )
         except Exception as e:
-            print(f"Error saving VIX cache: {e}")
+            logger.warning(f"Error saving VIX cache: {e}")
     
     def generate_historical_proxy(
         self,
