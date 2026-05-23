@@ -37,6 +37,7 @@ CRON_TARGETS = [
     "portfolio-lab-daily-pnl",
     "portfolio-lab-attribution",
     "portfolio-lab-unified-dashboard",
+    "portfolio-lab-health",
 ]
 
 # Expected max duration per job (seconds). Exceeding 2x this triggers alerts.

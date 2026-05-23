@@ -158,7 +158,7 @@ dashboard:
 eval:
 	@echo "=== Strategy Evaluator: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 env ALPHALAB_MODE=$${ALPHALAB_MODE:-paper} python3 -m src.strategy.evaluator 2>&1 | tee -a $(DATA_DIR)/eval.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && ALPHALAB_MODE=$${ALPHALAB_MODE:-paper} timeout 600 python3 -m src.strategy.evaluator 2>&1 | tee -a $(DATA_DIR)/eval.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -272,6 +272,20 @@ overlay-dashboard:
 	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
 
+.PHONY: health
+health:
+	@echo "=== Health Monitor: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.monitor.rebalance_health 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	python3 $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR
+
 # ── GARCH-CVaR Risk Metrics ────────────────────────────────────────────
 
 .PHONY: garch-risk
@@ -352,7 +366,7 @@ ask:
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
-all: data dashboard eval research wiki-sync sync build overlay-signals overlay-dashboard garch-risk daily-pnl attribution unified-dashboard
+all: data dashboard health eval research wiki-sync sync build overlay-signals overlay-dashboard garch-risk daily-pnl attribution unified-dashboard
 	@echo "=== All tasks complete: $$(date) ==="
 
 # ── Cron Status Management ───────────────────────────────────────────
