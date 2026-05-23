@@ -39,7 +39,7 @@ _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
     import torch
 
-from src.paths import PROJECT_ROOT
+from src.paths import PROJECT_ROOT, DATA_DIR
 
 from src.agents.agent_graph import AgentGraph
 from src.agents.marl_trainer import MARLTrainer, MarketEnvironment
@@ -55,8 +55,7 @@ except ImportError:
 
 # Constants
 VERSION = "2.51.0"
-MODELS_DIR = Path("~/projects/portfolio-lab/models").expanduser()
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
+MODELS_DIR = PROJECT_ROOT / "models"
 CHECKPOINT_DIR = MODELS_DIR / "marl_checkpoints"
 
 

@@ -45,7 +45,7 @@ from datetime import datetime
 from collections import defaultdict, deque
 from enum import Enum
 
-from src.paths import PROJECT_ROOT
+from src.paths import PROJECT_ROOT, DATA_DIR
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 # hmmlearn (~23MB) + sklearn (~78MB) accumulate in single-process test runs.
@@ -65,9 +65,8 @@ else:
 
 
 # Paths
-DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser()
 MODEL_PATH = DATA_DIR / "hmm_regime_model.pkl"
-PRICES_PATH = Path("~/projects/portfolio-lab/public/data/prices.json").expanduser()
+PRICES_PATH = PROJECT_ROOT / "public" / "data" / "prices.json"
 
 # Regime definitions
 class MarketRegime(Enum):
