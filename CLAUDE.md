@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-- Test count: **4155 safe** (0 failures, 21 skipped, 4176 collected)
+- Test count: **4178 safe** (0 failures, 21 skipped, 4199 collected)
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
@@ -56,11 +56,11 @@ Max per-signal cap: 50%
 ## Architecture
 
 ### Signal/Overlay Map
-- `src/signals/` — signal generators (credit_spread, commodity_curve, collar_signal, bond_duration_signal, crypto_momentum, calendar_seasonality, vix_term_structure, multi_speed_momentum, international_momentum, alternative_data, cross_asset_relative_value, vpin_bvc, behavioral_sentiment, factor_rotation, stacking_feature_engine/integrator, signal_pruner, regime_gate)
-- `src/strategy/` — overlays & strategy (unified_orchestrator, vixy_hedge_sizing, evaluator, BanditWeighter in ensemble_voter)
+- `src/signals/` — signal generators (collar_signal, bond_duration_signal, crypto_momentum, calendar_seasonality, vix_term_structure, multi_speed_momentum, international_momentum, alternative_data_signal, cross_asset_relative_value, cross_asset_regime_arb, vpin_bvc, behavioral_sentiment, fed_policy_overlay, health_tracker, stacking_feature_engine/integrator, stacking_integrator, tsmom_overlay/tsmom_integration, signal_pruner, signal_snapshot, regime_gate, multi_strategy_adapters)
+- `src/strategy/` — overlays & strategy (unified_orchestrator, vixy_hedge_sizing, evaluator, ensemble_voter with BanditWeighter, factor_rotation, adaptive_ensemble_weights, turnover_validator, graduation_checklist, adaptive_sizing, risk_parity_weight_overlay, vol_parity_allocator)
 - `src/backtest/` — backtest engines. **Use `src/backtest/metrics.py`** for BacktestResult/BacktestMetrics/compute_metrics() (canonical shared dataclass + computation, eliminates copy-paste)
 - `src/broker/` — broker integration (order_router, position_sync, collar_options_bridge, options_utils)
-- `src/monitor/` — monitoring (garch_cvar, hedge_efficiency)
+- `src/monitor/` — monitoring (garch_cvar, cvar_metrics, risk_decomposition, performance_attribution, unified_dashboard, daily_brief, rebalance_health)
 - `src/agents/` — MARL system (ML-gated, see below)
 - `src/data/` — data fetchers (Yahoo Finance, behavioral sentiment, international)
 - `src/research/` — research tools (agent, features, wiki_sync)
