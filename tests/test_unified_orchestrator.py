@@ -212,6 +212,155 @@ class TestEdgeCases:
         assert len(rec.execution_recommendation) > 0
 
 
+class TestStateManagement:
+    """Test _load_state / _save_state methods."""
+
+    def test_load_state_no_file(self, tmp_path):
+        """Missing state file returns defaults."""
+        orch = UnifiedOrchestrator()
+        orch.STATE_FILE = tmp_path / "nonexistent.json"
+        state = orch._load_state()
+        assert state["last_unified"] is None
+        assert state["conflict_history"] == []
+
+    def test_load_state_corrupt_file(self, tmp_path):
+        """Corrupt JSON returns defaults without crashing."""
+        orch = UnifiedOrchestrator()
+        orch.STATE_FILE = tmp_path / "bad.json"
+        orch.STATE_FILE.write_text("{invalid json")
+        state = orch._load_state()
+        assert state["last_unified"] is None
+
+    def test_save_and_load_roundtrip(self, tmp_path):
+        """Save then load should preserve state."""
+        orch = UnifiedOrchestrator()
+        orch.STATE_FILE = tmp_path / "state.json"
+        orch._state = {"last_unified": "2026-01-01", "conflict_history": ["spy_conflict"]}
+        orch._save_state()
+        loaded = orch._load_state()
+        assert loaded["last_unified"] == "2026-01-01"
+        assert loaded["conflict_history"] == ["spy_conflict"]
+
+    def test_save_creates_parent_dirs(self, tmp_path):
+        """_save_state should create missing parent directories."""
+        orch = UnifiedOrchestrator()
+        orch.STATE_FILE = tmp_path / "deep" / "nested" / "state.json"
+        orch._state = {"last_unified": None, "conflict_history": []}
+        orch._save_state()
+        assert orch.STATE_FILE.exists()
+
+
+class TestVixLevelFetch:
+    """Test _fetch_vix_level with mocked DB."""
+
+    def test_no_db_returns_default(self, tmp_path):
+        """Missing DB returns default VIX of 16.0."""
+        orch = UnifiedOrchestrator()
+        # Patch MARKET_DB to nonexistent path
+        import src.strategy.unified_orchestrator as uo_mod
+        orig = uo_mod.MARKET_DB
+        uo_mod.MARKET_DB = tmp_path / "no_such.db"
+        try:
+            assert orch._fetch_vix_level() == 16.0
+        finally:
+            uo_mod.MARKET_DB = orig
+
+    def test_db_with_vix_data(self, tmp_path):
+        """DB with VIX data returns the stored value."""
+        import sqlite3
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
+        conn.execute("INSERT INTO prices VALUES ('^VIX', '2026-01-01', 22.5)")
+        conn.commit()
+        conn.close()
+
+        import src.strategy.unified_orchestrator as uo_mod
+        orig = uo_mod.MARKET_DB
+        uo_mod.MARKET_DB = db_path
+        orch = UnifiedOrchestrator()
+        try:
+            assert orch._fetch_vix_level() == 22.5
+        finally:
+            uo_mod.MARKET_DB = orig
+
+    def test_db_empty_returns_default(self, tmp_path):
+        """DB without VIX rows returns default."""
+        import sqlite3
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
+        conn.commit()
+        conn.close()
+
+        import src.strategy.unified_orchestrator as uo_mod
+        orig = uo_mod.MARKET_DB
+        uo_mod.MARKET_DB = db_path
+        orch = UnifiedOrchestrator()
+        try:
+            assert orch._fetch_vix_level() == 16.0
+        finally:
+            uo_mod.MARKET_DB = orig
+
+
+class TestConflictResolutionEdgeCases:
+    """Extended conflict resolution tests."""
+
+    @pytest.fixture
+    def orch(self):
+        return UnifiedOrchestrator()
+
+    def test_single_active_contribution(self, orch):
+        """Single active contribution should apply its delta."""
+        contributions = [
+            OverlayContribution("collar", "v1", "active", 0.5,
+                                -0.03, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                -0.005, 0.02, 80.0, "collar active"),
+        ]
+        weights, conflicts = orch.resolve_conflicts(contributions)
+        assert weights["spy"] < orch.BASELINE["spy"]  # -0.03 delta
+        assert weights["gld"] > orch.BASELINE["gld"]  # +0.02 delta
+
+    def test_suppressed_contribution_ignored(self, orch):
+        """Suppressed contributions should not affect weights."""
+        contributions = [
+            OverlayContribution("crypto", "v1", "suppressed", 0.0,
+                                0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.05,
+                                0.0, 0.0, 0.0, "suppressed"),
+        ]
+        weights, conflicts = orch.resolve_conflicts(contributions)
+        # Should be at baseline since suppressed
+        for k, v in orch.BASELINE.items():
+            assert abs(weights[k] - v) < 0.01
+
+    def test_many_small_deltas(self, orch):
+        """Many small contributions should accumulate without breaking bounds."""
+        contributions = []
+        for i in range(5):
+            contributions.append(OverlayContribution(
+                f"overlay_{i}", "v1", "active", 0.15,
+                0.005, 0.003, 0.001, 0.0, 0.0, 0.0, 0.0,
+                0.001, 0.01, 70.0, f"overlay {i}",
+            ))
+        weights, conflicts = orch.resolve_conflicts(contributions)
+        assert 0.36 <= weights["spy"] <= 0.56
+        assert 0.28 <= weights["gld"] <= 0.48
+
+    def test_conflict_detected_on_opposite_spy(self, orch):
+        """Opposing SPY deltas should register as a conflict."""
+        contributions = [
+            OverlayContribution("bull", "v1", "active", 0.3,
+                                0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                0.0, 0.0, 80.0, "bull"),
+            OverlayContribution("bear", "v1", "active", 0.3,
+                                -0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                0.0, 0.0, 80.0, "bear"),
+        ]
+        _, conflicts = orch.resolve_conflicts(contributions)
+        assert len(conflicts) >= 1
+        assert any("spy" in c.lower() or "SPY" in c for c in conflicts)
+
+
 class TestOrchestratorBacktestValidation:
     """Validate the unified orchestrator's recommendation properties
     across multiple simulated scenarios (no real data needed)."""
