@@ -428,6 +428,19 @@ class CrossAssetRVScanner:
             "total_pairs": signal.total_pairs,
         }
 
+    def get_signal_snapshot(self):
+        """Return signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        raw = self.get_ensemble_signal()
+        raw["source"] = "cross_asset_rv"
+        raw["is_active"] = raw.get("signal_value", 0) != 0.0
+        raw["regime_fit"] = "all"
+        raw["explanation"] = (
+            f"Cross-asset RV: z={raw.get('avg_z_score', 0):+.2f}, "
+            f"diverged={raw.get('num_diverged', 0)}/{raw.get('total_pairs', 0)} pairs"
+        )
+        return SignalSnapshot.from_dict(raw)
+
     def _empty_signal(self) -> CrossAssetRVSignal:
         return CrossAssetRVSignal(
             timestamp=str(datetime.now()),

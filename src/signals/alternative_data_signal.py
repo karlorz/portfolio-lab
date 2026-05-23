@@ -476,6 +476,38 @@ class AlternativeDataSignalGenerator:
             return False
         return True
 
+    def get_signal_snapshot(self):
+        """Return latest signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        signal = self.load_latest_signal()
+        if signal is None:
+            return SignalSnapshot(
+                source="alternative_data",
+                timestamp=datetime.now().isoformat(),
+                value=0.0,
+                confidence=0.0,
+                is_active=False,
+                explanation="Alternative data signal unavailable",
+            )
+        composite_score = signal.raw_data.get("composite_score", 0.0) if signal.raw_data else 0.0
+        value = float(np.clip(composite_score, -1, 1)) if composite_score else 0.0
+        if value == 0.0:
+            regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
+            value = regime_map.get(signal.regime, 0.0)
+        return SignalSnapshot(
+            source="alternative_data",
+            timestamp=signal.timestamp,
+            value=value,
+            confidence=signal.confidence,
+            asset_signals={"SPY": value},
+            regime_fit="all",
+            is_active=True,
+            explanation=f"Alt Data: regime={signal.regime}, composite={composite_score:.4f}, "
+                        f"prob={signal.probability:.2f}, conf={signal.confidence:.2f}",
+            metadata={"regime": signal.regime, "probability": signal.probability,
+                      "raw_data": signal.raw_data},
+        )
+
     # ---- Main pipeline ----
 
     def generate_signal(self) -> EnsembleSignal:

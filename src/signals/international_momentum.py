@@ -11,6 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 import logging
+import numpy as np
 
 from src.paths import MARKET_DB, DATA_DIR
 
@@ -66,6 +67,40 @@ class InternationalMomentumSignal:
     
     def to_dict(self) -> Dict:
         return asdict(self)
+
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        if self.signal_type == "efa_lead":
+            value = float(np.clip(self.efa_vs_spy / 10.0, -0.5, 0.5))
+        elif self.signal_type == "eem_lead":
+            value = float(np.clip(self.eem_vs_spy / 10.0, -0.5, 0.5))
+        else:
+            value = 0.0
+        return SignalSnapshot(
+            source="international_momentum",
+            timestamp=self.timestamp,
+            value=value,
+            confidence=self.confidence,
+            asset_signals={
+                "SPY": self.spy_shift,
+                "EFA": self.efa_shift,
+                "EEM": self.eem_shift,
+            },
+            regime_fit="all",
+            is_active=self.is_active(),
+            explanation=f"Intl Momentum: {self.signal_type}, "
+                        f"conf={self.confidence_level}, "
+                        f"EFA/SPY={self.efa_vs_spy:+.2%}, "
+                        f"EEM/SPY={self.eem_vs_spy:+.2%}, "
+                        f"VIX_filter={self.vix_filter_active}",
+            metadata={
+                "signal_type": self.signal_type,
+                "confidence_level": self.confidence_level,
+                "vix_filter_active": self.vix_filter_active,
+                "correlation_override": self.correlation_override,
+            },
+        )
     
     def is_active(self) -> bool:
         """Check if signal is actionable"""

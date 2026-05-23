@@ -339,3 +339,124 @@ class TestModuleIntegration:
         assert snap.value == 0.0
         assert snap.is_active is False
 
+
+class TestNewModuleSnapshots:
+    """Test recently added get_signal_snapshot() methods."""
+
+    def test_cross_asset_rv_snapshot_from_dict(self):
+        """CrossAssetRVScanner.get_signal_snapshot() uses from_dict internally."""
+        from src.signals.cross_asset_relative_value import CrossAssetRVScanner
+        scanner = CrossAssetRVScanner.__new__(CrossAssetRVScanner)
+        # Mock get_ensemble_signal to return a standard dict
+        scanner.get_ensemble_signal = MagicMock(return_value={
+            "signal_value": 0.3,
+            "confidence": 0.7,
+            "timestamp": "2026-05-23T12:00:00",
+            "asset_signals": {"SPY": 0.2, "GLD": -0.1, "TLT": 0.0},
+            "avg_z_score": 1.5,
+            "num_diverged": 3,
+            "total_pairs": 6,
+        })
+        snap = scanner.get_signal_snapshot()
+        assert snap.source == "cross_asset_rv"
+        assert snap.value == 0.3
+        assert snap.confidence == 0.7
+        assert snap.is_active is True
+        assert "Cross-asset RV" in snap.explanation
+
+    def test_cross_asset_rv_snapshot_zero_signal(self):
+        """Zero signal_value → is_active=False."""
+        from src.signals.cross_asset_relative_value import CrossAssetRVScanner
+        scanner = CrossAssetRVScanner.__new__(CrossAssetRVScanner)
+        scanner.get_ensemble_signal = MagicMock(return_value={
+            "signal_value": 0.0,
+            "confidence": 0.0,
+            "timestamp": "2026-05-23T12:00:00",
+            "asset_signals": {},
+        })
+        snap = scanner.get_signal_snapshot()
+        assert snap.is_active is False
+
+    def test_alternative_data_snapshot_no_file(self):
+        """AlternativeDataSignalGenerator.get_signal_snapshot() with no data file."""
+        from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
+        gen = AlternativeDataSignalGenerator.__new__(AlternativeDataSignalGenerator)
+        gen.load_latest_signal = MagicMock(return_value=None)
+        snap = gen.get_signal_snapshot()
+        assert snap.source == "alternative_data"
+        assert snap.value == 0.0
+        assert snap.is_active is False
+
+    def test_international_momentum_snapshot(self):
+        """InternationalMomentumSignal.to_signal_snapshot() converts correctly."""
+        from src.signals.international_momentum import InternationalMomentumSignal
+        signal = InternationalMomentumSignal(
+            timestamp="2026-05-23T12:00:00",
+            signal_type="efa_lead",
+            confidence=0.7,
+            confidence_level="medium",
+            efa_momentum_6m=15.0,
+            eem_momentum_6m=5.0,
+            spy_momentum_6m=10.0,
+            efa_vs_spy=5.0,
+            eem_vs_spy=-5.0,
+            spy_shift=0.1,
+            efa_shift=-0.1,
+            eem_shift=0.0,
+            max_allocation_efa=0.05,
+            max_allocation_eem=0.03,
+            holding_period_days=30,
+            data_fresh=True,
+            vix_filter_active=False,
+            correlation_override=False,
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "international_momentum"
+        assert snap.value == pytest.approx(0.5)  # clip(5.0/10.0, -0.5, 0.5)
+        assert snap.confidence == 0.7
+        assert snap.is_active is True
+        assert "SPY" in snap.asset_signals
+
+    def test_international_momentum_snapshot_neutral(self):
+        """Neutral international momentum → zero value."""
+        from src.signals.international_momentum import InternationalMomentumSignal
+        signal = InternationalMomentumSignal(
+            timestamp="2026-05-23T12:00:00",
+            signal_type="neutral",
+            confidence=0.3,
+            confidence_level="low",
+            efa_momentum_6m=0.0,
+            eem_momentum_6m=0.0,
+            spy_momentum_6m=0.0,
+            efa_vs_spy=0.0,
+            eem_vs_spy=0.0,
+            spy_shift=0.0,
+            efa_shift=0.0,
+            eem_shift=0.0,
+            max_allocation_efa=0.05,
+            max_allocation_eem=0.03,
+            holding_period_days=30,
+            data_fresh=True,
+            vix_filter_active=True,
+            correlation_override=False,
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.value == 0.0
+        assert snap.is_active is False  # vix_filter_active=True
+
+    def test_cross_asset_rv_snapshot_to_reading(self):
+        """Cross-asset RV snapshot → SignalReading round-trip."""
+        from src.signals.cross_asset_relative_value import CrossAssetRVScanner
+        scanner = CrossAssetRVScanner.__new__(CrossAssetRVScanner)
+        scanner.get_ensemble_signal = MagicMock(return_value={
+            "signal_value": 0.3,
+            "confidence": 0.7,
+            "timestamp": "2026-05-23T12:00:00",
+            "asset_signals": {"SPY": 0.2, "GLD": -0.1, "TLT": 0.0},
+        })
+        snap = scanner.get_signal_snapshot()
+        reading = snap.to_signal_reading()
+        from src.strategy.ensemble_voter import SignalSource
+        assert reading.source == SignalSource.CROSS_ASSET_RV
+        assert reading.value == 0.3
+
