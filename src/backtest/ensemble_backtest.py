@@ -15,6 +15,7 @@ Usage:
 
 import json
 import sqlite3
+import logging
 import numpy as np
 import argparse
 from datetime import datetime
@@ -27,6 +28,8 @@ from src.backtest.metrics import BacktestResult
 from src.paths import MARKET_DB
 
 from src.signals.integrator import SignalIntegrator
+
+logger = logging.getLogger(__name__)
 
 
 class EnsembleBacktestEngine:
@@ -174,8 +177,8 @@ class EnsembleBacktestEngine:
                     "regime": composite.regime,
                     "sources": composite.sources
                 }
-            except Exception:
-                # Fallback to neutral signal
+            except Exception as e:
+                logger.debug("Signal failed for %s, using neutral: %s", asset, e)
                 signals[asset] = {
                     "score": 0.0,
                     "confidence": 0.0,
