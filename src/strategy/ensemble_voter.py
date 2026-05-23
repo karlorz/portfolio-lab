@@ -119,36 +119,36 @@ class EnsembleVote:
 # Weights sum=1.0 per regime.
 REGIME_WEIGHTS = {
     Regime.NORMAL: {
-        SignalSource.MULTI_SPEED_MOM: 0.1000,
+        SignalSource.MULTI_SPEED_MOM: 0.0500,
         SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.ALTERNATIVE_DATA: 0.2600,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.2100,
+        SignalSource.ALTERNATIVE_DATA: 0.2800,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.2200,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1700,
+        SignalSource.UNIFIED_OVERLAY: 0.1900,
     },
     Regime.HIGH_VOL: {
-        SignalSource.MULTI_SPEED_MOM: 0.1000,
+        SignalSource.MULTI_SPEED_MOM: 0.0500,
         SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.1800,
-        SignalSource.ALTERNATIVE_DATA: 0.2800,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.1900,
+        SignalSource.ALTERNATIVE_DATA: 0.3000,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1800,
+        SignalSource.UNIFIED_OVERLAY: 0.2000,
     },
     Regime.CRISIS: {
-        SignalSource.MULTI_SPEED_MOM: 0.1000,
+        SignalSource.MULTI_SPEED_MOM: 0.0500,
         SignalSource.CROSS_ASSET_RV: 0.3400,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1700,
         SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
-        SignalSource.ALTERNATIVE_DATA: 0.1800,
-        SignalSource.UNIFIED_OVERLAY: 0.2100,
+        SignalSource.ALTERNATIVE_DATA: 0.2000,
+        SignalSource.UNIFIED_OVERLAY: 0.2400,
     },
     Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.1000,
-        SignalSource.ALTERNATIVE_DATA: 0.2600,
+        SignalSource.MULTI_SPEED_MOM: 0.0500,
+        SignalSource.ALTERNATIVE_DATA: 0.2800,
         SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.2100,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.2200,
         SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1700,
+        SignalSource.UNIFIED_OVERLAY: 0.1900,
     }
 }
 
@@ -263,11 +263,20 @@ class EnsembleVoter:
         self.data_path = data_path or DATA_DIR
         self.db_path = self.data_path / "ensemble_signals.db"
         self._init_db()
-        
+
         # Current readings cache
         self.current_readings: Dict[SignalSource, SignalReading] = {}
         self.current_regime: Regime = Regime.NORMAL
         self.current_regime_confidence: float = 0.5
+
+        # Bandit weighter for dynamic signal weight adaptation
+        self.bandit = BanditWeighter(
+            signals=[s.value for s in SignalSource],
+            epsilon=0.1,
+            window=252,
+        )
+        self.bandit_blend: float = 0.0  # Start 100% static, shift toward bandit over time
+        self.bandit_observations: int = 0
 
     
     def _init_db(self):
@@ -617,13 +626,48 @@ class EnsembleVoter:
         return readings
 
     def get_regime_weights(self, regime_name: str) -> dict:
-        """Get static regime weights.
-
-        Note: BanditWeighter was removed (v9.35) — update_bandit() was never
-        called, so dynamic blending always returned 100% static weights.
-        """
+        """Get static regime weights."""
         regime_enum = getattr(Regime, regime_name, Regime.NORMAL)
         return dict(REGIME_WEIGHTS.get(regime_enum, {}))
+
+    def get_blended_weights(self, regime_name: str) -> dict:
+        """Get regime weights blended between static REGIME_WEIGHTS and bandit.
+
+        Starts 100% static (bandit_blend=0.0), gradually shifts toward
+        up to 70% bandit after 252 days of observations.
+        """
+        regime_enum = getattr(Regime, regime_name, Regime.NORMAL)
+        static = dict(REGIME_WEIGHTS.get(regime_enum, {}))
+        bandit = self.bandit.get_weights(regime_name)
+
+        if bandit is None:
+            return static  # Cold start: 100% static
+
+        # Blend: starts 100% static, shifts to 30/70 static/bandit after 252 days
+        blend = min(0.7, self.bandit_observations / 252 * 0.7)
+
+        # Convert static keys from SignalSource enum to string values for matching
+        static_by_value = {k.value: v for k, v in static.items()}
+
+        blended = {}
+        for sig_value in static_by_value:
+            bandit_w = bandit.get(sig_value, 0.0)
+            static_w = static_by_value[sig_value]
+            blended[sig_value] = static_w * (1 - blend) + bandit_w * blend
+
+        # Normalize to sum=1.0
+        total = sum(blended.values())
+        if total > 0:
+            blended = {k: v / total for k, v in blended.items()}
+
+        # Convert back to SignalSource keys
+        value_to_source = {s.value: s for s in SignalSource}
+        return {value_to_source[k]: v for k, v in blended.items() if k in value_to_source}
+
+    def update_bandit(self, signal_value: str, regime_name: str, daily_return: float):
+        """Update bandit with observed return for a signal in a regime."""
+        self.bandit.update(signal_value, regime_name, daily_return)
+        self.bandit_observations += 1
 
     def apply_goal_risk_budget(self, base_allocation: dict) -> dict:
         """Scale allocation weights based on investment goals from goals.json.
