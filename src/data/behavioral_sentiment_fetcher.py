@@ -8,8 +8,9 @@ v2.70 Phase 4: Integrated Reddit Sentiment for real social data
 
 import sqlite3
 import json
-import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+import yfinance as yf
 from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
@@ -25,6 +26,11 @@ try:
     REDDIT_AVAILABLE = True
 except ImportError:
     REDDIT_AVAILABLE = False
+
+# Reddit scraping gated off (HTTP 403 as of 2025+).
+# Set REDDIT_ENABLED = True after implementing PRAW-based scraping.
+REDDIT_ENABLED = False
+_reddit_disabled_warned = False
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -158,7 +164,9 @@ class BehavioralSentimentFetcher:
                 row = cursor.fetchone()
                 if row:
                     cache_time = datetime.fromisoformat(row[1])
-                    age = datetime.now() - cache_time
+                    if cache_time.tzinfo is None:
+                        cache_time = cache_time.replace(tzinfo=timezone.utc)
+                    age = datetime.now(timezone.utc) - cache_time
                     if age < timedelta(hours=CACHE_TTL_HOURS):
                         data = json.loads(row[0])
                         return self._dict_to_snapshot(data)
@@ -204,74 +212,60 @@ class BehavioralSentimentFetcher:
         )
     
     def _fetch_vix_data(self) -> Tuple[float, float]:
-        """Fetch VIX and VIX9D from Yahoo Finance API"""
+        """Fetch VIX and VIX9D from Yahoo Finance via yfinance"""
+        vix = 16.0   # Default fallback
+        vix9d = 14.4  # Default fallback
+
+        # ^VIX
         try:
-            # Yahoo Finance API for VIX (^VIX)
-            url = "https://query1.finance.yahoo.com/v8/finance/chart/^VIX?interval=1d&range=1d"
-            response = requests.get(url, timeout=10)
-            data = response.json()
-            
-            if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
-                result = data['chart']['result'][0]
-                vix = result['meta']['regularMarketPrice']
-            else:
-                vix = 16.0  # Fallback
-            
-            # VIX9D (^VIX9D) - short-term VIX
-            url9d = "https://query1.finance.yahoo.com/v8/finance/chart/^VIX9D?interval=1d&range=1d"
-            response9d = requests.get(url9d, timeout=10)
-            data9d = response9d.json()
-            
-            if 'chart' in data9d and 'result' in data9d['chart'] and data9d['chart']['result']:
-                result9d = data9d['chart']['result'][0]
-                vix9d = result9d['meta']['regularMarketPrice']
+            ticker = yf.Ticker("^VIX")
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                vix = float(hist["Close"].iloc[-1])
+        except Exception as e:
+            logger.warning("yfinance fetch failed for ^VIX: %s", e)
+
+        # ^VIX9D (short-term VIX)
+        try:
+            ticker9d = yf.Ticker("^VIX9D")
+            hist9d = ticker9d.history(period="1d")
+            if not hist9d.empty:
+                vix9d = float(hist9d["Close"].iloc[-1])
             else:
                 vix9d = vix * 0.9  # Estimate as 90% of VIX
-            
-            return float(vix), float(vix9d)
         except Exception as e:
-            logger.warning(f"Failed to fetch VIX data: {e}")
-            return 16.0, 14.4  # Default values
+            logger.warning("yfinance fetch failed for ^VIX9D: %s", e)
+            vix9d = vix * 0.9
+
+        return float(vix), float(vix9d)
     
     def _fetch_skew_index(self) -> float:
-        """Fetch CBOE SKEW Index (synthetic from options data)"""
+        """Fetch CBOE SKEW Index from Yahoo Finance via yfinance"""
         try:
-            # Yahoo Finance for SKEW (^SKEW)
-            url = "https://query1.finance.yahoo.com/v8/finance/chart/^SKEW?interval=1d&range=1d"
-            response = requests.get(url, timeout=10)
-            data = response.json()
-            
-            if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
-                result = data['chart']['result'][0]
-                skew = result['meta']['regularMarketPrice']
-                return float(skew)
+            ticker = yf.Ticker("^SKEW")
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                return float(hist["Close"].iloc[-1])
         except Exception as e:
-            logger.warning(f"Failed to fetch SKEW: {e}")
-        
+            logger.warning("yfinance fetch failed for ^SKEW: %s", e)
+
         # Estimate SKEW from VIX if unavailable
         vix, _ = self._fetch_vix_data()
         # SKEW approx 100 + (VIX - 15) * 2
         return 100 + max(0, (vix - 15)) * 2
     
     def _fetch_put_call_ratio(self) -> float:
-        """Fetch CBOE equity put/call ratio"""
+        """Fetch CBOE equity put/call ratio from Yahoo Finance via yfinance"""
         try:
-            # CBOE publishes daily P/C ratio
-            url = "https://query1.finance.yahoo.com/v8/finance/chart/^CPCE?interval=1d&range=5d"
-            response = requests.get(url, timeout=10)
-            data = response.json()
-            
-            if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
-                result = data['chart']['result'][0]
-                if 'close' in result['indicators']['quote'][0]:
-                    closes = result['indicators']['quote'][0]['close']
-                    # Filter None values
-                    closes = [c for c in closes if c is not None]
-                    if closes:
-                        return sum(closes) / len(closes)
+            ticker = yf.Ticker("^CPCE")
+            hist = ticker.history(period="5d")
+            if not hist.empty and "Close" in hist.columns:
+                closes = hist["Close"].dropna().tolist()
+                if closes:
+                    return sum(closes) / len(closes)
         except Exception as e:
-            logger.warning(f"Failed to fetch P/C ratio: {e}")
-        
+            logger.warning("yfinance fetch failed for ^CPCE: %s", e)
+
         return 0.65  # Historical average
     
     def _estimate_retail_flow(self) -> RetailFlow:
@@ -310,8 +304,14 @@ class BehavioralSentimentFetcher:
         Estimate social media intensity using Reddit data when available.
         Falls back to VIX-based proxy if Reddit is unavailable.
         """
+        # Warn once if Reddit is available but disabled via REDDIT_ENABLED flag
+        global _reddit_disabled_warned
+        if REDDIT_AVAILABLE and not REDDIT_ENABLED and not _reddit_disabled_warned:
+            _reddit_disabled_warned = True
+            logger.info("Reddit scraping disabled (HTTP 403) — using VIX proxy for social intensity")
+
         # Try Reddit data first (v2.70 Phase 4)
-        if REDDIT_AVAILABLE:
+        if REDDIT_AVAILABLE and REDDIT_ENABLED:
             try:
                 reddit_fetcher = RedditSentimentFetcher(cache_db=self.cache_db)
                 reddit_snapshot = reddit_fetcher.fetch_sentiment()

@@ -8,9 +8,11 @@ dataclasses, cache operations, composite score, signal recommendation, history.
 import pytest
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+import pandas as pd
 
 from src.data.behavioral_sentiment_fetcher import (
     BehavioralSentimentFetcher,
@@ -225,7 +227,7 @@ class TestFetcherInit:
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         # Insert stale data manually
-        stale_time = (datetime.now() - timedelta(hours=CACHE_TTL_HOURS + 1)).isoformat()
+        stale_time = (datetime.now(timezone.utc) - timedelta(hours=CACHE_TTL_HOURS + 1)).isoformat()
         snap = BehavioralSentimentSnapshot(
             timestamp=stale_time,
             options=OptionsSentiment(
@@ -334,7 +336,7 @@ class TestFetchVixData:
     def test_returns_default_on_failure(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=Exception("network error")):
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("network error")):
             vix, vix9d = fetcher._fetch_vix_data()
             assert vix == 16.0
             assert vix9d == 14.4
@@ -342,15 +344,11 @@ class TestFetchVixData:
     def test_parses_yahoo_response(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "chart": {"result": [{"meta": {"regularMarketPrice": 22.5}}]}
-        }
-        mock_resp9d = MagicMock()
-        mock_resp9d.json.return_value = {
-            "chart": {"result": [{"meta": {"regularMarketPrice": 20.1}}]}
-        }
-        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=[mock_resp, mock_resp9d]):
+        mock_vix = MagicMock()
+        mock_vix.history.return_value = pd.DataFrame({"Close": [22.5]})
+        mock_vix9d = MagicMock()
+        mock_vix9d.history.return_value = pd.DataFrame({"Close": [20.1]})
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=[mock_vix, mock_vix9d]):
             vix, vix9d = fetcher._fetch_vix_data()
             assert vix == 22.5
             assert vix9d == 20.1
@@ -358,13 +356,13 @@ class TestFetchVixData:
     def test_fallback_when_no_result(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"chart": {"result": []}}
-        mock_resp9d = MagicMock()
-        mock_resp9d.json.return_value = {"chart": {"result": []}}
-        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=[mock_resp, mock_resp9d]):
+        mock_vix = MagicMock()
+        mock_vix.history.return_value = pd.DataFrame()  # empty
+        mock_vix9d = MagicMock()
+        mock_vix9d.history.return_value = pd.DataFrame()  # empty
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=[mock_vix, mock_vix9d]):
             vix, vix9d = fetcher._fetch_vix_data()
-            # vix9d falls back to vix * 0.9 = 16.0 * 0.9 = 14.4
+            # Both fall back: vix=16.0, vix9d=14.4
             assert vix == 16.0
             assert vix9d == 14.4
 
@@ -374,7 +372,7 @@ class TestFetchSkewIndex:
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         with patch.object(fetcher, "_fetch_vix_data", return_value=(16.0, 14.4)):
-            with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=Exception("error")):
+            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("error")):
                 skew = fetcher._fetch_skew_index()
                 # Fallback: 100 + max(0, (16-15)*2) = 102
                 assert skew == 102.0
@@ -382,11 +380,9 @@ class TestFetchSkewIndex:
     def test_parses_yahoo_skew(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "chart": {"result": [{"meta": {"regularMarketPrice": 145.0}}]}
-        }
-        with patch("src.data.behavioral_sentiment_fetcher.requests.get", return_value=mock_resp):
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame({"Close": [145.0]})
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
             skew = fetcher._fetch_skew_index()
             assert skew == 145.0
 
@@ -395,18 +391,16 @@ class TestFetchPutCallRatio:
     def test_returns_default_on_failure(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=Exception("error")):
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("error")):
             ratio = fetcher._fetch_put_call_ratio()
             assert ratio == 0.65
 
     def test_parses_closes(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "chart": {"result": [{"indicators": {"quote": [{"close": [0.7, 0.8, 0.75]}]}}]}
-        }
-        with patch("src.data.behavioral_sentiment_fetcher.requests.get", return_value=mock_resp):
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame({"Close": [0.7, 0.8, 0.75]})
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
             ratio = fetcher._fetch_put_call_ratio()
             assert abs(ratio - 0.75) < 0.01
 

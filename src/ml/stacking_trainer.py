@@ -56,7 +56,7 @@ else:
 
 from src.paths import PROJECT_ROOT
 
-from src.signals.stacking_feature_engine import StackingFeatureEngine, SignalSource
+from src.signals.stacking_feature_engine import StackingFeatureEngine, SignalSource, Signal, RegimeContext, HistoricalAccuracy
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ class TrainingConfig:
     n_splits: int = 5  # Time series cross-validation folds
     
     # Feature configuration
-    feature_count: int = 102
+    feature_count: int = 59
     
     # Data sources
     db_path: str = "data/market.db"
@@ -153,7 +153,7 @@ class StackingTrainer:
         self.model_version: Optional[str] = None
         
         # Ensure model directory exists
-        self.model_dir = Path(project_root) / self.config.model_dir
+        self.model_dir = Path(PROJECT_ROOT) / self.config.model_dir
         self.model_dir.mkdir(parents=True, exist_ok=True)
     
     def _load_historical_data(
@@ -169,7 +169,7 @@ class StackingTrainer:
             y: Target vector (n_samples,) - 1 if signal was correct, 0 otherwise
             dates: List of dates for each sample
         """
-        db_path = Path(project_root) / self.config.db_path
+        db_path = Path(PROJECT_ROOT) / self.config.db_path
         
         if not db_path.exists():
             logger.warning(f"Database not found at {db_path}, using synthetic data")
@@ -237,7 +237,7 @@ class StackingTrainer:
         
         for date, data in sorted(data_by_date.items()):
             # Need all 8 signals present
-            if len(data['signals']) < 8:
+            if len(data['signals']) < 6:
                 continue
             
             # Create feature vector
@@ -270,24 +270,50 @@ class StackingTrainer:
         return np.array(X_list), np.array(y_list), dates
     
     def _create_features_from_signals(
-        self, 
+        self,
         signals: Dict[str, Dict]
     ) -> Optional[np.ndarray]:
-        """Create 102-dimensional feature vector from signal dictionary."""
-        # Map string sources to enum
-        signal_values = {}
+        """Create 59-dimensional feature vector from signal dictionary."""
+        # Map string sources to enum and create Signal objects
+        signal_objects = {}
         for source_str, data in signals.items():
             try:
                 source = SignalSource(source_str)
-                signal_values[source] = data['value']
+                signal_objects[source] = Signal(
+                    source=source,
+                    value=data['value'],
+                    timestamp=datetime.now(),
+                    confidence=data.get('confidence', 0.5),
+                )
             except ValueError:
                 continue
-        
-        if len(signal_values) < 8:
+
+        if len(signal_objects) < 6:
             return None
-        
+
+        # Create default regime context (actual data not available here)
+        regime_context = RegimeContext(
+            vix_level=20.0,
+            trend_strength=0.0,
+            timestamp=datetime.now(),
+        )
+
+        # Create default historical accuracy (actual data not available here)
+        historical_accuracy = {
+            source: HistoricalAccuracy(
+                source=source,
+                accuracy_90d=0.5,
+                predictions_count=0,
+                timestamp=datetime.now(),
+            )
+            for source in SignalSource
+        }
+
         # Use feature engine to generate features
-        features = self.feature_engine.generate_feature_vector(signal_values)
+        feature_vector = self.feature_engine.create_features(
+            signal_objects, regime_context, historical_accuracy
+        )
+        features = self.feature_engine.to_numpy(feature_vector)
         return features
     
     def _generate_synthetic_data(
@@ -620,7 +646,7 @@ class StackingTrainer:
     
     def _save_backfill_predictions(self, predictions: List[Dict]):
         """Save backfilled predictions to database."""
-        db_path = Path(project_root) / self.config.db_path
+        db_path = Path(PROJECT_ROOT) / self.config.db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         
         conn = sqlite3.connect(db_path)
@@ -701,7 +727,7 @@ def main():
         print(json.dumps(stats, indent=2))
         
     elif args.command == 'list':
-        model_files = sorted(Path(project_root / 'models').glob("signal_stacker_*.json"))
+        model_files = sorted(Path(PROJECT_ROOT / 'models').glob("signal_stacker_*.json"))
         print(f"Available models ({len(model_files)}):")
         for mf in model_files:
             print(f"  {mf.name}")

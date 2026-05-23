@@ -95,13 +95,22 @@ def generate() -> dict[str, Any]:
 
     next_rebalance = last_ts + timedelta(days=30)
 
+    # Deduplicate by date — same-day entries should not create multiple compliance intervals
+    seen_dates = set()
+    deduped = []
+    for entry in history:
+        date_key = entry.get("date", entry.get("timestamp", "")[:10])
+        if date_key not in seen_dates:
+            seen_dates.add(date_key)
+            deduped.append(entry)
+
     # Schedule compliance
     on_time = 0
     delayed = 0
-    for i, entry in enumerate(history):
+    for i, entry in enumerate(deduped):
         if i == 0:
             continue
-        prev_ts = datetime.fromisoformat(history[i - 1]["timestamp"])
+        prev_ts = datetime.fromisoformat(deduped[i - 1]["timestamp"])
         curr_ts = datetime.fromisoformat(entry["timestamp"])
         delta_days = (curr_ts - prev_ts).days
         if 25 <= delta_days <= 35:

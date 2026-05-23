@@ -42,6 +42,19 @@ from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION
 
 logger = logging.getLogger(__name__)
 
+# Module-level health tracker singleton (lazy initialized)
+_health_tracker = None
+
+def _get_health_tracker():
+    global _health_tracker
+    if _health_tracker is None:
+        try:
+            from src.signals.health_tracker import SignalHealthTracker
+            _health_tracker = SignalHealthTracker()
+        except Exception:
+            pass
+    return _health_tracker
+
 
 class Regime(Enum):
     """Market regime classifications."""
@@ -823,7 +836,20 @@ class EnsembleVoter:
             if source in weights:
                 reading.weight = weights[source]
                 weighted_signals.append(reading)
-        
+
+        # Log signal predictions for health tracking (v3.12)
+        try:
+            tracker = _get_health_tracker()
+            if tracker is not None:
+                for reading in weighted_signals:
+                    tracker.log_prediction_simple(
+                        source=reading.source.value,
+                        signal_value=reading.value,
+                        confidence=reading.confidence,
+                    )
+        except Exception as e:
+            logger.debug(f"Health tracking log failed: {e}")
+
         if not weighted_signals:
             return EnsembleVote(
                 timestamp=str(datetime.now()),
