@@ -78,18 +78,17 @@ class EnsembleBacktestEngine:
         if not self.db_path.exists():
             return []
             
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT date, close, open, high, low, volume
-            FROM prices
-            WHERE symbol = ? AND date >= ? AND date <= ?
-            ORDER BY date ASC
-        """, (symbol, start_date, end_date))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT date, close, open, high, low, volume
+                FROM prices
+                WHERE symbol = ? AND date >= ? AND date <= ?
+                ORDER BY date ASC
+            """, (symbol, start_date, end_date))
+
+            rows = cursor.fetchall()
         
         data = [
             {

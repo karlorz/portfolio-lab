@@ -824,7 +824,8 @@ class NetworkMomentumBacktester:
                 if not period_df.empty:
                     crisis_return = period_df['value'].iloc[-1] / period_df['value'].iloc[0] - 1
                     crisis_returns[crisis] = crisis_return
-            except (KeyError, IndexError, TypeError):
+            except (KeyError, IndexError, TypeError) as e:
+                logger.debug("Crisis period %s data unavailable: %s", crisis, e)
                 crisis_returns[crisis] = None
         
         # Baseline comparison

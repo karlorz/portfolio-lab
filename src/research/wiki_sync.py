@@ -277,8 +277,8 @@ created: {timestamp}
             for line in f:
                 try:
                     orders.append(json.loads(line))
-                except (json.JSONDecodeError, OSError):
-                    pass
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.debug("Skipping malformed order line: %s", e)
         
         if not orders:
             return None

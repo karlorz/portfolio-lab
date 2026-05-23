@@ -62,12 +62,11 @@ class CombinedOverlayBacktest:
             try:
                 import sqlite3
                 import pandas as pd
-                conn = sqlite3.connect(str(db_path))
-                df = pd.read_sql_query(
-                    "SELECT date, symbol, close FROM prices ORDER BY date",
-                    conn
-                )
-                conn.close()
+                with sqlite3.connect(str(db_path)) as conn:
+                    df = pd.read_sql_query(
+                        "SELECT date, symbol, close FROM prices ORDER BY date",
+                        conn
+                    )
 
                 if not df.empty:
                     for sym in ["SPY", "GLD", "TLT"]:

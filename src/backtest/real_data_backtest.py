@@ -39,31 +39,30 @@ class RealDataBacktest:
             logger.error("market.db not found")
             return {}
 
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(db_path)) as conn:
+            cursor = conn.cursor()
 
-        data = {}
-        symbol_map = {
-            "SPY": "SPY", "GLD": "GLD", "TLT": "TLT", "IEF": "IEF",
-            "BTC": "BTC-USD", "ETH": "ETH-USD", "VIX": "^VIX",
-        }
+            data = {}
+            symbol_map = {
+                "SPY": "SPY", "GLD": "GLD", "TLT": "TLT", "IEF": "IEF",
+                "BTC": "BTC-USD", "ETH": "ETH-USD", "VIX": "^VIX",
+            }
 
-        for asset, db_sym in symbol_map.items():
-            cursor.execute(
-                "SELECT date, close FROM prices WHERE symbol=? ORDER BY date",
-                (db_sym,)
-            )
-            rows = cursor.fetchall()
-            if rows:
-                data[asset] = {
-                    "dates": [r[0] for r in rows],
-                    "prices": [float(r[1]) for r in rows],
-                }
-                logger.info(f"Loaded {asset}: {len(rows)} days, "
-                           f"${data[asset]['prices'][0]:.2f} → "
-                           f"${data[asset]['prices'][-1]:.2f}")
+            for asset, db_sym in symbol_map.items():
+                cursor.execute(
+                    "SELECT date, close FROM prices WHERE symbol=? ORDER BY date",
+                    (db_sym,)
+                )
+                rows = cursor.fetchall()
+                if rows:
+                    data[asset] = {
+                        "dates": [r[0] for r in rows],
+                        "prices": [float(r[1]) for r in rows],
+                    }
+                    logger.info(f"Loaded {asset}: {len(rows)} days, "
+                               f"${data[asset]['prices'][0]:.2f} → "
+                               f"${data[asset]['prices'][-1]:.2f}")
 
-        conn.close()
         return data
 
     def _compute_returns(self, prices: List[float]) -> List[float]:

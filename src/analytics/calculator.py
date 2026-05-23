@@ -2,6 +2,7 @@
 Performance analytics calculations: drawdown, rolling metrics, benchmarks.
 """
 import json
+import logging
 import numpy as np
 from typing import Dict, List, Optional
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 from src.paths import DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -102,7 +105,8 @@ class AnalyticsCalculator:
             for line in f:
                 try:
                     data.append(json.loads(line))
-                except (json.JSONDecodeError, OSError):
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.debug("Skipping malformed performance line: %s", e)
                     continue
         return data
     

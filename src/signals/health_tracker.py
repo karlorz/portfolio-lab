@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 DB_PATH = MARKET_DB
 STATE_PATH = DATA_DIR / ".signal_health_state.json"
 
-
 class SignalSource(Enum):
     """Signal sources tracked for health monitoring."""
     MULTI_SPEED_MOM = "multi_speed_momentum"
@@ -40,13 +39,11 @@ class SignalSource(Enum):
     CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"
     UNIFIED_OVERLAY = "unified_overlay"
 
-
 class SignalHealthStatus(Enum):
     """Health status classification."""
     HEALTHY = "healthy"  # health >= 0.7
     DEGRADED = "degraded"  # 0.5 <= health < 0.7
     UNHEALTHY = "unhealthy"  # health < 0.5
-
 
 @dataclass
 class SignalPrediction:
@@ -68,7 +65,6 @@ class SignalPrediction:
             "metadata": json.dumps(self.metadata),
         }
 
-
 @dataclass
 class HealthScore:
     """Health score for a signal source."""
@@ -85,7 +81,6 @@ class HealthScore:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
-
 @dataclass
 class DecayAlert:
     """Alert when signal health drops significantly."""
@@ -99,7 +94,6 @@ class DecayAlert:
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
-
 
 class SignalHealthTracker:
     """
@@ -122,60 +116,59 @@ class SignalHealthTracker:
     
     def _init_database(self):
         """Initialize signal_predictions table."""
-        conn = sqlite3.connect(self.db_path)
-        # Enable WAL mode first — must be set before any writes
-        conn.execute("PRAGMA journal_mode=WAL")
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            # Enable WAL mode first — must be set before any writes
+            conn.execute("PRAGMA journal_mode=WAL")
+            cursor = conn.cursor()
         
-        # Signal predictions table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS signal_predictions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                source TEXT NOT NULL,
-                signal_value REAL,
-                confidence REAL,
-                predicted_direction INTEGER,
-                metadata TEXT,
-                actual_direction INTEGER,
-                accuracy_calculated INTEGER DEFAULT 0
-            )
-        """)
+            # Signal predictions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS signal_predictions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    signal_value REAL,
+                    confidence REAL,
+                    predicted_direction INTEGER,
+                    metadata TEXT,
+                    actual_direction INTEGER,
+                    accuracy_calculated INTEGER DEFAULT 0
+                )
+            """)
         
-        # Create indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_source_timestamp 
-            ON signal_predictions(source, timestamp)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_timestamp 
-            ON signal_predictions(timestamp)
-        """)
+            # Create indexes
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_source_timestamp 
+                ON signal_predictions(source, timestamp)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_timestamp 
+                ON signal_predictions(timestamp)
+            """)
         
-        # Health scores history
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS signal_health_scores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                source TEXT NOT NULL,
-                health_score REAL,
-                accuracy_30d REAL,
-                accuracy_60d REAL,
-                accuracy_90d REAL,
-                decay_rate REAL,
-                predictions_count INTEGER,
-                status TEXT
-            )
-        """)
+            # Health scores history
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS signal_health_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    health_score REAL,
+                    accuracy_30d REAL,
+                    accuracy_60d REAL,
+                    accuracy_90d REAL,
+                    decay_rate REAL,
+                    predictions_count INTEGER,
+                    status TEXT
+                )
+            """)
         
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_health_source_timestamp 
-            ON signal_health_scores(source, timestamp)
-        """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_health_source_timestamp 
+                ON signal_health_scores(source, timestamp)
+            """)
         
-        conn.commit()
+            conn.commit()
 
-        conn.close()
         logger.info("Signal health database initialized")
     
     def _load_state(self) -> Dict:
@@ -201,24 +194,23 @@ class SignalHealthTracker:
         
         Call this from each signal source after generating signals.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        cursor.execute("""
-            INSERT INTO signal_predictions 
-            (timestamp, source, signal_value, confidence, predicted_direction, metadata)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            prediction.timestamp,
-            prediction.source,
-            prediction.signal_value,
-            prediction.confidence,
-            prediction.predicted_direction,
-            json.dumps(prediction.metadata)
-        ))
+            cursor.execute("""
+                INSERT INTO signal_predictions 
+                (timestamp, source, signal_value, confidence, predicted_direction, metadata)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                prediction.timestamp,
+                prediction.source,
+                prediction.signal_value,
+                prediction.confidence,
+                prediction.predicted_direction,
+                json.dumps(prediction.metadata)
+            ))
         
-        conn.commit()
-        conn.close()
+            conn.commit()
     
     def log_prediction_simple(
         self,
@@ -260,19 +252,18 @@ class SignalHealthTracker:
         spy_return = returns_data.get('SPY', 0)
         actual_direction = 1 if spy_return > 0 else (-1 if spy_return < 0 else 0)
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        # Update all predictions for this date with actual direction
-        cursor.execute("""
-            UPDATE signal_predictions 
-            SET actual_direction = ?, accuracy_calculated = 1
-            WHERE date(timestamp) = date(?) AND actual_direction IS NULL
-        """, (actual_direction, date))
+            # Update all predictions for this date with actual direction
+            cursor.execute("""
+                UPDATE signal_predictions 
+                SET actual_direction = ?, accuracy_calculated = 1
+                WHERE date(timestamp) = date(?) AND actual_direction IS NULL
+            """, (actual_direction, date))
         
-        updated = cursor.rowcount
-        conn.commit()
-        conn.close()
+            updated = cursor.rowcount
+            conn.commit()
         
         logger.info(f"Updated {updated} predictions with actual direction for {date}")
         return updated
@@ -293,47 +284,46 @@ class SignalHealthTracker:
         """
         end_date = end_date or datetime.now().strftime("%Y-%m-%d")
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        # Get predictions with actual directions
-        periods = {
-            '30d': (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d"),
-            '60d': (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=60)).strftime("%Y-%m-%d"),
-            '90d': (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=90)).strftime("%Y-%m-%d"),
-        }
+            # Get predictions with actual directions
+            periods = {
+                '30d': (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d"),
+                '60d': (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=60)).strftime("%Y-%m-%d"),
+                '90d': (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=90)).strftime("%Y-%m-%d"),
+            }
         
-        accuracies = {}
-        counts = {}
+            accuracies = {}
+            counts = {}
         
-        for period, start_date in periods.items():
-            cursor.execute("""
-                SELECT predicted_direction, actual_direction
-                FROM signal_predictions
-                WHERE source = ? 
-                AND date(timestamp) BETWEEN date(?) AND date(?)
-                AND actual_direction IS NOT NULL
-            """, (source, start_date, end_date))
+            for period, start_date in periods.items():
+                cursor.execute("""
+                    SELECT predicted_direction, actual_direction
+                    FROM signal_predictions
+                    WHERE source = ? 
+                    AND date(timestamp) BETWEEN date(?) AND date(?)
+                    AND actual_direction IS NOT NULL
+                """, (source, start_date, end_date))
             
-            rows = cursor.fetchall()
+                rows = cursor.fetchall()
             
-            if not rows:
-                accuracies[period] = 0.5  # Neutral if no data
-                counts[period] = 0
-                continue
+                if not rows:
+                    accuracies[period] = 0.5  # Neutral if no data
+                    counts[period] = 0
+                    continue
             
-            # Calculate directional accuracy
-            correct = sum(1 for pred, actual in rows if pred == actual and pred != 0)
-            total = sum(1 for pred, actual in rows if pred != 0)  # Exclude neutral predictions
+                # Calculate directional accuracy
+                correct = sum(1 for pred, actual in rows if pred == actual and pred != 0)
+                total = sum(1 for pred, actual in rows if pred != 0)  # Exclude neutral predictions
             
-            if total > 0:
-                accuracies[period] = correct / total
-            else:
-                accuracies[period] = 0.5
+                if total > 0:
+                    accuracies[period] = correct / total
+                else:
+                    accuracies[period] = 0.5
             
-            counts[period] = len(rows)
+                counts[period] = len(rows)
         
-        conn.close()
         
         # Weighted health score
         if counts['90d'] < 10:  # Need minimum data
@@ -385,29 +375,28 @@ class SignalHealthTracker:
     
     def save_health_scores(self, scores: Dict[str, HealthScore]):
         """Save health scores to database."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        for score in scores.values():
-            cursor.execute("""
-                INSERT INTO signal_health_scores
-                (timestamp, source, health_score, accuracy_30d, accuracy_60d, 
-                 accuracy_90d, decay_rate, predictions_count, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                score.timestamp,
-                score.source,
-                score.health_score,
-                score.accuracy_30d,
-                score.accuracy_60d,
-                score.accuracy_90d,
-                score.decay_rate,
-                score.predictions_count,
-                score.status
-            ))
+            for score in scores.values():
+                cursor.execute("""
+                    INSERT INTO signal_health_scores
+                    (timestamp, source, health_score, accuracy_30d, accuracy_60d, 
+                     accuracy_90d, decay_rate, predictions_count, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    score.timestamp,
+                    score.source,
+                    score.health_score,
+                    score.accuracy_30d,
+                    score.accuracy_60d,
+                    score.accuracy_90d,
+                    score.decay_rate,
+                    score.predictions_count,
+                    score.status
+                ))
         
-        conn.commit()
-        conn.close()
+            conn.commit()
         self._save_state()
     
     def detect_decay_alerts(
@@ -419,64 +408,63 @@ class SignalHealthTracker:
         
         Returns alerts for signals where health dropped >20% over lookback period.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
         
-        alerts = []
+            alerts = []
         
-        for source in SignalSource:
-            # Get health score history for this source
-            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+            for source in SignalSource:
+                # Get health score history for this source
+                start_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
             
-            cursor.execute("""
-                SELECT timestamp, health_score
-                FROM signal_health_scores
-                WHERE source = ? AND date(timestamp) >= date(?)
-                ORDER BY timestamp ASC
-            """, (source.value, start_date))
+                cursor.execute("""
+                    SELECT timestamp, health_score
+                    FROM signal_health_scores
+                    WHERE source = ? AND date(timestamp) >= date(?)
+                    ORDER BY timestamp ASC
+                """, (source.value, start_date))
             
-            rows = cursor.fetchall()
+                rows = cursor.fetchall()
             
-            if len(rows) < 2:
-                continue
+                if len(rows) < 2:
+                    continue
             
-            # Calculate drop
-            previous_health = rows[0][1]  # First record in period
-            current_health = rows[-1][1]  # Most recent
-            drop = (previous_health - current_health) / previous_health if previous_health > 0 else 0
+                # Calculate drop
+                previous_health = rows[0][1]  # First record in period
+                current_health = rows[-1][1]  # Most recent
+                drop = (previous_health - current_health) / previous_health if previous_health > 0 else 0
             
-            if drop >= self.DECAY_THRESHOLD:
-                severity = "critical" if drop >= 0.30 else "warning"
+                if drop >= self.DECAY_THRESHOLD:
+                    severity = "critical" if drop >= 0.30 else "warning"
                 
-                alert = DecayAlert(
-                    source=source.value,
-                    alert_timestamp=datetime.now().isoformat(),
-                    previous_health=previous_health,
-                    current_health=current_health,
-                    drop_30d=round(drop, 4),
-                    severity=severity,
-                    message=f"{source.value}: Health dropped {drop:.1%} in {lookback_days}d "
-                            f"({previous_health:.2f} -> {current_health:.2f})"
-                )
+                    alert = DecayAlert(
+                        source=source.value,
+                        alert_timestamp=datetime.now().isoformat(),
+                        previous_health=previous_health,
+                        current_health=current_health,
+                        drop_30d=round(drop, 4),
+                        severity=severity,
+                        message=f"{source.value}: Health dropped {drop:.1%} in {lookback_days}d "
+                                f"({previous_health:.2f} -> {current_health:.2f})"
+                    )
                 
-                alerts.append(alert)
+                    alerts.append(alert)
 
-                # Save to state (dedup: skip if same source + same health already recorded)
-                if "decay_alerts" not in self.state:
-                    self.state["decay_alerts"] = []
-                existing = self.state["decay_alerts"]
-                is_duplicate = any(
-                    a.get("source") == source.value
-                    and abs(a.get("current_health", 0) - current_health) < 0.001
-                    and abs(a.get("previous_health", 0) - previous_health) < 0.001
-                    for a in existing[-20:]  # check last 20 for this source
-                )
-                if not is_duplicate:
-                    self.state["decay_alerts"].append(alert.to_dict())
-                # Keep only last 100 alerts
-                self.state["decay_alerts"] = self.state["decay_alerts"][-100:]
+                    # Save to state (dedup: skip if same source + same health already recorded)
+                    if "decay_alerts" not in self.state:
+                        self.state["decay_alerts"] = []
+                    existing = self.state["decay_alerts"]
+                    is_duplicate = any(
+                        a.get("source") == source.value
+                        and abs(a.get("current_health", 0) - current_health) < 0.001
+                        and abs(a.get("previous_health", 0) - previous_health) < 0.001
+                        for a in existing[-20:]  # check last 20 for this source
+                    )
+                    if not is_duplicate:
+                        self.state["decay_alerts"].append(alert.to_dict())
+                    # Keep only last 100 alerts
+                    self.state["decay_alerts"] = self.state["decay_alerts"][-100:]
         
-        conn.close()
         self._save_state()
         
         return alerts
@@ -539,7 +527,6 @@ class SignalHealthTracker:
             "overall_health": "healthy" if healthy_count >= len(scores) * 0.6 else "degraded"
         }
 
-
 def backfill_predictions(
     db_path: Optional[Path] = None,
     start_date: str = "2024-01-01"
@@ -553,85 +540,83 @@ def backfill_predictions(
     tracker = SignalHealthTracker(db_path)
     
     # Load from regime_log as proxy for historical signals
-    conn = sqlite3.connect(tracker.db_path)
-    cursor = conn.cursor()
+    with sqlite3.connect(tracker.db_path) as conn:
+        cursor = conn.cursor()
     
-    count = 0
+        count = 0
     
-    try:
-        # Get historical regime classifications as HMM signal proxy
-        cursor.execute("""
-            SELECT date, regime, vix_level FROM regime_log
-            WHERE date >= date(?) AND regime IS NOT NULL
-            ORDER BY date
-        """, (start_date,))
-        
-        rows = cursor.fetchall()
-        
-        for row in rows:
-            date, regime, vix = row
-            
-            # Convert regime to signal value
-            signal_map = {
-                'bull': 0.8,
-                'bear': -0.8,
-                'neutral': 0.0,
-                'high_vol': -0.3,
-                'crisis': -0.9
-            }
-            
-            signal_value = signal_map.get(regime, 0.0)
-            
-            # Calculate actual direction from next day's SPY return
+        try:
+            # Get historical regime classifications as HMM signal proxy
             cursor.execute("""
-                SELECT close FROM prices
-                WHERE symbol = 'SPY' AND date > date(?)
-                ORDER BY date LIMIT 2
-            """, (date,))
+                SELECT date, regime, vix_level FROM regime_log
+                WHERE date >= date(?) AND regime IS NOT NULL
+                ORDER BY date
+            """, (start_date,))
+        
+            rows = cursor.fetchall()
+        
+            for row in rows:
+                date, regime, vix = row
             
-            price_rows = cursor.fetchall()
-            if len(price_rows) == 2:
-                p1, p2 = price_rows[0][0], price_rows[1][0]
-                ret = (p2 - p1) / p1 if p1 > 0 else 0
-                actual = 1 if ret > 0 else (-1 if ret < 0 else 0)
-                
-                # Log prediction
-                prediction = SignalPrediction(
-                    timestamp=date + "T00:00:00",
-                    source="hmm",
-                    signal_value=signal_value,
-                    confidence=0.7 if regime in ['bull', 'bear'] else 0.5,
-                    predicted_direction=1 if signal_value > 0.2 else (-1 if signal_value < -0.2 else 0),
-                    metadata={"regime": regime, "vix": vix}
-                )
-                
-                # Insert with actual direction
+                # Convert regime to signal value
+                signal_map = {
+                    'bull': 0.8,
+                    'bear': -0.8,
+                    'neutral': 0.0,
+                    'high_vol': -0.3,
+                    'crisis': -0.9
+                }
+            
+                signal_value = signal_map.get(regime, 0.0)
+            
+                # Calculate actual direction from next day's SPY return
                 cursor.execute("""
-                    INSERT OR IGNORE INTO signal_predictions
-                    (timestamp, source, signal_value, confidence, predicted_direction, metadata, actual_direction, accuracy_calculated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-                """, (
-                    prediction.timestamp,
-                    prediction.source,
-                    prediction.signal_value,
-                    prediction.confidence,
-                    prediction.predicted_direction,
-                    json.dumps(prediction.metadata),
-                    actual
-                ))
+                    SELECT close FROM prices
+                    WHERE symbol = 'SPY' AND date > date(?)
+                    ORDER BY date LIMIT 2
+                """, (date,))
+            
+                price_rows = cursor.fetchall()
+                if len(price_rows) == 2:
+                    p1, p2 = price_rows[0][0], price_rows[1][0]
+                    ret = (p2 - p1) / p1 if p1 > 0 else 0
+                    actual = 1 if ret > 0 else (-1 if ret < 0 else 0)
                 
-                if cursor.rowcount > 0:
-                    count += 1
+                    # Log prediction
+                    prediction = SignalPrediction(
+                        timestamp=date + "T00:00:00",
+                        source="hmm",
+                        signal_value=signal_value,
+                        confidence=0.7 if regime in ['bull', 'bear'] else 0.5,
+                        predicted_direction=1 if signal_value > 0.2 else (-1 if signal_value < -0.2 else 0),
+                        metadata={"regime": regime, "vix": vix}
+                    )
+                
+                    # Insert with actual direction
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO signal_predictions
+                        (timestamp, source, signal_value, confidence, predicted_direction, metadata, actual_direction, accuracy_calculated)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                    """, (
+                        prediction.timestamp,
+                        prediction.source,
+                        prediction.signal_value,
+                        prediction.confidence,
+                        prediction.predicted_direction,
+                        json.dumps(prediction.metadata),
+                        actual
+                    ))
+                
+                    if cursor.rowcount > 0:
+                        count += 1
         
-        conn.commit()
-        logger.info(f"Backfilled {count} historical predictions")
+            conn.commit()
+            logger.info(f"Backfilled {count} historical predictions")
         
-    except Exception as e:
-        logger.error(f"Backfill error: {e}")
+        except Exception as e:
+            logger.error(f"Backfill error: {e}")
     
-    conn.close()
     return count
-
 
 # CLI interface
 if __name__ == "__main__":

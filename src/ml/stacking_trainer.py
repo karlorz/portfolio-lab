@@ -176,39 +176,37 @@ class StackingTrainer:
             logger.warning(f"Database not found at {db_path}, using synthetic data")
             return self._generate_synthetic_data()
         
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Check if signal_predictions table exists
-        cursor.execute("""
-            SELECT name FROM sqlite_master 
-            WHERE type='table' AND name='signal_predictions'
-        """)
-        
-        if not cursor.fetchone():
-            logger.warning("signal_predictions table not found, using synthetic data")
-            conn.close()
-            return self._generate_synthetic_data()
-        
-        # Load signal predictions
-        query = """
-            SELECT 
-                timestamp, source, signal_value, confidence, 
-                predicted_direction, actual_direction
-            FROM signal_predictions 
-            WHERE timestamp >= ?
-        """
-        params = [start_date]
-        
-        if end_date:
-            query += " AND timestamp <= ?"
-            params.append(end_date)
-        
-        query += " ORDER BY timestamp, source"
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+
+            # Check if signal_predictions table exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='signal_predictions'
+            """)
+
+            if not cursor.fetchone():
+                logger.warning("signal_predictions table not found, using synthetic data")
+                return self._generate_synthetic_data()
+
+            # Load signal predictions
+            query = """
+                SELECT
+                    timestamp, source, signal_value, confidence,
+                    predicted_direction, actual_direction
+                FROM signal_predictions
+                WHERE timestamp >= ?
+            """
+            params = [start_date]
+
+            if end_date:
+                query += " AND timestamp <= ?"
+                params.append(end_date)
+
+            query += " ORDER BY timestamp, source"
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
         
         if len(rows) < self.config.min_training_days:
             logger.warning(f"Insufficient data ({len(rows)} rows), using synthetic data")
@@ -648,37 +646,36 @@ class StackingTrainer:
         db_path = Path(PROJECT_ROOT) / self.config.db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Create table if not exists
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS stacking_predictions (
-                date TEXT PRIMARY KEY,
-                prediction INTEGER,
-                probability REAL,
-                confidence REAL,
-                actual INTEGER,
-                correct INTEGER,
-                fallback INTEGER,
-                model_version TEXT
-            )
-        """)
-        
-        # Insert predictions
-        for pred in predictions:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+
+            # Create table if not exists
             cursor.execute("""
-                INSERT OR REPLACE INTO stacking_predictions 
-                (date, prediction, probability, confidence, actual, correct, fallback, model_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                pred['date'], pred['prediction'], pred['probability'],
-                pred['confidence'], pred['actual'], int(pred['correct']),
-                int(pred['fallback']), self.model_version
-            ))
-        
-        conn.commit()
-        conn.close()
+                CREATE TABLE IF NOT EXISTS stacking_predictions (
+                    date TEXT PRIMARY KEY,
+                    prediction INTEGER,
+                    probability REAL,
+                    confidence REAL,
+                    actual INTEGER,
+                    correct INTEGER,
+                    fallback INTEGER,
+                    model_version TEXT
+                )
+            """)
+
+            # Insert predictions
+            for pred in predictions:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO stacking_predictions
+                    (date, prediction, probability, confidence, actual, correct, fallback, model_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    pred['date'], pred['prediction'], pred['probability'],
+                    pred['confidence'], pred['actual'], int(pred['correct']),
+                    int(pred['fallback']), self.model_version
+                ))
+
+            conn.commit()
         
         logger.info(f"Saved {len(predictions)} predictions to database")
 

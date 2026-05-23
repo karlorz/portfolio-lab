@@ -4,11 +4,14 @@ Generates features from price data, VIX, and market microstructure.
 """
 import os
 import json
+import logging
 import sqlite3
 import numpy as np
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -172,7 +175,8 @@ class FeaturePipeline:
         
         try:
             return np.corrcoef(returns1, returns2)[0, 1]
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            logger.debug("Correlation computation failed: %s", e)
             return 0.0
     
     def generate_features(
@@ -413,7 +417,8 @@ class FeatureStore:
                     record = json.loads(line)
                     if record.get("symbol") == symbol and record.get("timestamp", "") > cutoff:
                         features.append(record)
-                except (json.JSONDecodeError, OSError):
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.debug("Skipping malformed feature line: %s", e)
                     continue
         
         return features

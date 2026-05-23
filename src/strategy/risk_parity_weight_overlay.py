@@ -24,12 +24,15 @@ Source: Bridgewater All Weather, Asness (1996), BlackRock Systematic
 import numpy as np
 import pandas as pd
 import json
+import logging
 import argparse
 from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
 
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = DATA_DIR / "signals.db"
 PRICES_PATH = PRICES_JSON
@@ -317,7 +320,8 @@ class RPBacktester:
                 if not period_df.empty:
                     crisis_return = period_df['value'].iloc[-1] / period_df['value'].iloc[0] - 1
                     crisis_returns[crisis] = crisis_return
-            except (KeyError, IndexError, TypeError):
+            except (KeyError, IndexError, TypeError) as e:
+                logger.debug("Crisis period %s data unavailable: %s", crisis, e)
                 crisis_returns[crisis] = None
         
         # Baseline comparison

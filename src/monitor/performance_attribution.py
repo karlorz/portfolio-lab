@@ -285,14 +285,16 @@ class PerformanceAttribution:
             if isinstance(value, str):
                 try:
                     value = float(value)
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as e:
+                    logger.debug("Failed to convert signal value to float: %s", e)
                     continue
 
             weight = sig.get("weight", 0)
             if isinstance(weight, str):
                 try:
                     weight = float(weight)
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as e:
+                    logger.debug("Failed to convert signal weight to float: %s", e)
                     weight = 0
             weights.append(weight)
 
@@ -382,7 +384,8 @@ class PerformanceAttribution:
                 if isinstance(val, str):
                     try:
                         val = float(val)
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError) as e:
+                        logger.debug("Failed to convert signal value to float: %s", e)
                         val = 0
                 date_values[d][src] = val
 

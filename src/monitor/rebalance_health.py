@@ -46,7 +46,8 @@ def _parse_order_file(path: Path) -> dict[str, Any] | None:
             time_str = ts_parts[3] if len(ts_parts) > 3 else "000000"
             try:
                 ts = datetime.strptime(f"{date_str}_{time_str}", "%Y%m%d_%H%M%S")
-            except ValueError:
+            except ValueError as e:
+                logger.debug("Failed to parse timestamp from path %s: %s", path.name, e)
                 ts = datetime.fromtimestamp(path.stat().st_mtime)
         else:
             ts = datetime.fromtimestamp(path.stat().st_mtime)

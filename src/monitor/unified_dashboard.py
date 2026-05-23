@@ -213,7 +213,8 @@ def _get_attribution_section() -> Dict[str, Any]:
 
     try:
         data = json.loads(files[0].read_text())
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to parse dashboard data: %s", e)
         return {"available": False}
 
     sources = data.get("sources", {})

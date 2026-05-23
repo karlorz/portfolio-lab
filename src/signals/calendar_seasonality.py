@@ -673,7 +673,8 @@ def main():
             try:
                 year, month = sys.argv[2].split("-")
                 year, month = int(year), int(month)
-            except ValueError:
+            except ValueError as e:
+                logger.debug("Failed to parse calendar date argument: %s", e)
                 year, month = date.today().year, date.today().month
         else:
             year, month = date.today().year, date.today().month

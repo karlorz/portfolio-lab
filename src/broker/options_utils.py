@@ -314,22 +314,21 @@ class OptionsChainFetcher:
         try:
             db_path = MARKET_DB
             if db_path.exists():
-                conn = sqlite3.connect(db_path)
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
-                    (underlying,),
-                )
-                row = cursor.fetchone()
-                if row:
-                    spot = float(row[0])
-                cursor.execute(
-                    "SELECT close FROM prices WHERE symbol = 'VIX' ORDER BY date DESC LIMIT 1"
-                )
-                vix_row = cursor.fetchone()
-                if vix_row:
-                    vix = float(vix_row[0])
-                conn.close()
+                with sqlite3.connect(db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+                        (underlying,),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        spot = float(row[0])
+                    cursor.execute(
+                        "SELECT close FROM prices WHERE symbol = 'VIX' ORDER BY date DESC LIMIT 1"
+                    )
+                    vix_row = cursor.fetchone()
+                    if vix_row:
+                        vix = float(vix_row[0])
         except Exception as e:
             logger.warning(f"Failed to load SPY/VIX prices from DB: {e}")
 
@@ -412,47 +411,46 @@ class OptionsChainFetcher:
         """Cache chain to SQLite for historical analysis."""
         cache_file = self.cache_dir / f"{chain.underlying}_options.db"
         
-        conn = sqlite3.connect(str(cache_file))
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS options_chain (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL,
-                option_type TEXT NOT NULL,
-                strike REAL NOT NULL,
-                expiration TEXT NOT NULL,
-                bid REAL,
-                ask REAL,
-                last REAL,
-                delta REAL,
-                volume INTEGER,
-                open_interest INTEGER,
-                fetched_at TEXT NOT NULL
-            )
-        """)
-        
-        for quote in chain.quotes:
+        with sqlite3.connect(str(cache_file)) as conn:
+            cursor = conn.cursor()
+
             cursor.execute("""
-                INSERT INTO options_chain 
-                (symbol, option_type, strike, expiration, bid, ask, last, delta, volume, open_interest, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                quote.symbol,
-                quote.option_type.value,
-                quote.strike,
-                quote.expiration.isoformat(),
-                quote.bid,
-                quote.ask,
-                quote.last,
-                quote.delta,
-                quote.volume,
-                quote.open_interest,
-                chain.fetched_at.isoformat(),
-            ))
-        
-        conn.commit()
-        conn.close()
+                CREATE TABLE IF NOT EXISTS options_chain (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    option_type TEXT NOT NULL,
+                    strike REAL NOT NULL,
+                    expiration TEXT NOT NULL,
+                    bid REAL,
+                    ask REAL,
+                    last REAL,
+                    delta REAL,
+                    volume INTEGER,
+                    open_interest INTEGER,
+                    fetched_at TEXT NOT NULL
+                )
+            """)
+
+            for quote in chain.quotes:
+                cursor.execute("""
+                    INSERT INTO options_chain
+                    (symbol, option_type, strike, expiration, bid, ask, last, delta, volume, open_interest, fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    quote.symbol,
+                    quote.option_type.value,
+                    quote.strike,
+                    quote.expiration.isoformat(),
+                    quote.bid,
+                    quote.ask,
+                    quote.last,
+                    quote.delta,
+                    quote.volume,
+                    quote.open_interest,
+                    chain.fetched_at.isoformat(),
+                ))
+
+            conn.commit()
         logger.info(f"Cached {len(chain.quotes)} quotes to {cache_file}")
 
 
@@ -472,18 +470,17 @@ class OptionsChainCache:
         if not cache_file.exists():
             return []
         
-        conn = sqlite3.connect(str(cache_file))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT * FROM options_chain
-            WHERE fetched_at >= datetime('now', ?)
-            ORDER BY fetched_at DESC
-        """, (f'-{days} days',))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(str(cache_file)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT * FROM options_chain
+                WHERE fetched_at >= datetime('now', ?)
+                ORDER BY fetched_at DESC
+            """, (f'-{days} days',))
+
+            rows = cursor.fetchall()
         
         return [dict(row) for row in rows]
     

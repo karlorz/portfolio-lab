@@ -480,27 +480,25 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
     from src.paths import MARKET_DB
     db_path = MARKET_DB
     if db_path.exists():
-        conn = sqlite3.connect(str(db_path))
-        try:
-            df = pd.read_sql_query(
-                "SELECT date, open, high, low, close, volume FROM prices "
-                "WHERE symbol = ? ORDER BY date DESC LIMIT ?",
-                conn, params=(symbol, days),
-            )
-            if not df.empty:
-                df['date'] = pd.to_datetime(df['date'])
-                df = df.set_index('date').sort_index()
-                # Check if OHLC is populated
-                if df['open'].notna().sum() > len(df) * 0.5:
-                    for col in ['open', 'high', 'low']:
-                        df[col] = df[col].fillna(df['close'])
-                    df = df.dropna(subset=['close', 'volume'])
-                    df['volume'] = df['volume'].fillna(0)
-                    return df[['open', 'high', 'low', 'close', 'volume']]
-        except Exception as e:
-            logger.warning(f"Failed to fetch OHLCV for {symbol} from DB: {e}")
-        finally:
-            conn.close()
+        with sqlite3.connect(str(db_path)) as conn:
+            try:
+                df = pd.read_sql_query(
+                    "SELECT date, open, high, low, close, volume FROM prices "
+                    "WHERE symbol = ? ORDER BY date DESC LIMIT ?",
+                    conn, params=(symbol, days),
+                )
+                if not df.empty:
+                    df['date'] = pd.to_datetime(df['date'])
+                    df = df.set_index('date').sort_index()
+                    # Check if OHLC is populated
+                    if df['open'].notna().sum() > len(df) * 0.5:
+                        for col in ['open', 'high', 'low']:
+                            df[col] = df[col].fillna(df['close'])
+                        df = df.dropna(subset=['close', 'volume'])
+                        df['volume'] = df['volume'].fillna(0)
+                        return df[['open', 'high', 'low', 'close', 'volume']]
+            except Exception as e:
+                logger.warning(f"Failed to fetch OHLCV for {symbol} from DB: {e}")
 
     # Fallback: fetch from Yahoo Finance v8 API
     try:

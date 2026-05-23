@@ -13,12 +13,15 @@ Usage:
 """
 
 import json
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, NamedTuple
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR
 
@@ -204,7 +207,8 @@ class GraduationChecklist:
                     if line:
                         try:
                             perf_entries.append(json.loads(line))
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError as e:
+                            logger.debug("Skipping malformed performance line: %s", e)
                             continue
             state["performance"] = perf_entries
 

@@ -520,41 +520,40 @@ class MultiSpeedMomentum:
 
     def save_to_db(self, portfolio: MultiSpeedPortfolio):
         """Save ensemble recommendation to signals database."""
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        
-        # Create table if not exists
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS multi_speed_recommendations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                base_allocation TEXT,
-                target_allocation TEXT,
-                adjustments TEXT,
-                predicted_volatility REAL,
-                overall_confidence REAL,
-                tier_contributions TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        c.execute('''
-            INSERT INTO multi_speed_recommendations
-            (timestamp, base_allocation, target_allocation, adjustments, 
-             predicted_volatility, overall_confidence, tier_contributions)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            portfolio.timestamp,
-            json.dumps(portfolio.base_allocation),
-            json.dumps(portfolio.target_allocation),
-            json.dumps(portfolio.ensemble_adjustments),
-            portfolio.predicted_volatility,
-            portfolio.overall_confidence,
-            json.dumps(portfolio.tier_contributions)
-        ))
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            c = conn.cursor()
+
+            # Create table if not exists
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS multi_speed_recommendations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    base_allocation TEXT,
+                    target_allocation TEXT,
+                    adjustments TEXT,
+                    predicted_volatility REAL,
+                    overall_confidence REAL,
+                    tier_contributions TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            c.execute('''
+                INSERT INTO multi_speed_recommendations
+                (timestamp, base_allocation, target_allocation, adjustments,
+                 predicted_volatility, overall_confidence, tier_contributions)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                portfolio.timestamp,
+                json.dumps(portfolio.base_allocation),
+                json.dumps(portfolio.target_allocation),
+                json.dumps(portfolio.ensemble_adjustments),
+                portfolio.predicted_volatility,
+                portfolio.overall_confidence,
+                json.dumps(portfolio.tier_contributions)
+            ))
+
+            conn.commit()
 
 
 class MultiSpeedBacktester:
@@ -680,7 +679,8 @@ class MultiSpeedBacktester:
                 if not period_df.empty:
                     crisis_return = period_df['value'].iloc[-1] / period_df['value'].iloc[0] - 1
                     crisis_returns[crisis] = crisis_return
-            except (KeyError, IndexError, TypeError):
+            except (KeyError, IndexError, TypeError) as e:
+                logger.debug("Crisis period %s data unavailable: %s", crisis, e)
                 crisis_returns[crisis] = None
         
         # Baseline comparison (static allocation)

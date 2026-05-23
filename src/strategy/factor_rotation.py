@@ -118,19 +118,18 @@ class FactorMomentumEngine:
         if not self.db_path.exists():
             return []
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT date, close, volume
-            FROM prices
-            WHERE symbol = ?
-            ORDER BY date DESC
-            LIMIT ?
-        """, (symbol, days))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT date, close, volume
+                FROM prices
+                WHERE symbol = ?
+                ORDER BY date DESC
+                LIMIT ?
+            """, (symbol, days))
+
+            rows = cursor.fetchall()
         
         return [
             {"date": row[0], "close": row[1], "volume": row[2]}
@@ -752,35 +751,33 @@ class FactorRotationBacktest:
         if not self.engine.db_path.exists():
             return {"error": "No market data available", "status": "failed"}
 
-        conn = sqlite3.connect(self.engine.db_path)
+        with sqlite3.connect(self.engine.db_path) as conn:
 
-        # Get all available trading dates in range
-        dates = pd.read_sql(
-            "SELECT DISTINCT date FROM prices WHERE date BETWEEN ? AND ? ORDER BY date",
-            conn, params=(start_date, end_date)
-        )['date'].tolist()
+            # Get all available trading dates in range
+            dates = pd.read_sql(
+                "SELECT DISTINCT date FROM prices WHERE date BETWEEN ? AND ? ORDER BY date",
+                conn, params=(start_date, end_date)
+            )['date'].tolist()
 
-        if len(dates) < 252:
-            conn.close()
-            return {"error": f"Insufficient data: {len(dates)} days (need 252+)", "status": "failed"}
+            if len(dates) < 252:
+                return {"error": f"Insufficient data: {len(dates)} days (need 252+)", "status": "failed"}
 
-        # Get prices for all factor symbols
-        symbols = list(self.engine.FACTORS)
-        price_data = {}
-        for sym in symbols:
-            rows = pd.read_sql(
-                "SELECT date, close FROM prices WHERE symbol = ? AND date BETWEEN ? AND ? ORDER BY date",
-                conn, params=(sym, start_date, end_date)
+            # Get prices for all factor symbols
+            symbols = list(self.engine.FACTORS)
+            price_data = {}
+            for sym in symbols:
+                rows = pd.read_sql(
+                    "SELECT date, close FROM prices WHERE symbol = ? AND date BETWEEN ? AND ? ORDER BY date",
+                    conn, params=(sym, start_date, end_date)
+                )
+                if not rows.empty:
+                    price_data[sym] = rows.set_index('date')['close']
+
+            # Get SPY for benchmark
+            spy_prices = pd.read_sql(
+                "SELECT date, close FROM prices WHERE symbol = 'SPY' AND date BETWEEN ? AND ? ORDER BY date",
+                conn, params=(start_date, end_date)
             )
-            if not rows.empty:
-                price_data[sym] = rows.set_index('date')['close']
-
-        # Get SPY for benchmark
-        spy_prices = pd.read_sql(
-            "SELECT date, close FROM prices WHERE symbol = 'SPY' AND date BETWEEN ? AND ? ORDER BY date",
-            conn, params=(start_date, end_date)
-        )
-        conn.close()
 
         if spy_prices.empty:
             return {"error": "No SPY benchmark data", "status": "failed"}

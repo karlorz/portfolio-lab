@@ -171,14 +171,13 @@ class AIController:
         try:
             if not self.db_path.exists():
                 return np.ones(days)
-            conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT ?",
-                (symbol, days)
-            )
-            rows = cursor.fetchall()
-            conn.close()
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT ?",
+                    (symbol, days)
+                )
+                rows = cursor.fetchall()
             if rows and len(rows) >= days // 2:
                 prices = np.array([r[0] for r in reversed(rows)], dtype=np.float64)
                 if prices[-1] > 0:
@@ -368,13 +367,13 @@ class AIController:
                 controller_action.metadata if controller_action else {}
             )
             
-            portfolio_values.append(info['portfolio_value'])
-            
+            portfolio_values.append(info.get('portfolio_value', portfolio_values[-1]))
+
             if info.get('turnover', 0) > 0.01:
                 trades.append({
                     'step': step,
                     'turnover': info['turnover'],
-                    'value': info['portfolio_value']
+                    'value': info.get('portfolio_value', portfolio_values[-1])
                 })
             
             obs = next_obs
@@ -382,10 +381,16 @@ class AIController:
         
         # Calculate metrics
         returns = np.diff(portfolio_values) / portfolio_values[:-1]
-        
+
+        if len(returns) < 2:
+            return {"version": self.version, "start_value": initial_value,
+                    "end_value": portfolio_values[-1] if portfolio_values else initial_value,
+                    "cagr": 0.0, "volatility": 0.0, "sharpe": 0.0,
+                    "max_drawdown": 0.0, "trades": len(trades)}
+
         cagr = (portfolio_values[-1] / portfolio_values[0]) ** (252 / len(returns)) - 1
         volatility = np.std(returns) * np.sqrt(252)
-        sharpe = (np.mean(returns) * 252) / (np.std(returns) * np.sqrt(252) + 1e-8)
+        sharpe = (np.mean(returns) * 252) / (volatility + 1e-8)
         
         # Max drawdown
         peak = np.maximum.accumulate(portfolio_values)

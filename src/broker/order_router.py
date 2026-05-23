@@ -72,14 +72,13 @@ class OrderRouter:
         try:
             if not os.path.exists(self.db_path):
                 return 0.0
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
-                (symbol,)
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+                    (symbol,)
+                )
+                row = cursor.fetchone()
             return float(row[0]) if row else 0.0
         except sqlite3.Error:
             logger.warning("Failed to fetch price from %s for %s", self.db_path, symbol)

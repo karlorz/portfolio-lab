@@ -251,7 +251,8 @@ class BanditWeighter:
         total = np.sum(exp_values)
         if total < 1e-10:
             # All equal if everything is zero
-            w = 1.0 / len(self.signals)
+            n = len(self.signals)
+            w = 1.0 / n if n > 0 else 0.0
             return {s: w for s in self.signals}
         return {sig: float(exp_values[i] / total)
                 for i, sig in enumerate(self.signals)}

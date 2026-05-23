@@ -10,6 +10,8 @@ Usage:
     from src.paths import DATA_DIR, MARKET_DB, PRICES_JSON
 """
 
+import os
+import tempfile
 from pathlib import Path
 from typing import Dict
 
@@ -34,7 +36,7 @@ BACKTEST_RESULTS_DIR = DATA_DIR / "backtest_results"
 FACTORS_DIR = DATA_DIR / "factors"
 CACHE_DIR = DATA_DIR / "cache"
 OPTIONS_CACHE_DIR = DATA_DIR / "cache" / "options"
-LOCK_DIR = Path("/tmp/portfolio-lab-locks")
+LOCK_DIR = Path(os.environ.get("LOCK_DIR", os.path.join(tempfile.gettempdir(), "portfolio-lab-locks")))
 LLM_COSTS_DIR = DATA_DIR / "llm_costs"
 ATTRIBUTION_DIR = DATA_DIR / "attribution"
 

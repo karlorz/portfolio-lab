@@ -162,9 +162,12 @@ class AgentConsensus:
         
         if not signals:
             return 0.0, 0.0
-        
+
         # Weighted average
-        weights = np.array(confidences) / sum(confidences)
+        total_conf = sum(confidences)
+        if total_conf == 0:
+            return 0.0, 0.0
+        weights = np.array(confidences) / total_conf
         weighted_signal = np.dot(signals, weights)
         
         # Consensus = agreement level

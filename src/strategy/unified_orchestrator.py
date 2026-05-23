@@ -207,13 +207,12 @@ class UnifiedOrchestrator:
         if not db_path.exists():
             return 16.0  # default fallback (normal VIX)
         try:
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT close FROM prices WHERE symbol='^VIX' ORDER BY date DESC LIMIT 1"
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT close FROM prices WHERE symbol='^VIX' ORDER BY date DESC LIMIT 1"
+                )
+                row = cursor.fetchone()
             if row and len(row) > 0 and row[0] > 0:
                 return float(row[0])
         except Exception as e:
@@ -457,7 +456,8 @@ class UnifiedOrchestrator:
                 try:
                     cal_mod = float(c.reason.split(":")[1].split("x")[0].strip()) \
                         if ":" in c.reason else 1.0
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as e:
+                    logger.debug("Failed to parse calendar modifier: %s", e)
                     cal_mod = 1.0
                 break
 

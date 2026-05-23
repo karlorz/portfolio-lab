@@ -72,7 +72,6 @@ class AlternativeDataSignal:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-
 @dataclass
 class CompositeSignal:
     """Composite alternative data signal across sources."""
@@ -100,7 +99,6 @@ class CompositeSignal:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-
 @dataclass
 class EarningsPrediction:
     """Earnings prediction based on alternative data."""
@@ -126,23 +124,21 @@ class EarningsPrediction:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-
 # ---------------------------------------------------------------------------
 # Database Setup
 # ---------------------------------------------------------------------------
 
 ALT_DATA_DB = DATA_DIR / "alternative_data.db"
 
-
 def init_database():
     """Initialize SQLite database for alternative data storage."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     
-    conn = sqlite3.connect(ALT_DATA_DB)
-    cursor = conn.cursor()
-    
-    # Satellite data table
-    cursor.execute("""
+    with sqlite3.connect(ALT_DATA_DB) as conn:
+        cursor = conn.cursor()
+
+        # Satellite data table
+        cursor.execute("""
         CREATE TABLE IF NOT EXISTS satellite_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT NOT NULL,
@@ -231,7 +227,6 @@ def init_database():
     conn.commit()
     conn.close()
 
-
 # ---------------------------------------------------------------------------
 # Base Adapter
 # ---------------------------------------------------------------------------
@@ -255,7 +250,6 @@ class AlternativeDataAdapter(ABC):
     def _get_db_connection(self) -> sqlite3.Connection:
         """Get database connection."""
         return sqlite3.connect(self.db_path)
-
 
 # ---------------------------------------------------------------------------
 # Satellite Data Adapter
@@ -494,7 +488,6 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
         conn.commit()
         conn.close()
 
-
 # ---------------------------------------------------------------------------
 # Credit Card Data Adapter
 # ---------------------------------------------------------------------------
@@ -719,7 +712,6 @@ class CreditCardAdapter(AlternativeDataAdapter):
         conn.commit()
         conn.close()
 
-
 # ---------------------------------------------------------------------------
 # Supply Chain Adapter
 # ---------------------------------------------------------------------------
@@ -929,7 +921,6 @@ class SupplyChainAdapter(AlternativeDataAdapter):
         conn.commit()
         conn.close()
 
-
 # ---------------------------------------------------------------------------
 # Main Client
 # ---------------------------------------------------------------------------
@@ -1086,7 +1077,6 @@ class AlternativeDataClient:
         """Get composite signals for multiple tickers."""
         return {ticker: self.get_composite_signal(ticker, days) for ticker in tickers}
 
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -1229,7 +1219,6 @@ def main():
     
     print(f"Unknown command: {command}")
     sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

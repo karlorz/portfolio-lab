@@ -381,17 +381,17 @@ def main():
     mode = os.environ.get("ALPHALAB_MODE", "paper")
     state_file = DATA_DIR / f"portfolio_{mode}.json"
     
-    conn = sqlite3.connect(DB_PATH)
-    portfolio = Portfolio(state_file, mode)
-    
-    # Get current state
-    prices = get_latest_prices(conn)
-    regime = get_current_regime(conn)
-    vix = get_latest_vix(conn)
-    
+    with sqlite3.connect(DB_PATH) as conn:
+        portfolio = Portfolio(state_file, mode)
+
+        # Get current state
+        prices = get_latest_prices(conn)
+        regime = get_current_regime(conn)
+        vix = get_latest_vix(conn)
+
     print(f"Mode: {mode}, Regime: {regime}, VIX: {vix:.2f}" if vix else f"Mode: {mode}, Regime: {regime}")
     print(f"Portfolio value: ${portfolio.total_value(prices):,.2f}")
-    
+
     # Check kill switches
     kill_reason = portfolio.check_risk_limits(prices)
     if kill_reason:
@@ -444,7 +444,6 @@ def main():
     if mode == "paper":
         check_graduation_criteria(portfolio)
     
-    conn.close()
     print(f"[{datetime.now()}] Evaluation complete")
 
 def _deduplicate_to_daily(history: List[Dict]) -> List[Dict]:

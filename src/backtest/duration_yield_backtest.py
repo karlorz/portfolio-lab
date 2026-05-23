@@ -148,29 +148,26 @@ def load_yield_spread_history() -> pd.DataFrame:
 
     # Try database first
     if MARKET_DB.exists():
-        conn = sqlite3.connect(MARKET_DB)
-        cursor = conn.cursor()
+        with sqlite3.connect(MARKET_DB) as conn:
+            cursor = conn.cursor()
 
-        # Check if we have yield data
-        cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='yield_curve_regimes'
-        """)
+            # Check if we have yield data
+            cursor.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='yield_curve_regimes'
+            """)
 
-        if cursor.fetchone():
-            df = pd.read_sql_query("""
-                SELECT date, regime, spread
-                FROM yield_curve_regimes
-                ORDER BY date
-            """, conn)
-            conn.close()
+            if cursor.fetchone():
+                df = pd.read_sql_query("""
+                    SELECT date, regime, spread
+                    FROM yield_curve_regimes
+                    ORDER BY date
+                """, conn)
 
-            if len(df) > 0:
-                df["date"] = pd.to_datetime(df["date"])
-                logger.info(f"Loaded {len(df)} regime records from database")
-                return df
-
-        conn.close()
+                if len(df) > 0:
+                    df["date"] = pd.to_datetime(df["date"])
+                    logger.info(f"Loaded {len(df)} regime records from database")
+                    return df
 
     # Use synthetic regime data based on known periods
     logger.info("Using synthetic regime classification...")

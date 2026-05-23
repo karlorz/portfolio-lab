@@ -516,7 +516,12 @@ class TSMOMBacktester:
         
         # Calculate metrics
         returns = pd.Series(portfolio_values).pct_change().dropna()
-        
+
+        if len(returns) < 1:
+            return {"strategy": "TSMOM Overlay Backtest v2.52",
+                    "cagr": 0, "volatility": 0, "sharpe": 0,
+                    "max_drawdown": 0, "calmar": 0}
+
         cagr = (portfolio_values[-1] / portfolio_values[0]) ** (252 / len(returns)) - 1
         volatility = returns.std() * np.sqrt(252)
         sharpe = cagr / volatility if volatility > 0 else 0

@@ -56,37 +56,34 @@ class PositionSync:
         if not os.path.exists(self.db_path):
             return {}
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Check if positions table exists
-        cursor.execute("""
-            SELECT name FROM sqlite_master 
-            WHERE type='table' AND name='positions'
-        """)
-        if not cursor.fetchone():
-            conn.close()
-            return {}
-        
-        cursor.execute("""
-            SELECT symbol, qty, avg_price, current_price, market_value, updated_at
-            FROM positions
-            WHERE qty != 0
-        """)
-        
-        positions = {}
-        for row in cursor.fetchall():
-            symbol, qty, avg_price, current_price, market_value, updated_at = row
-            positions[symbol] = {
-                "symbol": symbol,
-                "qty": float(qty) if qty else 0.0,
-                "avg_price": float(avg_price) if avg_price else 0.0,
-                "current_price": float(current_price) if current_price else 0.0,
-                "market_value": float(market_value) if market_value else 0.0,
-                "updated_at": updated_at,
-            }
-        
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            # Check if positions table exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='positions'
+            """)
+            if not cursor.fetchone():
+                return {}
+
+            cursor.execute("""
+                SELECT symbol, qty, avg_price, current_price, market_value, updated_at
+                FROM positions
+                WHERE qty != 0
+            """)
+
+            positions = {}
+            for row in cursor.fetchall():
+                symbol, qty, avg_price, current_price, market_value, updated_at = row
+                positions[symbol] = {
+                    "symbol": symbol,
+                    "qty": float(qty) if qty else 0.0,
+                    "avg_price": float(avg_price) if avg_price else 0.0,
+                    "current_price": float(current_price) if current_price else 0.0,
+                    "market_value": float(market_value) if market_value else 0.0,
+                    "updated_at": updated_at,
+                }
         return positions
     
     def get_broker_positions(self) -> Dict[str, AlpacaPosition]:
@@ -239,46 +236,45 @@ class PositionSync:
             broker_positions = self.get_broker_positions()
             
             # Ensure positions table exists
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS positions (
-                    symbol TEXT PRIMARY KEY,
-                    qty REAL DEFAULT 0,
-                    avg_price REAL DEFAULT 0,
-                    current_price REAL DEFAULT 0,
-                    market_value REAL DEFAULT 0,
-                    updated_at TEXT
-                )
-            """)
-            
-            # Update local positions
-            timestamp = datetime.now().isoformat()
-            for symbol, pos in broker_positions.items():
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
                 cursor.execute("""
-                    INSERT OR REPLACE INTO positions 
-                    (symbol, qty, avg_price, current_price, market_value, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    symbol,
-                    pos.qty,
-                    pos.avg_entry_price,
-                    pos.current_price,
-                    pos.market_value,
-                    timestamp,
-                ))
-            
-            # Remove positions not in broker
-            broker_symbols = set(broker_positions.keys())
-            cursor.execute("SELECT symbol FROM positions")
-            local_symbols = {row[0] for row in cursor.fetchall()}
-            
-            for symbol in local_symbols - broker_symbols:
-                cursor.execute("DELETE FROM positions WHERE symbol = ?", (symbol,))
-            
-            conn.commit()
-            conn.close()
+                    CREATE TABLE IF NOT EXISTS positions (
+                        symbol TEXT PRIMARY KEY,
+                        qty REAL DEFAULT 0,
+                        avg_price REAL DEFAULT 0,
+                        current_price REAL DEFAULT 0,
+                        market_value REAL DEFAULT 0,
+                        updated_at TEXT
+                    )
+                """)
+
+                # Update local positions
+                timestamp = datetime.now().isoformat()
+                for symbol, pos in broker_positions.items():
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO positions
+                        (symbol, qty, avg_price, current_price, market_value, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        symbol,
+                        pos.qty,
+                        pos.avg_entry_price,
+                        pos.current_price,
+                        pos.market_value,
+                        timestamp,
+                    ))
+
+                # Remove positions not in broker
+                broker_symbols = set(broker_positions.keys())
+                cursor.execute("SELECT symbol FROM positions")
+                local_symbols = {row[0] for row in cursor.fetchall()}
+
+                for symbol in local_symbols - broker_symbols:
+                    cursor.execute("DELETE FROM positions WHERE symbol = ?", (symbol,))
+
+                conn.commit()
             
             return {
                 "status": "success",
