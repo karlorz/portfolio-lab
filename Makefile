@@ -112,7 +112,7 @@ test-ml:
 data:
 	@echo "=== Data Pipeline: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 bun run fetch-data 2>&1 | tee -a $(DATA_DIR)/cron.log; \
+	cd $(PROJECT_DIR) && export PATH="$$HOME/.bun/bin:$$PATH" && ulimit -v 3145728 && timeout 300 bun run fetch-data 2>&1 | tee -a $(DATA_DIR)/cron.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
