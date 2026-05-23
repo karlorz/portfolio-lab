@@ -30,6 +30,7 @@ import numpy as np
 
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
+    BacktestResult,
     DailyPrices,
     compute_metrics,
     compute_crisis_returns,
@@ -83,85 +84,6 @@ class BacktestConfig(_BaseConfig):
 
     # Backtest-specific: momentum lookback
     momentum_lookback_days: int = MOMENTUM_LOOKBACK
-
-
-@dataclass
-class BacktestResult:
-    """Complete backtest results comparing baseline vs bond duration rotation."""
-
-    # Core metrics
-    total_return: float
-    cagr: float
-    volatility: float
-    sharpe_ratio: float
-    max_drawdown: float
-
-    # Baseline comparison
-    baseline_total_return: float
-    baseline_cagr: float
-    baseline_volatility: float
-    baseline_sharpe: float
-    baseline_max_drawdown: float
-    sharpe_improvement: float
-    cagr_impact: float
-
-    # Rotation activity
-    rotation_active_days: int
-    rotation_active_pct: float
-    avg_effective_duration: float
-
-    # Average bond sleeve weights (across entire backtest)
-    avg_tlt_weight: float
-    avg_ief_weight: float
-    avg_shy_weight: float
-
-    # Crisis returns
-    crisis_returns_rotated: Dict[str, float]
-    crisis_returns_baseline: Dict[str, float]
-
-    # Regime breakdown: how often in each momentum regime
-    regime_breakdown: Dict[str, Dict[str, float]]
-
-    # Trade stats
-    total_rebalances: int
-    total_transaction_costs: float
-
-    # Config
-    config_snapshot: Dict
-
-    def to_dict(self) -> Dict:
-        """Serialize to dict for JSON output."""
-        return {
-            "total_return": self.total_return,
-            "cagr": self.cagr,
-            "volatility": self.volatility,
-            "sharpe_ratio": self.sharpe_ratio,
-            "max_drawdown": self.max_drawdown,
-            "baseline_total_return": self.baseline_total_return,
-            "baseline_cagr": self.baseline_cagr,
-            "baseline_volatility": self.baseline_volatility,
-            "baseline_sharpe": self.baseline_sharpe,
-            "baseline_max_drawdown": self.baseline_max_drawdown,
-            "sharpe_improvement": self.sharpe_improvement,
-            "cagr_impact": self.cagr_impact,
-            "rotation_active_days": self.rotation_active_days,
-            "rotation_active_pct": self.rotation_active_pct,
-            "avg_effective_duration": self.avg_effective_duration,
-            "avg_tlt_weight": self.avg_tlt_weight,
-            "avg_ief_weight": self.avg_ief_weight,
-            "avg_shy_weight": self.avg_shy_weight,
-            "crisis_returns_rotated": self.crisis_returns_rotated,
-            "crisis_returns_baseline": self.crisis_returns_baseline,
-            "regime_breakdown": self.regime_breakdown,
-            "total_rebalances": self.total_rebalances,
-            "total_transaction_costs": self.total_transaction_costs,
-            "config_snapshot": self.config_snapshot,
-        }
-
-
-# ---------------------------------------------------------------------------
-# Walk-Forward Backtester
-# ---------------------------------------------------------------------------
 
 
 class WalkForwardBondDurationBacktester:
@@ -457,41 +379,43 @@ class WalkForwardBondDurationBacktester:
             volatility=rotated_metrics.volatility,
             sharpe_ratio=rotated_metrics.sharpe_ratio,
             max_drawdown=rotated_metrics.max_drawdown,
-            baseline_total_return=baseline_metrics.total_return,
-            baseline_cagr=baseline_metrics.cagr,
-            baseline_volatility=baseline_metrics.volatility,
             baseline_sharpe=baseline_metrics.sharpe_ratio,
-            baseline_max_drawdown=baseline_metrics.max_drawdown,
             sharpe_improvement=round(
                 rotated_metrics.sharpe_ratio - baseline_metrics.sharpe_ratio, 4
             ),
-            cagr_impact=round(
-                rotated_metrics.cagr - baseline_metrics.cagr, 2
-            ),
-            rotation_active_days=rotation_active_days,
-            rotation_active_pct=rotation_active_pct,
-            avg_effective_duration=avg_effective_duration,
-            avg_tlt_weight=avg_tlt_weight,
-            avg_ief_weight=avg_ief_weight,
-            avg_shy_weight=avg_shy_weight,
-            crisis_returns_rotated=crisis_rotated,
-            crisis_returns_baseline=crisis_baseline,
-            regime_breakdown=regime_breakdown,
             total_rebalances=total_rebalances,
             total_transaction_costs=round(total_costs, 2),
-            config_snapshot={
-                "start_date": config.start_date,
-                "end_date": config.end_date,
-                "initial_capital": config.initial_capital,
-                "rebalance_frequency_days": config.rebalance_frequency_days,
-                "transaction_cost_bps": config.transaction_cost_bps,
-                "momentum_lookback_days": config.momentum_lookback_days,
-                "base_allocation": {
-                    "SPY": config.base_weights['SPY'],
-                    "GLD": config.base_weights['GLD'],
-                    "TLT": config.base_weights['TLT'],
+            extras={
+                "baseline_total_return": baseline_metrics.total_return,
+                "baseline_cagr": baseline_metrics.cagr,
+                "baseline_volatility": baseline_metrics.volatility,
+                "baseline_max_drawdown": baseline_metrics.max_drawdown,
+                "cagr_impact": round(
+                    rotated_metrics.cagr - baseline_metrics.cagr, 2
+                ),
+                "rotation_active_days": rotation_active_days,
+                "rotation_active_pct": rotation_active_pct,
+                "avg_effective_duration": avg_effective_duration,
+                "avg_tlt_weight": avg_tlt_weight,
+                "avg_ief_weight": avg_ief_weight,
+                "avg_shy_weight": avg_shy_weight,
+                "crisis_returns_rotated": crisis_rotated,
+                "crisis_returns_baseline": crisis_baseline,
+                "regime_breakdown": regime_breakdown,
+                "config_snapshot": {
+                    "start_date": config.start_date,
+                    "end_date": config.end_date,
+                    "initial_capital": config.initial_capital,
+                    "rebalance_frequency_days": config.rebalance_frequency_days,
+                    "transaction_cost_bps": config.transaction_cost_bps,
+                    "momentum_lookback_days": config.momentum_lookback_days,
+                    "base_allocation": {
+                        "SPY": config.base_weights['SPY'],
+                        "GLD": config.base_weights['GLD'],
+                        "TLT": config.base_weights['TLT'],
+                    },
+                    "bond_sleeve_allocation": "BondDurationCalculator.compute_duration_allocation() via _momentum_to_yield_context()",
                 },
-                "bond_sleeve_allocation": "BondDurationCalculator.compute_duration_allocation() via _momentum_to_yield_context()",
             },
         )
 
@@ -716,25 +640,26 @@ class WalkForwardBondDurationBacktester:
             volatility=0.0,
             sharpe_ratio=0.0,
             max_drawdown=0.0,
-            baseline_total_return=0.0,
-            baseline_cagr=0.0,
-            baseline_volatility=0.0,
-            baseline_sharpe=0.0,
-            baseline_max_drawdown=0.0,
             sharpe_improvement=0.0,
-            cagr_impact=0.0,
-            rotation_active_days=0,
-            rotation_active_pct=0.0,
-            avg_effective_duration=0.0,
-            avg_tlt_weight=0.0,
-            avg_ief_weight=0.0,
-            avg_shy_weight=0.0,
-            crisis_returns_rotated={},
-            crisis_returns_baseline={},
-            regime_breakdown={},
             total_rebalances=0,
             total_transaction_costs=0.0,
-            config_snapshot={},
+            extras={
+                "baseline_total_return": 0.0,
+                "baseline_cagr": 0.0,
+                "baseline_volatility": 0.0,
+                "baseline_max_drawdown": 0.0,
+                "cagr_impact": 0.0,
+                "rotation_active_days": 0,
+                "rotation_active_pct": 0.0,
+                "avg_effective_duration": 0.0,
+                "avg_tlt_weight": 0.0,
+                "avg_ief_weight": 0.0,
+                "avg_shy_weight": 0.0,
+                "crisis_returns_rotated": {},
+                "crisis_returns_baseline": {},
+                "regime_breakdown": {},
+                "config_snapshot": {},
+            },
         )
 
     def print_results(self, result: BacktestResult) -> None:
@@ -749,43 +674,48 @@ class WalkForwardBondDurationBacktester:
               f"GLD {self.config.base_weights['GLD']*100:.0f}% / "
               f"Bonds {self.config.base_weights['TLT']*100:.0f}%")
 
+        e = result.extras
+
         print(f"\n  {'Metric':<30} {'Baseline':>10} {'Rotated':>10} {'Delta':>10}")
         print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")
-        print(f"  {'Total Return':<30} {result.baseline_total_return:>9.2f}% {result.total_return:>9.2f}% "
-              f"{result.total_return - result.baseline_total_return:>+9.2f}%")
-        print(f"  {'CAGR':<30} {result.baseline_cagr:>9.2f}% {result.cagr:>9.2f}% "
-              f"{result.cagr_impact:>+9.2f}%")
-        print(f"  {'Volatility':<30} {result.baseline_volatility:>9.2f}% {result.volatility:>9.2f}% "
-              f"{result.volatility - result.baseline_volatility:>+9.2f}%")
+        print(f"  {'Total Return':<30} {e['baseline_total_return']:>9.2f}% {result.total_return:>9.2f}% "
+              f"{result.total_return - e['baseline_total_return']:>+9.2f}%")
+        print(f"  {'CAGR':<30} {e['baseline_cagr']:>9.2f}% {result.cagr:>9.2f}% "
+              f"{e['cagr_impact']:>+9.2f}%")
+        print(f"  {'Volatility':<30} {e['baseline_volatility']:>9.2f}% {result.volatility:>9.2f}% "
+              f"{result.volatility - e['baseline_volatility']:>+9.2f}%")
         print(f"  {'Sharpe Ratio':<30} {result.baseline_sharpe:>10.4f} {result.sharpe_ratio:>10.4f} "
               f"{result.sharpe_improvement:>+10.4f}")
-        print(f"  {'Max Drawdown':<30} {result.baseline_max_drawdown:>9.2f}% {result.max_drawdown:>9.2f}% "
-              f"{result.max_drawdown - result.baseline_max_drawdown:>+9.2f}%")
+        print(f"  {'Max Drawdown':<30} {e['baseline_max_drawdown']:>9.2f}% {result.max_drawdown:>9.2f}% "
+              f"{result.max_drawdown - e['baseline_max_drawdown']:>+9.2f}%")
 
         print(f"\n  -- Rotation Activity --")
-        print(f"  Rotation active days:  {result.rotation_active_days} ({result.rotation_active_pct:.1f}%)")
-        print(f"  Avg effective duration: {result.avg_effective_duration:.1f} yr")
-        print(f"  Avg sleeve weights:    TLT {result.avg_tlt_weight:.1%} / "
-              f"IEF {result.avg_ief_weight:.1%} / SHY {result.avg_shy_weight:.1%}")
+        print(f"  Rotation active days:  {e['rotation_active_days']} ({e['rotation_active_pct']:.1f}%)")
+        print(f"  Avg effective duration: {e['avg_effective_duration']:.1f} yr")
+        print(f"  Avg sleeve weights:    TLT {e['avg_tlt_weight']:.1%} / "
+              f"IEF {e['avg_ief_weight']:.1%} / SHY {e['avg_shy_weight']:.1%}")
         print(f"  Rebalances:            {result.total_rebalances}")
         print(f"  Transaction costs:     ${result.total_transaction_costs:.2f}")
 
         print(f"\n  -- Crisis Returns (%) --")
         print(f"  {'Year':<10} {'Baseline':>10} {'Rotated':>10}")
         print(f"  {'-'*10} {'-'*10} {'-'*10}")
+        crisis_baseline = e.get("crisis_returns_baseline", {})
+        crisis_rotated = e.get("crisis_returns_rotated", {})
         all_crisis_years = sorted(
-            set(list(result.crisis_returns_baseline.keys()) + list(result.crisis_returns_rotated.keys()))
+            set(list(crisis_baseline.keys()) + list(crisis_rotated.keys()))
         )
         for year in all_crisis_years:
-            b = result.crisis_returns_baseline.get(year, 0.0)
-            r = result.crisis_returns_rotated.get(year, 0.0)
+            b = crisis_baseline.get(year, 0.0)
+            r = crisis_rotated.get(year, 0.0)
             print(f"  {year:<10} {b:>10.2f} {r:>10.2f}")
 
         print(f"\n  -- Regime Breakdown --")
         print(f"  {'Regime':<12} {'% Time':>8} {'Avg Dur':>8} {'TLT':>8} {'IEF':>8} {'SHY':>8}")
         print(f"  {'-'*12} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
+        regime_breakdown = e.get("regime_breakdown", {})
         for reg_name in ["rising", "neutral", "falling"]:
-            stats = result.regime_breakdown.get(reg_name)
+            stats = regime_breakdown.get(reg_name)
             if stats:
                 print(f"  {reg_name:<12} {stats['pct_of_time']:>7.1f}% "
                       f"{stats['avg_effective_duration']:>7.1f} "
@@ -797,7 +727,9 @@ class WalkForwardBondDurationBacktester:
 
     def save_results(self, result: BacktestResult, output_path: Optional[str] = None) -> None:
         """Save backtest results to a JSON file."""
-        data = result.to_dict()
+        from dataclasses import asdict
+
+        data = asdict(result)
         data["_metadata"] = {
             "strategy": "bond_duration",
             "generated": datetime.now().isoformat(),

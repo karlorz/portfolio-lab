@@ -19,9 +19,9 @@ import pytest
 from src.backtest.alternative_data_backtest import (
     AlternativeDataBacktester,
     BacktestConfig,
-    BacktestResult,
     DailyReturn,
 )
+from src.backtest.metrics import BacktestResult
 
 
 # ── BacktestConfig Tests ─────────────────────────────────────────────────
@@ -103,23 +103,23 @@ class TestBacktestResult:
             max_drawdown=-18.4,
             baseline_sharpe=0.79,
             sharpe_improvement=0.03,
-            overlay_active_months=120,
-            overlay_active_pct=50.0,
-            return_2008=-10.5,
-            return_2020=2.1,
-            return_2022=-8.3,
             total_rebalances=150,
-            avg_rebalance_size=0.025,
             total_transaction_costs=45.0,
-            regime_distribution={"bull": 1000, "bear": 500, "neutral": 300, "crisis": 100},
-            regime_returns={"bull": 15.0, "bear": -8.0, "neutral": 2.0, "crisis": -12.0},
-            equity_curve=[{"date": "2020-01-02", "baseline": 100000, "overlay": 100000}],
+            crisis_returns={"2008": -10.5, "2020": 2.1, "2022": -8.3},
+            extras={
+                "overlay_active_months": 120,
+                "overlay_active_pct": 50.0,
+                "avg_rebalance_size": 0.025,
+                "regime_distribution": {"bull": 1000, "bear": 500, "neutral": 300, "crisis": 100},
+                "regime_returns": {"bull": 15.0, "bear": -8.0, "neutral": 2.0, "crisis": -12.0},
+                "equity_curve": [{"date": "2020-01-02", "baseline": 100000, "overlay": 100000}],
+            },
         )
         assert result.total_return == 15.2
         assert result.sharpe_ratio == 0.82
         assert result.sharpe_improvement == 0.03
         assert result.total_rebalances == 150
-        assert result.regime_distribution["bull"] == 1000
+        assert result.extras["regime_distribution"]["bull"] == 1000
 
     def test_json_serializable(self):
         """All fields must be JSON-serializable."""
@@ -131,19 +131,20 @@ class TestBacktestResult:
             max_drawdown=-10.0,
             baseline_sharpe=0.45,
             sharpe_improvement=0.05,
-            overlay_active_months=12,
-            overlay_active_pct=25.0,
-            return_2008=-8.0,
-            return_2020=None,
-            return_2022=-5.0,
             total_rebalances=30,
-            avg_rebalance_size=0.015,
             total_transaction_costs=15.0,
-            regime_distribution={"bull": 200},
-            regime_returns={"bull": 5.0},
-            equity_curve=[],
+            crisis_returns={"2008": -8.0, "2022": -5.0},
+            extras={
+                "overlay_active_months": 12,
+                "overlay_active_pct": 25.0,
+                "avg_rebalance_size": 0.015,
+                "regime_distribution": {"bull": 200},
+                "regime_returns": {"bull": 5.0},
+                "equity_curve": [],
+            },
         )
-        json.dumps(result.__dict__)  # Should not raise
+        from dataclasses import asdict
+        json.dumps(asdict(result))  # Should not raise
 
     def test_none_crisis_returns(self):
         """Crisis returns can be None."""
@@ -155,20 +156,18 @@ class TestBacktestResult:
             max_drawdown=0.0,
             baseline_sharpe=0.0,
             sharpe_improvement=0.0,
-            overlay_active_months=0,
-            overlay_active_pct=0.0,
-            return_2008=None,
-            return_2020=None,
-            return_2022=None,
             total_rebalances=0,
-            avg_rebalance_size=0.0,
             total_transaction_costs=0.0,
-            regime_distribution={},
-            regime_returns={},
-            equity_curve=[],
+            extras={
+                "overlay_active_months": 0,
+                "overlay_active_pct": 0.0,
+                "avg_rebalance_size": 0.0,
+                "regime_distribution": {},
+                "regime_returns": {},
+                "equity_curve": [],
+            },
         )
-        assert result.return_2008 is None
-        assert result.return_2020 is None
+        assert result.crisis_returns is None
 
 
 # ── AlternativeDataBacktester Construction Tests ─────────────────────────
@@ -544,13 +543,13 @@ class TestRunBacktest:
         assert result.max_drawdown is not None
         assert result.baseline_sharpe is not None
         assert result.sharpe_improvement is not None
-        assert result.overlay_active_months >= 0
+        assert result.extras["overlay_active_months"] >= 0
         assert result.total_rebalances >= 0
-        assert "bull" in result.regime_distribution
-        assert "bear" in result.regime_distribution
-        assert "neutral" in result.regime_distribution
-        assert "crisis" in result.regime_distribution
-        assert len(result.equity_curve) > 0
+        assert "bull" in result.extras["regime_distribution"]
+        assert "bear" in result.extras["regime_distribution"]
+        assert "neutral" in result.extras["regime_distribution"]
+        assert "crisis" in result.extras["regime_distribution"]
+        assert len(result.extras["equity_curve"]) > 0
 
     def test_equity_curve_structure(self):
         data = self._make_synthetic_data(n_days=300)
@@ -559,7 +558,7 @@ class TestRunBacktest:
         )
         bt.data = data
         result = bt.run_backtest()
-        pt = result.equity_curve[0]
+        pt = result.extras["equity_curve"][0]
         assert "date" in pt
         assert "baseline" in pt
         assert "overlay" in pt
@@ -574,7 +573,7 @@ class TestRunBacktest:
         )
         bt.data = data
         result = bt.run_backtest()
-        total = sum(result.regime_distribution.values())
+        total = sum(result.extras["regime_distribution"].values())
         assert total > 0
         assert total <= len(data)
 
@@ -634,7 +633,7 @@ class TestEdgeCases:
         result = bt.run_backtest()
         assert result is not None
         # Should have bear or crisis regimes
-        assert result.regime_distribution.get("bear", 0) > 0 or result.regime_distribution.get("crisis", 0) > 0
+        assert result.extras["regime_distribution"].get("bear", 0) > 0 or result.extras["regime_distribution"].get("crisis", 0) > 0
 
     def test_high_volatility_does_not_crash(self):
         """Extreme daily returns should not cause runtime errors."""
@@ -687,7 +686,8 @@ class TestEdgeCases:
             assert "total_return" in saved
             assert "cagr" in saved
             assert "sharpe_ratio" in saved
-            assert "regime_distribution" in saved
+            assert "extras" in saved
+            assert "regime_distribution" in saved["extras"]
         finally:
             Path(output_path).unlink()
 

@@ -12,14 +12,15 @@ Period: 2006-2026 (20+ years including GFC, COVID, 2022 rate hikes)
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
+    BacktestResult,
     compute_metrics,
     save_results_json,
 )
@@ -71,36 +72,6 @@ class DailyReturn:
     spy_return: float
     gld_return: float
     tlt_return: float
-
-
-@dataclass
-class BacktestResult:
-    """Complete backtest results comparing baseline vs signal overlay."""
-
-    # Basic metrics
-    total_return: float
-    cagr: float
-    volatility: float
-    sharpe_ratio: float
-    max_drawdown: float
-
-    # Overlay-specific
-    overlay_active_rebalances: int
-    baseline_sharpe: float
-    sharpe_improvement: float
-
-    # Trade stats
-    total_rebalances: int
-    avg_turnover: float
-    total_transaction_costs: float
-
-    # Crisis performance (annualized daily returns)
-    return_2008: Optional[float] = None
-    return_2020: Optional[float] = None
-    return_2022: Optional[float] = None
-
-    # Equity curve (sampled)
-    equity_curve: Optional[List[Dict]] = None
 
 
 class MultiSpeedMomentumBacktester:
@@ -443,28 +414,32 @@ class MultiSpeedMomentumBacktester:
         )
 
         result = BacktestResult(
-            total_return=(overlay_eq[-1] / self.config.initial_capital - 1.0) * 100.0,
+            total_return=(overlay_eq[-1] / self.config.initial_capital - 1.0) * 100.0 if self.config.initial_capital else 0.0,
             cagr=overlay_m["cagr"],
             volatility=overlay_m["volatility"],
             sharpe_ratio=overlay_m["sharpe"],
             max_drawdown=overlay_m["max_dd"],
-            overlay_active_rebalances=overlay_active,
             baseline_sharpe=base_m["sharpe"],
             sharpe_improvement=overlay_m["sharpe"] - base_m["sharpe"],
-            return_2008=_crisis_return(crisis_2008),
-            return_2020=_crisis_return(crisis_2020),
-            return_2022=_crisis_return(crisis_2022),
             total_rebalances=total_rebalances,
             avg_turnover=np.mean(turnover_list) if turnover_list else 0.0,
             total_transaction_costs=total_costs,
-            equity_curve=[
-                {
-                    "date": bt_data[min(i, len(bt_data) - 1)].date if i > 0 else bt_data[0].date,
-                    "baseline": round(base_eq[i], 2),
-                    "overlay": round(overlay_eq[i], 2),
-                }
-                for i in range(0, len(overlay_eq), max(1, len(overlay_eq) // 252))
-            ],
+            crisis_returns={
+                "2008": _crisis_return(crisis_2008),
+                "2020": _crisis_return(crisis_2020),
+                "2022": _crisis_return(crisis_2022),
+            },
+            extras={
+                "overlay_active_rebalances": overlay_active,
+                "equity_curve": [
+                    {
+                        "date": bt_data[min(i, len(bt_data) - 1)].date if i > 0 else bt_data[0].date,
+                        "baseline": round(base_eq[i], 2),
+                        "overlay": round(overlay_eq[i], 2),
+                    }
+                    for i in range(0, len(overlay_eq), max(1, len(overlay_eq) // 252))
+                ],
+            },
         )
 
         return result
@@ -504,14 +479,14 @@ class MultiSpeedMomentumBacktester:
         imp = result.sharpe_improvement
         mark = "+" if imp >= 0.02 else "~" if imp >= 0.0 else "-"
         print(f"    Improvement          {imp:>+8.3f}    [{mark}]")
-        print(f"    Active rebalances    {result.overlay_active_rebalances:>8}")
+        print(f"    Active rebalances    {result.extras['overlay_active_rebalances']:>8}")
         print()
 
         print("  CRISIS PERFORMANCE (Overlay)")
         print("  " + "-" * 58)
-        for label, val in [("2008 GFC", result.return_2008),
-                            ("2020 COVID", result.return_2020),
-                            ("2022 Rate Hikes", result.return_2022)]:
+        crisis = result.crisis_returns or {}
+        for label, key in [("2008 GFC", "2008"), ("2020 COVID", "2020"), ("2022 Rate Hikes", "2022")]:
+            val = crisis.get(key)
             if val is not None:
                 print(f"    {label:20s}  {val:>+10.2f}%")
             else:
@@ -539,6 +514,8 @@ class MultiSpeedMomentumBacktester:
 
     def save_results(self, result: BacktestResult, output_path: Optional[str] = None) -> None:
         """Save backtest results to JSON."""
+        from dataclasses import asdict
+
         if output_path is None:
             output_path = str(BACKTEST_RESULTS_DIR / "multi_speed_momentum_backtest.json")
 

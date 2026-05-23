@@ -22,14 +22,15 @@ Target: Validate that UNIFIED_OVERLAY adds alpha (Sharpe >= baseline).
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
+    BacktestResult,
     compute_metrics,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
@@ -67,42 +68,6 @@ class DailyData:
     gld_return: float
     tlt_return: float
     vix_level: Optional[float] = None
-
-
-@dataclass
-class BacktestResult:
-    """Complete backtest results comparing baseline vs unified overlay."""
-
-    # Overlay metrics
-    total_return: float
-    cagr: float
-    volatility: float
-    sharpe_ratio: float
-    max_drawdown: float
-
-    # Comparison
-    baseline_sharpe: float
-    sharpe_improvement: float
-    overlay_active_days: int
-    overlay_active_pct: float
-
-    # Per-overlay activation stats
-    collar_active_days: int
-    vixy_active_days: int
-    crypto_active_days: int
-    bond_duration_active_days: int
-
-    # Trade stats
-    total_rebalances: int
-    total_transaction_costs: float
-
-    # Crisis performance
-    return_2008: Optional[float] = None
-    return_2020: Optional[float] = None
-    return_2022: Optional[float] = None
-
-    # Equity curve
-    equity_curve: Optional[List[Dict]] = None
 
 
 class UnifiedOverlayBacktester:
@@ -250,10 +215,12 @@ class UnifiedOverlayBacktester:
         empty_result = BacktestResult(
             total_return=0, cagr=0, volatility=0, sharpe_ratio=0,
             max_drawdown=0, baseline_sharpe=0, sharpe_improvement=0,
-            overlay_active_days=0, overlay_active_pct=0,
-            collar_active_days=0, vixy_active_days=0,
-            crypto_active_days=0, bond_duration_active_days=0,
             total_rebalances=0, total_transaction_costs=0,
+            extras={
+                "overlay_active_days": 0, "overlay_active_pct": 0,
+                "collar_active_days": 0, "vixy_active_days": 0,
+                "crypto_active_days": 0, "bond_duration_active_days": 0,
+            },
         )
 
         if not self.data:
@@ -421,18 +388,22 @@ class UnifiedOverlayBacktester:
             max_drawdown=overlay_metrics.max_drawdown,
             baseline_sharpe=baseline_metrics.sharpe_ratio,
             sharpe_improvement=sharpe_improvement,
-            overlay_active_days=overlay_active_days,
-            overlay_active_pct=overlay_active_days / len(self.data) * 100 if self.data else 0,
-            collar_active_days=collar_active,
-            vixy_active_days=vixy_active,
-            crypto_active_days=crypto_active,
-            bond_duration_active_days=bond_dur_active,
             total_rebalances=total_rebalances,
             total_transaction_costs=total_costs,
-            return_2008=crisis_returns.get("2008"),
-            return_2020=crisis_returns.get("2020"),
-            return_2022=crisis_returns.get("2022"),
-            equity_curve=equity_curve_sampled,
+            crisis_returns={
+                "2008": crisis_returns.get("2008"),
+                "2020": crisis_returns.get("2020"),
+                "2022": crisis_returns.get("2022"),
+            },
+            extras={
+                "overlay_active_days": overlay_active_days,
+                "overlay_active_pct": overlay_active_days / len(self.data) * 100 if self.data else 0,
+                "collar_active_days": collar_active,
+                "vixy_active_days": vixy_active,
+                "crypto_active_days": crypto_active,
+                "bond_duration_active_days": bond_dur_active,
+                "equity_curve": equity_curve_sampled,
+            },
         )
 
     def print_results(self, result: BacktestResult):
@@ -452,23 +423,30 @@ class UnifiedOverlayBacktester:
         verdict = "POSITIVE" if result.sharpe_improvement > 0 else "NEGATIVE"
         print(f"    Verdict:            {verdict}")
         print(f"\n  Overlay Activity:")
-        print(f"    Days active:       {result.overlay_active_days}/{len(self.data)} ({result.overlay_active_pct:.1f}%)")
-        print(f"    Collar days:       {result.collar_active_days}")
-        print(f"    VIXY hedge days:   {result.vixy_active_days}")
-        print(f"    Crypto days:       {result.crypto_active_days}")
-        print(f"    Bond duration days:{result.bond_duration_active_days}")
+        e = result.extras
+        print(f"    Days active:       {e['overlay_active_days']}/{len(self.data)} ({e['overlay_active_pct']:.1f}%)")
+        print(f"    Collar days:       {e['collar_active_days']}")
+        print(f"    VIXY hedge days:   {e['vixy_active_days']}")
+        print(f"    Crypto days:       {e['crypto_active_days']}")
+        print(f"    Bond duration days:{e['bond_duration_active_days']}")
         print(f"\n  Trade Stats:")
         print(f"    Rebalances:        {result.total_rebalances}")
         print(f"    Transaction costs: ${result.total_transaction_costs:.2f}")
-        if result.return_2008 is not None:
+        crisis = result.crisis_returns or {}
+        if any(v is not None for v in crisis.values()):
             print(f"\n  Crisis Performance:")
-            print(f"    2008 return:       {result.return_2008:.2f}%")
-            print(f"    2020 return:       {result.return_2020:.2f}%")
-            print(f"    2022 return:       {result.return_2022:.2f}%")
+            if crisis.get("2008") is not None:
+                print(f"    2008 return:       {crisis['2008']:.2f}%")
+            if crisis.get("2020") is not None:
+                print(f"    2020 return:       {crisis['2020']:.2f}%")
+            if crisis.get("2022") is not None:
+                print(f"    2022 return:       {crisis['2022']:.2f}%")
         print("\n" + "=" * 70)
 
     def save_results(self, result: BacktestResult, path: Optional[str] = None):
         """Save results to JSON file."""
+        from dataclasses import asdict
+
         out_path = Path(path) if path else BACKTEST_RESULTS_DIR / "unified_overlay_results.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
 

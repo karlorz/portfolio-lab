@@ -22,7 +22,6 @@ from src.backtest.duration_yield_backtest import (
     REGIME_EFFECTIVE_DURATION,
     EXPENSE_RATIOS,
     TRANSACTION_COST,
-    BacktestResult,
     classify_regime_from_spread,
     calculate_returns,
     calculate_sharpe,
@@ -32,6 +31,7 @@ from src.backtest.duration_yield_backtest import (
     save_results,
     print_results,
 )
+from src.backtest.metrics import BacktestResult
 
 
 # ---------------------------------------------------------------------------
@@ -128,35 +128,47 @@ class TestBacktestResult:
 
     def test_fields(self):
         r = BacktestResult(
-            static_cagr=0.10, static_volatility=0.12, static_sharpe=0.80, static_max_dd=-0.25,
-            dynamic_cagr=0.12, dynamic_volatility=0.13, dynamic_sharpe=0.85, dynamic_max_dd=-0.23,
-            sharpe_delta=0.05, cagr_delta=0.02, max_dd_delta=0.02,
-            crisis_2008_static=-0.12, crisis_2008_dynamic=-0.10,
-            crisis_2020_static=-0.07, crisis_2020_dynamic=-0.05,
-            crisis_2022_static=-0.14, crisis_2022_dynamic=-0.13,
-            regime_days={"flat": 100, "inverted": 80}, regime_transitions=3,
-            rebalancing_costs=0.002,
-            start_date="2010-01-01", end_date="2020-12-31", total_days=2520,
-            timestamp="2026-05-14",
+            total_return=210.58, cagr=12.0, volatility=13.0, sharpe_ratio=0.85,
+            max_drawdown=-23.0,
+            extras={
+                "static_cagr": 0.10, "static_volatility": 0.12, "static_sharpe": 0.80,
+                "static_max_dd": -0.25,
+                "dynamic_cagr": 0.12, "dynamic_volatility": 0.13, "dynamic_sharpe": 0.85,
+                "dynamic_max_dd": -0.23,
+                "sharpe_delta": 0.05, "cagr_delta": 0.02, "max_dd_delta": 0.02,
+                "crisis_2008_static": -0.12, "crisis_2008_dynamic": -0.10,
+                "crisis_2020_static": -0.07, "crisis_2020_dynamic": -0.05,
+                "crisis_2022_static": -0.14, "crisis_2022_dynamic": -0.13,
+                "regime_days": {"flat": 100, "inverted": 80}, "regime_transitions": 3,
+                "rebalancing_costs": 0.002,
+                "start_date": "2010-01-01", "end_date": "2020-12-31", "total_days": 2520,
+                "timestamp": "2026-05-14",
+            },
         )
-        assert r.sharpe_delta == 0.05
-        assert r.cagr_delta == 0.02
+        assert r.extras["sharpe_delta"] == 0.05
+        assert r.extras["cagr_delta"] == 0.02
 
     def test_negative_delta(self):
         r = BacktestResult(
-            static_cagr=0.10, static_volatility=0.12, static_sharpe=0.80, static_max_dd=-0.25,
-            dynamic_cagr=0.08, dynamic_volatility=0.14, dynamic_sharpe=0.70, dynamic_max_dd=-0.30,
-            sharpe_delta=-0.10, cagr_delta=-0.02, max_dd_delta=-0.05,
-            crisis_2008_static=-0.12, crisis_2008_dynamic=-0.15,
-            crisis_2020_static=-0.07, crisis_2020_dynamic=-0.09,
-            crisis_2022_static=-0.14, crisis_2022_dynamic=-0.16,
-            regime_days={"flat": 100}, regime_transitions=0,
-            rebalancing_costs=0.001,
-            start_date="2010-01-01", end_date="2020-12-31", total_days=2520,
-            timestamp="2026-05-14",
+            total_return=-50.0, cagr=-5.0, volatility=14.0, sharpe_ratio=0.70,
+            max_drawdown=-30.0,
+            extras={
+                "static_cagr": 0.10, "static_volatility": 0.12, "static_sharpe": 0.80,
+                "static_max_dd": -0.25,
+                "dynamic_cagr": 0.08, "dynamic_volatility": 0.14, "dynamic_sharpe": 0.70,
+                "dynamic_max_dd": -0.30,
+                "sharpe_delta": -0.10, "cagr_delta": -0.02, "max_dd_delta": -0.05,
+                "crisis_2008_static": -0.12, "crisis_2008_dynamic": -0.15,
+                "crisis_2020_static": -0.07, "crisis_2020_dynamic": -0.09,
+                "crisis_2022_static": -0.14, "crisis_2022_dynamic": -0.16,
+                "regime_days": {"flat": 100}, "regime_transitions": 0,
+                "rebalancing_costs": 0.001,
+                "start_date": "2010-01-01", "end_date": "2020-12-31", "total_days": 2520,
+                "timestamp": "2026-05-14",
+            },
         )
-        assert r.sharpe_delta < 0
-        assert r.cagr_delta < 0
+        assert r.extras["sharpe_delta"] < 0
+        assert r.extras["cagr_delta"] < 0
 
 
 # ---------------------------------------------------------------------------
@@ -308,15 +320,15 @@ class TestRunBacktest:
     def test_has_all_metrics(self):
         prices_df, regimes_df = _make_synthetic_data(252)
         result = run_backtest(prices_df, regimes_df)
-        assert result.static_sharpe != 0
-        assert result.dynamic_sharpe != 0
-        assert result.total_days > 0
+        assert result.extras["static_sharpe"] != 0
+        assert result.extras["dynamic_sharpe"] != 0
+        assert result.extras["total_days"] > 0
 
     def test_regime_days_sum(self):
         prices_df, regimes_df = _make_synthetic_data(252)
         result = run_backtest(prices_df, regimes_df)
-        total = sum(result.regime_days.values())
-        assert total == result.total_days
+        total = sum(result.extras["regime_days"].values())
+        assert total == result.extras["total_days"]
 
     def test_single_regime(self):
         dates = pd.date_range(start="2020-01-01", periods=252, freq="B")
@@ -326,30 +338,30 @@ class TestRunBacktest:
             prices_df[col] = start * np.cumprod(1 + rng.normal(0.0003, 0.01, 252))
         regimes_df = _make_regimes_df(dates, "flat")
         result = run_backtest(prices_df, regimes_df)
-        assert result.regime_days.get("flat", 0) == result.total_days
+        assert result.extras["regime_days"].get("flat", 0) == result.extras["total_days"]
 
     def test_result_properties(self):
         prices_df, regimes_df = _make_synthetic_data(252)
         result = run_backtest(prices_df, regimes_df)
-        assert -1 <= result.static_sharpe <= 5
-        assert -1 <= result.dynamic_sharpe <= 5
+        assert -1 <= result.extras["static_sharpe"] <= 5
+        assert -1 <= result.extras["dynamic_sharpe"] <= 5
 
     def test_crisis_returns_populated(self):
         prices_df, regimes_df = _make_synthetic_data(504)
         result = run_backtest(prices_df, regimes_df)
-        assert isinstance(result.crisis_2008_static, float)
-        assert isinstance(result.crisis_2008_dynamic, float)
+        assert isinstance(result.extras["crisis_2008_static"], float)
+        assert isinstance(result.extras["crisis_2008_dynamic"], float)
 
     def test_date_filtering(self):
         prices_df, regimes_df = _make_synthetic_data(252, start="2010-06-01")
         result = run_backtest(prices_df, regimes_df,
                               start_date="2010-07-01", end_date="2010-12-31")
-        assert result.total_days > 0
+        assert result.extras["total_days"] > 0
 
     def test_sharpe_delta_computed(self):
         prices_df, regimes_df = _make_synthetic_data(252)
         result = run_backtest(prices_df, regimes_df)
-        assert isinstance(result.sharpe_delta, float)
+        assert isinstance(result.extras["sharpe_delta"], float)
 
     def test_handles_missing_columns(self):
         """backtest should handle DataFrames without all expected columns."""
@@ -368,16 +380,22 @@ class TestSaveResults:
 
     def test_creates_file(self, tmp_path):
         r = BacktestResult(
-            static_cagr=0.10, static_volatility=0.12, static_sharpe=0.80, static_max_dd=-0.25,
-            dynamic_cagr=0.12, dynamic_volatility=0.13, dynamic_sharpe=0.85, dynamic_max_dd=-0.23,
-            sharpe_delta=0.05, cagr_delta=0.02, max_dd_delta=0.02,
-            crisis_2008_static=-0.12, crisis_2008_dynamic=-0.10,
-            crisis_2020_static=-0.07, crisis_2020_dynamic=-0.05,
-            crisis_2022_static=-0.14, crisis_2022_dynamic=-0.13,
-            regime_days={"flat": 100}, regime_transitions=0,
-            rebalancing_costs=0.001,
-            start_date="2010-01-01", end_date="2020-12-31", total_days=2520,
-            timestamp="2026-05-14",
+            total_return=210.58, cagr=12.0, volatility=13.0, sharpe_ratio=0.85,
+            max_drawdown=-23.0,
+            extras={
+                "static_cagr": 0.10, "static_volatility": 0.12, "static_sharpe": 0.80,
+                "static_max_dd": -0.25,
+                "dynamic_cagr": 0.12, "dynamic_volatility": 0.13, "dynamic_sharpe": 0.85,
+                "dynamic_max_dd": -0.23,
+                "sharpe_delta": 0.05, "cagr_delta": 0.02, "max_dd_delta": 0.02,
+                "crisis_2008_static": -0.12, "crisis_2008_dynamic": -0.10,
+                "crisis_2020_static": -0.07, "crisis_2020_dynamic": -0.05,
+                "crisis_2022_static": -0.14, "crisis_2022_dynamic": -0.13,
+                "regime_days": {"flat": 100}, "regime_transitions": 0,
+                "rebalancing_costs": 0.001,
+                "start_date": "2010-01-01", "end_date": "2020-12-31", "total_days": 2520,
+                "timestamp": "2026-05-14",
+            },
         )
         path = tmp_path / "results.json"
         with patch("src.backtest.duration_yield_backtest.OUTPUT_PATH", path):
@@ -386,24 +404,30 @@ class TestSaveResults:
 
     def test_valid_json(self, tmp_path):
         r = BacktestResult(
-            static_cagr=0.10, static_volatility=0.12, static_sharpe=0.80, static_max_dd=-0.25,
-            dynamic_cagr=0.12, dynamic_volatility=0.13, dynamic_sharpe=0.85, dynamic_max_dd=-0.23,
-            sharpe_delta=0.05, cagr_delta=0.02, max_dd_delta=0.02,
-            crisis_2008_static=-0.12, crisis_2008_dynamic=-0.10,
-            crisis_2020_static=-0.07, crisis_2020_dynamic=-0.05,
-            crisis_2022_static=-0.14, crisis_2022_dynamic=-0.13,
-            regime_days={"flat": 100}, regime_transitions=0,
-            rebalancing_costs=0.001,
-            start_date="2010-01-01", end_date="2020-12-31", total_days=2520,
-            timestamp="2026-05-14",
+            total_return=210.58, cagr=12.0, volatility=13.0, sharpe_ratio=0.85,
+            max_drawdown=-23.0,
+            extras={
+                "static_cagr": 0.10, "static_volatility": 0.12, "static_sharpe": 0.80,
+                "static_max_dd": -0.25,
+                "dynamic_cagr": 0.12, "dynamic_volatility": 0.13, "dynamic_sharpe": 0.85,
+                "dynamic_max_dd": -0.23,
+                "sharpe_delta": 0.05, "cagr_delta": 0.02, "max_dd_delta": 0.02,
+                "crisis_2008_static": -0.12, "crisis_2008_dynamic": -0.10,
+                "crisis_2020_static": -0.07, "crisis_2020_dynamic": -0.05,
+                "crisis_2022_static": -0.14, "crisis_2022_dynamic": -0.13,
+                "regime_days": {"flat": 100}, "regime_transitions": 0,
+                "rebalancing_costs": 0.001,
+                "start_date": "2010-01-01", "end_date": "2020-12-31", "total_days": 2520,
+                "timestamp": "2026-05-14",
+            },
         )
         path = tmp_path / "results.json"
         with patch("src.backtest.duration_yield_backtest.OUTPUT_PATH", path):
             save_results(r)
         with open(path) as f:
             data = json.load(f)
-        assert "static_cagr" in data
-        assert "dynamic_cagr" in data
+        assert "static_cagr" in data["extras"]
+        assert "dynamic_cagr" in data["extras"]
 
 
 # ---------------------------------------------------------------------------
@@ -414,17 +438,23 @@ class TestPrintResults:
 
     def test_prints_output(self, capsys):
         r = BacktestResult(
-            static_cagr=0.10, static_volatility=0.12, static_sharpe=0.80, static_max_dd=-0.25,
-            dynamic_cagr=0.12, dynamic_volatility=0.13, dynamic_sharpe=0.85, dynamic_max_dd=-0.23,
-            sharpe_delta=0.05, cagr_delta=0.02, max_dd_delta=0.02,
-            crisis_2008_static=-0.12, crisis_2008_dynamic=-0.10,
-            crisis_2020_static=-0.07, crisis_2020_dynamic=-0.05,
-            crisis_2022_static=-0.14, crisis_2022_dynamic=-0.13,
-            regime_days={"flat": 100, "inverted": 50, "steep": 50},
-            regime_transitions=3,
-            rebalancing_costs=0.002,
-            start_date="2010-01-01", end_date="2020-12-31", total_days=2520,
-            timestamp="2026-05-14",
+            total_return=210.58, cagr=12.0, volatility=13.0, sharpe_ratio=0.85,
+            max_drawdown=-23.0,
+            extras={
+                "static_cagr": 0.10, "static_volatility": 0.12, "static_sharpe": 0.80,
+                "static_max_dd": -0.25,
+                "dynamic_cagr": 0.12, "dynamic_volatility": 0.13, "dynamic_sharpe": 0.85,
+                "dynamic_max_dd": -0.23,
+                "sharpe_delta": 0.05, "cagr_delta": 0.02, "max_dd_delta": 0.02,
+                "crisis_2008_static": -0.12, "crisis_2008_dynamic": -0.10,
+                "crisis_2020_static": -0.07, "crisis_2020_dynamic": -0.05,
+                "crisis_2022_static": -0.14, "crisis_2022_dynamic": -0.13,
+                "regime_days": {"flat": 100, "inverted": 50, "steep": 50},
+                "regime_transitions": 3,
+                "rebalancing_costs": 0.002,
+                "start_date": "2010-01-01", "end_date": "2020-12-31", "total_days": 2520,
+                "timestamp": "2026-05-14",
+            },
         )
         print_results(r)
         out = capsys.readouterr().out
@@ -434,16 +464,22 @@ class TestPrintResults:
 
     def test_shows_sharpe_delta(self, capsys):
         r = BacktestResult(
-            static_cagr=0.10, static_volatility=0.12, static_sharpe=0.80, static_max_dd=-0.25,
-            dynamic_cagr=0.12, dynamic_volatility=0.13, dynamic_sharpe=0.85, dynamic_max_dd=-0.23,
-            sharpe_delta=0.05, cagr_delta=0.02, max_dd_delta=0.02,
-            crisis_2008_static=-0.12, crisis_2008_dynamic=-0.10,
-            crisis_2020_static=-0.07, crisis_2020_dynamic=-0.05,
-            crisis_2022_static=-0.14, crisis_2022_dynamic=-0.13,
-            regime_days={"flat": 100}, regime_transitions=0,
-            rebalancing_costs=0.001,
-            start_date="2010-01-01", end_date="2020-12-31", total_days=2520,
-            timestamp="2026-05-14",
+            total_return=210.58, cagr=12.0, volatility=13.0, sharpe_ratio=0.85,
+            max_drawdown=-23.0,
+            extras={
+                "static_cagr": 0.10, "static_volatility": 0.12, "static_sharpe": 0.80,
+                "static_max_dd": -0.25,
+                "dynamic_cagr": 0.12, "dynamic_volatility": 0.13, "dynamic_sharpe": 0.85,
+                "dynamic_max_dd": -0.23,
+                "sharpe_delta": 0.05, "cagr_delta": 0.02, "max_dd_delta": 0.02,
+                "crisis_2008_static": -0.12, "crisis_2008_dynamic": -0.10,
+                "crisis_2020_static": -0.07, "crisis_2020_dynamic": -0.05,
+                "crisis_2022_static": -0.14, "crisis_2022_dynamic": -0.13,
+                "regime_days": {"flat": 100}, "regime_transitions": 0,
+                "rebalancing_costs": 0.001,
+                "start_date": "2010-01-01", "end_date": "2020-12-31", "total_days": 2520,
+                "timestamp": "2026-05-14",
+            },
         )
         print_results(r)
         out = capsys.readouterr().out

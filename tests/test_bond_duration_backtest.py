@@ -16,7 +16,6 @@ import pytest
 
 from src.backtest.bond_duration_backtest import (
     BacktestConfig,
-    BacktestResult,
     DailyPrices,
     WalkForwardBondDurationBacktester,
     RISING_ALLOCATION,
@@ -27,6 +26,7 @@ from src.backtest.bond_duration_backtest import (
     FALLING_THRESHOLD,
     MOMENTUM_LOOKBACK,
 )
+from src.backtest.metrics import BacktestResult
 
 
 # ── BacktestConfig Tests ────────────────────────────────────────────────────
@@ -80,94 +80,107 @@ class TestBacktestResult:
     """Test BacktestResult creation, to_dict, and empty state."""
 
     def test_create_and_to_dict(self):
+        from dataclasses import asdict
         result = BacktestResult(
             total_return=10.5,
             cagr=8.2,
             volatility=12.3,
             sharpe_ratio=0.85,
             max_drawdown=-15.4,
-            baseline_total_return=9.0,
-            baseline_cagr=7.5,
-            baseline_volatility=11.8,
             baseline_sharpe=0.78,
-            baseline_max_drawdown=-18.2,
             sharpe_improvement=0.07,
-            cagr_impact=0.7,
-            rotation_active_days=800,
-            rotation_active_pct=35.0,
-            avg_effective_duration=8.5,
-            avg_tlt_weight=0.35,
-            avg_ief_weight=0.30,
-            avg_shy_weight=0.35,
-            crisis_returns_rotated={"2008": -10.2, "2020": 3.1},
-            crisis_returns_baseline={"2008": -12.3, "2020": 1.5},
-            regime_breakdown={
-                "rising": {"pct_of_time": 40.0, "avg_effective_duration": 12.5, "count": 80},
-                "falling": {"pct_of_time": 35.0, "avg_effective_duration": 4.2, "count": 70},
-            },
             total_rebalances=100,
             total_transaction_costs=32.50,
-            config_snapshot={"momentum_lookback_days": 60},
+            extras={
+                "baseline_total_return": 9.0,
+                "baseline_cagr": 7.5,
+                "baseline_volatility": 11.8,
+                "baseline_max_drawdown": -18.2,
+                "cagr_impact": 0.7,
+                "rotation_active_days": 800,
+                "rotation_active_pct": 35.0,
+                "avg_effective_duration": 8.5,
+                "avg_tlt_weight": 0.35,
+                "avg_ief_weight": 0.30,
+                "avg_shy_weight": 0.35,
+                "crisis_returns_rotated": {"2008": -10.2, "2020": 3.1},
+                "crisis_returns_baseline": {"2008": -12.3, "2020": 1.5},
+                "regime_breakdown": {
+                    "rising": {"pct_of_time": 40.0, "avg_effective_duration": 12.5, "count": 80},
+                    "falling": {"pct_of_time": 35.0, "avg_effective_duration": 4.2, "count": 70},
+                },
+                "config_snapshot": {"momentum_lookback_days": 60},
+            },
         )
 
-        d = result.to_dict()
+        d = asdict(result)
         assert d["total_return"] == 10.5
         assert d["sharpe_ratio"] == 0.85
         assert d["sharpe_improvement"] == 0.07
-        assert d["rotation_active_days"] == 800
-        assert d["avg_tlt_weight"] == 0.35
-        assert d["avg_ief_weight"] == 0.30
-        assert d["avg_shy_weight"] == 0.35
-        assert d["crisis_returns_rotated"]["2008"] == -10.2
-        assert d["regime_breakdown"]["rising"]["pct_of_time"] == 40.0
+        assert d["extras"]["rotation_active_days"] == 800
+        assert d["extras"]["avg_tlt_weight"] == 0.35
+        assert d["extras"]["avg_ief_weight"] == 0.30
+        assert d["extras"]["avg_shy_weight"] == 0.35
+        assert d["extras"]["crisis_returns_rotated"]["2008"] == -10.2
+        assert d["extras"]["regime_breakdown"]["rising"]["pct_of_time"] == 40.0
         assert d["total_rebalances"] == 100
-        assert d["config_snapshot"]["momentum_lookback_days"] == 60
+        assert d["extras"]["config_snapshot"]["momentum_lookback_days"] == 60
 
     def test_json_serializable(self):
         """All fields in to_dict must be JSON-serializable."""
+        from dataclasses import asdict
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
-            max_drawdown=-10.0, baseline_total_return=4.0, baseline_cagr=2.5,
-            baseline_volatility=9.5, baseline_sharpe=0.45, baseline_max_drawdown=-12.0,
-            sharpe_improvement=0.05, cagr_impact=0.5, rotation_active_days=100,
-            rotation_active_pct=25.0, avg_effective_duration=7.5,
-            avg_tlt_weight=0.40, avg_ief_weight=0.30, avg_shy_weight=0.30,
-            crisis_returns_rotated={"2008": -8.0}, crisis_returns_baseline={"2008": -10.0},
-            regime_breakdown={"rising": {"pct_of_time": 50.0, "avg_effective_duration": 12.0, "count": 50}},
+            max_drawdown=-10.0, baseline_sharpe=0.45, sharpe_improvement=0.05,
             total_rebalances=30, total_transaction_costs=15.0,
-            config_snapshot={"start_date": "2006-01-01"},
+            extras={
+                "baseline_total_return": 4.0, "baseline_cagr": 2.5,
+                "baseline_volatility": 9.5, "baseline_max_drawdown": -12.0,
+                "cagr_impact": 0.5, "rotation_active_days": 100,
+                "rotation_active_pct": 25.0, "avg_effective_duration": 7.5,
+                "avg_tlt_weight": 0.40, "avg_ief_weight": 0.30, "avg_shy_weight": 0.30,
+                "crisis_returns_rotated": {"2008": -8.0}, "crisis_returns_baseline": {"2008": -10.0},
+                "regime_breakdown": {"rising": {"pct_of_time": 50.0, "avg_effective_duration": 12.0, "count": 50}},
+                "config_snapshot": {"start_date": "2006-01-01"},
+            },
         )
-        json.dumps(result.to_dict())  # Should not raise
+        json.dumps(asdict(result))  # Should not raise
 
     def test_empty_crisis_returns(self):
         """Crisis returns can be empty dict without errors."""
         result = BacktestResult(
             total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
-            max_drawdown=0.0, baseline_total_return=0.0, baseline_cagr=0.0,
-            baseline_volatility=0.0, baseline_sharpe=0.0, baseline_max_drawdown=0.0,
-            sharpe_improvement=0.0, cagr_impact=0.0, rotation_active_days=0,
-            rotation_active_pct=0.0, avg_effective_duration=0.0,
-            avg_tlt_weight=0.0, avg_ief_weight=0.0, avg_shy_weight=0.0,
-            crisis_returns_rotated={}, crisis_returns_baseline={},
-            regime_breakdown={}, total_rebalances=0, total_transaction_costs=0.0,
-            config_snapshot={},
+            max_drawdown=0.0, sharpe_improvement=0.0, total_rebalances=0,
+            total_transaction_costs=0.0,
+            extras={
+                "baseline_total_return": 0.0, "baseline_cagr": 0.0,
+                "baseline_volatility": 0.0, "baseline_max_drawdown": 0.0,
+                "cagr_impact": 0.0, "rotation_active_days": 0,
+                "rotation_active_pct": 0.0, "avg_effective_duration": 0.0,
+                "avg_tlt_weight": 0.0, "avg_ief_weight": 0.0, "avg_shy_weight": 0.0,
+                "crisis_returns_rotated": {}, "crisis_returns_baseline": {},
+                "regime_breakdown": {}, "config_snapshot": {},
+            },
         )
-        assert result.to_dict()["crisis_returns_rotated"] == {}
+        assert result.extras["crisis_returns_rotated"] == {}
 
     def test_empty_result_all_zeros(self):
         """Empty result has all zero/empty fields."""
         result = BacktestResult(
             total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
-            max_drawdown=0.0, baseline_total_return=0.0, baseline_cagr=0.0,
-            baseline_volatility=0.0, baseline_sharpe=0.0, baseline_max_drawdown=0.0,
-            sharpe_improvement=0.0, cagr_impact=0.0, rotation_active_days=0,
-            rotation_active_pct=0.0, avg_effective_duration=0.0,
-            avg_tlt_weight=0.0, avg_ief_weight=0.0, avg_shy_weight=0.0,
-            crisis_returns_rotated={}, crisis_returns_baseline={},
-            regime_breakdown={}, total_rebalances=0, total_transaction_costs=0.0,
-            config_snapshot={},
+            max_drawdown=0.0, sharpe_improvement=0.0, total_rebalances=0,
+            total_transaction_costs=0.0,
+            extras={
+                "baseline_total_return": 0.0, "baseline_cagr": 0.0,
+                "baseline_volatility": 0.0, "baseline_max_drawdown": 0.0,
+                "cagr_impact": 0.0, "rotation_active_days": 0,
+                "rotation_active_pct": 0.0, "avg_effective_duration": 0.0,
+                "avg_tlt_weight": 0.0, "avg_ief_weight": 0.0, "avg_shy_weight": 0.0,
+                "crisis_returns_rotated": {}, "crisis_returns_baseline": {},
+                "regime_breakdown": {}, "config_snapshot": {},
+            },
         )
-        assert result.rotation_active_days == 0
+        assert result.extras["rotation_active_days"] == 0
         assert result.total_rebalances == 0
 
 
@@ -277,10 +290,10 @@ class TestWalkForwardBondDurationBacktester:
         result = bt._empty_result()
         assert result.total_return == 0.0
         assert result.sharpe_ratio == 0.0
-        assert result.rotation_active_days == 0
+        assert result.extras["rotation_active_days"] == 0
         assert result.total_rebalances == 0
-        assert result.crisis_returns_rotated == {}
-        assert result.avg_tlt_weight == 0.0
+        assert result.extras["crisis_returns_rotated"] == {}
+        assert result.extras["avg_tlt_weight"] == 0.0
 
     def test_single_day_data_returns_zero_result(self):
         """Only one data point should return an empty result."""
@@ -327,9 +340,10 @@ class TestWalkForwardBondDurationBacktester:
                 data = json.load(f)
             assert "total_return" in data
             assert "sharpe_ratio" in data
-            assert "crisis_returns_rotated" in data
-            assert "regime_breakdown" in data
-            assert "avg_tlt_weight" in data
+            assert "extras" in data
+            assert "crisis_returns_rotated" in data["extras"]
+            assert "regime_breakdown" in data["extras"]
+            assert "avg_tlt_weight" in data["extras"]
             assert data["_metadata"]["strategy"] == "bond_duration"
         finally:
             Path(output_path).unlink()
@@ -520,8 +534,8 @@ class TestEdgeCases:
         bt.load_data()
         result = bt.run()
         # Should have at least some crisis data
-        assert isinstance(result.crisis_returns_baseline, dict)
-        assert isinstance(result.crisis_returns_rotated, dict)
+        assert isinstance(result.extras["crisis_returns_baseline"], dict)
+        assert isinstance(result.extras["crisis_returns_rotated"], dict)
 
     def test_no_rebalance_freq_edge(self):
         """Very frequent rebalancing should still work."""

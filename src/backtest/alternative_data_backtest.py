@@ -14,7 +14,7 @@ Period: 2006-2026 (21 years, including GFC, COVID, 2022 rate hikes)
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -22,6 +22,7 @@ import numpy as np
 
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
+    BacktestResult,
     compute_metrics,
     save_results_json,
 )
@@ -60,41 +61,6 @@ class DailyReturn:
     gld_return: float
     tlt_return: float
     vix_spot: Optional[float] = None
-
-
-@dataclass
-class BacktestResult:
-    """Complete backtest results for alternative data signal."""
-
-    # Basic metrics
-    total_return: float
-    cagr: float
-    volatility: float
-    sharpe_ratio: float
-    max_drawdown: float
-
-    # Overlay impact
-    baseline_sharpe: float
-    sharpe_improvement: float
-    overlay_active_months: int
-    overlay_active_pct: float
-
-    # Crisis performance
-    return_2008: Optional[float]
-    return_2020: Optional[float]
-    return_2022: Optional[float]
-
-    # Trade stats
-    total_rebalances: int
-    avg_rebalance_size: float
-    total_transaction_costs: float
-
-    # Regime breakdown
-    regime_distribution: Dict[str, int]
-    regime_returns: Dict[str, float]
-
-    # Full equity curve (sampled)
-    equity_curve: List[Dict]
 
 
 class AlternativeDataBacktester:
@@ -490,46 +456,50 @@ class AlternativeDataBacktester:
             sharpe_improvement=(
                 overlay_metrics["sharpe"] - base_metrics["sharpe"]
             ),
-            overlay_active_months=overlay_active_months,
-            overlay_active_pct=overlay_active_pct,
-            return_2008=(
-                self._annualize_returns(returns_2008)
-                if returns_2008
-                else None
-            ),
-            return_2020=(
-                self._annualize_returns(returns_2020)
-                if returns_2020
-                else None
-            ),
-            return_2022=(
-                self._annualize_returns(returns_2022)
-                if returns_2022
-                else None
-            ),
             total_rebalances=total_rebalances,
-            avg_rebalance_size=(
-                np.mean(rebalance_sizes) if rebalance_sizes else 0
-            ),
             total_transaction_costs=total_costs,
-            regime_distribution=regime_distribution,
-            regime_returns=avg_regime_returns,
-            equity_curve=[
-                {
-                    "date": backtest_data[
-                        min(i, len(backtest_data) - 1)
-                    ].date
-                    if i > 0
-                    else backtest_data[0].date,
-                    "baseline": base_equity[i],
-                    "overlay": overlay_equity[i],
-                }
-                for i in range(
-                    0,
-                    len(overlay_equity),
-                    max(1, len(overlay_equity) // 252),
-                )
-            ],
+            crisis_returns={
+                "2008": (
+                    self._annualize_returns(returns_2008)
+                    if returns_2008
+                    else None
+                ),
+                "2020": (
+                    self._annualize_returns(returns_2020)
+                    if returns_2020
+                    else None
+                ),
+                "2022": (
+                    self._annualize_returns(returns_2022)
+                    if returns_2022
+                    else None
+                ),
+            },
+            extras={
+                "overlay_active_months": overlay_active_months,
+                "overlay_active_pct": overlay_active_pct,
+                "avg_rebalance_size": (
+                    np.mean(rebalance_sizes) if rebalance_sizes else 0
+                ),
+                "regime_distribution": regime_distribution,
+                "regime_returns": avg_regime_returns,
+                "equity_curve": [
+                    {
+                        "date": backtest_data[
+                            min(i, len(backtest_data) - 1)
+                        ].date
+                        if i > 0
+                        else backtest_data[0].date,
+                        "baseline": base_equity[i],
+                        "overlay": overlay_equity[i],
+                    }
+                    for i in range(
+                        0,
+                        len(overlay_equity),
+                        max(1, len(overlay_equity) // 252),
+                    )
+                ],
+            },
         )
 
         return result
@@ -621,6 +591,8 @@ class AlternativeDataBacktester:
         output_path: Optional[str] = None,
     ) -> None:
         """Save backtest results to JSON."""
+        from dataclasses import asdict
+
         if output_path is None:
             output_path = str(
                 BACKTEST_RESULTS_DIR
@@ -708,19 +680,21 @@ class AlternativeDataBacktester:
         )
         print(
             f"  Active months:      "
-            f"{result.overlay_active_months:>9} "
-            f"({result.overlay_active_pct:.1f}%)"
+            f"{result.extras['overlay_active_months']:>9} "
+            f"({result.extras['overlay_active_pct']:.1f}%)"
         )
         print()
 
         # -- Crisis performance --
         print("  CRISIS PERFORMANCE (annualised)")
         print("  " + "-" * 60)
-        for label, val in [
-            ("2008 GFC", result.return_2008),
-            ("2020 COVID", result.return_2020),
-            ("2022 Rate Hikes", result.return_2022),
+        crisis = result.crisis_returns or {}
+        for label, key in [
+            ("2008 GFC", "2008"),
+            ("2020 COVID", "2020"),
+            ("2022 Rate Hikes", "2022"),
         ]:
+            val = crisis.get(key)
             if val is not None:
                 print(f"  {label:20s}  {val:>+9.2f}%")
         print()
@@ -734,7 +708,7 @@ class AlternativeDataBacktester:
         )
         print(
             f"  Avg rebalance size: "
-            f"{result.avg_rebalance_size * 100:>9.2f}%"
+            f"{result.extras['avg_rebalance_size'] * 100:>9.2f}%"
         )
         print(
             f"  Transaction costs:  "
@@ -743,13 +717,13 @@ class AlternativeDataBacktester:
         print()
 
         # -- Regime distribution --
-        total_regime = sum(result.regime_distribution.values())
+        total_regime = sum(result.extras["regime_distribution"].values())
         print("  REGIME DISTRIBUTION")
         print("  " + "-" * 60)
         for regime in ["bull", "neutral", "bear", "crisis"]:
-            count = result.regime_distribution.get(regime, 0)
+            count = result.extras["regime_distribution"].get(regime, 0)
             pct = count / total_regime * 100 if total_regime else 0
-            ann_ret = result.regime_returns.get(regime, 0.0)
+            ann_ret = result.extras["regime_returns"].get(regime, 0.0)
             signal = self.REGIME_SIGNAL_MAP.get(regime, 0.0)
             print(
                 f"  {regime:10s}  count={count:>5} "
@@ -763,7 +737,7 @@ class AlternativeDataBacktester:
         print("  REGIME -> SIGNAL MAPPING (ensemble_voter.py L581)")
         print("  " + "-" * 60)
         for regime, signal in self.REGIME_SIGNAL_MAP.items():
-            ann_ret = result.regime_returns.get(regime, 0.0)
+            ann_ret = result.extras["regime_returns"].get(regime, 0.0)
             verdict = "OK" if (
                 (signal > 0 and ann_ret > 0)
                 or (signal < 0 and ann_ret < 0)

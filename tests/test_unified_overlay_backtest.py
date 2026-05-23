@@ -25,9 +25,9 @@ from dataclasses import asdict
 from src.backtest.unified_overlay_backtest import (
     BacktestConfig,
     DailyData,
-    BacktestResult,
     UnifiedOverlayBacktester,
 )
+from src.backtest.metrics import BacktestResult
 
 
 # ---------------------------------------------------------------------------
@@ -222,10 +222,12 @@ class TestBacktestResult:
             total_return=108.5, cagr=10.5, volatility=11.5,
             sharpe_ratio=0.95, max_drawdown=-26.0,
             baseline_sharpe=0.94, sharpe_improvement=0.01,
-            overlay_active_days=500, overlay_active_pct=95.0,
-            collar_active_days=400, vixy_active_days=100,
-            crypto_active_days=350, bond_duration_active_days=200,
             total_rebalances=50, total_transaction_costs=500.0,
+            extras={
+                "overlay_active_days": 500, "overlay_active_pct": 95.0,
+                "collar_active_days": 400, "vixy_active_days": 100,
+                "crypto_active_days": 350, "bond_duration_active_days": 200,
+            },
         )
         assert result.sharpe_ratio == 0.95
         assert result.sharpe_improvement == 0.01
@@ -235,14 +237,16 @@ class TestBacktestResult:
             total_return=100.0, cagr=10.0, volatility=12.0,
             sharpe_ratio=0.9, max_drawdown=-25.0,
             baseline_sharpe=0.85, sharpe_improvement=0.05,
-            overlay_active_days=500, overlay_active_pct=95.0,
-            collar_active_days=400, vixy_active_days=100,
-            crypto_active_days=350, bond_duration_active_days=200,
             total_rebalances=50, total_transaction_costs=500.0,
+            extras={
+                "overlay_active_days": 500, "overlay_active_pct": 95.0,
+                "collar_active_days": 400, "vixy_active_days": 100,
+                "crypto_active_days": 350, "bond_duration_active_days": 200,
+            },
         )
         d = asdict(result)
         assert "sharpe_ratio" in d
-        assert "equity_curve" in d
+        assert "extras" in d
         assert d["sharpe_improvement"] == 0.05
 
 
@@ -289,11 +293,13 @@ class TestOutput:
             total_return=100.0, cagr=10.0, volatility=12.0,
             sharpe_ratio=0.9, max_drawdown=-25.0,
             baseline_sharpe=0.85, sharpe_improvement=0.05,
-            overlay_active_days=500, overlay_active_pct=95.0,
-            collar_active_days=400, vixy_active_days=100,
-            crypto_active_days=350, bond_duration_active_days=200,
             total_rebalances=50, total_transaction_costs=500.0,
-            return_2008=-10.0, return_2020=15.0, return_2022=-8.0,
+            crisis_returns={"2008": -10.0, "2020": 15.0, "2022": -8.0},
+            extras={
+                "overlay_active_days": 500, "overlay_active_pct": 95.0,
+                "collar_active_days": 400, "vixy_active_days": 100,
+                "crypto_active_days": 350, "bond_duration_active_days": 200,
+            },
         )
         # Should not raise
         backtester.print_results(result)
@@ -303,10 +309,12 @@ class TestOutput:
             total_return=100.0, cagr=10.0, volatility=12.0,
             sharpe_ratio=0.9, max_drawdown=-25.0,
             baseline_sharpe=0.85, sharpe_improvement=0.05,
-            overlay_active_days=500, overlay_active_pct=95.0,
-            collar_active_days=400, vixy_active_days=100,
-            crypto_active_days=350, bond_duration_active_days=200,
             total_rebalances=50, total_transaction_costs=500.0,
+            extras={
+                "overlay_active_days": 500, "overlay_active_pct": 95.0,
+                "collar_active_days": 400, "vixy_active_days": 100,
+                "crypto_active_days": 350, "bond_duration_active_days": 200,
+            },
         )
         out_file = str(tmp_path / "results.json")
         backtester.save_results(result, path=out_file)

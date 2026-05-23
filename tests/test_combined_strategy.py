@@ -31,9 +31,10 @@ sys.modules['src.agents.risk_agent_hmm'] = mock_hmm
 sys.modules['src.signals.fed_policy_overlay'] = mock_fed
 
 from src.backtest.combined_strategy import (
-    DailyPosition, BacktestResult, CombinedStrategyBacktester,
+    DailyPosition, CombinedStrategyBacktester,
     TRANSACTION_COST, REBALANCE_FREQ, MIN_HISTORY_DAYS,
 )
+from src.backtest.metrics import BacktestResult
 
 # Restore original modules to prevent polluting other test files
 for _k, _v in _orig_modules.items():
@@ -58,14 +59,19 @@ def _make_position(date='2026-01-01', value=100000.0):
 
 def _make_result():
     return BacktestResult(
-        strategy='combined', start_date='2006-01-01', end_date='2026-05-08',
-        trading_days=5000, rebalances=238,
-        start_value=100000, end_value=500000,
+        total_return=400.0,
         cagr=0.10, volatility=0.11, sharpe_ratio=0.79,
-        max_drawdown=-0.25, calmar_ratio=0.40,
-        baseline_cagr=0.09, baseline_sharpe=0.72,
-        excess_return=0.01, information_ratio=0.30,
-        tsmom_contribution=0.03, hmm_contribution=0.01, fed_contribution=0.005,
+        max_drawdown=-0.25, total_rebalances=238,
+        baseline_sharpe=0.72,
+        extras={
+            "strategy_name": 'combined', "start_date": '2006-01-01', "end_date": '2026-05-08',
+            "trading_days": 5000,
+            "start_value": 100000, "end_value": 500000,
+            "calmar_ratio": 0.40,
+            "baseline_cagr": 0.09,
+            "excess_return": 0.01, "information_ratio": 0.30,
+            "tsmom_contribution": 0.03, "hmm_contribution": 0.01, "fed_contribution": 0.005,
+        },
     )
 
 
@@ -161,32 +167,33 @@ class TestDailyPosition:
 class TestBacktestResult:
     def test_creation(self):
         r = _make_result()
-        assert r.strategy == 'combined'
+        assert r.extras['strategy_name'] == 'combined'
         assert r.sharpe_ratio == 0.79
 
     def test_to_dict(self):
+        from dataclasses import asdict
         r = _make_result()
-        d = r.to_dict()
-        assert d['strategy'] == 'combined'
+        d = asdict(r)
+        assert d['extras']['strategy_name'] == 'combined'
         assert d['cagr'] == 0.10
         assert d['sharpe_ratio'] == 0.79
         assert d['max_drawdown'] == -0.25
-        assert 'tsmom_contribution' in d
-        assert 'hmm_contribution' in d
-        assert 'fed_contribution' in d
+        assert 'tsmom_contribution' in d['extras']
+        assert 'hmm_contribution' in d['extras']
+        assert 'fed_contribution' in d['extras']
 
     def test_to_dict_crisis_fields_optional(self):
+        from dataclasses import asdict
         r = _make_result()
-        d = r.to_dict()
-        assert d['crisis_2008_return'] is None
+        d = asdict(r)
+        assert d['crisis_returns'] is None or d['crisis_returns'].get('2008') is None
 
     def test_to_dict_with_crisis(self):
+        from dataclasses import asdict
         r = _make_result()
-        r.crisis_2008_return = -0.12
-        r.crisis_2020_return = -0.07
-        r.crisis_2022_return = -0.13
-        d = r.to_dict()
-        assert d['crisis_2008_return'] == -0.12
+        r.crisis_returns = {"2008": -0.12, "2020": -0.07, "2022": -0.13}
+        d = asdict(r)
+        assert d['crisis_returns']['2008'] == -0.12
 
 
 # ---------------------------------------------------------------------------

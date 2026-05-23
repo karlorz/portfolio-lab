@@ -18,7 +18,7 @@ Usage:
 import logging
 import math
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from src.paths import DATA_DIR
@@ -27,58 +27,12 @@ from typing import Optional, Dict, List, Tuple
 import numpy as np
 
 from src.backtest.metrics import (
+    BacktestResult,
     save_results_json,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class BacktestResult:
-    """Complete backtest result."""
-    timestamp: str
-
-    # Parameters
-    start_date: str
-    end_date: str
-    trading_days: int
-
-    # Baseline 46/38/16
-    baseline_cagr: float
-    baseline_vol: float
-    baseline_sharpe: float
-    baseline_max_dd: float
-    baseline_crisis_2008: float
-    baseline_crisis_2020: float
-    baseline_crisis_2022: float
-
-    # Combined overlays
-    combined_cagr: float
-    combined_vol: float
-    combined_sharpe: float
-    combined_max_dd: float
-    combined_crisis_2008: float
-    combined_crisis_2020: float
-    combined_crisis_2022: float
-
-    # Improvements
-    sharpe_delta: float
-    dd_improvement: float    # Max DD reduction (positive = better)
-    cagr_delta: float
-
-    # Overlay activity
-    collar_active_pct: float
-    crypto_active_pct: float
-    bond_rotation_avg_tlt: float
-    avg_overlays_active: float
-
-    # Target validation
-    meets_sharpe_target: bool   # Sharpe >= 0.90
-    meets_dd_target: bool       # Max DD >= -22% (vs -26.2%)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 class CombinedOverlayBacktest:
@@ -423,42 +377,52 @@ class CombinedOverlayBacktest:
             b_max_dd = c_max_dd = 0
             c08b = c08c = c20b = c20c = c22b = c22c = 0
 
+        total_return = round((combined_value - 1.0) * 100, 2)
+
         return BacktestResult(
-            timestamp=datetime.now().isoformat(),
-            start_date=dates[180] if len(dates) > 180 else dates[0],
-            end_date=dates[-1] if dates else "N/A",
-            trading_days=len(daily_baseline),
-            baseline_cagr=round(b_cagr, 2),
-            baseline_vol=round(b_vol, 2),
-            baseline_sharpe=round(b_sharpe, 3),
-            baseline_max_dd=round(b_max_dd, 2),
-            baseline_crisis_2008=round(c08b, 2),
-            baseline_crisis_2020=round(c20b, 2),
-            baseline_crisis_2022=round(c22b, 2),
-            combined_cagr=round(c_cagr, 2),
-            combined_vol=round(c_vol, 2),
-            combined_sharpe=round(c_sharpe, 3),
-            combined_max_dd=round(c_max_dd, 2),
-            combined_crisis_2008=round(c08c, 2),
-            combined_crisis_2020=round(c20c, 2),
-            combined_crisis_2022=round(c22c, 2),
-            sharpe_delta=round(c_sharpe - b_sharpe, 3),
-            dd_improvement=round(b_max_dd - c_max_dd, 2),
-            cagr_delta=round(c_cagr - b_cagr, 2),
-            collar_active_pct=round(
-                sum(collar_weights) / len(collar_weights) * 100, 1
-            ) if collar_weights else 0,
-            crypto_active_pct=round(
-                sum(crypto_weights) / len(crypto_weights) * 100, 1
-            ) if crypto_weights else 0,
-            bond_rotation_avg_tlt=round(
-                np.mean(tlt_weights) * 100, 1
-            ) if tlt_weights else 0,
-            avg_overlays_active=round(
-                np.mean(active_counts), 1
-            ) if active_counts else 0,
-            meets_sharpe_target=c_sharpe >= 0.90,
-            meets_dd_target=c_max_dd >= -22.0,
+            total_return=total_return,
+            cagr=round(c_cagr, 2),
+            volatility=round(c_vol, 2),
+            sharpe_ratio=round(c_sharpe, 3),
+            max_drawdown=round(c_max_dd, 2),
+            extras={
+                "timestamp": datetime.now().isoformat(),
+                "start_date": dates[180] if len(dates) > 180 else dates[0],
+                "end_date": dates[-1] if dates else "N/A",
+                "trading_days": len(daily_baseline),
+                "baseline_cagr": round(b_cagr, 2),
+                "baseline_vol": round(b_vol, 2),
+                "baseline_sharpe": round(b_sharpe, 3),
+                "baseline_max_dd": round(b_max_dd, 2),
+                "combined_cagr": round(c_cagr, 2),
+                "combined_vol": round(c_vol, 2),
+                "combined_max_dd": round(c_max_dd, 2),
+                "sharpe_delta": round(c_sharpe - b_sharpe, 3),
+                "dd_improvement": round(b_max_dd - c_max_dd, 2),
+                "cagr_delta": round(c_cagr - b_cagr, 2),
+                "collar_active_pct": round(
+                    sum(collar_weights) / len(collar_weights) * 100, 1
+                ) if collar_weights else 0,
+                "crypto_active_pct": round(
+                    sum(crypto_weights) / len(crypto_weights) * 100, 1
+                ) if crypto_weights else 0,
+                "bond_rotation_avg_tlt": round(
+                    np.mean(tlt_weights) * 100, 1
+                ) if tlt_weights else 0,
+                "avg_overlays_active": round(
+                    np.mean(active_counts), 1
+                ) if active_counts else 0,
+                "meets_sharpe_target": c_sharpe >= 0.90,
+                "meets_dd_target": c_max_dd >= -22.0,
+            },
+            crisis_returns={
+                "2008_baseline": round(c08b, 2),
+                "2008_combined": round(c08c, 2),
+                "2020_baseline": round(c20b, 2),
+                "2020_combined": round(c20c, 2),
+                "2022_baseline": round(c22b, 2),
+                "2022_combined": round(c22c, 2),
+            },
         )
 
 
@@ -471,42 +435,45 @@ def run_combined_backtest() -> BacktestResult:
 def main():
     bt = CombinedOverlayBacktest()
     result = bt.run_backtest()
+    e = result.extras
 
     print("=" * 60)
     print("COMBINED OVERLAY BACKTEST v4.90")
     print("=" * 60)
-    print(f"Period: {result.start_date} → {result.end_date}")
-    print(f"Trading Days: {result.trading_days}")
+    print(f"Period: {e['start_date']} \u2192 {e['end_date']}")
+    print(f"Trading Days: {e['trading_days']}")
     print()
     print(f"{'Metric':<20} {'Baseline':>10} {'Combined':>10} {'Delta':>10}")
     print("-" * 50)
-    print(f"{'CAGR':<20} {result.baseline_cagr:>9.2f}% {result.combined_cagr:>9.2f}% {result.cagr_delta:>+9.2f}%")
-    print(f"{'Volatility':<20} {result.baseline_vol:>9.2f}% {result.combined_vol:>9.2f}%")
-    print(f"{'Sharpe':<20} {result.baseline_sharpe:>10.3f} {result.combined_sharpe:>10.3f} {result.sharpe_delta:>+10.3f}")
-    print(f"{'Max Drawdown':<20} {result.baseline_max_dd:>9.2f}% {result.combined_max_dd:>9.2f}% {result.dd_improvement:>+9.2f}pp")
+    print(f"{'CAGR':<20} {e['baseline_cagr']:>9.2f}% {e['combined_cagr']:>9.2f}% {e['cagr_delta']:>+9.2f}%")
+    print(f"{'Volatility':<20} {e['baseline_vol']:>9.2f}% {e['combined_vol']:>9.2f}%")
+    print(f"{'Sharpe':<20} {e['baseline_sharpe']:>10.3f} {result.sharpe_ratio:>10.3f} {e['sharpe_delta']:>+10.3f}")
+    print(f"{'Max Drawdown':<20} {e['baseline_max_dd']:>9.2f}% {e['combined_max_dd']:>9.2f}% {e['dd_improvement']:>+9.2f}pp")
     print()
     print("Crisis Returns:")
-    print(f"  {'2008':<8} {result.baseline_crisis_2008:>9.2f}% {result.combined_crisis_2008:>9.2f}%")
-    print(f"  {'2020':<8} {result.baseline_crisis_2020:>9.2f}% {result.combined_crisis_2020:>9.2f}%")
-    print(f"  {'2022':<8} {result.baseline_crisis_2022:>9.2f}% {result.combined_crisis_2022:>9.2f}%")
+    crisis = result.crisis_returns or {}
+    print(f"  {'2008':<8} {crisis.get('2008_baseline', 0):>9.2f}% {crisis.get('2008_combined', 0):>9.2f}%")
+    print(f"  {'2020':<8} {crisis.get('2020_baseline', 0):>9.2f}% {crisis.get('2020_combined', 0):>9.2f}%")
+    print(f"  {'2022':<8} {crisis.get('2022_baseline', 0):>9.2f}% {crisis.get('2022_combined', 0):>9.2f}%")
     print()
     print("Overlay Activity:")
-    print(f"  Collar active: {result.collar_active_pct:.0f}% of days")
-    print(f"  Crypto active: {result.crypto_active_pct:.0f}% of days")
-    print(f"  Avg TLT weight: {result.bond_rotation_avg_tlt:.0f}%")
-    print(f"  Avg overlays active: {result.avg_overlays_active:.1f}/4")
+    print(f"  Collar active: {e['collar_active_pct']:.0f}% of days")
+    print(f"  Crypto active: {e['crypto_active_pct']:.0f}% of days")
+    print(f"  Avg TLT weight: {e['bond_rotation_avg_tlt']:.0f}%")
+    print(f"  Avg overlays active: {e['avg_overlays_active']:.1f}/4")
     print()
     print("Targets:")
-    print(f"  Sharpe >= 0.90: {'YES' if result.meets_sharpe_target else 'NO'} "
-          f"({result.combined_sharpe:.3f})")
-    print(f"  Max DD >= -22%: {'YES' if result.meets_dd_target else 'NO'} "
-          f"({result.combined_max_dd:.1f}%)")
+    print(f"  Sharpe >= 0.90: {'YES' if e['meets_sharpe_target'] else 'NO'} "
+          f"({result.sharpe_ratio:.3f})")
+    print(f"  Max DD >= -22%: {'YES' if e['meets_dd_target'] else 'NO'} "
+          f"({e['combined_max_dd']:.1f}%)")
     print("=" * 60)
 
     # Save if requested
     if "--save" in sys.argv:
+        from dataclasses import asdict
         out_path = bt.data_dir / "backtest_results" / "combined_overlay.json"
-        save_results_json(result.to_dict(), output_path=str(out_path))
+        save_results_json(asdict(result), output_path=str(out_path))
         print(f"\nSaved to {out_path}")
 
 

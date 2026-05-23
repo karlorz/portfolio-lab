@@ -18,13 +18,13 @@ import pytest
 from src.backtest.cross_asset_regime_arb_backtest import (
     BacktestConfig,
     DailyReturn,
-    BacktestResult,
     RebalanceSignal,
     CrossAssetRegimeArbBacktester,
     ALLOCATION_SHIFTS,
     MAX_SIGNAL_STRENGTH,
     main,
 )
+from src.backtest.metrics import BacktestResult
 
 
 # ── BacktestConfig Tests ──────────────────────────────────────────────────
@@ -136,28 +136,28 @@ class TestBacktestResult:
             volatility=12.3,
             sharpe_ratio=0.85,
             max_drawdown=-15.4,
-            overlay_active_months=24,
             baseline_sharpe=0.79,
             sharpe_improvement=0.06,
-            return_2008=-12.0,
-            return_2020=3.0,
-            return_2022=None,
             total_rebalances=30,
             total_transaction_costs=45.0,
-            signal_frequency=0.5,
-            divergence_breakdown={"equity_rotation": 10, "no_divergence": 20},
-            equity_curve=[{"date": "2020-01-01", "baseline": 100000.0, "overlay": 101000.0}],
-            rebalance_signals=[{"date": "2020-01-31", "signal_value": 0.3}],
+            crisis_returns={"2008": -12.0, "2020": 3.0},
+            extras={
+                "overlay_active_months": 24,
+                "signal_frequency": 0.5,
+                "divergence_breakdown": {"equity_rotation": 10, "no_divergence": 20},
+                "equity_curve": [{"date": "2020-01-01", "baseline": 100000.0, "overlay": 101000.0}],
+                "rebalance_signals": [{"date": "2020-01-31", "signal_value": 0.3}],
+            },
         )
         assert result.total_return == 10.5
         assert result.sharpe_ratio == 0.85
-        assert result.overlay_active_months == 24
+        assert result.extras["overlay_active_months"] == 24
         assert result.baseline_sharpe == 0.79
         assert result.sharpe_improvement == 0.06
-        assert result.return_2008 == -12.0
-        assert result.return_2022 is None
-        assert result.signal_frequency == 0.5
-        assert result.divergence_breakdown["equity_rotation"] == 10
+        assert result.crisis_returns["2008"] == -12.0
+        assert result.crisis_returns.get("2022") is None
+        assert result.extras["signal_frequency"] == 0.5
+        assert result.extras["divergence_breakdown"]["equity_rotation"] == 10
 
     def test_json_serializable(self):
         """asdict(result) must be JSON-serializable."""
@@ -165,10 +165,13 @@ class TestBacktestResult:
 
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
-            max_drawdown=-10.0, overlay_active_months=5, baseline_sharpe=0.45,
-            sharpe_improvement=0.05, return_2008=-8.0, return_2020=2.0, return_2022=None,
-            total_rebalances=10, total_transaction_costs=5.0, signal_frequency=0.3,
-            divergence_breakdown={}, equity_curve=[], rebalance_signals=[],
+            max_drawdown=-10.0, baseline_sharpe=0.45,
+            sharpe_improvement=0.05, total_rebalances=10, total_transaction_costs=5.0,
+            crisis_returns={"2008": -8.0, "2020": 2.0},
+            extras={
+                "overlay_active_months": 5, "signal_frequency": 0.3,
+                "divergence_breakdown": {}, "equity_curve": [], "rebalance_signals": [],
+            },
         )
         data = asdict(result)
         json.dumps(data)  # Should not raise
@@ -177,12 +180,14 @@ class TestBacktestResult:
         """Empty divergence breakdown should not error."""
         result = BacktestResult(
             total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
-            max_drawdown=0.0, overlay_active_months=0, baseline_sharpe=0.0,
-            sharpe_improvement=0.0, return_2008=None, return_2020=None, return_2022=None,
-            total_rebalances=0, total_transaction_costs=0.0, signal_frequency=0.0,
-            divergence_breakdown={}, equity_curve=[], rebalance_signals=[],
+            max_drawdown=0.0, baseline_sharpe=0.0,
+            sharpe_improvement=0.0, total_rebalances=0, total_transaction_costs=0.0,
+            extras={
+                "overlay_active_months": 0, "signal_frequency": 0.0,
+                "divergence_breakdown": {}, "equity_curve": [], "rebalance_signals": [],
+            },
         )
-        assert result.divergence_breakdown == {}
+        assert result.extras["divergence_breakdown"] == {}
 
 
 # ── CrossAssetRegimeArbBacktester Tests ────────────────────────────────────
@@ -476,17 +481,17 @@ class TestCrossAssetRegimeArbBacktester:
         assert isinstance(result.max_drawdown, float)
         assert isinstance(result.baseline_sharpe, float)
         assert isinstance(result.sharpe_improvement, float)
-        assert isinstance(result.overlay_active_months, int)
+        assert isinstance(result.extras["overlay_active_months"], int)
         assert isinstance(result.total_rebalances, int)
-        assert isinstance(result.signal_frequency, float)
-        assert isinstance(result.divergence_breakdown, dict)
-        assert isinstance(result.equity_curve, list)
+        assert isinstance(result.extras["signal_frequency"], float)
+        assert isinstance(result.extras["divergence_breakdown"], dict)
+        assert isinstance(result.extras["equity_curve"], list)
 
     def test_run_backtest_rebalance_signals(self, bt_with_data):
         """Rebalance signals list should contain dict entries with keys."""
         result = bt_with_data.run_backtest()
-        if result.rebalance_signals:
-            entry = result.rebalance_signals[0]
+        if result.extras.get("rebalance_signals"):
+            entry = result.extras["rebalance_signals"][0]
             assert "date" in entry
             assert "signal_value" in entry
             assert "pattern" in entry
@@ -543,13 +548,13 @@ class TestCrossAssetRegimeArbBacktester:
         """Divergence breakdown should have at least one entry type."""
         result = bt_with_data.run_backtest()
         # With random data, some divergence patterns will be detected
-        assert len(result.divergence_breakdown) > 0
+        assert len(result.extras["divergence_breakdown"]) > 0
 
     def test_run_backtest_equity_curve_sampled(self, bt_with_data):
         """Equity curve entries should have date/baseline/overlay keys."""
         result = bt_with_data.run_backtest()
-        if result.equity_curve:
-            entry = result.equity_curve[0]
+        if result.extras.get("equity_curve"):
+            entry = result.extras["equity_curve"][0]
             assert "date" in entry
             assert "baseline" in entry
             assert "overlay" in entry
@@ -606,11 +611,14 @@ class TestCrossAssetRegimeArbBacktester:
         """print_report should produce output without errors."""
         result = BacktestResult(
             total_return=10.5, cagr=8.2, volatility=12.3, sharpe_ratio=0.85,
-            max_drawdown=-15.4, overlay_active_months=24, baseline_sharpe=0.79,
-            sharpe_improvement=0.06, return_2008=-12.0, return_2020=3.0,
-            return_2022=None, total_rebalances=30, total_transaction_costs=45.0,
-            signal_frequency=0.5, divergence_breakdown={"equity_rotation": 10},
-            equity_curve=[], rebalance_signals=[],
+            max_drawdown=-15.4, baseline_sharpe=0.79,
+            sharpe_improvement=0.06, total_rebalances=30, total_transaction_costs=45.0,
+            crisis_returns={"2008": -12.0, "2020": 3.0},
+            extras={
+                "overlay_active_months": 24, "signal_frequency": 0.5,
+                "divergence_breakdown": {"equity_rotation": 10},
+                "equity_curve": [], "rebalance_signals": [],
+            },
         )
         bt = CrossAssetRegimeArbBacktester()
         bt.print_report(result)
@@ -622,11 +630,12 @@ class TestCrossAssetRegimeArbBacktester:
         """print_report handles None crisis returns gracefully."""
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
-            max_drawdown=-10.0, overlay_active_months=0, baseline_sharpe=0.45,
-            sharpe_improvement=0.05, return_2008=None, return_2020=None,
-            return_2022=None, total_rebalances=0, total_transaction_costs=0.0,
-            signal_frequency=0.0, divergence_breakdown={}, equity_curve=[],
-            rebalance_signals=[],
+            max_drawdown=-10.0, baseline_sharpe=0.45,
+            sharpe_improvement=0.05, total_rebalances=0, total_transaction_costs=0.0,
+            extras={
+                "overlay_active_months": 0, "signal_frequency": 0.0,
+                "divergence_breakdown": {}, "equity_curve": [], "rebalance_signals": [],
+            },
         )
         bt = CrossAssetRegimeArbBacktester()
         bt.print_report(result)
@@ -637,11 +646,14 @@ class TestCrossAssetRegimeArbBacktester:
         """save_results should create a valid JSON file."""
         result = BacktestResult(
             total_return=10.5, cagr=8.2, volatility=12.3, sharpe_ratio=0.85,
-            max_drawdown=-15.4, overlay_active_months=24, baseline_sharpe=0.79,
-            sharpe_improvement=0.06, return_2008=-12.0, return_2020=3.0,
-            return_2022=None, total_rebalances=30, total_transaction_costs=45.0,
-            signal_frequency=0.5, divergence_breakdown={"equity_rotation": 10},
-            equity_curve=[], rebalance_signals=[],
+            max_drawdown=-15.4, baseline_sharpe=0.79,
+            sharpe_improvement=0.06, total_rebalances=30, total_transaction_costs=45.0,
+            crisis_returns={"2008": -12.0, "2020": 3.0},
+            extras={
+                "overlay_active_months": 24, "signal_frequency": 0.5,
+                "divergence_breakdown": {"equity_rotation": 10},
+                "equity_curve": [], "rebalance_signals": [],
+            },
         )
         bt = CrossAssetRegimeArbBacktester()
 
@@ -655,9 +667,10 @@ class TestCrossAssetRegimeArbBacktester:
             assert "total_return" in data
             assert "cagr" in data
             assert "sharpe_ratio" in data
-            assert "overlay_active_months" in data
-            assert "divergence_breakdown" in data
-            assert "rebalance_signals" in data
+            assert "extras" in data
+            assert "overlay_active_months" in data["extras"]
+            assert "divergence_breakdown" in data["extras"]
+            assert "rebalance_signals" in data["extras"]
         finally:
             Path(output_path).unlink()
 
@@ -743,7 +756,7 @@ class TestEdgeCases:
             bt.data.append(DailyReturn(date=day, spy_return=spy_r, gld_return=gld_r, tlt_return=tlt_r))
         result = bt.run_backtest()
         if result:
-            total_counts = sum(result.divergence_breakdown.values())
+            total_counts = sum(result.extras["divergence_breakdown"].values())
             assert total_counts > 0
 
 

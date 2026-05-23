@@ -39,6 +39,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 from src.backtest.metrics import (
+    BacktestResult,
     compute_metrics,
     save_results_json,
 )
@@ -88,72 +89,6 @@ class DailyPosition:
     fed_regime: Optional[str] = None
     rebalance_executed: bool = False
     turnover: float = 0.0
-
-
-@dataclass
-class BacktestResult:
-    """Complete backtest results."""
-    strategy: str
-    start_date: str
-    end_date: str
-    trading_days: int
-    rebalances: int
-
-    # Performance metrics
-    start_value: float
-    end_value: float
-    cagr: float
-    volatility: float
-    sharpe_ratio: float
-    max_drawdown: float
-    calmar_ratio: float
-
-    # Comparison to baseline
-    baseline_cagr: float
-    baseline_sharpe: float
-    excess_return: float  # Annualized
-    information_ratio: float
-
-    # Attribution
-    tsmom_contribution: float
-    hmm_contribution: float
-    fed_contribution: float
-
-    # Crisis performance
-    crisis_2008_return: Optional[float] = None
-    crisis_2020_return: Optional[float] = None
-    crisis_2022_return: Optional[float] = None
-
-    # Path
-    daily_values: List[float] = None
-    daily_returns: List[float] = None
-    positions: List[DailyPosition] = None
-
-    def to_dict(self) -> dict:
-        return {
-            'strategy': self.strategy,
-            'start_date': self.start_date,
-            'end_date': self.end_date,
-            'trading_days': self.trading_days,
-            'rebalances': self.rebalances,
-            'start_value': self.start_value,
-            'end_value': self.end_value,
-            'cagr': round(self.cagr, 4),
-            'volatility': round(self.volatility, 4),
-            'sharpe_ratio': round(self.sharpe_ratio, 4),
-            'max_drawdown': round(self.max_drawdown, 4),
-            'calmar_ratio': round(self.calmar_ratio, 4),
-            'baseline_cagr': round(self.baseline_cagr, 4),
-            'baseline_sharpe': round(self.baseline_sharpe, 4),
-            'excess_return': round(self.excess_return, 4),
-            'information_ratio': round(self.information_ratio, 4),
-            'tsmom_contribution': round(self.tsmom_contribution, 4),
-            'hmm_contribution': round(self.hmm_contribution, 4),
-            'fed_contribution': round(self.fed_contribution, 4),
-            'crisis_2008_return': self.crisis_2008_return,
-            'crisis_2020_return': self.crisis_2020_return,
-            'crisis_2022_return': self.crisis_2022_return,
-        }
 
 
 class CombinedStrategyBacktester:
@@ -601,32 +536,42 @@ class CombinedStrategyBacktester:
         tracking_error = excess_returns.std() * np.sqrt(252)
         information_ratio = (cagr - baseline_result['cagr']) / tracking_error if tracking_error > 0 else 0
 
+        total_return = (
+            (portfolio_value / initial_value - 1) * 100
+            if initial_value else 0.0
+        )
+
         return BacktestResult(
-            strategy="Combined Signal v2.55 (TSMOM + HMM + Fed)",
-            start_date=self.dates[start_idx],
-            end_date=self.dates[end_idx],
-            trading_days=days,
-            rebalances=rebalances,
-            start_value=initial_value,
-            end_value=portfolio_value,
+            total_return=total_return,
             cagr=cagr,
             volatility=volatility,
             sharpe_ratio=sharpe,
             max_drawdown=max_dd,
-            calmar_ratio=calmar,
-            baseline_cagr=baseline_result['cagr'],
+            total_rebalances=rebalances,
             baseline_sharpe=baseline_result['sharpe'],
-            excess_return=cagr - baseline_result['cagr'],
-            information_ratio=information_ratio,
-            tsmom_contribution=tsmom_contrib,
-            hmm_contribution=hmm_contrib,
-            fed_contribution=fed_contrib,
-            crisis_2008_return=crisis_2008,
-            crisis_2020_return=crisis_2020,
-            crisis_2022_return=crisis_2022,
-            daily_values=daily_values,
-            daily_returns=daily_returns,
-            positions=positions
+            crisis_returns={
+                "2008": crisis_2008,
+                "2020": crisis_2020,
+                "2022": crisis_2022,
+            },
+            extras={
+                "strategy_name": "Combined Signal v2.55 (TSMOM + HMM + Fed)",
+                "start_date": self.dates[start_idx],
+                "end_date": self.dates[end_idx],
+                "trading_days": days,
+                "start_value": initial_value,
+                "end_value": portfolio_value,
+                "calmar_ratio": calmar,
+                "baseline_cagr": baseline_result['cagr'],
+                "excess_return": cagr - baseline_result['cagr'],
+                "information_ratio": information_ratio,
+                "tsmom_contribution": tsmom_contrib,
+                "hmm_contribution": hmm_contrib,
+                "fed_contribution": fed_contrib,
+                "daily_values": daily_values,
+                "daily_returns": daily_returns,
+                "positions": positions,
+            },
         )
 
     def _run_baseline(
@@ -721,40 +666,43 @@ def main():
         print("\n" + "=" * 60)
         print("BACKTEST RESULTS")
         print("=" * 60)
-        print(f"Strategy: {result.strategy}")
-        print(f"Period: {result.start_date} to {result.end_date}")
-        print(f"Trading Days: {result.trading_days}")
-        print(f"Rebalances: {result.rebalances}")
+        e = result.extras
+        print(f"Strategy: {e['strategy_name']}")
+        print(f"Period: {e['start_date']} to {e['end_date']}")
+        print(f"Trading Days: {e['trading_days']}")
+        print(f"Rebalances: {result.total_rebalances}")
         print()
         print("PERFORMANCE METRICS:")
         print(f"  CAGR: {result.cagr:.2%}")
         print(f"  Volatility: {result.volatility:.2%}")
         print(f"  Sharpe Ratio: {result.sharpe_ratio:.4f}")
         print(f"  Max Drawdown: {result.max_drawdown:.2%}")
-        print(f"  Calmar Ratio: {result.calmar_ratio:.4f}")
+        print(f"  Calmar Ratio: {e['calmar_ratio']:.4f}")
         print()
         print("BASELINE COMPARISON (46/38/16 Buy & Hold):")
-        print(f"  Baseline CAGR: {result.baseline_cagr:.2%}")
+        print(f"  Baseline CAGR: {e['baseline_cagr']:.2%}")
         print(f"  Baseline Sharpe: {result.baseline_sharpe:.4f}")
-        print(f"  Excess Return: {result.excess_return:.2%}")
-        print(f"  Information Ratio: {result.information_ratio:.4f}")
+        print(f"  Excess Return: {e['excess_return']:.2%}")
+        print(f"  Information Ratio: {e['information_ratio']:.4f}")
         print()
         print("CRISIS PERFORMANCE:")
-        if result.crisis_2008_return:
-            print(f"  2008: {result.crisis_2008_return:.2%}")
-        if result.crisis_2020_return:
-            print(f"  2020: {result.crisis_2020_return:.2%}")
-        if result.crisis_2022_return:
-            print(f"  2022: {result.crisis_2022_return:.2%}")
+        crisis = result.crisis_returns or {}
+        if crisis.get("2008"):
+            print(f"  2008: {crisis['2008']:.2%}")
+        if crisis.get("2020"):
+            print(f"  2020: {crisis['2020']:.2%}")
+        if crisis.get("2022"):
+            print(f"  2022: {crisis['2022']:.2%}")
         print("=" * 60)
 
         # Save results
+        from dataclasses import asdict
         if args.output:
-            save_results_json(result.to_dict(), output_path=args.output)
+            save_results_json(asdict(result), output_path=args.output)
             print(f"\nResults saved to {args.output}")
 
         # Also save to results path
-        save_results_json(result.to_dict(), output_path=str(RESULTS_PATH))
+        save_results_json(asdict(result), output_path=str(RESULTS_PATH))
         print(f"Results saved to {RESULTS_PATH}")
 
     elif args.command == 'summary':

@@ -10,36 +10,39 @@ from pathlib import Path
 
 from src.backtest.combined_overlay_backtest import (
     CombinedOverlayBacktest,
-    BacktestResult,
     run_combined_backtest,
 )
+from src.backtest.metrics import BacktestResult
 
 
 class TestBacktestResult:
     """Test backtest result dataclass."""
 
     def test_serializable(self):
+        from dataclasses import asdict
         result = BacktestResult(
-            timestamp="2026-05-16T00:00:00",
-            start_date="2006-01-03", end_date="2026-05-15",
-            trading_days=5000,
-            baseline_cagr=10.6, baseline_vol=11.1, baseline_sharpe=0.79,
-            baseline_max_dd=-26.2,
-            baseline_crisis_2008=-12.3, baseline_crisis_2020=-7.1,
-            baseline_crisis_2022=-13.0,
-            combined_cagr=12.0, combined_vol=11.0, combined_sharpe=0.91,
-            combined_max_dd=-21.0,
-            combined_crisis_2008=-10.0, combined_crisis_2020=-5.0,
-            combined_crisis_2022=-10.0,
-            sharpe_delta=0.12, dd_improvement=5.2, cagr_delta=1.4,
-            collar_active_pct=65.0, crypto_active_pct=40.0,
-            bond_rotation_avg_tlt=45.0, avg_overlays_active=2.5,
-            meets_sharpe_target=True, meets_dd_target=True,
+            total_return=0.0,
+            cagr=12.0,
+            volatility=11.0,
+            sharpe_ratio=0.91,
+            max_drawdown=-21.0,
+            extras={
+                "timestamp": "2026-05-16T00:00:00",
+                "start_date": "2006-01-03", "end_date": "2026-05-15",
+                "trading_days": 5000,
+                "baseline_cagr": 10.6, "baseline_vol": 11.1, "baseline_sharpe": 0.79,
+                "baseline_max_dd": -26.2,
+                "combined_cagr": 12.0, "combined_vol": 11.0, "combined_max_dd": -21.0,
+                "sharpe_delta": 0.12, "dd_improvement": 5.2, "cagr_delta": 1.4,
+                "collar_active_pct": 65.0, "crypto_active_pct": 40.0,
+                "bond_rotation_avg_tlt": 45.0, "avg_overlays_active": 2.5,
+                "meets_sharpe_target": True, "meets_dd_target": True,
+            },
         )
-        d = result.to_dict()
+        d = asdict(result)
         assert isinstance(d, dict)
-        assert d["combined_sharpe"] == 0.91
-        assert d["meets_sharpe_target"]
+        assert d["sharpe_ratio"] == 0.91
+        assert d["extras"]["meets_sharpe_target"]
 
 
 class TestCombinedOverlayBacktest:
@@ -104,30 +107,31 @@ class TestCombinedOverlayBacktest:
     def test_run_backtest(self, bt):
         result = bt.run_backtest()
         assert isinstance(result, BacktestResult)
-        assert result.trading_days > 0
-        assert result.baseline_sharpe != 0
-        assert result.combined_sharpe != 0
+        assert result.extras["trading_days"] > 0
+        assert result.extras["baseline_sharpe"] != 0
+        assert result.sharpe_ratio != 0
 
     def test_run_backtest_has_crisis_data(self, bt):
         result = bt.run_backtest()
+        crisis = result.crisis_returns or {}
         # At least one crisis period should have data
         any_crisis = (
-            result.baseline_crisis_2008 != 0 or
-            result.baseline_crisis_2020 != 0 or
-            result.baseline_crisis_2022 != 0
+            crisis.get("2008_baseline", 0) != 0 or
+            crisis.get("2020_baseline", 0) != 0 or
+            crisis.get("2022_baseline", 0) != 0
         )
         assert any_crisis, "At least one crisis period should be captured"
 
     def test_sharpe_delta_reasonable(self, bt):
         result = bt.run_backtest()
         # Combined should be better or within noise
-        assert result.sharpe_delta > -0.05
+        assert result.extras["sharpe_delta"] > -0.05
 
     def test_overlay_activity_tracked(self, bt):
         result = bt.run_backtest()
-        assert 0 <= result.collar_active_pct <= 100
-        assert 0 <= result.crypto_active_pct <= 100
-        assert 0 <= result.bond_rotation_avg_tlt <= 100
+        assert 0 <= result.extras["collar_active_pct"] <= 100
+        assert 0 <= result.extras["crypto_active_pct"] <= 100
+        assert 0 <= result.extras["bond_rotation_avg_tlt"] <= 100
 
     def test_convenience_function(self):
         result = run_combined_backtest()

@@ -17,10 +17,10 @@ import pytest
 from src.backtest.multi_speed_momentum_backtest import (
     BacktestConfig,
     DailyReturn,
-    BacktestResult,
     MultiSpeedMomentumBacktester,
     main,
 )
+from src.backtest.metrics import BacktestResult
 
 
 # ── BacktestConfig Tests ──────────────────────────────────────────────────
@@ -99,18 +99,18 @@ class TestBacktestResult:
             volatility=12.3,
             sharpe_ratio=0.85,
             max_drawdown=-15.4,
-            overlay_active_rebalances=120,
             baseline_sharpe=0.79,
             sharpe_improvement=0.06,
             total_rebalances=50,
             avg_turnover=0.15,
             total_transaction_costs=45.50,
+            extras={"overlay_active_rebalances": 120},
         )
         assert result.total_return == 10.5
         assert result.sharpe_ratio == 0.85
         assert result.baseline_sharpe == 0.79
         assert result.sharpe_improvement == 0.06
-        assert result.overlay_active_rebalances == 120
+        assert result.extras["overlay_active_rebalances"] == 120
         assert result.total_rebalances == 50
         assert result.avg_turnover == 0.15
         assert result.total_transaction_costs == 45.50
@@ -119,23 +119,25 @@ class TestBacktestResult:
         """Crisis return fields should be None by default."""
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
-            max_drawdown=-10.0, overlay_active_rebalances=0, baseline_sharpe=0.45,
+            max_drawdown=-10.0, baseline_sharpe=0.45,
             sharpe_improvement=0.05, total_rebalances=10, avg_turnover=0.0,
             total_transaction_costs=0.0,
+            extras={"overlay_active_rebalances": 0},
         )
-        assert result.return_2008 is None
-        assert result.return_2020 is None
-        assert result.return_2022 is None
+        assert result.crisis_returns is None or result.crisis_returns.get("2008") is None
+        assert result.crisis_returns is None or result.crisis_returns.get("2020") is None
+        assert result.crisis_returns is None or result.crisis_returns.get("2022") is None
 
     def test_equity_curve_default_none(self):
         """Equity curve should be None by default."""
         result = BacktestResult(
             total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
-            max_drawdown=0.0, overlay_active_rebalances=0, baseline_sharpe=0.0,
+            max_drawdown=0.0, baseline_sharpe=0.0,
             sharpe_improvement=0.0, total_rebalances=0, avg_turnover=0.0,
             total_transaction_costs=0.0,
+            extras={"overlay_active_rebalances": 0},
         )
-        assert result.equity_curve is None
+        assert result.extras.get("equity_curve") is None
 
     def test_json_serializable(self):
         """asdict(result) must be JSON-serializable."""
@@ -143,10 +145,14 @@ class TestBacktestResult:
 
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
-            max_drawdown=-10.0, overlay_active_rebalances=50, baseline_sharpe=0.45,
+            max_drawdown=-10.0, baseline_sharpe=0.45,
             sharpe_improvement=0.05, total_rebalances=10, avg_turnover=0.1,
-            total_transaction_costs=5.0, return_2008=-12.0, return_2020=3.0,
-            equity_curve=[{"date": "2020-01-01", "baseline": 100000.0, "overlay": 101000.0}],
+            total_transaction_costs=5.0,
+            extras={
+                "overlay_active_rebalances": 50,
+                "return_2008": -12.0, "return_2020": 3.0,
+                "equity_curve": [{"date": "2020-01-01", "baseline": 100000.0, "overlay": 101000.0}],
+            },
         )
         data = asdict(result)
         json.dumps(data)  # Should not raise
@@ -155,9 +161,10 @@ class TestBacktestResult:
         """Very high and very low return values should round-trip."""
         result = BacktestResult(
             total_return=999.99, cagr=50.0, volatility=30.0, sharpe_ratio=1.5,
-            max_drawdown=-99.99, overlay_active_rebalances=0, baseline_sharpe=0.8,
+            max_drawdown=-99.99, baseline_sharpe=0.8,
             sharpe_improvement=0.7, total_rebalances=0, avg_turnover=0.0,
             total_transaction_costs=0.0,
+            extras={"overlay_active_rebalances": 0},
         )
         assert result.total_return == 999.99
         assert result.max_drawdown == -99.99
@@ -479,8 +486,8 @@ class TestMultiSpeedMomentumBacktester:
     def test_run_backtest_equity_curve_sampled(self, bt_with_data):
         """Equity curve should be populated with dict entries."""
         result = bt_with_data.run_backtest()
-        if result.equity_curve:
-            entry = result.equity_curve[0]
+        if result.extras.get("equity_curve"):
+            entry = result.extras["equity_curve"][0]
             assert "date" in entry
             assert "baseline" in entry
             assert "overlay" in entry
@@ -517,9 +524,11 @@ class TestMultiSpeedMomentumBacktester:
         """print_report should produce output without errors."""
         result = BacktestResult(
             total_return=10.5, cagr=8.2, volatility=12.3, sharpe_ratio=0.85,
-            max_drawdown=-15.4, overlay_active_rebalances=50, baseline_sharpe=0.79,
+            max_drawdown=-15.4, baseline_sharpe=0.79,
             sharpe_improvement=0.06, total_rebalances=30, avg_turnover=0.1,
-            total_transaction_costs=25.0, return_2008=-12.0, return_2020=3.0,
+            total_transaction_costs=25.0,
+            crisis_returns={"2008": -12.0, "2020": 3.0},
+            extras={"overlay_active_rebalances": 50},
         )
         bt = MultiSpeedMomentumBacktester()
         bt.print_report(result)
@@ -532,9 +541,10 @@ class TestMultiSpeedMomentumBacktester:
         """print_report handles None crisis returns gracefully."""
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
-            max_drawdown=-10.0, overlay_active_rebalances=0, baseline_sharpe=0.45,
+            max_drawdown=-10.0, baseline_sharpe=0.45,
             sharpe_improvement=0.05, total_rebalances=0, avg_turnover=0.0,
             total_transaction_costs=0.0,
+            extras={"overlay_active_rebalances": 0},
         )
         bt = MultiSpeedMomentumBacktester()
         bt.print_report(result)
@@ -545,9 +555,10 @@ class TestMultiSpeedMomentumBacktester:
         """save_results should create a valid JSON file."""
         result = BacktestResult(
             total_return=10.5, cagr=8.2, volatility=12.3, sharpe_ratio=0.85,
-            max_drawdown=-15.4, overlay_active_rebalances=50, baseline_sharpe=0.79,
+            max_drawdown=-15.4, baseline_sharpe=0.79,
             sharpe_improvement=0.06, total_rebalances=30, avg_turnover=0.1,
-            total_transaction_costs=25.0, return_2008=-12.0, return_2020=3.0,
+            total_transaction_costs=25.0,
+            extras={"overlay_active_rebalances": 50, "return_2008": -12.0, "return_2020": 3.0},
         )
         bt = MultiSpeedMomentumBacktester()
 
@@ -562,7 +573,7 @@ class TestMultiSpeedMomentumBacktester:
             assert "cagr" in data
             assert "sharpe_ratio" in data
             assert "max_drawdown" in data
-            assert "overlay_active_rebalances" in data
+            assert "overlay_active_rebalances" in data["extras"]
             assert "total_rebalances" in data
         finally:
             Path(output_path).unlink()

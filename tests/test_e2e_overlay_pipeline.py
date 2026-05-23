@@ -140,9 +140,9 @@ class TestBacktestPipeline:
 
         bt = CombinedOverlayBacktest()
         result = bt.run_backtest()
-        assert result.trading_days > 0
+        assert result.extras["trading_days"] > 0
         assert result.baseline_sharpe != 0
-        assert result.sharpe_delta is not None
+        assert result.extras["sharpe_delta"] is not None
 
     def test_dbc_sweep_runs(self):
         """v4.90: DBC weight sweep."""

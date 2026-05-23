@@ -17,15 +17,16 @@ Dynamic Allocation: Regime-based shifts in TLT/IEF/SHY weights
 
 import json
 import sqlite3
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict
+from typing import Any, Dict
 import logging
 
 import pandas as pd
 import numpy as np
 
 from src.backtest.metrics import (
+    BacktestResult,
     save_results_json,
 )
 from src.paths import DATA_DIR, MARKET_DB
@@ -71,46 +72,6 @@ EXPENSE_RATIOS = {
 
 # Transaction costs (bps)
 TRANSACTION_COST = 0.0010  # 10 bps per trade
-
-
-@dataclass
-class BacktestResult:
-    """Results from duration backtest comparison."""
-    # Static metrics
-    static_cagr: float
-    static_volatility: float
-    static_sharpe: float
-    static_max_dd: float
-
-    # Dynamic metrics
-    dynamic_cagr: float
-    dynamic_volatility: float
-    dynamic_sharpe: float
-    dynamic_max_dd: float
-
-    # Comparison
-    sharpe_delta: float
-    cagr_delta: float
-    max_dd_delta: float
-
-    # Crisis performance
-    crisis_2008_static: float
-    crisis_2008_dynamic: float
-    crisis_2020_static: float
-    crisis_2020_dynamic: float
-    crisis_2022_static: float
-    crisis_2022_dynamic: float
-
-    # Regime statistics
-    regime_days: Dict[str, int]
-    regime_transitions: int
-    rebalancing_costs: float
-
-    # Metadata
-    start_date: str
-    end_date: str
-    total_days: int
-    timestamp: str
 
 
 def load_price_data() -> pd.DataFrame:
@@ -485,40 +446,55 @@ def run_backtest(
     crisis_2022_dynamic = merged[merged["date"].dt.year == 2022]["dynamic_portfolio_ret"].sum()
 
     return BacktestResult(
-        static_cagr=static_cagr,
-        static_volatility=static_vol,
-        static_sharpe=static_sharpe,
-        static_max_dd=static_max_dd,
-        dynamic_cagr=dynamic_cagr,
-        dynamic_volatility=dynamic_vol,
-        dynamic_sharpe=dynamic_sharpe,
-        dynamic_max_dd=dynamic_max_dd,
-        sharpe_delta=dynamic_sharpe - static_sharpe,
-        cagr_delta=dynamic_cagr - static_cagr,
-        max_dd_delta=dynamic_max_dd - static_max_dd,
-        crisis_2008_static=crisis_2008_static,
-        crisis_2008_dynamic=crisis_2008_dynamic,
-        crisis_2020_static=crisis_2020_static,
-        crisis_2020_dynamic=crisis_2020_dynamic,
-        crisis_2022_static=crisis_2022_static,
-        crisis_2022_dynamic=crisis_2022_dynamic,
-        regime_days=regime_days_count,
-        regime_transitions=regime_transitions,
-        rebalancing_costs=rebalance_costs,
-        start_date=start_date,
-        end_date=end_date,
-        total_days=len(merged),
-        timestamp=datetime.now().isoformat()
+        total_return=((1 + dynamic_returns).prod() - 1) * 100,
+        cagr=dynamic_cagr * 100,
+        volatility=dynamic_vol * 100,
+        sharpe_ratio=dynamic_sharpe,
+        max_drawdown=dynamic_max_dd * 100,
+        total_rebalances=regime_transitions,
+        total_transaction_costs=rebalance_costs,
+        crisis_returns={
+            "2008": crisis_2008_dynamic * 100,
+            "2020": crisis_2020_dynamic * 100,
+            "2022": crisis_2022_dynamic * 100,
+        },
+        extras={
+            "static_cagr": static_cagr,
+            "static_volatility": static_vol,
+            "static_sharpe": static_sharpe,
+            "static_max_dd": static_max_dd,
+            "dynamic_cagr": dynamic_cagr,
+            "dynamic_volatility": dynamic_vol,
+            "dynamic_sharpe": dynamic_sharpe,
+            "dynamic_max_dd": dynamic_max_dd,
+            "sharpe_delta": dynamic_sharpe - static_sharpe,
+            "cagr_delta": dynamic_cagr - static_cagr,
+            "max_dd_delta": dynamic_max_dd - static_max_dd,
+            "crisis_2008_static": crisis_2008_static,
+            "crisis_2008_dynamic": crisis_2008_dynamic,
+            "crisis_2020_static": crisis_2020_static,
+            "crisis_2020_dynamic": crisis_2020_dynamic,
+            "crisis_2022_static": crisis_2022_static,
+            "crisis_2022_dynamic": crisis_2022_dynamic,
+            "regime_days": regime_days_count,
+            "regime_transitions": regime_transitions,
+            "rebalancing_costs": rebalance_costs,
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_days": len(merged),
+            "timestamp": datetime.now().isoformat(),
+        },
     )
 
 
 def print_results(result: BacktestResult):
     """Print backtest results in formatted table."""
+    e = result.extras
     print("\n" + "="*70)
     print("DURATION-YIELD CURVE REGIME BACKTEST RESULTS")
     print("="*70)
-    print(f"Period: {result.start_date} to {result.end_date}")
-    print(f"Total Days: {result.total_days:,}")
+    print(f"Period: {e['start_date']} to {e['end_date']}")
+    print(f"Total Days: {e['total_days']:,}")
     print()
 
     print("-"*70)
@@ -526,10 +502,10 @@ def print_results(result: BacktestResult):
     print("-"*70)
     print(f"{'Metric':<25} {'Static':<15} {'Dynamic':<15} {'Delta':<15}")
     print("-"*70)
-    print(f"{'CAGR':<25} {result.static_cagr*100:>14.2f}% {result.dynamic_cagr*100:>14.2f}% {result.cagr_delta*100:>+14.2f}%")
-    print(f"{'Volatility':<25} {result.static_volatility*100:>14.2f}% {result.dynamic_volatility*100:>14.2f}% {(result.dynamic_volatility-result.static_volatility)*100:>+14.2f}%")
-    print(f"{'Sharpe Ratio':<25} {result.static_sharpe:>14.3f} {result.dynamic_sharpe:>14.3f} {result.sharpe_delta:>+14.3f}")
-    print(f"{'Max Drawdown':<25} {result.static_max_dd*100:>14.2f}% {result.dynamic_max_dd*100:>14.2f}% {result.max_dd_delta*100:>+14.2f}%")
+    print(f"{'CAGR':<25} {e['static_cagr']*100:>14.2f}% {e['dynamic_cagr']*100:>14.2f}% {e['cagr_delta']*100:>+14.2f}%")
+    print(f"{'Volatility':<25} {e['static_volatility']*100:>14.2f}% {e['dynamic_volatility']*100:>14.2f}% {(e['dynamic_volatility']-e['static_volatility'])*100:>+14.2f}%")
+    print(f"{'Sharpe Ratio':<25} {e['static_sharpe']:>14.3f} {e['dynamic_sharpe']:>14.3f} {e['sharpe_delta']:>+14.3f}")
+    print(f"{'Max Drawdown':<25} {e['static_max_dd']*100:>14.2f}% {e['dynamic_max_dd']*100:>14.2f}% {e['max_dd_delta']*100:>+14.2f}%")
     print()
 
     print("-"*70)
@@ -537,19 +513,19 @@ def print_results(result: BacktestResult):
     print("-"*70)
     print(f"{'Crisis':<25} {'Static':<15} {'Dynamic':<15} {'Delta':<15}")
     print("-"*70)
-    print(f"{'2008 Financial Crisis':<25} {result.crisis_2008_static*100:>14.2f}% {result.crisis_2008_dynamic*100:>14.2f}% {(result.crisis_2008_dynamic-result.crisis_2008_static)*100:>+14.2f}%")
-    print(f"{'2020 COVID':<25} {result.crisis_2020_static*100:>14.2f}% {result.crisis_2020_dynamic*100:>14.2f}% {(result.crisis_2020_dynamic-result.crisis_2020_static)*100:>+14.2f}%")
-    print(f"{'2022 Rate Hikes':<25} {result.crisis_2022_static*100:>14.2f}% {result.crisis_2022_dynamic*100:>14.2f}% {(result.crisis_2022_dynamic-result.crisis_2022_static)*100:>+14.2f}%")
+    print(f"{'2008 Financial Crisis':<25} {e['crisis_2008_static']*100:>14.2f}% {e['crisis_2008_dynamic']*100:>14.2f}% {(e['crisis_2008_dynamic']-e['crisis_2008_static'])*100:>+14.2f}%")
+    print(f"{'2020 COVID':<25} {e['crisis_2020_static']*100:>14.2f}% {e['crisis_2020_dynamic']*100:>14.2f}% {(e['crisis_2020_dynamic']-e['crisis_2020_static'])*100:>+14.2f}%")
+    print(f"{'2022 Rate Hikes':<25} {e['crisis_2022_static']*100:>14.2f}% {e['crisis_2022_dynamic']*100:>14.2f}% {(e['crisis_2022_dynamic']-e['crisis_2022_static'])*100:>+14.2f}%")
     print()
 
     print("-"*70)
     print("REGIME STATISTICS")
     print("-"*70)
-    for regime, days in result.regime_days.items():
-        pct = days / result.total_days * 100
+    for regime, days in e["regime_days"].items():
+        pct = days / e["total_days"] * 100
         print(f"{regime.capitalize():<25} {days:>10,} days ({pct:>5.1f}%)")
-    print(f"{'Total Regime Transitions':<25} {result.regime_transitions:>14}")
-    print(f"{'Rebalancing Costs':<25} ${result.rebalancing_costs*100000:>13.2f}")
+    print(f"{'Total Regime Transitions':<25} {e['regime_transitions']:>14}")
+    print(f"{'Rebalancing Costs':<25} ${e['rebalancing_costs']*100000:>13.2f}")
     print()
 
     print("-"*70)
@@ -557,13 +533,14 @@ def print_results(result: BacktestResult):
     print("-"*70)
 
     # Check criteria
-    sharpe_target_met = result.sharpe_delta >= 0.015
-    max_dd_ok = result.max_dd_delta > -0.02
-    crisis_2008_ok = result.crisis_2008_dynamic <= result.crisis_2008_static + 0.02
+    ex = result.extras
+    sharpe_target_met = ex["sharpe_delta"] >= 0.015
+    max_dd_ok = ex["max_dd_delta"] > -0.02
+    crisis_2008_ok = ex["crisis_2008_dynamic"] <= ex["crisis_2008_static"] + 0.02
 
-    print(f"{'Sharpe +0.015 target':<40} {'✓ PASS' if sharpe_target_met else '✗ FAIL':<15} (got {result.sharpe_delta:+.3f})")
-    print(f"{'Max DD <2% degradation':<40} {'✓ PASS' if max_dd_ok else '✗ FAIL':<15} (got {result.max_dd_delta*100:+.2f}%)")
-    print(f"{'2008 crisis benefit':<40} {'✓ PASS' if crisis_2008_ok else '✗ FAIL':<15} (dynamic {result.crisis_2008_dynamic*100:.1f}% vs static {result.crisis_2008_static*100:.1f}%)")
+    print(f"{'Sharpe +0.015 target':<40} {'✓ PASS' if sharpe_target_met else '✗ FAIL':<15} (got {ex['sharpe_delta']:+.3f})")
+    print(f"{'Max DD <2% degradation':<40} {'✓ PASS' if max_dd_ok else '✗ FAIL':<15} (got {ex['max_dd_delta']*100:+.2f}%)")
+    print(f"{'2008 crisis benefit':<40} {'✓ PASS' if crisis_2008_ok else '✗ FAIL':<15} (dynamic {ex['crisis_2008_dynamic']*100:.1f}% vs static {ex['crisis_2008_static']*100:.1f}%)")
     print()
 
     print("="*70)
@@ -571,6 +548,7 @@ def print_results(result: BacktestResult):
 
 def save_results(result: BacktestResult):
     """Save results to JSON file."""
+    from dataclasses import asdict
     save_results_json(asdict(result), output_path=str(OUTPUT_PATH))
     logger.info(f"Results saved to {OUTPUT_PATH}")
 
@@ -596,9 +574,9 @@ def main():
 
         # Return exit code based on success criteria
         success = (
-            result.sharpe_delta >= 0.015 and
-            result.max_dd_delta > -0.02 and
-            result.crisis_2008_dynamic <= result.crisis_2008_static + 0.02
+            result.extras["sharpe_delta"] >= 0.015 and
+            result.extras["max_dd_delta"] > -0.02 and
+            result.extras["crisis_2008_dynamic"] <= result.extras["crisis_2008_static"] + 0.02
         )
 
         return 0 if success else 1

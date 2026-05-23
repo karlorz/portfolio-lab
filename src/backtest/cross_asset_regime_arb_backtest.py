@@ -22,14 +22,15 @@ Period: 2006-2026
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
+    BacktestResult,
     compute_metrics,
     save_results_json,
 )
@@ -121,39 +122,6 @@ class RebalanceSignal:
     spy_momentum: float
     gld_momentum: float
     tlt_momentum: float
-
-
-@dataclass
-class BacktestResult:
-    """Complete backtest results."""
-    # Basic metrics
-    total_return: float
-    cagr: float
-    volatility: float
-    sharpe_ratio: float
-    max_drawdown: float
-
-    # Overlay impact
-    overlay_active_months: int
-    baseline_sharpe: float
-    sharpe_improvement: float
-
-    # Crisis performance
-    return_2008: Optional[float]
-    return_2020: Optional[float]
-    return_2022: Optional[float]
-
-    # Trade stats
-    total_rebalances: int
-    total_transaction_costs: float
-
-    # Divergence statistics
-    signal_frequency: float  # Fraction of months with non-zero signal
-    divergence_breakdown: Dict[str, int]  # Pattern name -> count of occurrences
-
-    # Full history
-    equity_curve: List[Dict]
-    rebalance_signals: List[Dict]
 
 
 class CrossAssetRegimeArbBacktester:
@@ -406,6 +374,8 @@ class CrossAssetRegimeArbBacktester:
 
         logger.info(f"Running backtest on {len(backtest_data)} days")
 
+        from dataclasses import asdict
+
         # Initialize portfolios
         base_capital = self.config.initial_capital
         overlay_capital = self.config.initial_capital
@@ -562,37 +532,41 @@ class CrossAssetRegimeArbBacktester:
             volatility=overlay_metrics["volatility"],
             sharpe_ratio=overlay_metrics["sharpe"],
             max_drawdown=overlay_metrics["max_dd"],
-            overlay_active_months=overlay_active_months,
             baseline_sharpe=base_metrics["sharpe"],
             sharpe_improvement=overlay_metrics["sharpe"]
             - base_metrics["sharpe"],
-            return_2008=self._annualize(returns_2008) if returns_2008 else None,
-            return_2020=self._annualize(returns_2020) if returns_2020 else None,
-            return_2022=self._annualize(returns_2022) if returns_2022 else None,
             total_rebalances=total_rebalances,
             total_transaction_costs=total_costs,
-            signal_frequency=signal_freq,
-            divergence_breakdown=divergence_counts,
-            equity_curve=[
-                {
-                    "date": backtest_data[
-                        min(
-                            j,
-                            len(backtest_data) - 1,
-                        )
-                    ].date
-                    if j > 0
-                    else backtest_data[0].date,
-                    "baseline": base_equity[j],
-                    "overlay": overlay_equity[j],
-                }
-                for j in range(
-                    0,
-                    len(overlay_equity),
-                    max(1, len(overlay_equity) // 252),
-                )
-            ],
-            rebalance_signals=[asdict(s) for s in rebalance_signals],
+            crisis_returns={
+                "2008": self._annualize(returns_2008) if returns_2008 else None,
+                "2020": self._annualize(returns_2020) if returns_2020 else None,
+                "2022": self._annualize(returns_2022) if returns_2022 else None,
+            },
+            extras={
+                "overlay_active_months": overlay_active_months,
+                "signal_frequency": signal_freq,
+                "divergence_breakdown": divergence_counts,
+                "equity_curve": [
+                    {
+                        "date": backtest_data[
+                            min(
+                                j,
+                                len(backtest_data) - 1,
+                            )
+                        ].date
+                        if j > 0
+                        else backtest_data[0].date,
+                        "baseline": base_equity[j],
+                        "overlay": overlay_equity[j],
+                    }
+                    for j in range(
+                        0,
+                        len(overlay_equity),
+                        max(1, len(overlay_equity) // 252),
+                    )
+                ],
+                "rebalance_signals": [asdict(s) for s in rebalance_signals],
+            },
         )
 
         return result
@@ -660,19 +634,20 @@ class CrossAssetRegimeArbBacktester:
             f"{'PASS' if result.sharpe_improvement >= 0.01 else 'NO IMPROVEMENT'}"
         )
         print(
-            f"Active Months:     {result.overlay_active_months:>8} "
-            f"({result.signal_frequency * 100:.1f}% of months)"
+            f"Active Months:     {result.extras['overlay_active_months']:>8} "
+            f"({result.extras['signal_frequency'] * 100:.1f}% of months)"
         )
         print()
 
         print("CRISIS PERFORMANCE")
         print("-" * 60)
-        if result.return_2008 is not None:
-            print(f"2008 GFC:          {result.return_2008:>8.2f}%")
-        if result.return_2020 is not None:
-            print(f"2020 COVID:        {result.return_2020:>8.2f}%")
-        if result.return_2022 is not None:
-            print(f"2022 Rate Hikes:   {result.return_2022:>8.2f}%")
+        crisis = result.crisis_returns or {}
+        if crisis.get("2008") is not None:
+            print(f"2008 GFC:          {crisis['2008']:>8.2f}%")
+        if crisis.get("2020") is not None:
+            print(f"2020 COVID:        {crisis['2020']:>8.2f}%")
+        if crisis.get("2022") is not None:
+            print(f"2022 Rate Hikes:   {crisis['2022']:>8.2f}%")
         print()
 
         print("TRADE STATISTICS")
@@ -683,9 +658,9 @@ class CrossAssetRegimeArbBacktester:
 
         print("DIVERGENCE BREAKDOWN")
         print("-" * 60)
-        total_div = sum(result.divergence_breakdown.values()) or 1
+        total_div = sum(result.extras["divergence_breakdown"].values()) or 1
         for pattern, count in sorted(
-            result.divergence_breakdown.items(), key=lambda x: -x[1]
+            result.extras["divergence_breakdown"].items(), key=lambda x: -x[1]
         ):
             pct = count / total_div * 100
             print(f"{pattern:<25s} {count:>5d} ({pct:>5.1f}%)")
@@ -699,7 +674,7 @@ class CrossAssetRegimeArbBacktester:
                 result.sharpe_improvement > 0,
             ),
             ("Max DD > -30%", result.max_drawdown > -30),
-            ("Signal active > 20% of months", result.signal_frequency > 0.20),
+            ("Signal active > 20% of months", result.extras["signal_frequency"] > 0.20),
         ]
         for desc, passed in checks:
             print(f"{'PASS' if passed else 'FAIL'}  {desc}")
@@ -709,6 +684,8 @@ class CrossAssetRegimeArbBacktester:
         self, result: BacktestResult, output_path: Optional[str] = None
     ) -> None:
         """Save backtest results to JSON."""
+        from dataclasses import asdict
+
         if output_path is None:
             output_path = str(
                 BACKTEST_RESULTS_DIR / "cross_asset_regime_arb_backtest.json"
