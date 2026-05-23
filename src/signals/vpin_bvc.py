@@ -69,6 +69,38 @@ class VPINSignal:
     recommendation: str  # 'execute', 'delay', 'avoid'
     expected_cost_impact: float  # bps estimate
 
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        # Map recommendation to directional value
+        rec_map = {"execute": 0.2, "delay": -0.1, "avoid": -0.4}
+        value = rec_map.get(self.recommendation, 0.0)
+        is_active = self.confidence >= 0.3 and self.recommendation != "execute"
+
+        return SignalSnapshot(
+            source="vpin_bvc",
+            timestamp=self.timestamp.isoformat() if hasattr(self.timestamp, 'isoformat') else str(self.timestamp),
+            value=value,
+            confidence=self.confidence,
+            asset_signals={},  # VPIN is execution-timing, not asset-allocation
+            regime_fit="all",
+            is_active=is_active,
+            explanation=f"VPIN: regime={self.regime}, "
+                        f"vpin={self.vpin:.4f}, "
+                        f"z={self.z_score:.2f}, "
+                        f"toxicity={self.toxicity_level:.2f}, "
+                        f"rec={self.recommendation}",
+            metadata={
+                "vpin": self.vpin,
+                "vpin_ma": self.vpin_ma,
+                "z_score": self.z_score,
+                "regime": self.regime,
+                "toxicity_level": self.toxicity_level,
+                "recommendation": self.recommendation,
+            },
+        )
+
 
 class BVCCalculator:
     """

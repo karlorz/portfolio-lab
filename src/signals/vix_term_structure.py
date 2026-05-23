@@ -72,6 +72,36 @@ class VIXTermStructureSignal:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        return SignalSnapshot(
+            source="vix_term_structure",
+            timestamp=self.timestamp,
+            value=self.signal_value,
+            confidence=self.confidence,
+            asset_signals={
+                "SPY": self.spy_shift,
+                "GLD": self.gld_shift,
+                "TLT": self.tlt_shift,
+            },
+            regime_fit="all",
+            is_active=self.is_valid,
+            explanation=f"VIX TS: {self.signal_state}, "
+                        f"regime={self.regime}({self.regime_strength:.2f}), "
+                        f"VIX={self.vix_spot:.1f}, "
+                        f"slope={self.slope_vix3m_vix:.3f}",
+            metadata={
+                "signal_state": self.signal_state,
+                "regime": self.regime,
+                "regime_strength": self.regime_strength,
+                "vix_spot": self.vix_spot,
+                "slope_signal": self.slope_signal,
+                "roll_yield_signal": self.roll_yield_signal,
+            },
+        )
+
 
 class VIXTermStructureCalculator:
     """

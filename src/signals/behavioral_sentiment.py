@@ -57,6 +57,43 @@ class BehavioralSignal:
     def to_dict(self) -> Dict:
         return asdict(self)
 
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        # Map signal_type to directional value
+        type_map = {
+            "contrarian_buy": 0.5,
+            "moderate_buy": 0.3,
+            "neutral": 0.0,
+            "moderate_sell": -0.3,
+            "contrarian_sell": -0.5,
+        }
+        value = type_map.get(self.signal_type, 0.0)
+        is_active = not self.regime_suppressed and self.confidence >= 0.3
+
+        return SignalSnapshot(
+            source="behavioral_sentiment",
+            timestamp=self.timestamp,
+            value=value,
+            confidence=self.confidence,
+            asset_signals={"SPY": self.equity_shift_pct},
+            regime_fit="all",
+            is_active=is_active,
+            explanation=f"Behavioral: {self.signal_type}, "
+                        f"composite={self.composite_score:.2f}, "
+                        f"z={self.z_score:.2f}, "
+                        f"VIX={self.vix:.1f}, "
+                        f"suppressed={self.regime_suppressed}",
+            metadata={
+                "signal_type": self.signal_type,
+                "composite_score": self.composite_score,
+                "z_score": self.z_score,
+                "vix": self.vix,
+                "regime_suppressed": self.regime_suppressed,
+            },
+        )
+
 
 class BehavioralSentimentSignal:
     """Generates contrarian behavioral sentiment signals with regime gating"""

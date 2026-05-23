@@ -636,3 +636,125 @@ class TestUnifiedOrchestratorSignals:
         snap = signal.to_signal_snapshot()
         assert snap.value == 0.0  # "unhedged" maps to 0.0
         assert snap.is_active is False
+
+
+class TestAdditionalSignalSnapshots:
+    """Test to_signal_snapshot() for behavioral sentiment, VIX TS, VPIN."""
+
+    def test_behavioral_sentiment_contrarian_buy(self):
+        """BehavioralSignal contrarian_buy → positive value."""
+        from src.signals.behavioral_sentiment import BehavioralSignal
+        signal = BehavioralSignal(
+            signal_type="contrarian_buy", confidence=0.7,
+            equity_shift_pct=0.03, holding_period_days=30,
+            z_score=1.8, composite_score=1.5, vix=22.0,
+            regime_suppressed=False, rationale="Extreme fear contrarian",
+            timestamp="2026-05-23T12:00:00",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "behavioral_sentiment"
+        assert snap.value == 0.5  # contrarian_buy
+        assert snap.confidence == 0.7
+        assert snap.is_active is True
+        assert snap.asset_signals["SPY"] == 0.03
+
+    def test_behavioral_sentiment_regime_suppressed(self):
+        """Regime-suppressed behavioral signal is inactive."""
+        from src.signals.behavioral_sentiment import BehavioralSignal
+        signal = BehavioralSignal(
+            signal_type="contrarian_sell", confidence=0.6,
+            equity_shift_pct=-0.02, holding_period_days=30,
+            z_score=-1.5, composite_score=-1.2, vix=35.0,
+            regime_suppressed=True, rationale="High VIX regime",
+            timestamp="2026-05-23T12:00:00",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.is_active is False  # regime_suppressed=True
+
+    def test_behavioral_sentiment_neutral(self):
+        """Neutral behavioral signal → zero value."""
+        from src.signals.behavioral_sentiment import BehavioralSignal
+        signal = BehavioralSignal(
+            signal_type="neutral", confidence=0.2,
+            equity_shift_pct=0.0, holding_period_days=7,
+            z_score=0.1, composite_score=0.0, vix=18.0,
+            regime_suppressed=False, rationale="No extreme sentiment",
+            timestamp="2026-05-23T12:00:00",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.value == 0.0
+        assert snap.is_active is False  # confidence < 0.3
+
+    def test_vix_term_structure_snapshot(self):
+        """VIXTermStructureSignal.to_signal_snapshot() converts correctly."""
+        from src.signals.vix_term_structure import VIXTermStructureSignal
+        signal = VIXTermStructureSignal(
+            timestamp="2026-05-23T12:00:00",
+            signal_state="risk_off", signal_value=-0.6,
+            vix_spot=25.0, vix3m=28.0, vix6m=None,
+            slope_vix3m_vix=1.12,
+            regime="backwardation", regime_strength=0.7,
+            slope_signal=-0.5, roll_yield_signal=-0.3,
+            vix_zscore_signal=-0.4, curve_shape_signal=-0.2,
+            spy_shift=-0.05, gld_shift=0.03, tlt_shift=0.02,
+            confidence=0.75, is_valid=True,
+            reason="Inverted term structure",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "vix_term_structure"
+        assert snap.value == -0.6
+        assert snap.confidence == 0.75
+        assert snap.is_active is True
+        assert snap.asset_signals["SPY"] == -0.05
+
+    def test_vix_term_structure_invalid(self):
+        """Invalid VIX TS signal → inactive."""
+        from src.signals.vix_term_structure import VIXTermStructureSignal
+        signal = VIXTermStructureSignal(
+            timestamp="2026-05-23T12:00:00",
+            signal_state="neutral", signal_value=0.0,
+            vix_spot=18.0, vix3m=None, vix6m=None,
+            slope_vix3m_vix=0.0,
+            regime="flat", regime_strength=0.0,
+            slope_signal=0.0, roll_yield_signal=0.0,
+            vix_zscore_signal=0.0, curve_shape_signal=0.0,
+            spy_shift=0.0, gld_shift=0.0, tlt_shift=0.0,
+            confidence=0.1, is_valid=False,
+            reason="Insufficient data",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.is_active is False
+
+    def test_vpin_signal_snapshot(self):
+        """VPINSignal.to_signal_snapshot() converts correctly."""
+        from src.signals.vpin_bvc import VPINSignal
+        from datetime import datetime
+        signal = VPINSignal(
+            timestamp=datetime(2026, 5, 23, 12, 0, 0),
+            vpin=0.45, vpin_ma=0.30, vpin_std=0.08,
+            z_score=1.88, percentile=0.92,
+            regime="elevated", confidence=0.7,
+            toxicity_level=0.65, recommendation="delay",
+            expected_cost_impact=15.0,
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "vpin_bvc"
+        assert snap.value == -0.1  # "delay"
+        assert snap.confidence == 0.7
+        assert snap.is_active is True  # confidence >= 0.3 and rec != "execute"
+
+    def test_vpin_signal_avoid(self):
+        """VPIN avoid recommendation → negative value, active."""
+        from src.signals.vpin_bvc import VPINSignal
+        from datetime import datetime
+        signal = VPINSignal(
+            timestamp=datetime(2026, 5, 23, 12, 0, 0),
+            vpin=0.65, vpin_ma=0.30, vpin_std=0.08,
+            z_score=4.38, percentile=0.99,
+            regime="high", confidence=0.85,
+            toxicity_level=0.90, recommendation="avoid",
+            expected_cost_impact=45.0,
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.value == -0.4  # "avoid"
+        assert snap.is_active is True
