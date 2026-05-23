@@ -276,7 +276,7 @@ class BayesianVolPipeline:
                         vol = float(np.std(window_rets) * math.sqrt(252))
                         vols.append(vol)
             except Exception as e:
-                logger.warning(f"Failed to fetch volatility history: {e}")
+                logger.warning("Failed to fetch volatility history: %s", e)
 
         if not vols:
             vols = [0.16] * 100  # Default 16% vol

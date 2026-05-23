@@ -119,7 +119,7 @@ class ETHStakingModel:
                 with open(STATE_FILE) as f:
                     return json.load(f)
             except Exception as e:
-                logger.warning(f"Failed to load staking state: {e}")
+                logger.warning("Failed to load staking state: %s", e)
         return {}
 
     def _save_state(self):

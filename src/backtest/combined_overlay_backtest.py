@@ -78,7 +78,7 @@ class CombinedOverlayBacktest:
                             }
                     return data
             except Exception as e:
-                logger.warning(f"Database load failed: {e}")
+                logger.warning("Database load failed: %s", e)
 
         # Generate synthetic data spanning 2006-2026
         return self._generate_synthetic_data()

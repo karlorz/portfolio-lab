@@ -200,8 +200,8 @@ def answer_query(question: str, dashboard: Optional[Dict[str, Any]] = None) -> s
         try:
             from src.monitor.unified_dashboard import generate_unified_dashboard
             dashboard = generate_unified_dashboard()
-        except Exception:
-            logger.warning("Failed to generate unified dashboard, using empty fallback")
+        except Exception as e:
+            logger.warning("Failed to generate unified dashboard, using empty fallback: %s", e)
             dashboard = {}
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")

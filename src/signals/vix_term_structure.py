@@ -240,7 +240,7 @@ class VIXTermStructureCalculator:
         - Curve shape: 15% (confirmation)
         """
         if vix3m is None or vix3m <= 0:
-            logger.warning(f"[{date}] VIX3M unavailable, using VIX spot proxy")
+            logger.warning("[%s] VIX3M unavailable, using VIX spot proxy", date)
             # Use VIX level as fallback
             if vix < self.VIX_CHEAP:
                 slope_signal = 0.5  # Complacent
@@ -324,14 +324,14 @@ class VIXTermStructureSignalGenerator:
     def load_vix_data(self) -> Dict:
         """Load VIX term structure data from storage."""
         if not self.VIX_DATA_PATH.exists():
-            logger.warning(f"VIX data file not found: {self.VIX_DATA_PATH}")
+            logger.warning("VIX data file not found: %s", self.VIX_DATA_PATH)
             return {}
         
         try:
             with open(self.VIX_DATA_PATH, 'r') as f:
                 return json.load(f)
         except Exception as e:
-            logger.error(f"Error loading VIX data: {e}")
+            logger.error("Error loading VIX data: %s", e)
             return {}
     
     def fetch_current_vix(self) -> Optional[Dict]:
@@ -457,9 +457,9 @@ class VIXTermStructureSignalGenerator:
         try:
             with open(self.OUTPUT_PATH, 'w') as f:
                 json.dump(signal.to_dict(), f, indent=2)
-            logger.info(f"Saved VIX signal to {self.OUTPUT_PATH}")
+            logger.info("Saved VIX signal to %s", self.OUTPUT_PATH)
         except Exception as e:
-            logger.error(f"Error saving signal: {e}")
+            logger.error("Error saving signal: %s", e)
     
     def get_signal_history(self, days: int = 30) -> List[VIXTermStructureSignal]:
         """Generate signals for historical dates."""

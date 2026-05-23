@@ -305,7 +305,7 @@ class OverlayDashboardGenerator:
     def save(self, dashboard: OverlayDashboardData):
         with open(self.OUTPUT_PATH, "w") as f:
             json.dump(dashboard.to_dict(), f, indent=2, default=str)
-        logger.info(f"Dashboard saved to {self.OUTPUT_PATH}")
+        logger.info("Dashboard saved to %s", self.OUTPUT_PATH)
 
 
 def generate_overlay_dashboard() -> OverlayDashboardData:

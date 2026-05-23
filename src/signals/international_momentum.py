@@ -184,7 +184,7 @@ class InternationalMomentumGenerator:
                 if row:
                     return float(row[0])
         except Exception as e:
-            logger.warning(f"Could not fetch VIX: {e}")
+            logger.warning("Could not fetch VIX: %s", e)
         return 20.0  # Default to normal level
     
     def _get_correlation(self) -> float:
@@ -202,7 +202,7 @@ class InternationalMomentumGenerator:
                 if row:
                     return float(row[0])
         except Exception as e:
-            logger.warning(f"Could not fetch correlation: {e}")
+            logger.warning("Could not fetch correlation: %s", e)
         return 0.85  # Default normal correlation
     
     @staticmethod
@@ -354,7 +354,7 @@ class InternationalMomentumGenerator:
                 ))
                 conn.commit()
         except Exception as e:
-            logger.error(f"Failed to save signal: {e}")
+            logger.error("Failed to save signal: %s", e)
     
     def get_signal_history(self, days: int = 90) -> List[Dict]:
         """Get signal history for specified days"""

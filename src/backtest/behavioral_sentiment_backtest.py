@@ -84,7 +84,7 @@ class BehavioralSentimentBacktest:
                     if close is not None and close > 0:
                         prices[symbol][date_str] = float(close)
         except Exception as e:
-            logger.error(f"Failed to load prices: {e}")
+            logger.error("Failed to load prices: %s", e)
         return prices
 
     def _load_signals(
@@ -109,7 +109,7 @@ class BehavioralSentimentBacktest:
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
-        logger.info(f"Behavioral sentiment backtest: {start_date} → {end_date}")
+        logger.info("Behavioral sentiment backtest: %s -> %s", start_date, end_date)
 
         # Load prices
         prices = self._load_prices(["SPY", "GLD", "TLT"], start_date, end_date)
@@ -121,7 +121,7 @@ class BehavioralSentimentBacktest:
         common_dates = sorted(spy_dates & gld_dates & tlt_dates)
 
         if len(common_dates) < 60:
-            logger.error(f"Insufficient data: {len(common_dates)} common trading days")
+            logger.error("Insufficient data: %d common trading days", len(common_dates))
             return self._empty_result(start_date, end_date)
 
         # Load signals (signals use their own VIX data, slightly different dates)

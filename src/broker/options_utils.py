@@ -222,7 +222,7 @@ class OptionsChainFetcher:
             try:
                 return await self._fetch_from_api(underlying)
             except Exception as e:
-                logger.error(f"API fetch failed: {e}, falling back to simulation")
+                logger.error("API fetch failed: %s, falling back to simulation", e)
         
         return await self._generate_simulated_chain(underlying)
     
@@ -298,7 +298,7 @@ class OptionsChainFetcher:
                 open_interest=int(quote_data.get("open_interest", 0)),
             )
         except Exception as e:
-            logger.warning(f"Failed to parse option data: {e}")
+            logger.warning("Failed to parse option data: %s", e)
             return None
     
     async def _generate_simulated_chain(self, underlying: str) -> OptionsChain:
@@ -330,7 +330,7 @@ class OptionsChainFetcher:
                     if vix_row:
                         vix = float(vix_row[0])
         except Exception as e:
-            logger.warning(f"Failed to load SPY/VIX prices from DB: {e}")
+            logger.warning("Failed to load SPY/VIX prices from DB: %s", e)
 
         today = date.today()
         quotes = []
@@ -451,7 +451,7 @@ class OptionsChainFetcher:
                 ))
 
             conn.commit()
-        logger.info(f"Cached {len(chain.quotes)} quotes to {cache_file}")
+        logger.info("Cached %d quotes to %s", len(chain.quotes), cache_file)
 
 
 class OptionsChainCache:

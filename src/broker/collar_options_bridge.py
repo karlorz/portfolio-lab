@@ -134,7 +134,7 @@ class CollarOptionsBridge:
         try:
             chain = await self._fetcher.fetch_0dte_chain("SPY")
         except (ModuleNotFoundError, ImportError, Exception) as e:
-            logger.info(f"Options chain unavailable ({e}), using BS fallback")
+            logger.info("Options chain unavailable (%s), using BS fallback", e)
 
         if chain is not None:
             if spot is None:
@@ -166,7 +166,7 @@ class CollarOptionsBridge:
                     latest = max(data.keys())
                     return data[latest].get("vix_spot", 16.0)
             except Exception as e:
-                logger.warning(f"Failed to load VIX term structure: {e}")
+                logger.warning("Failed to load VIX term structure: %s", e)
         return 16.0
 
     def _find_from_chain(

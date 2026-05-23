@@ -271,8 +271,8 @@ class AlpacaClient:
         try:
             position = client.get_open_position(symbol)
             return Position.from_alpaca(position)
-        except Exception:
-            logger.warning("Failed to get position for %s", symbol)
+        except Exception as e:
+            logger.warning("Failed to get position for %s: %s", symbol, e)
             return None
 
     def close_position(self, symbol: str, qty: Optional[float] = None) -> Order:

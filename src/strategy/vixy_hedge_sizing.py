@@ -343,7 +343,7 @@ class VIXYHedgeSizer:
                 self._state = VIXYHedgeState(**data)
                 return self._state
             except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"Corrupt state file: {e}, using defaults")
+                logger.warning("Corrupt state file: %s, using defaults", e)
         self._state = VIXYHedgeState(
             timestamp=datetime.now().isoformat(),
             current_allocation=0.0,
@@ -388,7 +388,7 @@ class VIXYHedgeSizer:
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self._state_file, 'w') as f:
             json.dump(asdict(self._state), f, indent=2, default=str)
-        logger.info(f"VIXY hedge state saved: {signal.allocation_pct}% allocation")
+        logger.info("VIXY hedge state saved: %s%% allocation", signal.allocation_pct)
 
     def update_after_rebalance(self, actual_allocation: float):
         """Update state after a rebalance executes."""
@@ -499,8 +499,8 @@ def main():
                 gen = VIXTermStructureGenerator()
                 spot = gen.get_vix_spot()
                 vix = spot if spot else 18.0
-            except Exception:
-                logger.warning("Failed to get VIX spot from term structure, defaulting to 18.0")
+            except Exception as e:
+                logger.warning("Failed to get VIX spot from term structure, defaulting to 18.0: %s", e)
                 vix = 18.0  # Default for development
 
         signal = sizer.get_signal(vix)

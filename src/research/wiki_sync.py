@@ -52,7 +52,7 @@ class WikiSync:
                 if f"sha256: {hash_val}" in existing:
                     return raw_path  # Unchanged — skip write
             except Exception as e:
-                logger.warning(f"Failed to read existing raw file {raw_path}: {e}")
+                logger.warning("Failed to read existing raw file %s: %s", raw_path, e)
 
         frontmatter = f"""---
 type: raw

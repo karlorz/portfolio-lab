@@ -449,7 +449,7 @@ class RegretWeightedSelector:
             with open(perf_path, "w") as f:
                 json.dump(perf_data, f, indent=2)
         except (OSError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to track regret-weighted performance: {e}")
+            logger.warning("Failed to track regret-weighted performance: %s", e)
 
     # ------------------------------------------------------------------
     # State persistence
@@ -464,7 +464,7 @@ class RegretWeightedSelector:
                     data = json.load(f)
                 return RegretWeightedState.from_dict(data)
             except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Failed to load regret-weighted state: {e}")
+                logger.warning("Failed to load regret-weighted state: %s", e)
         return RegretWeightedState(rolling_window=self.rolling_window)
 
     def _save_state(self) -> None:
@@ -475,7 +475,7 @@ class RegretWeightedSelector:
             with open(path, "w") as f:
                 json.dump(self.state.to_dict(), f, indent=2)
         except OSError as e:
-            logger.warning(f"Failed to save regret-weighted state: {e}")
+            logger.warning("Failed to save regret-weighted state: %s", e)
 
     def _resolve_path(self) -> Path:
         """Resolve state path."""

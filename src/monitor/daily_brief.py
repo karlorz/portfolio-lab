@@ -285,7 +285,7 @@ def main():
                 )
                 brief["has_narrative"] = True
         except Exception as e:
-            logger.warning(f"Failed to generate unified dashboard narrative: {e}")
+            logger.warning("Failed to generate unified dashboard narrative: %s", e)
 
     print(brief["full_text"])
 

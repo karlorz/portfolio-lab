@@ -156,11 +156,11 @@ class FactorDataManager:
                     ))
                     count += 1
                 except Exception as e:
-                    logger.warning(f"Failed to insert price for {symbol} {p.get('date')}: {e}")
+                    logger.warning("Failed to insert price for %s %s: %s", symbol, p.get("date"), e)
             conn.commit()
         
         self._update_metadata_timestamp()
-        logger.info(f"Stored {count} price records for {symbol}")
+        logger.info("Stored %d price records for %s", count, symbol)
         return count
     
     def get_prices(self, symbol: str, days: int = 252) -> List[Dict]:
@@ -348,7 +348,7 @@ class FactorDataManager:
             with open(self.metadata_path, "w") as f:
                 json.dump(metadata, f, indent=2)
         except Exception as e:
-            logger.warning(f"Failed to update metadata: {e}")
+            logger.warning("Failed to update metadata: %s", e)
 
 
 def fetch_factor_prices_from_pipeline(symbol: str, prices_data: Optional[Dict] = None) -> List[Dict]:
@@ -362,13 +362,13 @@ def fetch_factor_prices_from_pipeline(symbol: str, prices_data: Optional[Dict] =
 
     if prices_data is None:
         if not PRICES_JSON.exists():
-            logger.warning(f"Prices file not found: {PRICES_JSON}")
+            logger.warning("Prices file not found: %s", PRICES_JSON)
             return []
         with open(PRICES_JSON, 'r') as f:
             prices_data = json.load(f)
     
     if symbol not in prices_data:
-        logger.warning(f"No data for {symbol} in prices.json")
+        logger.warning("No data for %s in prices.json", symbol)
         return []
     
     # Convert compact format {d, p} to OHLCV format
@@ -386,7 +386,7 @@ def fetch_factor_prices_from_pipeline(symbol: str, prices_data: Optional[Dict] =
             'volume': 0  # Not available in compact format
         })
     
-    logger.info(f"Loaded {len(records)} records for {symbol} from pipeline")
+    logger.info("Loaded %d records for %s from pipeline", len(records), symbol)
     return records
 
 
@@ -395,7 +395,7 @@ def fetch_factor_prices_from_yahoo(symbol: str, days: int = 252) -> List[Dict]:
     
     Kept for backward compatibility. New code should use fetch_factor_prices_from_pipeline().
     """
-    logger.info(f"Fetching {days} days of data for {symbol} from Yahoo Finance")
+    logger.info("Fetching %d days of data for %s from Yahoo Finance", days, symbol)
     return fetch_factor_prices_from_pipeline(symbol)
 
 
@@ -414,8 +414,8 @@ def main():
     
     if args.command == "init":
         logger.info("Factor data database initialized")
-        logger.info(f"Database: {manager.db_path}")
-        logger.info(f"Metadata: {manager.metadata_path}")
+        logger.info("Database: %s", manager.db_path)
+        logger.info("Metadata: %s", manager.metadata_path)
         
     elif args.command == "status":
         with sqlite3.connect(manager.db_path) as conn:

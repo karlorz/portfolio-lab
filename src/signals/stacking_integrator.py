@@ -121,14 +121,15 @@ class StackingIntegrator:
             )
             
             logger.info(
-                f"Loaded stacking model v{self.metadata.version} "
-                f"({self.metadata.feature_count} features, "
-                f"val_acc={self.metadata.accuracy_val:.3f})"
+                "Loaded stacking model v%s (%d features, val_acc=%.3f)",
+                self.metadata.version,
+                self.metadata.feature_count,
+                self.metadata.accuracy_val,
             )
             return True
             
         except Exception as e:
-            logger.error(f"Failed to load model from {model_path}: {e}")
+            logger.error("Failed to load model from %s: %s", model_path, e)
             self.model = None
             self.metadata = None
             return False
@@ -209,8 +210,9 @@ class StackingIntegrator:
             # Check fallback threshold
             if confidence < self.fallback_threshold:
                 logger.info(
-                    f"Confidence {confidence:.3f} below threshold {self.fallback_threshold}, "
-                    "using weighted voting"
+                    "Confidence %.3f below threshold %s, using weighted voting",
+                    confidence,
+                    self.fallback_threshold,
                 )
                 return self._weighted_voting_fallback(
                     base_signals, features, start_time
@@ -237,14 +239,16 @@ class StackingIntegrator:
             self._add_to_history(prediction)
             
             logger.debug(
-                f"Stacking prediction: {direction} ({confidence:.3f}) "
-                f"in {latency_ms:.2f}ms"
+                "Stacking prediction: %s (%.3f) in %.2fms",
+                direction,
+                confidence,
+                latency_ms,
             )
             
             return prediction
             
         except Exception as e:
-            logger.error(f"Model prediction failed: {e}, using fallback")
+            logger.error("Model prediction failed: %s, using fallback", e)
             return self._weighted_voting_fallback(
                 base_signals, features, start_time
             )
@@ -356,8 +360,10 @@ class StackingIntegrator:
         self._add_to_history(prediction)
         
         logger.debug(
-            f"Fallback prediction: {direction} ({confidence:.3f}) "
-            f"in {latency_ms:.2f}ms"
+            "Fallback prediction: %s (%.3f) in %.2fms",
+            direction,
+            confidence,
+            latency_ms,
         )
         
         return prediction
@@ -467,11 +473,11 @@ class StackingIntegrator:
             with open(filepath, 'w') as f:
                 json.dump(records, f, indent=2)
             
-            logger.info(f"Exported {len(records)} predictions to {filepath}")
+            logger.info("Exported %d predictions to %s", len(records), filepath)
             return True
-            
+
         except Exception as e:
-            logger.error(f"Failed to export predictions: {e}")
+            logger.error("Failed to export predictions: %s", e)
             return False
 
 

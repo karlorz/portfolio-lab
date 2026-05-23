@@ -70,7 +70,7 @@ class VIXDataManager:
                     }
                 print(f"Loaded {len(self.data)} VIX term structure records")
             except Exception as e:
-                logger.warning(f"Error loading VIX cache: {e}")
+                logger.warning("Error loading VIX cache: %s", e)
     
     def _save_cached_data(self):
         """Save VIX data to cache"""
@@ -82,7 +82,7 @@ class VIXDataManager:
                     indent=2
                 )
         except Exception as e:
-            logger.warning(f"Error saving VIX cache: {e}")
+            logger.warning("Error saving VIX cache: %s", e)
     
     def generate_historical_proxy(
         self,

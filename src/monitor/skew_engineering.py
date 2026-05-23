@@ -125,7 +125,7 @@ class SkewEngine:
     def _get_prices(self, days: int = 260) -> np.ndarray:
         """Fetch daily returns from market.db."""
         if not self.db_path.exists():
-            logger.warning(f"Database not found: {self.db_path}")
+            logger.warning("Database not found: %s", self.db_path)
             return np.array([])
 
         try:
@@ -177,7 +177,7 @@ class SkewEngine:
             return returns
 
         except (sqlite3.Error, Exception) as e:
-            logger.error(f"Error fetching prices: {e}")
+            logger.error("Error fetching prices: %s", e)
             return np.array([])
 
     def compute_skew_ratio(
@@ -234,8 +234,7 @@ class SkewEngine:
 
         if len(returns) < self.MIN_OBS:
             logger.warning(
-                f"Insufficient data for {self.symbol}: "
-                f"{len(returns)} obs"
+                "Insufficient data for %s: %d obs", self.symbol, len(returns)
             )
             return SkewMetrics(
                 symbol=self.symbol,
@@ -314,7 +313,7 @@ class SkewEngine:
             with open(STATE_FILE, "w") as f:
                 json.dump(state.to_dict(), f, indent=2)
         except OSError as e:
-            logger.error(f"Failed to save state: {e}")
+            logger.error("Failed to save state: %s", e)
 
     def load_state(self) -> Optional[SkewState]:
         """Load persistent state from disk."""
@@ -325,7 +324,7 @@ class SkewEngine:
                 data = json.load(f)
             return SkewState.from_dict(data)
         except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Failed to load state: {e}")
+            logger.error("Failed to load state: %s", e)
             return None
 
     def get_vol_adjustment(self, target_vol: float = 0.10) -> float:

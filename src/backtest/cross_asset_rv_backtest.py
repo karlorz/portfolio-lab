@@ -45,7 +45,7 @@ class CrossAssetRVBacktester:
     def load_data(self, data_path: Optional[str] = None) -> bool:
         path = Path(data_path) if data_path else PRICES_JSON
         if not path.exists():
-            logger.error(f"Price data not found: {path}")
+            logger.error("Price data not found: %s", path)
             return False
 
         with open(path) as f:
@@ -68,7 +68,7 @@ class CrossAssetRVBacktester:
                 if date and price and date in self.prices:
                     self.prices[date][symbol] = float(price)
 
-        logger.info(f"Loaded {len(self.dates)} trading days, {len(self.price_data)} symbols")
+        logger.info("Loaded %d trading days, %d symbols", len(self.dates), len(self.price_data))
         return True
 
     def _get_signal(self, date: str) -> Tuple[str, float]:

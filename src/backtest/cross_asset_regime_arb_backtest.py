@@ -153,7 +153,7 @@ class CrossAssetRegimeArbBacktester:
 
                 self._process_price_data(prices_data)
                 logger.info(
-                    f"Loaded {len(self.data)} days of price data from {prices_path}"
+                    "Loaded %d days of price data from %s", len(self.data), prices_path
                 )
                 return True
 
@@ -161,7 +161,7 @@ class CrossAssetRegimeArbBacktester:
             return False
 
         except Exception as e:
-            logger.error(f"Failed to load data: {e}")
+            logger.error("Failed to load data: %s", e)
             return False
 
     def _process_price_data(self, prices_data: Dict) -> None:
@@ -369,7 +369,7 @@ class CrossAssetRegimeArbBacktester:
             logger.error("No data in backtest period")
             return None
 
-        logger.info(f"Running backtest on {len(backtest_data)} days")
+        logger.info("Running backtest on %d days", len(backtest_data))
 
         from dataclasses import asdict
 
@@ -688,7 +688,7 @@ class CrossAssetRegimeArbBacktester:
                 BACKTEST_RESULTS_DIR / "cross_asset_regime_arb_backtest.json"
             )
         save_results_json(asdict(result), output_path=output_path)
-        logger.info(f"Results saved to {output_path}")
+        logger.info("Results saved to %s", output_path)
 
 
 # ---- CLI ----

@@ -767,7 +767,7 @@ class AlternativeDataSignalAdapter(SignalSource):
             return result
             
         except Exception as e:
-            logger.warning(f"Alternative data signal generation failed for {ticker}: {e}")
+            logger.warning("Alternative data signal generation failed for %s: %s", ticker, e)
             return None
 
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
@@ -834,7 +834,7 @@ class LLMSentimentSignalAdapter(SignalSource):
             )
             
         except Exception as e:
-            logger.warning(f"LLM narrative signal generation failed for {ticker}: {e}")
+            logger.warning("LLM narrative signal generation failed for %s: %s", ticker, e)
             return None
 
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:

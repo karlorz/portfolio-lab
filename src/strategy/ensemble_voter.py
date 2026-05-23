@@ -597,8 +597,8 @@ class EnsembleVoter:
             from src.config.goals import load_goals, get_risk_budget_multiplier
             goals = load_goals()
             risk_mult = get_risk_budget_multiplier(goals)
-        except Exception:
-            logger.warning("Failed to load goals for risk budget, using risk_mult=1.0")
+        except Exception as e:
+            logger.warning("Failed to load goals for risk budget, using risk_mult=1.0: %s", e)
             risk_mult = 1.0
 
         if risk_mult >= 1.0:

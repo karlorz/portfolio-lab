@@ -135,7 +135,7 @@ class AdaptiveSizer:
                 self.prices = json.load(f)
             return self.prices
         except Exception as e:
-            logger.error(f"Failed to load prices: {e}")
+            logger.error("Failed to load prices: %s", e)
             return None
 
     def _get_series(self, symbol: str) -> Optional[np.ndarray]:
@@ -192,7 +192,7 @@ class AdaptiveSizer:
                 state = json.loads(cb_path.read_text())
                 return state.get("severity", "ok")
         except Exception as e:
-            logger.error(f"Failed to load circuit breaker state: {e}")
+            logger.error("Failed to load circuit breaker state: %s", e)
         return "ok"
 
     def _load_ensemble_signal(self) -> Tuple[float, float]:
@@ -205,7 +205,7 @@ class AdaptiveSizer:
                 agreement = float(state.get("agreement_ratio", 0.5))
                 return signal, agreement
         except Exception as e:
-            logger.error(f"Failed to load ensemble signal from {ev_path}: {e}")
+            logger.error("Failed to load ensemble signal from %s: %s", ev_path, e)
         return 0.0, 0.5
 
     def _compute_vol_adjustment(self, vol_20d: float) -> Dict[str, float]:
@@ -408,7 +408,7 @@ class AdaptiveSizer:
             state = json.loads(self.state_path.read_text())
             self.last_allocation = state.get("last_allocation", dict(BASE_ALLOCATION))
         except Exception as e:
-            logger.warning(f"Failed to load sizing state: {e}")
+            logger.warning("Failed to load sizing state: %s", e)
 
     def _save_state(self, decision: SizingDecision):
         """Save sizing state to disk."""
@@ -428,7 +428,7 @@ class AdaptiveSizer:
         try:
             self.state_path.write_text(json.dumps(state, indent=2, default=str))
         except Exception as e:
-            logger.warning(f"Failed to save sizing state: {e}")
+            logger.warning("Failed to save sizing state: %s", e)
 
     # ── Status Report ────────────────────────────────────────────────────────
 

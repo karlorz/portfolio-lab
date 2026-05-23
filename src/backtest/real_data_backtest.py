@@ -59,9 +59,10 @@ class RealDataBacktest:
                         "dates": [r[0] for r in rows],
                         "prices": [float(r[1]) for r in rows],
                     }
-                    logger.info(f"Loaded {asset}: {len(rows)} days, "
-                               f"${data[asset]['prices'][0]:.2f} → "
-                               f"${data[asset]['prices'][-1]:.2f}")
+                    num_days = len(rows)
+                    first_price = data[asset]['prices'][0]
+                    last_price = data[asset]['prices'][-1]
+                    logger.info("Loaded %s: %d days, $%.2f -> $%.2f", asset, num_days, first_price, last_price)
 
         return data
 

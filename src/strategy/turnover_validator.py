@@ -319,7 +319,7 @@ class TurnoverValidator:
                     data = json.load(f)
                 return TurnoverValidatorState.from_dict(data)
             except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Failed to load turnover validator state: {e}")
+                logger.warning("Failed to load turnover validator state: %s", e)
         return TurnoverValidatorState(rolling_window=self.rolling_window)
 
     def _save_state(self) -> None:
@@ -330,7 +330,7 @@ class TurnoverValidator:
             with open(path, "w") as f:
                 json.dump(self.state.to_dict(), f, indent=2)
         except OSError as e:
-            logger.warning(f"Failed to save turnover validator state: {e}")
+            logger.warning("Failed to save turnover validator state: %s", e)
 
     def _resolve_path(self) -> Path:
         """Resolve state path."""

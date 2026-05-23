@@ -265,7 +265,7 @@ class SignalHealthTracker:
             updated = cursor.rowcount
             conn.commit()
         
-        logger.info(f"Updated {updated} predictions with actual direction for {date}")
+        logger.info("Updated %s predictions with actual direction for %s", updated, date)
         return updated
     
     def calculate_health_score(
@@ -327,7 +327,8 @@ class SignalHealthTracker:
         
         # Weighted health score
         if counts['90d'] < 10:  # Need minimum data
-            logger.warning(f"Insufficient data for {source}: only {counts['90d']} predictions")
+            ninety_day_count = counts['90d']
+            logger.warning("Insufficient data for %s: only %d predictions", source, ninety_day_count)
             return None
         
         health = (
@@ -611,10 +612,10 @@ def backfill_predictions(
                         count += 1
         
             conn.commit()
-            logger.info(f"Backfilled {count} historical predictions")
+            logger.info("Backfilled %d historical predictions", count)
         
         except Exception as e:
-            logger.error(f"Backfill error: {e}")
+            logger.error("Backfill error: %s", e)
     
     return count
 

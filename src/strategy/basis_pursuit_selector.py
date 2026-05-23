@@ -511,7 +511,7 @@ class BasisPursuitSelector:
             with open(perf_path, "w") as f:
                 json.dump(perf_data, f, indent=2)
         except (OSError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to track basis pursuit performance: {e}")
+            logger.warning("Failed to track basis pursuit performance: %s", e)
 
     # ------------------------------------------------------------------
     # State persistence
@@ -526,7 +526,7 @@ class BasisPursuitSelector:
                     data = json.load(f)
                 return BasisPursuitState.from_dict(data)
             except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Failed to load basis pursuit state: {e}")
+                logger.warning("Failed to load basis pursuit state: %s", e)
         return BasisPursuitState(rolling_window=self.rolling_window)
 
     def _save_state(self) -> None:
@@ -537,7 +537,7 @@ class BasisPursuitSelector:
             with open(path, "w") as f:
                 json.dump(self.state.to_dict(), f, indent=2)
         except OSError as e:
-            logger.warning(f"Failed to save basis pursuit state: {e}")
+            logger.warning("Failed to save basis pursuit state: %s", e)
 
     def _resolve_path(self) -> Path:
         """Resolve state path."""

@@ -242,7 +242,7 @@ class OrderRouter:
                             "timestamp": datetime.now().isoformat(),
                         }
                 except (OSError, json.JSONDecodeError) as e:
-                    logger.warning(f"Kill switch file corrupt/unreadable, blocking orders for safety: {e}")
+                    logger.warning("Kill switch file corrupt/unreadable, blocking orders for safety: %s", e)
                     return {
                         "status": "blocked",
                         "message": f"Kill switch file unreadable - execution blocked for safety: {e}",

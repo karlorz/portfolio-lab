@@ -142,7 +142,7 @@ class StackingEnsembleBacktest:
                     if close is not None and close > 0:
                         prices[symbol][date_str] = float(close)
         except Exception as e:
-            logger.error(f"Failed to load prices: {e}")
+            logger.error("Failed to load prices: %s", e)
         return prices
 
     # ------------------------------------------------------------------

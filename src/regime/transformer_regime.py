@@ -255,10 +255,10 @@ class TransformerRegimeDetector:
                     torch.load(self.MODEL_PATH, weights_only=True)
                 )
                 self._model.eval()
-                logger.info(f"Loaded trained model from {self.MODEL_PATH}")
+                logger.info("Loaded trained model from %s", self.MODEL_PATH)
                 return
             except Exception as e:
-                logger.warning(f"Failed to load model: {e}, retraining...")
+                logger.warning("Failed to load model: %s, retraining...", e)
 
         logger.info("Training new transformer regime model...")
         self.train()
@@ -320,16 +320,16 @@ class TransformerRegimeDetector:
                 best_acc = val_acc
 
             if (epoch + 1) % 5 == 0:
-                logger.info(f"Epoch {epoch+1}/{epochs}: loss={total_loss/n_batches:.4f}, "
-                           f"val_acc={val_acc:.3f}")
+                logger.info("Epoch %d/%d: loss=%.4f, val_acc=%.3f",
+                           epoch + 1, epochs, total_loss / n_batches, val_acc)
 
-        logger.info(f"Training complete: best val acc = {best_acc:.3f}")
+        logger.info("Training complete: best val acc = %.3f", best_acc)
 
     def save(self):
         if self._model is not None:
             self.MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
             torch.save(self._model.state_dict(), self.MODEL_PATH)
-            logger.info(f"Model saved to {self.MODEL_PATH}")
+            logger.info("Model saved to %s", self.MODEL_PATH)
 
     def detect(self, returns: List[float],
                vols: Optional[List[float]] = None,
