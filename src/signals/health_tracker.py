@@ -27,7 +27,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Paths
-DATA_DIR
 DB_PATH = MARKET_DB
 STATE_PATH = DATA_DIR / ".signal_health_state.json"
 
@@ -124,6 +123,8 @@ class SignalHealthTracker:
     def _init_database(self):
         """Initialize signal_predictions table."""
         conn = sqlite3.connect(self.db_path)
+        # Enable WAL mode first — must be set before any writes
+        conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
         
         # Signal predictions table
@@ -173,9 +174,6 @@ class SignalHealthTracker:
         """)
         
         conn.commit()
-
-        # Enable WAL mode for concurrent read/write access without locking
-        conn.execute("PRAGMA journal_mode=WAL")
 
         conn.close()
         logger.info("Signal health database initialized")

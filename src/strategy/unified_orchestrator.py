@@ -227,7 +227,6 @@ class UnifiedOrchestrator:
 
         # ── Premium-cost overlay conflict reduction (v9.15) ────────
         # Determine which hedges are appropriate based on VIX level
-        vix_level < self.VIX_COLLAR_MAX
         collar_crisis = vix_level >= self.VIX_CRISIS
         vixy_active = vix_level >= self.VIX_VIXY_MIN
 

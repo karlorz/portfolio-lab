@@ -74,7 +74,10 @@ class TestConstants:
         assert "crisis" in REGIME_OVERRIDES
         assert "vol_spike" in REGIME_OVERRIDES
         assert "low_vol" in REGIME_OVERRIDES
+        assert "normal" in REGIME_OVERRIDES
         for regime, alloc in REGIME_OVERRIDES.items():
+            if alloc is None:
+                continue  # normal uses BASE_ALLOCATION
             assert abs(sum(alloc.values()) - 1.0) < 0.01, f"{regime} doesn't sum to 1"
 
 

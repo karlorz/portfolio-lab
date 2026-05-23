@@ -36,6 +36,7 @@ REGIME_OVERRIDES = {
     "crisis": {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30},  # Risk-off
     "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},  # Defensive
     "low_vol": {"SPY": 0.55, "GLD": 0.30, "TLT": 0.15},  # Risk-on
+    "normal": None,  # Use BASE_ALLOCATION (46/38/16)
 }
 
 class Position(NamedTuple):
@@ -407,7 +408,7 @@ def main():
     logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
 
     # Determine target allocation
-    target_alloc = REGIME_OVERRIDES.get(regime, BASE_ALLOCATION)
+    target_alloc = REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION
     print(f"Target allocation: {target_alloc}")
     
     # Generate orders

@@ -261,14 +261,13 @@ class BayesianVolPipeline:
         if db_path.exists():
             try:
                 import sqlite3
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT close FROM prices WHERE symbol=? ORDER BY date",
-                    (symbol,)
-                )
-                prices = [float(r[0]) for r in cursor.fetchall()]
-                conn.close()
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT close FROM prices WHERE symbol=? ORDER BY date",
+                        (symbol,)
+                    )
+                    prices = [float(r[0]) for r in cursor.fetchall()]
 
                 if len(prices) > 20:
                     returns = np.diff(np.log(prices))

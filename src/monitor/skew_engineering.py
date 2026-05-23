@@ -129,45 +129,44 @@ class SkewEngine:
             return np.array([])
 
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.cursor()
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
 
-            # Check table structure
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-            tables = [row[0] for row in cursor.fetchall()]
+                # Check table structure
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+                tables = [row[0] for row in cursor.fetchall()]
 
-            if "daily_bars" in tables:
-                query = """
-                    SELECT close FROM daily_bars
-                    WHERE symbol = ?
-                    ORDER BY date DESC
-                    LIMIT ?
-                """
-            elif "prices" in tables:
-                query = """
-                    SELECT close FROM prices
-                    WHERE symbol = ?
-                    ORDER BY date DESC
-                    LIMIT ?
-                """
-            else:
-                # Try generic approach
-                query = """
-                    SELECT close FROM market_data
-                    WHERE symbol = ?
-                    ORDER BY date DESC
-                    LIMIT ?
-                """
+                if "daily_bars" in tables:
+                    query = """
+                        SELECT close FROM daily_bars
+                        WHERE symbol = ?
+                        ORDER BY date DESC
+                        LIMIT ?
+                    """
+                elif "prices" in tables:
+                    query = """
+                        SELECT close FROM prices
+                        WHERE symbol = ?
+                        ORDER BY date DESC
+                        LIMIT ?
+                    """
+                else:
+                    # Try generic approach
+                    query = """
+                        SELECT close FROM market_data
+                        WHERE symbol = ?
+                        ORDER BY date DESC
+                        LIMIT ?
+                    """
 
-            cursor.execute(query, (self.symbol, days + 1))
-            rows = cursor.fetchall()
-            conn.close()
+                cursor.execute(query, (self.symbol, days + 1))
+                rows = cursor.fetchall()
 
             if len(rows) < 2:
                 logger.warning(
-                    f"Not enough data for {self.symbol}: {len(rows)} rows"
+                    "Not enough data for %s: %d rows", self.symbol, len(rows)
                 )
                 return np.array([])
 

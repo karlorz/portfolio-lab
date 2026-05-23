@@ -258,24 +258,22 @@ class CryptoMomentumSignalGenerator:
         if db_path.exists():
             try:
                 import sqlite3
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
-                # Try crypto symbols
-                for sym in [symbol, f"{symbol}-USD", f"{symbol}USD"]:
-                    cursor.execute(
-                        "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT ?",
-                        (sym, days + 1)
-                    )
-                    rows = cursor.fetchall()
-                    if rows:
-                        prices = [float(r[0]) for r in reversed(rows)]
-                        returns = [
-                            (prices[i] / prices[i-1] - 1)
-                            for i in range(1, len(prices))
-                        ]
-                        conn.close()
-                        return prices, returns
-                conn.close()
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
+                    # Try crypto symbols
+                    for sym in [symbol, f"{symbol}-USD", f"{symbol}USD"]:
+                        cursor.execute(
+                            "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT ?",
+                            (sym, days + 1)
+                        )
+                        rows = cursor.fetchall()
+                        if rows:
+                            prices = [float(r[0]) for r in reversed(rows)]
+                            returns = [
+                                (prices[i] / prices[i-1] - 1)
+                                for i in range(1, len(prices))
+                            ]
+                            return prices, returns
             except Exception as e:
                 logger.warning(f"Failed to fetch price history for {symbol} from DB: {e}")
 
