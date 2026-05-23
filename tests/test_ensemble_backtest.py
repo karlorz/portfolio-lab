@@ -9,8 +9,9 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from src.backtest.metrics import BacktestResult
 from src.backtest.ensemble_backtest import (
-    EnsembleBacktestResult, EnsembleBacktestEngine,
+    EnsembleBacktestEngine,
 )
 
 
@@ -19,22 +20,31 @@ from src.backtest.ensemble_backtest import (
 # ---------------------------------------------------------------------------
 
 def _make_result():
-    return EnsembleBacktestResult(
-        start_date='2005-01-01', end_date='2026-05-13',
-        portfolio='46/38/16',
-        total_return=3.5, annualized_return=0.10,
+    return BacktestResult(
+        total_return=3.5, cagr=0.10,
         volatility=0.11, sharpe_ratio=0.90,
-        sortino_ratio=1.2, max_drawdown=-0.25,
-        max_dd_duration=180, calmar_ratio=0.40,
-        var_95=-0.018, cvar_95=-0.025,
-        num_rebalances=250, avg_signal_confidence=0.65,
-        regime_distribution={'normal': 0.6, 'high_vol': 0.25, 'crisis': 0.1, 'recovery': 0.05},
-        crisis_alpha_2008=0.05, crisis_alpha_2020=0.03, crisis_alpha_2022=0.02,
-        source_contributions={
-            'tsfm': {'hits': 150, 'avg_confidence': 0.72, 'return': 0.02, 'sharpe': 0.15},
-            'cta': {'hits': 120, 'avg_confidence': 0.65, 'return': 0.01, 'sharpe': 0.10},
+        max_drawdown=-0.25,
+        total_rebalances=250,
+        extras={
+            "start_date": "2005-01-01",
+            "end_date": "2026-05-13",
+            "portfolio": "46/38/16",
+            "sortino_ratio": 1.2,
+            "max_dd_duration": 180,
+            "calmar_ratio": 0.40,
+            "var_95": -0.018,
+            "cvar_95": -0.025,
+            "avg_signal_confidence": 0.65,
+            "regime_distribution": {"normal": 0.6, "high_vol": 0.25, "crisis": 0.1, "recovery": 0.05},
+            "crisis_alpha_2008": 0.05,
+            "crisis_alpha_2020": 0.03,
+            "crisis_alpha_2022": 0.02,
+            "source_contributions": {
+                "tsfm": {"hits": 150, "avg_confidence": 0.72, "return": 0.02, "sharpe": 0.15},
+                "cta": {"hits": 120, "avg_confidence": 0.65, "return": 0.01, "sharpe": 0.10},
+            },
+            "rolling_sharpe_1y": [("2025-01-01", 0.85), ("2025-06-01", 0.92)],
         },
-        rolling_sharpe_1y=[('2025-01-01', 0.85), ('2025-06-01', 0.92)],
     )
 
 
@@ -54,20 +64,21 @@ def _make_engine(tmp_path):
 class TestEnsembleBacktestResult:
     def test_creation(self):
         r = _make_result()
-        assert r.portfolio == '46/38/16'
+        assert r.extras["portfolio"] == '46/38/16'
         assert r.sharpe_ratio == 0.90
 
     def test_to_dict(self):
+        from dataclasses import asdict
         r = _make_result()
-        d = r.to_dict()
+        d = asdict(r)
         assert d['sharpe_ratio'] == 0.90
         assert d['max_drawdown'] == -0.25
-        assert 'crisis_alpha_2008' in d
-        assert 'source_contributions' in d
+        assert 'crisis_alpha_2008' in d['extras']
+        assert 'source_contributions' in d['extras']
 
     def test_regime_distribution(self):
         r = _make_result()
-        assert abs(sum(r.regime_distribution.values()) - 1.0) < 0.01
+        assert abs(sum(r.extras["regime_distribution"].values()) - 1.0) < 0.01
 
 
 # ---------------------------------------------------------------------------

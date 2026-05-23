@@ -121,93 +121,92 @@ class TestBehavioralSentimentBacktest:
         """Module imports cleanly without ML dependencies."""
         from src.backtest.behavioral_sentiment_backtest import (
             BehavioralSentimentBacktest,
-            BehavioralBacktestResult,
         )
+        from src.backtest.metrics import BacktestResult
         assert BehavioralSentimentBacktest is not None
-        assert BehavioralBacktestResult is not None
+        assert BacktestResult is not None
 
     def test_result_dataclass(self):
-        """BehavioralBacktestResult dataclass initializes with defaults."""
-        from src.backtest.behavioral_sentiment_backtest import BehavioralBacktestResult
+        """BacktestResult initializes with behavioral extras defaults."""
+        from src.backtest.metrics import BacktestResult
 
-        r = BehavioralBacktestResult(
-            timestamp="",
-            start_date="",
-            end_date="",
-            trading_days=0,
-            baseline_cagr=0.0,
-            baseline_vol=0.0,
-            baseline_sharpe=0.0,
-            baseline_max_dd=0.0,
-            baseline_crisis_2022=0.0,
-            overlay_cagr=0.0,
-            overlay_vol=0.0,
-            overlay_sharpe=0.0,
-            overlay_max_dd=0.0,
-            overlay_crisis_2022=0.0,
-            sharpe_delta=0.0,
-            dd_improvement=0.0,
-            cagr_delta=0.0,
-            signal_days_pct=0.0,
-            buy_signal_days=0,
-            sell_signal_days=0,
-            neutral_days=0,
-            avg_equity_shift=0.0,
-            false_positive_rate=0.0,
-            mean_signal_return_20d=0.0,
-            regime_vix_low_sharpe=0.0,
-            regime_vix_normal_sharpe=0.0,
-            regime_vix_elevated_sharpe=0.0,
-            regime_vix_high_sharpe=0.0,
-            regime_vix_crisis_sharpe=0.0,
-            meets_sharpe_target=False,
+        r = BacktestResult(
+            total_return=0.0, cagr=0.0, volatility=0.0,
+            sharpe_ratio=0.0, max_drawdown=0.0,
+            baseline_sharpe=0.0, sharpe_improvement=0.0,
+            extras={
+                "timestamp": "",
+                "start_date": "",
+                "end_date": "",
+                "trading_days": 0,
+                "baseline_cagr": 0.0,
+                "baseline_vol": 0.0,
+                "baseline_max_dd": 0.0,
+                "baseline_crisis_2022": 0.0,
+                "overlay_crisis_2022": 0.0,
+                "dd_improvement": 0.0,
+                "cagr_delta": 0.0,
+                "signal_days_pct": 0.0,
+                "buy_signal_days": 0,
+                "sell_signal_days": 0,
+                "neutral_days": 0,
+                "avg_equity_shift": 0.0,
+                "false_positive_rate": 0.0,
+                "mean_signal_return_20d": 0.0,
+                "regime_vix_low_sharpe": 0.0,
+                "regime_vix_normal_sharpe": 0.0,
+                "regime_vix_elevated_sharpe": 0.0,
+                "regime_vix_high_sharpe": 0.0,
+                "regime_vix_crisis_sharpe": 0.0,
+                "meets_sharpe_target": False,
+            },
         )
-        assert r.sharpe_delta == 0.0
-        assert r.trading_days == 0
+        assert r.sharpe_improvement == 0.0
+        assert r.extras["trading_days"] == 0
 
     def test_to_dict(self):
         """Result serializes to dict for JSON output."""
-        from src.backtest.behavioral_sentiment_backtest import BehavioralBacktestResult
+        from dataclasses import asdict
+        from src.backtest.metrics import BacktestResult
 
-        r = BehavioralBacktestResult(
-            timestamp="2026-01-01",
-            start_date="2021-01-01",
-            end_date="2026-01-01",
-            trading_days=1260,
-            baseline_cagr=10.0,
-            baseline_vol=12.0,
-            baseline_sharpe=0.8,
-            baseline_max_dd=-20.0,
-            baseline_crisis_2022=-12.0,
-            overlay_cagr=10.5,
-            overlay_vol=12.0,
-            overlay_sharpe=0.83,
-            overlay_max_dd=-19.0,
-            overlay_crisis_2022=-11.0,
-            sharpe_delta=0.03,
-            dd_improvement=1.0,
-            cagr_delta=0.5,
-            signal_days_pct=25.0,
-            buy_signal_days=100,
-            sell_signal_days=80,
-            neutral_days=1080,
-            avg_equity_shift=3.5,
-            false_positive_rate=40.0,
-            mean_signal_return_20d=0.5,
-            regime_vix_low_sharpe=0.9,
-            regime_vix_normal_sharpe=0.8,
-            regime_vix_elevated_sharpe=0.5,
-            regime_vix_high_sharpe=0.3,
-            regime_vix_crisis_sharpe=-0.2,
-            meets_sharpe_target=True,
+        r = BacktestResult(
+            total_return=64.7, cagr=10.5, volatility=12.0,
+            sharpe_ratio=0.83, max_drawdown=-19.0,
+            baseline_sharpe=0.8, sharpe_improvement=0.03,
+            extras={
+                "timestamp": "2026-01-01",
+                "start_date": "2021-01-01",
+                "end_date": "2026-01-01",
+                "trading_days": 1260,
+                "baseline_cagr": 10.0,
+                "baseline_vol": 12.0,
+                "baseline_max_dd": -20.0,
+                "baseline_crisis_2022": -12.0,
+                "overlay_crisis_2022": -11.0,
+                "dd_improvement": 1.0,
+                "cagr_delta": 0.5,
+                "signal_days_pct": 25.0,
+                "buy_signal_days": 100,
+                "sell_signal_days": 80,
+                "neutral_days": 1080,
+                "avg_equity_shift": 3.5,
+                "false_positive_rate": 40.0,
+                "mean_signal_return_20d": 0.5,
+                "regime_vix_low_sharpe": 0.9,
+                "regime_vix_normal_sharpe": 0.8,
+                "regime_vix_elevated_sharpe": 0.5,
+                "regime_vix_high_sharpe": 0.3,
+                "regime_vix_crisis_sharpe": -0.2,
+                "meets_sharpe_target": True,
+            },
         )
 
-        d = r.to_dict()
+        d = asdict(r)
         assert d["baseline_sharpe"] == 0.8
-        assert d["overlay_sharpe"] == 0.83
-        assert d["sharpe_delta"] == 0.03
-        assert d["meets_sharpe_target"] is True
-        assert d["buy_signal_days"] == 100
+        assert d["sharpe_ratio"] == 0.83
+        assert d["sharpe_improvement"] == 0.03
+        assert d["extras"]["meets_sharpe_target"] is True
+        assert d["extras"]["buy_signal_days"] == 100
 
         # Verify JSON round-trip
         json_str = json.dumps(d)
@@ -221,9 +220,9 @@ class TestBehavioralSentimentBacktest:
         bt = BehavioralSentimentBacktest(cache_db=test_db)
         result = bt.run(start_date="2022-01-01", end_date="2022-12-31")
 
-        assert result.trading_days > 0
-        assert result.start_date is not None
-        assert result.end_date is not None
+        assert result.extras["trading_days"] > 0
+        assert result.extras["start_date"] is not None
+        assert result.extras["end_date"] is not None
 
     def test_backtest_with_crisis_data(self, test_db_crisis):
         """Backtest handles crisis VIX regimes correctly."""
@@ -233,9 +232,9 @@ class TestBehavioralSentimentBacktest:
         result = bt.run(start_date="2022-01-01", end_date="2022-12-31")
 
         # Should have some buy signals (VIX 25-30 range)
-        assert result.buy_signal_days + result.sell_signal_days + result.neutral_days > 0
+        assert result.extras["buy_signal_days"] + result.extras["sell_signal_days"] + result.extras["neutral_days"] > 0
         # Signal days pct should be non-zero (some VIX <15 and VIX 25-30 days)
-        assert result.signal_days_pct >= 0
+        assert result.extras["signal_days_pct"] >= 0
 
     def test_empty_result_on_no_data(self):
         """Returns empty result when no data available."""
@@ -253,7 +252,7 @@ class TestBehavioralSentimentBacktest:
 
             bt = BehavioralSentimentBacktest(cache_db=db)
             result = bt.run(start_date="1999-01-01", end_date="1999-12-31")
-            assert result.trading_days == 0
+            assert result.extras["trading_days"] == 0
 
     def test_max_drawdown_computation(self):
         """Max drawdown is correctly computed from returns."""
@@ -323,20 +322,20 @@ class TestBehavioralSentimentBacktest:
         result = bt.run(start_date="2022-01-01", end_date="2022-12-31")
 
         # Core fields
-        assert result.trading_days > 0
+        assert result.extras["trading_days"] > 0
         assert isinstance(result.baseline_sharpe, float)
-        assert isinstance(result.overlay_sharpe, float)
+        assert isinstance(result.sharpe_ratio, float)
 
         # Signal quality
-        assert isinstance(result.signal_days_pct, float)
-        assert isinstance(result.false_positive_rate, float)
+        assert isinstance(result.extras["signal_days_pct"], float)
+        assert isinstance(result.extras["false_positive_rate"], float)
 
         # Regime
-        assert isinstance(result.regime_vix_low_sharpe, float)
-        assert isinstance(result.regime_vix_crisis_sharpe, float)
+        assert isinstance(result.extras["regime_vix_low_sharpe"], float)
+        assert isinstance(result.extras["regime_vix_crisis_sharpe"], float)
 
         # Target
-        assert isinstance(result.meets_sharpe_target, bool)
+        assert isinstance(result.extras["meets_sharpe_target"], bool)
 
     def test_baseline_weights_constant(self):
         """Baseline weights match the 46/38/16 allocation."""
@@ -382,7 +381,6 @@ class TestBehavioralSentimentBacktest:
         """Module can be imported and instantiated without crashing."""
         from src.backtest.behavioral_sentiment_backtest import (
             BehavioralSentimentBacktest,
-            BehavioralBacktestResult,
         )
         bt = BehavioralSentimentBacktest(cache_db=test_db)
         assert bt is not None
@@ -418,7 +416,7 @@ class TestBehavioralSentimentBacktest:
             bt = BehavioralSentimentBacktest(cache_db=db)
             result = bt.run(start_date="2022-01-01", end_date="2022-01-05")
             # With only 1 daily return, still runs but with minimal data
-            assert result.trading_days >= 0
+            assert result.extras["trading_days"] >= 0
 
     def test_no_vix_data_handled(self):
         """Missing VIX data produces zero regime Sharpe but doesn't crash."""
@@ -451,51 +449,50 @@ class TestBehavioralSentimentBacktest:
             result = bt.run(start_date="2022-01-01", end_date="2022-12-31")
 
             # VIX data missing → all regime Sharpes should be 0
-            assert result.regime_vix_low_sharpe == 0.0
-            assert result.regime_vix_crisis_sharpe == 0.0
+            assert result.extras["regime_vix_low_sharpe"] == 0.0
+            assert result.extras["regime_vix_crisis_sharpe"] == 0.0
 
     def test_meets_target_logic(self):
         """meets_sharpe_target correctly evaluates delta >= 0.03."""
-        from src.backtest.behavioral_sentiment_backtest import BehavioralBacktestResult
+        from src.backtest.metrics import BacktestResult
 
         def _make(delta):
-            return BehavioralBacktestResult(
-                timestamp="",
-                start_date="",
-                end_date="",
-                trading_days=0,
-                baseline_cagr=0,
-                baseline_vol=0,
-                baseline_sharpe=0,
-                baseline_max_dd=0,
-                baseline_crisis_2022=0,
-                overlay_cagr=0,
-                overlay_vol=0,
-                overlay_sharpe=0,
-                overlay_max_dd=0,
-                overlay_crisis_2022=0,
-                sharpe_delta=delta,
-                dd_improvement=0,
-                cagr_delta=0,
-                signal_days_pct=0,
-                buy_signal_days=0,
-                sell_signal_days=0,
-                neutral_days=0,
-                avg_equity_shift=0,
-                false_positive_rate=0,
-                mean_signal_return_20d=0,
-                regime_vix_low_sharpe=0,
-                regime_vix_normal_sharpe=0,
-                regime_vix_elevated_sharpe=0,
-                regime_vix_high_sharpe=0,
-                regime_vix_crisis_sharpe=0,
-                meets_sharpe_target=(delta >= 0.03),
+            return BacktestResult(
+                total_return=0.0, cagr=0.0, volatility=0.0,
+                sharpe_ratio=0.0, max_drawdown=0.0,
+                baseline_sharpe=0.0, sharpe_improvement=delta,
+                extras={
+                    "timestamp": "",
+                    "start_date": "",
+                    "end_date": "",
+                    "trading_days": 0,
+                    "baseline_cagr": 0.0,
+                    "baseline_vol": 0.0,
+                    "baseline_max_dd": 0.0,
+                    "baseline_crisis_2022": 0.0,
+                    "overlay_crisis_2022": 0.0,
+                    "dd_improvement": 0.0,
+                    "cagr_delta": 0.0,
+                    "signal_days_pct": 0.0,
+                    "buy_signal_days": 0,
+                    "sell_signal_days": 0,
+                    "neutral_days": 0,
+                    "avg_equity_shift": 0.0,
+                    "false_positive_rate": 0.0,
+                    "mean_signal_return_20d": 0.0,
+                    "regime_vix_low_sharpe": 0.0,
+                    "regime_vix_normal_sharpe": 0.0,
+                    "regime_vix_elevated_sharpe": 0.0,
+                    "regime_vix_high_sharpe": 0.0,
+                    "regime_vix_crisis_sharpe": 0.0,
+                    "meets_sharpe_target": (delta >= 0.03),
+                },
             )
 
-        assert _make(0.05).meets_sharpe_target is True
-        assert _make(0.03).meets_sharpe_target is True
-        assert _make(0.02).meets_sharpe_target is False
-        assert _make(-0.01).meets_sharpe_target is False
+        assert _make(0.05).extras["meets_sharpe_target"] is True
+        assert _make(0.03).extras["meets_sharpe_target"] is True
+        assert _make(0.02).extras["meets_sharpe_target"] is False
+        assert _make(-0.01).extras["meets_sharpe_target"] is False
 
     def test_negative_returns_max_dd(self):
         """Consecutive negative returns produce correct max drawdown."""
@@ -538,4 +535,4 @@ class TestBehavioralSentimentBacktest:
             bt = BehavioralSentimentBacktest(cache_db=db)
             result = bt.run(start_date="2022-01-01", end_date="2022-01-10")
             # Common dates: Jan 3-5 only (all three symbols present)
-            assert result.trading_days <= 5
+            assert result.extras["trading_days"] <= 5

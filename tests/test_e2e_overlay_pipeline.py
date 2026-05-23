@@ -160,8 +160,8 @@ class TestBacktestPipeline:
         bt = RealDataBacktest()
         result = bt.run()
         assert result is not None
-        if result.trading_days > 0:
-            assert result.combined_sharpe != 0
+        if result.extras.get("trading_days", 0) > 0:
+            assert result.sharpe_ratio != 0
 
 
 class TestEndToEndFlow:

@@ -25,8 +25,6 @@ from src.broker.options_utils import (
     OptionsChain,
     OptionsChainFetcher,
     OptionsChainCache,
-    fetch_chain_sync,
-    get_best_0dte_call,
 )
 
 
@@ -567,50 +565,6 @@ class TestOptionsChainCache:
         assert avg == 0.0
 
 
-class TestConvenienceFunctions:
-    """fetch_chain_sync and get_best_0dte_call."""
-
-    @patch("src.broker.options_utils.OptionsChainFetcher")
-    def test_fetch_chain_sync(self, mock_fetcher_class):
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch_0dte_chain = AsyncMock(return_value=OptionsChain(underlying="SPY"))
-        mock_fetcher_class.return_value = mock_fetcher
-
-        chain = fetch_chain_sync("SPY")
-        assert chain.underlying == "SPY"
-
-    @patch("src.broker.options_utils.fetch_chain_sync")
-    def test_get_best_0dte_call(self, mock_fetch):
-        q = OptionQuote(
-            symbol="SPY240516C00550000", underlying="SPY",
-            option_type=OptionType.CALL, strike=550.0,
-            expiration=date.today(), bid=9.90, ask=10.10,
-            last=10.0, mark=10.00, delta=0.30,
-            volume=100, open_interest=1000,
-        )
-        chain = OptionsChain(underlying="SPY", quotes=[q])
-        mock_fetch.return_value = chain
-
-        best = get_best_0dte_call(target_delta=0.30)
-        assert best is not None
-        assert best.delta == 0.30
-
-    @patch("src.broker.options_utils.fetch_chain_sync")
-    def test_get_best_0dte_call_no_0dte(self, mock_fetch):
-        q = OptionQuote(
-            symbol="SPY240516C00550000", underlying="SPY",
-            option_type=OptionType.CALL, strike=550.0,
-            expiration=date.today() + timedelta(days=1),
-            bid=9.90, ask=10.10, last=10.0, mark=10.00, delta=0.30,
-            volume=100, open_interest=1000,
-        )
-        chain = OptionsChain(underlying="SPY", quotes=[q])
-        mock_fetch.return_value = chain
-
-        best = get_best_0dte_call(target_delta=0.30)
-        assert best is None
-
-
 class TestEdgeCases:
     """Edge cases and boundary conditions."""
 
@@ -686,16 +640,3 @@ class TestEdgeCases:
         assert best.strike == 550.0
 
 
-class TestAsyncWrapperSafety:
-    """Regression: fetch_chain_sync must not crash if called from a running event loop."""
-
-    @patch("src.broker.options_utils.OptionsChainFetcher")
-    def test_fetch_chain_sync_from_async_context(self, mock_fetcher_class):
-        """fetch_chain_sync should work even when called from a running event loop."""
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch_0dte_chain = AsyncMock(return_value=OptionsChain(underlying="SPY"))
-        mock_fetcher_class.return_value = mock_fetcher
-
-        # This should not raise RuntimeError about nested event loops
-        chain = fetch_chain_sync("SPY")
-        assert chain.underlying == "SPY"

@@ -7,9 +7,9 @@ import pytest
 import numpy as np
 from pathlib import Path
 
+from src.backtest.metrics import BacktestResult
 from src.backtest.real_data_backtest import (
     RealDataBacktest,
-    RealDataBacktestResult,
     run_real_data_backtest,
 )
 
@@ -18,24 +18,33 @@ class TestRealDataBacktestResult:
     """Test result dataclass."""
 
     def test_serializable(self):
-        result = RealDataBacktestResult(
-            timestamp="2026-05-16", data_start="2021-05-10",
-            data_end="2026-05-15", trading_days=1200,
-            baseline_cagr=14.8, baseline_vol=12.3, baseline_sharpe=1.204,
-            baseline_max_dd=-19.1, baseline_total_return=82.2,
-            collar_sharpe=1.22, collar_dd=-16.5,
-            crypto_sharpe=1.22, bond_dur_sharpe=1.22,
-            combined_cagr=15.3, combined_vol=11.6, combined_sharpe=1.318,
-            combined_max_dd=-16.6, combined_total_return=87.1,
-            sharpe_delta=0.113, dd_improvement=2.5,
-            collar_days_pct=16.0, crypto_days_pct=55.0,
-            avg_tlt_sleeve_pct=16.0,
-            meets_target=True,
-            recommendation="Test recommendation",
+        result = BacktestResult(
+            total_return=87.1, cagr=15.3, volatility=11.6,
+            sharpe_ratio=1.318, max_drawdown=-16.6,
+            baseline_sharpe=1.204, sharpe_improvement=0.113,
+            extras={
+                "timestamp": "2026-05-16",
+                "data_start": "2021-05-10",
+                "data_end": "2026-05-15",
+                "trading_days": 1200,
+                "baseline_cagr": 14.8,
+                "baseline_vol": 12.3,
+                "baseline_max_dd": -19.1,
+                "baseline_total_return": 82.2,
+                "collar_sharpe": 1.22,
+                "collar_dd": -16.5,
+                "crypto_sharpe": 1.22,
+                "bond_dur_sharpe": 1.22,
+                "dd_improvement": 2.5,
+                "collar_days_pct": 16.0,
+                "crypto_days_pct": 55.0,
+                "avg_tlt_sleeve_pct": 16.0,
+                "meets_target": True,
+                "recommendation": "Test recommendation",
+            },
         )
-        d = result.to_dict()
-        assert d["baseline_sharpe"] == 1.204
-        assert d["meets_target"]
+        assert result.baseline_sharpe == 1.204
+        assert result.extras["meets_target"]
 
 
 class TestRealDataBacktest:
@@ -93,16 +102,16 @@ class TestRealDataBacktest:
     def test_run_with_real_data(self, bt):
         """Should work when market.db is available."""
         result = bt.run()
-        assert isinstance(result, RealDataBacktestResult)
+        assert isinstance(result, BacktestResult)
         # If data loaded successfully
-        if result.trading_days > 0:
+        if result.extras["trading_days"] > 0:
             assert result.baseline_sharpe != 0
-            assert result.combined_sharpe != 0
-            assert result.recommendation is not None
+            assert result.sharpe_ratio != 0
+            assert result.extras["recommendation"] is not None
 
     def test_convenience_function(self):
         result = run_real_data_backtest()
-        assert isinstance(result, RealDataBacktestResult)
+        assert isinstance(result, BacktestResult)
 
 
 class TestEdgeCases:
@@ -113,5 +122,5 @@ class TestEdgeCases:
         # Point to non-existent path
         bt.DATA_DIR = Path("/nonexistent")
         result = bt.run()
-        assert result.trading_days == 0
-        assert "No data" in result.recommendation
+        assert result.extras["trading_days"] == 0
+        assert "No data" in result.extras["recommendation"]

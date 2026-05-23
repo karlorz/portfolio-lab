@@ -25,12 +25,15 @@ import json
 import logging
 import math
 import sqlite3
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
+
+from src.backtest.metrics import BacktestResult
+from src.paths import DATA_DIR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,63 +49,8 @@ MAX_SHIFT = 0.05  # ±5%
 # Benchmark comparison: TSMOM expected Sharpe
 TSMOM_EXPECTED_SHARPE = 0.96
 
-from src.paths import DATA_DIR
-
 # Paths
 DEFAULT_CACHE_DB = DATA_DIR / "market.db"
-
-
-@dataclass
-class BehavioralBacktestResult:
-    """Complete backtest result for behavioral sentiment overlay."""
-
-    timestamp: str
-
-    # Parameters
-    start_date: str
-    end_date: str
-    trading_days: int
-
-    # Baseline 46/38/16
-    baseline_cagr: float
-    baseline_vol: float
-    baseline_sharpe: float
-    baseline_max_dd: float
-    baseline_crisis_2022: float
-
-    # Behavioral overlay
-    overlay_cagr: float
-    overlay_vol: float
-    overlay_sharpe: float
-    overlay_max_dd: float
-    overlay_crisis_2022: float
-
-    # Improvements
-    sharpe_delta: float
-    dd_improvement: float
-    cagr_delta: float
-
-    # Signal quality
-    signal_days_pct: float
-    buy_signal_days: int
-    sell_signal_days: int
-    neutral_days: int
-    avg_equity_shift: float
-    false_positive_rate: float
-    mean_signal_return_20d: float
-
-    # Regime performance (Sharpe by VIX bucket)
-    regime_vix_low_sharpe: float     # VIX < 15
-    regime_vix_normal_sharpe: float  # VIX 15-20
-    regime_vix_elevated_sharpe: float  # VIX 20-25
-    regime_vix_high_sharpe: float    # VIX 25-30
-    regime_vix_crisis_sharpe: float  # VIX > 30
-
-    # Target validation
-    meets_sharpe_target: bool  # delta >= +0.03
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 class BehavioralSentimentBacktest:
@@ -156,7 +104,7 @@ class BehavioralSentimentBacktest:
         self,
         start_date: str = "2021-05-10",
         end_date: Optional[str] = None,
-    ) -> BehavioralBacktestResult:
+    ) -> BacktestResult:
         """Run the full walk-forward backtest."""
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
@@ -191,10 +139,10 @@ class BehavioralSentimentBacktest:
         metrics = self._compute_metrics(
             common_dates, baseline_returns, overlay_returns, signal_stats
         )
-        metrics.start_date = common_dates[0]
-        metrics.end_date = common_dates[-1]
-        metrics.trading_days = len(common_dates)
-        metrics.timestamp = datetime.now().isoformat()
+        metrics.extras["start_date"] = common_dates[0]
+        metrics.extras["end_date"] = common_dates[-1]
+        metrics.extras["trading_days"] = len(common_dates)
+        metrics.extras["timestamp"] = datetime.now().isoformat()
 
         return metrics
 
@@ -322,39 +270,38 @@ class BehavioralSentimentBacktest:
         baseline_rets: List[float],
         overlay_rets: List[float],
         stats: Dict,
-    ) -> BehavioralBacktestResult:
+    ) -> BacktestResult:
         """Compute all performance metrics from return series."""
-        result = BehavioralBacktestResult(
-            timestamp="",
-            start_date="",
-            end_date="",
-            trading_days=0,
-            baseline_cagr=0.0,
-            baseline_vol=0.0,
-            baseline_sharpe=0.0,
-            baseline_max_dd=0.0,
-            baseline_crisis_2022=0.0,
-            overlay_cagr=0.0,
-            overlay_vol=0.0,
-            overlay_sharpe=0.0,
-            overlay_max_dd=0.0,
-            overlay_crisis_2022=0.0,
-            sharpe_delta=0.0,
-            dd_improvement=0.0,
-            cagr_delta=0.0,
-            signal_days_pct=0.0,
-            buy_signal_days=stats["buy_days"],
-            sell_signal_days=stats["sell_days"],
-            neutral_days=stats["neutral_days"],
-            avg_equity_shift=0.0,
-            false_positive_rate=0.0,
-            mean_signal_return_20d=0.0,
-            regime_vix_low_sharpe=0.0,
-            regime_vix_normal_sharpe=0.0,
-            regime_vix_elevated_sharpe=0.0,
-            regime_vix_high_sharpe=0.0,
-            regime_vix_crisis_sharpe=0.0,
-            meets_sharpe_target=False,
+        e = {
+            "timestamp": "",
+            "start_date": "",
+            "end_date": "",
+            "trading_days": 0,
+            "baseline_cagr": 0.0,
+            "baseline_vol": 0.0,
+            "baseline_max_dd": 0.0,
+            "baseline_crisis_2022": 0.0,
+            "overlay_crisis_2022": 0.0,
+            "dd_improvement": 0.0,
+            "cagr_delta": 0.0,
+            "signal_days_pct": 0.0,
+            "buy_signal_days": stats["buy_days"],
+            "sell_signal_days": stats["sell_days"],
+            "neutral_days": stats["neutral_days"],
+            "avg_equity_shift": 0.0,
+            "false_positive_rate": 0.0,
+            "mean_signal_return_20d": 0.0,
+            "regime_vix_low_sharpe": 0.0,
+            "regime_vix_normal_sharpe": 0.0,
+            "regime_vix_elevated_sharpe": 0.0,
+            "regime_vix_high_sharpe": 0.0,
+            "regime_vix_crisis_sharpe": 0.0,
+            "meets_sharpe_target": False,
+        }
+        result = BacktestResult(
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, baseline_sharpe=0.0, sharpe_improvement=0.0,
+            extras=e,
         )
 
         if len(baseline_rets) < 20:
@@ -367,13 +314,13 @@ class BehavioralSentimentBacktest:
         bl_cum = np.prod(1.0 + arr_bl)
         ol_cum = np.prod(1.0 + arr_ol)
         years = len(arr_bl) / 252.0
-        result.baseline_cagr = round((bl_cum ** (1.0 / years) - 1.0) * 100, 2) if years > 0 else 0.0
-        result.overlay_cagr = round((ol_cum ** (1.0 / years) - 1.0) * 100, 2) if years > 0 else 0.0
-        result.cagr_delta = round(result.overlay_cagr - result.baseline_cagr, 2)
+        e["baseline_cagr"] = round((bl_cum ** (1.0 / years) - 1.0) * 100, 2) if years > 0 else 0.0
+        result.cagr = round((ol_cum ** (1.0 / years) - 1.0) * 100, 2) if years > 0 else 0.0
+        e["cagr_delta"] = round(result.cagr - e["baseline_cagr"], 2)
 
         # Volatility (annualized)
-        result.baseline_vol = round(float(np.std(arr_bl, ddof=1)) * math.sqrt(252) * 100, 2)
-        result.overlay_vol = round(float(np.std(arr_ol, ddof=1)) * math.sqrt(252) * 100, 2)
+        e["baseline_vol"] = round(float(np.std(arr_bl, ddof=1)) * math.sqrt(252) * 100, 2)
+        result.volatility = round(float(np.std(arr_ol, ddof=1)) * math.sqrt(252) * 100, 2)
 
         # Sharpe (assuming 0% risk-free for simplicity)
         bl_mean_daily = float(np.mean(arr_bl))
@@ -381,49 +328,52 @@ class BehavioralSentimentBacktest:
         bl_std_daily = max(float(np.std(arr_bl, ddof=1)), 1e-8)
         ol_std_daily = max(float(np.std(arr_ol, ddof=1)), 1e-8)
         result.baseline_sharpe = round((bl_mean_daily / bl_std_daily) * math.sqrt(252), 3)
-        result.overlay_sharpe = round((ol_mean_daily / ol_std_daily) * math.sqrt(252), 3)
-        result.sharpe_delta = round(result.overlay_sharpe - result.baseline_sharpe, 3)
+        result.sharpe_ratio = round((ol_mean_daily / ol_std_daily) * math.sqrt(252), 3)
+        result.sharpe_improvement = round(result.sharpe_ratio - result.baseline_sharpe, 3)
 
         # Max drawdown
-        result.baseline_max_dd = round(self._max_drawdown(arr_bl) * 100, 2)
-        result.overlay_max_dd = round(self._max_drawdown(arr_ol) * 100, 2)
-        result.dd_improvement = round(
-            abs(result.baseline_max_dd) - abs(result.overlay_max_dd), 2
+        e["baseline_max_dd"] = round(self._max_drawdown(arr_bl) * 100, 2)
+        result.max_drawdown = round(self._max_drawdown(arr_ol) * 100, 2)
+        e["dd_improvement"] = round(
+            abs(e["baseline_max_dd"]) - abs(result.max_drawdown), 2
         )
 
+        # Total return
+        result.total_return = round((ol_cum - 1.0) * 100, 2)
+
         # Crisis year 2022
-        result.baseline_crisis_2022 = round(
+        e["baseline_crisis_2022"] = round(
             self._year_return(dates, arr_bl, "2022") * 100, 2
         )
-        result.overlay_crisis_2022 = round(
+        e["overlay_crisis_2022"] = round(
             self._year_return(dates, arr_ol, "2022") * 100, 2
         )
 
         # Signal stats
         td = stats["total_days"]
         non_neutral = stats["buy_days"] + stats["sell_days"]
-        result.signal_days_pct = round(non_neutral / td * 100, 1) if td > 0 else 0.0
-        result.avg_equity_shift = round(stats["avg_shift"] * 100, 2)
+        e["signal_days_pct"] = round(non_neutral / td * 100, 1) if td > 0 else 0.0
+        e["avg_equity_shift"] = round(stats["avg_shift"] * 100, 2)
         total_nn = int(stats["total_non_neutral"])
         false_pos = int(stats["false_positives"])
-        result.false_positive_rate = (
+        e["false_positive_rate"] = (
             round(false_pos / total_nn * 100, 1) if total_nn > 0 else 0.0
         )
         sig_rets = stats["signal_returns_20d"]
-        result.mean_signal_return_20d = (
+        e["mean_signal_return_20d"] = (
             round(float(np.mean(sig_rets)) * 100, 2) if sig_rets else 0.0
         )
 
         # Regime-specific Sharpe (by VIX level) — single VIX load, one pass
         regime_sharpes = self._all_regime_sharpes(dates, arr_ol)
-        result.regime_vix_low_sharpe = round(regime_sharpes[0], 3)
-        result.regime_vix_normal_sharpe = round(regime_sharpes[1], 3)
-        result.regime_vix_elevated_sharpe = round(regime_sharpes[2], 3)
-        result.regime_vix_high_sharpe = round(regime_sharpes[3], 3)
-        result.regime_vix_crisis_sharpe = round(regime_sharpes[4], 3)
+        e["regime_vix_low_sharpe"] = round(regime_sharpes[0], 3)
+        e["regime_vix_normal_sharpe"] = round(regime_sharpes[1], 3)
+        e["regime_vix_elevated_sharpe"] = round(regime_sharpes[2], 3)
+        e["regime_vix_high_sharpe"] = round(regime_sharpes[3], 3)
+        e["regime_vix_crisis_sharpe"] = round(regime_sharpes[4], 3)
 
         # Target validation
-        result.meets_sharpe_target = result.sharpe_delta >= 0.03
+        e["meets_sharpe_target"] = result.sharpe_improvement >= 0.03
 
         return result
 
@@ -508,39 +458,37 @@ class BehavioralSentimentBacktest:
 
     def _empty_result(
         self, start_date: str, end_date: str
-    ) -> BehavioralBacktestResult:
+    ) -> BacktestResult:
         """Return an empty result when insufficient data."""
-        return BehavioralBacktestResult(
-            timestamp=datetime.now().isoformat(),
-            start_date=start_date,
-            end_date=end_date,
-            trading_days=0,
-            baseline_cagr=0.0,
-            baseline_vol=0.0,
-            baseline_sharpe=0.0,
-            baseline_max_dd=0.0,
-            baseline_crisis_2022=0.0,
-            overlay_cagr=0.0,
-            overlay_vol=0.0,
-            overlay_sharpe=0.0,
-            overlay_max_dd=0.0,
-            overlay_crisis_2022=0.0,
-            sharpe_delta=0.0,
-            dd_improvement=0.0,
-            cagr_delta=0.0,
-            signal_days_pct=0.0,
-            buy_signal_days=0,
-            sell_signal_days=0,
-            neutral_days=0,
-            avg_equity_shift=0.0,
-            false_positive_rate=0.0,
-            mean_signal_return_20d=0.0,
-            regime_vix_low_sharpe=0.0,
-            regime_vix_normal_sharpe=0.0,
-            regime_vix_elevated_sharpe=0.0,
-            regime_vix_high_sharpe=0.0,
-            regime_vix_crisis_sharpe=0.0,
-            meets_sharpe_target=False,
+        return BacktestResult(
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, baseline_sharpe=0.0, sharpe_improvement=0.0,
+            extras={
+                "timestamp": datetime.now().isoformat(),
+                "start_date": start_date,
+                "end_date": end_date,
+                "trading_days": 0,
+                "baseline_cagr": 0.0,
+                "baseline_vol": 0.0,
+                "baseline_max_dd": 0.0,
+                "baseline_crisis_2022": 0.0,
+                "overlay_crisis_2022": 0.0,
+                "dd_improvement": 0.0,
+                "cagr_delta": 0.0,
+                "signal_days_pct": 0.0,
+                "buy_signal_days": 0,
+                "sell_signal_days": 0,
+                "neutral_days": 0,
+                "avg_equity_shift": 0.0,
+                "false_positive_rate": 0.0,
+                "mean_signal_return_20d": 0.0,
+                "regime_vix_low_sharpe": 0.0,
+                "regime_vix_normal_sharpe": 0.0,
+                "regime_vix_elevated_sharpe": 0.0,
+                "regime_vix_high_sharpe": 0.0,
+                "regime_vix_crisis_sharpe": 0.0,
+                "meets_sharpe_target": False,
+            },
         )
 
 
@@ -566,37 +514,38 @@ if __name__ == "__main__":
     result = backtest.run(start_date=args.start, end_date=args.end)
 
     if args.mode == "summary" or args.summary:
+        e = result.extras
         print(f"\n=== Behavioral Sentiment Backtest Summary ===")
-        print(f"Period: {result.start_date} → {result.end_date} ({result.trading_days} days)")
+        print(f"Period: {e['start_date']} → {e['end_date']} ({e['trading_days']} days)")
         print(f"\nBaseline 46/38/16:")
-        print(f"  CAGR: {result.baseline_cagr}%  Vol: {result.baseline_vol}%  "
-              f"Sharpe: {result.baseline_sharpe}  MaxDD: {result.baseline_max_dd}%")
-        print(f"  2022: {result.baseline_crisis_2022}%")
+        print(f"  CAGR: {e['baseline_cagr']}%  Vol: {e['baseline_vol']}%  "
+              f"Sharpe: {result.baseline_sharpe}  MaxDD: {e['baseline_max_dd']}%")
+        print(f"  2022: {e['baseline_crisis_2022']}%")
         print(f"\nBehavioral Overlay:")
-        print(f"  CAGR: {result.overlay_cagr}%  Vol: {result.overlay_vol}%  "
-              f"Sharpe: {result.overlay_sharpe}  MaxDD: {result.overlay_max_dd}%")
-        print(f"  2022: {result.overlay_crisis_2022}%")
+        print(f"  CAGR: {result.cagr}%  Vol: {result.volatility}%  "
+              f"Sharpe: {result.sharpe_ratio}  MaxDD: {result.max_drawdown}%")
+        print(f"  2022: {e['overlay_crisis_2022']}%")
         print(f"\nDelta:")
-        print(f"  Sharpe: {result.sharpe_delta:+.3f}  "
-              f"MaxDD: {result.dd_improvement:+.1f}pp  "
-              f"CAGR: {result.cagr_delta:+.1f}pp")
+        print(f"  Sharpe: {result.sharpe_improvement:+.3f}  "
+              f"MaxDD: {e['dd_improvement']:+.1f}pp  "
+              f"CAGR: {e['cagr_delta']:+.1f}pp")
         print(f"\nSignal Quality:")
-        print(f"  Active: {result.signal_days_pct}% of days  "
-              f"Buy: {result.buy_signal_days}  Sell: {result.sell_signal_days}  "
-              f"Neutral: {result.neutral_days}")
-        print(f"  Avg equity shift: {result.avg_equity_shift}%  "
-              f"False positive rate: {result.false_positive_rate}%")
-        print(f"  Mean 20d signal return: {result.mean_signal_return_20d}%")
+        print(f"  Active: {e['signal_days_pct']}% of days  "
+              f"Buy: {e['buy_signal_days']}  Sell: {e['sell_signal_days']}  "
+              f"Neutral: {e['neutral_days']}")
+        print(f"  Avg equity shift: {e['avg_equity_shift']}%  "
+              f"False positive rate: {e['false_positive_rate']}%")
+        print(f"  Mean 20d signal return: {e['mean_signal_return_20d']}%")
         print(f"\nRegime Sharpe (overlay):")
-        print(f"  VIX<15: {result.regime_vix_low_sharpe}  "
-              f"VIX 15-20: {result.regime_vix_normal_sharpe}  "
-              f"VIX 20-25: {result.regime_vix_elevated_sharpe}")
-        print(f"  VIX 25-30: {result.regime_vix_high_sharpe}  "
-              f"VIX>30: {result.regime_vix_crisis_sharpe}")
+        print(f"  VIX<15: {e['regime_vix_low_sharpe']}  "
+              f"VIX 15-20: {e['regime_vix_normal_sharpe']}  "
+              f"VIX 20-25: {e['regime_vix_elevated_sharpe']}")
+        print(f"  VIX 25-30: {e['regime_vix_high_sharpe']}  "
+              f"VIX>30: {e['regime_vix_crisis_sharpe']}")
         print(f"\nTarget: Sharpe delta >= +0.03 → "
-              f"{'MET' if result.meets_sharpe_target else 'NOT MET'}")
+              f"{'MET' if e['meets_sharpe_target'] else 'NOT MET'}")
 
     if args.output:
         output_path = Path(args.output)
-        output_path.write_text(json.dumps(result.to_dict(), indent=2))
+        output_path.write_text(json.dumps(asdict(result), indent=2))
         print(f"\nResults saved to {args.output}")

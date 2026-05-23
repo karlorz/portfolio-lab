@@ -12,7 +12,6 @@ from src.broker.collar_options_bridge import (
     CollarOptionsBridge,
     LiveCollarStrikes,
     DataSource,
-    fetch_collar_sync,
 )
 from src.broker.options_utils import OptionsChain, OptionQuote, OptionType
 
@@ -168,7 +167,3 @@ class TestEdgeCases:
         result = bridge._find_from_chain(chain, 550.0, 16.0, 30)
         assert result is None  # Should return None, triggering fallback
 
-    def test_convenience_function(self):
-        """Sync wrapper should work."""
-        strikes = fetch_collar_sync()
-        assert isinstance(strikes, LiveCollarStrikes)

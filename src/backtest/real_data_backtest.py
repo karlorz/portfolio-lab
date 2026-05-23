@@ -13,60 +13,16 @@ import json
 import logging
 import math
 import sqlite3
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from datetime import datetime
 from typing import Dict, List, Tuple
 import numpy as np
 
+from src.backtest.metrics import BacktestResult
+from src.paths import BASE_ALLOCATION, DATA_DIR
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RealDataBacktestResult:
-    """Complete backtest result using real market data."""
-    timestamp: str
-    data_start: str
-    data_end: str
-    trading_days: int
-
-    # Baseline 46/38/16
-    baseline_cagr: float
-    baseline_vol: float
-    baseline_sharpe: float
-    baseline_max_dd: float
-    baseline_total_return: float
-
-    # Single overlays (each alone)
-    collar_sharpe: float
-    collar_dd: float
-    crypto_sharpe: float
-    bond_dur_sharpe: float
-
-    # Combined (all overlays together)
-    combined_cagr: float
-    combined_vol: float
-    combined_sharpe: float
-    combined_max_dd: float
-    combined_total_return: float
-
-    # Delta
-    sharpe_delta: float
-    dd_improvement: float
-
-    # Activity
-    collar_days_pct: float
-    crypto_days_pct: float
-    avg_tlt_sleeve_pct: float
-
-    # Decision
-    meets_target: bool
-    recommendation: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-from src.paths import BASE_ALLOCATION, DATA_DIR
 
 class RealDataBacktest:
     """
@@ -153,23 +109,35 @@ class RealDataBacktest:
         avg_mom = (max(0, btc_mom_6m) + max(0, eth_mom_6m)) / 2
         return min(0.05, 0.02 + 0.03 * avg_mom)
 
-    def run(self) -> RealDataBacktestResult:
+    def run(self) -> BacktestResult:
         """Run backtest with real market data."""
         data = self._load_market_data()
 
         if not data or "SPY" not in data:
             logger.error("No market data available")
-            return RealDataBacktestResult(
-                timestamp=datetime.now().isoformat(),
-                data_start="N/A", data_end="N/A", trading_days=0,
-                baseline_cagr=0, baseline_vol=0, baseline_sharpe=0,
-                baseline_max_dd=0, baseline_total_return=0,
-                collar_sharpe=0, collar_dd=0, crypto_sharpe=0, bond_dur_sharpe=0,
-                combined_cagr=0, combined_vol=0, combined_sharpe=0,
-                combined_max_dd=0, combined_total_return=0,
-                sharpe_delta=0, dd_improvement=0,
-                collar_days_pct=0, crypto_days_pct=0, avg_tlt_sleeve_pct=0,
-                meets_target=False, recommendation="No data available",
+            return BacktestResult(
+                total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+                max_drawdown=0.0, baseline_sharpe=0.0, sharpe_improvement=0.0,
+                extras={
+                    "timestamp": datetime.now().isoformat(),
+                    "data_start": "N/A",
+                    "data_end": "N/A",
+                    "trading_days": 0,
+                    "baseline_cagr": 0.0,
+                    "baseline_vol": 0.0,
+                    "baseline_max_dd": 0.0,
+                    "baseline_total_return": 0.0,
+                    "collar_sharpe": 0.0,
+                    "collar_dd": 0.0,
+                    "crypto_sharpe": 0.0,
+                    "bond_dur_sharpe": 0.0,
+                    "dd_improvement": 0.0,
+                    "collar_days_pct": 0.0,
+                    "crypto_days_pct": 0.0,
+                    "avg_tlt_sleeve_pct": 0.0,
+                    "meets_target": False,
+                    "recommendation": "No data available",
+                },
             )
 
         # Align all series to common dates
@@ -278,17 +246,29 @@ class RealDataBacktest:
 
         if days < 30:
             logger.error("Insufficient data for backtest")
-            return RealDataBacktestResult(
-                timestamp=datetime.now().isoformat(),
-                data_start=dates[0], data_end=dates[-1], trading_days=days,
-                baseline_cagr=0, baseline_vol=0, baseline_sharpe=0,
-                baseline_max_dd=0, baseline_total_return=0,
-                collar_sharpe=0, collar_dd=0, crypto_sharpe=0, bond_dur_sharpe=0,
-                combined_cagr=0, combined_vol=0, combined_sharpe=0,
-                combined_max_dd=0, combined_total_return=0,
-                sharpe_delta=0, dd_improvement=0,
-                collar_days_pct=0, crypto_days_pct=0, avg_tlt_sleeve_pct=0,
-                meets_target=False, recommendation="Insufficient data",
+            return BacktestResult(
+                total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+                max_drawdown=0.0, baseline_sharpe=0.0, sharpe_improvement=0.0,
+                extras={
+                    "timestamp": datetime.now().isoformat(),
+                    "data_start": dates[0],
+                    "data_end": dates[-1],
+                    "trading_days": days,
+                    "baseline_cagr": 0.0,
+                    "baseline_vol": 0.0,
+                    "baseline_max_dd": 0.0,
+                    "baseline_total_return": 0.0,
+                    "collar_sharpe": 0.0,
+                    "collar_dd": 0.0,
+                    "crypto_sharpe": 0.0,
+                    "bond_dur_sharpe": 0.0,
+                    "dd_improvement": 0.0,
+                    "collar_days_pct": 0.0,
+                    "crypto_days_pct": 0.0,
+                    "avg_tlt_sleeve_pct": 0.0,
+                    "meets_target": False,
+                    "recommendation": "Insufficient data",
+                },
             )
 
         b_cagr = np.mean(daily_base) * 252
@@ -302,31 +282,33 @@ class RealDataBacktest:
 
         meets = c_sharpe >= 0.90
 
-        return RealDataBacktestResult(
-            timestamp=datetime.now().isoformat(),
-            data_start=dates[warmup], data_end=dates[-1],
-            trading_days=days,
-            baseline_cagr=round(b_cagr, 2),
-            baseline_vol=round(b_vol, 2),
+        return BacktestResult(
+            total_return=round((comb_val - 1) * 100, 1),
+            cagr=round(c_cagr, 2),
+            volatility=round(c_vol, 2),
+            sharpe_ratio=round(c_sharpe, 3),
+            max_drawdown=round(c_dd, 2),
             baseline_sharpe=round(b_sharpe, 3),
-            baseline_max_dd=round(b_dd, 2),
-            baseline_total_return=round((base_val - 1) * 100, 1),
-            collar_sharpe=round(b_sharpe + 0.02, 3),
-            collar_dd=round(b_dd + 3, 2),
-            crypto_sharpe=round(b_sharpe + 0.015, 3),
-            bond_dur_sharpe=round(b_sharpe + 0.02, 3),
-            combined_cagr=round(c_cagr, 2),
-            combined_vol=round(c_vol, 2),
-            combined_sharpe=round(c_sharpe, 3),
-            combined_max_dd=round(c_dd, 2),
-            combined_total_return=round((comb_val - 1) * 100, 1),
-            sharpe_delta=round(c_sharpe - b_sharpe, 3),
-            dd_improvement=round(b_dd - c_dd, 2),
-            collar_days_pct=round(collar_active / days * 100, 1),
-            crypto_days_pct=round(crypto_active / days * 100, 1),
-            avg_tlt_sleeve_pct=round(tlt_total / days * 100, 1),
-            meets_target=meets,
-            recommendation=(
+            sharpe_improvement=round(c_sharpe - b_sharpe, 3),
+            extras={
+                "timestamp": datetime.now().isoformat(),
+                "data_start": dates[warmup],
+                "data_end": dates[-1],
+                "trading_days": days,
+                "baseline_cagr": round(b_cagr, 2),
+                "baseline_vol": round(b_vol, 2),
+                "baseline_max_dd": round(b_dd, 2),
+                "baseline_total_return": round((base_val - 1) * 100, 1),
+                "collar_sharpe": round(b_sharpe + 0.02, 3),
+                "collar_dd": round(b_dd + 3, 2),
+                "crypto_sharpe": round(b_sharpe + 0.015, 3),
+                "bond_dur_sharpe": round(b_sharpe + 0.02, 3),
+                "dd_improvement": round(b_dd - c_dd, 2),
+                "collar_days_pct": round(collar_active / days * 100, 1),
+                "crypto_days_pct": round(crypto_active / days * 100, 1),
+                "avg_tlt_sleeve_pct": round(tlt_total / days * 100, 1),
+                "meets_target": meets,
+                "recommendation": (
                 f"Real data {dates[warmup]}→{dates[-1]}: "
                 f"Baseline Sharpe {b_sharpe:.3f}, Combined {c_sharpe:.3f} "
                 f"({c_sharpe - b_sharpe:+.3f}). "
@@ -334,10 +316,11 @@ class RealDataBacktest:
                 f"Max DD: {b_dd:.1f}% → {c_dd:.1f}% "
                 f"({b_dd - c_dd:+.1f}pp improvement)."
             ),
+            },
         )
 
 
-def run_real_data_backtest() -> RealDataBacktestResult:
+def run_real_data_backtest() -> BacktestResult:
     bt = RealDataBacktest()
     return bt.run()
 
@@ -350,31 +333,31 @@ def main():
     print("=" * 65)
     print("REAL DATA COMBINED BACKTEST — v4.90 FINAL")
     print("=" * 65)
-    print(f"Period: {result.data_start} → {result.data_end}")
-    print(f"Trading Days: {result.trading_days}")
+    print(f"Period: {result.extras['data_start']} → {result.extras['data_end']}")
+    print(f"Trading Days: {result.extras['trading_days']}")
     print()
     print(f"{'Metric':<25} {'Baseline':>10} {'Combined':>10} {'Δ':>10}")
     print("-" * 55)
-    print(f"{'CAGR':<25} {result.baseline_cagr:>9.2f}% {result.combined_cagr:>9.2f}% {result.combined_cagr - result.baseline_cagr:>+9.2f}%")
-    print(f"{'Volatility':<25} {result.baseline_vol:>9.2f}% {result.combined_vol:>9.2f}%")
-    print(f"{'Sharpe Ratio':<25} {result.baseline_sharpe:>10.3f} {result.combined_sharpe:>10.3f} {result.sharpe_delta:>+10.3f}")
-    print(f"{'Max Drawdown':<25} {result.baseline_max_dd:>9.2f}% {result.combined_max_dd:>9.2f}% {result.dd_improvement:>+9.2f}pp")
-    print(f"{'Total Return':<25} {result.baseline_total_return:>9.1f}% {result.combined_total_return:>9.1f}%")
+    print(f"{'CAGR':<25} {result.extras['baseline_cagr']:>9.2f}% {result.cagr:>9.2f}% {result.cagr - result.extras['baseline_cagr']:>+9.2f}%")
+    print(f"{'Volatility':<25} {result.extras['baseline_vol']:>9.2f}% {result.volatility:>9.2f}%")
+    print(f"{'Sharpe Ratio':<25} {result.baseline_sharpe:>10.3f} {result.sharpe_ratio:>10.3f} {result.sharpe_improvement:>+10.3f}")
+    print(f"{'Max Drawdown':<25} {result.extras['baseline_max_dd']:>9.2f}% {result.max_drawdown:>9.2f}% {result.extras['dd_improvement']:>+9.2f}pp")
+    print(f"{'Total Return':<25} {result.extras['baseline_total_return']:>9.1f}% {result.total_return:>9.1f}%")
     print()
     print("Overlay Activity (real data):")
-    print(f"  Collar active: {result.collar_days_pct:.0f}% of days")
-    print(f"  Crypto active: {result.crypto_days_pct:.0f}% of days")
-    print(f"  Avg TLT in bond sleeve: {result.avg_tlt_sleeve_pct:.0f}%")
+    print(f"  Collar active: {result.extras['collar_days_pct']:.0f}% of days")
+    print(f"  Crypto active: {result.extras['crypto_days_pct']:.0f}% of days")
+    print(f"  Avg TLT in bond sleeve: {result.extras['avg_tlt_sleeve_pct']:.0f}%")
     print()
-    print(f"Sharpe Target (0.90): {'MET' if result.meets_target else 'NOT MET'}")
-    print(f"Recommendation: {result.recommendation}")
+    print(f"Sharpe Target (0.90): {'MET' if result.extras['meets_target'] else 'NOT MET'}")
+    print(f"Recommendation: {result.extras['recommendation']}")
     print("=" * 65)
 
     if "--save" in sys.argv:
         out = bt.DATA_DIR / "backtest_results" / "real_data_combined.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
+            json.dump(asdict(result), f, indent=2)
         print(f"Saved to {out}")
 
 

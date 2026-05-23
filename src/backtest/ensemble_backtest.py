@@ -20,53 +20,13 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from collections import defaultdict
 
+from src.backtest.metrics import BacktestResult
 from src.paths import MARKET_DB
 
 from src.signals.integrator import SignalIntegrator
-
-
-@dataclass
-class EnsembleBacktestResult:
-    """Complete ensemble backtest metrics"""
-    start_date: str
-    end_date: str
-    portfolio: str
-    
-    # Returns
-    total_return: float
-    annualized_return: float
-    volatility: float
-    sharpe_ratio: float
-    sortino_ratio: float
-    
-    # Risk
-    max_drawdown: float
-    max_dd_duration: int
-    calmar_ratio: float
-    var_95: float
-    cvar_95: float
-    
-    # Signal stats
-    num_rebalances: int
-    avg_signal_confidence: float
-    regime_distribution: Dict[str, float]
-    
-    # Crisis performance
-    crisis_alpha_2008: float
-    crisis_alpha_2020: float
-    crisis_alpha_2022: float
-    
-    # Component contributions
-    source_contributions: Dict[str, Dict[str, float]]
-    
-    # Rolling metrics
-    rolling_sharpe_1y: List[Tuple[str, float]]
-    
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 class EnsembleBacktestEngine:
@@ -268,7 +228,7 @@ class EnsembleBacktestEngine:
         start_date: str = "2005-01-01",
         end_date: str = "2026-05-13",
         rebalance_freq: str = "monthly"
-    ) -> EnsembleBacktestResult:
+    ) -> BacktestResult:
         """
         Run full ensemble backtest
         
@@ -436,57 +396,60 @@ class EnsembleBacktestEngine:
                 window_sharpe = window_annual_ret / window_vol if window_vol > 0 else 0
                 rolling_sharpe.append((dates[i], window_sharpe))
         
-        return EnsembleBacktestResult(
-            start_date=dates[0],
-            end_date=dates[-1],
-            portfolio="/".join(f"{k}:{v:.2f}" for k, v in portfolio.items()),
+        return BacktestResult(
             total_return=total_return,
-            annualized_return=annualized_return,
+            cagr=annualized_return,
             volatility=volatility,
             sharpe_ratio=sharpe,
-            sortino_ratio=sortino,
             max_drawdown=max_dd,
-            max_dd_duration=max_dd_duration,
-            calmar_ratio=calmar,
-            var_95=var_95,
-            cvar_95=cvar_95,
-            num_rebalances=len(rebalance_dates),
-            avg_signal_confidence=np.mean([s["signals"].get("SPY", {}).get("confidence", 0) 
-                                          for s in signal_history]) if signal_history else 0,
-            regime_distribution=dict(regime_dist),
-            crisis_alpha_2008=crisis_alpha.get("2008", 0),
-            crisis_alpha_2020=crisis_alpha.get("2020", 0),
-            crisis_alpha_2022=crisis_alpha.get("2022", 0),
-            source_contributions=dict(source_contributions),
-            rolling_sharpe_1y=rolling_sharpe[-10:] if rolling_sharpe else []
+            total_rebalances=len(rebalance_dates),
+            extras={
+                "start_date": dates[0],
+                "end_date": dates[-1],
+                "portfolio": "/".join(f"{k}:{v:.2f}" for k, v in portfolio.items()),
+                "sortino_ratio": sortino,
+                "max_dd_duration": max_dd_duration,
+                "calmar_ratio": calmar,
+                "var_95": var_95,
+                "cvar_95": cvar_95,
+                "avg_signal_confidence": np.mean([s["signals"].get("SPY", {}).get("confidence", 0)
+                                                  for s in signal_history]) if signal_history else 0,
+                "regime_distribution": dict(regime_dist),
+                "crisis_alpha_2008": crisis_alpha.get("2008", 0),
+                "crisis_alpha_2020": crisis_alpha.get("2020", 0),
+                "crisis_alpha_2022": crisis_alpha.get("2022", 0),
+                "source_contributions": dict(source_contributions),
+                "rolling_sharpe_1y": rolling_sharpe[-10:] if rolling_sharpe else [],
+            },
         )
-    
-    def validate_target(self, result: EnsembleBacktestResult, target_sharpe: float = 0.95) -> bool:
+
+    def validate_target(self, result: BacktestResult, target_sharpe: float = 0.95) -> bool:
         """Validate against target Sharpe ratio"""
         passed = result.sharpe_ratio >= target_sharpe
-        
+        e = result.extras
+
         print(f"\n{'='*60}")
         print(f"ENSEMBLE BACKTEST VALIDATION (Target Sharpe: {target_sharpe:.2f})")
         print(f"{'='*60}")
         print(f"Sharpe Ratio:      {result.sharpe_ratio:.2f} {'✓' if passed else '✗'}")
-        print(f"CAGR:              {result.annualized_return*100:.2f}%")
+        print(f"CAGR:              {result.cagr*100:.2f}%")
         print(f"Volatility:        {result.volatility*100:.2f}%")
         print(f"Max Drawdown:      {result.max_drawdown*100:.1f}%")
-        print(f"Sortino:           {result.sortino_ratio:.2f}")
-        print(f"Calmar:            {result.calmar_ratio:.2f}")
+        print(f"Sortino:           {e['sortino_ratio']:.2f}")
+        print(f"Calmar:            {e['calmar_ratio']:.2f}")
         print(f"\nCrisis Alpha:")
-        print(f"  2008 GFC:        {result.crisis_alpha_2008*100:+.1f}%")
-        print(f"  2020 COVID:      {result.crisis_alpha_2020*100:+.1f}%")
-        print(f"  2022 Bear:       {result.crisis_alpha_2022*100:+.1f}%")
+        print(f"  2008 GFC:        {e['crisis_alpha_2008']*100:+.1f}%")
+        print(f"  2020 COVID:      {e['crisis_alpha_2020']*100:+.1f}%")
+        print(f"  2022 Bear:       {e['crisis_alpha_2022']*100:+.1f}%")
         print(f"\nSource Contributions:")
-        for src, stats in sorted(result.source_contributions.items(), 
+        for src, stats in sorted(e['source_contributions'].items(),
                                  key=lambda x: x[1].get("hits", 0), reverse=True)[:5]:
             print(f"  {src:20s}: {stats['hits']:4d} hits, conf={stats['avg_confidence']:.2f}")
         print(f"\nRegime Distribution:")
-        for regime, pct in sorted(result.regime_distribution.items(), key=lambda x: -x[1]):
+        for regime, pct in sorted(e['regime_distribution'].items(), key=lambda x: -x[1]):
             print(f"  {regime:12s}: {pct*100:.1f}%")
         print(f"{'='*60}")
-        
+
         return passed
 
 
@@ -563,7 +526,7 @@ def main():
         
         if args.output:
             with open(args.output, 'w') as f:
-                json.dump(result.to_dict(), f, indent=2, default=str)
+                json.dump(asdict(result), f, indent=2, default=str)
             print(f"\nResults saved to: {args.output}")
     
     elif args.command == "benchmark":
@@ -598,12 +561,12 @@ def main():
         
         print(f"\nEnsemble (8-source):")
         print(f"  Sharpe: {ensemble_result.sharpe_ratio:.2f}")
-        print(f"  CAGR:   {ensemble_result.annualized_return*100:.2f}%")
+        print(f"  CAGR:   {ensemble_result.cagr*100:.2f}%")
         print(f"  MaxDD:  {ensemble_result.max_drawdown*100:.1f}%")
-        
+
         print(f"\nStatic (46/38/16):")
         print(f"  Sharpe: {static_result.sharpe_ratio:.2f}")
-        print(f"  CAGR:   {static_result.annualized_return*100:.2f}%")
+        print(f"  CAGR:   {static_result.cagr*100:.2f}%")
         print(f"  MaxDD:  {static_result.max_drawdown*100:.1f}%")
         
         improvement = ensemble_result.sharpe_ratio - static_result.sharpe_ratio

@@ -499,35 +499,6 @@ class OptionsChainCache:
         return sum(volumes) / len(volumes) if volumes else 0.0
 
 
-# Convenience functions for CLI usage
-def fetch_chain_sync(underlying: str = "SPY") -> OptionsChain:
-    """Synchronous wrapper for fetching options chain."""
-    fetcher = OptionsChainFetcher()
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if loop and loop.is_running():
-        # Already in async context — create a new loop to avoid RuntimeError
-        new_loop = asyncio.new_event_loop()
-        try:
-            return new_loop.run_until_complete(fetcher.fetch_0dte_chain(underlying))
-        finally:
-            new_loop.close()
-    return asyncio.run(fetcher.fetch_0dte_chain(underlying))
-
-
-def get_best_0dte_call(target_delta: float = 0.30) -> Optional[OptionQuote]:
-    """Get best 0DTE call option near target delta."""
-    chain = fetch_chain_sync("SPY")
-    
-    if not chain.get_0dte():
-        logger.warning("No 0DTE options found")
-        return None
-    
-    return chain.find_optimal_call(target_delta=target_delta)
-
-
 if __name__ == "__main__":
     import asyncio
     

@@ -282,7 +282,7 @@ class DashboardGenerator:
         try:
             import importlib
             rebalancing_pkg = importlib.import_module('src.rebalancing')
-            SmartRebalanceGate = rebalancing_pkg.SmartRebalanceGate
+            SmartRebalanceGate = rebalancing_pkg.integration.SmartRebalanceGate
 
             gate = SmartRebalanceGate()
             # Build current holdings from positions
