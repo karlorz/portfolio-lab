@@ -18,8 +18,6 @@ Usage:
 
 from typing import Dict, List, Optional
 
-from src.paths import PROJECT_ROOT
-
 from src.signals.integrator import SignalSourceResult
 from src.signals.multi_speed_momentum import MultiSpeedMomentum, SPEED_TIERS, DEFAULT_BASE_ALLOCATION
 from src.strategy.risk_parity_weight_overlay import RiskParityWeightOverlay, DEFAULT_BASE as RP_DEFAULT

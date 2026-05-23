@@ -24,7 +24,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -45,9 +45,6 @@ try:
     from src.signals.cross_asset_regime_arb import (  # type: ignore[import-untyped]
         CrossAssetRegimeArbDetector,
         DivergencePattern,
-        AssetRegime,
-        BondRegime,
-        GoldRegime,
         BULL_MOMENTUM_THRESHOLD,
         BEAR_MOMENTUM_THRESHOLD,
         MOMENTUM_LOOKBACK,

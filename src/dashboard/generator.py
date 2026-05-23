@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 PUBLIC_DIR = PUBLIC_DATA_DIR
 DB_PATH = MARKET_DB
 
-import sys
-
 class DashboardGenerator:
     def __init__(self):
         PUBLIC_DIR.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from src.paths import DATA_DIR, MARKET_DB
+from src.paths import DATA_DIR
 
 
 @dataclass

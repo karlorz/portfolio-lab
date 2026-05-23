@@ -13,7 +13,6 @@ Gating rules derived from deep research (2026-05-23):
 Hysteresis: minimum 20-day dwell time per regime prevents chattering
 on rapid regime transitions (AlphaCrafter, Yuan et al. 2026).
 """
-from enum import Enum
 from typing import Dict, List, Optional, Set
 
 

@@ -29,7 +29,6 @@ from datetime import datetime, timedelta
 from itertools import combinations
 from enum import Enum
 from pathlib import Path
-from src.paths import PROJECT_ROOT
 
 
 class SignalSource(Enum):

@@ -18,7 +18,6 @@ Usage:
 import logging
 import math
 import sys
-from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from src.paths import BASE_ALLOCATION, DATA_DIR

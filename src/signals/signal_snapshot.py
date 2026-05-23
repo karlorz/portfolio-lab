@@ -12,7 +12,7 @@ metadata for diagnostics and a to_signal_reading() bridge method.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 
 
 @dataclass

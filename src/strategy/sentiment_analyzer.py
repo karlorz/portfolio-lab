@@ -18,8 +18,6 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from collections import deque
 
-from src.paths import PROJECT_ROOT
-
 logger = logging.getLogger(__name__)
 import numpy as np
 
