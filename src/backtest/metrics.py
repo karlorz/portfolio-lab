@@ -184,7 +184,11 @@ def compute_crisis_returns(
     crisis_years: List[str] = None,
     base_weights: Dict[str, float] = None,
 ) -> Dict[str, float]:
-    """Compute portfolio returns during crisis years.
+    """Compute maximum drawdown during crisis years.
+
+    Uses worst peak-to-trough return within each year instead of
+    simple first-day/last-day price change, which misses intra-year
+    drawdowns like the 2020 crash-then-recovery pattern.
 
     Args:
         prices: {date: {symbol: price}} lookup.
@@ -193,7 +197,7 @@ def compute_crisis_returns(
         base_weights: Asset weights (default: SPY 0.46, GLD 0.38, TLT 0.16).
 
     Returns:
-        {year: return_pct} dict.
+        {year: max_drawdown_pct} dict (negative values = losses).
     """
     if crisis_years is None:
         crisis_years = ['2008', '2020', '2022']
@@ -205,15 +209,28 @@ def compute_crisis_returns(
         year_days = [d for d in trading_days if d.startswith(year)]
         if len(year_days) < 2:
             continue
-        first_prices = prices.get(year_days[0], {})
-        last_prices = prices.get(year_days[-1], {})
-        year_ret = 0.0
-        for sym, w in base_weights.items():
-            p1 = first_prices.get(sym)
-            p2 = last_prices.get(sym)
-            if p1 and p2 and p1 > 0:
-                year_ret += w * (p2 / p1 - 1)
-        result[year] = round(year_ret * 100, 2)
+
+        # Build daily portfolio values for the year
+        portfolio_values = []
+        for day in year_days:
+            day_prices = prices.get(day, {})
+            pv = sum(w * day_prices.get(sym, 0) for sym, w in base_weights.items())
+            portfolio_values.append(pv)
+
+        if not portfolio_values or portfolio_values[0] == 0:
+            continue
+
+        # Find maximum drawdown (worst peak-to-trough)
+        peak = portfolio_values[0]
+        max_dd = 0.0
+        for pv in portfolio_values:
+            if pv > peak:
+                peak = pv
+            dd = (peak - pv) / peak
+            if dd > max_dd:
+                max_dd = dd
+
+        result[year] = round(-max_dd * 100, 2)  # Negative = loss
 
     return result
 
