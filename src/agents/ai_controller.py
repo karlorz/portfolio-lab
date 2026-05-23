@@ -39,7 +39,7 @@ _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
     import torch
 
-from src.paths import PROJECT_ROOT, DATA_DIR
+from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION
 
 from src.agents.agent_graph import AgentGraph
 from src.agents.marl_trainer import MARLTrainer, MarketEnvironment
@@ -98,7 +98,7 @@ def load_price_data(tickers: List[str] = None) -> Dict[str, np.ndarray]:
 
 def create_default_portfolio() -> Dict[str, float]:
     """Create default 46/38/16/0 allocation."""
-    return {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+    return {**BASE_ALLOCATION, 'CASH': 0.0}
 
 
 def parse_allocation_string(alloc_str: str) -> Dict[str, float]:

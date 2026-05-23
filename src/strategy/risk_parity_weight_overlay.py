@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
 
-from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT
+from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT, BASE_ALLOCATION
 
 DB_PATH = DATA_DIR / "signals.db"
 PRICES_PATH = PRICES_JSON
@@ -39,7 +39,7 @@ MAX_DEVIATION = 0.15  # ±15% deviation from base
 MIN_WEIGHT = 0.05
 REBALANCE_FREQ = 21
 
-DEFAULT_BASE = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+DEFAULT_BASE = {**BASE_ALLOCATION, 'CASH': 0.0}
 
 
 @dataclass
