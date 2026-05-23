@@ -66,14 +66,14 @@ class RealDataBacktestResult:
     def to_dict(self) -> dict:
         return asdict(self)
 
-from src.paths import DATA_DIR
+from src.paths import BASE_ALLOCATION, DATA_DIR
 
 class RealDataBacktest:
     """
     Combined overlay backtest using actual market data.
     """
 
-    BASELINE = {"spy": 0.46, "gld": 0.38, "tlt": 0.16}
+    BASELINE = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
     DATA_DIR = DATA_DIR
 
     def _load_market_data(self) -> Dict[str, Dict]:

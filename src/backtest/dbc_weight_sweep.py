@@ -71,7 +71,7 @@ class DBCSweepResult:
         d["rows"] = [r.to_dict() for r in self.rows]
         return d
 
-from src.paths import DATA_DIR
+from src.paths import BASE_ALLOCATION, DATA_DIR
 
 class DBCWeightSweep:
     """
@@ -81,7 +81,7 @@ class DBCWeightSweep:
     Uses simplified commodity return model (backwardation/contango proxy).
     """
 
-    BASELINE = {"spy": 0.46, "gld": 0.38, "tlt": 0.16}
+    BASELINE = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
 
     def __init__(self):
         self.data_dir = DATA_DIR

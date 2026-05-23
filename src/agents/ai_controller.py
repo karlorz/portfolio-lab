@@ -164,7 +164,7 @@ class AIController:
         self.current_allocation = create_default_portfolio()
         self.last_action: Optional[Dict] = None
         self.action_history: List[Dict] = []
-        self.db_path = Path("~/projects/portfolio-lab/data/market.db").expanduser()
+        self.db_path = DATA_DIR / "market.db"
 
     def _fetch_price_history(self, symbol: str, days: int = 60) -> np.ndarray:
         """Fetch recent close prices from market.db. Falls back to ones if unavailable."""

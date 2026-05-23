@@ -14,6 +14,7 @@ Target: 40%+ cost reduction vs calendar rebalancing.
 
 import json
 import yaml
+from src.paths import BASE_ALLOCATION
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
@@ -393,11 +394,7 @@ def create_sample_portfolio() -> PortfolioSnapshot:
             'GLD': 38000,
             'TLT': 16000,
         },
-        targets={
-            'SPY': 0.46,
-            'GLD': 0.38,
-            'TLT': 0.16,
-        },
+        targets=dict(BASE_ALLOCATION),
         total_value=100000,
         timestamp=datetime.now(),
     )

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 
 from src.data.vix_futures import VIXDataManager
+from src.paths import BASE_ALLOCATION
 from src.strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition
 
 
@@ -69,11 +70,7 @@ class VolatilityParityAllocator:
     
     # Configuration
     TARGET_VOLATILITY = 10.0      # Target portfolio volatility (%)
-    CORE_BASE_WEIGHTS = {         # Base allocation (before vol scaling)
-        'SPY': 0.46,
-        'GLD': 0.38,
-        'TLT': 0.16
-    }
+    CORE_BASE_WEIGHTS = BASE_ALLOCATION  # Canonical 46/38/16 from src.paths
     CORE_ASSET_VOLS = {           # Individual asset volatilities
         'SPY': 15.0,              # 15% annualized
         'GLD': 14.0,

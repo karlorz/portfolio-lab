@@ -21,7 +21,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from src.paths import DATA_DIR
+from src.paths import BASE_ALLOCATION, DATA_DIR
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
@@ -43,7 +43,7 @@ class CombinedOverlayBacktest:
     Each overlay adds its contribution to the baseline allocation.
     """
 
-    BASELINE = {"spy": 0.46, "gld": 0.38, "tlt": 0.16}
+    BASELINE = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
 
     # Approximate asset proxies
     # SHY ~ short-term treasuries (low vol, low return)
