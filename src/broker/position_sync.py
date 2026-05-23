@@ -12,8 +12,8 @@ from dataclasses import dataclass
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from broker.alpaca import AlpacaClient
-from broker.alpaca import Position as AlpacaPosition
+from src.broker.alpaca import AlpacaClient
+from src.broker.alpaca import Position as AlpacaPosition
 
 from src.paths import MARKET_DB, DATA_DIR
 
