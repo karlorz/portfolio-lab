@@ -394,15 +394,15 @@ class FedPolicyOverlay:
             inflation_yoy = cpi_inflation.iloc[-1]['inflation_yoy']
         else:
             # Fallback to breakeven
-            if breakeven_df is not None:
+            if breakeven_df is not None and not breakeven_df.empty:
                 inflation_yoy = breakeven_df.iloc[-1]['value']
             else:
                 inflation_yoy = 2.0  # Default assumption
         
         # Real rates
-        if tips_10y_df is not None:
+        if tips_10y_df is not None and not tips_10y_df.empty:
             real_rate_10y = tips_10y_df.iloc[-1]['value']
-        elif nominal_10y_df is not None and breakeven_df is not None:
+        elif nominal_10y_df is not None and not nominal_10y_df.empty and breakeven_df is not None and not breakeven_df.empty:
             # Approximate: nominal - breakeven
             real_rate_10y = nominal_10y_df.iloc[-1]['value'] - breakeven_df.iloc[-1]['value']
         else:
@@ -412,7 +412,7 @@ class FedPolicyOverlay:
         real_rate_short = fed_funds_rate - inflation_yoy
         
         # Yield curve slope
-        if nominal_10y_df is not None and nominal_2y_df is not None:
+        if nominal_10y_df is not None and not nominal_10y_df.empty and nominal_2y_df is not None and not nominal_2y_df.empty:
             latest_10y = nominal_10y_df.iloc[-1]['value']
             # Find closest 2y date
             closest_2y = nominal_2y_df[nominal_2y_df['date'] <= nominal_10y_df.iloc[-1]['date']]

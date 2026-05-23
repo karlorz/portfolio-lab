@@ -6,6 +6,7 @@ Runs continuously to evaluate signals, generate orders, route to paper or live.
 
 import os
 import json
+import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Dict, List, Optional, NamedTuple
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB
+
+logger = logging.getLogger(__name__)
 
 # Config
 DB_PATH = MARKET_DB
@@ -214,8 +217,8 @@ class Portfolio:
                 # Trigger kill if CVaR exceeds 3× VaR (extreme tail risk)
                 if metrics.cvar_ratio > 3.0 and metrics.filter_active:
                     return f"extreme_tail_risk_cvar_ratio_{metrics.cvar_ratio:.1f}"
-            except Exception:
-                pass  # GARCH failure should not block risk checks
+            except Exception as e:
+                logger.warning("GARCH-CVaR computation failed, skipping tail risk check: %s", e)
 
         # Position concentration check
         for p in self.positions.values():
@@ -232,8 +235,8 @@ class Portfolio:
             data = asdict(metrics) if hasattr(metrics, '__dataclass_fields__') else {}
             with open(report_path, 'w') as f:
                 json.dump(data, f, indent=2, default=str)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to write GARCH health report: %s", e)
 
 def get_current_regime(conn: sqlite3.Connection) -> str:
     """Get latest detected regime using VIX thresholds and trend analysis."""

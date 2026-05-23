@@ -118,6 +118,8 @@ class AlternativeDataSignalGenerator:
         """Compute total return over a period from a price list."""
         if len(prices) < period:
             return None
+        if prices[-period] == 0:
+            return None
         return (prices[-1] / prices[-period]) - 1.0
 
     # ---- Component 1: Treasury Curve ----

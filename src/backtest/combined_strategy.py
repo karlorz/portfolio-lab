@@ -269,11 +269,10 @@ class CombinedStrategyBacktester:
         tlt_return = (tlt_prices.iloc[-1] / tlt_prices.iloc[0]) - 1
 
         # Gold/SPY ratio change (proxy for inflation expectations)
+        inflation_proxy = 0.0
         if gld_prices is not None:
             gld_return = (gld_prices.iloc[-1] / gld_prices.iloc[0]) - 1
-            gld_return - spy_return
-        else:
-            pass
+            inflation_proxy = gld_return - spy_return
 
         # Classify regime based on heuristics
         if tlt_return > 0.05 and spy_return > 0.05:
@@ -284,6 +283,10 @@ class CombinedStrategyBacktester:
             # Both down = tightening (rates up, growth down)
             regime = 'TIGHTENING'
             deltas = {'SPY': -0.10, 'GLD': +0.10, 'TLT': 0.0}
+        elif inflation_proxy > 0.05:
+            # Gold outperforming SPY = inflation concerns
+            regime = 'UNCERTAIN'
+            deltas = {'SPY': -0.05, 'GLD': +0.10, 'TLT': -0.05}
         elif abs(tlt_return) < 0.02 and abs(spy_return) < 0.03:
             regime = 'NEUTRAL'
             deltas = {'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0}
