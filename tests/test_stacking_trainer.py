@@ -36,7 +36,7 @@ class TestTrainingConfig:
         assert config.reg_lambda == 1.0
         assert config.eval_metric == "auc"
         assert config.min_training_days == 252
-        assert config.feature_count == 102
+        assert config.feature_count == 59
     
     def test_custom_config(self):
         """Test custom configuration values."""
@@ -73,7 +73,7 @@ class TestStackingTrainer:
         """Test synthetic data generation for testing."""
         X, y, dates = trainer._generate_synthetic_data(n_samples=100)
         
-        assert X.shape == (100, 102)
+        assert X.shape == (100, 59)
         assert len(y) == 100
         assert len(dates) == 100
         assert all(isinstance(d, str) for d in dates)
@@ -83,15 +83,15 @@ class TestStackingTrainer:
         """Test feature names list generation."""
         names = trainer._get_feature_names()
         
-        # Should have 102 features
-        assert len(names) == 102
+        # Should have 59 features
+        assert len(names) == 59
         
         # Check for expected prefixes
         base_names = [n for n in names if n.startswith("base_")]
-        assert len(base_names) == 8  # 8 base signals
+        assert len(base_names) == 6  # 6 base signals
         
         mult_names = [n for n in names if n.startswith("mult_")]
-        assert len(mult_names) == 28  # C(8,2) = 28 pairs
+        assert len(mult_names) == 15  # C(6,2) = 15 pairs
     
     def test_train_with_synthetic_data(self, trainer, tmp_path):
         """Test full training pipeline with synthetic data."""
@@ -152,7 +152,7 @@ class TestStackingTrainer:
         trainer.load_model(result.model_path)
         
         # Create test features
-        X_test = np.random.randn(102)
+        X_test = np.random.randn(59)
         
         prediction = trainer.predict(X_test)
         
@@ -166,7 +166,7 @@ class TestStackingTrainer:
     
     def test_predict_without_model(self, trainer):
         """Test prediction without loaded model triggers fallback."""
-        X_test = np.random.randn(102)
+        X_test = np.random.randn(59)
         
         prediction = trainer.predict(X_test)
         
@@ -181,7 +181,7 @@ class TestStackingTrainer:
         trainer.load_model(result.model_path)
         
         # Test features (may trigger low confidence)
-        X_test = np.zeros(102)
+        X_test = np.zeros(59)
         
         prediction = trainer.predict(X_test, confidence_threshold=0.9)
         
@@ -289,7 +289,7 @@ class TestIntegration:
         assert success
         
         # 3. Predict
-        X_test = np.random.randn(102)
+        X_test = np.random.randn(59)
         prediction = new_trainer.predict(X_test)
         assert prediction is not None
         

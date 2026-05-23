@@ -138,6 +138,9 @@ class BehavioralSentimentFetcher:
     
     def __init__(self, cache_db: Path = CACHE_DB):
         self.cache_db = cache_db
+        # Instance-level VIX cache to avoid redundant yfinance calls
+        self._vix_cache: Optional[Tuple[float, float]] = None
+        self._vix_cache_time: Optional[datetime] = None
         self._init_cache()
     
     def _init_cache(self):
@@ -214,7 +217,15 @@ class BehavioralSentimentFetcher:
         )
     
     def _fetch_vix_data(self) -> Tuple[float, float]:
-        """Fetch VIX and VIX9D from Yahoo Finance via yfinance"""
+        """Fetch VIX and VIX9D from Yahoo Finance via yfinance (cached 60s)"""
+        # Instance-level cache: at most one real fetch per 60 seconds
+        now = datetime.now()
+        if self._vix_cache is not None and self._vix_cache_time is not None:
+            age = now - self._vix_cache_time
+            if age.total_seconds() < 60:
+                logger.debug("Using cached VIX data (age=%.1fs)", age.total_seconds())
+                return self._vix_cache
+
         vix = 16.0   # Default fallback
         vix9d = 14.4  # Default fallback
 
@@ -243,7 +254,10 @@ class BehavioralSentimentFetcher:
             logger.warning("yfinance fetch failed for ^VIX9D: %s", e)
             vix9d = vix * 0.9
 
-        return float(vix), float(vix9d)
+        result = (float(vix), float(vix9d))
+        self._vix_cache = result
+        self._vix_cache_time = now
+        return result
     
     def _fetch_skew_index(self) -> float:
         """Fetch CBOE SKEW Index from Yahoo Finance via yfinance"""

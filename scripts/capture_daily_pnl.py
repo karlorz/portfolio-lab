@@ -24,6 +24,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.paths import DATA_DIR
 
+try:
+    from src.strategy.evaluator import PAPER_CONFIG
+    INITIAL_CAPITAL = PAPER_CONFIG.get("initial_capital", 100000)
+except ImportError:
+    INITIAL_CAPITAL = 100000
+
 
 def load_portfolio(mode: str = "paper") -> Optional[Dict[str, Any]]:
     """Load portfolio state from JSON file."""
@@ -68,7 +74,7 @@ def compute_pnl_snapshot(portfolio: Dict[str, Any]) -> Dict[str, Any]:
         daily_return = last.get("daily_return", 0.0)
 
     # Compute cumulative P&L
-    initial_capital = 100000  # Default from PAPER_CONFIG
+    initial_capital = INITIAL_CAPITAL
     total_pnl = total_value - initial_capital
     total_pnl_pct = total_pnl / initial_capital if initial_capital > 0 else 0
 

@@ -173,6 +173,10 @@ class SignalHealthTracker:
         """)
         
         conn.commit()
+
+        # Enable WAL mode for concurrent read/write access without locking
+        conn.execute("PRAGMA journal_mode=WAL")
+
         conn.close()
         logger.info("Signal health database initialized")
     

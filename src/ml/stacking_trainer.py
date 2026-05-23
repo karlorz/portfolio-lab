@@ -492,11 +492,11 @@ class StackingTrainer:
         names = []
         sources = list(SignalSource)
         
-        # Base signals (0-7)
+        # Base signals (0-5)
         for source in sources:
             names.append(f"base_{source.value}")
-        
-        # Pairwise interactions (8-91)
+
+        # Pairwise interactions (6-50) — 15 pairs × 3 types = 45 features
         # Use combinations from itertools to get all pairs
         from itertools import combinations
         pairs = list(combinations(sources, 2))
@@ -507,10 +507,10 @@ class StackingTrainer:
             names.append(f"disagree_{s1.value[:3]}_{s2.value[:3]}")
             names.append(f"avg_{s1.value[:3]}_{s2.value[:3]}")
         
-        # Regime context (92-93)
+        # Regime context (51-52)
         names.extend(["vix_normalized", "trend_strength"])
-        
-        # Historical accuracy (94-101)
+
+        # Historical accuracy (53-58)
         for source in sources:
             names.append(f"hist_acc_{source.value[:3]}")
         
@@ -716,7 +716,7 @@ def main():
     elif args.command == 'backfill':
         if not trainer.model:
             # Try to load latest model
-            model_files = sorted(trainer.model_dir.glob("signal_stacker_v*.json"))
+            model_files = sorted(trainer.model_dir.glob("signal_stacker_v*.pkl"))
             if model_files:
                 trainer.load_model(str(model_files[-1]))
             else:
@@ -727,7 +727,7 @@ def main():
         print(json.dumps(stats, indent=2))
         
     elif args.command == 'list':
-        model_files = sorted(Path(PROJECT_ROOT / 'models').glob("signal_stacker_*.json"))
+        model_files = sorted(Path(PROJECT_ROOT / 'models').glob("signal_stacker_*.pkl"))
         print(f"Available models ({len(model_files)}):")
         for mf in model_files:
             print(f"  {mf.name}")

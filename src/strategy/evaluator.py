@@ -352,9 +352,8 @@ def main():
 
     # Clear stale kill switch if risk limits are no longer breached
     kill_file = DATA_DIR / f".kill_switch_{mode}"
-    if kill_file.exists():
-        kill_file.unlink()
-        logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
+    kill_file.unlink(missing_ok=True)
+    logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
 
     # Determine target allocation
     target_alloc = REGIME_OVERRIDES.get(regime, BASE_ALLOCATION)
