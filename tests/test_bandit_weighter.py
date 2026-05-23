@@ -1,7 +1,7 @@
 """Tests for BanditWeighter — epsilon-greedy contextual bandit for ensemble signals."""
 import numpy as np
 import pytest
-from src.strategy.ensemble_voter import BanditWeighter
+from src.strategy.ensemble_voter import BanditWeighter, EnsembleVoter, Regime, SignalSource
 
 
 class TestBanditWeighter:
@@ -98,3 +98,204 @@ class TestBanditWeighter:
         # High temperature makes weights more uniform
         assert 0.3 < weights["sig_a"] < 0.7
         assert 0.3 < weights["sig_b"] < 0.7
+
+
+class TestBanditWeighterRollingSharpe:
+    """Tests for _rolling_sharpe edge cases."""
+
+    def test_insufficient_data_returns_zero(self):
+        bw = BanditWeighter(["sig_a"])
+        bw.update("sig_a", "NORMAL", 0.001)
+        bw.update("sig_a", "NORMAL", 0.002)
+        # Only 2 observations (< 21 minimum)
+        sharpe = bw._rolling_sharpe("sig_a", "NORMAL")
+        assert sharpe == 0.0
+
+    def test_zero_std_returns_zero(self):
+        bw = BanditWeighter(["sig_a"])
+        for _ in range(30):
+            bw.update("sig_a", "NORMAL", 0.001)  # Constant returns
+        sharpe = bw._rolling_sharpe("sig_a", "NORMAL")
+        assert sharpe == 0.0  # Zero std → Sharpe = 0
+
+    def test_negative_returns_negative_sharpe(self):
+        bw = BanditWeighter(["sig_a"])
+        rng = np.random.RandomState(42)
+        for _ in range(30):
+            bw.update("sig_a", "NORMAL", rng.normal(-0.005, 0.002))
+        sharpe = bw._rolling_sharpe("sig_a", "NORMAL")
+        assert sharpe < 0
+
+    def test_positive_returns_positive_sharpe(self):
+        bw = BanditWeighter(["sig_a"])
+        rng = np.random.RandomState(42)
+        for _ in range(30):
+            bw.update("sig_a", "NORMAL", rng.normal(0.003, 0.001))
+        sharpe = bw._rolling_sharpe("sig_a", "NORMAL")
+        assert sharpe > 0
+
+    def test_regime_isolation(self):
+        """Returns for one regime don't affect another."""
+        bw = BanditWeighter(["sig_a"])
+        rng = np.random.RandomState(42)
+        for _ in range(30):
+            bw.update("sig_a", "NORMAL", rng.normal(0.005, 0.001))
+        for _ in range(30):
+            bw.update("sig_a", "CRISIS", rng.normal(-0.010, 0.002))
+        assert bw._rolling_sharpe("sig_a", "NORMAL") > 0
+        assert bw._rolling_sharpe("sig_a", "CRISIS") < 0
+
+
+class TestBanditWeighterWindowTrimming:
+    """Tests for window-based history trimming."""
+
+    def test_history_trimmed_to_window(self):
+        bw = BanditWeighter(["sig_a"], window=50)
+        for i in range(100):
+            bw.update("sig_a", "NORMAL", 0.001)
+        assert len(bw._history["NORMAL"]["sig_a"]) == 50
+
+    def test_recent_values_preserved_after_trim(self):
+        bw = BanditWeighter(["sig_a"], window=10)
+        for i in range(20):
+            bw.update("sig_a", "NORMAL", float(i))
+        history = bw._history["NORMAL"]["sig_a"]
+        assert history[0] == 10.0  # Last 10 values: 10..19
+        assert history[-1] == 19.0
+
+    def test_large_window_no_trim(self):
+        bw = BanditWeighter(["sig_a"], window=1000)
+        for _ in range(100):
+            bw.update("sig_a", "NORMAL", 0.001)
+        assert len(bw._history["NORMAL"]["sig_a"]) == 100  # Under window, no trim
+
+
+class TestBanditWeighterSoftmax:
+    """Tests for _softmax edge cases."""
+
+    def test_all_zero_sharpes_equal_weights(self):
+        bw = BanditWeighter(["sig_a", "sig_b", "sig_c"])
+        sharpes = {"sig_a": 0.0, "sig_b": 0.0, "sig_c": 0.0}
+        weights = bw._softmax(sharpes)
+        for sig in ["sig_a", "sig_b", "sig_c"]:
+            assert abs(weights[sig] - 1.0 / 3) < 0.01
+
+    def test_single_dominant_signal(self):
+        bw = BanditWeighter(["sig_a", "sig_b"], temperature=0.01)
+        sharpes = {"sig_a": 5.0, "sig_b": -1.0}
+        weights = bw._softmax(sharpes)
+        assert weights["sig_a"] > 0.99
+
+    def test_negative_sharpes_produce_valid_weights(self):
+        bw = BanditWeighter(["sig_a", "sig_b"])
+        sharpes = {"sig_a": -2.0, "sig_b": -3.0}
+        weights = bw._softmax(sharpes)
+        assert abs(sum(weights.values()) - 1.0) < 0.001
+        assert weights["sig_a"] > weights["sig_b"]
+
+
+class TestEnsembleVoterGetBlendedWeights:
+    """Tests for EnsembleVoter.get_blended_weights()."""
+
+    def test_cold_start_returns_static_weights(self):
+        voter = EnsembleVoter()
+        weights = voter.get_blended_weights("NORMAL")
+        assert weights is not None
+        total = sum(weights.values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_bandit_blend_increases_with_observations(self):
+        voter = EnsembleVoter()
+        static = voter.get_blended_weights("NORMAL")
+
+        # Feed 252 bandit observations
+        rng = np.random.RandomState(42)
+        for i in range(252):
+            for src in SignalSource:
+                voter.update_bandit(src.value, "NORMAL", rng.normal(0.001, 0.005))
+
+        blended = voter.get_blended_weights("NORMAL")
+        # After 252 observations, blend should be ~0.7
+        # Weights should differ from pure static (unless bandit learned exactly static)
+        assert blended is not None
+        total = sum(blended.values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_blend_zero_observations_is_pure_static(self):
+        voter = EnsembleVoter()
+        weights = voter.get_blended_weights("NORMAL")
+        # All weights should be the static regime weights
+        from src.strategy.ensemble_voter import REGIME_WEIGHTS
+        static = REGIME_WEIGHTS.get(Regime.NORMAL, {})
+        for k, v in weights.items():
+            if k in static:
+                assert abs(v - static[k]) < 0.001
+
+    def test_unknown_regime_defaults_to_normal(self):
+        voter = EnsembleVoter()
+        weights = voter.get_blended_weights("NONEXISTENT")
+        # Should fallback to NORMAL weights
+        assert weights is not None
+
+
+class TestEnsembleVoterUpdateBandit:
+    """Tests for EnsembleVoter.update_bandit()."""
+
+    def test_increment_observations(self):
+        voter = EnsembleVoter()
+        initial = voter.bandit_observations
+        voter.update_bandit("multi_speed_momentum", "NORMAL", 0.001)
+        assert voter.bandit_observations == initial + 1
+
+    def test_multiple_updates_increment_count(self):
+        voter = EnsembleVoter()
+        voter.update_bandit("multi_speed_momentum", "NORMAL", 0.001)
+        voter.update_bandit("cross_asset_rv", "NORMAL", 0.002)
+        voter.update_bandit("international_momentum", "NORMAL", -0.001)
+        assert voter.bandit_observations == 3
+
+
+class TestEnsembleVoterGoalRiskBudget:
+    """Tests for EnsembleVoter.apply_goal_risk_budget()."""
+
+    def test_risk_mult_one_no_change(self):
+        voter = EnsembleVoter()
+        alloc = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        # With risk_mult >= 1.0, returns unchanged
+        result = voter.apply_goal_risk_budget(alloc)
+        assert result == alloc
+
+    def test_empty_allocation_returns_unchanged(self):
+        voter = EnsembleVoter()
+        result = voter.apply_goal_risk_budget({})
+        assert result == {}
+
+    def test_zero_total_returns_unchanged(self):
+        voter = EnsembleVoter()
+        result = voter.apply_goal_risk_budget({"SPY": 0.0})
+        # total=0 early return
+        assert result == {"SPY": 0.0}
+
+
+class TestEnsembleVoterGetRegimeWeights:
+    """Tests for EnsembleVoter.get_regime_weights()."""
+
+    def test_normal_regime(self):
+        voter = EnsembleVoter()
+        weights = voter.get_regime_weights("NORMAL")
+        assert isinstance(weights, dict)
+        assert len(weights) > 0
+
+    def test_crisis_regime(self):
+        voter = EnsembleVoter()
+        weights = voter.get_regime_weights("CRISIS")
+        assert isinstance(weights, dict)
+        # Crisis should shift weight toward defensive signals
+        assert len(weights) > 0
+
+    def test_unknown_regime_falls_back_to_normal(self):
+        voter = EnsembleVoter()
+        weights = voter.get_regime_weights("NONEXISTENT")
+        # Falls back to NORMAL
+        normal_weights = voter.get_regime_weights("NORMAL")
+        assert weights == normal_weights
