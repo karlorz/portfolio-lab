@@ -304,6 +304,51 @@ class TestRiskLimits:
         assert result is not None
         assert "max_drawdown" in result
 
+    def test_garch_cvar_no_breach(self, tmp_path):
+        """GARCH-CVaR integration should not trigger on normal returns."""
+        p = _make_portfolio(tmp_path, cash=100000)
+        p.positions = {"SPY": _make_position(weight=0.30)}
+        # Add history with normal returns
+        rng = np.random.RandomState(42)
+        for _ in range(100):
+            p.history.append({
+                "total_value": 100000 + rng.normal(0, 500),
+                "daily_return": float(rng.normal(0.0004, 0.01)),
+            })
+        result = p.check_risk_limits({"SPY": 460})
+        # Should not trigger extreme tail risk with normal returns
+        assert result is None or "extreme_tail_risk" not in result
+
+    def test_garch_cvar_writes_health_report(self, tmp_path):
+        """check_risk_limits should write .health_report.json to DATA_DIR."""
+        from src.paths import DATA_DIR as PROJECT_DATA_DIR
+        p = _make_portfolio(tmp_path, cash=100000)
+        p.positions = {"SPY": _make_position(weight=0.30)}
+        rng = np.random.RandomState(42)
+        for _ in range(100):
+            p.history.append({
+                "total_value": 100000 + rng.normal(0, 500),
+                "daily_return": float(rng.normal(0.0004, 0.01)),
+            })
+        p.check_risk_limits({"SPY": 460})
+        # Report is written to project DATA_DIR (not tmp_path)
+        report_path = PROJECT_DATA_DIR / ".health_report.json"
+        assert report_path.exists()
+        with open(report_path) as f:
+            data = json.load(f)
+        assert "var_95" in data
+        assert "cvar_95" in data
+        assert "cvar_ratio" in data
+
+    def test_garch_failure_does_not_block(self, tmp_path):
+        """If GARCH computation fails, risk check should still complete."""
+        p = _make_portfolio(tmp_path, cash=100000)
+        p.positions = {"SPY": _make_position(weight=0.30)}
+        p.history = [{"total_value": 100000, "daily_return": 0.001}] * 100
+        # Even if GARCH fails, check_risk_limits should return None (no breach)
+        result = p.check_risk_limits({"SPY": 460})
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # calculate_performance

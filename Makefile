@@ -13,6 +13,7 @@
 #   make overlay-signals    Generate all overlay signals
 #   make overlay-dashboard  Generate overlay dashboard data
 #   make unified-dashboard  Generate unified system dashboard
+#   make garch-risk       Compute GARCH-CVaR risk metrics
 #   make all               Run all maintenance tasks sequentially
 #   make cron-reset        Reset cron status file
 
@@ -269,6 +270,22 @@ overlay-dashboard:
 	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
 
+# ── GARCH-CVaR Risk Metrics ────────────────────────────────────────────
+
+.PHONY: garch-risk
+garch-risk:
+	@echo "=== GARCH-CVaR Risk: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && python3 scripts/compute_garch_risk.py 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	python3 $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR
+
 # ── Performance Attribution ────────────────────────────────────────────
 
 .PHONY: attribution
@@ -317,7 +334,7 @@ ask:
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
-all: data dashboard eval research wiki-sync sync build overlay-signals overlay-dashboard attribution unified-dashboard
+all: data dashboard eval research wiki-sync sync build overlay-signals overlay-dashboard garch-risk attribution unified-dashboard
 	@echo "=== All tasks complete: $$(date) ==="
 
 # ── Cron Status Management ───────────────────────────────────────────
@@ -335,6 +352,7 @@ cron-reset:
 	@python3 $(CRON_UPDATE) portfolio-lab-position-sync pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
+	@python3 $(CRON_UPDATE) portfolio-lab-garch-risk pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"

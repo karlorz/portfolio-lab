@@ -186,19 +186,54 @@ class Portfolio:
     def check_risk_limits(self, prices: Dict[str, float]) -> Optional[str]:
         """Check if risk limits breached. Returns kill reason or None."""
         total = self.total_value(prices)
-        
+
         # Drawdown check (need equity curve)
         if len(self.history) > 20:
             peak = max(h["total_value"] for h in self.history[-252:])  # 1 year lookback
             if total < peak * (1 - PAPER_CONFIG["max_drawdown_pct"]):
                 return f"max_drawdown_{(peak - total) / peak:.2%}"
-        
+
+        # GARCH-CVaR tail risk check
+        if len(self.history) > 63:  # Need at least 3 months
+            try:
+                from src.monitor.garch_cvar import calculate_garch_cvar
+                recent_returns = np.array([
+                    h.get("daily_return", 0.0) for h in self.history[-252:]
+                ])
+                current_dd = 0.0
+                if len(self.history) > 20:
+                    peak = max(h["total_value"] for h in self.history[-252:])
+                    current_dd = (total - peak) / peak if peak > 0 else 0.0
+                metrics = calculate_garch_cvar(
+                    returns=recent_returns,
+                    current_drawdown=current_dd,
+                    max_drawdown=-PAPER_CONFIG["max_drawdown_pct"],
+                )
+                # Write GARCH health report for dashboard consumption
+                self._write_garch_health_report(metrics)
+                # Trigger kill if CVaR exceeds 3× VaR (extreme tail risk)
+                if metrics.cvar_ratio > 3.0 and metrics.filter_active:
+                    return f"extreme_tail_risk_cvar_ratio_{metrics.cvar_ratio:.1f}"
+            except Exception:
+                pass  # GARCH failure should not block risk checks
+
         # Position concentration check
         for p in self.positions.values():
             if p.weight > PAPER_CONFIG["max_position_pct"]:
                 return f"max_position_{p.symbol}_{p.weight:.2%}"
-        
+
         return None
+
+    def _write_garch_health_report(self, metrics) -> None:
+        """Write GARCH-CVaR metrics to .health_report.json for dashboard."""
+        try:
+            from dataclasses import asdict
+            report_path = DATA_DIR / ".health_report.json"
+            data = asdict(metrics) if hasattr(metrics, '__dataclass_fields__') else {}
+            with open(report_path, 'w') as f:
+                json.dump(data, f, indent=2, default=str)
+        except Exception:
+            pass
 
 def get_current_regime(conn: sqlite3.Connection) -> str:
     """Get latest detected regime using VIX thresholds and trend analysis."""

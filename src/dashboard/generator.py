@@ -578,23 +578,36 @@ class DashboardGenerator:
             "forecast_volatility": 0.015,
             "volatility_clustering": "elevated",
         }
-        
+
         try:
-            # Try to load from health report which now includes GARCH-CVaR
+            # Load from GARCH-CVaR health report (flat format from compute_garch_risk.py)
             health_file = DATA_DIR / ".health_report.json"
             if health_file.exists():
                 with open(health_file) as f:
-                    health = json.load(f)
-                    cvar_check = health.get("checks", {}).get("cvar_metrics", {})
-                    if cvar_check.get("garch_filtered", False):
-                        garch_cvar["cvar_95"] = cvar_check.get("cvar_95", -0.0179)
-                        garch_cvar["var_95"] = cvar_check.get("var_95", -0.0127)
-                        garch_cvar["cvar_ratio"] = cvar_check.get("cvar_ratio", 1.51)
-                        garch_cvar["garch_active"] = cvar_check.get("garch_active", True)
+                    data = json.load(f)
+
+                # Support both flat GARCHCVaRMetrics format and nested checks format
+                if data.get("garch_filtered") is not None:
+                    # Flat format (from compute_garch_risk.py / evaluator._write_garch_health_report)
+                    garch_cvar["cvar_95"] = data.get("cvar_95", garch_cvar["cvar_95"]) / 100.0 if abs(data.get("cvar_95", 0)) > 1 else data.get("cvar_95", garch_cvar["cvar_95"])
+                    garch_cvar["var_95"] = data.get("var_95", garch_cvar["var_95"]) / 100.0 if abs(data.get("var_95", 0)) > 1 else data.get("var_95", garch_cvar["var_95"])
+                    garch_cvar["cvar_ratio"] = data.get("cvar_ratio", garch_cvar["cvar_ratio"])
+                    garch_cvar["garch_active"] = data.get("filter_active", False)
+                    if data.get("conditional_volatility_current") is not None:
+                        garch_cvar["current_volatility"] = data["conditional_volatility_current"] / 100.0
+                    if data.get("garch_persistence") is not None:
+                        garch_cvar["volatility_clustering"] = "high" if data["garch_persistence"] > 0.95 else "elevated" if data["garch_persistence"] > 0.85 else "normal"
+                elif data.get("checks", {}).get("cvar_metrics", {}).get("garch_filtered"):
+                    # Legacy nested format
+                    cvar_check = data["checks"]["cvar_metrics"]
+                    garch_cvar["cvar_95"] = cvar_check.get("cvar_95", -0.0179)
+                    garch_cvar["var_95"] = cvar_check.get("var_95", -0.0127)
+                    garch_cvar["cvar_ratio"] = cvar_check.get("cvar_ratio", 1.51)
+                    garch_cvar["garch_active"] = cvar_check.get("garch_active", True)
         except Exception:
             # Use default values
             pass
-        
+
         return garch_cvar
 
     def _load_entropy_data(self) -> Dict:

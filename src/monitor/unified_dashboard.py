@@ -46,25 +46,60 @@ def _read_json(path: str) -> Optional[Any]:
 
 
 def _get_health_section() -> Dict[str, Any]:
-    """System health from .health_report.json."""
+    """System health from .health_report.json.
+
+    Supports two formats:
+    - Legacy: {status, checks, summary, alerts} — structured health report
+    - GARCH flat: {var_95, cvar_95, tail_severity, ...} — GARCHCVaRMetrics asdict
+    """
     report = _read_json(".health_report.json")
     if not report:
         return {"available": False, "status": "unknown"}
 
-    checks = report.get("checks", {})
+    # Legacy format: has explicit status field and checks
+    if "checks" in report or "status" in report:
+        checks = report.get("checks", {})
+        return {
+            "available": True,
+            "timestamp": report.get("timestamp"),
+            "status": report.get("status", "unknown"),
+            "checks_passed": report.get("summary", {}).get("passed", 0),
+            "checks_total": report.get("summary", {}).get("total_checks", 0),
+            "alerts": report.get("alerts", []),
+            "components": {
+                name: {
+                    "status": c.get("status"),
+                    "ok": c.get("ok", False),
+                }
+                for name, c in checks.items()
+            },
+        }
+
+    # GARCH flat format: derive status from tail_severity and cvar_ratio
+    tail = report.get("tail_severity", "normal")
+    cvar_ratio = report.get("cvar_ratio", 1.0)
+    if tail in ("extreme", "severe") or cvar_ratio > 3.0:
+        status = "unhealthy"
+    else:
+        status = "healthy"
+
     return {
         "available": True,
         "timestamp": report.get("timestamp"),
-        "status": report.get("status", "unknown"),
-        "checks_passed": report.get("summary", {}).get("passed", 0),
-        "checks_total": report.get("summary", {}).get("total_checks", 0),
-        "alerts": report.get("alerts", []),
+        "status": status,
+        "checks_passed": 1 if status == "healthy" else 0,
+        "checks_total": 1,
+        "alerts": [] if status == "healthy" else [
+            f"Tail severity: {tail}, CVaR ratio: {cvar_ratio:.2f}"
+        ],
         "components": {
-            name: {
-                "status": c.get("status"),
-                "ok": c.get("ok", False),
-            }
-            for name, c in checks.items()
+            "garch_cvar": {
+                "status": status,
+                "ok": status == "healthy",
+                "var_95": report.get("var_95"),
+                "cvar_95": report.get("cvar_95"),
+                "tail_severity": tail,
+            },
         },
     }
 
