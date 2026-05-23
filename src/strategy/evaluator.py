@@ -203,7 +203,7 @@ class Portfolio:
                 current_dd = 0.0
                 if len(self.history) > 20:
                     peak = max(h["total_value"] for h in self.history[-252:])
-                    current_dd = (total - peak) / peak if peak > 0 else 0.0
+                    current_dd = min(0.0, (total - peak) / peak) if peak > 0 else 0.0
                 metrics = calculate_garch_cvar(
                     returns=recent_returns,
                     current_drawdown=current_dd,
