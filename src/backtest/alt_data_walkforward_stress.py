@@ -14,6 +14,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, List
 
+from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
 from src.paths import PRICES_JSON, SIGNALS_DIR, BASE_ALLOCATION as WEIGHTS
 
 

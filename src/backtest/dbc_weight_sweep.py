@@ -24,6 +24,8 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import numpy as np
 
+from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

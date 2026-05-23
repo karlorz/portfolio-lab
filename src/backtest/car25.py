@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
+from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
+
 # Default simulation parameters
 DEFAULT_SIMULATIONS = 1000
 DEFAULT_HORIZON_YEARS = 2
