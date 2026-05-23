@@ -153,6 +153,98 @@ REGIME_WEIGHTS = {
 }
 
 
+# ── Epsilon-Greedy Contextual Bandit for Dynamic Signal Weighting ──
+
+class BanditWeighter:
+    """Epsilon-greedy contextual bandit for dynamic signal weight adaptation.
+
+    Tracks rolling Sharpe per (signal, regime_bin). With epsilon probability
+    explores a random signal; otherwise exploits the best-performing signal
+    for the current regime. Softmax converts Sharpe estimates to weights.
+
+    No external dependencies beyond numpy (already imported).
+    """
+    def __init__(
+        self,
+        signals: list,
+        epsilon: float = 0.1,
+        window: int = 252,
+        temperature: float = 1.0,
+    ):
+        self.signals = list(signals)
+        self.epsilon = epsilon
+        self.window = window
+        self.temperature = temperature
+        # _history[regime][signal] = list of daily returns (rolling window)
+        self._history: dict = {}
+
+    def select(self, regime: str) -> str:
+        """Select a signal using epsilon-greedy strategy."""
+        import random
+        if random.random() < self.epsilon:
+            return random.choice(self.signals)
+        # Exploit: pick signal with best rolling Sharpe in this regime
+        best_signal = self.signals[0]
+        best_sharpe = -float("inf")
+        for sig in self.signals:
+            sh = self._rolling_sharpe(sig, regime)
+            if sh > best_sharpe:
+                best_sharpe = sh
+                best_signal = sig
+        return best_signal
+
+    def update(self, signal: str, regime: str, daily_return: float):
+        """Record a daily return observation for a signal in a regime."""
+        if regime not in self._history:
+            self._history[regime] = {}
+        if signal not in self._history[regime]:
+            self._history[regime][signal] = []
+        self._history[regime][signal].append(daily_return)
+        # Trim to window
+        if len(self._history[regime][signal]) > self.window:
+            self._history[regime][signal] = \
+                self._history[regime][signal][-self.window:]
+
+    def get_weights(self, regime: str) -> dict | None:
+        """Get softmax-normalized weights for all signals in a regime.
+
+        Returns None if no data exists for this regime (cold start).
+        Returns dict mapping signal_name -> weight (sums to 1.0).
+        """
+        if regime not in self._history:
+            return None
+        sharpes = {}
+        for sig in self.signals:
+            sharpes[sig] = self._rolling_sharpe(sig, regime)
+        return self._softmax(sharpes)
+
+    def _rolling_sharpe(self, signal: str, regime: str) -> float:
+        """Compute rolling Sharpe ratio for a signal in a regime."""
+        hist = self._history.get(regime, {}).get(signal, [])
+        if len(hist) < 21:  # Need at least 1 month
+            return 0.0
+        arr = np.array(hist[-self.window:])
+        mu = np.mean(arr)
+        sigma = np.std(arr)
+        if sigma < 1e-10:
+            return 0.0
+        return float(mu / sigma * np.sqrt(252))
+
+    def _softmax(self, sharpes: dict) -> dict:
+        """Convert Sharpe estimates to weights via softmax."""
+        values = np.array([sharpes[s] for s in self.signals])
+        # Subtract max for numerical stability
+        values = values - np.max(values)
+        if self.temperature > 0:
+            values = values / self.temperature
+        exp_values = np.exp(values)
+        total = np.sum(exp_values)
+        if total < 1e-10:
+            # All equal if everything is zero
+            w = 1.0 / len(self.signals)
+            return {s: w for s in self.signals}
+        return {sig: float(exp_values[i] / total)
+                for i, sig in enumerate(self.signals)}
 
 
 class EnsembleVoter:
