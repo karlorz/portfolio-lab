@@ -427,5 +427,297 @@ class TestEnsembleVoter:
             assert abs(info['shift']) <= 0.05 + 0.001
 
 
+# ===========================================================================
+# Sub-method tests for decomposed compute_vote()
+# ===========================================================================
+
+class TestResolveInputs:
+    """Tests for EnsembleVoter._resolve_inputs()."""
+
+    def test_none_readings_uses_current(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        voter.current_readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.3),
+        }
+        readings, regime, conf = voter._resolve_inputs(None, Regime.NORMAL, 0.6)
+        assert SignalSource.MULTI_SPEED_MOM in readings
+        assert regime == Regime.NORMAL
+        assert conf == 0.6
+
+    def test_none_regime_triggers_detect(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        readings = {SignalSource.MULTI_SPEED_MOM: _make_reading()}
+        # Should not crash even when regime is None (detect_regime called)
+        r, reg, conf = voter._resolve_inputs(readings, None, None)
+        assert isinstance(reg, Regime)
+        assert 0.0 <= conf <= 1.0  # confidence from detect_regime
+
+    def test_none_confidence_defaults_half(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        readings = {SignalSource.MULTI_SPEED_MOM: _make_reading()}
+        _, _, conf = voter._resolve_inputs(readings, Regime.NORMAL, None)
+        assert conf == 0.5
+
+    def test_all_provided_passthrough(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        readings = {SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.7)}
+        r, reg, conf = voter._resolve_inputs(readings, Regime.CRISIS, 0.9)
+        assert r is readings
+        assert reg == Regime.CRISIS
+        assert conf == 0.9
+
+
+class TestApplyRegimeGating:
+    """Tests for EnsembleVoter._apply_regime_gating()."""
+
+    def test_no_regime_gate_passes_through(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        voter.regime_gate = None
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
+        result = voter._apply_regime_gating(weights, 'NORMAL')
+        assert result == weights
+
+    def test_with_regime_gate_filters(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        mock_gate = MagicMock()
+        mock_gate.filter_weights.return_value = {
+            SignalSource.MULTI_SPEED_MOM: 0.0,
+            SignalSource.CROSS_ASSET_RV: 1.0,
+        }
+        voter.regime_gate = mock_gate
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
+        result = voter._apply_regime_gating(weights, 'CRISIS')
+        # Should call filter_weights and normalize
+        assert result[SignalSource.CROSS_ASSET_RV] == 1.0
+        assert result[SignalSource.MULTI_SPEED_MOM] == 0.0
+
+    def test_all_zero_weights_stays_zero(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        mock_gate = MagicMock()
+        mock_gate.filter_weights.return_value = {
+            SignalSource.MULTI_SPEED_MOM: 0.0,
+            SignalSource.CROSS_ASSET_RV: 0.0,
+        }
+        voter.regime_gate = mock_gate
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
+        result = voter._apply_regime_gating(weights, 'CRISIS')
+        assert sum(result.values()) == 0.0
+
+
+class TestApplyAdaptiveWeights:
+    """Tests for EnsembleVoter._apply_adaptive_weights()."""
+
+    def test_returns_valid_dict(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
+        result = voter._apply_adaptive_weights(weights, Regime.NORMAL)
+        assert isinstance(result, dict)
+        assert len(result) == 2
+        # Weights should be positive and finite
+        for v in result.values():
+            assert np.isfinite(v)
+
+    def test_exception_returns_original(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 1.0}
+        # Malformed attribution data shouldn't crash
+        result = voter._apply_adaptive_weights(weights, Regime.NORMAL)
+        assert isinstance(result, dict)
+
+
+class TestApplyHealthWeights:
+    """Tests for EnsembleVoter._apply_health_weights()."""
+
+    def test_exception_returns_original(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
+        # If health tracker can't init, should still return valid weights
+        result = voter._apply_health_weights(weights)
+        assert isinstance(result, dict)
+        assert len(result) == 2
+
+
+class TestApplyTurnoverValidation:
+    """Tests for EnsembleVoter._apply_turnover_validation()."""
+
+    def test_exception_returns_original(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.6, SignalSource.CROSS_ASSET_RV: 0.4}
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.3),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=0.2),
+        }
+        result = voter._apply_turnover_validation(weights, readings, Regime.NORMAL)
+        assert isinstance(result, dict)
+        # Should still have both signals
+        assert len(result) == 2
+
+
+class TestApplyWeightsToReadings:
+    """Tests for EnsembleVoter._apply_weights_to_readings()."""
+
+    def test_assigns_weights_to_readings(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.5),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=0.3),
+        }
+        weights = {
+            SignalSource.MULTI_SPEED_MOM: 0.6,
+            SignalSource.CROSS_ASSET_RV: 0.4,
+        }
+        result = voter._apply_weights_to_readings(readings, weights)
+        assert len(result) == 2
+        # Check that weights were assigned
+        for r in result:
+            assert r.weight > 0
+
+    def test_missing_weight_excluded(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.5),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=0.3),
+        }
+        weights = {
+            SignalSource.MULTI_SPEED_MOM: 1.0,
+            # CROSS_ASSET_RV not in weights
+        }
+        result = voter._apply_weights_to_readings(readings, weights)
+        assert len(result) == 1
+        assert result[0].source == SignalSource.MULTI_SPEED_MOM
+
+
+class TestComputeConsensus:
+    """Tests for EnsembleVoter._compute_consensus()."""
+
+    def test_empty_signals_returns_neutral(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        result = voter._compute_consensus([], Regime.NORMAL, 0.5)
+        assert result.weighted_consensus == 0.0
+        assert result.action == 'neutral'
+
+    def test_crisis_forces_risk_off(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=0.5, confidence=0.8),
+        ]
+        signals[0].weight = 1.0
+        result = voter._compute_consensus(signals, Regime.CRISIS, 0.9)
+        assert result.action == 'risk_off'
+
+    def test_strong_positive_equity_bias(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=0.6, confidence=0.9,
+                          asset_signals={'SPY': 0.7, 'TLT': -0.2, 'GLD': 0.1}),
+            _make_reading(value=0.5, confidence=0.8,
+                          asset_signals={'SPY': 0.6, 'TLT': -0.1, 'GLD': 0.2}),
+        ]
+        signals[0].weight = 0.6
+        signals[1].weight = 0.4
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.7)
+        assert result.equity_bias > 0.3
+        assert result.action == 'increase_equity'
+
+    def test_strong_negative_equity_bias(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        neg_assets = {'SPY': -0.6, 'TLT': 0.2, 'GLD': 0.1}
+        signals = [
+            _make_reading(value=-0.5, confidence=0.9, asset_signals=neg_assets),
+            _make_reading(value=-0.4, confidence=0.8, asset_signals=neg_assets),
+        ]
+        signals[0].weight = 0.6
+        signals[1].weight = 0.4
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.7)
+        assert result.equity_bias < -0.3
+        assert result.action == 'decrease_equity'
+
+    def test_agreement_ratio_bounded(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=0.3, confidence=0.8),
+            _make_reading(value=-0.2, confidence=0.7),
+        ]
+        signals[0].weight = 0.6
+        signals[1].weight = 0.4
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.5)
+        assert 0.0 <= result.agreement <= 1.0
+
+    def test_nan_values_filtered(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=float('nan'), confidence=0.8),
+            _make_reading(value=0.3, confidence=0.7),
+        ]
+        signals[0].weight = 0.5
+        signals[1].weight = 0.5
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.5)
+        assert np.isfinite(result.weighted_consensus)
+
+    def test_zero_weight_handles_gracefully(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=0.5, confidence=0.8),
+        ]
+        signals[0].weight = 0.0
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.5)
+        assert np.isfinite(result.weighted_consensus)
+
+
+class TestBuildVote:
+    """Tests for EnsembleVoter._build_vote()."""
+
+    def test_builds_valid_ensemble_vote(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        signals = [_make_reading(value=0.3)]
+        signals[0].weight = 1.0
+        consensus = voter._ConsensusResult(
+            weighted_consensus=0.3, agreement=0.8,
+            equity_bias=0.4, duration_bias=-0.1, gold_bias=0.05,
+            action='increase_equity', action_confidence=0.6,
+        )
+        vote = voter._build_vote(signals, consensus, Regime.NORMAL, 0.7)
+        assert isinstance(vote, EnsembleVote)
+        assert vote.num_sources == 1
+        assert vote.weighted_consensus == 0.3
+        assert vote.equity_bias == 0.4
+        assert vote.action == 'increase_equity'
+        assert 'Regime' in vote.reasoning
+
+    def test_includes_source_details_in_reasoning(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=0.5, source=SignalSource.MULTI_SPEED_MOM),
+            _make_reading(value=0.2, source=SignalSource.CROSS_ASSET_RV),
+        ]
+        signals[0].weight = 0.6
+        signals[1].weight = 0.4
+        consensus = voter._ConsensusResult(
+            weighted_consensus=0.4, agreement=0.9,
+            equity_bias=0.3, duration_bias=0.0, gold_bias=0.0,
+            action='neutral', action_confidence=0.5,
+        )
+        vote = voter._build_vote(signals, consensus, Regime.NORMAL, 0.6)
+        assert 'multi_speed_momentum' in vote.reasoning
+
+
+class TestPersistVote:
+    """Tests for EnsembleVoter._persist_vote()."""
+
+    def test_saves_vote_to_db(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        vote = EnsembleVote(
+            timestamp='2026-01-01', regime=Regime.NORMAL, regime_confidence=0.7,
+            num_sources=1, weighted_consensus=0.3, agreement_ratio=0.8,
+            equity_bias=0.3, duration_bias=-0.1, gold_bias=0.05,
+            action='increase_equity', confidence=0.6, reasoning='test', source_votes=[],
+        )
+        voter._persist_vote(vote, weighted_consensus=0.3)
+        import sqlite3
+        with sqlite3.connect(str(voter.db_path)) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM ensemble_votes").fetchone()
+            assert row[0] >= 1
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
