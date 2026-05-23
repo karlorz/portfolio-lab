@@ -42,7 +42,6 @@ Reference:
 import pandas as pd
 import json
 import argparse
-import sys
 import requests
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -51,8 +50,6 @@ from datetime import datetime, timedelta
 
 from src.paths import DATA_DIR, BASE_ALLOCATION, PROJECT_ROOT
 
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
 FRED_SERIES = {
     'FEDFUNDS': 'Federal Funds Effective Rate',
     'CPIAUCSL': 'Consumer Price Index (All Urban)', 

@@ -34,7 +34,6 @@ import numpy as np
 import pandas as pd
 import json
 import argparse
-import sys
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
@@ -44,10 +43,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 
-# Add project root
 from src.paths import BASE_ALLOCATION, DATA_DIR, PROJECT_ROOT, PRICES_JSON as PRICES_PATH
-
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.signals.tsmom_overlay import TSMOMOverlay, DEFAULT_BASE_ALLOCATION
 

@@ -47,9 +47,6 @@ from enum import Enum
 
 from src.paths import PROJECT_ROOT
 
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
-
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 # hmmlearn (~23MB) + sklearn (~78MB) accumulate in single-process test runs.
 _ML_ENABLED_RISK = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"

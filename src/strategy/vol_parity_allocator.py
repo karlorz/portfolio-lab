@@ -11,9 +11,6 @@ import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.vix_futures import VIXDataManager
 from src.strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition

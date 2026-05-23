@@ -12,12 +12,8 @@ import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.vix_futures import VIXDataManager, fetch_vix_futures_data
 

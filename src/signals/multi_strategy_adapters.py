@@ -16,13 +16,9 @@ Usage:
     # For integrator integration, use class methods
 """
 
-import sys
 from typing import Dict, List, Optional
 
 from src.paths import PROJECT_ROOT
-
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.signals.integrator import SignalSourceResult
 from src.signals.multi_speed_momentum import MultiSpeedMomentum, SPEED_TIERS, DEFAULT_BASE_ALLOCATION

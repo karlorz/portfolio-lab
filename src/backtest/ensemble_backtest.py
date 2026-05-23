@@ -17,7 +17,6 @@ import json
 import sqlite3
 import numpy as np
 import argparse
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -26,8 +25,6 @@ from collections import defaultdict
 
 from src.paths import MARKET_DB
 
-# Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.signals.integrator import SignalIntegrator
 
 

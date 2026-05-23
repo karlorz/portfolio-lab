@@ -42,16 +42,12 @@ import numpy as np
 import pandas as pd
 import json
 import argparse
-import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from itertools import combinations
 
 from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT
-
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"

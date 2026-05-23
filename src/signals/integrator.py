@@ -50,9 +50,6 @@ from typing import Dict, List, Optional, Any
 
 from src.paths import DATA_DIR, PROJECT_ROOT
 
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
-
 # Existing module imports
 from src.data.alternative_data import AlternativeDataClient
 

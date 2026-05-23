@@ -29,11 +29,7 @@ from datetime import datetime, timedelta
 from itertools import combinations
 from enum import Enum
 from pathlib import Path
-import sys
-
 from src.paths import PROJECT_ROOT
-
-sys.path.insert(0, str(PROJECT_ROOT))
 
 
 class SignalSource(Enum):

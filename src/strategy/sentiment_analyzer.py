@@ -12,7 +12,6 @@ Implements:
 
 import json
 import logging
-import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,9 +22,6 @@ from src.paths import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 import numpy as np
-
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.paths import DATA_DIR
 

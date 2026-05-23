@@ -28,7 +28,6 @@ import numpy as np
 import json
 import sqlite3
 import argparse
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -41,9 +40,6 @@ if _ML_ENABLED:
     import torch
 
 from src.paths import PROJECT_ROOT
-
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agents.agent_graph import AgentGraph
 from src.agents.marl_trainer import MARLTrainer, MarketEnvironment

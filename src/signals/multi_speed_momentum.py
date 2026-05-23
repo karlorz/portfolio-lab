@@ -39,7 +39,6 @@ import numpy as np
 import pandas as pd
 import json
 import argparse
-import sys
 from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
@@ -47,9 +46,6 @@ import sqlite3
 from datetime import datetime
 
 from src.paths import PROJECT_ROOT
-
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.paths import DATA_DIR, PRICES_JSON
 

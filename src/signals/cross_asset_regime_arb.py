@@ -37,8 +37,6 @@ logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR, PROJECT_ROOT
 
-sys.path.insert(0, str(PROJECT_ROOT))
-
 STATE_DIR = DATA_DIR / "regime_arb"
 
 # Default detection parameters

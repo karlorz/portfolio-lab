@@ -36,12 +36,9 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 from enum import Enum
-import sys
 import logging
 
 from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, PROJECT_ROOT
-
-sys.path.insert(0, str(PROJECT_ROOT))
 
 logger = logging.getLogger(__name__)
 

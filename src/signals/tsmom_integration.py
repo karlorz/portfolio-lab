@@ -19,16 +19,12 @@ Usage:
     signals = adapter.get_portfolio_signals(["SPY", "GLD", "TLT"])
 """
 
-import sys
 from datetime import datetime
 from typing import Dict, List, Optional
 
 import numpy as np
 
 from src.paths import PROJECT_ROOT
-
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.signals.tsmom_overlay import TSMOMOverlay, TSMOMSignal, DEFAULT_BASE_ALLOCATION
 from src.signals.integrator import SignalSourceResult

@@ -13,7 +13,6 @@ Integrates with:
 """
 
 import json
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -23,9 +22,6 @@ from enum import Enum
 from src.paths import PROJECT_ROOT
 
 import numpy as np
-
-# Add project root to path
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.paths import DATA_DIR, BASE_ALLOCATION
 

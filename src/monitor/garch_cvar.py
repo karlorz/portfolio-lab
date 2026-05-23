@@ -35,12 +35,7 @@ except ImportError:
     ARCH_AVAILABLE = False
     warnings.warn("arch library not available. GARCH-CVaR will fallback to historical CVaR.")
 
-import sys
-
 from src.paths import PROJECT_ROOT as project_root
-# Add project root to path for imports
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
 
 from src.monitor.cvar_metrics import (
     CVaRMetrics, calculate_var, calculate_cvar, 
