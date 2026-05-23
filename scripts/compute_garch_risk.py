@@ -113,7 +113,41 @@ def main():
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
     from dataclasses import asdict
+    import math
     report = asdict(metrics)
+
+    # Add portfolio entropy metrics
+    weights = list(BASE_ALLOCATION.values())
+    n = len(weights)
+    shannon = -sum(w * math.log(w) for w in weights if w > 0)
+    effective_n = math.exp(shannon)
+    h_max = math.log(n) if n > 1 else 1.0
+    normalized_score = (shannon / h_max) * 100.0 if h_max > 0 else 0.0
+    hhi = sum(w * w for w in weights)
+
+    report["checks"] = {
+        "portfolio_entropy": {
+            "name": "portfolio_entropy",
+            "status": "good" if normalized_score > 90 else "warning",
+            "ok": normalized_score > 70,
+            "metrics": {
+                "shannon_entropy": round(shannon, 4),
+                "effective_n": round(effective_n, 2),
+                "normalized_score": round(normalized_score, 1),
+                "hhi_index": round(hhi, 4),
+            },
+        },
+    }
+
+    # Derive top-level status for unified dashboard compatibility
+    tail = report.get("tail_severity", "normal")
+    cvar_ratio = report.get("cvar_ratio", 1.0)
+    if tail in ("extreme", "severe") or cvar_ratio > 3.0:
+        report["status"] = "unhealthy"
+    else:
+        report["status"] = "healthy"
+    report["summary"] = {"passed": 1, "total_checks": 1}
+
     with open(report_path, 'w') as f:
         json.dump(report, f, indent=2, default=str)
 

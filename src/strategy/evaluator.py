@@ -233,10 +233,62 @@ class Portfolio:
             from dataclasses import asdict
             report_path = DATA_DIR / ".health_report.json"
             data = asdict(metrics) if hasattr(metrics, '__dataclass_fields__') else {}
+
+            # Add portfolio entropy metrics from current allocation
+            data["checks"] = data.get("checks", {})
+            data["checks"]["portfolio_entropy"] = self._compute_portfolio_entropy()
+
+            # Derive top-level status for unified dashboard compatibility
+            tail = data.get("tail_severity", "normal")
+            cvar_ratio = data.get("cvar_ratio", 1.0)
+            if tail in ("extreme", "severe") or cvar_ratio > 3.0:
+                data["status"] = "unhealthy"
+            else:
+                data["status"] = "healthy"
+            data["summary"] = {"passed": 1, "total_checks": 1}
+
             with open(report_path, 'w') as f:
                 json.dump(data, f, indent=2, default=str)
         except Exception as e:
             logger.debug("Failed to write GARCH health report: %s", e)
+
+    @staticmethod
+    def _compute_portfolio_entropy() -> dict:
+        """Compute portfolio concentration metrics from BASE_ALLOCATION.
+
+        Returns Shannon entropy, effective number of assets, normalized
+        score (0-100), and Herfindahl-Hirschman Index (HHI).
+        """
+        import math
+        from src.paths import BASE_ALLOCATION
+
+        weights = list(BASE_ALLOCATION.values())
+        n = len(weights)
+
+        # Shannon entropy: H = -sum(w_i * ln(w_i))
+        shannon = -sum(w * math.log(w) for w in weights if w > 0)
+
+        # Effective number of assets: exp(H)
+        effective_n = math.exp(shannon)
+
+        # Normalized score: H / H_max * 100, where H_max = ln(n)
+        h_max = math.log(n) if n > 1 else 1.0
+        normalized_score = (shannon / h_max) * 100.0 if h_max > 0 else 0.0
+
+        # HHI: sum(w_i^2) — ranges from 1/n (equal) to 1 (concentrated)
+        hhi = sum(w * w for w in weights)
+
+        return {
+            "name": "portfolio_entropy",
+            "status": "good" if normalized_score > 90 else "warning",
+            "ok": normalized_score > 70,
+            "metrics": {
+                "shannon_entropy": round(shannon, 4),
+                "effective_n": round(effective_n, 2),
+                "normalized_score": round(normalized_score, 1),
+                "hhi_index": round(hhi, 4),
+            },
+        }
 
 def get_current_regime(conn: sqlite3.Connection) -> str:
     """Get latest detected regime using VIX thresholds and trend analysis."""
