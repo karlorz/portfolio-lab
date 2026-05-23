@@ -45,7 +45,7 @@ from dataclasses import dataclass, asdict
 import sqlite3
 from datetime import datetime
 
-from src.paths import PROJECT_ROOT
+from src.paths import PROJECT_ROOT, BASE_ALLOCATION
 
 from src.paths import DATA_DIR, PRICES_JSON
 
@@ -88,13 +88,7 @@ ASSET_TICKERS = {
     'CASH': 'CASH',
 }
 
-DEFAULT_BASE_ALLOCATION = {
-    'SPY': 0.46,
-    'GLD': 0.34,  # Reduced from 0.38 to accommodate DBC
-    'TLT': 0.16,
-    'DBC': 0.04,  # Phase 2: 4% commodity exposure
-    'CASH': 0.0,
-}
+DEFAULT_BASE_ALLOCATION = {**BASE_ALLOCATION, 'CASH': 0.0}
 
 
 @dataclass

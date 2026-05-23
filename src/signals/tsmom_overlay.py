@@ -39,7 +39,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT
+from src.paths import DATA_DIR, PRICES_JSON, PROJECT_ROOT, BASE_ALLOCATION
 
 # Constants
 DB_PATH = DATA_DIR / "signals.db"
@@ -62,12 +62,7 @@ ASSET_TICKERS = {
     'CASH': 'CASH',  # Cash/money market
 }
 
-DEFAULT_BASE_ALLOCATION = {
-    'SPY': 0.46,
-    'GLD': 0.38,
-    'TLT': 0.16,
-    'CASH': 0.0,
-}
+DEFAULT_BASE_ALLOCATION = {**BASE_ALLOCATION, 'CASH': 0.0}
 
 
 @dataclass

@@ -98,9 +98,12 @@ class TestConstants:
         total = sum(DEFAULT_BASE_ALLOCATION.values())
         assert abs(total - 1.0) < 0.01
 
-    def test_dbc_in_allocation(self):
-        assert 'DBC' in DEFAULT_BASE_ALLOCATION
-        assert DEFAULT_BASE_ALLOCATION['DBC'] == 0.04
+    def test_allocation_matches_canonical(self):
+        """Allocation should match canonical BASE_ALLOCATION from src.paths."""
+        from src.paths import BASE_ALLOCATION
+        for asset, weight in BASE_ALLOCATION.items():
+            assert asset in DEFAULT_BASE_ALLOCATION
+            assert DEFAULT_BASE_ALLOCATION[asset] == weight
 
 
 # ---------------------------------------------------------------------------
