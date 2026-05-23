@@ -11,16 +11,21 @@ Usage:
 
 import json
 import sqlite3
+import logging
 import numpy as np
 import argparse
 from datetime import datetime
 from typing import Dict, List, Tuple
 from dataclasses import dataclass, asdict
 
-from src.paths import DATA_DIR, BASE_ALLOCATION
+from src.paths import DATA_DIR, BASE_ALLOCATION, MARKET_DB
+
+DB_PATH = MARKET_DB
 
 RISK_METRICS_PATH = DATA_DIR / "risk_metrics.json"
 RISK_HISTORY_PATH = DATA_DIR / "risk_metrics_history.json"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -170,8 +175,11 @@ def compute_cvar_metrics(window_days: int = 252) -> CVaRMetrics:
 def load_history() -> List[Dict]:
     """Load historical CVaR metrics."""
     if RISK_HISTORY_PATH.exists():
-        with open(RISK_HISTORY_PATH, 'r') as f:
-            return json.load(f)
+        try:
+            with open(RISK_HISTORY_PATH, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Corrupted history file, starting fresh: %s", e)
     return []
 
 

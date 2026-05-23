@@ -163,7 +163,6 @@ class Portfolio:
             else:
                 if symbol in self.positions and self.positions[symbol].shares >= fill_shares:
                     p = self.positions[symbol]
-                    (fill_price - p.avg_price) * fill_shares
                     new_shares = p.shares - fill_shares
                     
                     if new_shares > 0:
