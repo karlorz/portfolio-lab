@@ -59,7 +59,7 @@ class TestConstants:
 
     def test_paper_config(self):
         assert PAPER_CONFIG["initial_capital"] == 100000
-        assert PAPER_CONFIG["max_position_pct"] == 0.4
+        assert PAPER_CONFIG["max_position_pct"] == 0.5
         assert PAPER_CONFIG["max_drawdown_pct"] == 0.15
         assert PAPER_CONFIG["rebalance_threshold"] == 0.10
         assert PAPER_CONFIG["volatility_target"] == 0.12
@@ -286,7 +286,7 @@ class TestRiskLimits:
 
     def test_concentration_breach(self, tmp_path):
         p = _make_portfolio(tmp_path, cash=0)
-        p.positions = {"SPY": _make_position(weight=0.50, value=50000)}
+        p.positions = {"SPY": _make_position(weight=0.55, value=55000)}
         result = p.check_risk_limits({"SPY": 460})
         assert result is not None
         assert "max_position" in result

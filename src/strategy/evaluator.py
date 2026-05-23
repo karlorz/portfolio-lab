@@ -22,7 +22,7 @@ PERFORMANCE_LOG = DATA_DIR / "performance.jsonl"
 # Paper trading config (default)
 PAPER_CONFIG = {
     "initial_capital": 100000,
-    "max_position_pct": 0.4,  # Max 40% in any single asset
+    "max_position_pct": 0.5,  # Max 50% in any single asset (SPY 46% target + drift)
     "max_drawdown_pct": 0.15,  # Kill switch at 15% DD
     "rebalance_threshold": 0.10,  # 10% drift triggers rebalance
     "volatility_target": 0.12,  # 12% annual vol target
