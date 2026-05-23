@@ -568,5 +568,13 @@ class TestGetSignalHistory:
         assert result[0].signal_agreement == "aligned_bullish"
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+class TestSQLParameterization:
+    """Regression: SQL queries must use parameterized ? instead of .format()."""
+
+    def test_get_signal_history_uses_params(self):
+        """get_signal_history should use parameterized query, not .format()."""
+        import inspect
+        from src.signals.integrator import SignalIntegrator
+        source = inspect.getsource(SignalIntegrator.get_signal_history)
+        assert ".format(days)" not in source, \
+            "SQL query still uses .format(days) — must use ? parameterized query"

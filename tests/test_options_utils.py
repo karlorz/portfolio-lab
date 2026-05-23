@@ -684,3 +684,18 @@ class TestEdgeCases:
         best = chain.find_optimal_call(target_delta=0.30)
         assert best is not None
         assert best.strike == 550.0
+
+
+class TestAsyncWrapperSafety:
+    """Regression: fetch_chain_sync must not crash if called from a running event loop."""
+
+    @patch("src.broker.options_utils.OptionsChainFetcher")
+    def test_fetch_chain_sync_from_async_context(self, mock_fetcher_class):
+        """fetch_chain_sync should work even when called from a running event loop."""
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_0dte_chain = AsyncMock(return_value=OptionsChain(underlying="SPY"))
+        mock_fetcher_class.return_value = mock_fetcher
+
+        # This should not raise RuntimeError about nested event loops
+        chain = fetch_chain_sync("SPY")
+        assert chain.underlying == "SPY"
