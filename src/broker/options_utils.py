@@ -477,10 +477,10 @@ class OptionsChainCache:
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT * FROM options_chain 
-            WHERE fetched_at >= datetime('now', '-{} days')
+            SELECT * FROM options_chain
+            WHERE fetched_at >= datetime('now', ?)
             ORDER BY fetched_at DESC
-        """.format(days))
+        """, (f'-{days} days',))
         
         rows = cursor.fetchall()
         conn.close()
@@ -503,6 +503,17 @@ class OptionsChainCache:
 def fetch_chain_sync(underlying: str = "SPY") -> OptionsChain:
     """Synchronous wrapper for fetching options chain."""
     fetcher = OptionsChainFetcher()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        # Already in async context — create a new loop to avoid RuntimeError
+        new_loop = asyncio.new_event_loop()
+        try:
+            return new_loop.run_until_complete(fetcher.fetch_0dte_chain(underlying))
+        finally:
+            new_loop.close()
     return asyncio.run(fetcher.fetch_0dte_chain(underlying))
 
 

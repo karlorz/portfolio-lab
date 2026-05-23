@@ -310,6 +310,16 @@ class CollarOptionsBridge:
 def fetch_collar_sync() -> LiveCollarStrikes:
     """Synchronous wrapper for collar options fetch."""
     bridge = CollarOptionsBridge()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        new_loop = asyncio.new_event_loop()
+        try:
+            return new_loop.run_until_complete(bridge.fetch_optimal_collar())
+        finally:
+            new_loop.close()
     return asyncio.run(bridge.fetch_optimal_collar())
 
 

@@ -300,11 +300,11 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
         cursor.execute("""
             SELECT ticker, date, parking_occupancy_pct, occupancy_vs_last_year_pct,
                    store_count, data_quality_score, source
-            FROM satellite_data 
-            WHERE ticker = ? 
-            AND date >= date('now', '-{} days')
+            FROM satellite_data
+            WHERE ticker = ?
+            AND date >= date('now', ?)
             ORDER BY date DESC
-        """.format(days), (ticker,))
+        """, (ticker, f'-{days} days'))
         
         rows = cursor.fetchall()
         
@@ -529,11 +529,11 @@ class CreditCardAdapter(AlternativeDataAdapter):
             SELECT ticker, date, spending_growth_yoy, spending_growth_mom,
                    transaction_volume_index, avg_ticket_size, category_rank_pct,
                    data_quality_score, source
-            FROM credit_card_data 
-            WHERE ticker = ? 
-            AND date >= date('now', '-{} days')
+            FROM credit_card_data
+            WHERE ticker = ?
+            AND date >= date('now', ?)
             ORDER BY date DESC
-        """.format(days), (ticker,))
+        """, (ticker, f'-{days} days'))
         
         rows = cursor.fetchall()
         
@@ -753,11 +753,11 @@ class SupplyChainAdapter(AlternativeDataAdapter):
         cursor.execute("""
             SELECT ticker, date, container_throughput_index, inventory_days_coverage,
                    supplier_lead_time_days, shipping_cost_index, data_quality_score, source
-            FROM supply_chain_data 
-            WHERE ticker = ? 
-            AND date >= date('now', '-{} days')
+            FROM supply_chain_data
+            WHERE ticker = ?
+            AND date >= date('now', ?)
             ORDER BY date DESC
-        """.format(days), (ticker,))
+        """, (ticker, f'-{days} days'))
         
         rows = cursor.fetchall()
         

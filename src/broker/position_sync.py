@@ -4,6 +4,7 @@ Position synchronization between Alpaca broker and local portfolio-lab state.
 import os
 import sys
 import json
+import logging
 import sqlite3
 from typing import Dict, List, Any
 from datetime import datetime
@@ -13,6 +14,8 @@ from src.broker.alpaca import AlpacaClient
 from src.broker.alpaca import Position as AlpacaPosition
 
 from src.paths import MARKET_DB, DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -95,7 +98,7 @@ class PositionSync:
             positions = self.client.get_positions()
             return {p.symbol: p for p in positions}
         except Exception as e:
-            print(f"Error fetching broker positions: {e}")
+            logger.warning("Error fetching broker positions: %s", e)
             return {}
     
     def calculate_drift(

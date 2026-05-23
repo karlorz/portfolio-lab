@@ -1183,9 +1183,9 @@ class SignalIntegrator:
         
         cursor.execute("""
             SELECT * FROM composite_signals
-            WHERE ticker = ? AND timestamp >= date('now', '-{} days')
+            WHERE ticker = ? AND timestamp >= date('now', ?)
             ORDER BY timestamp DESC
-        """.format(days), (ticker,))
+        """, (ticker, f'-{days} days'))
         
         rows = cursor.fetchall()
         conn.close()

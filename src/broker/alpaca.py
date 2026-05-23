@@ -247,7 +247,7 @@ class AlpacaClient:
             client.cancel_order_by_id(order_id)
             return True
         except Exception as e:
-            print(f"Error cancelling order {order_id}: {e}")
+            logger.warning("Error cancelling order %s: %s", order_id, e)
             return False
     
     def cancel_all_orders(self) -> int:
@@ -257,7 +257,7 @@ class AlpacaClient:
             result = client.cancel_orders()
             return len(result) if result else 0
         except Exception as e:
-            print(f"Error cancelling all orders: {e}")
+            logger.warning("Error cancelling all orders: %s", e)
             return 0
     
     def get_positions(self) -> List[Position]:

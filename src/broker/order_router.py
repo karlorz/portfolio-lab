@@ -106,7 +106,7 @@ class OrderRouter:
             
             return signals
         except Exception as e:
-            print(f"Error loading signals: {e}")
+            logger.warning("Error loading signals: %s", e)
             return []
     
     def get_current_positions(self) -> Dict[str, Dict[str, float]]:
@@ -124,7 +124,7 @@ class OrderRouter:
                 for p in positions
             }
         except Exception as e:
-            print(f"Error fetching positions: {e}")
+            logger.warning("Error fetching positions: %s", e)
             return {}
     
     def calculate_orders(

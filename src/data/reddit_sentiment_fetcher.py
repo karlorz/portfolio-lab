@@ -439,11 +439,11 @@ class RedditSentimentFetcher:
         try:
             with sqlite3.connect(self.cache_db) as conn:
                 cursor = conn.execute("""
-                    SELECT timestamp, data_json 
-                    FROM reddit_sentiment_cache 
-                    WHERE created_at > datetime('now', '-{} days')
+                    SELECT timestamp, data_json
+                    FROM reddit_sentiment_cache
+                    WHERE created_at > datetime('now', ?)
                     ORDER BY created_at DESC
-                """.format(days))
+                """, (f'-{days} days',))
                 
                 history = []
                 for row in cursor.fetchall():
@@ -463,11 +463,11 @@ class RedditSentimentFetcher:
                 cursor = conn.execute("""
                     SELECT ticker, subreddit, post_title, sentiment_score,
                            upvotes, comment_count, created_utc, fetched_at
-                    FROM reddit_mentions 
-                    WHERE ticker = ? 
-                    AND fetched_at > datetime('now', '-{} days')
+                    FROM reddit_mentions
+                    WHERE ticker = ?
+                    AND fetched_at > datetime('now', ?)
                     ORDER BY fetched_at DESC
-                """.format(days), (ticker,))
+                """, (ticker, f'-{days} days'))
                 
                 columns = [desc[0] for desc in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]

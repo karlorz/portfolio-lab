@@ -533,9 +533,9 @@ class BehavioralSentimentFetcher:
         try:
             with sqlite3.connect(self.cache_db) as conn:
                 cursor = conn.execute(
-                    """SELECT data, created_at FROM behavioral_sentiment_cache 
-                       WHERE created_at >= date('now', '-{} days')
-                       ORDER BY created_at DESC""".format(days)
+                    """SELECT data, created_at FROM behavioral_sentiment_cache
+                       WHERE created_at >= date('now', ?)
+                       ORDER BY created_at DESC""", (f'-{days} days',)
                 )
                 rows = cursor.fetchall()
                 return [json.loads(row[0]) for row in rows]
