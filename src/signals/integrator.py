@@ -778,9 +778,10 @@ class AlternativeDataSignalAdapter(SignalSource):
             self._store_signal(ticker, result)
             return result
             
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Alternative data signal generation failed for {ticker}: {e}")
             return None
-    
+
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical accuracy."""
         conn = sqlite3.connect(self.db_path)
@@ -845,9 +846,10 @@ class LLMSentimentSignalAdapter(SignalSource):
                 }
             )
             
-        except Exception:
+        except Exception as e:
+            logger.warning(f"LLM narrative signal generation failed for {ticker}: {e}")
             return None
-    
+
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical accuracy based on LLM research."""
         # GPT-4o-mini achieves ~76% accuracy based on Q3 2026 research
