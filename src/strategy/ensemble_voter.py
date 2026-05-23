@@ -51,8 +51,8 @@ def _get_health_tracker():
         try:
             from src.signals.health_tracker import SignalHealthTracker
             _health_tracker = SignalHealthTracker()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("SignalHealthTracker unavailable: %s", e)
     return _health_tracker
 
 

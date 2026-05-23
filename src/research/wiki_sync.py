@@ -157,8 +157,8 @@ Based on recent regime patterns:
             for line in f:
                 try:
                     entries.append(json.loads(line))
-                except (json.JSONDecodeError, OSError):
-                    pass
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.debug("Skipping malformed line: %s", e)
         
         if len(entries) < 10:
             return None
