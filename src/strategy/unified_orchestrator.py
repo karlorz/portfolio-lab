@@ -177,6 +177,11 @@ class UnifiedOrchestrator:
     VIX_VIXY_MIN = 20.0           # VIXY hedge starts at VIX 20
     VIX_CRISIS = 40.0             # Collar freeze threshold
 
+    # Calendar modifier thresholds
+    CAL_MOD_LOW = 0.60            # Below this → strong seasonal headwind
+    CAL_MOD_MODERATE = 0.80       # Below this → moderate seasonal effect
+    CAL_MOD_SHARPE_HIGH = 0.85    # Above this → higher Sharpe contribution
+
     STATE_FILE = DATA_DIR / "unified_orchestrator_state.json"
 
     def __init__(self):
@@ -375,7 +380,7 @@ class UnifiedOrchestrator:
                 ief_delta=0.0, shy_delta=0.0,
                 btc_delta=0.0, eth_delta=0.0,
                 vol_impact=0.0,
-                sharpe_contribution=0.015 if mod < 0.85 else 0.005,
+                sharpe_contribution=0.015 if mod < self.CAL_MOD_SHARPE_HIGH else 0.005,
                 confidence=85.0,
                 reason=f"Calendar: {mod:.2f}x urgency modifier",
             )]
@@ -472,9 +477,9 @@ class UnifiedOrchestrator:
                 break
 
         # Execution recommendation
-        if cal_mod < 0.60:
+        if cal_mod < self.CAL_MOD_LOW:
             exec_rec = "wait — strong seasonal headwind"
-        elif cal_mod < 0.80:
+        elif cal_mod < self.CAL_MOD_MODERATE:
             exec_rec = "delay — moderate seasonal effect"
         else:
             exec_rec = "proceed — normal conditions"

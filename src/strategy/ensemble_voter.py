@@ -257,10 +257,19 @@ class BanditWeighter:
 class EnsembleVoter:
     """
     Multi-source signal ensemble with regime-adaptive weighting.
-    
+
     Collects signals from all strategy modules, applies regime-dependent
     weighting, and produces consensus recommendations.
     """
+
+    # Regime detection thresholds
+    CRISIS_VOL_THRESHOLD = 0.30        # 20d annualized vol above this → CRISIS
+    CRISIS_DRAWDOWN_THRESHOLD = -0.10  # Drawdown below this → CRISIS
+    HIGH_VOL_VOL_THRESHOLD = 0.20      # 20d annualized vol above this → HIGH_VOL
+    HIGH_VOL_DRAWDOWN_THRESHOLD = -0.05
+    HIGH_VOL_MOM_THRESHOLD = 0.0       # Negative momentum with drawdown → HIGH_VOL
+    RECOVERY_DRAWDOWN_THRESHOLD = -0.03
+    RECOVERY_MOM_THRESHOLD = 0.02
     
     def __init__(
         self,
@@ -359,13 +368,13 @@ class EnsembleVoter:
         mom_20d = returns.tail(20).sum()
         
         # Regime detection
-        if vol_20d > 0.30 or drawdown < -0.10:
+        if vol_20d > self.CRISIS_VOL_THRESHOLD or drawdown < self.CRISIS_DRAWDOWN_THRESHOLD:
             regime = Regime.CRISIS
-            confidence = min(abs(drawdown) * 5, 0.9) if drawdown < -0.05 else 0.5
-        elif vol_20d > 0.20 or (drawdown < -0.05 and mom_20d < 0):
+            confidence = min(abs(drawdown) * 5, 0.9) if drawdown < self.HIGH_VOL_DRAWDOWN_THRESHOLD else 0.5
+        elif vol_20d > self.HIGH_VOL_VOL_THRESHOLD or (drawdown < self.HIGH_VOL_DRAWDOWN_THRESHOLD and mom_20d < self.HIGH_VOL_MOM_THRESHOLD):
             regime = Regime.HIGH_VOL
             confidence = min(vol_20d * 3, 0.8)
-        elif drawdown < -0.03 and mom_20d > 0.02:
+        elif drawdown < self.RECOVERY_DRAWDOWN_THRESHOLD and mom_20d > self.RECOVERY_MOM_THRESHOLD:
             regime = Regime.RECOVERY
             confidence = min(mom_20d * 20, 0.7)
         else:

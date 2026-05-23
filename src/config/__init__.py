@@ -1,1 +1,3 @@
-# Portfolio-Lab configuration package
+"""Portfolio-Lab configuration package."""
+
+__all__ = ["goals"]

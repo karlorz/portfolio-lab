@@ -15,6 +15,7 @@ __all__ = [
     "regime_sentiment",
     "regret_weighted_selector",
     "risk_parity_weight_overlay",
+    "sector_momentum_calc",
     "sentiment_analyzer",
     "turnover_validator",
     "unified_orchestrator",
