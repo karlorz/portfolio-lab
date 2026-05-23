@@ -14,6 +14,7 @@
 #   make overlay-dashboard  Generate overlay dashboard data
 #   make unified-dashboard  Generate unified system dashboard
 #   make garch-risk       Compute GARCH-CVaR risk metrics
+#   make daily-pnl        Capture daily P&L snapshot
 #   make all               Run all maintenance tasks sequentially
 #   make cron-reset        Reset cron status file
 
@@ -44,6 +45,7 @@ help:
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
 	@echo "  make unified-dashboard  Generate unified system dashboard"
+	@echo "  make daily-pnl    Capture daily P&L snapshot"
 
 # ── Test Suite ────────────────────────────────────────────────────────
 
@@ -286,6 +288,22 @@ garch-risk:
 	else STATUS="error"; fi; \
 	python3 $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR
 
+# ── Daily P&L Capture ────────────────────────────────────────────────
+
+.PHONY: daily-pnl
+daily-pnl:
+	@echo "=== Daily P&L Capture: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && python3 scripts/capture_daily_pnl.py 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	python3 $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR
+
 # ── Performance Attribution ────────────────────────────────────────────
 
 .PHONY: attribution
@@ -334,7 +352,7 @@ ask:
 # ── Run All ──────────────────────────────────────────────────────────
 
 .PHONY: all
-all: data dashboard eval research wiki-sync sync build overlay-signals overlay-dashboard garch-risk attribution unified-dashboard
+all: data dashboard eval research wiki-sync sync build overlay-signals overlay-dashboard garch-risk daily-pnl attribution unified-dashboard
 	@echo "=== All tasks complete: $$(date) ==="
 
 # ── Cron Status Management ───────────────────────────────────────────
@@ -353,6 +371,7 @@ cron-reset:
 	@python3 $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-garch-risk pending 0 manual
+	@python3 $(CRON_UPDATE) portfolio-lab-daily-pnl pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
 	@python3 $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
