@@ -84,6 +84,38 @@ class CalendarSeasonalitySignal:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        # Map effect to directional value
+        effect_map = {"positive": 0.3, "neutral": 0.0, "negative": -0.3, "avoid": -0.5}
+        value = effect_map.get(self.effect, 0.0)
+
+        # Not trading day or no active windows → inactive
+        is_active = self.is_trading_day and len(self.active_windows) > 0
+
+        return SignalSnapshot(
+            source="calendar_seasonality",
+            timestamp=self.assessment_date,
+            value=value,
+            confidence=self.confidence,
+            asset_signals={},  # Calendar signal is portfolio-wide, not asset-specific
+            regime_fit="all",
+            is_active=is_active,
+            explanation=f"Calendar: {self.recommendation}, "
+                        f"effect={self.effect}, "
+                        f"windows={self.active_windows}, "
+                        f"urgency={self.urgency_modifier:.2f}",
+            metadata={
+                "recommendation": self.recommendation,
+                "effect": self.effect,
+                "active_windows": self.active_windows,
+                "urgency_modifier": self.urgency_modifier,
+                "day_of_week": self.day_of_week,
+            },
+        )
+
 
 class NYSECalendar:
     """

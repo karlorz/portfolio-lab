@@ -88,6 +88,35 @@ class BondDurationSignal:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        # Map position to directional value: short → negative, long → positive
+        position_map = {"short": -0.5, "intermediate": -0.15, "blend": 0.0, "long": 0.5}
+        value = position_map.get(self.position, 0.0)
+
+        return SignalSnapshot(
+            source="bond_duration_signal",
+            timestamp=self.timestamp,
+            value=value,
+            confidence=self.confidence,
+            asset_signals={"TLT": self.tlt_weight, "IEF": self.ief_weight, "SHY": self.shy_weight},
+            regime_fit="all",
+            is_active=self.is_valid,
+            explanation=f"Bond Duration: {self.position}, "
+                        f"curve={self.curve_regime}, "
+                        f"real_rate={self.real_rate_regime}, "
+                        f"duration={self.effective_duration:.1f}y",
+            metadata={
+                "curve_regime": self.curve_regime,
+                "real_rate_regime": self.real_rate_regime,
+                "position": self.position,
+                "effective_duration": self.effective_duration,
+                "spread_10y2y": self.spread_10y2y,
+            },
+        )
+
 
 class BondDurationCalculator:
     """

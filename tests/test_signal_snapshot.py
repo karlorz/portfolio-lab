@@ -502,3 +502,137 @@ class TestNewModuleSnapshots:
         assert reading.source == SignalSource.MULTI_SPEED_MOM
         assert reading.value == 0.5
 
+
+class TestUnifiedOrchestratorSignals:
+    """Test to_signal_snapshot() for signals consumed by the unified orchestrator."""
+
+    def test_bond_duration_signal_snapshot(self):
+        """BondDurationSignal.to_signal_snapshot() converts correctly."""
+        from src.signals.bond_duration_signal import BondDurationSignal
+        signal = BondDurationSignal(
+            timestamp="2026-05-23T12:00:00",
+            yield_10y=4.5, yield_2y=4.3, spread_10y2y=0.2,
+            curve_regime="steep", real_rate=1.8, real_rate_regime="attractive",
+            rate_6m_ago=4.0, rate_change_6m=0.5, rate_direction="rising",
+            tlt_weight=0.15, ief_weight=0.10, shy_weight=0.05,
+            effective_duration=12.5, position="long",
+            confidence=0.7, is_valid=True, reason="Steep curve, attractive real rates",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "bond_duration_signal"
+        assert snap.value == 0.5  # "long" maps to 0.5
+        assert snap.confidence == 0.7
+        assert snap.is_active is True
+        assert snap.asset_signals["TLT"] == 0.15
+        assert "steep" in snap.explanation
+
+    def test_bond_duration_signal_invalid(self):
+        """Invalid bond duration signal produces inactive snapshot."""
+        from src.signals.bond_duration_signal import BondDurationSignal
+        signal = BondDurationSignal(
+            timestamp="2026-05-23T12:00:00",
+            yield_10y=4.0, yield_2y=4.0, spread_10y2y=0.0,
+            curve_regime="flat", real_rate=0.5, real_rate_regime="neutral",
+            rate_6m_ago=4.0, rate_change_6m=0.0, rate_direction="stable",
+            tlt_weight=0.10, ief_weight=0.10, shy_weight=0.10,
+            effective_duration=5.0, position="blend",
+            confidence=0.3, is_valid=False, reason="Flat curve, no signal",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.is_active is False
+        assert snap.value == 0.0  # "blend" maps to 0.0
+
+    def test_calendar_seasonality_signal_snapshot(self):
+        """CalendarSeasonalitySignal.to_signal_snapshot() converts correctly."""
+        from src.signals.calendar_seasonality import CalendarSeasonalitySignal
+        signal = CalendarSeasonalitySignal(
+            assessment_date="2026-05-23",
+            day_of_week="Friday", is_trading_day=True,
+            active_windows=["tom_window", "opex_week"],
+            urgency_modifier=0.8,
+            tom_modifier=0.3, holiday_modifier=0.0,
+            quarter_end_modifier=0.0, monday_modifier=0.0,
+            fomc_modifier=0.0, december_modifier=0.0, opex_modifier=0.2,
+            recommendation="proceed", effect="positive",
+            next_window="month_end", next_window_date="2026-05-29",
+            days_to_next_window=6, confidence=0.65,
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "calendar_seasonality"
+        assert snap.value == 0.3  # "positive" maps to 0.3
+        assert snap.confidence == 0.65
+        assert snap.is_active is True
+        assert snap.asset_signals == {}  # Calendar signal is portfolio-wide
+
+    def test_calendar_seasonality_non_trading_day(self):
+        """Non-trading day produces inactive snapshot."""
+        from src.signals.calendar_seasonality import CalendarSeasonalitySignal
+        signal = CalendarSeasonalitySignal(
+            assessment_date="2026-05-24",
+            day_of_week="Saturday", is_trading_day=False,
+            active_windows=[],
+            urgency_modifier=0.0,
+            tom_modifier=0.0, holiday_modifier=0.0,
+            quarter_end_modifier=0.0, monday_modifier=0.0,
+            fomc_modifier=0.0, december_modifier=0.0, opex_modifier=0.0,
+            recommendation="delay", effect="neutral",
+            next_window="monday", next_window_date="2026-05-26",
+            days_to_next_window=2, confidence=0.3,
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.is_active is False
+
+    def test_collar_signal_snapshot(self):
+        """CollarSignal.to_signal_snapshot() converts correctly."""
+        from src.signals.collar_signal import CollarSignal, CollarStrikes
+        strikes = CollarStrikes(
+            underlying_price=590.0, call_strike=610.0, put_strike=560.0,
+            call_premium=3.50, put_premium=4.20, net_premium=-0.70,
+            call_delta=0.30, put_delta=-0.25, vix_level=18.0,
+            regime="normal", days_to_expiry=30, is_cashless=False,
+            collar_cost_pct=0.0012,
+        )
+        signal = CollarSignal(
+            timestamp="2026-05-23T12:00:00",
+            signal_state="collared",
+            call_strike=610.0, put_strike=560.0, underlying_price=590.0,
+            expected_monthly_yield=0.008, max_upside_pct=0.034,
+            max_downside_pct=-0.051,
+            vix_level=18.0, regime="normal",
+            strikes=strikes,
+            collar_notional_pct=0.50, spy_shift=0.05,
+            confidence=0.75, is_valid=True,
+            reason="Normal VIX, collared position",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "collar_signal"
+        assert snap.value == 0.3  # "collared" maps to 0.3
+        assert snap.confidence == 0.75
+        assert snap.is_active is True
+        assert snap.asset_signals["SPY"] == -0.05  # -spy_shift
+
+    def test_collar_signal_unhedged(self):
+        """Unhedged collar produces zero value."""
+        from src.signals.collar_signal import CollarSignal, CollarStrikes
+        strikes = CollarStrikes(
+            underlying_price=590.0, call_strike=0, put_strike=0,
+            call_premium=0, put_premium=0, net_premium=0,
+            call_delta=0, put_delta=0, vix_level=25.0,
+            regime="high_vol", days_to_expiry=0, is_cashless=True,
+            collar_cost_pct=0,
+        )
+        signal = CollarSignal(
+            timestamp="2026-05-23T12:00:00",
+            signal_state="unhedged",
+            call_strike=0, put_strike=0, underlying_price=590.0,
+            expected_monthly_yield=0.0, max_upside_pct=0.0,
+            max_downside_pct=0.0,
+            vix_level=25.0, regime="high_vol",
+            strikes=strikes,
+            collar_notional_pct=0.0, spy_shift=0.0,
+            confidence=0.3, is_valid=False,
+            reason="High VIX, no collar",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.value == 0.0  # "unhedged" maps to 0.0
+        assert snap.is_active is False

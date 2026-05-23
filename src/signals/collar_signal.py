@@ -104,6 +104,41 @@ class CollarSignal:
         d["strikes"] = self.strikes.to_dict()
         return d
 
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        # Map signal_state to directional value
+        state_map = {
+            "collared": 0.3,      # Active protection → mildly bullish with hedge
+            "unhedged": 0.0,      # No collar → neutral
+            "cashless": 0.2,      # Zero-cost collar → mild bullish with hedge
+            "protective": -0.2,   # Protective put overlay → defensive
+        }
+        value = state_map.get(self.signal_state, 0.0)
+
+        return SignalSnapshot(
+            source="collar_signal",
+            timestamp=self.timestamp,
+            value=value,
+            confidence=self.confidence,
+            asset_signals={"SPY": -self.spy_shift},
+            regime_fit="all",
+            is_active=self.is_valid,
+            explanation=f"Collar: {self.signal_state}, "
+                        f"VIX={self.vix_level:.1f}, "
+                        f"notional={self.collar_notional_pct:.0%}, "
+                        f"yield={self.expected_monthly_yield:.2%}",
+            metadata={
+                "signal_state": self.signal_state,
+                "vix_level": self.vix_level,
+                "regime": self.regime,
+                "collar_notional_pct": self.collar_notional_pct,
+                "max_upside_pct": self.max_upside_pct,
+                "max_downside_pct": self.max_downside_pct,
+            },
+        )
+
 
 class BlackScholesPricer:
     """
