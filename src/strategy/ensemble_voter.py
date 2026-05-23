@@ -27,6 +27,7 @@ Usage:
 """
 
 import json
+import random
 import sqlite3
 import numpy as np
 import pandas as pd
@@ -166,7 +167,7 @@ class BanditWeighter:
     """
     def __init__(
         self,
-        signals: list,
+        signals: List[str],
         epsilon: float = 0.1,
         window: int = 252,
         temperature: float = 1.0,
@@ -180,7 +181,6 @@ class BanditWeighter:
 
     def select(self, regime: str) -> str:
         """Select a signal using epsilon-greedy strategy."""
-        import random
         if random.random() < self.epsilon:
             return random.choice(self.signals)
         # Exploit: pick signal with best rolling Sharpe in this regime
@@ -275,7 +275,6 @@ class EnsembleVoter:
             epsilon=0.1,
             window=252,
         )
-        self.bandit_blend: float = 0.0  # Start 100% static, shift toward bandit over time
         self.bandit_observations: int = 0
 
     
@@ -638,6 +637,11 @@ class EnsembleVoter:
         """
         regime_enum = getattr(Regime, regime_name, Regime.NORMAL)
         static = dict(REGIME_WEIGHTS.get(regime_enum, {}))
+
+        # If bandit not initialized (e.g. test fixtures bypassing __init__), fall back
+        if not hasattr(self, 'bandit') or self.bandit is None:
+            return static
+
         bandit = self.bandit.get_weights(regime_name)
 
         if bandit is None:
@@ -739,7 +743,7 @@ class EnsembleVoter:
         self.current_regime_confidence = regime_confidence
         
         # Get weights for regime (blended with bandit if available)
-        weights = self.get_regime_weights(regime.name)
+        weights = self.get_blended_weights(regime.name)
         
         # Apply adaptive ensemble weighting (v6.09) if available
         try:

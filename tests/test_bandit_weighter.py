@@ -42,10 +42,10 @@ class TestBanditWeighter:
 
     def test_get_weights_sums_to_one(self):
         bw = BanditWeighter(["sig_a", "sig_b", "sig_c"])
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         for sig in ["sig_a", "sig_b", "sig_c"]:
             for _ in range(63):
-                bw.update(sig, "NORMAL", np.random.normal(0.0001, 0.01))
+                bw.update(sig, "NORMAL", rng.normal(0.0001, 0.01))
         weights = bw.get_weights("NORMAL")
         assert weights is not None
         assert abs(sum(weights.values()) - 1.0) < 0.001

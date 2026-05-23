@@ -5,7 +5,7 @@ from src.signals.signal_pruner import correlation_cluster, backward_eliminate
 
 
 class TestCorrelationCluster:
-    def test_returns_dict_of_clusters(self):
+    def test_returns_list_of_clusters(self):
         returns = {
             "sig_a": np.array([0.01, 0.02, -0.01, 0.005, 0.01]),
             "sig_b": np.array([0.01, 0.02, -0.01, 0.005, 0.01]),  # perfect corr with a
