@@ -11,9 +11,10 @@ Usage:
 """
 
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Union
 
 # Repository root (3 levels up from this file: paths.py -> src/ -> repo_root/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -49,3 +50,28 @@ WORK_DIR = HOME / "projects" / "portfolio-lab" / "work"
 # Grid-search winner: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026)
 # Single source of truth — import this instead of repeating the dict.
 BASE_ALLOCATION: Dict[str, float] = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+
+
+def sqlite_connect(db_path: Union[str, Path], **kwargs) -> sqlite3.Connection:
+    """Open a SQLite connection with WAL journal mode enabled.
+
+    WAL mode allows concurrent reads during writes, preventing 'database
+    is locked' errors under cron-heavy workloads. The PRAGMA is idempotent
+    — calling it on an already-WAL database is a no-op.
+
+    Usage::
+
+        from src.paths import sqlite_connect
+        with sqlite_connect(MARKET_DB) as conn:
+            conn.execute("SELECT ...")
+
+    Args:
+        db_path: Path to the SQLite database file.
+        **kwargs: Additional keyword arguments forwarded to sqlite3.connect().
+
+    Returns:
+        sqlite3.Connection with WAL mode enabled.
+    """
+    conn = sqlite3.connect(str(db_path), **kwargs)
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn

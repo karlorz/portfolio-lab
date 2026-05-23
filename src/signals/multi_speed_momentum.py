@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
 import sqlite3
+from src.paths import sqlite_connect
 from datetime import datetime
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
@@ -520,7 +521,7 @@ class MultiSpeedMomentum:
 
     def save_to_db(self, portfolio: MultiSpeedPortfolio):
         """Save ensemble recommendation to signals database."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             c = conn.cursor()
 
             # Create table if not exists

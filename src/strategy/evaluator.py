@@ -8,6 +8,7 @@ import os
 import json
 import logging
 import sqlite3
+from src.paths import sqlite_connect
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
@@ -381,7 +382,7 @@ def main():
     mode = os.environ.get("ALPHALAB_MODE", "paper")
     state_file = DATA_DIR / f"portfolio_{mode}.json"
     
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite_connect(DB_PATH) as conn:
         portfolio = Portfolio(state_file, mode)
 
         # Get current state

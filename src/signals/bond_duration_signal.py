@@ -264,7 +264,7 @@ class BondDurationSignalGenerator:
         if db_path.exists():
             try:
                 import sqlite3
-                with sqlite3.connect(str(db_path)) as conn:
+                with sqlite_connect(str(db_path)) as conn:
                     cursor = conn.cursor()
 
                     # Fetch latest yields

@@ -38,7 +38,7 @@ from pathlib import Path
 from enum import Enum
 import logging
 
-from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION
+from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect
 
 logger = logging.getLogger(__name__)
 
@@ -294,8 +294,7 @@ class EnsembleVoter:
     def _init_db(self):
         """Initialize signal history database."""
         self.data_path.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+        with sqlite_connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS ensemble_votes (
                     timestamp TEXT PRIMARY KEY,
@@ -1052,7 +1051,7 @@ class EnsembleVoter:
     
     def _save_vote(self, vote: EnsembleVote):
         """Save vote to database, including per-source readings (v5.70)."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO ensemble_votes
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

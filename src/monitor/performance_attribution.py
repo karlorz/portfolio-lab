@@ -22,6 +22,7 @@ Usage:
 import json
 import logging
 import sqlite3
+from src.paths import sqlite_connect
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -135,7 +136,7 @@ class PerformanceAttribution:
 
         history = []
         try:
-            with sqlite3.connect(self.ensemble_db) as conn:
+            with sqlite_connect(self.ensemble_db) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
@@ -194,7 +195,7 @@ class PerformanceAttribution:
 
         if paper_db.exists():
             try:
-                with sqlite3.connect(paper_db) as conn:
+                with sqlite_connect(paper_db) as conn:
                     conn.row_factory = sqlite3.Row
                     cursor = conn.cursor()
                     cursor.execute("""
@@ -600,7 +601,7 @@ def patch_save_vote():
         original_save(self, vote)
         # Also save source readings
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite_connect(self.db_path) as conn:
                 for reading in vote.source_votes:
                     conn.execute("""
                         INSERT INTO source_readings

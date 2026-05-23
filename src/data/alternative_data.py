@@ -29,6 +29,7 @@ CLI:
 
 import json
 import sqlite3
+from src.paths import sqlite_connect
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
@@ -134,7 +135,7 @@ def init_database():
     """Initialize SQLite database for alternative data storage."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     
-    with sqlite3.connect(ALT_DATA_DB) as conn:
+    with sqlite_connect(ALT_DATA_DB) as conn:
         cursor = conn.cursor()
 
         # Satellite data table
@@ -282,7 +283,7 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
         if ticker not in self.RETAIL_TICKERS:
             return []  # No satellite data for non-retail
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             # Check if we have recent data
@@ -349,7 +350,7 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
     
     def _store_data(self, rows: list[tuple]):
         """Store data in database."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.executemany("""
@@ -463,7 +464,7 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
     
     def _store_signal(self, signal: AlternativeDataSignal):
         """Store signal in database."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.execute("""
@@ -507,7 +508,7 @@ class CreditCardAdapter(AlternativeDataAdapter):
         if ticker not in self.CONSUMER_TICKERS:
             return []
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.execute("""
@@ -573,7 +574,7 @@ class CreditCardAdapter(AlternativeDataAdapter):
     
     def _store_data(self, rows: list[tuple]):
         """Store credit card data."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.executemany("""
@@ -684,7 +685,7 @@ class CreditCardAdapter(AlternativeDataAdapter):
     
     def _store_signal(self, signal: AlternativeDataSignal):
         """Store signal."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.execute("""
@@ -728,7 +729,7 @@ class SupplyChainAdapter(AlternativeDataAdapter):
         if ticker not in self.SUPPLY_CHAIN_TICKERS:
             return []
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.execute("""
@@ -783,7 +784,7 @@ class SupplyChainAdapter(AlternativeDataAdapter):
     
     def _store_data(self, rows: list[tuple]):
         """Store supply chain data."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.executemany("""
@@ -890,7 +891,7 @@ class SupplyChainAdapter(AlternativeDataAdapter):
     
     def _store_signal(self, signal: AlternativeDataSignal):
         """Store signal."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.execute("""

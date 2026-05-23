@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import sqlite3
+from src.paths import sqlite_connect
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional, Tuple
@@ -129,7 +130,7 @@ class SkewEngine:
             return np.array([])
 
         try:
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite_connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
 
                 # Check table structure

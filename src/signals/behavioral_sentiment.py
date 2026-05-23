@@ -5,6 +5,7 @@ regime-gated suppression, and contrarian allocation signals.
 """
 
 import sqlite3
+from src.paths import sqlite_connect
 import logging
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
@@ -112,7 +113,7 @@ class BehavioralSentimentSignal:
     def _init_zscore_table(self):
         """Ensure z-score history table exists"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS behavioral_zscore_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,7 +130,7 @@ class BehavioralSentimentSignal:
     def _get_zscore(self, composite_score: float) -> float:
         """Compute z-score of composite_score against 90-day rolling window"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 cutoff = (datetime.now() - timedelta(days=ZSCORE_WINDOW_DAYS)).isoformat()
                 cursor = conn.execute(
                     """SELECT composite_score FROM behavioral_zscore_history
@@ -157,7 +158,7 @@ class BehavioralSentimentSignal:
     def _record_score(self, composite_score: float, signal_type: str):
         """Record a score to the rolling history table"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 conn.execute(
                     """INSERT INTO behavioral_zscore_history
                        (timestamp, composite_score, signal_type)
@@ -328,7 +329,7 @@ class BehavioralSentimentSignal:
 
         results = []
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 # Try to get VIX data from prices table
                 cursor = conn.execute(
                     """SELECT date, close FROM prices

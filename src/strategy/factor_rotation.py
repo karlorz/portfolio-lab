@@ -20,6 +20,7 @@ Strategy Logic:
 import json
 import logging
 import sqlite3
+from src.paths import sqlite_connect
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -118,7 +119,7 @@ class FactorMomentumEngine:
         if not self.db_path.exists():
             return []
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -751,7 +752,7 @@ class FactorRotationBacktest:
         if not self.engine.db_path.exists():
             return {"error": "No market data available", "status": "failed"}
 
-        with sqlite3.connect(self.engine.db_path) as conn:
+        with sqlite_connect(self.engine.db_path) as conn:
 
             # Get all available trading dates in range
             dates = pd.read_sql(

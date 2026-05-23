@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Any
 from enum import Enum
 import logging
 
-from src.paths import DATA_DIR, MARKET_DB
+from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -116,9 +116,7 @@ class SignalHealthTracker:
     
     def _init_database(self):
         """Initialize signal_predictions table."""
-        with sqlite3.connect(self.db_path) as conn:
-            # Enable WAL mode first — must be set before any writes
-            conn.execute("PRAGMA journal_mode=WAL")
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             # Signal predictions table
@@ -194,7 +192,7 @@ class SignalHealthTracker:
         
         Call this from each signal source after generating signals.
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             cursor.execute("""
@@ -252,7 +250,7 @@ class SignalHealthTracker:
         spy_return = returns_data.get('SPY', 0)
         actual_direction = 1 if spy_return > 0 else (-1 if spy_return < 0 else 0)
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             # Update all predictions for this date with actual direction
@@ -284,7 +282,7 @@ class SignalHealthTracker:
         """
         end_date = end_date or datetime.now().strftime("%Y-%m-%d")
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             # Get predictions with actual directions
@@ -376,7 +374,7 @@ class SignalHealthTracker:
     
     def save_health_scores(self, scores: Dict[str, HealthScore]):
         """Save health scores to database."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             for score in scores.values():
@@ -409,7 +407,7 @@ class SignalHealthTracker:
         
         Returns alerts for signals where health dropped >20% over lookback period.
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
         
             alerts = []
@@ -541,7 +539,7 @@ def backfill_predictions(
     tracker = SignalHealthTracker(db_path)
     
     # Load from regime_log as proxy for historical signals
-    with sqlite3.connect(tracker.db_path) as conn:
+    with sqlite_connect(tracker.db_path) as conn:
         cursor = conn.cursor()
     
         count = 0

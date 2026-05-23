@@ -5,6 +5,7 @@ Generates momentum-based signals for EFA/EEM overlay strategy
 
 import json
 import sqlite3
+from src.paths import sqlite_connect
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
@@ -146,7 +147,7 @@ class InternationalMomentumGenerator:
     
     def _init_signal_history(self):
         """Initialize signal history table"""
-        with sqlite3.connect(self.cache_db) as conn:
+        with sqlite_connect(self.cache_db) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS international_signals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,7 +175,7 @@ class InternationalMomentumGenerator:
     def _get_vix_level(self) -> float:
         """Get current VIX level from cache"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 cursor = conn.execute("""
                     SELECT value FROM market_data 
                     WHERE symbol = '^VIX' 
@@ -190,7 +191,7 @@ class InternationalMomentumGenerator:
     def _get_correlation(self) -> float:
         """Get 30-day EFA-SPY correlation"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 # This would need a correlation table
                 # For now, return a placeholder
                 cursor = conn.execute("""
@@ -331,7 +332,7 @@ class InternationalMomentumGenerator:
     def _save_signal(self, signal: InternationalMomentumSignal):
         """Save signal to history database"""
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            with sqlite_connect(self.cache_db) as conn:
                 conn.execute("""
                     INSERT INTO international_signals (
                         timestamp, signal_type, confidence,
@@ -358,7 +359,7 @@ class InternationalMomentumGenerator:
     
     def get_signal_history(self, days: int = 90) -> List[Dict]:
         """Get signal history for specified days"""
-        with sqlite3.connect(self.cache_db) as conn:
+        with sqlite_connect(self.cache_db) as conn:
             cursor = conn.execute("""
                 SELECT * FROM international_signals 
                 WHERE timestamp >= datetime('now', ?)
@@ -372,7 +373,7 @@ class InternationalMomentumGenerator:
     
     def get_current_signal(self) -> Optional[InternationalMomentumSignal]:
         """Get most recent signal from database"""
-        with sqlite3.connect(self.cache_db) as conn:
+        with sqlite_connect(self.cache_db) as conn:
             cursor = conn.execute("""
                 SELECT * FROM international_signals 
                 ORDER BY timestamp DESC LIMIT 1

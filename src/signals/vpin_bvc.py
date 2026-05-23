@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import sqlite3
+from src.paths import sqlite_connect
 
 logger = logging.getLogger(__name__)
 
@@ -480,7 +481,7 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
     from src.paths import MARKET_DB
     db_path = MARKET_DB
     if db_path.exists():
-        with sqlite3.connect(str(db_path)) as conn:
+        with sqlite_connect(str(db_path)) as conn:
             try:
                 df = pd.read_sql_query(
                     "SELECT date, open, high, low, close, volume FROM prices "

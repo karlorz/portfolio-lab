@@ -41,6 +41,7 @@ import json
 import sqlite3
 import argparse
 import sys
+from src.paths import sqlite_connect
 import statistics
 import warnings
 from abc import ABC, abstractmethod
@@ -242,7 +243,7 @@ def init_database():
     """Initialize SQLite database for signal history and accuracy tracking."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite_connect(DB_PATH) as conn:
         cursor = conn.cursor()
 
         # Signal history table
@@ -359,7 +360,7 @@ class SignalSource(ABC):
     
     def _store_signal(self, ticker: str, result: SignalSourceResult):
         """Store signal in database."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -433,7 +434,7 @@ class TechnicalSignal(SignalSource):
         if not self.market_db.exists():
             return None
 
-        with sqlite3.connect(self.market_db) as conn:
+        with sqlite_connect(self.market_db) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -490,7 +491,7 @@ class TechnicalSignal(SignalSource):
         if not self.market_db.exists():
             return 0.0
 
-        with sqlite3.connect(self.market_db) as conn:
+        with sqlite_connect(self.market_db) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -535,7 +536,7 @@ class TechnicalSignal(SignalSource):
     
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical accuracy from database."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -610,7 +611,7 @@ class MacroSignal(SignalSource):
         """Get Fed hawk-dove stance (-1 = dovish, +1 = hawkish)."""
         # Check if Fed analyzer data available
         try:
-            with sqlite3.connect(self.alt_data_db) as conn:
+            with sqlite_connect(self.alt_data_db) as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("""
@@ -631,7 +632,7 @@ class MacroSignal(SignalSource):
     def _get_yield_curve_signal(self) -> float:
         """Generate signal from yield curve (steepening = bullish, inversion = bearish)."""
         try:
-            with sqlite3.connect(self.market_db) as conn:
+            with sqlite_connect(self.market_db) as conn:
                 cursor = conn.cursor()
 
                 # Get 10Y and 2Y yields
@@ -677,7 +678,7 @@ class MacroSignal(SignalSource):
     def _get_30d_change(self, symbol: str) -> Optional[float]:
         """Get 30-day price change for symbol."""
         try:
-            with sqlite3.connect(self.market_db) as conn:
+            with sqlite_connect(self.market_db) as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("""
@@ -700,7 +701,7 @@ class MacroSignal(SignalSource):
     
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical accuracy."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -772,7 +773,7 @@ class AlternativeDataSignalAdapter(SignalSource):
 
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical accuracy."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -996,7 +997,7 @@ class SignalIntegrator:
     def _detect_regime(self) -> str:
         """Detect current market regime."""
         try:
-            with sqlite3.connect(DATA_DIR / "market.db") as conn:
+            with sqlite_connect(DATA_DIR / "market.db") as conn:
                 cursor = conn.cursor()
 
                 # Get VIX level
@@ -1047,7 +1048,7 @@ class SignalIntegrator:
     
     def _store_composite(self, composite: CompositeSignal):
         """Store composite signal to database."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -1143,7 +1144,7 @@ class SignalIntegrator:
     
     def _store_recommendation(self, recommendation: PortfolioRecommendation):
         """Store portfolio recommendation."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -1165,7 +1166,7 @@ class SignalIntegrator:
 
     def get_signal_history(self, ticker: str, days: int = 30) -> List[CompositeSignal]:
         """Get historical composite signals for a ticker."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""

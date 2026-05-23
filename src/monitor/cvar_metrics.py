@@ -11,6 +11,7 @@ Usage:
 
 import json
 import sqlite3
+from src.paths import sqlite_connect
 import logging
 import numpy as np
 import argparse
@@ -83,7 +84,7 @@ def fetch_portfolio_returns(days: int = 252) -> Tuple[np.ndarray, float, float]:
         # Return synthetic data for testing
         return np.random.normal(0.0003, 0.012, days), 0.0, -0.15
     
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite_connect(DB_PATH) as conn:
         cursor = conn.cursor()
 
         # Get portfolio assets - SPY, GLD, TLT (46/38/16 allocation)
