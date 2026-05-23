@@ -581,6 +581,13 @@ class CrossAssetRegimeArbDetector:
             "persistence_days": signal.divergence.persistence_days,
         }
 
+    def get_signal_snapshot(self):
+        """Return signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        raw = self.get_ensemble_signal()
+        raw["source"] = "cross_asset_regime_arb"
+        return SignalSnapshot.from_dict(raw)
+
 
 # ---- CLI ----
 

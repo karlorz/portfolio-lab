@@ -88,6 +88,31 @@ class CryptoCompositeSignal:
         d["eth_signal"] = self.eth_signal.to_dict()
         return d
 
+    def to_signal_snapshot(self):
+        """Convert to canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        # Map composite_weight (0-0.05) to value (-1 to +1)
+        # 0.05 allocation -> +1.0 (max bullish), 0 -> 0.0 (neutral)
+        value = min(1.0, self.composite_weight / 0.05) if self.is_valid else 0.0
+        return SignalSnapshot(
+            source="crypto_momentum",
+            timestamp=self.timestamp,
+            value=value,
+            confidence=self.confidence,
+            asset_signals={
+                "GLD": -self.gld_reduction,
+            },
+            regime_fit="normal",
+            is_active=self.is_valid,
+            explanation=self.reason,
+            metadata={
+                "composite_weight": self.composite_weight,
+                "signal_state": self.signal_state,
+                "vol_scale_factor": self.vol_scale_factor,
+                "funding_source": self.funding_source,
+            },
+        )
+
 
 class CryptoMomentumCalculator:
     """
