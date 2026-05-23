@@ -428,7 +428,26 @@ class EnsembleVoter:
 
         readings = {}
 
-        # 1. Multi-Speed Momentum (v2.56) — typed SignalSnapshot bridge
+        # Collect from each signal source
+        self._collect_msm_signal(readings, date)
+        self._collect_cross_asset_rv_signal(readings)
+        self._collect_intl_momentum_signal(readings, active_sources, regime)
+        self._collect_alt_data_signal(readings, active_sources, regime)
+        self._collect_regime_arb_signal(readings)
+        self._collect_unified_overlay_signal(readings, active_sources, regime)
+
+        self.current_readings = readings
+        return readings
+
+    def _should_skip(self, source: SignalSource, active_sources, regime: Optional[Regime]) -> bool:
+        """Check if a signal source should be skipped for the current regime."""
+        if active_sources is not None and source not in active_sources:
+            logger.debug("Skipping %s: zero weight for regime=%s", source.value, regime.value if regime else '?')
+            return True
+        return False
+
+    def _collect_msm_signal(self, readings: Dict, date: Optional[str]) -> None:
+        """Collect multi-speed momentum signal."""
         try:
             from src.signals.multi_speed_momentum import MultiSpeedMomentum
             msm = MultiSpeedMomentum()
@@ -440,7 +459,8 @@ class EnsembleVoter:
         except Exception as e:
             logger.debug("Multi-speed momentum unavailable: %s", e)
 
-        # 2. Cross-Asset Relative Value (v5.71) — typed SignalSnapshot bridge
+    def _collect_cross_asset_rv_signal(self, readings: Dict) -> None:
+        """Collect cross-asset relative value signal."""
         try:
             from src.signals.cross_asset_relative_value import CrossAssetRVScanner
             rv_scanner = CrossAssetRVScanner()
@@ -452,67 +472,67 @@ class EnsembleVoter:
         except Exception as e:
             logger.debug("Cross-asset RV unavailable: %s", e)
 
-        # 3. International Equity Momentum (v3.13) — typed SignalSnapshot bridge
-        # Skip if zero weight for current regime
-        if active_sources is not None and SignalSource.INTERNATIONAL_MOMENTUM not in active_sources:
-            logger.debug("Skipping INTERNATIONAL_MOMENTUM: zero weight for regime=%s", regime.value if regime else '?')
-        else:
-            try:
-                from src.signals.international_momentum import InternationalMomentumGenerator
+    def _collect_intl_momentum_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect international equity momentum signal."""
+        if self._should_skip(SignalSource.INTERNATIONAL_MOMENTUM, active_sources, regime):
+            return
+        try:
+            from src.signals.international_momentum import InternationalMomentumGenerator
 
-                # Load price data for SPY, EFA, EEM
-                price_data = self._load_price_data()
-                if price_data is not None and not price_data.empty:
-                    window = 126  # ~6 months of trading days
-                    required_cols = [c for c in ['SPY', 'EFA', 'EEM'] if c in price_data.columns]
-                    if len(required_cols) >= 2:
-                        recent = price_data[required_cols].iloc[-window:] if len(price_data) >= window else price_data[required_cols]
-                        if len(recent) >= 20:
-                            efa_mom = (recent['EFA'].iloc[-1] / recent['EFA'].iloc[0] - 1) * 100 if 'EFA' in recent else 0.0
-                            eem_mom = (recent['EEM'].iloc[-1] / recent['EEM'].iloc[0] - 1) * 100 if 'EEM' in recent else 0.0
-                            spy_mom = (recent['SPY'].iloc[-1] / recent['SPY'].iloc[0] - 1) * 100
+            price_data = self._load_price_data()
+            if price_data is not None and not price_data.empty:
+                window = 126  # ~6 months of trading days
+                required_cols = [c for c in ['SPY', 'EFA', 'EEM'] if c in price_data.columns]
+                if len(required_cols) >= 2:
+                    recent = price_data[required_cols].iloc[-window:] if len(price_data) >= window else price_data[required_cols]
+                    if len(recent) >= 20:
+                        efa_mom = (recent['EFA'].iloc[-1] / recent['EFA'].iloc[0] - 1) * 100 if 'EFA' in recent else 0.0
+                        eem_mom = (recent['EEM'].iloc[-1] / recent['EEM'].iloc[0] - 1) * 100 if 'EEM' in recent else 0.0
+                        spy_mom = (recent['SPY'].iloc[-1] / recent['SPY'].iloc[0] - 1) * 100
 
-                            data = {
-                                'timestamp': str(datetime.now()),
-                                'relative': {
-                                    'efa_momentum_6m': efa_mom,
-                                    'eem_momentum_6m': eem_mom,
-                                    'spy_momentum_6m': spy_mom,
-                                    'efa_vs_spy': efa_mom - spy_mom,
-                                    'eem_vs_spy': eem_mom - spy_mom,
-                                },
-                                'data_fresh': True,
-                            }
+                        data = {
+                            'timestamp': str(datetime.now()),
+                            'relative': {
+                                'efa_momentum_6m': efa_mom,
+                                'eem_momentum_6m': eem_mom,
+                                'spy_momentum_6m': spy_mom,
+                                'efa_vs_spy': efa_mom - spy_mom,
+                                'eem_vs_spy': eem_mom - spy_mom,
+                            },
+                            'data_fresh': True,
+                        }
 
-                            intl_gen = InternationalMomentumGenerator()
-                            intl_signal = intl_gen.generate_signal(data)
-                            snapshot = intl_signal.to_signal_snapshot()
-                            if snapshot.is_active:
-                                readings[SignalSource.INTERNATIONAL_MOMENTUM] = snapshot.to_signal_reading()
-            except ImportError:
-                pass
-            except Exception as e:
-                logger.debug("International momentum unavailable: %s", e)
+                        intl_gen = InternationalMomentumGenerator()
+                        intl_signal = intl_gen.generate_signal(data)
+                        snapshot = intl_signal.to_signal_snapshot()
+                        if snapshot.is_active:
+                            readings[SignalSource.INTERNATIONAL_MOMENTUM] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug("International momentum unavailable: %s", e)
 
+    def _collect_alt_data_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect alternative data signal."""
+        if self._should_skip(SignalSource.ALTERNATIVE_DATA, active_sources, regime):
+            return
+        try:
+            from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
+            alt_gen = AlternativeDataSignalGenerator()
+            snapshot = alt_gen.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.ALTERNATIVE_DATA] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug("Alternative data unavailable: %s", e)
 
-        # 4. Alternative Data (v9.00) — typed SignalSnapshot bridge
-        # Skip if zero weight for current regime
-        if active_sources is not None and SignalSource.ALTERNATIVE_DATA not in active_sources:
-            logger.debug("Skipping ALTERNATIVE_DATA: zero weight for regime=%s", regime.value if regime else '?')
-        else:
-            try:
-                from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
-                alt_gen = AlternativeDataSignalGenerator()
-                snapshot = alt_gen.get_signal_snapshot()
-                if snapshot.is_active:
-                    readings[SignalSource.ALTERNATIVE_DATA] = snapshot.to_signal_reading()
-            except ImportError:
-                pass
-            except Exception as e:
-                logger.debug("Alternative data unavailable: %s", e)
-
-
-        # 5. Cross-Asset Regime Arbitrage (v8.09) — typed SignalSnapshot bridge
+    def _collect_regime_arb_signal(self, readings: Dict) -> None:
+        """Collect cross-asset regime arbitrage signal."""
         try:
             from src.signals.cross_asset_regime_arb import CrossAssetRegimeArbDetector
             arb_detector = CrossAssetRegimeArbDetector()
@@ -524,24 +544,21 @@ class EnsembleVoter:
         except Exception as e:
             logger.debug("Cross-asset regime arb unavailable: %s", e)
 
-
-        # 6. Unified Overlay (v4.90) — collar + bond_duration + crypto + calendar
-        # Skip if zero weight for current regime
-        if active_sources is not None and SignalSource.UNIFIED_OVERLAY not in active_sources:
-            logger.debug("Skipping UNIFIED_OVERLAY: zero weight for regime=%s", regime.value if regime else '?')
-        else:
-            try:
-                from .orchestrator_ensemble_bridge import OrchestratorEnsembleBridge
-                bridge = OrchestratorEnsembleBridge()
-                unified_reading = bridge.get_ensemble_reading()
-                readings[SignalSource.UNIFIED_OVERLAY] = unified_reading
-            except ImportError:
-                pass
-            except Exception as e:
-                logger.debug("Unified overlay unavailable: %s", e)
-
-        self.current_readings = readings
-        return readings
+    def _collect_unified_overlay_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect unified overlay signal (collar + bond_duration + crypto + calendar)."""
+        if self._should_skip(SignalSource.UNIFIED_OVERLAY, active_sources, regime):
+            return
+        try:
+            from .orchestrator_ensemble_bridge import OrchestratorEnsembleBridge
+            bridge = OrchestratorEnsembleBridge()
+            unified_reading = bridge.get_ensemble_reading()
+            readings[SignalSource.UNIFIED_OVERLAY] = unified_reading
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug("Unified overlay unavailable: %s", e)
 
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
