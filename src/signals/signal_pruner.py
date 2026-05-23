@@ -78,7 +78,11 @@ def backward_eliminate(
     def ensemble_sharpe(names):
         if not names:
             return -float("inf")
-        data = np.column_stack([returns[n] for n in names])
+        # Guard against missing keys in returns dict
+        available = [n for n in names if n in returns]
+        if not available:
+            return -float("inf")
+        data = np.column_stack([returns[n] for n in available])
         eq_weighted = np.mean(data, axis=1)
         mu = np.mean(eq_weighted)
         sigma = np.std(eq_weighted)

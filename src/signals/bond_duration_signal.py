@@ -264,21 +264,19 @@ class BondDurationSignalGenerator:
         if db_path.exists():
             try:
                 import sqlite3
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
 
-                # Fetch latest yields
-                yields = {}
-                for sym in ["^TNX", "10Y", "2Y", "SHY", "IEF"]:
-                    cursor.execute(
-                        "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT 1",
-                        (sym,)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        yields[sym] = float(row[0])
-
-                conn.close()
+                    # Fetch latest yields
+                    yields = {}
+                    for sym in ["^TNX", "10Y", "2Y", "SHY", "IEF"]:
+                        cursor.execute(
+                            "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT 1",
+                            (sym,)
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            yields[sym] = float(row[0])
 
                 # ^TNX is 10Y yield * 10 (e.g., 45 = 4.5%)
                 y10 = yields.get("^TNX", 45) / 10 if yields.get("^TNX", 0) > 1 else yields.get("^TNX", 4.5)

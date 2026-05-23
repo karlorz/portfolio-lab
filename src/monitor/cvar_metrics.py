@@ -83,27 +83,25 @@ def fetch_portfolio_returns(days: int = 252) -> Tuple[np.ndarray, float, float]:
         # Return synthetic data for testing
         return np.random.normal(0.0003, 0.012, days), 0.0, -0.15
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Get portfolio assets - SPY, GLD, TLT (46/38/16 allocation)
-    allocation = BASE_ALLOCATION
-    
-    prices = {}
-    for symbol in allocation.keys():
-        cursor.execute("""
-            SELECT date, close FROM prices 
-            WHERE symbol = ? 
-            ORDER BY date DESC 
-            LIMIT ?
-        """, (symbol, days))
-        
-        rows = cursor.fetchall()
-        if rows:
-            prices[symbol] = np.array([r[1] for r in reversed(rows)])
-    
-    conn.close()
-    
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+
+        # Get portfolio assets - SPY, GLD, TLT (46/38/16 allocation)
+        allocation = BASE_ALLOCATION
+
+        prices = {}
+        for symbol in allocation.keys():
+            cursor.execute("""
+                SELECT date, close FROM prices
+                WHERE symbol = ?
+                ORDER BY date DESC
+                LIMIT ?
+            """, (symbol, days))
+
+            rows = cursor.fetchall()
+            if rows:
+                prices[symbol] = np.array([r[1] for r in reversed(rows)])
+
     if len(prices) < 2:
         return np.random.normal(0.0003, 0.012, days), 0.0, -0.15
     

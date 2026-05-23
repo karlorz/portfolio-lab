@@ -132,9 +132,9 @@ class BayesianVolModel:
         # Effective prior precision with regime scaling
         alpha_eff = prior_precision / regime_scale
 
-        # Likelihood: mean of recent vols
+        # Likelihood: mean and variance of recent vols
         likelihood_vol = float(np.mean(recent_vols))
-        float(np.var(recent_vols)) if n > 1 else likelihood_vol**2
+        likelihood_var = float(np.var(recent_vols)) if n > 1 else likelihood_vol**2
 
         # Posterior: precision-weighted average
         alpha_post = alpha_eff + n

@@ -422,13 +422,12 @@ class CollarSignalGenerator:
         if db_path.exists():
             try:
                 import sqlite3
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT close FROM prices WHERE symbol='SPY' ORDER BY date DESC LIMIT 1"
-                )
-                row = cursor.fetchone()
-                conn.close()
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT close FROM prices WHERE symbol='SPY' ORDER BY date DESC LIMIT 1"
+                    )
+                    row = cursor.fetchone()
                 if row:
                     return float(row[0])
             except Exception as e:
@@ -441,13 +440,12 @@ class CollarSignalGenerator:
         if db_path.exists():
             try:
                 import sqlite3
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT close FROM prices WHERE symbol='VIX' ORDER BY date DESC LIMIT 1"
-                )
-                row = cursor.fetchone()
-                conn.close()
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT close FROM prices WHERE symbol='VIX' ORDER BY date DESC LIMIT 1"
+                    )
+                    row = cursor.fetchone()
                 if row:
                     return float(row[0])
             except Exception as e:

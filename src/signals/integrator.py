@@ -241,90 +241,89 @@ class PortfolioRecommendation:
 def init_database():
     """Initialize SQLite database for signal history and accuracy tracking."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Signal history table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS signal_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            source_type TEXT NOT NULL,
-            source_name TEXT NOT NULL,
-            signal REAL,
-            confidence REAL,
-            raw_score REAL,
-            raw_unit TEXT,
-            historical_accuracy REAL,
-            metadata TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Composite signals table
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS composite_signals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            composite_score REAL,
-            composite_confidence REAL,
-            detected_regime TEXT,
-            weights_used TEXT,
-            primary_drivers TEXT,
-            signal_agreement TEXT,
-            expected_accuracy REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(ticker, timestamp)
-        )
-    """)
-    
-    # Accuracy tracking table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS signal_accuracy (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            source_type TEXT NOT NULL,
-            source_name TEXT NOT NULL,
-            prediction_timestamp TEXT,
-            predicted_signal REAL,
-            actual_return REAL,
-            horizon_days INTEGER,
-            accuracy_score REAL,
-            error REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Portfolio recommendations table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS portfolio_recommendations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            current_allocation TEXT,
-            recommended_allocation TEXT,
-            composite_sentiment TEXT,
-            confidence REAL,
-            regime TEXT,
-            deltas TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Create indexes
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_signal_history_ticker_ts 
-        ON signal_history(ticker, timestamp)
-    """)
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_accuracy_source 
-        ON signal_accuracy(ticker, source_type, source_name)
-    """)
-    
-    conn.commit()
-    conn.close()
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+
+        # Signal history table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS signal_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_name TEXT NOT NULL,
+                signal REAL,
+                confidence REAL,
+                raw_score REAL,
+                raw_unit TEXT,
+                historical_accuracy REAL,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Composite signals table
+        cursor.execute("""
+                CREATE TABLE IF NOT EXISTS composite_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                composite_score REAL,
+                composite_confidence REAL,
+                detected_regime TEXT,
+                weights_used TEXT,
+                primary_drivers TEXT,
+                signal_agreement TEXT,
+                expected_accuracy REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(ticker, timestamp)
+            )
+        """)
+
+        # Accuracy tracking table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS signal_accuracy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_name TEXT NOT NULL,
+                prediction_timestamp TEXT,
+                predicted_signal REAL,
+                actual_return REAL,
+                horizon_days INTEGER,
+                accuracy_score REAL,
+                error REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Portfolio recommendations table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_recommendations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                current_allocation TEXT,
+                recommended_allocation TEXT,
+                composite_sentiment TEXT,
+                confidence REAL,
+                regime TEXT,
+                deltas TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Create indexes
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signal_history_ticker_ts
+            ON signal_history(ticker, timestamp)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accuracy_source
+            ON signal_accuracy(ticker, source_type, source_name)
+        """)
+
+        conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -360,22 +359,21 @@ class SignalSource(ABC):
     
     def _store_signal(self, ticker: str, result: SignalSourceResult):
         """Store signal in database."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO signal_history 
-            (ticker, timestamp, source_type, source_name, signal, confidence,
-             raw_score, raw_unit, historical_accuracy, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            ticker, result.timestamp, self.source_type, self.source_name,
-            result.signal, result.confidence, result.raw_score, result.raw_unit,
-            result.historical_accuracy, json.dumps(result.metadata)
-        ))
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT INTO signal_history
+                (ticker, timestamp, source_type, source_name, signal, confidence,
+                 raw_score, raw_unit, historical_accuracy, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                ticker, result.timestamp, self.source_type, self.source_name,
+                result.signal, result.confidence, result.raw_score, result.raw_unit,
+                result.historical_accuracy, json.dumps(result.metadata)
+            ))
+
+            conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -434,20 +432,19 @@ class TechnicalSignal(SignalSource):
         """Calculate dual momentum metrics."""
         if not self.market_db.exists():
             return None
-        
-        conn = sqlite3.connect(self.market_db)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT date, close FROM prices 
-            WHERE symbol = ? 
-            AND date >= date('now', '-400 days')
-            ORDER BY date DESC
-        """, (ticker,))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
+
+        with sqlite3.connect(self.market_db) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT date, close FROM prices
+                WHERE symbol = ?
+                AND date >= date('now', '-400 days')
+                ORDER BY date DESC
+            """, (ticker,))
+
+            rows = cursor.fetchall()
+
         if len(rows) < 200:
             return None
         
@@ -492,20 +489,19 @@ class TechnicalSignal(SignalSource):
         """Calculate mean reversion signal (RSI proxy)."""
         if not self.market_db.exists():
             return 0.0
-        
-        conn = sqlite3.connect(self.market_db)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT close FROM prices 
-            WHERE symbol = ? 
-            AND date >= date('now', '-30 days')
-            ORDER BY date DESC
-        """, (ticker,))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
+
+        with sqlite3.connect(self.market_db) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT close FROM prices
+                WHERE symbol = ?
+                AND date >= date('now', '-30 days')
+                ORDER BY date DESC
+            """, (ticker,))
+
+            rows = cursor.fetchall()
+
         if len(rows) < 14:
             return 0.0
         
@@ -539,23 +535,22 @@ class TechnicalSignal(SignalSource):
     
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical accuracy from database."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT accuracy_score FROM signal_accuracy
-            WHERE ticker = ? AND source_type = ? AND source_name = ?
-            AND horizon_days = ?
-            ORDER BY prediction_timestamp DESC
-            LIMIT 50
-        """, (ticker, self.source_type, self.source_name, horizon_days))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT accuracy_score FROM signal_accuracy
+                WHERE ticker = ? AND source_type = ? AND source_name = ?
+                AND horizon_days = ?
+                ORDER BY prediction_timestamp DESC
+                LIMIT 50
+            """, (ticker, self.source_type, self.source_name, horizon_days))
+
+            rows = cursor.fetchall()
+
         if not rows:
             return None
-        
+
         # Return average accuracy
         accuracies = [r[0] for r in rows if r[0] is not None]
         return statistics.mean(accuracies) if accuracies else None
@@ -615,17 +610,16 @@ class MacroSignal(SignalSource):
         """Get Fed hawk-dove stance (-1 = dovish, +1 = hawkish)."""
         # Check if Fed analyzer data available
         try:
-            conn = sqlite3.connect(self.alt_data_db)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT hawk_dove_score FROM fed_analysis 
-                ORDER BY date DESC LIMIT 1
-            """)
-            
-            row = cursor.fetchone()
-            conn.close()
-            
+            with sqlite3.connect(self.alt_data_db) as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT hawk_dove_score FROM fed_analysis
+                    ORDER BY date DESC LIMIT 1
+                """)
+
+                row = cursor.fetchone()
+
             if row:
                 return float(row[0])
         except Exception as e:
@@ -637,18 +631,17 @@ class MacroSignal(SignalSource):
     def _get_yield_curve_signal(self) -> float:
         """Generate signal from yield curve (steepening = bullish, inversion = bearish)."""
         try:
-            conn = sqlite3.connect(self.market_db)
-            cursor = conn.cursor()
-            
-            # Get 10Y and 2Y yields
-            cursor.execute("""
-                SELECT symbol, close FROM prices 
-                WHERE symbol IN ('TLT', 'SHY') 
-                AND date = (SELECT MAX(date) FROM prices WHERE symbol IN ('TLT', 'SHY'))
-            """)
-            
-            rows = {r[0]: r[1] for r in cursor.fetchall()}
-            conn.close()
+            with sqlite3.connect(self.market_db) as conn:
+                cursor = conn.cursor()
+
+                # Get 10Y and 2Y yields
+                cursor.execute("""
+                    SELECT symbol, close FROM prices
+                    WHERE symbol IN ('TLT', 'SHY')
+                    AND date = (SELECT MAX(date) FROM prices WHERE symbol IN ('TLT', 'SHY'))
+                """)
+
+                rows = {r[0]: r[1] for r in cursor.fetchall()}
             
             if 'TLT' in rows and 'SHY' in rows:
                 # TLT inverse to yields, so calculate approximate spread
@@ -684,18 +677,17 @@ class MacroSignal(SignalSource):
     def _get_30d_change(self, symbol: str) -> Optional[float]:
         """Get 30-day price change for symbol."""
         try:
-            conn = sqlite3.connect(self.market_db)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT close FROM prices 
-                WHERE symbol = ? 
-                ORDER BY date DESC 
-                LIMIT 22
-            """, (symbol,))
-            
-            rows = cursor.fetchall()
-            conn.close()
+            with sqlite3.connect(self.market_db) as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT close FROM prices
+                    WHERE symbol = ?
+                    ORDER BY date DESC
+                    LIMIT 22
+                """, (symbol,))
+
+                rows = cursor.fetchall()
             
             if len(rows) >= 22:
                 current = rows[0][0]
@@ -708,18 +700,17 @@ class MacroSignal(SignalSource):
     
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical accuracy."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT accuracy_score FROM signal_accuracy
-            WHERE ticker = ? AND source_type = ? AND source_name = ?
-            ORDER BY prediction_timestamp DESC
-            LIMIT 30
-        """, (ticker, self.source_type, self.source_name))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT accuracy_score FROM signal_accuracy
+                WHERE ticker = ? AND source_type = ? AND source_name = ?
+                ORDER BY prediction_timestamp DESC
+                LIMIT 30
+            """, (ticker, self.source_type, self.source_name))
+
+            rows = cursor.fetchall()
         
         if rows:
             accuracies = [r[0] for r in rows if r[0] is not None]
@@ -781,18 +772,17 @@ class AlternativeDataSignalAdapter(SignalSource):
 
     def get_historical_accuracy(self, ticker: str, horizon_days: int = 21) -> Optional[float]:
         """Get historical accuracy."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT accuracy_score FROM signal_accuracy
-            WHERE ticker = ? AND source_type = ? AND source_name = ?
-            ORDER BY prediction_timestamp DESC
-            LIMIT 20
-        """, (ticker, self.source_type, self.source_name))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT accuracy_score FROM signal_accuracy
+                WHERE ticker = ? AND source_type = ? AND source_name = ?
+                ORDER BY prediction_timestamp DESC
+                LIMIT 20
+            """, (ticker, self.source_type, self.source_name))
+
+            rows = cursor.fetchall()
         
         if rows:
             accuracies = [r[0] for r in rows if r[0] is not None]
@@ -1006,19 +996,18 @@ class SignalIntegrator:
     def _detect_regime(self) -> str:
         """Detect current market regime."""
         try:
-            conn = sqlite3.connect(DATA_DIR / "market.db")
-            cursor = conn.cursor()
-            
-            # Get VIX level
-            cursor.execute("""
-                SELECT close FROM prices 
-                WHERE symbol = 'VIX' 
-                ORDER BY date DESC 
-                LIMIT 1
-            """)
-            
-            row = cursor.fetchone()
-            conn.close()
+            with sqlite3.connect(DATA_DIR / "market.db") as conn:
+                cursor = conn.cursor()
+
+                # Get VIX level
+                cursor.execute("""
+                    SELECT close FROM prices
+                    WHERE symbol = 'VIX'
+                    ORDER BY date DESC
+                    LIMIT 1
+                """)
+
+                row = cursor.fetchone()
             
             if row:
                 vix = float(row[0])
@@ -1058,28 +1047,27 @@ class SignalIntegrator:
     
     def _store_composite(self, composite: CompositeSignal):
         """Store composite signal to database."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO composite_signals 
-            (ticker, timestamp, composite_score, composite_confidence, detected_regime,
-             weights_used, primary_drivers, signal_agreement, expected_accuracy)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            composite.ticker,
-            composite.timestamp,
-            composite.composite_score,
-            composite.composite_confidence,
-            composite.detected_regime,
-            json.dumps(composite.weights_used),
-            json.dumps(composite.primary_drivers),
-            composite.signal_agreement,
-            composite.expected_accuracy,
-        ))
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO composite_signals
+                (ticker, timestamp, composite_score, composite_confidence, detected_regime,
+                 weights_used, primary_drivers, signal_agreement, expected_accuracy)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                composite.ticker,
+                composite.timestamp,
+                composite.composite_score,
+                composite.composite_confidence,
+                composite.detected_regime,
+                json.dumps(composite.weights_used),
+                json.dumps(composite.primary_drivers),
+                composite.signal_agreement,
+                composite.expected_accuracy,
+            ))
+
+            conn.commit()
     
     def get_allocation_deltas(self, 
                               current_alloc: Dict[str, float],
@@ -1155,40 +1143,38 @@ class SignalIntegrator:
     
     def _store_recommendation(self, recommendation: PortfolioRecommendation):
         """Store portfolio recommendation."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO portfolio_recommendations 
-            (timestamp, current_allocation, recommended_allocation, composite_sentiment,
-             confidence, regime, deltas)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            recommendation.timestamp,
-            json.dumps(recommendation.current_allocation),
-            json.dumps(recommendation.recommended_allocation),
-            recommendation.composite_sentiment,
-            recommendation.confidence,
-            recommendation.regime,
-            json.dumps([d.to_dict() for d in recommendation.deltas]),
-        ))
-        
-        conn.commit()
-        conn.close()
-    
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT INTO portfolio_recommendations
+                (timestamp, current_allocation, recommended_allocation, composite_sentiment,
+                 confidence, regime, deltas)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                recommendation.timestamp,
+                json.dumps(recommendation.current_allocation),
+                json.dumps(recommendation.recommended_allocation),
+                recommendation.composite_sentiment,
+                recommendation.confidence,
+                recommendation.regime,
+                json.dumps([d.to_dict() for d in recommendation.deltas]),
+            ))
+
+            conn.commit()
+
     def get_signal_history(self, ticker: str, days: int = 30) -> List[CompositeSignal]:
         """Get historical composite signals for a ticker."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT * FROM composite_signals
-            WHERE ticker = ? AND timestamp >= date('now', ?)
-            ORDER BY timestamp DESC
-        """, (ticker, f'-{days} days'))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT * FROM composite_signals
+                WHERE ticker = ? AND timestamp >= date('now', ?)
+                ORDER BY timestamp DESC
+            """, (ticker, f'-{days} days'))
+
+            rows = cursor.fetchall()
         
         signals = []
         for row in rows:
