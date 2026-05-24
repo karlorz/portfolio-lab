@@ -262,3 +262,99 @@ class TestBayesianVolPipelineExtended:
             result = pipeline.estimate(sym)
             assert isinstance(result, BayesianVolEstimate)
             assert result.symbol == sym
+
+
+class TestBayesianVolModelMoreExtended:
+    """Additional edge cases beyond the existing extended tests."""
+
+    @pytest.fixture
+    def model(self):
+        return BayesianVolModel(prior_window=252, update_window=20)
+
+    def test_fit_prior_wide_spread_vols(self, model):
+        """Wide spread of vols should give lower precision."""
+        rng = np.random.RandomState(42)
+        vols = list(rng.uniform(0.05, 0.60, 300))
+        _, prec = model.fit_prior(vols)
+        # Wide spread → low precision (unless capped at 60)
+        assert prec <= 60.0
+
+    def test_update_extreme_likelihood(self, model):
+        """Extreme likelihood vol should be shrunk toward prior."""
+        result = model.update(0.20, 30.0, [0.80] * 5)
+        # Posterior should be between prior (0.20) and likelihood (~0.80)
+        assert result.posterior_vol < 0.80
+        assert result.posterior_vol > 0.20
+
+    def test_update_all_same_recent(self, model):
+        """All identical recent values should give very precise likelihood."""
+        result = model.update(0.20, 10.0, [0.25] * 20)
+        assert result.likelihood_vol == pytest.approx(0.25, abs=0.01)
+
+    def test_regime_scale_monotonic_with_kurtosis(self, model):
+        """Higher kurtosis should generally produce higher regime_scale."""
+        rng = np.random.RandomState(42)
+        base = list(rng.normal(0, 0.01, 60))
+        # Add more extreme events for second series
+        extreme = base.copy()
+        for i in [10, 20, 30, 40, 50]:
+            extreme[i] = -0.08
+        for i in [11, 21, 31, 41, 51]:
+            extreme[i] = 0.08
+        scale_base = model.compute_regime_scale(base)
+        scale_extreme = model.compute_regime_scale(extreme)
+        assert scale_extreme >= scale_base
+
+    def test_excess_kurtosis_single_value(self, model):
+        """Single value should return 0 (insufficient data)."""
+        ek = model._excess_kurtosis([1.0])
+        assert ek == 0.0
+
+    def test_excess_kurtosis_two_values(self, model):
+        """Two identical values → excess kurtosis = -2 (degenerate)."""
+        ek = model._excess_kurtosis([1.0, 1.0])
+        # Variance = 0, should return 0 per implementation
+        assert ek == 0.0
+
+    def test_update_zero_prior_precision(self, model):
+        """Zero prior precision should make posterior follow likelihood."""
+        result = model.update(0.20, 0.01, [0.40] * 10)
+        # Very weak prior → posterior should be near likelihood
+        assert abs(result.posterior_vol - result.likelihood_vol) < 0.05
+
+
+class TestBayesianVolPipelineMoreExtended:
+    """Additional pipeline edge cases."""
+
+    @pytest.fixture
+    def pipeline(self):
+        return BayesianVolPipeline()
+
+    def test_estimate_empty_vol_history(self, pipeline):
+        """Empty vol history should still produce a valid estimate."""
+        result = pipeline.estimate("TEST", vol_history=[])
+        # Should use defaults
+        assert isinstance(result, BayesianVolEstimate)
+
+    def test_estimate_very_short_recent_returns(self, pipeline):
+        """Very short recent_returns list should default scale to 1.0."""
+        vol_history = [0.20] * 50
+        recent_returns = [0.01]
+        result = pipeline.estimate("TEST", vol_history=vol_history,
+                                   recent_returns=recent_returns)
+        assert result.regime_scale == 1.0
+
+    def test_estimate_none_recent_returns(self, pipeline):
+        """None recent_returns should use default regime_scale."""
+        vol_history = [0.20] * 50
+        result = pipeline.estimate("TEST", vol_history=vol_history,
+                                   recent_returns=None)
+        assert result.regime_scale == 1.0
+
+    def test_save_estimate_to_existing_dir(self, pipeline, tmp_path):
+        """save_estimate should write to an existing directory."""
+        vol_history = [0.20] * 50
+        result = pipeline.estimate("TESTDIR", vol_history=vol_history)
+        pipeline.OUTPUT_DIR = tmp_path
+        pipeline.save_estimate(result)
+        assert (tmp_path / "TESTDIR_bayesian_vol.json").exists()
