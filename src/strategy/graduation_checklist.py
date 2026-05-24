@@ -75,6 +75,10 @@ class GraduationChecklist:
             "value": 3,
             "description": "Circuit breaker confidence >= 3 consecutive cycles (no trip)",
         },
+        "min_dsr": {
+            "value": 0.50,
+            "description": "Deflated Sharpe Ratio >= 0.50 (validates against multiple-testing bias)",
+        },
         "manual_approval": {
             "value": False,
             "description": "Human-in-the-loop approval (MANDATORY — always False by default)",
@@ -123,7 +127,10 @@ class GraduationChecklist:
         # 7. Circuit breaker confidence
         results["circuit_breaker_confidence"] = self._check_circuit_breaker(state)
 
-        # 8. Manual approval (always False by default)
+        # 8. DSR validation (multiple-testing correction)
+        results["min_dsr"] = self._check_dsr(state)
+
+        # 9. Manual approval (always False by default)
         results["manual_approval"] = self._check_manual_approval(state)
 
         return results
@@ -470,13 +477,66 @@ class GraduationChecklist:
         # Check if an explicit approval file exists
         approval_file = DATA_DIR / ".manual_approval"
         approved = approval_file.exists()
-        
+
         return CheckResult(
             name="manual_approval",
             passed=approved,
             value=1 if approved else 0,
             required=1,
             description=self.criteria["manual_approval"]["description"],
+        )
+
+    def _check_dsr(self, state: Dict) -> CheckResult:
+        """Deflated Sharpe Ratio — validates Sharpe against multiple-testing bias.
+
+        With 94 grid-search configurations, DSR quantifies the probability
+        that the observed Sharpe ratio is genuinely positive rather than the
+        best of many random trials. DSR >= 0.50 indicates the Sharpe is
+        more likely than not to be real.
+        """
+        required = self.criteria["min_dsr"]["value"]
+
+        # Compute Sharpe from portfolio history (same as _check_sharpe)
+        portfolio = state.get("portfolio", {})
+        history = portfolio.get("history", [])
+        daily = {}
+        for entry in history:
+            ts = entry.get("timestamp", "")
+            date_key = ts[:10] if len(ts) >= 10 else ts
+            daily[date_key] = entry
+        sorted_daily = [daily[d] for d in sorted(daily.keys())]
+        recent = sorted_daily[-63:] if len(sorted_daily) >= 3 else sorted_daily
+
+        if len(recent) < 3:
+            return CheckResult(
+                name="min_dsr",
+                passed=False,
+                value=0.0,
+                required=required,
+                description=self.criteria["min_dsr"]["description"],
+            )
+
+        returns = [h.get("daily_return", 0) for h in recent]
+        daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
+        sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
+        if sharpe > 3.0:
+            sharpe = 0.0
+
+        try:
+            from src.backtest.metrics import compute_deflated_sharpe_ratio
+            n_obs = len(returns) * 252  # Scale to annual observations
+            dsr = compute_deflated_sharpe_ratio(
+                sharpe_ratio=sharpe, n_trials=94, n_observations=n_obs,
+            )
+        except Exception:
+            dsr = 0.0
+
+        return CheckResult(
+            name="min_dsr",
+            passed=dsr >= required,
+            value=round(dsr, 4),
+            required=required,
+            description=self.criteria["min_dsr"]["description"],
         )
 
 

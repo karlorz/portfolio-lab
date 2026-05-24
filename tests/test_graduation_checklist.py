@@ -411,7 +411,7 @@ class TestIntegratedCheck:
         state = _make_state_file(None)
         checklist = GraduationChecklist()
         results = checklist.check(state)
-        assert len(results) == 8
+        assert len(results) == 9
         expected = [
             "min_trading_days",
             "min_sharpe",
@@ -420,6 +420,7 @@ class TestIntegratedCheck:
             "health_checks",
             "min_tca_orders",
             "circuit_breaker_confidence",
+            "min_dsr",
             "manual_approval",
         ]
         for name in expected:
@@ -481,7 +482,7 @@ class TestIntegratedCheck:
         assert "readiness_score" in report
         assert "is_graduation_ready" in report
         assert "criteria" in report
-        assert len(report["criteria"]) == 8
+        assert len(report["criteria"]) == 9
 
     def test_progress_summary(self):
         state = _make_state_file(None)
