@@ -475,37 +475,61 @@ class SignalHealthTracker:
     def get_adjusted_weights(
         self,
         base_weights: Dict[str, float],
-        min_weight_multiplier: float = 0.2
+        min_weight_multiplier: float = 0.2,
+        ic_bonus_threshold: float = 0.05,
+        ic_penalty_threshold: float = 0.02,
+        ic_weight_factor: float = 0.15,
     ) -> Dict[str, float]:
         """
         Calculate health-adjusted weights for ensemble voting.
-        
-        Formula: adjusted_weight = base_weight * max(min_multiplier, health_score)
-        
+
+        Formula:
+          adjusted_weight = base_weight * health_multiplier * ic_multiplier
+
+        health_multiplier = max(min_multiplier, health_score)
+        ic_multiplier:
+          - |IC| > ic_bonus_threshold: 1.0 + ic_weight_factor * |IC|
+          - |IC| < ic_penalty_threshold: 1.0 - ic_weight_factor * (1 - |IC|/ic_penalty_threshold)
+          - otherwise: 1.0 (neutral)
+
         Args:
             base_weights: Dict mapping source to base weight (should sum to 1.0)
             min_weight_multiplier: Floor for weight adjustment (default 0.2)
-        
+            ic_bonus_threshold: IC above this gets a weight boost (default 0.05)
+            ic_penalty_threshold: IC below this gets a weight penalty (default 0.02)
+            ic_weight_factor: Magnitude of IC adjustment (default 0.15)
+
         Returns:
             Dict of adjusted weights (normalized to sum to 1.0)
         """
         scores = self.calculate_all_health_scores()
-        
+
         adjusted = {}
         for source, base_weight in base_weights.items():
             score = scores.get(source)
             if score:
-                multiplier = max(min_weight_multiplier, score.health_score)
-                adjusted[source] = base_weight * multiplier
+                # Health multiplier
+                health_mult = max(min_weight_multiplier, score.health_score)
+
+                # IC multiplier
+                ic_mult = 1.0
+                if score.ic is not None:
+                    abs_ic = abs(score.ic)
+                    if abs_ic > ic_bonus_threshold:
+                        ic_mult = 1.0 + ic_weight_factor * abs_ic
+                    elif abs_ic < ic_penalty_threshold:
+                        ic_mult = 1.0 - ic_weight_factor * (1 - abs_ic / ic_penalty_threshold)
+
+                adjusted[source] = base_weight * health_mult * ic_mult
             else:
                 # No health data - use neutral health (0.5)
                 adjusted[source] = base_weight * 0.5
-        
+
         # Normalize to sum to 1.0
         total = sum(adjusted.values())
         if total > 0:
             adjusted = {k: v / total for k, v in adjusted.items()}
-        
+
         return adjusted
 
     # ------------------------------------------------------------------

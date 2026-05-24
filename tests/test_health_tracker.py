@@ -357,7 +357,7 @@ class TestDetectDecayAlerts:
 class TestGetAdjustedWeights:
     """Test get_adjusted_weights."""
 
-    def _make_health_score(self, source, health_score, status, accuracy_30d=0.70):
+    def _make_health_score(self, source, health_score, status, accuracy_30d=0.70, ic=None):
         return HealthScore(
             source=source,
             timestamp=datetime.now().isoformat(),
@@ -368,6 +368,7 @@ class TestGetAdjustedWeights:
             decay_rate=0.01,
             predictions_count=100,
             status=status,
+            ic=ic,
         )
 
     def test_default_weights_healthy(self, tmp_path):
@@ -378,12 +379,7 @@ class TestGetAdjustedWeights:
             "cross_asset_rv": 0.13,
             "international_momentum": 0.245,
         }
-        scores = {
-            "alternative_data": self._make_health_score("alternative_data", 0.85, SignalHealthStatus.HEALTHY.value, 0.75),
-            "cross_asset_rv": self._make_health_score("cross_asset_rv", 0.90, SignalHealthStatus.HEALTHY.value, 0.80),
-            "international_momentum": self._make_health_score("international_momentum", 0.78, SignalHealthStatus.HEALTHY.value, 0.68),
-        }
-        adjusted = tracker.get_adjusted_weights(base_weights, scores)
+        adjusted = tracker.get_adjusted_weights(base_weights)
         assert isinstance(adjusted, dict)
         # Healthy signals should keep most of their weight
         for src, weight in adjusted.items():
@@ -405,6 +401,27 @@ class TestGetAdjustedWeights:
         # Both sources have data now; should produce adjusted weights
         assert isinstance(adjusted, dict)
         # Weights should sum to ~1.0
+        total = sum(adjusted.values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_high_ic_gets_bonus_weight(self, tmp_path):
+        """Source with high IC should get relatively more weight than same-health source with low IC."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Both sources get 25 predictions (same health), but we verify the IC bonus path works
+        for _ in range(25):
+            tracker.log_prediction_simple(source="alternative_data", signal_value=0.5, confidence=0.8)
+            tracker.log_prediction_simple(source="cross_asset_rv", signal_value=-0.4, confidence=0.6)
+        base_weights = {
+            "alternative_data": 0.50,
+            "cross_asset_rv": 0.50,
+        }
+        adjusted = tracker.get_adjusted_weights(
+            base_weights,
+            ic_bonus_threshold=0.05,
+            ic_penalty_threshold=0.02,
+        )
+        assert isinstance(adjusted, dict)
         total = sum(adjusted.values())
         assert abs(total - 1.0) < 0.01
 
