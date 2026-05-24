@@ -441,5 +441,168 @@ class TestDriftEdgeCases:
         assert len(drift) == 0  # abs(1.0) > 1.0 is False
 
 
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestPositionDriftDataclass:
+    """Test PositionDrift dataclass."""
+
+    def test_position_drift_creation(self):
+        from src.broker.position_sync import PositionDrift
+        drift = PositionDrift(
+            symbol="SPY", local_qty=100, broker_qty=105,
+            qty_delta=5, local_value=50000, broker_value=52500,
+            value_delta=2500, drift_pct=0.05,
+        )
+        assert drift.symbol == "SPY"
+        assert drift.qty_delta == 5
+        assert drift.drift_pct == 0.05
+
+    def test_position_drift_negative(self):
+        """Negative drift should be representable."""
+        from src.broker.position_sync import PositionDrift
+        drift = PositionDrift(
+            symbol="GLD", local_qty=200, broker_qty=190,
+            qty_delta=-10, local_value=38000, broker_value=36100,
+            value_delta=-1900, drift_pct=-0.05,
+        )
+        assert drift.qty_delta == -10
+        assert drift.drift_pct == -0.05
+
+
+class TestCalculateDriftExtended:
+    """Extended calculate_drift edge cases."""
+
+    def _make_sync(self):
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = ":memory:"
+        sync.data_dir = "/tmp"
+        sync.sync_log_path = "/tmp/test_sync.jsonl"
+        return sync
+
+    def test_multiple_symbols(self):
+        """Should handle drift across multiple symbols."""
+        sync = self._make_sync()
+        local = {
+            "SPY": {"qty": 100, "market_value": 50000},
+            "GLD": {"qty": 200, "market_value": 38000},
+            "TLT": {"qty": 50, "market_value": 5000},
+        }
+        broker = {
+            "SPY": MagicMock(qty=105, market_value=52500),
+            "GLD": MagicMock(qty=200, market_value=38000),
+            "TLT": MagicMock(qty=50, market_value=5000),
+        }
+        drift = sync.calculate_drift(local, broker)
+        assert len(drift) == 1  # Only SPY has drift
+        assert drift[0].symbol == "SPY"
+
+    def test_symbol_in_broker_not_local(self):
+        """Symbol only in broker should show as new position."""
+        sync = self._make_sync()
+        local = {}
+        broker = {"SPY": MagicMock(qty=100, market_value=50000)}
+        drift = sync.calculate_drift(local, broker)
+        assert len(drift) == 1
+        assert drift[0].local_qty == 0
+        assert drift[0].broker_qty == 100
+        assert drift[0].drift_pct == 1.0
+
+    def test_symbol_in_local_not_broker(self):
+        """Symbol only in local should show negative drift."""
+        sync = self._make_sync()
+        local = {"SPY": {"qty": 100, "market_value": 50000}}
+        broker = {}
+        drift = sync.calculate_drift(local, broker)
+        assert len(drift) == 1
+        assert drift[0].broker_qty == 0
+        assert drift[0].qty_delta == -100
+
+    def test_no_drift_when_matching(self):
+        """Matching positions should produce no drift items."""
+        sync = self._make_sync()
+        local = {"SPY": {"qty": 100, "market_value": 50000}}
+        broker = {"SPY": MagicMock(qty=100, market_value=50000)}
+        drift = sync.calculate_drift(local, broker)
+        assert len(drift) == 0
+
+    def test_empty_both(self):
+        """Empty local and broker should produce no drift."""
+        sync = self._make_sync()
+        drift = sync.calculate_drift({}, {})
+        assert len(drift) == 0
+
+
+class TestSyncExtended:
+    """Extended sync method tests."""
+
+    def _make_sync(self):
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = ":memory:"
+        sync.data_dir = "/tmp"
+        sync.sync_log_path = "/tmp/test_sync.jsonl"
+        sync.client = MagicMock()
+        return sync
+
+    def test_sync_not_ready(self):
+        """sync() when client not ready should return not_configured."""
+        sync = self._make_sync()
+        sync.client.is_ready.return_value = False
+        result = sync.sync()
+        assert result["status"] == "not_configured"
+
+    def test_sync_dry_run_no_log(self, tmp_path):
+        """dry_run=True should not write to sync log."""
+        sync = self._make_sync()
+        sync.client.is_ready.return_value = True
+        sync.client.get_positions.return_value = []
+        sync.client.get_account.return_value = {"equity": 100000, "cash": 50000, "buying_power": 200000}
+        sync.sync_log_path = str(tmp_path / "sync.jsonl")
+        sync.get_local_positions = lambda: {}
+        sync.get_broker_positions = lambda: {}
+        result = sync.sync(dry_run=True)
+        assert result["status"] == "success"
+        assert not (tmp_path / "sync.jsonl").exists()
+
+    def test_sync_success_report_structure(self):
+        """Successful sync should have expected report keys."""
+        sync = self._make_sync()
+        sync.client.is_ready.return_value = True
+        sync.client.get_positions.return_value = []
+        sync.client.get_account.return_value = {"equity": 100000, "cash": 50000, "buying_power": 200000}
+        sync.get_local_positions = lambda: {"SPY": {"qty": 100, "market_value": 50000}}
+        sync.get_broker_positions = lambda: {}
+        result = sync.sync(dry_run=True)
+        assert "timestamp" in result
+        assert "local_positions" in result
+        assert "broker_positions" in result
+        assert "drift" in result
+
+    def test_sync_error_handling(self):
+        """sync() should handle exceptions gracefully."""
+        sync = self._make_sync()
+        sync.client.is_ready.return_value = True
+        sync.client.get_account.side_effect = Exception("API error")
+        sync.get_local_positions = lambda: {}
+        sync.get_broker_positions = lambda: {}
+        result = sync.sync()
+        assert result["status"] == "error"
+        assert "API error" in result["message"]
+
+
+class TestReconcileToBrokerExtended:
+    """Extended reconcile_to_broker tests."""
+
+    def test_reconcile_not_ready(self):
+        """reconcile_to_broker() when not ready should return not_configured."""
+        sync = PositionSync.__new__(PositionSync)
+        sync.client = MagicMock()
+        sync.client.is_ready.return_value = False
+        result = sync.reconcile_to_broker()
+        assert result["status"] == "not_configured"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
