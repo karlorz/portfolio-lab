@@ -1030,3 +1030,499 @@ class TestTSFMAllocationScalar:
             if data["tsfm_score"] < 0:
                 assert data["tsfm_allocation_scalar"] < 1.0
                 break
+
+
+# ---------------------------------------------------------------------------
+# FactorScore dataclass — validation and edge cases
+# ---------------------------------------------------------------------------
+
+class TestFactorScoreValidation:
+    def test_negative_price(self):
+        """FactorScore can be created with negative price (edge case)."""
+        score = FactorScore(
+            symbol="TEST", factor_name="Test", price=-10.0,
+            return_12m=0.1, return_6m=0.05, return_3m=0.02,
+            volatility=0.15, sharpe_12m=0.5, momentum_score=0.1, rank=1,
+        )
+        assert score.price == -10.0
+        assert score.symbol == "TEST"
+
+    def test_zero_volatility(self):
+        """FactorScore with zero volatility (edge case for division)."""
+        score = _make_score(volatility=0.0)
+        assert score.volatility == 0.0
+
+    def test_default_rank_zero(self):
+        """Default rank is 0 before assignment by evaluate()."""
+        score = FactorScore(
+            symbol="T", factor_name="T", price=100.0,
+            return_12m=0.1, return_6m=0.05, return_3m=0.02,
+            volatility=0.15, sharpe_12m=0.5, momentum_score=0.1, rank=0,
+        )
+        assert score.rank == 0
+
+
+# ---------------------------------------------------------------------------
+# FactorMomentumEngine — constructor validation
+# ---------------------------------------------------------------------------
+
+class TestEngineConstructor:
+    def test_default_constructor(self):
+        """Default constructor uses reasonable defaults."""
+        engine = FactorMomentumEngine()
+        assert engine.top_n == 2
+        assert engine.lookback_months == 12
+        assert engine.min_momentum == 0.0
+        assert engine.vol_lookback == 20
+        assert engine.max_per_category == 1
+
+    def test_top_n_zero(self):
+        """top_n=0 selects 1 factor then breaks (0 >= 0 guard is True after append)."""
+        engine = _make_engine_with_mocked_db(top_n=0)
+        result = engine.evaluate()
+        # With top_n=0, one factor is appended before len(selected) >= 0 breaks
+        assert len(result["selected_factors"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# _calculate_factor_score — additional edge cases
+# ---------------------------------------------------------------------------
+
+class TestFactorScoreCalcEdgeCases:
+    def test_exactly_252_days(self):
+        """Exactly 252 data points is sufficient (boundary)."""
+        engine = FactorMomentumEngine()
+        data = _generate_price_data(252, drift=0.0004, seed=42)
+        engine._fetch_price_data = lambda sym, days=300: data
+        score = engine._calculate_factor_score("MTUM")
+        assert score is not None
+
+    def test_zero_close_prices(self):
+        """All-zero close prices handled without crash."""
+        engine = FactorMomentumEngine()
+        data = [{"date": f"2024-01-{i+1:02d}", "close": 0.0, "volume": 1000}
+                for i in range(300)]
+        engine._fetch_price_data = lambda sym, days=300: data
+        score = engine._calculate_factor_score("MTUM")
+        assert score is not None
+
+    def test_constant_price_series(self):
+        """Flat price yields zero returns and non-zero vol floor."""
+        engine = FactorMomentumEngine()
+        data = [{"date": f"2024-01-{i+1:02d}", "close": 100.0, "volume": 1000}
+                for i in range(300)]
+        engine._fetch_price_data = lambda sym, days=300: data
+        score = engine._calculate_factor_score("MTUM")
+        assert score is not None
+        assert score.return_12m == 0.0
+        assert score.return_6m == 0.0
+        assert score.return_3m == 0.0
+
+    def test_momentum_acceleration_formula(self):
+        """Verify momentum_acceleration = return_1m - (return_3m / 3)."""
+        engine = FactorMomentumEngine()
+        data = _generate_price_data(300, drift=0.001, seed=55)
+        engine._fetch_price_data = lambda sym, days=300: data
+        score = engine._calculate_factor_score("MTUM")
+        assert score is not None
+        closes = np.array([d["close"] for d in data])
+        days_1m = min(21, len(closes) - 1)
+        return_1m = (closes[-1] / closes[-days_1m]) - 1
+        expected_accel = return_1m - (score.return_3m / 3)
+        assert abs(score.momentum_acceleration - expected_accel) < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# evaluate() — additional coverage
+# ---------------------------------------------------------------------------
+
+class TestEvaluateAdditional:
+    def test_evaluate_allocation_deterministic(self):
+        """Same data produces identical allocation."""
+        engine1 = _make_engine_with_mocked_db(top_n=2)
+        engine2 = _make_engine_with_mocked_db(top_n=2)
+        result1 = engine1.evaluate()
+        result2 = engine2.evaluate()
+        if result1["allocation"] and result2["allocation"]:
+            assert result1["allocation"] == result2["allocation"]
+
+    def test_evaluate_diversity_output_shape(self):
+        """Diversity dict contains categories_used and category_distribution."""
+        engine = _make_engine_with_mocked_db()
+        result = engine.evaluate()
+        assert "diversity" in result
+        assert "categories_used" in result["diversity"]
+        assert "category_distribution" in result["diversity"]
+
+    def test_evaluate_all_factors_filtered_by_min_momentum(self):
+        """When every factor fails min_momentum, selected is empty."""
+        engine = _make_engine_with_mocked_db(min_momentum=10.0)
+        result = engine.evaluate()
+        assert result["selected_factors"] == []
+        assert result["allocation"] == {"SPY": 1.0}
+
+    def test_evaluate_current_scores_has_all_fields(self):
+        """Each entry in current_scores has all expected fields."""
+        engine = _make_engine_with_mocked_db()
+        result = engine.evaluate()
+        for sym, data in result["current_scores"].items():
+            for field in ("factor_name", "category", "return_12m", "return_6m",
+                          "return_3m", "volatility", "sharpe_12m",
+                          "momentum_score", "rank"):
+                assert field in data, f"{sym} missing {field}"
+
+
+# ---------------------------------------------------------------------------
+# _generate_allocation — additional edge cases
+# ---------------------------------------------------------------------------
+
+class TestGenerateAllocationExpanded:
+    def test_total_inv_vol_zero_equal_weight(self):
+        """When all inverse vols approach zero, factors get equal weight."""
+        engine = FactorMomentumEngine()
+        selected = [
+            ("MTUM", _make_score(volatility=1e10)),
+            ("USMV", _make_score(symbol="USMV", volatility=1e10)),
+        ]
+        alloc = engine._generate_allocation(selected)
+        assert abs(sum(alloc.values()) - 1.0) < 1e-10
+        assert abs(alloc["MTUM"] - 0.5) < 1e-10
+        assert abs(alloc["USMV"] - 0.5) < 1e-10
+
+    def test_single_factor_extreme_vol(self):
+        """Single factor always gets full weight regardless of volatility."""
+        engine = FactorMomentumEngine()
+        selected = [("MTUM", _make_score(volatility=1e10))]
+        alloc = engine._generate_allocation(selected)
+        assert abs(alloc["MTUM"] - 1.0) < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# evaluate_tsfm — additional coverage
+# ---------------------------------------------------------------------------
+
+class TestTSFMEvaluationExpanded:
+    def test_tsfm_empty_universe_error(self):
+        """When all symbols return None, TSFM reports insufficient data."""
+        engine = FactorMomentumEngine()
+        engine._fetch_price_data = lambda sym, days=300: []
+        result = engine.evaluate_tsfm(vix_level=20.0)
+        assert "error" in result["tsfm"]
+
+    def test_tsfm_factor_divergence_exists(self):
+        """factor_divergence is computed for each symbol."""
+        engine = _make_engine_with_mocked_db()
+        result = engine.evaluate_tsfm(vix_level=20.0)
+        for sym, data in result["tsfm"]["tsfm_scores"].items():
+            assert "factor_divergence" in data
+            assert data["factor_divergence"] >= 0.0
+
+    def test_tsfm_selection_diversity(self):
+        """TSFM selection enforces max 1 factor per category."""
+        engine = _make_engine_with_mocked_db(top_n=3)
+        result = engine.evaluate_tsfm(vix_level=20.0)
+        selected = result["tsfm"]["selected_factors_tsfm"]
+        categories = [engine.FACTORS[s]["category"] for s in selected]
+        assert len(categories) == len(set(categories))
+
+    def test_tsfm_divergence_zero_when_std_zero(self):
+        """When all tsfm_scores are identical, divergence is 0.0."""
+        engine = FactorMomentumEngine()
+        data = _generate_price_data(300, drift=0.0, vol=0.0, seed=100)
+        engine._fetch_price_data = lambda sym, days=300: data
+        result = engine.evaluate_tsfm(vix_level=20.0)
+        for sym, data in result["tsfm"]["tsfm_scores"].items():
+            assert data["factor_divergence"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# evaluate_ml_enhanced — additional coverage
+# ---------------------------------------------------------------------------
+
+class TestMLEnhancedEvaluationExpanded:
+    def test_ml_enhanced_empty_scores(self):
+        """When no factor data is available, ML result still has ml_enhanced flag."""
+        engine = FactorMomentumEngine()
+        engine._fetch_price_data = lambda sym, days=300: []
+        result = engine.evaluate_ml_enhanced(vix_level=20.0)
+        assert "ml_enhanced" in result
+        assert result["ml_enhanced"] is True
+
+    def test_ml_vix_context_stored(self):
+        """VIX context is stored in result."""
+        engine = _make_engine_with_mocked_db()
+        result = engine.evaluate_ml_enhanced(vix_level=25.0)
+        assert result["vix_context"] == 25.0
+
+
+# ---------------------------------------------------------------------------
+# _calculate_ml_features — expanded edge cases
+# ---------------------------------------------------------------------------
+
+class TestMLFeaturesExpanded:
+    def test_vix_percentile_at_67_boundary(self):
+        """VIX=30 => percentile ~0.667, below 0.67 threshold, multiplier=1."""
+        engine = FactorMomentumEngine()
+        scores = {"MTUM": _make_score(momentum_score=0.20)}
+        result = engine._calculate_ml_features("MTUM", scores, vix_level=30.0)
+        assert abs(result["regime_momentum"] - 0.20) < 1e-6
+
+    def test_vix_percentile_above_67(self):
+        """VIX=30.1 => percentile ~0.67, above threshold, multiplier=0.5."""
+        engine = FactorMomentumEngine()
+        scores = {"MTUM": _make_score(momentum_score=0.20)}
+        result = engine._calculate_ml_features("MTUM", scores, vix_level=30.1)
+        assert abs(result["regime_momentum"] - 0.10) < 1e-2
+
+    def test_ml_features_zero_spy_vol(self):
+        """When SPY volatility is zero, factor_divergence still computed."""
+        engine = FactorMomentumEngine()
+        scores = {
+            "SPY": _make_score(symbol="SPY", volatility=0.0),
+            "MTUM": _make_score(momentum_score=0.20, volatility=0.15),
+        }
+        result = engine._calculate_ml_features("MTUM", scores, vix_level=20.0)
+        assert "factor_divergence" in result
+        assert result["factor_divergence"] > 0
+
+    def test_vtv_no_vug_no_spy_ml_features(self):
+        """VTV synergy handles missing VUG and SPY gracefully -> synergy 0."""
+        engine = FactorMomentumEngine()
+        scores = {
+            "VTV": _make_score(symbol="VTV", momentum_score=0.20),
+        }
+        result = engine._calculate_ml_features("VTV", scores, vix_level=20.0)
+        assert result["value_momentum_synergy"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# FactorRotationBacktest — expanded edge cases
+# ---------------------------------------------------------------------------
+
+class TestFactorRotationBacktestExpanded:
+    def test_run_insufficient_data(self):
+        """Backtest with fewer than 252 trading days returns error."""
+        engine = FactorMomentumEngine(db_path=Path("/nonexistent/market.db"))
+        bt = FactorRotationBacktest(engine)
+        result = bt.run_backtest("2024-01-01", "2024-06-01")
+        assert "error" in result
+
+    def test_backtest_no_spy_data(self):
+        """Backtest missing SPY benchmark returns error."""
+        engine = FactorMomentumEngine(db_path=Path("/nonexistent/market.db"))
+        bt = FactorRotationBacktest(engine)
+        result = bt.run_backtest("2020-01-01", "2024-12-31")
+        assert "error" in result or "status" in result
+
+    def test_backtest_initial_capital_field(self):
+        """Backtest result contains initial_capital of 100000."""
+        engine = FactorMomentumEngine(db_path=Path("/nonexistent/market.db"))
+        bt = FactorRotationBacktest(engine)
+        result = bt.run_backtest("2020-01-01", "2024-12-31")
+        if "initial_capital" in result:
+            assert result["initial_capital"] == 100000.0
+
+
+# ---------------------------------------------------------------------------
+# _generate_recommendation — strength levels
+# ---------------------------------------------------------------------------
+
+class TestRecommendationExpanded:
+    def test_weak_momentum_recommendation(self):
+        """Avg 12m return < 10% yields 'weak' strength (2 diff categories avoids concentrated)."""
+        engine = FactorMomentumEngine()
+        selected = [
+            ("USMV", _make_score(symbol="USMV", factor_name="Low Vol",
+                                 return_12m=0.05)),
+            ("MTUM", _make_score(symbol="MTUM", factor_name="Momentum",
+                                 return_12m=0.05)),
+        ]
+        all_scores = {
+            "USMV": _make_score(symbol="USMV", return_12m=0.05),
+            "MTUM": _make_score(return_12m=0.05),
+        }
+        rec = engine._generate_recommendation(selected, all_scores)
+        assert "weak" in rec.lower()
+
+    def test_strong_momentum_recommendation(self):
+        """Avg 12m return > 20% yields 'strong' strength (2 diff categories)."""
+        engine = FactorMomentumEngine()
+        selected = [
+            ("MTUM", _make_score(factor_name="Momentum", return_12m=0.25)),
+            ("USMV", _make_score(symbol="USMV", factor_name="Low Vol",
+                                 return_12m=0.25)),
+        ]
+        all_scores = {
+            "MTUM": _make_score(return_12m=0.25),
+            "USMV": _make_score(symbol="USMV", return_12m=0.25),
+        }
+        rec = engine._generate_recommendation(selected, all_scores)
+        assert "strong" in rec.lower()
+
+    def test_moderate_momentum_recommendation(self):
+        """Avg 12m return between 10-20% yields 'moderate' strength (2 diff categories)."""
+        engine = FactorMomentumEngine()
+        selected = [
+            ("QUAL", _make_score(symbol="QUAL", factor_name="Quality",
+                                 return_12m=0.15)),
+            ("USMV", _make_score(symbol="USMV", factor_name="Low Vol",
+                                 return_12m=0.15)),
+        ]
+        all_scores = {
+            "QUAL": _make_score(return_12m=0.15),
+            "USMV": _make_score(symbol="USMV", return_12m=0.15),
+        }
+        rec = engine._generate_recommendation(selected, all_scores)
+        assert "moderate" in rec.lower()
+
+
+# ---------------------------------------------------------------------------
+# TSFM allocation scalar normalization (formula verification)
+# ---------------------------------------------------------------------------
+
+class TestTSFMNormalization:
+    def test_tsfm_scalar_formula_mapping(self):
+        """Verify tsfm_score in [-2,2] maps to scalar in [0,2]."""
+        engine = _make_engine_with_mocked_db()
+        result = engine.evaluate_tsfm(vix_level=20.0)
+        for sym, sdata in result["tsfm"]["tsfm_scores"].items():
+            ts = sdata["tsfm_score"]
+            normalized = (ts + 2) / 2
+            expected = min(2.0, max(0.0, normalized))
+            assert abs(sdata["tsfm_allocation_scalar"] - expected) < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# evaluate_tsfm — no positive TSFM score (all negative or zero)
+# ---------------------------------------------------------------------------
+
+class TestTSFMNoPositiveScore:
+    def test_tsfm_no_positive_selected(self):
+        """When no factors have positive tsfm_score, selection is empty."""
+        engine = FactorMomentumEngine()
+        data = _generate_price_data(300, drift=-0.002, seed=210)
+        engine._fetch_price_data = lambda sym, days=300: data
+        result = engine.evaluate_tsfm(vix_level=20.0)
+        for sym, sdata in result["tsfm"]["tsfm_scores"].items():
+            assert sdata["tsfm_score"] <= 0
+        assert result["tsfm"]["selected_factors_tsfm"] == []
+
+
+# ---------------------------------------------------------------------------
+# _generate_ml_recommendation — moderate signal threshold
+# ---------------------------------------------------------------------------
+
+class TestMLRecommendationExpanded:
+    def test_moderate_ml_signal(self):
+        """composite_ml_score between 0.15-0.3 yields 'moderate ML signal'."""
+        engine = FactorMomentumEngine()
+        score = _make_score(symbol="MTUM", factor_name="Momentum")
+        score.composite_ml_score = 0.20
+        scores = {"MTUM": score}
+        selected = [("MTUM", scores["MTUM"])]
+        rec = engine._generate_ml_recommendation(selected, scores)
+        assert "moderate" in rec.lower()
+
+
+# ---------------------------------------------------------------------------
+# _generate_tsfm_recommendation — various regime and strength combos
+# ---------------------------------------------------------------------------
+
+class TestTSFMRecommendationExpanded:
+    def test_tsfm_empty_result_no_selected(self):
+        """Empty selected returns risk-off message."""
+        engine = FactorMomentumEngine()
+        rec = engine._generate_tsfm_recommendation([], {}, 20.0)
+        assert "risk-off" in rec.lower()
+
+    def test_tsfm_multi_factor_names_joined(self):
+        """Multiple selected factors are comma-joined in recommendation."""
+        engine = FactorMomentumEngine()
+        selected = [
+            ("MTUM", _make_score(symbol="MTUM", factor_name="Momentum",
+                                 tsfm_score=1.0, tsfm_allocation_scalar=1.2)),
+            ("USMV", _make_score(symbol="USMV", factor_name="Low Vol",
+                                 tsfm_score=0.8, tsfm_allocation_scalar=1.1)),
+        ]
+        all_scores = {
+            "MTUM": _make_score(tsfm_score=1.0, tsfm_allocation_scalar=1.2),
+            "USMV": _make_score(symbol="USMV", factor_name="Low Vol",
+                                tsfm_score=0.8, tsfm_allocation_scalar=1.1),
+        }
+        rec = engine._generate_tsfm_recommendation(selected, all_scores, 20.0)
+        assert "Momentum" in rec
+        assert "Low Vol" in rec
+
+
+# ---------------------------------------------------------------------------
+# _calculate_signal_strength — more than 3 factors
+# ---------------------------------------------------------------------------
+
+class TestSignalStrengthManyFactors:
+    def test_four_factors_uses_top_three_spread(self):
+        """4+ factors: spread uses only top 3, ignores trailing factors."""
+        engine = FactorMomentumEngine()
+        selected = [
+            ("MTUM", _make_score(momentum_score=0.30, volatility=0.15)),
+            ("USMV", _make_score(symbol="USMV", momentum_score=0.20,
+                                 volatility=0.12)),
+            ("QUAL", _make_score(symbol="QUAL", momentum_score=0.10,
+                                 volatility=0.14)),
+            ("VTV", _make_score(symbol="VTV", momentum_score=0.05,
+                                volatility=0.16)),
+        ]
+        strength = engine._calculate_signal_strength(selected)
+        assert 0.0 <= strength <= 1.0
+
+    def test_strength_capped_at_one(self):
+        """Signal strength is capped at 1.0 (all positive momentum)."""
+        engine = FactorMomentumEngine()
+        selected = [
+            ("MTUM", _make_score(momentum_score=100.0, volatility=0.10)),
+            ("USMV", _make_score(symbol="USMV", momentum_score=50.0,
+                                 volatility=0.10)),
+            ("QUAL", _make_score(symbol="QUAL", momentum_score=1.0,
+                                volatility=0.10)),
+        ]
+        strength = engine._calculate_signal_strength(selected)
+        assert abs(strength - 1.0) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# FactorScore dataclass — __post_init__ not present but field mutation works
+# ---------------------------------------------------------------------------
+
+class TestFactorScoreMutation:
+    def test_field_mutation_persists(self):
+        """FactorScore fields are mutable."""
+        score = _make_score()
+        score.symbol = "QQQ"
+        score.factor_name = "Nasdaq 100"
+        score.price = 200.0
+        assert score.symbol == "QQQ"
+        assert score.factor_name == "Nasdaq 100"
+        assert score.price == 200.0
+
+    def test_large_float_fields(self):
+        """Extreme float values stored correctly."""
+        score = _make_score(return_12m=999.0, volatility=999.0)
+        assert score.return_12m == 999.0
+        assert score.volatility == 999.0
+
+
+# ---------------------------------------------------------------------------
+# ENGINE universe validation
+# ---------------------------------------------------------------------------
+
+class TestEngineUniverse:
+    def test_universe_is_list(self):
+        """universe is a list of symbols."""
+        engine = FactorMomentumEngine()
+        assert isinstance(engine.universe, list)
+        assert len(engine.universe) == 11
+
+    def test_universe_mutability(self):
+        """universe can be temporarily modified (as done in backtest)."""
+        engine = FactorMomentumEngine()
+        engine.universe = ["SPY", "QQQ"]
+        assert engine.universe == ["SPY", "QQQ"]

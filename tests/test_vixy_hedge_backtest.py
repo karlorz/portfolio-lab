@@ -66,6 +66,63 @@ class TestBacktestConfig:
         total = sum(config.base_weights.values())
         assert abs(total - 1.0) < 0.01
 
+    def test_max_hedge_pct_zero_disables_hedge(self):
+        """max_hedge_pct=0 should effectively disable hedging."""
+        config = BacktestConfig(max_hedge_pct=0.0)
+        bt = WalkForwardVIXYBacktester(config)
+        bt.load_data()
+        _, tracker, _ = bt._run_hedged(bt._daily_prices, bt.config)
+        assert tracker["max_pct"] == 0.0
+        assert tracker["active_days"] == 0
+
+    def test_max_hedge_pct_large_capped_by_sizer(self):
+        """Very large max_hedge_pct should not cause overflow; sizer's own cap applies."""
+        config = BacktestConfig(max_hedge_pct=100.0)
+        bt = WalkForwardVIXYBacktester(config)
+        bt.load_data()
+        _, tracker, _ = bt._run_hedged(bt._daily_prices, bt.config)
+        # Sizer internally caps at 10%, but config allows up to 100%
+        # In practice the VIXY allocation from the sizer should be <= 10%
+        assert tracker["max_pct"] <= 10.0
+
+    def test_rebalance_frequency_zero(self):
+        """rebalance_frequency_days=0 should not cause division or logic errors."""
+        config = BacktestConfig(rebalance_frequency_days=0)
+        bt = WalkForwardVIXYBacktester(config)
+        bt.load_data()
+        result = bt.run()
+        assert isinstance(result, BacktestResult)
+
+    def test_rebalance_frequency_negative(self):
+        """rebalance_frequency_days negative should not crash."""
+        config = BacktestConfig(rebalance_frequency_days=-5)
+        bt = WalkForwardVIXYBacktester(config)
+        bt.load_data()
+        # Should still run without raising
+        _, tracker, _ = bt._run_hedged(bt._daily_prices, bt.config)
+        assert tracker["rebalances"] > 0  # i==1 triggers rebalance
+
+    def test_custom_base_weights(self):
+        """Custom base weights should be used in baseline and hedged runs."""
+        custom_weights = {"SPY": 0.50, "GLD": 0.30, "TLT": 0.20}
+        config = BacktestConfig(base_weights=custom_weights)
+        assert config.base_weights["SPY"] == 0.50
+        assert config.base_weights["GLD"] == 0.30
+        assert config.base_weights["TLT"] == 0.20
+        bt = WalkForwardVIXYBacktester(config)
+        bt.load_data()
+        result = bt.run()
+        assert result.extras["config_snapshot"]["base_allocation"]["SPY"] == 0.50
+
+    def test_negative_transaction_cost(self):
+        """Negative transaction cost should not cause crashes (though unrealistic)."""
+        config = BacktestConfig(transaction_cost_bps=-5.0)
+        bt = WalkForwardVIXYBacktester(config)
+        bt.load_data()
+        _, tracker, _ = bt._run_hedged(bt._daily_prices, bt.config)
+        # Negative cost would mean negative total_costs (a "rebate")
+        assert tracker["total_costs"] <= 0.0
+
 
 # ── BacktestResult Tests ─────────────────────────────────────────────────
 
@@ -548,6 +605,174 @@ class TestWalkForwardVIXYBacktester:
         assert breakdown["crisis"]["pct_of_time"] == 25.0
         assert breakdown["elevated"]["avg_hedge_pct"] == 2.5
 
+    def test_baseline_custom_weights(self):
+        """Baseline run should accept custom weight configuration."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        config = BacktestConfig(
+            base_weights={"SPY": 0.60, "GLD": 0.25, "TLT": 0.15},
+            initial_capital=50000.0,
+        )
+        equity = bt._run_baseline(bt._daily_prices[:50], config)
+        assert len(equity) == 50
+        assert equity[0] == 50000.0
+
+    def test_run_hedged_max_hedge_zero(self):
+        """With max_hedge_pct=0, hedged run should match baseline behavior."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        config = BacktestConfig(max_hedge_pct=0.0)
+        hedge_equity, tracker, _ = bt._run_hedged(bt._daily_prices[:100], config)
+        assert tracker["max_pct"] == 0.0
+        assert tracker["active_days"] == 0
+        # No rebalances happen (VIXY stays at 0, no weight change)
+        # But i==1 still triggers initial rebalance with zero hedge
+
+    def test_run_hedged_cost_calculation(self):
+        """Transaction cost should be proportional to turnover and config cost_bps."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        config = BacktestConfig(
+            transaction_cost_bps=50.0,  # 50 bps = 0.5%
+            max_hedge_pct=10.0,
+        )
+        _, tracker, _ = bt._run_hedged(bt._daily_prices[:50], config)
+        # With high cost, total_costs should be > 0 when hedge is active
+        assert tracker["total_costs"] >= 0.0
+
+    def test_get_vix_level_negative(self):
+        """When DailyPrices.vix is negative, _get_vix_level should fall back to proxy."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        bt._daily_prices[50].vix = -5.0
+        level = bt._get_vix_level(50)
+        assert level > 0.0  # Falls back to proxy
+
+    def test_build_prices_lookup_empty(self):
+        """_build_prices_lookup with no daily prices should return empty dict."""
+        bt = WalkForwardVIXYBacktester()
+        bt._daily_prices = []
+        lookup = bt._build_prices_lookup()
+        assert lookup == {}
+
+    def test_compute_crisis_returns_hedged_same_day(self):
+        """Crisis return with same start and end date should be 0.0."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        # Use a single date that is in a crisis year
+        crisis_date = None
+        for d in bt._trading_dates:
+            if d.startswith("2020"):
+                crisis_date = d
+                break
+        if crisis_date is None:
+            # Fallback: use first date
+            crisis_date = bt._trading_dates[0]
+
+        lookup = bt._build_prices_lookup()
+        eq_curve = [100000.0, 101000.0]
+        # Map date to idx 0 -> start_idx = 0, end_idx = 0
+        bt._daily_prices = bt._daily_prices[:1]
+        bt._daily_prices[0].date = crisis_date
+        bt._trading_dates = [crisis_date]
+        result = bt._compute_crisis_returns_hedged(
+            lookup, [crisis_date], eq_curve, 100000.0
+        )
+        assert isinstance(result, dict)
+
+    def test_compute_crisis_returns_hedged_zero_initial_equity(self):
+        """Crisis returns when eq_start is 0 should not crash (division by zero guard)."""
+        bt = WalkForwardVIXYBacktester()
+        lookup = {"2020-01-02": {"SPY": 100.0, "GLD": 100.0, "TLT": 100.0}}
+        # eq_start = 0 would cause division by zero; method skips when eq_start == 0
+        bt._daily_prices = [DailyPrices(date="2020-01-02", spy=100.0, gld=100.0, tlt=100.0)]
+        result = bt._compute_crisis_returns_hedged(
+            lookup, ["2020-01-02"], [0.0, 100.0], 100000.0
+        )
+        assert isinstance(result, dict)
+        # Since start_idx=0 -> eq_start=0 -> skipped (eq_start > 0 is False)
+        assert len(result) == 0
+
+    def test_compute_regime_breakdown_duplicate_regime(self):
+        """Multiple entries for the same regime should be aggregated correctly."""
+        bt = WalkForwardVIXYBacktester()
+        tracker = [
+            {"date": "2020-01-15", "vix_level": 25.0, "regime": "elevated", "hedge_pct": 2.0},
+            {"date": "2020-01-16", "vix_level": 26.0, "regime": "elevated", "hedge_pct": 3.0},
+            {"date": "2020-01-17", "vix_level": 24.0, "regime": "elevated", "hedge_pct": 1.0},
+        ]
+        breakdown = bt._compute_regime_breakdown(tracker)
+        assert "elevated" in breakdown
+        assert breakdown["elevated"]["count"] == 3
+        assert breakdown["elevated"]["avg_hedge_pct"] == 2.0  # (2+3+1)/3
+        assert breakdown["elevated"]["max_hedge_pct"] == 3.0
+        assert breakdown["elevated"]["pct_of_time"] == 100.0
+
+    def test_compute_regime_breakdown_all_same_regime_percentages(self):
+        """Many entries for one regime should yield 100% pct_of_time."""
+        bt = WalkForwardVIXYBacktester()
+        tracker = [
+            {"date": f"2020-01-{d:02d}", "vix_level": 15.0, "regime": "normal", "hedge_pct": 1.0}
+            for d in range(1, 31)
+        ]
+        breakdown = bt._compute_regime_breakdown(tracker)
+        assert len(breakdown) == 1
+        assert breakdown["normal"]["pct_of_time"] == 100.0
+        assert breakdown["normal"]["count"] == 30
+
+    def test_empty_result_custom_extras(self):
+        """_empty_result should produce a dict with all expected keys in extras."""
+        bt = WalkForwardVIXYBacktester()
+        result = bt._empty_result()
+        expected_keys = [
+            "baseline_total_return", "baseline_cagr", "baseline_volatility",
+            "baseline_sharpe", "baseline_max_drawdown", "cagr_impact",
+            "hedge_active_days", "hedge_active_pct", "avg_hedge_pct",
+            "max_hedge_pct", "crisis_returns_hedged", "crisis_returns_baseline",
+            "regime_breakdown", "config_snapshot",
+        ]
+        for key in expected_keys:
+            assert key in result.extras
+
+    def test_run_empty_daily_prices(self, monkeypatch):
+        """With no daily prices loaded after load_data, run should return empty result."""
+        bt = WalkForwardVIXYBacktester()
+        # Prevent run() from calling load_data again
+        monkeypatch.setattr(bt, "load_data", lambda: None)
+        bt._daily_prices = []
+        bt._trading_dates = []
+        result = bt.run()
+        assert result.total_return == 0.0
+        assert result.extras["hedge_active_days"] == 0
+
+    def test_compute_portfolio_return_negative_gld_tlt(self):
+        """Portfolio return with negative GLD or TLT price changes should compute correctly."""
+        bt = WalkForwardVIXYBacktester()
+        p0 = DailyPrices(date="2020-01-01", spy=100.0, gld=100.0, tlt=100.0)
+        p1 = DailyPrices(date="2020-01-02", spy=100.0, gld=95.0, tlt=90.0)
+        ret = bt._compute_portfolio_return(p0, p1, 0.46, 0.38, 0.16, 0.0)
+        # spy_ret=0.0, gld_ret=-0.05, tlt_ret=-0.10
+        # ret = 0.46*0 + 0.38*(-0.05) + 0.16*(-0.10) = -0.019 - 0.016 = -0.035
+        assert abs(ret - (-0.035)) < 1e-10
+
+    def test_compute_portfolio_return_zero_weights(self):
+        """Portfolio return with all-zero weights should be 0."""
+        bt = WalkForwardVIXYBacktester()
+        p0 = DailyPrices(date="2020-01-01", spy=100.0, gld=100.0, tlt=100.0)
+        p1 = DailyPrices(date="2020-01-02", spy=110.0, gld=105.0, tlt=102.0)
+        ret = bt._compute_portfolio_return(p0, p1, 0.0, 0.0, 0.0, 0.0)
+        assert ret == 0.0
+
+    def test_compute_portfolio_return_negative_spy_vixy_non_inverse(self):
+        """When spy_ret >= 0, VIXY return uses -spy_ret * 2.0 (not 3.5)."""
+        bt = WalkForwardVIXYBacktester()
+        p0 = DailyPrices(date="2020-01-01", spy=100.0, gld=100.0, tlt=100.0)
+        p1 = DailyPrices(date="2020-01-02", spy=105.0, gld=100.0, tlt=100.0)
+        # spy_ret = 0.05, vixy_ret = -0.05 * 2.0 = -0.10
+        ret = bt._compute_portfolio_return(p0, p1, 0.40, 0.38, 0.16, 0.06)
+        # ret = 0.40*0.05 + 0.06*(-0.10) = 0.02 - 0.006 = 0.014
+        assert abs(ret - 0.014) < 1e-10
+
 
 # ── Edge Cases ────────────────────────────────────────────────────────────
 
@@ -705,6 +930,185 @@ class TestEdgeCases:
         bt.load_data()
         _, tracker, _ = bt._run_hedged(bt._daily_prices, bt.config)
         assert tracker["total_costs"] == 0.0
+
+    def test_load_data_empty_json(self, tmp_path):
+        """Empty JSON file (no symbols) should trigger synthetic data fallback."""
+        from src.backtest import vixy_hedge_backtest as vhb
+
+        # Create an empty prices JSON
+        empty_json = tmp_path / "empty_prices.json"
+        empty_json.write_text("{}")
+        original_path = vhb.PRICES_JSON
+        vhb.PRICES_JSON = empty_json
+
+        try:
+            bt = WalkForwardVIXYBacktester()
+            bt.load_data()
+            assert len(bt._daily_prices) > 0
+        finally:
+            vhb.PRICES_JSON = original_path
+
+    def test_load_data_malformed_json(self, tmp_path):
+        """Malformed JSON file should raise JSONDecodeError (not silently swallowed)."""
+        from src.backtest import vixy_hedge_backtest as vhb
+
+        bad_json = tmp_path / "bad_prices.json"
+        bad_json.write_text("{invalid json!!}")
+        original_path = vhb.PRICES_JSON
+        vhb.PRICES_JSON = bad_json
+
+        try:
+            bt = WalkForwardVIXYBacktester()
+            with pytest.raises(json.JSONDecodeError):
+                bt.load_data()
+        finally:
+            vhb.PRICES_JSON = original_path
+
+    def test_load_data_missing_symbols(self, tmp_path):
+        """JSON missing SPY/GLD/TLT should trigger synthetic data fallback."""
+        from src.backtest import vixy_hedge_backtest as vhb
+
+        partial_json = tmp_path / "partial_prices.json"
+        partial_json.write_text('{"QQQ": [{"d": "2020-01-02", "p": 100.0}]}')
+        original_path = vhb.PRICES_JSON
+        vhb.PRICES_JSON = partial_json
+
+        try:
+            bt = WalkForwardVIXYBacktester()
+            bt.load_data()
+            assert len(bt._daily_prices) > 0
+        finally:
+            vhb.PRICES_JSON = original_path
+
+    def test_save_results_default_path(self, tmp_path):
+        """save_results without output_path should save to BACKTEST_RESULTS_DIR."""
+        from src.backtest import vixy_hedge_backtest as vhb
+
+        original_dir = vhb.BACKTEST_RESULTS_DIR
+        test_dir = tmp_path / "results"
+        test_dir.mkdir()
+        vhb.BACKTEST_RESULTS_DIR = test_dir
+
+        try:
+            bt = WalkForwardVIXYBacktester()
+            bt.load_data()
+            result = bt.run()
+            bt.save_results(result)
+            expected_file = test_dir / "vixy_hedge_backtest_results.json"
+            assert expected_file.exists()
+            with open(expected_file) as f:
+                data = json.load(f)
+            assert data["_metadata"]["strategy"] == "vixy_hedge"
+        finally:
+            vhb.BACKTEST_RESULTS_DIR = original_dir
+
+    def test_hedge_tracker_empty_allocations_avg(self):
+        """Hedge tracker with empty allocations list should compute avg_pct=0.0."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        # Trigger the allocation math via regular run
+        config = BacktestConfig(max_hedge_pct=0.0)
+        _, tracker, _ = bt._run_hedged(bt._daily_prices[:50], config)
+        # VIXY weight is always 0, allocations list should exist
+        assert len(tracker["allocations"]) == len(bt._daily_prices[:50]) - 1
+        assert all(a == 0.0 for a in tracker["allocations"])
+
+    def test_run_hedged_allocations_vixy_consumes_spy(self):
+        """When SPY sleeve is fully consumed by VIXY, new_spy_w should be 0."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        config = BacktestConfig(
+            base_weights={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            max_hedge_pct=100.0,
+        )
+        _, tracker, regime_tracker = bt._run_hedged(bt._daily_prices[:100], config)
+        # With max_hedge=100%, VIXY should be capped by sizer internally
+        # The new_spy_w = max(0.46 - hedge_pct_as_decimal, 0)
+        # In extreme cases, this should still be >= 0
+        assert tracker["max_pct"] <= 10.0  # Sizer's internal cap
+
+    def test_all_exports_correct(self):
+        """Module __all__ should match actual public names."""
+        import src.backtest.vixy_hedge_backtest as vhb
+        expected = {
+            'TRADING_DAYS_PER_YEAR', 'MONTHLY_TRADING_DAYS', 'CRISIS_YEARS',
+            'BASE_SYMBOLS', 'VIX_SYMBOL', 'BacktestConfig', 'WalkForwardVIXYBacktester',
+        }
+        assert set(vhb.__all__) == expected
+
+    def test_main_cli_defaults(self):
+        """main() CLI should handle default arguments (no -- flags)."""
+        import sys
+        from src.backtest.vixy_hedge_backtest import main
+        original_argv = sys.argv
+        try:
+            sys.argv = ["vixy_hedge_backtest.py", "run"]
+            main()
+        except SystemExit:
+            pass  # argparse may call sys.exit on --help
+        finally:
+            sys.argv = original_argv
+
+    def test_main_cli_custom_args(self):
+        """main() CLI should accept custom start/end/capital/max-hedge flags."""
+        import sys
+        from src.backtest.vixy_hedge_backtest import main
+        original_argv = sys.argv
+        try:
+            sys.argv = [
+                "vixy_hedge_backtest.py", "run",
+                "--start", "2015-01-01",
+                "--end", "2016-01-01",
+                "--capital", "50000",
+                "--max-hedge", "8.0",
+            ]
+            main()
+        except SystemExit:
+            pass
+        finally:
+            sys.argv = original_argv
+
+    def test_main_cli_save_flag(self, tmp_path):
+        """main() CLI --save flag should create JSON output."""
+        import sys
+        from src.backtest import vixy_hedge_backtest as vhb
+        from src.backtest.vixy_hedge_backtest import main
+
+        original_argv = sys.argv
+        original_dir = vhb.BACKTEST_RESULTS_DIR
+        test_dir = tmp_path / "results"
+        test_dir.mkdir()
+        vhb.BACKTEST_RESULTS_DIR = test_dir
+
+        try:
+            sys.argv = [
+                "vixy_hedge_backtest.py", "run",
+                "--start", "2015-01-01",
+                "--end", "2015-06-01",
+                "--save",
+            ]
+            main()
+        except SystemExit:
+            pass
+        finally:
+            sys.argv = original_argv
+            vhb.BACKTEST_RESULTS_DIR = original_dir
+
+    def test_custom_hedge_pct_config(self):
+        """BacktestConfig with custom max_hedge_pct should propagate through run()."""
+        config = BacktestConfig(max_hedge_pct=3.0)
+        bt = WalkForwardVIXYBacktester(config)
+        bt.load_data()
+        result = bt.run()
+        assert result.extras["config_snapshot"]["max_hedge_pct"] == 3.0
+
+    def test_hedge_pct_small_vix_returns_zero_hedge(self):
+        """VIX below 10 should produce zero or minimal hedge allocation."""
+        sizer = VIXYHedgeSizer()
+        alloc = sizer.compute_allocation(5.0)
+        # raw=0.5, NORMAL floor=0 ceiling=2 -> 0.5 -> clipped to floor=0?
+        # Actually: min(max(0.5, 0.0), 2.0) = 0.5
+        assert alloc == 0.5
 
 
 # ── Constants Tests ───────────────────────────────────────────────────

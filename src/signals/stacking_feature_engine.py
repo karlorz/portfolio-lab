@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 
-__all__ = ['SignalSource', 'Signal', 'RegimeContext', 'HistoricalAccuracy', 'FeatureVector', 'StackingFeatureEngine', 'StackingAccuracyTracker']
+__all__ = ['SignalSource', 'Signal', 'RegimeContext', 'HistoricalAccuracy', 'FeatureVector', 'StackingFeatureEngine', 'StackingAccuracyTracker', 'demo', 'main']
 
 class SignalSource(Enum):
     """Signal source identifiers for stacking features."""
@@ -573,20 +573,30 @@ def demo():
     return feature_vector, features_np
 
 
-if __name__ == "__main__":
+def main(args: Optional[List[str]] = None) -> None:
+    """
+    CLI entry point for the stacking feature engine.
+
+    Args:
+        args: Command-line arguments (defaults to sys.argv[1:])
+    """
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Stacking Feature Engine")
     parser.add_argument("--test", action="store_true", help="Run demo/test")
     parser.add_argument("--names", action="store_true", help="Print all feature names")
-    
-    args = parser.parse_args()
-    
-    if args.test:
+
+    parsed = parser.parse_args(args)
+
+    if parsed.test:
         demo()
-    elif args.names:
+    elif parsed.names:
         engine = StackingFeatureEngine()
         for name in engine.get_feature_names():
             print(name)
     else:
         parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

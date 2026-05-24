@@ -960,5 +960,128 @@ class TestModelPredictionExtended:
         assert result.latency_ms < 10.0
 
 
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.signals.stacking_integrator as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.signals.stacking_integrator as mod
+        assert len(mod.__all__) == 4
+
+
+# ---------------------------------------------------------------------------
+# StackingPrediction dataclass extended
+# ---------------------------------------------------------------------------
+
+class TestStackingPredictionExtended:
+    """Extended StackingPrediction dataclass tests."""
+
+    def test_all_fields(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(StackingPrediction)}
+        expected = {
+            "direction", "confidence", "probability_bullish",
+            "probability_bearish", "probability_neutral",
+            "fallback_used", "feature_vector", "top_features",
+            "timestamp", "model_version", "latency_ms",
+        }
+        assert field_names == expected
+
+    def test_default_values(self):
+        pred = StackingPrediction(
+            direction="bullish", confidence=0.8,
+            probability_bullish=0.6, probability_bearish=0.2,
+            probability_neutral=0.2, fallback_used=False,
+        )
+        assert pred.feature_vector is None
+        assert pred.top_features == []
+        assert pred.model_version == "unknown"
+        assert pred.latency_ms == 0.0
+
+
+# ---------------------------------------------------------------------------
+# ModelMetadata dataclass extended
+# ---------------------------------------------------------------------------
+
+class TestModelMetadataExtended:
+    """Extended ModelMetadata dataclass tests."""
+
+    def test_all_fields(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(ModelMetadata)}
+        expected = {
+            "version", "training_date", "feature_count",
+            "accuracy_train", "accuracy_val", "feature_importance",
+            "total_samples",
+        }
+        assert field_names == expected
+
+    def test_creation(self):
+        meta = ModelMetadata(
+            version="1.0", training_date=datetime.now(),
+            feature_count=50, accuracy_train=0.85, accuracy_val=0.80,
+            feature_importance={"feat1": 0.3}, total_samples=1000,
+        )
+        assert meta.version == "1.0"
+        assert meta.total_samples == 1000
+
+
+# ---------------------------------------------------------------------------
+# StackingIntegrator extended
+# ---------------------------------------------------------------------------
+
+class TestStackingIntegratorExtended:
+    """Extended integrator tests."""
+
+    def test_init_defaults(self):
+        integrator = StackingIntegrator()
+        assert integrator.model is None
+        assert integrator.metadata is None
+
+    def test_get_accuracy_stats_no_history(self):
+        integrator = StackingIntegrator()
+        stats = integrator.get_accuracy_stats()
+        assert isinstance(stats, dict)
+
+    def test_detect_drift_no_history(self):
+        integrator = StackingIntegrator()
+        result = integrator.detect_drift()
+        assert result is None
+
+    def test_export_prediction_log(self, tmp_path):
+        integrator = StackingIntegrator()
+        filepath = tmp_path / "predictions.json"
+        result = integrator.export_prediction_log(filepath)
+        assert isinstance(result, bool)
+
+    def test_load_model_nonexistent(self, tmp_path):
+        integrator = StackingIntegrator()
+        result = integrator.load_model(tmp_path / "nonexistent.pkl")
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# get_stacking_prediction convenience function
+# ---------------------------------------------------------------------------
+
+class TestGetStackingPrediction:
+    """Test the convenience function."""
+
+    def test_returns_prediction(self):
+        from src.signals.stacking_integrator import get_stacking_prediction
+        result = get_stacking_prediction(
+            base_signals={'tsmom': {'direction': 'bullish', 'confidence': 0.8}},
+        )
+        assert isinstance(result, StackingPrediction)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

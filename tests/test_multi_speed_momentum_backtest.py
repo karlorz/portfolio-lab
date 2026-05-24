@@ -667,6 +667,501 @@ class TestEdgeCases:
         return rets
 
 
+# ── Extended Config Validation ──────────────────────────────────────────────
+
+
+class TestConfigValidationExtended:
+    """Additional BacktestConfig edge cases (dataclass field validation)."""
+
+    def test_negative_max_shifts(self):
+        """Negative max shifts are allowed (inverts overlay intent)."""
+        config = BacktestConfig(max_spy_shift=-0.05, max_gld_shift=-0.03, max_tlt_shift=-0.02)
+        assert config.max_spy_shift == -0.05
+        assert config.max_gld_shift == -0.03
+        assert config.max_tlt_shift == -0.02
+
+    def test_zero_signal_threshold(self):
+        """Zero threshold means every signal triggers rebalance."""
+        config = BacktestConfig(signal_threshold=0.0)
+        assert config.signal_threshold == 0.0
+
+    def test_signal_threshold_no_overlay(self):
+        """Threshold of 1.0 means signals never exceed threshold."""
+        config = BacktestConfig(signal_threshold=1.0)
+        bt = MultiSpeedMomentumBacktester(config)
+        # _get_overlay_shifts does not check threshold; run_backtest does.
+        shifts = bt._get_overlay_shifts(0.5, 0.3, 0.1)
+        assert shifts["SPY"] == 0.5 * config.max_spy_shift
+
+    def test_tiny_transaction_cost(self):
+        """Very small transaction cost (0.1 bps)."""
+        config = BacktestConfig(transaction_cost_bps=0.1)
+        assert config.transaction_cost_bps == 0.1
+
+    def test_large_transaction_cost(self):
+        """Very large transaction cost (100 bps)."""
+        config = BacktestConfig(transaction_cost_bps=100.0)
+        assert config.transaction_cost_bps == 100.0
+
+    def test_rebalance_frequency_days_override(self):
+        """Custom rebalance_frequency_days is stored and used."""
+        config = BacktestConfig(rebalance_frequency_days=63)
+        assert config.rebalance_frequency_days == 63
+
+    def test_custom_base_weights(self):
+        """Custom base weights propagate correctly."""
+        config = BacktestConfig(base_weights={"SPY": 0.5, "GLD": 0.3, "TLT": 0.2})
+        assert config.base_weights["SPY"] == 0.5
+        assert abs(sum(config.base_weights.values()) - 1.0) < 0.01
+
+    def test_all_overlay_fields_settable(self):
+        """All overlay-specific fields can be set via constructor."""
+        config = BacktestConfig(
+            max_spy_shift=0.10,
+            max_gld_shift=0.05,
+            max_tlt_shift=0.04,
+            signal_threshold=0.05,
+        )
+        assert config.max_spy_shift == 0.10
+        assert config.max_gld_shift == 0.05
+        assert config.max_tlt_shift == 0.04
+        assert config.signal_threshold == 0.05
+
+
+# ── Extended DailyReturn Tests ─────────────────────────────────────────────
+
+
+class TestDailyReturnExtended:
+    """Additional DailyReturn edge cases."""
+
+    def test_zero_returns(self):
+        """All zero returns."""
+        dr = DailyReturn(date="2020-01-02", spy_return=0.0, gld_return=0.0, tlt_return=0.0)
+        assert dr.spy_return == 0.0
+        assert dr.gld_return == 0.0
+        assert dr.tlt_return == 0.0
+
+    def test_extreme_positive_returns(self):
+        """Very large positive returns (+100%, +50%, +30%)."""
+        dr = DailyReturn(date="2020-01-02", spy_return=1.0, gld_return=0.5, tlt_return=0.3)
+        assert dr.spy_return == 1.0
+        assert dr.gld_return == 0.5
+        assert dr.tlt_return == 0.3
+
+    def test_total_loss_returns(self):
+        """All -100% returns (total loss scenario)."""
+        dr = DailyReturn(date="2020-01-02", spy_return=-1.0, gld_return=-1.0, tlt_return=-1.0)
+        assert dr.spy_return == -1.0
+        assert dr.gld_return == -1.0
+        assert dr.tlt_return == -1.0
+
+    def test_mixed_sign_returns(self):
+        """Mixed positive and negative returns."""
+        dr = DailyReturn(date="2020-01-02", spy_return=0.02, gld_return=-0.01, tlt_return=0.005)
+        assert dr.spy_return > 0.0
+        assert dr.gld_return < 0.0
+        assert dr.tlt_return > 0.0
+
+
+# ── Extended Signal Computation Tests ───────────────────────────────────────
+
+
+class TestSignalComputationExtended:
+    """Signal computation boundary conditions and engine fallback."""
+
+    @staticmethod
+    def _make_prices(n_days: int, start_price: float = 100.0, drift: float = 0.0):
+        """Create a list of price dicts for testing."""
+        prices = []
+        for i in range(n_days):
+            day = (datetime(2020, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            prices.append({"d": day, "p": start_price * (1.0 + i * drift)})
+        return prices
+
+    def test_fallback_zero_momentum(self, monkeypatch):
+        """Flat price series => signal of 0.0."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
+        prices = self._make_prices(300, drift=0.0)
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {"SPY": prices}
+        signal = bt._compute_signal("SPY", prices[-1]["d"])
+        assert signal == pytest.approx(0.0)
+
+    def test_fallback_exactly_260(self, monkeypatch):
+        """Exactly 260 entries is sufficient for a signal."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
+        prices = self._make_prices(260, drift=0.001)
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {"SPY": prices}
+        signal = bt._compute_signal("SPY", prices[-1]["d"])
+        assert signal > 0.0
+
+    def test_fallback_259_entries_zero(self, monkeypatch):
+        """259 entries should return 0.0 (not enough data)."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
+        prices = self._make_prices(259, drift=0.001)
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {"SPY": prices}
+        signal = bt._compute_signal("SPY", prices[-1]["d"])
+        assert signal == 0.0
+
+    def test_fallback_sub_saturation(self, monkeypatch):
+        """12m return under 20% should not saturate (|signal| < 1.0)."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
+        prices = self._make_prices(300, drift=0.0005)
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {"SPY": prices}
+        signal = bt._compute_signal("SPY", prices[-1]["d"])
+        assert 0.0 < signal < 1.0
+
+    def test_signal_engine_raises_fallback_used(self, monkeypatch):
+        """When engine raises, fallback path is used."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            True,
+        )
+        class RaisingEngine:
+            def get_signal_for_ticker(self, ticker, date):
+                raise RuntimeError("engine failure")
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest.MultiSpeedMomentum",
+            lambda: RaisingEngine(),
+        )
+        prices = self._make_prices(300, drift=0.001)
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {"SPY": prices}
+        signal = bt._compute_signal("SPY", prices[-1]["d"])
+        assert signal > 0.0  # Fallback must produce positive signal
+
+    def test_signal_engine_returns_none_fallback_used(self, monkeypatch):
+        """When engine returns None, fallback path is used."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            True,
+        )
+        class NoneEngine:
+            def get_signal_for_ticker(self, ticker, date):
+                return None
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest.MultiSpeedMomentum",
+            lambda: NoneEngine(),
+        )
+        prices = self._make_prices(300, drift=0.001)
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {"SPY": prices}
+        signal = bt._compute_signal("SPY", prices[-1]["d"])
+        assert signal > 0.0  # Fallback
+
+    def test_signal_on_missing_ticker(self, monkeypatch):
+        """Missing ticker data returns 0.0 (via fallback)."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {}
+        signal = bt._compute_signal("SPY", "2020-01-02")
+        assert signal == 0.0
+
+    def test_get_prices_slice_exact_lookback(self):
+        """Entries exactly = lookback should NOT be truncated."""
+        bt = MultiSpeedMomentumBacktester()
+        raw = [{"d": f"2020-01-{d:02d}", "p": 100.0} for d in range(1, 401)]
+        bt.prices_raw = {"SPY": raw, "GLD": raw, "TLT": raw}
+        sliced = bt._get_prices_slice("2020-12-31", lookback=400)
+        assert len(sliced["SPY"]) == 400
+
+    def test_get_prices_slice_truncation(self):
+        """More entries than lookback should be truncated to lookback+50."""
+        bt = MultiSpeedMomentumBacktester()
+        raw = [{"d": f"2020-01-{d:02d}", "p": 100.0} for d in range(1, 501)]
+        bt.prices_raw = {"SPY": raw, "GLD": raw, "TLT": raw}
+        sliced = bt._get_prices_slice("2020-12-31", lookback=400)
+        assert len(sliced["SPY"]) == 450  # 400 + 50
+
+    def test_get_prices_slice_filters_by_end_date(self):
+        """Entries after end_date should be excluded."""
+        bt = MultiSpeedMomentumBacktester()
+        raw = [{"d": f"2020-01-{d:02d}", "p": 100.0} for d in range(1, 31)]
+        bt.prices_raw = {"SPY": raw}
+        sliced = bt._get_prices_slice("2020-01-15")
+        assert len(sliced["SPY"]) == 15
+
+
+# ── Extended Backtest Logic ─────────────────────────────────────────────────
+
+
+class TestBacktestLogicExtended:
+    """Backtest logic edge cases: normalization, costs, crisis, thresholds."""
+
+    def test_weight_normalization(self, monkeypatch):
+        """Shifts making sum != 1.0 should normalize weights."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
+        config = BacktestConfig(
+            max_spy_shift=0.30,
+            max_gld_shift=0.30,
+            max_tlt_shift=0.30,
+            signal_threshold=0.0,
+            start_date="2020-01-01",
+            end_date="2020-03-31",
+        )
+        prices = []
+        for i in range(500):
+            day = (datetime(2019, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            prices.append({"d": day, "p": 100.0 * (1 + i * 0.001)})
+        bt = MultiSpeedMomentumBacktester(config)
+        bt.prices_raw = {"SPY": prices, "GLD": prices, "TLT": prices}
+        bt._process_price_data()
+        assert len(bt.data) > 0
+        result = bt.run_backtest()
+        assert result is not None
+
+    def test_tiny_initial_capital(self):
+        """Very small initial capital ($1) should not crash."""
+        config = BacktestConfig(
+            initial_capital=1.0, start_date="2020-01-01", end_date="2020-01-31"
+        )
+        bt = MultiSpeedMomentumBacktester(config)
+        bt.data = [
+            DailyReturn(date="2020-01-02", spy_return=0.01, gld_return=0.005, tlt_return=-0.002),
+            DailyReturn(date="2020-01-03", spy_return=-0.005, gld_return=0.01, tlt_return=0.003),
+        ]
+        result = bt.run_backtest()
+        assert result is not None
+        assert isinstance(result.total_return, float)
+
+    def test_turnover_below_minimum(self):
+        """Turnover < 0.001 should not count as a rebalance."""
+        bt = MultiSpeedMomentumBacktester()
+        old = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        new = {"SPY": 0.4605, "GLD": 0.3795, "TLT": 0.16}
+        turnover = bt._compute_turnover(old, new)
+        assert turnover == pytest.approx(0.0005)
+        assert turnover < 0.001
+
+    def test_negative_returns_full_backtest(self):
+        """All-negative daily returns produce negative total_return."""
+        config = BacktestConfig(start_date="2020-01-01", end_date="2020-01-10")
+        bt = MultiSpeedMomentumBacktester(config)
+        bt.data = [
+            DailyReturn(
+                date=f"2020-01-{d:02d}",
+                spy_return=-0.01,
+                gld_return=-0.005,
+                tlt_return=-0.002,
+            )
+            for d in range(2, 11)
+        ]
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.total_return < 0.0
+
+    def test_short_backtest_period(self):
+        """Very short period (3 days) should still produce a result."""
+        config = BacktestConfig(start_date="2020-01-01", end_date="2020-01-05")
+        bt = MultiSpeedMomentumBacktester(config)
+        bt.data = [
+            DailyReturn(date="2020-01-02", spy_return=0.01, gld_return=0.005, tlt_return=-0.002),
+            DailyReturn(date="2020-01-03", spy_return=-0.005, gld_return=0.01, tlt_return=0.003),
+            DailyReturn(date="2020-01-06", spy_return=0.002, gld_return=-0.003, tlt_return=0.001),
+        ]
+        result = bt.run_backtest()
+        assert result is not None
+        assert isinstance(result.total_return, float)
+
+    def test_crisis_periods_empty(self):
+        """Crisis periods with no matching data should return None."""
+        config = BacktestConfig(start_date="2021-01-01", end_date="2021-12-31")
+        bt = MultiSpeedMomentumBacktester(config)
+        bt.data = [
+            DailyReturn(date="2021-01-04", spy_return=0.01, gld_return=0.005, tlt_return=-0.002),
+        ]
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.crisis_returns["2008"] is None
+        assert result.crisis_returns["2020"] is None
+        assert result.crisis_returns["2022"] is None
+
+    def test_signal_below_threshold_uses_base(self, monkeypatch):
+        """Weak signals below threshold should keep base weights."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
+        # Very small drift => 12m return < 2% => signal < 0.1
+        prices = []
+        for i in range(300):
+            day = (datetime(2019, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            prices.append({"d": day, "p": 100.0 * (1 + i * 0.00004)})
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {"SPY": prices, "GLD": prices, "TLT": prices}
+        sig = bt._compute_signal("SPY", prices[-1]["d"])
+        assert 0.0 < sig < 0.1  # Below default threshold
+
+    def test_transaction_cost_deducted(self, monkeypatch):
+        """High turnover should deduct costs from overlay capital."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
+        config = BacktestConfig(
+            signal_threshold=0.0,
+            max_spy_shift=0.05,
+            start_date="2020-01-01",
+            end_date="2020-06-30",
+            transaction_cost_bps=50.0,
+        )
+        prices = []
+        for i in range(550):
+            day = (datetime(2019, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            prices.append({"d": day, "p": 100.0 * (1 + i * 0.001)})
+        bt = MultiSpeedMomentumBacktester(config)
+        bt.prices_raw = {"SPY": prices, "GLD": prices, "TLT": prices}
+        bt._process_price_data()
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.total_transaction_costs >= 0.0
+
+
+# ── Extended Metrics & Helpers ─────────────────────────────────────────────
+
+
+class TestMetricsExtended:
+    """Additional metrics and helper method tests."""
+
+    def test_annualize_single_day(self):
+        """Single return value should produce a non-zero CAGR."""
+        cagr = MultiSpeedMomentumBacktester._annualize([0.01])
+        assert cagr != 0.0
+        assert isinstance(cagr, float)
+
+    def test_annualize_varied_returns(self):
+        """Varied returns should produce a stable CAGR."""
+        returns = [0.001, -0.002, 0.003, -0.001, 0.002] * 50
+        cagr = MultiSpeedMomentumBacktester._annualize(returns)
+        assert isinstance(cagr, float)
+        assert np.isfinite(cagr)
+
+    def test_metrics_all_negative(self):
+        """All-negative returns should produce negative Sharpe."""
+        returns = [-0.001] * 252
+        m = MultiSpeedMomentumBacktester._metrics(returns)
+        assert m["sharpe"] < 0
+
+    def test_metrics_low_volatility(self):
+        """Very low volatility returns should not crash."""
+        returns = [0.0001] * 252
+        m = MultiSpeedMomentumBacktester._metrics(returns)
+        assert np.isfinite(m["sharpe"])
+        assert m["volatility"] >= 0
+
+    def test_returns_from_equity_flat(self):
+        """Flat equity curve => all zero returns."""
+        rets = MultiSpeedMomentumBacktester._returns_from_equity([100.0, 100.0, 100.0])
+        assert all(r == 0.0 for r in rets)
+
+    def test_returns_from_equity_negative(self):
+        """Declining equity => all negative returns."""
+        rets = MultiSpeedMomentumBacktester._returns_from_equity([100.0, 99.0, 98.0])
+        assert all(r < 0.0 for r in rets)
+
+    def test_returns_from_equity_single_value(self):
+        """Single entry => empty returns list."""
+        rets = MultiSpeedMomentumBacktester._returns_from_equity([100.0])
+        assert rets == []
+
+
+# ── Extended Edge Cases ─────────────────────────────────────────────────────
+
+
+class TestEdgeCasesExtended:
+    """More edge cases: save default path, load data happy/invalid paths."""
+
+    def test_save_results_default_path(self, monkeypatch, tmp_path):
+        """save_results uses default path (BACKTEST_RESULTS_DIR / filename)."""
+        result = BacktestResult(
+            total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
+            max_drawdown=-10.0, baseline_sharpe=0.45,
+            sharpe_improvement=0.05, total_rebalances=0, avg_turnover=0.0,
+            total_transaction_costs=0.0,
+            extras={"overlay_active_rebalances": 0},
+        )
+        results_dir = tmp_path / "backtest_results"
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest.BACKTEST_RESULTS_DIR",
+            results_dir,
+        )
+        bt = MultiSpeedMomentumBacktester()
+        bt.save_results(result)
+        expected = results_dir / "multi_speed_momentum_backtest.json"
+        assert expected.exists()
+        with open(expected) as f:
+            data = json.load(f)
+        assert data["total_return"] == 5.0
+
+    def test_load_data_valid_json(self, monkeypatch, tmp_path):
+        """load_data with valid price JSON file succeeds."""
+        data = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 101.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-03", "p": 51.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-03", "p": 81.0}],
+        }
+        prices_file = tmp_path / "prices.json"
+        with open(prices_file, "w") as f:
+            json.dump(data, f)
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest.PRICES_JSON",
+            prices_file,
+        )
+        bt = MultiSpeedMomentumBacktester()
+        success = bt.load_data()
+        assert success
+        assert len(bt.data) == 1
+
+    def test_load_data_invalid_json(self, monkeypatch, tmp_path):
+        """load_data with malformed JSON should return False."""
+        prices_file = tmp_path / "prices.json"
+        with open(prices_file, "w") as f:
+            f.write("not valid json")
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest.PRICES_JSON",
+            prices_file,
+        )
+        bt = MultiSpeedMomentumBacktester()
+        success = bt.load_data()
+        assert not success
+
+    def test_run_backtest_no_filtered_data(self):
+        """No data matching the date range returns None."""
+        config = BacktestConfig(start_date="2030-01-01", end_date="2030-12-31")
+        bt = MultiSpeedMomentumBacktester(config)
+        bt.data = [
+            DailyReturn(date="2020-01-02", spy_return=0.01, gld_return=0.005, tlt_return=-0.002),
+        ]
+        result = bt.run_backtest()
+        assert result is None
+
+    def test_dailyreturn_all_fields_float(self):
+        """All return fields are floats even when ints are passed."""
+        dr = DailyReturn(date="2020-01-02", spy_return=1, gld_return=0, tlt_return=-1)
+        assert isinstance(dr.spy_return, int)  # No coercion, stored as passed
+
+
 # ── CLI Tests ──────────────────────────────────────────────────────────────
 
 

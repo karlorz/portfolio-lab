@@ -622,3 +622,476 @@ class TestStackingAccuracyTrackerExtended:
         tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, -0.5, 0.02)
         acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
         assert acc.accuracy_90d == 0.0
+
+
+# ==============================================================================
+# New tests: Signal dataclass boundary validation
+# ==============================================================================
+
+class TestSignalDataclassBoundaries:
+    """Signal dataclass boundary value tests."""
+
+    def test_signal_value_negative_one(self):
+        """Signal value -1.0 (lower boundary)."""
+        sig = Signal(SignalSource.MULTI_SPEED_MOM, -1.0, datetime.now(), 0.5)
+        assert sig.value == -1.0
+
+    def test_signal_value_positive_one(self):
+        """Signal value 1.0 (upper boundary)."""
+        sig = Signal(SignalSource.MULTI_SPEED_MOM, 1.0, datetime.now(), 0.5)
+        assert sig.value == 1.0
+
+    def test_signal_value_zero(self):
+        """Signal value 0.0 (neutral center)."""
+        sig = Signal(SignalSource.MULTI_SPEED_MOM, 0.0, datetime.now(), 0.5)
+        assert sig.value == 0.0
+
+    def test_signal_confidence_zero(self):
+        """Signal confidence 0.0 (lower boundary)."""
+        sig = Signal(SignalSource.MULTI_SPEED_MOM, 0.5, datetime.now(), 0.0)
+        assert sig.confidence == 0.0
+
+    def test_signal_confidence_one(self):
+        """Signal confidence 1.0 (upper boundary)."""
+        sig = Signal(SignalSource.MULTI_SPEED_MOM, 0.5, datetime.now(), 1.0)
+        assert sig.confidence == 1.0
+
+
+# ==============================================================================
+# New tests: RegimeContext dataclass edge cases
+# ==============================================================================
+
+class TestRegimeContextEdgeCases:
+    """RegimeContext dataclass edge case tests."""
+
+    def test_vix_level_zero(self):
+        """VIX level of 0 is accepted."""
+        ctx = RegimeContext(vix_level=0.0, trend_strength=0.5, timestamp=datetime.now())
+        assert ctx.vix_level == 0.0
+
+    def test_vix_level_high(self):
+        """VIX level of 100 is accepted (stress scenario)."""
+        ctx = RegimeContext(vix_level=100.0, trend_strength=0.5, timestamp=datetime.now())
+        assert ctx.vix_level == 100.0
+
+    def test_trend_strength_zero(self):
+        """Trend strength of 0.0."""
+        ctx = RegimeContext(vix_level=20.0, trend_strength=0.0, timestamp=datetime.now())
+        assert ctx.trend_strength == 0.0
+
+    def test_trend_strength_one(self):
+        """Trend strength of 1.0."""
+        ctx = RegimeContext(vix_level=20.0, trend_strength=1.0, timestamp=datetime.now())
+        assert ctx.trend_strength == 1.0
+
+
+# ==============================================================================
+# New tests: HistoricalAccuracy dataclass edge cases
+# ==============================================================================
+
+class TestHistoricalAccuracyEdgeCases:
+    """HistoricalAccuracy dataclass edge case tests."""
+
+    def test_accuracy_zero(self):
+        """Accuracy of 0.0 (all incorrect)."""
+        ha = HistoricalAccuracy(SignalSource.MULTI_SPEED_MOM, 0.0, 10, datetime.now())
+        assert ha.accuracy_90d == 0.0
+
+    def test_accuracy_one(self):
+        """Accuracy of 1.0 (all correct)."""
+        ha = HistoricalAccuracy(SignalSource.MULTI_SPEED_MOM, 1.0, 10, datetime.now())
+        assert ha.accuracy_90d == 1.0
+
+    def test_predictions_count_zero(self):
+        """Predictions count of 0 is accepted."""
+        ha = HistoricalAccuracy(SignalSource.MULTI_SPEED_MOM, 0.5, 0, datetime.now())
+        assert ha.predictions_count == 0
+
+
+# ==============================================================================
+# New tests: FeatureVector direct construction edge cases
+# ==============================================================================
+
+class TestFeatureVectorDirectConstruction:
+    """Direct FeatureVector construction edge cases."""
+
+    def test_default_dimension_count(self):
+        """FeatureVector defaults to 59."""
+        fv = FeatureVector(
+            base_values={}, multiplicative={}, disagreement={},
+            averages={}, vix_normalized=0.0, trend_strength=0.0,
+            accuracy_values={}, timestamp=datetime.now()
+        )
+        assert fv.dimension_count == 59
+
+    def test_empty_structures_acceptable(self):
+        """Empty dicts accepted in FeatureVector fields."""
+        fv = FeatureVector(
+            base_values={}, multiplicative={}, disagreement={},
+            averages={}, vix_normalized=0.0, trend_strength=0.0,
+            accuracy_values={}, timestamp=datetime.now()
+        )
+        assert len(fv.base_values) == 0
+        assert len(fv.multiplicative) == 0
+
+
+# ==============================================================================
+# New tests: StackingFeatureEngine edge cases
+# ==============================================================================
+
+class TestStackingFeatureEngineEdgeCases:
+    """StackingFeatureEngine creation edge cases."""
+
+    def test_all_signals_bullish(self, engine, regime_context, historical_accuracy):
+        """All signals at +1.0 produce correct multiplicative features."""
+        now = datetime.now()
+        signals = {s: Signal(s, 1.0, now, 0.8) for s in SignalSource}
+        fv = engine.create_features(signals, regime_context, historical_accuracy)
+        assert all(v == 1.0 for v in fv.base_values.values())
+        assert all(v == 1.0 for v in fv.multiplicative.values())  # 1 * 1 = 1
+
+    def test_all_signals_bearish(self, engine, regime_context, historical_accuracy):
+        """All signals at -1.0 produce positive multiplicative features."""
+        now = datetime.now()
+        signals = {s: Signal(s, -1.0, now, 0.8) for s in SignalSource}
+        fv = engine.create_features(signals, regime_context, historical_accuracy)
+        assert all(v == -1.0 for v in fv.base_values.values())
+        assert all(v == 1.0 for v in fv.multiplicative.values())  # -1 * -1 = 1
+
+    def test_all_signals_neutral(self, engine, regime_context, historical_accuracy):
+        """All signals at 0.0 produce all-zero pairwise features."""
+        now = datetime.now()
+        signals = {s: Signal(s, 0.0, now, 0.8) for s in SignalSource}
+        fv = engine.create_features(signals, regime_context, historical_accuracy)
+        assert all(v == 0.0 for v in fv.base_values.values())
+        assert all(v == 0.0 for v in fv.multiplicative.values())
+        assert all(v == 0.0 for v in fv.disagreement.values())
+        assert all(v == 0.0 for v in fv.averages.values())
+
+    def test_vix_level_zero_normalization(self, engine, full_signals, historical_accuracy):
+        """VIX level 0 produces 0.0 normalized value."""
+        regime = RegimeContext(vix_level=0.0, trend_strength=0.5, timestamp=datetime.now())
+        fv = engine.create_features(full_signals, regime, historical_accuracy)
+        assert fv.vix_normalized == 0.0
+
+    def test_error_message_lists_missing_sources(self, engine, regime_context, historical_accuracy):
+        """Error message includes missing sources."""
+        partial = {}
+        with pytest.raises(ValueError) as exc:
+            engine.create_features(partial, regime_context, historical_accuracy)
+        assert "Missing:" in str(exc.value)
+        assert "MULTI_SPEED_MOM" in str(exc.value)
+
+
+# ==============================================================================
+# New tests: Pairwise combination edge cases
+# ==============================================================================
+
+class TestPairwiseCombinationsEdgeCases:
+    """Edge cases for _get_pairwise_combinations."""
+
+    def test_empty_sources_list(self, engine):
+        """Empty list returns no pairs."""
+        pairs = engine._get_pairwise_combinations([])
+        assert len(pairs) == 0
+
+    def test_single_source(self, engine):
+        """Single source returns no pairs."""
+        pairs = engine._get_pairwise_combinations([SignalSource.MULTI_SPEED_MOM])
+        assert len(pairs) == 0
+
+    def test_two_sources(self, engine):
+        """Two sources return exactly one pair."""
+        pairs = engine._get_pairwise_combinations(
+            [SignalSource.MULTI_SPEED_MOM, SignalSource.CROSS_ASSET_RV]
+        )
+        assert len(pairs) == 1
+        assert pairs[0] == (SignalSource.MULTI_SPEED_MOM, SignalSource.CROSS_ASSET_RV)
+
+    def test_three_sources_produce_three_pairs(self, engine):
+        """Three sources produce C(3,2) = 3 pairs."""
+        sources = [
+            SignalSource.MULTI_SPEED_MOM,
+            SignalSource.CROSS_ASSET_RV,
+            SignalSource.INTERNATIONAL_MOMENTUM
+        ]
+        pairs = engine._get_pairwise_combinations(sources)
+        assert len(pairs) == 3
+
+
+# ==============================================================================
+# New tests: NumPy conversion edge cases
+# ==============================================================================
+
+class TestNumpyConversionEdgeCases:
+    """Edge cases for to_numpy conversion."""
+
+    def test_to_numpy_all_zeros(self, engine, historical_accuracy):
+        """All-zero features produce all-zero first 51 elements."""
+        now = datetime.now()
+        signals = {s: Signal(s, 0.0, now, 0.5) for s in SignalSource}
+        regime = RegimeContext(vix_level=0.0, trend_strength=0.0, timestamp=now)
+        fv = engine.create_features(signals, regime, historical_accuracy)
+        arr = engine.to_numpy(fv)
+        assert arr[0:6].sum() == 0.0
+        assert arr[6:21].sum() == 0.0  # multiplicative
+        assert arr[21:36].sum() == 0.0  # disagreement
+        assert arr[36:51].sum() == 0.0  # averages
+
+    def test_to_numpy_length_matches_feature_names(self, engine, full_signals, regime_context, historical_accuracy):
+        """Numpy array length equals number of feature names."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        arr = engine.to_numpy(fv)
+        names = engine.get_feature_names()
+        assert len(arr) == len(names)
+
+    def test_to_numpy_enum_order_matches(self, engine, full_signals, regime_context, historical_accuracy):
+        """Base signal order matches SignalSource enum order."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        arr = engine.to_numpy(fv)
+        expected = [full_signals[s].value for s in SignalSource]
+        for i, exp in enumerate(expected):
+            assert arr[i] == pytest.approx(exp)
+
+
+# ==============================================================================
+# New tests: Feature names edge cases
+# ==============================================================================
+
+class TestFeatureNamesEdgeCases:
+    """Edge cases for get_feature_names."""
+
+    def test_feature_names_all_unique(self, engine):
+        """All 59 feature names should be unique."""
+        names = engine.get_feature_names()
+        assert len(names) == len(set(names))
+
+    def test_feature_names_first_are_base(self, engine):
+        """First 6 names are base signals."""
+        names = engine.get_feature_names()
+        for i, source in enumerate(SignalSource):
+            assert names[i] == f"base_{source.value}"
+
+    def test_feature_names_last_are_accuracy(self, engine):
+        """Last 6 names are accuracy features."""
+        names = engine.get_feature_names()
+        for i, source in enumerate(SignalSource):
+            assert names[-6 + i] == f"acc90d_{source.value}"
+
+    def test_feature_names_vix_and_trend_at_51_52(self, engine):
+        """VIX at index 51, trend at index 52."""
+        names = engine.get_feature_names()
+        assert names[51] == "vix_normalized"
+        assert names[52] == "trend_strength"
+
+    def test_feature_names_section_order(self, engine):
+        """Sections appear in correct order: base, mult, disagree, avg, regime, acc."""
+        names = engine.get_feature_names()
+        # Find transition boundaries
+        base_end = next(i for i, n in enumerate(names) if n.startswith("mult_"))
+        mult_end = next(i for i, n in enumerate(names[base_end:]) if n.startswith("disagree_")) + base_end
+        disagree_end = next(i for i, n in enumerate(names[mult_end:]) if n.startswith("avg_")) + mult_end
+        avg_end = next(i for i, n in enumerate(names[disagree_end:]) if n == "vix_normalized") + disagree_end
+        assert names[0] == "base_multi_speed_momentum"
+        assert names[base_end].startswith("mult_")
+        assert names[mult_end].startswith("disagree_")
+        assert names[disagree_end].startswith("avg_")
+        assert names[avg_end] == "vix_normalized"
+        assert names[avg_end + 1] == "trend_strength"
+        assert names[avg_end + 2].startswith("acc90d_")
+
+
+# ==============================================================================
+# New tests: explain_features edge cases
+# ==============================================================================
+
+class TestExplainFeaturesEdgeCases:
+    """Edge cases for explain_features."""
+
+    def test_explain_all_neutral(self, engine, regime_context, historical_accuracy):
+        """All-neutral signals show 6 neutral, 0 bullish/bearish."""
+        now = datetime.now()
+        neutral = {s: Signal(s, 0.0, now, 0.5) for s in SignalSource}
+        fv = engine.create_features(neutral, regime_context, historical_accuracy)
+        explanation = engine.explain_features(fv)
+        assert explanation["base_signals_summary"]["neutral_count"] == 6
+        assert explanation["base_signals_summary"]["bullish_count"] == 0
+        assert explanation["base_signals_summary"]["bearish_count"] == 0
+
+    def test_explain_top_n_100(self, engine, full_signals, regime_context, historical_accuracy):
+        """top_n > 15 caps at 15 pairs (does not error)."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        explanation = engine.explain_features(fv, top_n=100)
+        assert len(explanation["pairwise_interactions"]["high_synergy"]) == 15
+
+    def test_explain_top_n_zero(self, engine, full_signals, regime_context, historical_accuracy):
+        """top_n=0 returns empty lists."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        explanation = engine.explain_features(fv, top_n=0)
+        assert len(explanation["pairwise_interactions"]["high_synergy"]) == 0
+
+
+# ==============================================================================
+# New tests: to_dict edge cases
+# ==============================================================================
+
+class TestToDictEdgeCases:
+    """Edge cases for to_dict serialization."""
+
+    def test_to_dict_vix_normalized_value(self, engine, full_signals, regime_context, historical_accuracy):
+        """VIX normalized appears as float in dict."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        d = engine.to_dict(fv)
+        assert "vix_normalized" in d
+        assert isinstance(d["vix_normalized"], float)
+
+    def test_to_dict_trend_strength_value(self, engine, full_signals, regime_context, historical_accuracy):
+        """Trend strength appears as float in dict."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        d = engine.to_dict(fv)
+        assert "trend_strength" in d
+        assert isinstance(d["trend_strength"], float)
+
+    def test_to_dict_accuracy_keys_are_strings(self, engine, full_signals, regime_context, historical_accuracy):
+        """Accuracy values dict has string keys."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        d = engine.to_dict(fv)
+        for key in d["accuracy_values"]:
+            assert isinstance(key, str)
+
+    def test_to_dict_dimension_count_in_output(self, engine, full_signals, regime_context, historical_accuracy):
+        """dimension_count present in dict output."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        d = engine.to_dict(fv)
+        assert d["dimension_count"] == 59
+
+
+# ==============================================================================
+# New tests: StackingAccuracyTracker edge cases
+# ==============================================================================
+
+class TestStackingAccuracyTrackerEdgeCases:
+    """Edge cases for accuracy tracker."""
+
+    def test_signal_zero_return_zero(self, tracker):
+        """Signal=0 and return=0 triggers neutral clause."""
+        now = datetime.now()
+        tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, 0.0, 0.0)
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        assert acc.accuracy_90d == 1.0
+
+    def test_no_history_returns_default(self, tracker):
+        """No predictions returns 0.5 default."""
+        now = datetime.now()
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        assert acc.accuracy_90d == 0.5
+        assert acc.predictions_count == 0
+
+    def test_all_old_records_pruned(self, tracker):
+        """All records outside window return default."""
+        now = datetime.now()
+        for _ in range(5):
+            tracker.record_prediction(
+                SignalSource.MULTI_SPEED_MOM,
+                now - timedelta(days=200), 0.5, 0.02
+            )
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        assert acc.predictions_count == 0
+        assert acc.accuracy_90d == 0.5
+
+    def test_trim_on_record(self, tracker):
+        """Old records trimmed when new record added."""
+        now = datetime.now()
+        tracker.record_prediction(
+            SignalSource.MULTI_SPEED_MOM,
+            now - timedelta(days=100), 0.5, 0.02
+        )
+        tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, 0.5, 0.02)
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        assert acc.predictions_count == 1
+
+    def test_get_all_accuracies_defaults_with_no_data(self, tracker):
+        """All accuracies default to 0.5 with no predictions."""
+        now = datetime.now()
+        accs = tracker.get_all_accuracies(now)
+        for source in SignalSource:
+            assert accs[source].accuracy_90d == 0.5
+            assert accs[source].predictions_count == 0
+
+
+# ==============================================================================
+# New tests: Integration across components
+# ==============================================================================
+
+class TestIntegration:
+    """Cross-component integration tests."""
+
+    def test_create_to_numpy_explain_consistency(self, engine, full_signals, regime_context, historical_accuracy):
+        """Pipeline: create -> to_numpy mean matches explain mean."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        arr = engine.to_numpy(fv)
+        names = engine.get_feature_names()
+        explanation = engine.explain_features(fv)
+        base_mean = np.mean(arr[0:6])
+        assert base_mean == pytest.approx(explanation["base_signals_summary"]["mean"])
+
+    def test_tracker_pipeline(self):
+        """Tracker: record -> get_all -> FeatureVector accuracy matches."""
+        tracker = StackingAccuracyTracker(window_days=90)
+        now = datetime.now()
+        for _ in range(10):
+            tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, 0.5, 0.02)
+        accs = tracker.get_all_accuracies(now)
+        assert accs[SignalSource.MULTI_SPEED_MOM].accuracy_90d == 1.0
+
+
+# ==============================================================================
+# New tests: CLI / demo code coverage
+# ==============================================================================
+
+class TestCLI:
+    """Coverage for main() CLI entry point and __main__ guard."""
+
+    def test_demo_returns_expected_types(self):
+        """demo() returns (FeatureVector, ndarray)."""
+        from src.signals.stacking_feature_engine import demo
+        fv, arr = demo()
+        from src.signals.stacking_feature_engine import FeatureVector
+        assert isinstance(fv, FeatureVector)
+        assert isinstance(arr, np.ndarray)
+        assert arr.shape == (59,)
+
+    def test_main_names_flag(self, capsys):
+        """main(['--names']) prints 59 feature names."""
+        from src.signals.stacking_feature_engine import main
+        main(["--names"])
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        assert len(lines) == 59
+        assert "base_multi_speed_momentum" in captured.out
+        assert "acc90d_unified_overlay" in captured.out
+
+    def test_main_test_flag(self, capsys):
+        """main(['--test']) runs demo without error."""
+        from src.signals.stacking_feature_engine import main
+        main(["--test"])
+        captured = capsys.readouterr()
+        assert "Feature vector created" in captured.out
+        assert "Shape: (59,)" in captured.out
+
+    def test_main_no_args_prints_help(self, capsys):
+        """main([]) prints help to stdout."""
+        from src.signals.stacking_feature_engine import main
+        main([])
+        captured = capsys.readouterr()
+        assert "usage:" in captured.out
+        assert "--test" in captured.out
+        assert "--names" in captured.out
+
+    def test_main_defaults_to_none(self, capsys, monkeypatch):
+        """main() with no arguments prints help (uses sys.argv)."""
+        monkeypatch.setattr("sys.argv", ["prog"])
+        from src.signals.stacking_feature_engine import main
+        main()
+        captured = capsys.readouterr()
+        assert "usage:" in captured.out

@@ -297,4 +297,149 @@ class TestGenerateSectorSignals:
         result = generate_sector_signals(path, vix=18.5, regime="neutral")
         assert isinstance(result, dict)
         assert "top_sectors" in result
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.strategy.sector_momentum_calc as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.strategy.sector_momentum_calc as mod
+        assert len(mod.__all__) == 5
+
+
+# ---------------------------------------------------------------------------
+# Constants validation extended
+# ---------------------------------------------------------------------------
+
+class TestConstantsExtended:
+    """Extended constants validation."""
+
+    def test_sector_etf_count(self):
+        assert len(SECTOR_ETF_DEFINITIONS) == 11
+
+    def test_sector_etf_map_matches_definitions(self):
+        for defn in SECTOR_ETF_DEFINITIONS:
+            assert defn["symbol"] in SECTOR_ETF_MAP
+            assert SECTOR_ETF_MAP[defn["symbol"]]["name"] == defn["name"]
+
+    def test_all_betas_positive(self):
+        for defn in SECTOR_ETF_DEFINITIONS:
+            assert defn["beta"] > 0
+
+    def test_sector_groups(self):
+        groups = {d["sectorGroup"] for d in SECTOR_ETF_DEFINITIONS}
+        assert "defensive" in groups
+        assert "cyclical" in groups
+        assert "sensitive" in groups
+
+    def test_regime_preferences_keys(self):
+        expected = {"early_expansion", "late_expansion", "contraction", "recovery", "neutral"}
+        assert set(REGIME_SECTOR_PREFERENCES.keys()) == expected
+
+    def test_regime_avoid_symbols_valid(self):
+        """All symbols in regime preferences should be valid ETFs."""
+        all_symbols = {d["symbol"] for d in SECTOR_ETF_DEFINITIONS}
+        for regime, prefs in REGIME_SECTOR_PREFERENCES.items():
+            for sym in prefs.get("preferred", []) + prefs.get("avoid", []):
+                assert sym in all_symbols, f"Unknown symbol {sym} in regime {regime}"
+
+
+# ---------------------------------------------------------------------------
+# SectorMomentumCalculator extended
+# ---------------------------------------------------------------------------
+
+class TestSectorMomentumCalculatorExtended:
+    """Extended calculator tests."""
+
+    def _make_calc(self):
+        data = _make_historical_data()
+        return SectorMomentumCalculator(data)
+
+    def test_calculate_all_momentum_returns_list(self):
+        calc = self._make_calc()
+        results = calc.calculate_all_momentum()
+        assert isinstance(results, list)
+
+    def test_calculate_momentum_missing_symbol(self):
+        calc = self._make_calc()
+        result = calc.calculate_momentum("NONEXISTENT")
+        assert result is None
+
+    def test_adjust_for_regime_neutral(self):
+        """Neutral regime should not adjust scores."""
+        calc = self._make_calc()
+        scores = [{"symbol": "XLK", "compositeMomentum": 0.5}]
+        result = calc.adjust_for_regime(scores, "neutral")
+        assert result[0]["compositeMomentum"] == 0.5
+
+    def test_adjust_for_regime_boosts_preferred(self):
+        """Early expansion should boost XLK."""
+        calc = self._make_calc()
+        scores = [{"symbol": "XLK", "compositeMomentum": 0.5}]
+        result = calc.adjust_for_regime(scores, "early_expansion")
+        assert result[0]["compositeMomentum"] > 0.5
+
+    def test_adjust_for_regime_penalizes_avoid(self):
+        """Early expansion should penalize XLU."""
+        calc = self._make_calc()
+        scores = [{"symbol": "XLU", "compositeMomentum": 0.5}]
+        result = calc.adjust_for_regime(scores, "early_expansion")
+        assert result[0]["compositeMomentum"] < 0.5
+
+    def test_get_allocation_with_high_vix(self):
+        """High VIX should reduce sector overlay."""
+        calc = self._make_calc()
+        scores = calc.calculate_all_momentum()
+        alloc = calc.get_allocation(scores, vix=40, vix_threshold=30)
+        assert isinstance(alloc, dict)
+
+    def test_get_allocation_low_vix(self):
+        """Low VIX should allow full sector overlay."""
+        calc = self._make_calc()
+        scores = calc.calculate_all_momentum()
+        alloc = calc.get_allocation(scores, vix=15, vix_threshold=30)
+        assert isinstance(alloc, dict)
+
+    def test_get_allocation_top_n(self):
+        """Should only include top_n sectors."""
+        calc = self._make_calc()
+        scores = calc.calculate_all_momentum()
+        alloc = calc.get_allocation(scores, top_n=3, vix=15, vix_threshold=30)
+        assert isinstance(alloc, dict)
+
+
+# ---------------------------------------------------------------------------
+# generate_sector_signals extended
+# ---------------------------------------------------------------------------
+
+class TestGenerateSectorSignalsExtended:
+    """Extended generate_sector_signals tests."""
+
+    def test_with_different_regimes(self, tmp_path):
+        import json
+        data = _make_historical_data()
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        for regime in ["early_expansion", "contraction", "recovery", "neutral"]:
+            result = generate_sector_signals(path, vix=20, regime=regime)
+            assert isinstance(result, dict)
+
+    def test_with_high_vix(self, tmp_path):
+        import json
+        data = _make_historical_data()
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=35, regime="neutral")
+        assert isinstance(result, dict)
         assert "allocation" in result
