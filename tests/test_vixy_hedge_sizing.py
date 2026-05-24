@@ -384,3 +384,166 @@ class TestBacktestValidation:
         days_hedged = sum(1 for a in allocations if a > 0)
 
         assert days_hedged > 0, "No hedged days in backtest"
+
+
+class TestHedgeRegimeExtended:
+    """Extended tests for regime classification."""
+
+    def test_boundary_vix_20(self):
+        assert VIXYHedgeSizer.classify_regime(20.0) == HedgeRegime.ELEVATED
+
+    def test_boundary_vix_30(self):
+        assert VIXYHedgeSizer.classify_regime(30.0) == HedgeRegime.STRESS
+
+    def test_boundary_vix_40(self):
+        assert VIXYHedgeSizer.classify_regime(40.0) == HedgeRegime.CRISIS
+
+    def test_just_below_20(self):
+        assert VIXYHedgeSizer.classify_regime(19.99) == HedgeRegime.NORMAL
+
+    def test_just_below_30(self):
+        assert VIXYHedgeSizer.classify_regime(29.99) == HedgeRegime.ELEVATED
+
+    def test_just_below_40(self):
+        assert VIXYHedgeSizer.classify_regime(39.99) == HedgeRegime.STRESS
+
+
+class TestVIXYHedgeSignalExtended:
+    """Extended tests for VIXYHedgeSignal dataclass."""
+
+    def test_signal_all_fields_present(self):
+        sizer = VIXYHedgeSizer()
+        signal = sizer.get_signal(25.0)
+        expected_fields = [
+            'timestamp', 'vix_level', 'regime', 'allocation_pct',
+            'action', 'signal_value', 'confidence',
+            'annual_cost_bps', 'monthly_decay_bps',
+            'expected_gain_shock', 'hedge_efficiency',
+            'ensemble_weight', 'collar_complement', 'source',
+        ]
+        for field in expected_fields:
+            assert hasattr(signal, field), f"Missing field: {field}"
+
+    def test_signal_source(self):
+        sizer = VIXYHedgeSizer()
+        signal = sizer.get_signal(25.0)
+        assert signal.source == "vixy_hedge"
+
+    def test_signal_action_values(self):
+        """Signal action should be one of the HedgeAction values."""
+        valid_actions = {a.value for a in HedgeAction}
+        sizer = VIXYHedgeSizer()
+        for vix in [12.0, 25.0, 35.0, 50.0]:
+            signal = sizer.get_signal(vix)
+            assert signal.action in valid_actions
+
+
+class TestVIXYHedgeStateExtended:
+    """Extended tests for VIXYHedgeState dataclass."""
+
+    def test_default_state(self):
+        state = VIXYHedgeState(
+            timestamp="2026-01-01T00:00:00",
+            current_allocation=0.0,
+            target_allocation=0.0,
+            vix_level=0.0,
+            regime="normal",
+            ytd_cost_bps=0.0,
+            ytd_benefit_bps=0.0,
+            hedge_efficiency=0.0,
+        )
+        assert state.total_signals == 0
+        assert state.last_rebalance is None
+
+    def test_state_with_history(self):
+        state = VIXYHedgeState(
+            timestamp="2026-05-14T00:00:00",
+            current_allocation=3.5,
+            target_allocation=4.0,
+            vix_level=25.0,
+            regime="elevated",
+            ytd_cost_bps=150.0,
+            ytd_benefit_bps=300.0,
+            hedge_efficiency=2.0,
+            total_signals=42,
+            last_rebalance="2026-05-10T00:00:00",
+        )
+        assert state.total_signals == 42
+        assert state.last_rebalance is not None
+
+
+class TestDetermineActionExtended:
+    """Extended tests for _determine_action."""
+
+    def test_increase_when_target_much_higher(self):
+        sizer = VIXYHedgeSizer()
+        action = sizer._determine_action(target=5.0, current=2.0, regime=HedgeRegime.NORMAL)
+        assert action == HedgeAction.INCREASE
+
+    def test_decrease_when_target_much_lower(self):
+        sizer = VIXYHedgeSizer()
+        action = sizer._determine_action(target=1.0, current=3.0, regime=HedgeRegime.NORMAL)
+        assert action == HedgeAction.DECREASE
+
+    def test_maintain_when_close(self):
+        sizer = VIXYHedgeSizer()
+        action = sizer._determine_action(target=3.0, current=2.5, regime=HedgeRegime.NORMAL)
+        assert action == HedgeAction.MAINTAIN
+
+    def test_freeze_during_crisis(self):
+        sizer = VIXYHedgeSizer()
+        action = sizer._determine_action(target=8.0, current=2.0, regime=HedgeRegime.CRISIS)
+        assert action == HedgeAction.FREEZE
+
+    def test_increase_during_stress(self):
+        sizer = VIXYHedgeSizer()
+        action = sizer._determine_action(target=5.0, current=2.0, regime=HedgeRegime.STRESS)
+        assert action == HedgeAction.INCREASE
+
+
+class TestVIXYHedgeConfigExtended:
+    """Extended tests for VIXYHedgeConfig."""
+
+    def test_config_defaults(self):
+        cfg = VIXYHedgeConfig()
+        assert cfg.min_hedge_pct == 0.0
+        assert cfg.max_hedge_pct == 10.0
+        assert cfg.cost_threshold == 2.0
+        assert cfg.vixy_expense_ratio == 0.0085
+        assert cfg.monthly_decay_pct == 0.05
+
+    def test_config_custom_values(self):
+        cfg = VIXYHedgeConfig(max_hedge_pct=5.0, ensemble_weight_stress=0.15)
+        assert cfg.max_hedge_pct == 5.0
+        assert cfg.ensemble_weight_stress == 0.15
+
+
+class TestCollarComplementExtended:
+    """Extended collar complement logic."""
+
+    def test_collar_at_low_allocation(self):
+        sizer = VIXYHedgeSizer()
+        signal = sizer.get_signal(12.0)  # NORMAL, low allocation
+        assert signal.collar_complement == 3.0
+
+    def test_collar_reduces_with_allocation(self):
+        sizer = VIXYHedgeSizer()
+        sig_low = sizer.get_signal(12.0)
+        sig_mid = sizer.get_signal(25.0)
+        assert sig_mid.collar_complement <= sig_low.collar_complement
+
+
+class TestStatusReport:
+    """Test status report generation."""
+
+    def test_status_returns_dict(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sizer = VIXYHedgeSizer(
+                config={"state_file": f"{tmpdir}/state.json"},
+                project_root=Path(tmpdir),
+            )
+            status = sizer.status()
+            assert isinstance(status, dict)
+            assert "current_allocation_pct" in status
+            assert "vix_level" in status
+            assert "regime" in status

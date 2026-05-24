@@ -412,5 +412,159 @@ class TestMainCLI:
         assert "Unknown" in captured.out or "unknown" in captured.out.lower()
 
 
+class TestSignalExtended:
+    """Extended tests for Signal dataclass."""
+
+    def test_signal_all_fields(self):
+        s = Signal(symbol="TLT", target_allocation=0.16,
+                   current_allocation=0.18, signal_type="vix", confidence=0.7)
+        assert s.symbol == "TLT"
+        assert s.target_allocation == 0.16
+        assert s.current_allocation == 0.18
+        assert s.signal_type == "vix"
+        assert s.confidence == 0.7
+
+    def test_signal_zero_allocation(self):
+        s = Signal(symbol="IEF", target_allocation=0.0)
+        assert s.target_allocation == 0.0
+
+    def test_signal_default_confidence(self):
+        s = Signal(symbol="SPY", target_allocation=0.5)
+        assert s.confidence == 1.0
+
+
+class TestOrderPlanExtended:
+    """Extended tests for OrderPlan dataclass."""
+
+    def test_order_plan_all_fields(self):
+        o = OrderPlan("GLD", "BUY", 25.5, "LIMIT", 7500, "trend_follow")
+        assert o.symbol == "GLD"
+        assert o.side == "BUY"
+        assert o.qty == 25.5
+        assert o.order_type == "LIMIT"
+        assert o.estimated_value == 7500
+        assert o.reason == "trend_follow"
+
+    def test_order_plan_market_type(self):
+        o = OrderPlan("SPY", "SELL", 100, "MARKET", 50000, "rebalance")
+        assert o.order_type == "MARKET"
+
+    def test_order_plan_zero_qty(self):
+        o = OrderPlan("SPY", "BUY", 0, "MARKET", 0, "test")
+        assert o.qty == 0
+
+
+class TestCalculateOrdersExtended:
+    """Extended tests for calculate_orders."""
+
+    def _make_router(self, tmpdir):
+        return OrderRouter(
+            signals_file=os.path.join(tmpdir, "signals.json"),
+            data_dir=tmpdir,
+            paper=True,
+            min_order_value=10.0,
+        )
+
+    def test_multiple_signals_multiple_positions(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._make_router(d)
+            signals = [
+                Signal(symbol="SPY", target_allocation=0.46),
+                Signal(symbol="GLD", target_allocation=0.38),
+                Signal(symbol="TLT", target_allocation=0.16),
+            ]
+            positions = {
+                "SPY": {"qty": 50, "market_value": 25000},
+                "GLD": {"qty": 30, "market_value": 6000},
+            }
+            orders = router.calculate_orders(signals, positions, total_value=100000)
+            symbols = {o.symbol for o in orders}
+            assert "SPY" in symbols
+            assert "GLD" in symbols
+            assert "TLT" in symbols
+
+    def test_zero_total_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._make_router(d)
+            signals = [Signal(symbol="SPY", target_allocation=0.50)]
+            orders = router.calculate_orders(signals, {}, total_value=0)
+            assert len(orders) == 0
+
+    def test_exact_target_no_order(self):
+        """Position at exact target → no order (within min_order_value)."""
+        with tempfile.TemporaryDirectory() as d:
+            router = self._make_router(d)
+            signals = [Signal(symbol="SPY", target_allocation=0.50)]
+            positions = {"SPY": {"qty": 100, "market_value": 5000}}
+            orders = router.calculate_orders(signals, positions, total_value=10000)
+            assert len(orders) == 0
+
+    def test_custom_min_order_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True, min_order_value=1000.0)
+            signals = [Signal(symbol="SPY", target_allocation=0.50)]
+            positions = {"SPY": {"qty": 100, "market_value": 4900}}
+            orders = router.calculate_orders(signals, positions, total_value=10000)
+            # $100 drift < $1000 minimum
+            assert len(orders) == 0
+
+
+class TestLoadSignalsExtended:
+    """Extended signal loading tests."""
+
+    def test_load_signals_with_extra_fields(self):
+        with tempfile.TemporaryDirectory() as d:
+            signals_file = os.path.join(d, "signals.json")
+            with open(signals_file, "w") as f:
+                json.dump({
+                    "target_allocations": {"SPY": 0.46, "GLD": 0.38},
+                    "metadata": {"generated_at": "2026-05-14"},
+                }, f)
+            router = OrderRouter(signals_file=signals_file, data_dir=d)
+            signals = router.load_signals()
+            assert len(signals) == 2
+
+    def test_load_signals_empty_allocations(self):
+        with tempfile.TemporaryDirectory() as d:
+            signals_file = os.path.join(d, "signals.json")
+            with open(signals_file, "w") as f:
+                json.dump({"target_allocations": {}}, f)
+            router = OrderRouter(signals_file=signals_file, data_dir=d)
+            signals = router.load_signals()
+            assert len(signals) == 0
+
+    def test_load_signals_corrupt_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            signals_file = os.path.join(d, "signals.json")
+            with open(signals_file, "w") as f:
+                f.write("not valid json")
+            router = OrderRouter(signals_file=signals_file, data_dir=d)
+            signals = router.load_signals()
+            assert signals == []
+
+
+class TestRebalanceExtended:
+    """Extended rebalance workflow tests."""
+
+    def test_rebalance_dry_run_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = True
+            router.load_signals = MagicMock(return_value=[Signal("SPY", 0.50)])
+            router.get_current_positions = MagicMock(return_value={})
+            router.calculate_orders = MagicMock(return_value=[
+                OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test"),
+            ])
+            router.execute_orders = MagicMock(return_value={
+                "status": "dry_run", "orders_executed": 1, "orders_failed": 0,
+            })
+            # Default dry_run=True
+            result = router.rebalance()
+            router.execute_orders.assert_called_once()
+            call_kwargs = router.execute_orders.call_args
+            assert call_kwargs[1].get("dry_run", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else True) is True
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

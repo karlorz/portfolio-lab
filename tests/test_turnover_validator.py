@@ -411,3 +411,112 @@ class TestSingleSourceEdgeCases:
         # Should not raise
         results = validator.update_and_validate({"src": 0.5})
         assert "src" in results
+
+
+class TestConstants:
+    """Validate module constants."""
+
+    def test_max_penalty(self):
+        assert MAX_TURNOVER_PENALTY == 0.5
+
+    def test_min_history(self):
+        assert MIN_SIGNAL_HISTORY == 5
+
+    def test_default_window(self):
+        assert DEFAULT_ROLLING_WINDOW == 20
+
+
+class TestSignalTurnoverMetricsExtended:
+    """Extended tests for SignalTurnoverMetrics dataclass."""
+
+    def test_all_fields(self):
+        m = SignalTurnoverMetrics(
+            source="test", signal_std=0.1, sign_flip_rate=0.3,
+            magnitude_volatility=0.05, turnover_penalty=0.2,
+            stability_score=0.7, expected_return=0.05,
+            risk_cost=0.02, turnover_cost=0.01, marginal_score=0.02,
+            num_periods=20,
+        )
+        assert m.source == "test"
+        assert m.signal_std == 0.1
+        assert m.magnitude_volatility == 0.05
+        assert m.expected_return == 0.05
+        assert m.risk_cost == 0.02
+        assert m.turnover_cost == 0.01
+        assert m.num_periods == 20
+        assert m.missing_data is False
+
+    def test_missing_data_default_false(self):
+        m = SignalTurnoverMetrics(
+            source="test", signal_std=0.1, sign_flip_rate=0.3,
+            magnitude_volatility=0.05, turnover_penalty=0.2,
+            stability_score=0.7, expected_return=0.05,
+            risk_cost=0.02, turnover_cost=0.01, marginal_score=0.02,
+            num_periods=20,
+        )
+        assert m.missing_data is False
+
+
+class TestTurnoverValidatorStateExtended:
+    """Extended tests for TurnoverValidatorState."""
+
+    def test_empty_history(self):
+        state = TurnoverValidatorState()
+        assert state.signal_history == {}
+        assert state.rolling_window == DEFAULT_ROLLING_WINDOW
+
+    def test_from_dict_partial(self):
+        d = {"signal_history": {"a": [0.5]}}
+        state = TurnoverValidatorState.from_dict(d)
+        assert state.signal_history == {"a": [0.5]}
+        assert state.rolling_window == DEFAULT_ROLLING_WINDOW
+
+    def test_to_dict_includes_all_fields(self):
+        state = TurnoverValidatorState(signal_history={"x": [1.0]}, rolling_window=30)
+        d = state.to_dict()
+        assert "signal_history" in d
+        assert "rolling_window" in d
+        assert d["rolling_window"] == 30
+
+
+class TestUpdateAndValidateExtended:
+    """Extended update_and_validate tests."""
+
+    def test_zero_signal(self, validator):
+        for _ in range(20):
+            validator.update_and_validate({"src": 0.0})
+        results = validator.update_and_validate({"src": 0.0})
+        assert results["src"].sign_flip_rate == 0.0
+        assert results["src"].signal_std == 0.0
+
+    def test_positive_then_negative(self, validator):
+        """Regime shift from positive to negative should produce sign flips."""
+        for i in range(10):
+            validator.update_and_validate({"src": 0.5})
+        for i in range(10):
+            validator.update_and_validate({"src": -0.5})
+        results = validator.update_and_validate({"src": -0.5})
+        assert results["src"].sign_flip_rate > 0
+
+    def test_get_adjusted_weights_empty_weights(self, validator):
+        """Empty weights dict should return empty."""
+        adjusted = validator.get_adjusted_weights({}, {})
+        assert adjusted == {}
+
+
+class TestDiagnosticsExtended:
+    """Extended diagnostics tests."""
+
+    def test_diagnostics_numeric_types(self, validator):
+        for _ in range(20):
+            validator.update_and_validate({"src": 0.5})
+        diag = validator.get_state_diagnostics()
+        assert isinstance(diag["src"]["periods"], int)
+        assert isinstance(diag["src"]["mean"], float)
+        assert isinstance(diag["src"]["turnover_penalty"], float)
+
+    def test_diagnostics_multiple_signals(self, validator):
+        for _ in range(20):
+            validator.update_and_validate({"a": 0.5, "b": -0.3})
+        diag = validator.get_state_diagnostics()
+        assert len(diag) == 2

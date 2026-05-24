@@ -589,3 +589,283 @@ class TestIntegrationNormalRegime:
             actual = decision.adjusted_allocation.get(asset, 0)
             # Within 5% of base (given vol adjustments)
             assert abs(actual - base) < 0.05
+
+
+# ---------------------------------------------------------------------------
+# Extended test coverage: to_dict, computation edge cases, constants, signals
+# ---------------------------------------------------------------------------
+
+
+class TestExtendedCoverage:
+    """Extended tests: dataclass to_dict, computation edge cases, constants, signals."""
+
+    # --- to_dict tests ---
+
+    def test_sizing_factors_to_dict_all_fields(self, normal_regime_state):
+        """SizingFactors.to_dict() should contain all dataclass fields."""
+        sizer = AdaptiveSizer(data_dir=normal_regime_state)
+        decision = sizer.compute_allocation()
+        d = decision.factors.to_dict()
+        expected = {
+            "timestamp", "regime", "regime_confidence", "spy_vol_20d",
+            "spy_mom_20d", "spy_drawdown_60d", "ensemble_signal",
+            "ensemble_agreement", "circuit_breaker_severity",
+        }
+        assert set(d.keys()) == expected, f"Keys mismatch: diff={expected ^ set(d.keys())}"
+        assert isinstance(d["timestamp"], str)
+        assert isinstance(d["regime"], str)
+        assert isinstance(d["regime_confidence"], float)
+
+    def test_sizing_decision_to_dict_all_fields(self, normal_regime_state):
+        """SizingDecision.to_dict() should contain all dataclass fields."""
+        sizer = AdaptiveSizer(data_dir=normal_regime_state)
+        decision = sizer.compute_allocation()
+        d = decision.to_dict()
+        expected = {
+            "timestamp", "base_allocation", "adjusted_allocation",
+            "adjustments", "regime_adjustment", "volatility_adjustment",
+            "signal_adjustment", "drawdown_adjustment", "factors",
+        }
+        assert set(d.keys()) == expected, f"Keys mismatch: diff={expected ^ set(d.keys())}"
+        # Nested factors should also be a dict (via asdict recursion)
+        assert isinstance(d["factors"], dict)
+        assert "regime" in d["factors"]
+
+    def test_sizing_decision_to_dict_preserves_allocations(self, normal_regime_state):
+        """to_dict should preserve base_allocation and adjusted_allocation."""
+        sizer = AdaptiveSizer(data_dir=normal_regime_state)
+        decision = sizer.compute_allocation()
+        d = decision.to_dict()
+        assert d["base_allocation"] == BASE_ALLOCATION
+        assert isinstance(d["adjusted_allocation"], dict)
+        # Should have all three core assets
+        for asset in ("SPY", "GLD", "TLT"):
+            assert asset in d["adjusted_allocation"]
+
+    # --- Volatility computation edge cases ---
+
+    def test_vol_adjustment_at_high_boundary_ratio(self):
+        """Vol ratio exactly at 0.8 (high-vol threshold) should give zero adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_vol_adjustment(0.175)  # 0.14/0.175 = 0.8
+        assert adj["SPY"] == 0.0
+        assert adj["GLD"] == 0.0
+        assert adj["TLT"] == 0.0
+
+    def test_vol_adjustment_at_low_boundary_ratio(self):
+        """Vol ratio exactly at 1.2 (low-vol threshold) should give zero adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_vol_adjustment(0.14 / 1.2)  # vol_ratio = 1.2
+        assert adj["SPY"] == 0.0
+        assert adj["GLD"] == 0.0
+        assert adj["TLT"] == 0.0
+
+    def test_vol_adjustment_very_low_vol_clamped(self):
+        """Extremely low vol should be clamped to vol_ratio=1.5, producing max positive SPY adj."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        # Must be just above the <= 0.001 guard threshold
+        adj = sizer._compute_vol_adjustment(0.0011)  # vol_ratio ~= 127, clamped to 1.5
+        assert adj["SPY"] > 0
+        assert adj["GLD"] < 0
+        assert adj["TLT"] < 0
+        # Check exact values at max factor
+        assert adj["SPY"] == pytest.approx(MAX_FACTOR_ADJUSTMENT * 0.7)
+        assert adj["GLD"] == pytest.approx(-MAX_FACTOR_ADJUSTMENT * 0.3)
+        assert adj["TLT"] == pytest.approx(-MAX_FACTOR_ADJUSTMENT * 0.3)
+
+    def test_vol_adjustment_mid_high_vol_scaling(self):
+        """Vol ratio at midpoint between 0.5 and 0.8 should produce proportional adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        # vol_ratio = 0.65, factor = (0.8-0.65)/0.3 = 0.5
+        vol = 0.14 / 0.65
+        adj = sizer._compute_vol_adjustment(vol)
+        expected_spy = -MAX_FACTOR_ADJUSTMENT * 0.5 * 0.7
+        expected_gld = +MAX_FACTOR_ADJUSTMENT * 0.5 * 0.5
+        expected_tlt = +MAX_FACTOR_ADJUSTMENT * 0.5 * 0.3
+        assert adj["SPY"] == pytest.approx(expected_spy)
+        assert adj["GLD"] == pytest.approx(expected_gld)
+        assert adj["TLT"] == pytest.approx(expected_tlt)
+
+    # --- Signal adjustment edge cases ---
+
+    def test_signal_at_one_tenth_boundary(self):
+        """Ensemble signal exactly at 0.1 should proceed (not blocked by < 0.1 check)."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_signal_adjustment(0.1, 0.8)
+        # Should have a tiny positive adjustment
+        assert adj["SPY"] > 0
+
+    def test_signal_just_below_one_tenth(self):
+        """Ensemble signal just below 0.1 should produce zero adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_signal_adjustment(0.099, 0.8)
+        assert adj["SPY"] == 0.0
+
+    def test_signal_agreement_at_exactly_half(self):
+        """Agreement exactly at 0.5 should produce zero adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_signal_adjustment(0.7, 0.5)
+        assert adj["SPY"] == 0.0
+
+    def test_signal_agreement_just_above_half(self):
+        """Agreement just above 0.5 should produce a very small adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_signal_adjustment(0.7, 0.51)
+        # factor = 0.7 * (0.51 - 0.5) * 2 = 0.014
+        assert adj["SPY"] > 0
+        assert adj["SPY"] < MAX_FACTOR_ADJUSTMENT * 0.01  # Very small
+
+    def test_signal_max_bullish(self):
+        """Signal=1.0 and agreement=1.0 should produce maximum bullish adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_signal_adjustment(1.0, 1.0)
+        # factor = 1.0 * (1.0-0.5) * 2 = 1.0
+        assert adj["SPY"] == pytest.approx(+MAX_FACTOR_ADJUSTMENT * 0.5)
+        assert adj["GLD"] == pytest.approx(-MAX_FACTOR_ADJUSTMENT * 0.3)
+        assert adj["TLT"] == pytest.approx(-MAX_FACTOR_ADJUSTMENT * 0.3)
+
+    def test_signal_max_bearish(self):
+        """Signal=-1.0 and agreement=1.0 should produce maximum bearish adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_signal_adjustment(-1.0, 1.0)
+        # factor = 1.0 * (1.0-0.5) * 2 = 1.0
+        assert adj["SPY"] == pytest.approx(-MAX_FACTOR_ADJUSTMENT * 0.5)
+        assert adj["GLD"] == pytest.approx(+MAX_FACTOR_ADJUSTMENT * 0.3)
+        assert adj["TLT"] == pytest.approx(+MAX_FACTOR_ADJUSTMENT * 0.3)
+
+    # --- Drawdown adjustment edge cases ---
+
+    def test_drawdown_exactly_at_ten_percent(self):
+        """Drawdown exactly at -0.10 should produce zero factor (threshold boundary)."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_drawdown_adjustment(-0.10, "ok")
+        # factor = min(1.0, (0.10 - 0.10) / 0.10) = 0.0
+        assert adj["SPY"] == 0.0
+        assert adj["GLD"] == 0.0
+        assert adj["TLT"] == 0.0
+
+    def test_drawdown_at_twenty_percent_max_factor(self):
+        """Drawdown at -0.20 should produce maximum factor of 1.0."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_drawdown_adjustment(-0.20, "ok")
+        # factor = min(1.0, (0.20 - 0.10) / 0.10) = 1.0
+        assert adj["SPY"] == pytest.approx(-MAX_FACTOR_ADJUSTMENT * 0.5)
+        assert adj["GLD"] == pytest.approx(+MAX_FACTOR_ADJUSTMENT * 0.3)
+        assert adj["TLT"] == pytest.approx(+MAX_FACTOR_ADJUSTMENT * 0.3)
+
+    def test_drawdown_severe_circuit_breaker_bypasses_dd(self):
+        """Severe circuit breaker should apply fixed reduction regardless of drawdown depth."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_drawdown_adjustment(-0.03, "severe")
+        assert adj["SPY"] == -MAX_FACTOR_ADJUSTMENT * 0.8
+        assert adj["GLD"] == +MAX_FACTOR_ADJUSTMENT * 0.5
+        assert adj["TLT"] == +MAX_FACTOR_ADJUSTMENT * 0.4
+
+    def test_drawdown_shallow_with_elevated_cb(self):
+        """Elevated circuit breaker with shallow drawdown still applies partial reduction."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_drawdown_adjustment(-0.01, "elevated")
+        assert adj["SPY"] == -MAX_FACTOR_ADJUSTMENT * 0.4
+        assert adj["GLD"] == +MAX_FACTOR_ADJUSTMENT * 0.3
+        assert adj["TLT"] == +MAX_FACTOR_ADJUSTMENT * 0.2
+
+    def test_drawdown_unknown_severity_ignored(self):
+        """Unknown circuit breaker severity (not ok/elevated/severe/critical) should be treated as ok."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_drawdown_adjustment(-0.03, "unknown_severity")
+        # Not in critical/severe/elevated, and -0.03 > -0.10, so no adjustment
+        assert adj["SPY"] == 0.0
+        assert adj["GLD"] == 0.0
+        assert adj["TLT"] == 0.0
+
+    # --- _apply_bounds edge cases ---
+
+    def test_apply_bounds_already_within(self):
+        """_apply_bounds on already-bounded weights should return normalized weights near original."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        bounded = sizer._apply_bounds({"SPY": 0.46, "GLD": 0.38, "TLT": 0.16})
+        # Each value within bounds, sum=1.0, so unchanged by clamp and normalization
+        assert bounded["SPY"] == pytest.approx(0.46, abs=0.005)
+        assert bounded["GLD"] == pytest.approx(0.38, abs=0.005)
+        assert bounded["TLT"] == pytest.approx(0.16, abs=0.005)
+
+    def test_apply_bounds_clamps_excessive_spy(self):
+        """_apply_bounds should clamp SPY above its 56% upper bound."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        bounded = sizer._apply_bounds({"SPY": 0.70, "GLD": 0.20, "TLT": 0.10})
+        # After clamp: SPY=0.56, GLD=0.28, TLT=0.10, sum=0.94
+        # After normalize: SPY=0.5957, GLD=0.2979, TLT=0.1064
+        assert bounded["SPY"] <= 0.56 / 0.94 + 0.01  # Slight tolerance after normalization
+        assert bounded["GLD"] >= 0.28 / 0.94 - 0.01
+        assert abs(sum(bounded.values()) - 1.0) < 0.01
+
+    def test_apply_bounds_zero_total_no_normalize(self):
+        """_apply_bounds with zero total after clamping should not divide by zero."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        # 'OTHER' has default bounds (0.0, 1.0), so 0.0 stays at 0.0 -> total=0
+        bounded = sizer._apply_bounds({"OTHER": 0.0})
+        assert bounded["OTHER"] == 0.0
+
+    def test_apply_bounds_single_asset_clamped(self):
+        """_apply_bounds with single asset should clamp to bounds."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        bounded = sizer._apply_bounds({"SPY": 0.90})
+        # Clamp to 0.56, then normalize (single asset -> 1.0)
+        assert bounded["SPY"] == pytest.approx(1.0)
+
+    # --- Constants validation ---
+
+    def test_regime_adjustments_covers_all_regimes(self):
+        """REGIME_ADJUSTMENTS should include low_vol, normal, high_vol, crisis, recovery, unknown."""
+        from src.strategy.adaptive_sizing import REGIME_ADJUSTMENTS
+        expected = {"low_vol", "normal", "high_vol", "crisis", "recovery", "unknown"}
+        assert set(REGIME_ADJUSTMENTS.keys()) == expected
+
+    def test_regime_adjustments_all_have_three_assets(self):
+        """Every regime adjustment dict should have SPY, GLD, TLT keys."""
+        from src.strategy.adaptive_sizing import REGIME_ADJUSTMENTS
+        for regime, adj in REGIME_ADJUSTMENTS.items():
+            assert "SPY" in adj, f"{regime} missing SPY"
+            assert "GLD" in adj, f"{regime} missing GLD"
+            assert "TLT" in adj, f"{regime} missing TLT"
+
+    def test_regime_adjustments_symmetric(self):
+        """Collective sum of adjustments per regime should not exceed +-0.15."""
+        from src.strategy.adaptive_sizing import REGIME_ADJUSTMENTS
+        for regime, adj in REGIME_ADJUSTMENTS.items():
+            total_adj = sum(adj.values())
+            assert abs(total_adj) <= 0.15, f"{regime} total adjustment {total_adj:.3f} too large"
+
+    def test_confidence_scaling_is_monotonic(self):
+        """CONFIDENCE_SCALING values should increase with confidence."""
+        from src.strategy.adaptive_sizing import CONFIDENCE_SCALING
+        confidences = sorted(CONFIDENCE_SCALING.keys())
+        for i in range(len(confidences) - 1):
+            assert CONFIDENCE_SCALING[confidences[i]] <= CONFIDENCE_SCALING[confidences[i + 1]], (
+                f"Non-monotonic at confidence {confidences[i]}"
+            )
+
+    def test_confidence_scaling_reaches_full(self):
+        """Highest confidence level should map to 1.0 scaling."""
+        from src.strategy.adaptive_sizing import CONFIDENCE_SCALING
+        max_conf = max(CONFIDENCE_SCALING.keys())
+        assert CONFIDENCE_SCALING[max_conf] == 1.0
+
+    def test_base_allocation_sums_to_one(self):
+        """BASE_ALLOCATION should sum to 1.0."""
+        total = sum(BASE_ALLOCATION.values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_hard_bounds_all_core_assets_present(self):
+        """HARD_BOUNDS should include SPY, GLD, TLT with valid ranges."""
+        for asset in ["SPY", "GLD", "TLT"]:
+            assert asset in HARD_BOUNDS, f"{asset} missing from HARD_BOUNDS"
+            lo, hi = HARD_BOUNDS[asset]
+            assert 0.0 <= lo < hi <= 1.0, f"{asset} bounds [{lo}, {hi}] invalid"
+
+    def test_hard_bounds_bond_overlap(self):
+        """Bond bounds should not overlap with equity/gold ranges."""
+        # TLT 6-26%, IEF 0-10%, SHY 0-10%
+        assert HARD_BOUNDS["TLT"] == (0.06, 0.26)
+        assert HARD_BOUNDS["IEF"] == (0.00, 0.10)
+        assert HARD_BOUNDS["SHY"] == (0.00, 0.10)

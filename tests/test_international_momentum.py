@@ -505,6 +505,340 @@ class TestInternationalMomentumSignalDataclass(unittest.TestCase):
         self.assertEqual(delta['EFA'], 0.0)
 
 
+class TestInternationalMomentumSignalExtended(unittest.TestCase):
+    """Extended tests for InternationalMomentumSignal dataclass methods."""
+
+    # --- to_dict field completeness ---
+
+    def test_to_dict_has_all_fields(self):
+        signal = self._make_signal()
+        d = signal.to_dict()
+        expected_fields = [
+            'timestamp', 'signal_type', 'confidence', 'confidence_level',
+            'efa_momentum_6m', 'eem_momentum_6m', 'spy_momentum_6m',
+            'efa_vs_spy', 'eem_vs_spy',
+            'spy_shift', 'efa_shift', 'eem_shift',
+            'max_allocation_efa', 'max_allocation_eem', 'holding_period_days',
+            'data_fresh', 'vix_filter_active', 'correlation_override',
+        ]
+        for field in expected_fields:
+            self.assertIn(field, d, f"Missing field: {field}")
+
+    def test_to_dict_values_match(self):
+        signal = self._make_signal(confidence=0.75, efa_vs_spy=0.09)
+        d = signal.to_dict()
+        self.assertEqual(d['confidence'], 0.75)
+        self.assertEqual(d['efa_vs_spy'], 0.09)
+
+    # --- is_active edge cases ---
+
+    def test_is_active_stale_data(self):
+        """Non-neutral signal with stale data is inactive."""
+        signal = self._make_signal(
+            signal_type='efa_lead', confidence=0.7,
+            efa_vs_spy=0.08, data_fresh=False,
+        )
+        self.assertFalse(signal.is_active())
+
+    def test_is_active_exactly_at_confidence_threshold(self):
+        """Confidence exactly 0.5 should be active."""
+        signal = self._make_signal(
+            signal_type='efa_lead', confidence=0.5,
+            efa_vs_spy=0.08, data_fresh=True,
+        )
+        self.assertTrue(signal.is_active())
+
+    def test_is_active_just_below_confidence_threshold(self):
+        """Confidence just below 0.5 should be inactive."""
+        signal = self._make_signal(
+            signal_type='efa_lead', confidence=0.49,
+            efa_vs_spy=0.08, data_fresh=True,
+        )
+        self.assertFalse(signal.is_active())
+
+    # --- get_allocation_delta ---
+
+    def test_get_allocation_delta_inactive_returns_zeros(self):
+        """Inactive signal returns zero deltas for all assets."""
+        signal = self._make_signal(
+            signal_type='efa_lead', confidence=0.3,
+            spy_shift=0.04, efa_shift=0.04, eem_shift=0.0,
+        )
+        delta = signal.get_allocation_delta()
+        self.assertEqual(delta, {'SPY': 0.0, 'EFA': 0.0, 'EEM': 0.0})
+
+    def test_get_allocation_delta_active_efa(self):
+        """Active EFA signal: SPY negative, EFA positive."""
+        signal = self._make_signal(
+            signal_type='efa_lead', confidence=0.7,
+            efa_vs_spy=0.08, spy_shift=0.035, efa_shift=0.035, eem_shift=0.0,
+        )
+        delta = signal.get_allocation_delta()
+        self.assertEqual(delta['SPY'], -0.035)
+        self.assertEqual(delta['EFA'], 0.035)
+        self.assertEqual(delta['EEM'], 0.0)
+
+    # --- to_signal_snapshot ---
+
+    def test_snapshot_eem_lead_value(self):
+        """EEM lead snapshot value is clipped eem_vs_spy / 10."""
+        signal = self._make_signal(
+            signal_type='eem_lead', confidence=0.7,
+            eem_vs_spy=0.12, efa_vs_spy=-0.02,
+        )
+        snapshot = signal.to_signal_snapshot()
+        self.assertAlmostEqual(snapshot.value, 0.012)
+
+    def test_snapshot_regime_fit_is_all(self):
+        snapshot = self._make_signal().to_signal_snapshot()
+        self.assertEqual(snapshot.regime_fit, "all")
+
+    def test_snapshot_explanation_contains_signal_type(self):
+        signal = self._make_signal(signal_type='efa_lead', confidence=0.65)
+        snapshot = signal.to_signal_snapshot()
+        self.assertIn('efa_lead', snapshot.explanation)
+
+    def test_snapshot_metadata_keys(self):
+        signal = self._make_signal(signal_type='eem_lead', confidence=0.75)
+        snapshot = signal.to_signal_snapshot()
+        self.assertIn('signal_type', snapshot.metadata)
+        self.assertIn('confidence_level', snapshot.metadata)
+        self.assertIn('vix_filter_active', snapshot.metadata)
+        self.assertIn('correlation_override', snapshot.metadata)
+
+    def test_snapshot_value_clipped_at_upper_bound(self):
+        """Very large outperformance should be clipped to 0.5."""
+        signal = self._make_signal(
+            signal_type='efa_lead', confidence=0.9, efa_vs_spy=0.80,
+        )
+        snapshot = signal.to_signal_snapshot()
+        self.assertLessEqual(snapshot.value, 0.5)
+
+    def test_snapshot_value_clipped_at_lower_bound(self):
+        """Very negative outperformance should be clipped to -0.5."""
+        signal = self._make_signal(
+            signal_type='eem_lead', confidence=0.9, eem_vs_spy=-0.80,
+        )
+        snapshot = signal.to_signal_snapshot()
+        self.assertGreaterEqual(snapshot.value, -0.5)
+
+    # --- helper ---
+
+    def _make_signal(self, **overrides):
+        defaults = dict(
+            timestamp='2026-05-14T10:00:00',
+            signal_type='neutral',
+            confidence=0.0,
+            confidence_level='low',
+            efa_momentum_6m=0.12,
+            eem_momentum_6m=0.08,
+            spy_momentum_6m=0.15,
+            efa_vs_spy=-0.03,
+            eem_vs_spy=-0.07,
+            spy_shift=0.0,
+            efa_shift=0.0,
+            eem_shift=0.0,
+            max_allocation_efa=0.05,
+            max_allocation_eem=0.03,
+            holding_period_days=30,
+            data_fresh=True,
+            vix_filter_active=False,
+            correlation_override=False,
+        )
+        defaults.update(overrides)
+        return InternationalMomentumSignal(**defaults)
+
+
+class TestInternationalMomentumGeneratorExtended(unittest.TestCase):
+    """Extended tests for InternationalMomentumGenerator."""
+
+    def setUp(self):
+        self.temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        self.generator = InternationalMomentumGenerator(cache_db=Path(self.temp_db.name))
+
+    def tearDown(self):
+        self.temp_db.close()
+        Path(self.temp_db.name).unlink(missing_ok=True)
+
+    # --- Class constants ---
+
+    def test_threshold_constants(self):
+        self.assertEqual(self.generator.EFA_THRESHOLD, 0.05)
+        self.assertEqual(self.generator.EEM_THRESHOLD, 0.08)
+
+    def test_allocation_constants(self):
+        self.assertEqual(self.generator.MAX_EFA_ALLOCATION, 0.05)
+        self.assertEqual(self.generator.MAX_EEM_ALLOCATION, 0.03)
+        self.assertEqual(self.generator.MIN_HOLDING_DAYS, 30)
+
+    def test_risk_filter_constants(self):
+        self.assertEqual(self.generator.VIX_CUTOFF, 30.0)
+        self.assertEqual(self.generator.CORRELATION_CUTOFF, 0.95)
+
+    # --- determine_signal_type edge cases ---
+
+    def test_determine_signal_type_efa_at_threshold(self):
+        """EFA exactly at threshold should produce NEUTRAL (strict >)."""
+        sig_type, conf = self.generator._determine_signal_type(
+            efa_vs_spy=0.05, eem_vs_spy=-0.02
+        )
+        self.assertEqual(sig_type, SignalType.NEUTRAL)
+
+    def test_determine_signal_type_eem_at_threshold(self):
+        """EEM exactly at threshold should produce NEUTRAL (strict >)."""
+        sig_type, conf = self.generator._determine_signal_type(
+            efa_vs_spy=-0.02, eem_vs_spy=0.08
+        )
+        self.assertEqual(sig_type, SignalType.NEUTRAL)
+
+    def test_determine_signal_type_efa_just_above_threshold(self):
+        sig_type, conf = self.generator._determine_signal_type(
+            efa_vs_spy=0.051, eem_vs_spy=0.0
+        )
+        self.assertEqual(sig_type, SignalType.EFA_LEAD)
+        self.assertGreater(conf, 0)
+
+    def test_determine_signal_type_confidence_caps_at_1(self):
+        """Confidence should be capped at 1.0 for very large outperformance."""
+        sig_type, conf = self.generator._determine_signal_type(
+            efa_vs_spy=0.50, eem_vs_spy=0.0
+        )
+        self.assertEqual(sig_type, SignalType.EFA_LEAD)
+        self.assertLessEqual(conf, 1.0)
+
+    # --- static determine_signal_type with custom thresholds ---
+
+    def test_static_determine_custom_thresholds(self):
+        """Custom thresholds should override defaults."""
+        sig_type, conf = InternationalMomentumGenerator.determine_signal_type(
+            efa_vs_spy=0.03, eem_vs_spy=0.0,
+            efa_threshold=0.02, eem_threshold=0.10,
+        )
+        self.assertEqual(sig_type, SignalType.EFA_LEAD)
+
+    # --- _calculate_allocation_shifts edge cases ---
+
+    def test_allocation_shifts_zero_confidence(self):
+        """Zero confidence produces zero shifts."""
+        spy, efa, eem = self.generator._calculate_allocation_shifts(
+            SignalType.EFA_LEAD, confidence=0.0
+        )
+        self.assertEqual(spy, 0.0)
+        self.assertEqual(efa, 0.0)
+        self.assertEqual(eem, 0.0)
+
+    # --- generate_signal edge cases ---
+
+    def test_generate_signal_empty_data(self):
+        """Empty data dict should produce neutral signal."""
+        signal = self.generator.generate_signal({})
+        self.assertEqual(signal.signal_type, 'neutral')
+        self.assertFalse(signal.is_active())
+
+    def test_generate_signal_custom_timestamp(self):
+        """Custom timestamp should be preserved."""
+        data = {
+            'timestamp': '2025-01-15T08:30:00',
+            'data_fresh': True,
+            'relative': {
+                'efa_momentum_6m': 0.10,
+                'eem_momentum_6m': 0.08,
+                'spy_momentum_6m': 0.15,
+                'efa_vs_spy': -0.02,
+                'eem_vs_spy': -0.03,
+            }
+        }
+        signal = self.generator.generate_signal(data)
+        self.assertEqual(signal.timestamp, '2025-01-15T08:30:00')
+
+    def test_generate_signal_rounding(self):
+        """Values should be rounded to 4 decimal places."""
+        data = {
+            'timestamp': '2026-05-14T10:00:00',
+            'data_fresh': True,
+            'relative': {
+                'efa_momentum_6m': 0.123456789,
+                'eem_momentum_6m': 0.08,
+                'spy_momentum_6m': 0.15,
+                'efa_vs_spy': 0.06,
+                'eem_vs_spy': -0.04,
+            }
+        }
+        with patch.object(self.generator, '_get_vix_level', return_value=20.0):
+            with patch.object(self.generator, '_get_correlation', return_value=0.85):
+                signal = self.generator.generate_signal(data)
+        self.assertEqual(signal.efa_momentum_6m, round(0.123456789, 4))
+
+    # --- get_current_signal ---
+
+    def test_get_current_signal_empty_db(self):
+        """Empty database should return None."""
+        result = self.generator.get_current_signal()
+        self.assertIsNone(result)
+
+    # --- get_signal_statistics ---
+
+    def test_get_signal_statistics_single_signal(self):
+        """Single signal statistics should work."""
+        data = {
+            'timestamp': '2026-05-14T10:00:00',
+            'data_fresh': True,
+            'relative': {
+                'efa_momentum_6m': 0.20,
+                'eem_momentum_6m': 0.08,
+                'spy_momentum_6m': 0.12,
+                'efa_vs_spy': 0.08,
+                'eem_vs_spy': -0.04,
+            }
+        }
+        with patch.object(self.generator, '_get_vix_level', return_value=20.0):
+            with patch.object(self.generator, '_get_correlation', return_value=0.85):
+                self.generator.generate_signal(data)
+
+        stats = self.generator.get_signal_statistics(days=30)
+        self.assertEqual(stats['total_signals'], 1)
+        self.assertEqual(stats['efa_lead_count'], 1)
+        self.assertIn('avg_confidence', stats)
+
+    # --- confidence_level classification ---
+
+    def test_generate_signal_low_confidence_level(self):
+        """Low confidence signal should have confidence_level='low'."""
+        data = {
+            'timestamp': '2026-05-14T10:00:00',
+            'data_fresh': True,
+            'relative': {
+                'efa_momentum_6m': 0.20,
+                'eem_momentum_6m': 0.08,
+                'spy_momentum_6m': 0.12,
+                'efa_vs_spy': 0.06,  # confidence ~0.6 (between 0.5-0.7 = medium)
+                'eem_vs_spy': -0.04,
+            }
+        }
+        with patch.object(self.generator, '_get_vix_level', return_value=20.0):
+            with patch.object(self.generator, '_get_correlation', return_value=0.85):
+                signal = self.generator.generate_signal(data)
+        self.assertEqual(signal.confidence_level, 'medium')
+
+    def test_generate_signal_high_confidence_level(self):
+        """High confidence signal should have confidence_level='high'."""
+        data = {
+            'timestamp': '2026-05-14T10:00:00',
+            'data_fresh': True,
+            'relative': {
+                'efa_momentum_6m': 0.20,
+                'eem_momentum_6m': 0.08,
+                'spy_momentum_6m': 0.12,
+                'efa_vs_spy': 0.09,  # confidence ~0.9 (above 0.7 = high)
+                'eem_vs_spy': -0.04,
+            }
+        }
+        with patch.object(self.generator, '_get_vix_level', return_value=20.0):
+            with patch.object(self.generator, '_get_correlation', return_value=0.85):
+                signal = self.generator.generate_signal(data)
+        self.assertEqual(signal.confidence_level, 'high')
+
+
 class TestInternationalMomentumGeneratorAdvanced(unittest.TestCase):
     """Additional tests for InternationalMomentumGenerator."""
 
