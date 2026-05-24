@@ -500,3 +500,90 @@ class TestEdgeCases:
         assert agg.classify_regime_signal(-0.6, 0.0) == "risk_off"
         # -0.61 IS < -0.6, so triggers extreme_risk_off
         assert agg.classify_regime_signal(-0.61, 0.0) == "extreme_risk_off"
+
+
+class TestExports:
+    """Module __all__ exports validation."""
+
+    def test_all_exports(self):
+        import src.strategy.sentiment_analyzer as mod
+        expected = {'AggregatedSentiment', 'SentimentAggregator', 'SentimentAnalyzerPipeline'}
+        assert expected.issubset(set(mod.__all__))
+
+    def test_all_exports_importable(self):
+        from src.strategy.sentiment_analyzer import (
+            AggregatedSentiment, SentimentAggregator, SentimentAnalyzerPipeline,
+        )
+        assert AggregatedSentiment is not None
+        assert SentimentAggregator is not None
+
+
+class TestAggregatedSentimentDataclass:
+    """Comprehensive dataclass field validation."""
+
+    def test_all_fields_in_to_dict(self):
+        from dataclasses import fields
+        result = AggregatedSentiment(
+            timestamp="2026-01-01", news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=0.4, composite_score=0.5, confidence=0.8,
+            smoothed_score=0.45, sentiment_momentum=0.1,
+            regime_signal="risk_on", sources_used=3, data_quality="good",
+        )
+        d = result.to_dict()
+        for f in fields(AggregatedSentiment):
+            assert f.name in d, f"Missing field: {f.name}"
+
+    def test_field_types(self):
+        result = AggregatedSentiment(
+            timestamp="2026-01-01", news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=0.4, composite_score=0.5, confidence=0.8,
+            smoothed_score=0.45, sentiment_momentum=0.1,
+            regime_signal="risk_on", sources_used=3, data_quality="good",
+        )
+        assert isinstance(result.timestamp, str)
+        assert isinstance(result.composite_score, float)
+        assert isinstance(result.confidence, float)
+        assert isinstance(result.regime_signal, str)
+        assert isinstance(result.sources_used, int)
+        assert isinstance(result.data_quality, str)
+
+    def test_to_dict_json_serializable(self):
+        result = AggregatedSentiment(
+            timestamp="2026-01-01", news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=0.4, composite_score=0.5, confidence=0.8,
+            smoothed_score=0.45, sentiment_momentum=0.1,
+            regime_signal="risk_on", sources_used=3, data_quality="good",
+        )
+        serialized = json.dumps(result.to_dict())
+        assert isinstance(serialized, str)
+
+
+class TestRegimeClassificationExtended:
+    """Extended regime classification boundary tests."""
+
+    @pytest.mark.parametrize("score,momentum,expected", [
+        (0.6, 0.0, "risk_on"),
+        (0.35, 0.0, "risk_on"),      # score > 0.3 triggers risk_on
+        (0.3, 0.0, "neutral"),        # score <= 0.3 is neutral
+        (0.29, 0.0, "neutral"),
+        (0.0, 0.0, "neutral"),
+        (-0.1, 0.0, "neutral"),
+        (-0.5, 0.0, "risk_off"),      # score < -0.3 triggers risk_off
+        (-0.6, 0.0, "risk_off"),
+        (-0.65, 0.0, "extreme_risk_off"),  # score < -0.65 triggers extreme
+    ])
+    def test_regime_boundaries(self, score, momentum, expected):
+        agg = SentimentAggregator()
+        assert agg.classify_regime_signal(score, momentum) == expected
+
+
+class TestDemo:
+    """Test demo() function."""
+
+    def test_demo_runs_without_error(self, capsys):
+        """demo() should run without raising."""
+        from src.strategy.sentiment_analyzer import demo
+        demo()
+        captured = capsys.readouterr()
+        # Demo produces some output
+        assert len(captured.out) > 0

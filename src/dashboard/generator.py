@@ -14,6 +14,12 @@ import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect
 
+__all__ = [
+    "DashboardGenerator",
+    "PUBLIC_DIR",
+    "DB_PATH",
+]
+
 logger = logging.getLogger(__name__)
 
 PUBLIC_DIR = PUBLIC_DATA_DIR

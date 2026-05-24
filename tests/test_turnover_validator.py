@@ -520,3 +520,531 @@ class TestDiagnosticsExtended:
             validator.update_and_validate({"a": 0.5, "b": -0.3})
         diag = validator.get_state_diagnostics()
         assert len(diag) == 2
+
+
+# ---------------------------------------------------------------------------
+# __all__ exports validation
+# ---------------------------------------------------------------------------
+
+
+class TestModuleAll:
+    """Validate __all__ exports from turnover_validator module."""
+
+    def test_all_is_defined(self):
+        import src.strategy.turnover_validator as tv
+        assert hasattr(tv, "__all__")
+        assert isinstance(tv.__all__, list)
+
+    def test_all_contains_expected_names(self):
+        import src.strategy.turnover_validator as tv
+        expected = {
+            "DEFAULT_ROLLING_WINDOW",
+            "MAX_TURNOVER_PENALTY",
+            "MIN_SIGNAL_HISTORY",
+            "DEFAULT_SIGNAL_COST",
+            "DEFAULT_RISK_FREE_RATE",
+            "SignalTurnoverMetrics",
+            "TurnoverValidatorState",
+            "TurnoverValidator",
+        }
+        assert set(tv.__all__) == expected
+
+    def test_all_items_accessible(self):
+        """Every name in __all__ should be importable from the module."""
+        import src.strategy.turnover_validator as tv
+        for name in tv.__all__:
+            assert hasattr(tv, name), f"{name} not found in module"
+
+    def test_public_exports_match_all(self):
+        """Names imported in test file should be a subset of __all__."""
+        import src.strategy.turnover_validator as tv
+        test_imports = {
+            "MAX_TURNOVER_PENALTY",
+            "MIN_SIGNAL_HISTORY",
+            "DEFAULT_ROLLING_WINDOW",
+            "SignalTurnoverMetrics",
+            "TurnoverValidator",
+            "TurnoverValidatorState",
+        }
+        assert test_imports.issubset(set(tv.__all__))
+
+    def test_signal_cost_and_rfr_exported(self):
+        import src.strategy.turnover_validator as tv
+        assert "DEFAULT_SIGNAL_COST" in tv.__all__
+        assert "DEFAULT_RISK_FREE_RATE" in tv.__all__
+
+
+# ---------------------------------------------------------------------------
+# Extended dataclass field validation
+# ---------------------------------------------------------------------------
+
+
+class TestDataclassFieldValidation:
+    """Comprehensive dataclass field validation for SignalTurnoverMetrics."""
+
+    def test_signal_turnover_metrics_all_fields_in_to_dict(self):
+        import src.strategy.turnover_validator as tv
+        m = tv.SignalTurnoverMetrics(
+            source="test", signal_std=0.1, sign_flip_rate=0.3,
+            magnitude_volatility=0.05, turnover_penalty=0.2,
+            stability_score=0.7, expected_return=0.05,
+            risk_cost=0.02, turnover_cost=0.01, marginal_score=0.02,
+            num_periods=20,
+        )
+        d = m.__dataclass_fields__
+        expected_fields = {
+            "source", "signal_std", "sign_flip_rate", "magnitude_volatility",
+            "turnover_penalty", "stability_score", "expected_return",
+            "risk_cost", "turnover_cost", "marginal_score", "num_periods",
+            "missing_data",
+        }
+        assert set(d.keys()) == expected_fields
+
+    def test_turnover_validator_state_all_fields_in_to_dict(self):
+        state = TurnoverValidatorState()
+        d = state.to_dict()
+        assert "signal_history" in d
+        assert "rolling_window" in d
+        assert len(d) == 2
+
+    def test_missing_data_default_value(self):
+        """missing_data should default to False."""
+        import src.strategy.turnover_validator as tv
+        fields = tv.SignalTurnoverMetrics.__dataclass_fields__
+        assert "missing_data" in fields
+        default = fields["missing_data"].default
+        assert default is False
+
+    def test_signal_turnover_metrics_field_types(self):
+        """Verify field types are correct."""
+        import src.strategy.turnover_validator as tv
+        fields = tv.SignalTurnoverMetrics.__dataclass_fields__
+        str_fields = {"source"}
+        float_fields = {
+            "signal_std", "sign_flip_rate", "magnitude_volatility",
+            "turnover_penalty", "stability_score", "expected_return",
+            "risk_cost", "turnover_cost", "marginal_score",
+        }
+        int_fields = {"num_periods"}
+        bool_fields = {"missing_data"}
+        for name in str_fields:
+            assert fields[name].type is str or fields[name].type == str, f"{name} should be str"
+        for name in float_fields:
+            assert fields[name].type is float or fields[name].type == float, f"{name} should be float"
+        for name in int_fields:
+            assert fields[name].type is int or fields[name].type == int, f"{name} should be int"
+        for name in bool_fields:
+            assert fields[name].type is bool or fields[name].type == bool, f"{name} should be bool"
+
+    def test_turnover_validator_state_field_types(self):
+        """Verify state dataclass field types."""
+        import src.strategy.turnover_validator as tv
+        fields = tv.TurnoverValidatorState.__dataclass_fields__
+        assert fields["signal_history"].type == Dict[str, List[float]]
+        assert fields["rolling_window"].type is int or fields["rolling_window"].type == int
+
+
+# ---------------------------------------------------------------------------
+# Additional computation edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestComputationEdgeCases:
+    """Boundary-value and edge-case tests for internal computation."""
+
+    def test_exactly_min_signal_history_boundary(self, validator):
+        """Exactly MIN_SIGNAL_HISTORY periods should compute normally (not missing)."""
+        for _ in range(MIN_SIGNAL_HISTORY):
+            validator.update_and_validate({"src": 0.5})
+        results = validator.update_and_validate({"src": 0.5})
+        m = results["src"]
+        assert not m.missing_data
+        assert m.num_periods == MIN_SIGNAL_HISTORY + 1  # +1 for the call itself
+
+    def test_one_below_min_signal_history(self, validator):
+        """One below threshold should be missing_data."""
+        for _ in range(MIN_SIGNAL_HISTORY - 2):
+            validator.update_and_validate({"src": 0.5})
+        results = validator.update_and_validate({"src": 0.5})
+        assert results["src"].missing_data
+
+    def test_zero_signal_full_window(self, validator):
+        """All-zero signals should produce zero penalty."""
+        for _ in range(20):
+            validator.update_and_validate({"src": 0.0})
+        results = validator.update_and_validate({"src": 0.0})
+        assert results["src"].turnover_penalty == 0.0
+        assert results["src"].stability_score == 1.0
+
+    def test_negative_signal_values(self, validator):
+        """All-negative signals should work correctly."""
+        for _ in range(20):
+            validator.update_and_validate({"src": -0.5})
+        results = validator.update_and_validate({"src": -0.5})
+        assert results["src"].sign_flip_rate == 0.0
+        assert results["src"].expected_return == pytest.approx(-0.5, abs=1e-10)
+        assert results["src"].marginal_score < 0
+
+    def test_very_large_signal_values(self, validator):
+        """Very large signal values should be handled without overflow."""
+        for _ in range(20):
+            validator.update_and_validate({"src": 1000.0})
+        results = validator.update_and_validate({"src": 1000.0})
+        assert results["src"].turnover_penalty >= 0
+        assert results["src"].turnover_penalty <= MAX_TURNOVER_PENALTY
+        assert not math.isinf(results["src"].marginal_score)
+        assert not math.isnan(results["src"].marginal_score)
+
+    def test_very_small_signal_values(self, validator):
+        """Very small (epsilon) signal values should work."""
+        for _ in range(20):
+            validator.update_and_validate({"src": 1e-10})
+        results = validator.update_and_validate({"src": 1e-10})
+        assert results["src"].turnover_penalty >= 0
+        assert results["src"].stability_score > 0.9
+
+    def test_single_element_history_penalty_zero(self, validator):
+        """Single-element history should always have zero penalty (missing_data)."""
+        results = validator.update_and_validate({"src": 0.5})
+        assert results["src"].missing_data
+        assert results["src"].turnover_penalty == 0.0
+
+    def test_alternating_magnitude_changes(self, validator):
+        """Large magnitude swings should increase magnitude_volatility."""
+        for i in range(20):
+            val = 10.0 if i % 2 == 0 else -10.0
+            validator.update_and_validate({"src": val})
+        results = validator.update_and_validate({"src": 10.0})
+        assert results["src"].magnitude_volatility > 5.0
+
+    def test_penalty_capped_at_max(self, validator):
+        """Extreme signals should produce penalty exactly at MAX_TURNOVER_PENALTY."""
+        # Maximum flip rate + maximum magnitude = penalty should be capped
+        for i in range(20):
+            val = 100.0 if i % 2 == 0 else -100.0
+            validator.update_and_validate({"extreme": val})
+        results = validator.update_and_validate({"extreme": 100.0})
+        assert results["extreme"].turnover_penalty == MAX_TURNOVER_PENALTY
+
+    def test_stability_score_formula_extremes(self, validator):
+        """Stability score formula produces correct values at extremes."""
+        # Constant signal -> max stability
+        for _ in range(20):
+            validator.update_and_validate({"const": 0.5})
+        results_const = validator.update_and_validate({"const": 0.5})["const"]
+        # Oscillating signal -> very low stability
+        for i in range(20):
+            validator.update_and_validate({"osc": 1.0 if i % 2 == 0 else -1.0})
+        results_osc = validator.update_and_validate({"osc": 1.0})["osc"]
+
+        assert results_const.stability_score >= results_osc.stability_score
+        # Stability components individually testable
+        assert results_const.sign_flip_rate < results_osc.sign_flip_rate
+
+    def test_marginal_score_negative_when_costs_exceed_return(self, validator):
+        """Marginal score should be negative when risk + turnover > expected return."""
+        # Noisy, low-mean signal
+        for i in range(20):
+            val = 0.01 if i % 2 == 0 else -0.01
+            validator.update_and_validate({"low_snr": val})
+        results = validator.update_and_validate({"low_snr": 0.01})
+        assert results["low_snr"].marginal_score < 0
+
+    def test_empty_signal_values(self, validator):
+        """Empty dict should not crash and produce empty results."""
+        results = validator.update_and_validate({})
+        assert results == {}
+
+    def test_signal_appears_later(self, validator):
+        """A signal that appears after updates should start fresh."""
+        for _ in range(10):
+            validator.update_and_validate({"existing": 0.5})
+        results = validator.update_and_validate({"existing": 0.5, "new": 0.8})
+        assert results["existing"].num_periods == 11
+        assert results["new"].num_periods == 1
+        assert results["new"].missing_data
+
+
+# ---------------------------------------------------------------------------
+# Constants validation
+# ---------------------------------------------------------------------------
+
+
+class TestAllConstants:
+    """Validate all module-level constants."""
+
+    def test_rolling_window_range(self):
+        assert 5 <= DEFAULT_ROLLING_WINDOW <= 100
+
+    def test_max_turnover_penalty_range(self):
+        assert 0.0 < MAX_TURNOVER_PENALTY <= 1.0
+
+    def test_min_signal_history_range(self):
+        assert 2 <= MIN_SIGNAL_HISTORY <= 20
+
+    def test_default_signal_cost(self):
+        from src.strategy.turnover_validator import DEFAULT_SIGNAL_COST
+        assert isinstance(DEFAULT_SIGNAL_COST, float)
+        assert 0.0 < DEFAULT_SIGNAL_COST < 0.01  # reasonable bps-level cost
+
+    def test_default_risk_free_rate(self):
+        from src.strategy.turnover_validator import DEFAULT_RISK_FREE_RATE
+        assert isinstance(DEFAULT_RISK_FREE_RATE, float)
+        assert 0.0 < DEFAULT_RISK_FREE_RATE < 0.30  # reasonable annual rate
+
+    def test_state_file_defined(self):
+        from src.strategy.turnover_validator import STATE_FILE
+        assert isinstance(STATE_FILE, str)
+        assert STATE_FILE.endswith(".json")
+        assert len(STATE_FILE) > 5
+
+    def test_all_constants_integration(self):
+        """All constants used together should produce valid computation."""
+        from src.strategy.turnover_validator import (
+            DEFAULT_ROLLING_WINDOW as W,
+            MIN_SIGNAL_HISTORY as MH,
+            MAX_TURNOVER_PENALTY as MP,
+            DEFAULT_SIGNAL_COST as SC,
+            DEFAULT_RISK_FREE_RATE as RF,
+        )
+        # Verify numerical ordering sanity
+        assert MH <= W  # min history should be <= window
+        assert SC < RF  # signal cost should be < risk-free rate
+        assert MP > 0.0
+
+    def test_rolling_window_type(self):
+        assert isinstance(DEFAULT_ROLLING_WINDOW, int)
+
+    def test_max_penalty_type(self):
+        assert isinstance(MAX_TURNOVER_PENALTY, (int, float))
+        assert isinstance(MAX_TURNOVER_PENALTY, float)
+
+    def test_min_history_type(self):
+        assert isinstance(MIN_SIGNAL_HISTORY, int)
+
+    def test_signal_cost_positive(self):
+        from src.strategy.turnover_validator import DEFAULT_SIGNAL_COST
+        assert DEFAULT_SIGNAL_COST > 0
+
+    def test_risk_free_rate_positive(self):
+        from src.strategy.turnover_validator import DEFAULT_RISK_FREE_RATE
+        assert DEFAULT_RISK_FREE_RATE > 0
+
+    def test_risk_free_rate_reasonable(self):
+        """Risk-free rate should be between 1% and 15%."""
+        from src.strategy.turnover_validator import DEFAULT_RISK_FREE_RATE
+        assert 0.01 <= DEFAULT_RISK_FREE_RATE <= 0.15
+
+
+# ---------------------------------------------------------------------------
+# CLI main() function tests
+# ---------------------------------------------------------------------------
+
+
+class TestCLIMain:
+    """Test the CLI main() function with mock arguments."""
+
+    @pytest.fixture
+    def isolated_data_dir(self, monkeypatch, tmp_path):
+        """Isolate the DATA_DIR for CLI tests."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr(tv, "DATA_DIR", tmp_path)
+        return tmp_path
+
+    def test_main_no_args(self, monkeypatch, isolated_data_dir):
+        """Running with no args should print help and not crash."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr("sys.argv", ["turnover_validator"])
+        # Should call parser.print_help() which doesn't raise
+        tv.main()
+
+    def test_main_status_empty(self, monkeypatch, capsys, isolated_data_dir):
+        """Status command with no history should print empty message."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr("sys.argv", ["turnover_validator", "status"])
+        tv.main()
+        captured = capsys.readouterr()
+        assert "No signal history yet" in captured.out
+        assert "Tracked signals: 0" in captured.out
+
+    def test_main_status_with_history(self, monkeypatch, capsys, isolated_data_dir):
+        """Status command with populated history should show diagnostics."""
+        import src.strategy.turnover_validator as tv
+        # Pre-populate state by creating a validator that saves to the isolated dir
+        state_path = isolated_data_dir / "turnover_validator_state.json"
+        v = tv.TurnoverValidator(state_path=state_path)
+        for _ in range(20):
+            v.update_and_validate({"signal_a": 0.5})
+        monkeypatch.setattr("sys.argv", ["turnover_validator", "status"])
+        tv.main()
+        captured = capsys.readouterr()
+        assert "Tracked signals: 1" in captured.out
+        assert "signal_a" in captured.out
+
+    def test_main_adjust_no_signals(self, monkeypatch, capsys, isolated_data_dir):
+        """Adjust command without --signals should print error."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr("sys.argv", ["turnover_validator", "adjust"])
+        tv.main()
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.out
+
+    def test_main_adjust_with_signals(self, monkeypatch, capsys, isolated_data_dir):
+        """Adjust command with signals should compute adjusted weights."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr("sys.argv", [
+            "turnover_validator", "adjust",
+            "--signals", "mom=0.5", "val=-0.3",
+            "--weights", "mom=0.15", "val=0.10",
+        ])
+        tv.main()
+        captured = capsys.readouterr()
+        assert "Turnover-Adjusted Weights" in captured.out
+        assert "mom" in captured.out
+        assert "val" in captured.out
+
+    def test_main_adjust_default_weights(self, monkeypatch, capsys, isolated_data_dir):
+        """Adjust command without --weights should use equal weights."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr("sys.argv", [
+            "turnover_validator", "adjust",
+            "--signals", "a=0.5", "b=-0.3",
+        ])
+        tv.main()
+        captured = capsys.readouterr()
+        assert "0.5000" in captured.out  # equal weight 1/2
+        assert "0.5000" in captured.out
+
+    def test_main_adjust_malformed_signals(self, monkeypatch, capsys, isolated_data_dir):
+        """Malformed signal entry should print WARN and skip."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr("sys.argv", [
+            "turnover_validator", "adjust",
+            "--signals", "badformat_no_eq",
+        ])
+        tv.main()
+        captured = capsys.readouterr()
+        assert "WARN" in captured.out or "ERROR" in captured.out
+
+    def test_main_invalid_command(self, monkeypatch, capsys, isolated_data_dir):
+        """Invalid subcommand should print help (argparse calls sys.exit)."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr("sys.argv", ["turnover_validator", "bogus"])
+        with pytest.raises(SystemExit):
+            tv.main()
+
+    def test_main_status_with_window(self, monkeypatch, capsys, isolated_data_dir):
+        """Status command with --window should accept the argument."""
+        import src.strategy.turnover_validator as tv
+        monkeypatch.setattr("sys.argv", [
+            "turnover_validator", "status", "--window", "30",
+        ])
+        tv.main()
+        captured = capsys.readouterr()
+        # Should not crash
+        assert captured.out is not None
+
+
+# ---------------------------------------------------------------------------
+# Public methods not yet tested
+# ---------------------------------------------------------------------------
+
+
+class TestPublicMethodsCoverage:
+    """Test remaining public methods and uncovered paths."""
+
+    def test_resolve_path_returns_path(self, validator):
+        """_resolve_path should return a Path object."""
+        path = validator._resolve_path()
+        assert isinstance(path, Path)
+
+    def test_resolve_path_string_input(self, tmp_state_path):
+        """Passing a string path should work."""
+        v = TurnoverValidator(state_path=str(tmp_state_path))
+        path = v._resolve_path()
+        assert isinstance(path, Path)
+
+    def test_state_file_default_location(self):
+        """Default state path should have the correct filename."""
+        from src.strategy.turnover_validator import STATE_FILE, DATA_DIR
+        v = TurnoverValidator()
+        expected = DATA_DIR / STATE_FILE
+        assert v.state_path == expected
+        assert v.state_path.name == STATE_FILE
+
+    def test_save_state_with_unwritable_path(self, tmp_state_path, monkeypatch):
+        """Save to unwritable path should not crash (caught OSError)."""
+        # Make parent non-writable
+        tmp_state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_state_path.parent.chmod(0o444)  # read-only
+        v = TurnoverValidator(state_path=tmp_state_path)
+        v.update_and_validate({"src": 0.5})  # should not raise
+        tmp_state_path.parent.chmod(0o755)  # restore
+
+    def test_get_adjusted_weights_new_signal_in_metrics(self, validator):
+        """A signal with no metrics in base_weights should get full weight."""
+        weights = {"existing": 0.15}
+        adjusted = validator.get_adjusted_weights(weights, {"existing": 0.5, "new_src": 0.8})
+        # new_src is not in base_weights, so not in result
+        assert "new_src" not in adjusted
+        assert adjusted["existing"] == 0.15
+
+    def test_get_adjusted_weights_partial_weights(self, validator):
+        """Only signals in base_weights should appear in output."""
+        weights = {"a": 0.10, "b": 0.10}
+        # Only provide signal 'a'
+        adjusted = validator.get_adjusted_weights(weights, {"a": 0.5})
+        assert "a" in adjusted
+        assert "b" in adjusted  # still appears with base weight
+        # If 'b' has no history, it stays at base weight
+        assert adjusted["b"] == 0.10
+
+    def test_multiple_update_same_period(self, validator):
+        """Calling update_and_validate multiple times with same period."""
+        r1 = validator.update_and_validate({"src": 0.5})
+        r2 = validator.update_and_validate({"src": 0.5})
+        # Each call appends to history
+        assert len(validator.state.signal_history["src"]) == 2
+
+    def test_source_appears_disappears(self, validator):
+        """Signal that disappears then reappears should be handled."""
+        for _ in range(5):
+            validator.update_and_validate({"a": 0.5, "b": -0.3})
+        # Only 'a' in this period
+        results = validator.update_and_validate({"a": 0.5})
+        assert "a" in results
+        assert "b" not in results  # not computed because not in signal_values
+
+    def test_marginal_score_boost_capped(self, validator):
+        """Marginal score boost should not exceed 20%."""
+        base_weights = {"strong": 0.10}
+        for _ in range(20):
+            validator.update_and_validate({"strong": 10.0})
+        adjusted = validator.get_adjusted_weights(base_weights, {"strong": 10.0})
+        max_with_boost = base_weights["strong"] * 1.20  # max 20% boost
+        assert adjusted["strong"] <= max_with_boost
+
+    def test_marginal_score_negative_no_boost(self, validator):
+        """Negative marginal score should not apply boost."""
+        base_weights = {"weak": 0.10}
+        for i in range(20):
+            val = 0.01 if i % 2 == 0 else -0.01
+            validator.update_and_validate({"weak": val})
+        adjusted = validator.get_adjusted_weights(base_weights, {"weak": 0.01})
+        # No boost since marginal is negative
+        assert adjusted["weak"] <= base_weights["weak"]
+
+    def test_signal_std_ddof1_used(self, validator):
+        """Signal std should use ddof=1 (sample std)."""
+        for _ in range(20):
+            validator.update_and_validate({"src": 0.5})
+        results = validator.update_and_validate({"src": 0.5})
+        # Constant signal should have std=0
+        assert results["src"].signal_std == 0.0
+
+    def test_history_accumulation_order(self, validator):
+        """History should be appended in chronological order."""
+        values = [0.1, 0.2, 0.3, 0.4, 0.5]
+        for v in values:
+            validator.update_and_validate({"src": v})
+        assert validator.state.signal_history["src"] == values

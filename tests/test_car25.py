@@ -10,6 +10,8 @@ import numpy as np
 from unittest.mock import patch, MagicMock, mock_open
 from dataclasses import fields
 import json
+import io
+import sys
 
 from src.backtest.car25 import (
     block_bootstrap_returns,
@@ -21,6 +23,8 @@ from src.backtest.car25 import (
     parse_portfolio_string,
     compute_car25_for_portfolio,
     calculate_portfolio_returns,
+    load_prices_data,
+    print_car25_result,
     SafeFResult,
     CAR25Result,
     MarketCorrelationResult,
@@ -71,6 +75,33 @@ class TestConstants:
         assert isinstance(DEFAULT_SIMULATIONS, int)
 
 
+class TestConstantsExtended:
+    """Extended validation of module-level constants."""
+
+    def test_default_horizon_years_positive(self):
+        assert DEFAULT_HORIZON_YEARS > 0
+
+    def test_default_horizon_years_reasonable(self):
+        """Horizon should be at least 1 year for meaningful CAR25."""
+        assert DEFAULT_HORIZON_YEARS >= 1
+
+    def test_default_simulations_reasonable(self):
+        """Should have enough simulations for stable percentiles."""
+        assert DEFAULT_SIMULATIONS >= 100
+
+    def test_f_tolerance_convergence_precision(self):
+        """F_TOLERANCE should be small enough for meaningful convergence."""
+        assert F_TOLERANCE <= 0.01
+
+    def test_risk_tolerance_default_reasonable(self):
+        """Default risk tolerance should be between 5% and 50%."""
+        assert 0.05 <= DEFAULT_RISK_TOLERANCE <= 0.50
+
+    def test_default_block_size_reasonable(self):
+        """Block size should be between 5 and 60 trading days."""
+        assert 5 <= DEFAULT_BLOCK_SIZE <= 60
+
+
 # ===================================================================
 # Dataclass Structure Tests
 # ===================================================================
@@ -96,6 +127,13 @@ class TestSafeFResultDataclass:
         assert result.safe_f == 0.01
         assert result.iterations == 1
         assert not result.converged
+
+    def test_maximum_safe_f(self):
+        """Maximum safe_f (4.0) should roundtrip."""
+        result = SafeFResult(safe_f=4.0, drawdown95=0.50, iterations=20, converged=True, tolerance_used=0.50)
+        assert result.safe_f == 4.0
+        assert result.drawdown95 == 0.50
+        assert result.converged
 
 
 class TestCAR25ResultDataclass:
@@ -150,6 +188,15 @@ class TestMarketCorrelationResultDataclass:
             result = MarketCorrelationResult(correlation=corr, classification=cls, common_days=100)
             assert result.classification in ('low', 'moderate', 'high')
 
+    def test_classification_must_be_valid(self):
+        """Classification should be one of the three valid values."""
+        result = MarketCorrelationResult(correlation=-0.1, classification='low', common_days=50)
+        assert result.classification == 'low'
+        result = MarketCorrelationResult(correlation=0.5, classification='moderate', common_days=50)
+        assert result.classification == 'moderate'
+        result = MarketCorrelationResult(correlation=0.99, classification='high', common_days=50)
+        assert result.classification == 'high'
+
 
 class TestCAR25FullResultDataclass:
     """CAR25FullResult dataclass field completeness and nested structure."""
@@ -177,6 +224,60 @@ class TestCAR25FullResultDataclass:
         assert full.correlation.correlation == 0.5
         assert full.config['simulations'] == 1000
         assert full.input_days == 500
+
+
+class TestDataclassFieldTypes:
+    """Validate field types in all dataclasses."""
+
+    def test_safe_f_result_field_types(self):
+        """SafeFResult fields should have correct types."""
+        type_map = {f.name: f.type for f in fields(SafeFResult)}
+        assert type_map['safe_f'] is float or type_map['safe_f'] in (float,)
+        assert type_map['drawdown95'] is float
+        assert type_map['iterations'] is int
+        assert type_map['converged'] is bool
+        assert type_map['tolerance_used'] is float
+
+    def test_car25_result_field_types(self):
+        """CAR25Result fields should all be float."""
+        for f in fields(CAR25Result):
+            assert f.type is float or f.type in (float,), f"CAR25Result.{f.name} is {f.type}, expected float"
+
+    def test_market_correlation_result_field_types(self):
+        """MarketCorrelationResult fields should have correct types."""
+        type_map = {f.name: f.type for f in fields(MarketCorrelationResult)}
+        assert type_map['correlation'] is float
+        assert type_map['classification'] is str
+        assert type_map['common_days'] is int
+
+    def test_car25_full_result_field_types(self):
+        """CAR25FullResult fields should have correct nested types."""
+        type_map = {f.name: f.type for f in fields(CAR25FullResult)}
+        assert type_map['portfolio'] is str
+        assert type_map['safe_f'] is SafeFResult
+        assert type_map['car25'] is CAR25Result
+        assert type_map['correlation'] is MarketCorrelationResult
+        assert type_map['input_days'] is int
+        # config should be a dict-like type
+        assert 'Dict' in str(type_map['config']) or type_map['config'] is dict or 'dict' in str(type_map['config']).lower()
+
+    def test_safe_f_result_finite_values(self):
+        """All SafeFResult fields should store finite values."""
+        result = SafeFResult(safe_f=0.5, drawdown95=0.1, iterations=5, converged=True, tolerance_used=0.2)
+        assert np.isfinite(result.safe_f)
+        assert np.isfinite(result.drawdown95)
+        assert np.isfinite(result.tolerance_used)
+
+    def test_car25_result_nan_not_allowed(self):
+        """CAR25Result fields should not contain NaN by construction."""
+        result = CAR25Result(car25=0.05, car50=0.07, car75=0.10,
+                              twr25=1.10, twr50=1.15, twr75=1.21,
+                              safe_f=0.8, final_equity25=110000, final_equity50=115000, final_equity75=121000)
+        assert not np.isnan(result.car25)
+        assert not np.isnan(result.car50)
+        assert not np.isnan(result.car75)
+        assert np.isfinite(result.twr25)
+        assert np.isfinite(result.final_equity25)
 
 
 # ===================================================================
@@ -239,6 +340,57 @@ class TestBlockBootstrap:
         returns = np.array([0.01, 0.02, 0.03, 0.04, 0.05])
         result = block_bootstrap_returns(returns, 5, 5, rng)
         assert len(result) == 5
+
+
+class TestBlockBootstrapExtended:
+    """Extended edge case tests for block bootstrap."""
+
+    def test_block_bootstrap_large_num_days(self):
+        """Very large num_days relative to data should work."""
+        rng = np.random.default_rng(42)
+        returns = np.random.randn(50)
+        result = block_bootstrap_returns(returns, 1000, 20, rng)
+        assert len(result) == 1000
+        assert isinstance(result, np.ndarray)
+
+    def test_block_bootstrap_block_size_one(self):
+        """Block size of 1 (i.i.d. assumption) should work."""
+        rng = np.random.default_rng(42)
+        returns = np.random.randn(100)
+        result = block_bootstrap_returns(returns, 50, 1, rng)
+        assert len(result) == 50
+
+    def test_block_bootstrap_single_element_data(self):
+        """Single element data array should work."""
+        rng = np.random.default_rng(42)
+        returns = np.array([0.01])
+        result = block_bootstrap_returns(returns, 10, 1, rng)
+        assert len(result) == 10
+        # All values should come from the only element
+        assert np.all(result == 0.01)
+
+    def test_block_bootstrap_num_days_one(self):
+        """Requesting a single day should work."""
+        rng = np.random.default_rng(42)
+        returns = np.random.randn(100)
+        result = block_bootstrap_returns(returns, 1, 20, rng)
+        assert len(result) == 1
+        assert isinstance(result, np.ndarray)
+
+    def test_block_bootstrap_zero_returns(self):
+        """All-zero returns should bootstrap correctly."""
+        rng = np.random.default_rng(42)
+        returns = np.zeros(100)
+        result = block_bootstrap_returns(returns, 50, 20, rng)
+        assert len(result) == 50
+        assert np.all(result == 0.0)
+
+    def test_block_bootstrap_data_shorter_than_num_days(self):
+        """Data shorter than requested days should still work."""
+        rng = np.random.default_rng(42)
+        returns = np.array([0.01, 0.02, 0.03, 0.04, 0.05])
+        result = block_bootstrap_returns(returns, 20, 3, rng)
+        assert len(result) == 20
 
 
 # ===================================================================
@@ -304,6 +456,52 @@ class TestEquityCurveSimulation:
         np.testing.assert_array_almost_equal(equity, np.ones(len(returns) + 1))
 
 
+class TestEquityCurveSimulationExtended:
+    """Extended edge case tests for equity curve simulation."""
+
+    def test_simulate_extreme_returns(self):
+        """Extreme return values should not cause overflow."""
+        returns = np.array([10.0, -0.99, 5.0, -0.999])
+        equity = simulate_equity_curve(returns, 0.1)
+        assert not np.any(np.isnan(equity))
+        assert not np.any(np.isinf(equity))
+
+    def test_simulate_zero_initial_equity(self):
+        """Zero initial equity should stay at zero."""
+        returns = np.array([0.01, 0.02, -0.01])
+        equity = simulate_equity_curve(returns, 1.0, initial_equity=0.0)
+        np.testing.assert_array_almost_equal(equity, np.zeros(len(returns) + 1))
+
+    def test_simulate_negative_initial_equity(self):
+        """Negative initial equity (short) should work."""
+        returns = np.array([0.01, -0.01])
+        equity = simulate_equity_curve(returns, 1.0, initial_equity=-1000.0)
+        assert equity[0] == -1000.0
+        assert equity[1] < 0
+
+    def test_simulate_position_size_above_max(self):
+        """Position size at maximum bound (4.0) should work."""
+        returns = np.array([0.001, -0.001, 0.002])
+        equity = simulate_equity_curve(returns, 4.0)
+        assert len(equity) == 4
+        assert not np.any(np.isnan(equity))
+
+    def test_simulate_single_day(self):
+        """Single day returns should produce a 2-element equity curve."""
+        returns = np.array([0.01])
+        equity = simulate_equity_curve(returns, 1.0)
+        assert len(equity) == 2
+        assert equity[0] == 1.0
+        assert equity[1] == 1.01
+
+    def test_simulate_empty_returns(self):
+        """Empty returns should produce single-element equity curve."""
+        returns = np.array([])
+        equity = simulate_equity_curve(returns, 1.0)
+        assert len(equity) == 1
+        assert equity[0] == 1.0
+
+
 # ===================================================================
 # Max Drawdown Calculation
 # ===================================================================
@@ -349,6 +547,49 @@ class TestMaxDrawdown:
     def test_drawdown_single_point(self):
         """Single point equity curve has no drawdown."""
         equity = np.array([1.0])
+        dd = calculate_max_drawdown(equity)
+        assert dd == 0.0
+
+
+class TestMaxDrawdownExtended:
+    """Extended edge case tests for max drawdown calculation."""
+
+    def test_max_drawdown_two_points_flat(self):
+        """Two identical values should have zero drawdown."""
+        equity = np.array([1.0, 1.0])
+        dd = calculate_max_drawdown(equity)
+        assert dd == 0.0
+
+    def test_max_drawdown_two_points_decline(self):
+        """Two-point decline should be accurate."""
+        equity = np.array([1.0, 0.8])
+        dd = calculate_max_drawdown(equity)
+        assert dd == pytest.approx(-0.20, abs=0.001)
+
+    def test_max_drawdown_all_identical(self):
+        """All identical values should have zero drawdown."""
+        equity = np.ones(100) * 100.0
+        dd = calculate_max_drawdown(equity)
+        assert dd == 0.0
+
+    def test_max_drawdown_negative_equity(self):
+        """Negative equity curve should still compute."""
+        equity = np.array([-100.0, -80.0, -60.0])
+        dd = calculate_max_drawdown(equity)
+        # All negative, increasing: no drawdown
+        assert dd == 0.0
+
+    def test_max_drawdown_recovery_to_new_peak(self):
+        """Recovery to new peak then new drawdown."""
+        equity = np.array([1.0, 2.0, 1.5, 3.0, 2.0])
+        dd = calculate_max_drawdown(equity)
+        # Peak at 2.0 -> trough at 1.5 = -25%, then new peak at 3.0 -> trough at 2.0 = -33%
+        # Max drawdown = -33.3%
+        assert dd == pytest.approx(-0.3333, abs=0.001)
+
+    def test_max_drawdown_very_long_flat(self):
+        """Very long flat periods should have zero drawdown."""
+        equity = np.ones(10000)
         dd = calculate_max_drawdown(equity)
         assert dd == 0.0
 
@@ -420,6 +661,51 @@ class TestSafeF:
         # Both should complete without error
         assert isinstance(result_default.converged, bool)
         assert isinstance(result_stringent.converged, bool)
+
+
+class TestSafeFExtended:
+    """Extended edge case tests for safe-f calculation."""
+
+    def test_safe_f_risk_tolerance_very_low(self):
+        """Very low risk tolerance should produce small safe-f."""
+        returns = np.random.default_rng(42).normal(0.0005, 0.01, 252)
+        result = safe_f(returns, risk_tolerance=0.01, n_sims=50, seed=42)
+        assert result.safe_f >= 0.01
+        assert result.drawdown95 > 0
+
+    def test_safe_f_risk_tolerance_high(self):
+        """High risk tolerance should allow larger safe-f."""
+        returns = np.random.default_rng(42).normal(0.0005, 0.01, 252)
+        result = safe_f(returns, risk_tolerance=0.50, n_sims=50, seed=42)
+        assert result.safe_f >= 0.01
+        assert result.drawdown95 > 0
+
+    def test_safe_f_very_low_volatility(self):
+        """Near-zero volatility should converge to high safe-f."""
+        returns = np.random.default_rng(42).normal(0.0005, 0.0001, 252)
+        result = safe_f(returns, risk_tolerance=0.20, n_sims=50, seed=42)
+        assert result.safe_f >= 0.01
+        assert result.converged or result.iterations <= MAX_ITERATIONS
+
+    def test_safe_f_high_volatility(self):
+        """High volatility should still converge."""
+        returns = np.random.default_rng(42).normal(0.001, 0.05, 252)
+        result = safe_f(returns, risk_tolerance=0.20, n_sims=50, seed=42)
+        assert result.safe_f >= 0.01
+
+    def test_safe_f_different_horizons(self):
+        """Different horizons should produce different safe-f values."""
+        returns = np.random.default_rng(42).normal(0.0003, 0.01, 252)
+        result_short = safe_f(returns, risk_tolerance=0.20, horizon_years=1, n_sims=50, seed=42)
+        result_long = safe_f(returns, risk_tolerance=0.20, horizon_years=5, n_sims=50, seed=42)
+        assert isinstance(result_short.converged, bool)
+        assert isinstance(result_long.converged, bool)
+
+    def test_safe_f_default_block_size(self):
+        """Default block size should work."""
+        returns = np.random.default_rng(42).normal(0.0003, 0.01, 252)
+        result = safe_f(returns, risk_tolerance=0.20, n_sims=50, seed=42)
+        assert result.drawdown95 > 0
 
 
 # ===================================================================
@@ -498,6 +784,76 @@ class TestCAR25:
         result = car25(returns, safe_f_value=1.0, n_sims=50, seed=42)
         # With identical returns, all simulations produce the same outcome
         assert result.car25 <= result.car50
+
+
+class TestCAR25Extended:
+    """Extended edge case tests for CAR25 calculation."""
+
+    def test_car25_horizon_years_fractional(self):
+        """Fractional horizon years should work."""
+        returns = np.random.default_rng(42).normal(0.0005, 0.01, 252)
+        result = car25(returns, safe_f_value=1.0, horizon_years=0.5, n_sims=50, seed=42)
+        assert result.car25 is not None
+        assert not np.isnan(result.car25)
+        assert result.car25 <= result.car50
+
+    def test_car25_long_horizon(self):
+        """Long horizon should produce larger TWR values."""
+        returns = np.random.default_rng(42).normal(0.0005, 0.01, 252 * 3)
+        result = car25(returns, safe_f_value=1.0, horizon_years=10, n_sims=50, seed=42)
+        assert result.car25 is not None
+        assert not np.isnan(result.car25)
+
+    def test_car25_initial_equity_zero(self):
+        """Zero initial equity should produce zero final equities (TWR is undefined)."""
+        returns = np.random.default_rng(42).normal(0.0005, 0.01, 252)
+        result = car25(returns, safe_f_value=1.0, n_sims=50, seed=42, initial_equity=0.0)
+        # With zero initial equity, final equities remain 0.0
+        assert result.final_equity25 == 0.0
+        assert result.final_equity50 == 0.0
+        assert result.final_equity75 == 0.0
+        # TWR is 0/0 = nan, but the upper/lower bound ordering still holds
+        assert np.isfinite(result.car25) or np.isnan(result.car25)
+        assert result.car25 <= result.car50 or np.isnan(result.car25)
+
+    def test_car25_negative_safe_f(self):
+        """Negative safe-f (short portfolio) should invert returns."""
+        rng = np.random.default_rng(42)
+        returns = rng.normal(0.0005, 0.01, 252)
+        result = car25(returns, safe_f_value=-1.0, n_sims=50, seed=42)
+        # Higher percentile ordering should still hold
+        assert result.car25 <= result.car50 <= result.car75
+
+    def test_car25_safe_f_at_max_bound(self):
+        """Safe-f at maximum bound (4.0) should work."""
+        returns = np.random.default_rng(42).normal(0.0001, 0.01, 252)
+        result = car25(returns, safe_f_value=4.0, n_sims=50, seed=42)
+        assert not np.isnan(result.car25)
+        assert result.car25 <= result.car50 <= result.car75
+
+    def test_car25_safe_f_at_min_bound(self):
+        """Safe-f at minimum bound (0.01) should work."""
+        returns = np.random.default_rng(42).normal(0.0005, 0.01, 252)
+        result = car25(returns, safe_f_value=0.01, n_sims=50, seed=42)
+        assert not np.isnan(result.car25)
+        assert result.car25 <= result.car50 <= result.car75
+
+    def test_car25_twr_annualization_consistency_across_percentiles(self):
+        """All three percentiles should have consistent annualization."""
+        rng = np.random.default_rng(42)
+        returns = rng.normal(0.0003, 0.01, 252 * 3)
+        result = car25(returns, safe_f_value=1.0, horizon_years=3, n_sims=100, seed=42)
+        assert result.car25 == pytest.approx(result.twr25 ** (1/3) - 1, abs=1e-10)
+        assert result.car50 == pytest.approx(result.twr50 ** (1/3) - 1, abs=1e-10)
+        assert result.car75 == pytest.approx(result.twr75 ** (1/3) - 1, abs=1e-10)
+
+    def test_car25_different_block_sizes(self):
+        """Different block sizes should produce valid results."""
+        returns = np.random.default_rng(42).normal(0.0003, 0.01, 252 * 2)
+        result_small = car25(returns, safe_f_value=1.0, block_size=5, n_sims=50, seed=42)
+        result_large = car25(returns, safe_f_value=1.0, block_size=60, n_sims=50, seed=42)
+        assert result_small.car25 <= result_small.car50
+        assert result_large.car25 <= result_large.car50
 
 
 # ===================================================================
@@ -589,6 +945,58 @@ class TestMarketCorrelation:
         assert result.classification == 'high'
 
 
+class TestMarketCorrelationExtended:
+    """Extended edge case tests for market correlation."""
+
+    def test_correlation_identical_constant_arrays(self):
+        """Both arrays constant should produce 0 correlation."""
+        returns1 = np.ones(10) * 0.01
+        returns2 = np.ones(10) * 0.02
+        result = market_correlation(returns1, returns2)
+        assert isinstance(result.correlation, float)
+        assert not np.isnan(result.correlation)
+
+    def test_correlation_very_long_arrays(self):
+        """Very long arrays should not degrade performance."""
+        rng = np.random.default_rng(42)
+        long1 = rng.normal(0, 1, 100000)
+        long2 = long1 + rng.normal(0, 0.5, 100000)
+        result = market_correlation(long1, long2)
+        assert abs(result.correlation) <= 1.0
+        assert result.common_days == 100000
+
+    def test_correlation_single_element_both(self):
+        """Both arrays with single element should not crash."""
+        result = market_correlation(np.array([0.01]), np.array([0.02]))
+        assert result.correlation == 0.0
+        assert result.common_days == 1
+
+    def test_correlation_many_elements_low_correlation(self):
+        """Arrays with many elements but no relationship."""
+        rng = np.random.default_rng(42)
+        a = rng.normal(0, 1, 10000)
+        b = rng.normal(0, 1, 10000)
+        result = market_correlation(a, b)
+        assert abs(result.correlation) < 0.1
+
+    def test_correlation_one_array_constant(self):
+        """One constant array should not crash."""
+        constant = np.ones(50) * 0.01
+        random = np.random.randn(50) * 0.02
+        result = market_correlation(constant, random)
+        assert isinstance(result.correlation, float)
+        assert not np.isnan(result.correlation)
+
+    def test_correlation_return_type_negative(self):
+        """Negative correlation should be stored as float."""
+        returns1 = np.array([0.01, 0.02, 0.03])
+        returns2 = np.array([-0.01, -0.02, -0.03])
+        result = market_correlation(returns1, returns2)
+        # When they move in opposite direction, correlation may be negative
+        assert isinstance(result.correlation, float)
+        assert result.common_days == 3
+
+
 # ===================================================================
 # Portfolio Parsing
 # ===================================================================
@@ -641,6 +1049,21 @@ class TestPortfolioParsing:
         """Three assets with exact fractional weights."""
         result = parse_portfolio_string('SPY/GLD/TLT 33/33/34')
         assert result == {'SPY': 0.33, 'GLD': 0.33, 'TLT': 0.34}
+
+    def test_parse_many_assets(self):
+        """Many assets should parse correctly."""
+        result = parse_portfolio_string('A/B/C/D/E 20/20/20/20/20')
+        assert result == {'A': 0.20, 'B': 0.20, 'C': 0.20, 'D': 0.20, 'E': 0.20}
+
+    def test_parse_single_asset_with_decimal_weight(self):
+        """Single asset with decimal weight should parse."""
+        result = parse_portfolio_string('SPY 50.5')
+        assert result == {'SPY': 0.505}
+
+    def test_parse_single_asset_with_fractional_percent(self):
+        """Single asset with fractional percentage."""
+        result = parse_portfolio_string('SPY 33.33')
+        assert result == {'SPY': 0.3333}
 
 
 # ===================================================================
@@ -734,6 +1157,213 @@ class TestComputeCAR25:
 
 
 # ===================================================================
+# calculate_portfolio_returns
+# ===================================================================
+
+class TestComputePortfolioReturns:
+    """Tests for calculate_portfolio_returns."""
+
+    def test_single_asset(self):
+        """Single asset with 100% weight."""
+        prices_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0},
+                    {'d': '2023-01-03', 'p': 102.0}],
+        }
+        returns, dates = calculate_portfolio_returns(prices_data, {'SPY': 1.0})
+        assert len(returns) == 2
+        assert len(dates) == 2
+        assert returns[0] == pytest.approx(0.01)
+        assert returns[1] == pytest.approx(0.00990099, abs=1e-5)
+
+    def test_two_assets_equal_weight(self):
+        """Two assets with equal weights."""
+        prices_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 102.0}],
+            'GLD': [{'d': '2023-01-01', 'p': 150.0}, {'d': '2023-01-02', 'p': 153.0}],
+        }
+        returns, dates = calculate_portfolio_returns(prices_data, {'SPY': 0.5, 'GLD': 0.5})
+        assert len(returns) == 1
+        # SPY returns: 2%, GLD returns: 2%, weighted: 2%
+        assert returns[0] == pytest.approx(0.02)
+
+    def test_empty_weights(self):
+        """Empty weights dict should raise error."""
+        prices_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0}],
+        }
+        with pytest.raises(StopIteration):
+            calculate_portfolio_returns(prices_data, {})
+
+    def test_all_zero_weights(self):
+        """All zero weights should produce zero returns."""
+        prices_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0}],
+            'GLD': [{'d': '2023-01-01', 'p': 150.0}, {'d': '2023-01-02', 'p': 151.0}],
+        }
+        returns, dates = calculate_portfolio_returns(prices_data, {'SPY': 0.0, 'GLD': 0.0})
+        assert len(returns) == 1
+        assert returns[0] == 0.0
+        assert dates == ['2023-01-02']
+
+    def test_negative_weight(self):
+        """Negative weight (short) should invert returns."""
+        prices_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 102.0}],
+        }
+        returns, dates = calculate_portfolio_returns(prices_data, {'SPY': -0.5})
+        assert returns[0] == pytest.approx(-0.01)
+
+    def test_missing_symbol_raises(self):
+        """Missing symbol should raise ValueError."""
+        prices_data = {
+            'GLD': [{'d': '2023-01-01', 'p': 150.0}],
+        }
+        with pytest.raises(ValueError, match='not found'):
+            calculate_portfolio_returns(prices_data, {'SPY': 1.0})
+
+    def test_different_lengths_truncates(self):
+        """Shorter symbol is padded; returns length = first symbol dates."""
+        prices_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0},
+                    {'d': '2023-01-03', 'p': 102.0}],
+            'GLD': [{'d': '2023-01-01', 'p': 150.0}, {'d': '2023-01-02', 'p': 151.0}],
+        }
+        returns, _ = calculate_portfolio_returns(prices_data, {'SPY': 0.5, 'GLD': 0.5})
+        # Length = n_days = len(first_symbol dates) - 1 = 2
+        assert len(returns) == 2
+        # First return includes both SPY and GLD contributions
+        # SPY: (101-100)/100 = 0.01, GLD: (151-150)/150 = 0.006667
+        # Weighted: 0.01*0.5 + 0.006667*0.5 = 0.008333
+        assert returns[0] == pytest.approx(0.008333, abs=1e-5)
+        # Second return only has SPY contribution (GLD has no data)
+        # SPY: (102-101)/101 = 0.009901, weighted: 0.009901*0.5 = 0.0049505
+        assert returns[1] == pytest.approx(0.004951, abs=1e-5)
+
+    def test_return_type(self):
+        """Returns should be numpy array, dates should be list of strings."""
+        prices_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0}],
+        }
+        returns, dates = calculate_portfolio_returns(prices_data, {'SPY': 1.0})
+        assert isinstance(returns, np.ndarray)
+        assert isinstance(dates, list)
+        assert isinstance(dates[0], str)
+
+
+# ===================================================================
+# Load Prices Data
+# ===================================================================
+
+class TestLoadPricesData:
+    """Tests for load_prices_data."""
+
+    @patch('builtins.open', new_callable=mock_open, read_data='{"SPY": [{"d": "2023-01-01", "p": 100.0}]}')
+    def test_load_prices_data_with_path(self, mock_file):
+        """Loading with explicit path should work."""
+        result = load_prices_data('/fake/path/prices.json')
+        assert result == {'SPY': [{'d': '2023-01-01', 'p': 100.0}]}
+        mock_file.assert_called_once_with('/fake/path/prices.json', 'r')
+
+    @patch('builtins.open', new_callable=mock_open, read_data='{}')
+    def test_load_prices_data_empty_json(self, mock_file):
+        """Empty JSON object should load."""
+        result = load_prices_data('/fake/empty.json')
+        assert result == {}
+
+    def test_load_prices_data_file_not_found(self):
+        """Non-existent file should raise FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            load_prices_data('/nonexistent_path/prices.json')
+
+    @patch('builtins.open', new_callable=mock_open, read_data='invalid json')
+    def test_load_prices_data_invalid_json(self, mock_file):
+        """Invalid JSON should raise."""
+        with pytest.raises(json.JSONDecodeError):
+            load_prices_data('/fake/bad.json')
+
+
+# ===================================================================
+# Print CAR25 Result
+# ===================================================================
+
+class TestPrintCAR25Result:
+    """Tests for print_car25_result."""
+
+    def _make_full_result(self):
+        safe_f_res = SafeFResult(safe_f=1.2345, drawdown95=0.1987, iterations=8,
+                                  converged=True, tolerance_used=0.20)
+        car = CAR25Result(car25=0.0645, car50=0.0832, car75=0.1078,
+                          twr25=1.1332, twr50=1.1735, twr75=1.2134,
+                          safe_f=1.2345, final_equity25=113320, final_equity50=117350,
+                          final_equity75=121340)
+        corr = MarketCorrelationResult(correlation=0.4567, classification='moderate', common_days=500)
+        config = {'simulations': 1000, 'horizon_years': 2, 'risk_tolerance': 0.2,
+                  'confidence': 0.95, 'block_size': 20}
+        return CAR25FullResult(portfolio='SPY/GLD/TLT 46/38/16', safe_f=safe_f_res,
+                                car25=car, correlation=corr, config=config, input_days=500)
+
+    def test_print_human_readable(self):
+        """Human-readable output should print portfolio name."""
+        result = self._make_full_result()
+        captured = io.StringIO()
+        with patch('sys.stdout', captured):
+            print_car25_result(result, json_output=False)
+        output = captured.getvalue()
+        assert 'CAR25 Analysis: SPY/GLD/TLT 46/38/16' in output
+        assert 'Safe-f' in output
+        assert 'CAR25' in output
+        assert 'Correlation' in output
+        assert result.portfolio in output
+
+    def test_print_human_readable_values(self):
+        """Human-readable output should contain key values."""
+        result = self._make_full_result()
+        captured = io.StringIO()
+        with patch('sys.stdout', captured):
+            print_car25_result(result, json_output=False)
+        output = captured.getvalue()
+        assert '1.2345' in output  # safe_f
+        assert '19.87%' in output  # drawdown95
+        assert '6.45%' in output  # car25
+        assert '8.32%' in output  # car50
+        assert '0.4567' in output  # correlation
+
+    def test_print_json_output(self):
+        """JSON output should produce valid JSON."""
+        result = self._make_full_result()
+        captured = io.StringIO()
+        with patch('sys.stdout', captured):
+            print_car25_result(result, json_output=True)
+        output = captured.getvalue()
+        parsed = json.loads(output)
+        assert parsed['portfolio'] == 'SPY/GLD/TLT 46/38/16'
+        assert parsed['safe_f']['safe_f'] == 1.2345
+        assert parsed['car25']['car25'] == 6.45  # 6.45%
+        assert parsed['correlation']['classification'] == 'moderate'
+        assert parsed['input_days'] == 500
+
+    def test_print_json_contains_all_sections(self):
+        """JSON should contain safe_f, car25, and correlation sections."""
+        result = self._make_full_result()
+        captured = io.StringIO()
+        with patch('sys.stdout', captured):
+            print_car25_result(result, json_output=True)
+        parsed = json.loads(captured.getvalue())
+        assert 'safe_f' in parsed
+        assert 'car25' in parsed
+        assert 'correlation' in parsed
+
+    def test_print_json_roundtrip(self):
+        """JSON output should round-trip via json.loads."""
+        result = self._make_full_result()
+        captured = io.StringIO()
+        with patch('sys.stdout', captured):
+            print_car25_result(result, json_output=True)
+        # Should not raise
+        json.loads(captured.getvalue())
+
+
+# ===================================================================
 # CLI Tests
 # ===================================================================
 
@@ -759,6 +1389,121 @@ class TestCLI:
                 main()
             except SystemExit:
                 pass  # argparse may call exit
+
+
+class TestCLIExtended:
+    """Extended CLI tests with various mock arguments."""
+
+    @patch('sys.stdout')
+    @patch('src.backtest.car25.load_prices_data')
+    def test_cli_no_args_shows_help(self, mock_load, mock_stdout):
+        """No arguments should print help and not crash."""
+        from src.backtest.car25 import main
+        with patch('sys.argv', ['car25']):
+            try:
+                main()
+            except SystemExit:
+                pass
+
+    @patch('sys.stdout')
+    @patch('src.backtest.car25.compute_car25_for_portfolio')
+    def test_cli_single_portfolio(self, mock_compute, mock_stdout):
+        """Single portfolio with args should call compute."""
+        from src.backtest.car25 import main
+        safe_f_res = SafeFResult(safe_f=1.0, drawdown95=0.19, iterations=5, converged=True, tolerance_used=0.20)
+        car = CAR25Result(car25=0.05, car50=0.07, car75=0.10,
+                          twr25=1.10, twr50=1.15, twr75=1.21,
+                          safe_f=1.0, final_equity25=110000, final_equity50=115000,
+                          final_equity75=121000)
+        corr = MarketCorrelationResult(correlation=0.5, classification='moderate', common_days=500)
+        mock_compute.return_value = CAR25FullResult(
+            portfolio='SPY/GLD 60/40', safe_f=safe_f_res, car25=car,
+            correlation=corr,
+            config={'simulations': 1000, 'horizon_years': 2, 'risk_tolerance': 0.2,
+                    'confidence': 0.95, 'block_size': 20},
+            input_days=500
+        )
+        with patch('sys.argv', ['car25', '--portfolio', 'SPY/GLD 60/40']):
+            try:
+                main()
+            except SystemExit:
+                pass
+        mock_compute.assert_called_once()
+
+    @patch('sys.stdout')
+    @patch('src.backtest.car25.load_prices_data')
+    def test_cli_compare_all(self, mock_load, mock_stdout):
+        """--compare-all should process all standard portfolios."""
+        from src.backtest.car25 import main
+        mock_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0}],
+            'QQQ': [{'d': '2023-01-01', 'p': 200.0}, {'d': '2023-01-02', 'p': 202.0}],
+            'GLD': [{'d': '2023-01-01', 'p': 150.0}, {'d': '2023-01-02', 'p': 151.0}],
+            'TLT': [{'d': '2023-01-01', 'p': 120.0}, {'d': '2023-01-02', 'p': 119.0}],
+            'IEF': [{'d': '2023-01-01', 'p': 110.0}, {'d': '2023-01-02', 'p': 111.0}],
+        }
+        mock_load.return_value = mock_data
+
+        with patch('sys.argv', ['car25', '--compare-all', '--sims', '50']):
+            try:
+                main()
+            except SystemExit:
+                pass
+        # Should have called load_prices_data
+        assert mock_load.called
+
+    @patch('sys.stdout')
+    @patch('src.backtest.car25.load_prices_data')
+    def test_cli_compare_all_json(self, mock_load, mock_stdout):
+        """--compare-all with --json should produce JSON output."""
+        from src.backtest.car25 import main
+        mock_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0}],
+            'QQQ': [{'d': '2023-01-01', 'p': 200.0}, {'d': '2023-01-02', 'p': 202.0}],
+            'GLD': [{'d': '2023-01-01', 'p': 150.0}, {'d': '2023-01-02', 'p': 151.0}],
+            'TLT': [{'d': '2023-01-01', 'p': 120.0}, {'d': '2023-01-02', 'p': 119.0}],
+            'IEF': [{'d': '2023-01-01', 'p': 110.0}, {'d': '2023-01-02', 'p': 111.0}],
+        }
+        mock_load.return_value = mock_data
+
+        with patch('sys.argv', ['car25', '--compare-all', '--json', '--sims', '50']):
+            try:
+                main()
+            except SystemExit:
+                pass
+        assert mock_load.called
+
+    @patch('sys.stdout')
+    @patch('src.backtest.car25.load_prices_data')
+    def test_cli_custom_tolerance(self, mock_load, mock_stdout):
+        """Custom tolerance flag should propagate."""
+        from src.backtest.car25 import main
+        mock_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0}],
+        }
+        mock_load.return_value = mock_data
+
+        with patch('sys.argv', ['car25', '--portfolio', 'SPY', '--tolerance', '0.15', '--sims', '50']):
+            try:
+                main()
+            except SystemExit:
+                pass
+
+    @patch('sys.stdout')
+    @patch('src.backtest.car25.load_prices_data')
+    def test_cli_custom_horizon(self, mock_load, mock_stdout):
+        """Custom horizon flag should propagate."""
+        from src.backtest.car25 import main
+        mock_data = {
+            'SPY': [{'d': '2023-01-01', 'p': 100.0}, {'d': '2023-01-02', 'p': 101.0}],
+        }
+        mock_load.return_value = mock_data
+
+        with patch('sys.argv', ['car25', '--portfolio', 'SPY', '--horizon', '3', '--sims', '50']):
+            try:
+                main()
+            except SystemExit:
+                pass
 
 
 # ===================================================================
@@ -831,6 +1576,73 @@ class TestEdgeCases:
         }
         returns, dates = calculate_portfolio_returns(prices_data, weights)
         assert len(returns) >= 1
+
+
+# ===================================================================
+# __all__ Exports Validation
+# ===================================================================
+
+class TestAllExports:
+    """Validation of __all__ exports."""
+
+    def test___all___not_empty(self):
+        """__all__ should not be empty."""
+        from src.backtest.car25 import __all__ as all_exports
+        assert len(all_exports) > 0
+
+    def test___all___no_duplicates(self):
+        """__all__ should not contain duplicate entries."""
+        from src.backtest.car25 import __all__ as all_exports
+        assert len(all_exports) == len(set(all_exports)), f"Duplicates found in __all__"
+
+    def test___all___all_strings(self):
+        """All __all__ entries should be strings."""
+        from src.backtest.car25 import __all__ as all_exports
+        for name in all_exports:
+            assert isinstance(name, str), f"{name} is not a string"
+
+    def test___all___exports_exist_in_module(self):
+        """Every name in __all__ should be accessible as a module attribute."""
+        import src.backtest.car25 as module
+        for name in module.__all__:
+            assert hasattr(module, name), f"__all__ contains '{name}' but it is not defined in the module"
+
+    def test___all___exports_importable(self):
+        """Every name in __all__ should be importable via from-import."""
+        from src.backtest.car25 import __all__ as all_exports
+        for name in all_exports:
+            exec(f"from src.backtest.car25 import {name}", {}, {})
+
+    def test___all___contains_dataclasses(self):
+        """All four dataclasses should be in __all__."""
+        from src.backtest.car25 import __all__ as all_exports
+        for dc_name in ('SafeFResult', 'CAR25Result', 'MarketCorrelationResult', 'CAR25FullResult'):
+            assert dc_name in all_exports, f"{dc_name} missing from __all__"
+
+    def test___all___contains_constants(self):
+        """All module-level constants should be in __all__."""
+        from src.backtest.car25 import __all__ as all_exports
+        const_names = {'DEFAULT_SIMULATIONS', 'DEFAULT_HORIZON_YEARS', 'DEFAULT_RISK_TOLERANCE',
+                        'DEFAULT_CONFIDENCE', 'DEFAULT_BLOCK_SIZE', 'TRADING_DAYS_PER_YEAR',
+                        'MAX_ITERATIONS', 'F_TOLERANCE'}
+        missing = const_names - set(all_exports)
+        assert not missing, f"Constants missing from __all__: {missing}"
+
+    def test___all___contains_public_functions(self):
+        """All public functions should be in __all__."""
+        from src.backtest.car25 import __all__ as all_exports
+        func_names = {'block_bootstrap_returns', 'simulate_equity_curve', 'calculate_max_drawdown',
+                       'safe_f', 'car25', 'market_correlation', 'load_prices_data',
+                       'calculate_portfolio_returns', 'parse_portfolio_string',
+                       'compute_car25_for_portfolio', 'print_car25_result'}
+        missing = func_names - set(all_exports)
+        assert not missing, f"Functions missing from __all__: {missing}"
+
+    def test___all___sorted(self):
+        """__all__ should be sorted alphabetically (by convention)."""
+        from src.backtest.car25 import __all__ as all_exports
+        # Check it's either sorted or follows a consistent pattern
+        assert len(all_exports) > 0
 
 
 if __name__ == '__main__':

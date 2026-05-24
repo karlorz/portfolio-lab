@@ -5,6 +5,8 @@ Tests for Bayesian Adaptive Volatility Model (v5.20)
 import pytest
 import numpy as np
 import math
+import sys
+from unittest.mock import patch
 from src.monitor.bayesian_vol import (
     BayesianVolModel, BayesianVolPipeline, BayesianVolEstimate,
     estimate_bayesian_vol,
@@ -358,3 +360,223 @@ class TestBayesianVolPipelineMoreExtended:
         pipeline.OUTPUT_DIR = tmp_path
         pipeline.save_estimate(result)
         assert (tmp_path / "TESTDIR_bayesian_vol.json").exists()
+
+
+class TestExports:
+    """Module __all__ exports validation."""
+
+    def test_all_exports(self):
+        import src.monitor.bayesian_vol as mod
+        expected = {'BayesianVolEstimate', 'BayesianVolModel', 'BayesianVolPipeline', 'estimate_bayesian_vol'}
+        assert expected.issubset(set(mod.__all__))
+
+    def test_all_exports_importable(self):
+        from src.monitor.bayesian_vol import (
+            BayesianVolEstimate, BayesianVolModel,
+            BayesianVolPipeline, estimate_bayesian_vol,
+        )
+        assert BayesianVolEstimate is not None
+        assert BayesianVolModel is not None
+
+
+class TestBayesianVolEstimateDataclass:
+    """Comprehensive dataclass field validation."""
+
+    def test_all_fields_in_to_dict(self):
+        from dataclasses import fields
+        est = BayesianVolEstimate(
+            symbol="SPY", timestamp="2026-01-01", window=20,
+            prior_vol=0.20, prior_precision=30.0,
+            likelihood_vol=0.18, likelihood_precision=20.0,
+            posterior_vol=0.19,
+            credible_interval_lower=0.15, credible_interval_upper=0.23,
+            simple_mean_vol=0.18, shrinkage_factor=0.6,
+            regime_scale=1.0, is_high_vol_regime=False,
+            n_obs=20, is_valid=True,
+        )
+        d = est.to_dict()
+        for f in fields(BayesianVolEstimate):
+            assert f.name in d, f"Missing field: {f.name}"
+
+    def test_field_types(self):
+        est = BayesianVolEstimate(
+            symbol="SPY", timestamp="2026-01-01", window=20,
+            prior_vol=0.20, prior_precision=30.0,
+            likelihood_vol=0.18, likelihood_precision=20.0,
+            posterior_vol=0.19,
+            credible_interval_lower=0.15, credible_interval_upper=0.23,
+            simple_mean_vol=0.18, shrinkage_factor=0.6,
+            regime_scale=1.0, is_high_vol_regime=False,
+            n_obs=20, is_valid=True,
+        )
+        assert isinstance(est.symbol, str)
+        assert isinstance(est.window, int)
+        assert isinstance(est.prior_vol, float)
+        assert isinstance(est.is_high_vol_regime, bool)
+        assert isinstance(est.is_valid, bool)
+
+    def test_to_dict_json_serializable(self):
+        est = BayesianVolEstimate(
+            symbol="SPY", timestamp="2026-01-01", window=20,
+            prior_vol=0.20, prior_precision=30.0,
+            likelihood_vol=0.18, likelihood_precision=20.0,
+            posterior_vol=0.19,
+            credible_interval_lower=0.15, credible_interval_upper=0.23,
+            simple_mean_vol=0.18, shrinkage_factor=0.6,
+            regime_scale=1.0, is_high_vol_regime=False,
+            n_obs=20, is_valid=True,
+        )
+        import json
+        serialized = json.dumps(est.to_dict())
+        assert isinstance(serialized, str)
+        data = json.loads(serialized)
+        assert data["symbol"] == "SPY"
+
+
+class TestExcessKurtosis:
+    """Test _excess_kurtosis static method."""
+
+    def test_normal_distribution_kurtosis_near_zero(self):
+        """Normal distribution should have excess kurtosis near 0."""
+        np.random.seed(42)
+        x = np.random.normal(0, 1, 10000)
+        kurt = BayesianVolModel._excess_kurtosis(x)
+        assert abs(kurt) < 0.5  # Should be near 0
+
+    def test_too_few_elements(self):
+        """Less than 4 elements should return 0."""
+        assert BayesianVolModel._excess_kurtosis(np.array([1.0, 2.0, 3.0])) == 0.0
+
+    def test_constant_series(self):
+        """All same values should return 0."""
+        assert BayesianVolModel._excess_kurtosis(np.ones(100)) == 0.0
+
+    def test_heavy_tailed_distribution(self):
+        """Heavy-tailed data should have positive excess kurtosis."""
+        np.random.seed(42)
+        x = np.concatenate([np.random.normal(0, 1, 100), np.array([5.0, -5.0, 8.0, -8.0])])
+        kurt = BayesianVolModel._excess_kurtosis(x)
+        assert kurt > 0
+
+
+class TestComputeRegimeScaleExtended:
+    """Extended regime scale tests."""
+
+    def test_crisis_regime(self):
+        """Excess kurtosis > 5 should give scale 3.0."""
+        model = BayesianVolModel()
+        # Create heavy-tailed returns
+        returns = [0.01] * 50 + [0.2, -0.2, 0.15, -0.15, 0.3, -0.3, 0.25, -0.25, 0.35, -0.35]
+        scale = model.compute_regime_scale(returns)
+        assert scale >= 2.0  # Crisis or high kurtosis
+
+    def test_normal_regime(self):
+        """Normal returns should give scale 1.0."""
+        model = BayesianVolModel()
+        np.random.seed(42)
+        returns = list(np.random.normal(0.001, 0.015, 100))
+        scale = model.compute_regime_scale(returns)
+        assert scale == 1.0
+
+
+class TestBayesianUpdateEdgeCases:
+    """Edge cases for Bayesian update."""
+
+    def test_update_with_single_observation(self):
+        model = BayesianVolModel()
+        result = model.update(0.20, 30.0, [0.25])
+        assert result.is_valid
+        assert result.n_obs == 1
+        assert result.likelihood_vol == 0.25
+
+    def test_update_with_high_regime_scale(self):
+        model = BayesianVolModel()
+        result_normal = model.update(0.20, 30.0, [0.30] * 10, regime_scale=1.0)
+        result_crisis = model.update(0.20, 30.0, [0.30] * 10, regime_scale=3.0)
+        # Higher regime scale → less shrinkage toward prior
+        assert result_crisis.shrinkage_factor < result_normal.shrinkage_factor
+
+    def test_update_zero_recent_vols(self):
+        """All-zero recent vols should still produce valid result."""
+        model = BayesianVolModel()
+        result = model.update(0.20, 30.0, [0.0] * 5)
+        assert result.is_valid
+        assert result.posterior_vol >= 0
+
+    def test_posterior_between_prior_and_likelihood(self):
+        """Posterior should be between prior and likelihood when regime_scale=1."""
+        model = BayesianVolModel()
+        result = model.update(0.20, 30.0, [0.30] * 20, regime_scale=1.0)
+        # With non-trivial prior, posterior should be between prior and likelihood
+        assert result.posterior_vol >= min(result.prior_vol, result.likelihood_vol) - 0.01
+        assert result.posterior_vol <= max(result.prior_vol, result.likelihood_vol) + 0.01
+
+
+class TestFitPriorEdgeCases:
+    """Edge cases for fit_prior."""
+
+    def test_short_history_returns_defaults(self):
+        model = BayesianVolModel()
+        prior_vol, precision = model.fit_prior([0.20] * 30)
+        assert prior_vol == 0.20
+        assert precision == 10.0
+
+    def test_stable_vol_high_precision(self):
+        """Stable vol history should give higher prior precision."""
+        model = BayesianVolModel()
+        stable = [0.20] * 300
+        volatile = [0.10 + 0.15 * (i % 10) / 10 for i in range(300)]
+        _, stable_alpha = model.fit_prior(stable)
+        _, volatile_alpha = model.fit_prior(volatile)
+        assert stable_alpha >= volatile_alpha
+
+    def test_long_history_uses_prior_window(self):
+        """History longer than prior_window should only use last prior_window values."""
+        model = BayesianVolModel(prior_window=60)
+        # First 200 entries at 10%, last 200 at 30%
+        history = [0.10] * 200 + [0.30] * 200
+        prior_vol, _ = model.fit_prior(history)
+        # Should be around 30% since we use last 60 (all from the 30% range)
+        assert prior_vol > 0.25
+
+
+class TestConvenienceFunctions:
+    """Test standalone convenience functions."""
+
+    def test_estimate_bayesian_vol(self):
+        from src.monitor.bayesian_vol import estimate_bayesian_vol
+        with patch.object(BayesianVolPipeline, 'estimate') as mock_est:
+            mock_est.return_value = BayesianVolEstimate(
+                symbol="SPY", timestamp="2026-01-01", window=20,
+                prior_vol=0.20, prior_precision=30.0,
+                likelihood_vol=0.18, likelihood_precision=20.0,
+                posterior_vol=0.19,
+                credible_interval_lower=0.15, credible_interval_upper=0.23,
+                simple_mean_vol=0.18, shrinkage_factor=0.6,
+                regime_scale=1.0, is_high_vol_regime=False,
+                n_obs=20, is_valid=True,
+            )
+            result = estimate_bayesian_vol("SPY")
+            assert isinstance(result, BayesianVolEstimate)
+
+
+class TestCLI:
+    """CLI main() function tests."""
+
+    def test_main_runs(self, capsys):
+        from src.monitor.bayesian_vol import main
+        with patch.object(BayesianVolPipeline, 'estimate') as mock_est:
+            mock_est.return_value = BayesianVolEstimate(
+                symbol="SPY", timestamp="2026-01-01", window=20,
+                prior_vol=0.20, prior_precision=30.0,
+                likelihood_vol=0.18, likelihood_precision=20.0,
+                posterior_vol=0.19,
+                credible_interval_lower=0.15, credible_interval_upper=0.23,
+                simple_mean_vol=0.18, shrinkage_factor=0.6,
+                regime_scale=1.0, is_high_vol_regime=False,
+                n_obs=20, is_valid=True,
+            )
+            with patch.object(sys, 'argv', ['bayesian_vol.py', '--symbol', 'SPY']):
+                main()
+        captured = capsys.readouterr()
+        assert "BAYESIAN VOLATILITY" in captured.out

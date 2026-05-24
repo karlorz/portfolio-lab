@@ -12,6 +12,7 @@ Usage:
     python -m src.strategy.graduation_checklist progress     # Show readiness progress
 """
 
+import copy
 import json
 import logging
 import sys
@@ -89,7 +90,7 @@ class GraduationChecklist:
     MIN_OBSERVATION_DAYS = 30
 
     def __init__(self, criteria: Optional[Dict] = None):
-        self.criteria = criteria or dict(self.DEFAULT_CRITERIA)
+        self.criteria = copy.deepcopy(criteria) if criteria is not None else copy.deepcopy(self.DEFAULT_CRITERIA)
 
     def check(self, state: Optional[Dict] = None) -> Dict[str, CheckResult]:
         """Check all graduation criteria against current state.
@@ -413,10 +414,14 @@ class GraduationChecklist:
     def _check_tca_orders(self, state: Dict) -> CheckResult:
         """Check TCA engine has enough orders for meaningful analysis."""
         tca = state.get("tca", {})
-        
+
         # Count orders across all symbols
         orders_by_symbol = tca.get("orders_by_symbol", {})
-        total_orders = sum(len(sym_orders) for sym_orders in orders_by_symbol.values())
+        total_orders = (
+            sum(len(sym_orders) for sym_orders in orders_by_symbol.values())
+            if isinstance(orders_by_symbol, dict)
+            else 0
+        )
         
         # Also check orders.jsonl directly
         orders_file = DATA_DIR / "orders.jsonl"
@@ -437,10 +442,12 @@ class GraduationChecklist:
     def _check_circuit_breaker(self, state: Dict) -> CheckResult:
         """Check circuit breaker confidence (no recent trips)."""
         cb = state.get("circuit_breaker", {})
-        
-        status = cb.get("status", "green" if isinstance(cb, dict) else "unknown")
-        trips = cb.get("trips", 0) if isinstance(cb, dict) else 0
-        consecutive_ok = cb.get("consecutive_ok", 0) if isinstance(cb, dict) else 0
+
+        if not isinstance(cb, dict):
+            cb = {}
+        status = cb.get("status", "green")
+        trips = cb.get("trips", 0)
+        consecutive_ok = cb.get("consecutive_ok", 0)
         
         required = int(self.criteria["circuit_breaker_confidence"]["value"])
         

@@ -274,7 +274,8 @@ class ConvexityHarvestStrategy:
             current += timedelta(days=1)
         
         # Calculate metrics
-        total_return = (capital - initial_capital) / initial_capital * 100
+        total_return = ((capital - initial_capital) / initial_capital * 100
+                        if initial_capital != 0 else 0.0)
         avg_daily_return = sum(daily_returns) / len(daily_returns) if daily_returns else 0
         
         # Volatility (annualized)
@@ -290,8 +291,9 @@ class ConvexityHarvestStrategy:
             running_capital *= (1 + ret / 100)
             if running_capital > peak:
                 peak = running_capital
-            dd = (peak - running_capital) / peak * 100
-            max_dd = max(max_dd, dd)
+            if peak > 0:
+                dd = (peak - running_capital) / peak * 100
+                max_dd = max(max_dd, dd)
         
         # Sharpe ratio (simplified, assuming 0% risk-free rate)
         sharpe = (avg_daily_return * 252) / volatility if volatility > 0 else 0

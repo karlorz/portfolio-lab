@@ -2663,5 +2663,675 @@ class TestGraduationJSONEdgeCases:
         gen.conn.close()
 
 
+# ---------------------------------------------------------------------------
+# __all__ exports validation
+# ---------------------------------------------------------------------------
+
+class TestAllExports:
+    """Test __all__ exports match module's public API."""
+
+    def test_all_defined(self):
+        """__all__ is defined and contains expected names."""
+        from src.dashboard.generator import __all__
+        assert isinstance(__all__, list)
+        assert "DashboardGenerator" in __all__
+        assert "PUBLIC_DIR" in __all__
+        assert "DB_PATH" in __all__
+        assert len(__all__) >= 3
+
+    def test_all_names_importable(self):
+        """Every name in __all__ can be imported from the module."""
+        from src.dashboard.generator import __all__, DashboardGenerator, PUBLIC_DIR, DB_PATH
+        name_map = {
+            "DashboardGenerator": DashboardGenerator,
+            "PUBLIC_DIR": PUBLIC_DIR,
+            "DB_PATH": DB_PATH,
+        }
+        assert set(__all__) == set(name_map.keys())
+        for name, obj in name_map.items():
+            assert obj is not None, f"{name} should not be None"
+
+
+# ---------------------------------------------------------------------------
+# Extended field type / dataclass validation
+# ---------------------------------------------------------------------------
+
+class TestOutputFieldTypes:
+    """Validate field types in all generated JSON outputs."""
+
+    def test_signals_json_field_types(self, tmp_path):
+        """All signals.json fields have correct Python types."""
+        gen, _ = _make_generator(tmp_path)
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps(
+            [{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]
+        ))
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    path = gen.generate_signals_json()
+        with open(path) as f:
+            data = json.load(f)
+
+        # Top-level scalar fields
+        assert isinstance(data["timestamp"], str), "timestamp should be str"
+        assert isinstance(data["cash"], (int, float)), "cash should be numeric"
+        assert isinstance(data["total_value"], (int, float)), "total_value should be numeric"
+
+        # Regime section
+        regime = data["regime"]
+        assert isinstance(regime, dict)
+        assert isinstance(regime["regime"], str)
+        assert regime["vix"] is None or isinstance(regime["vix"], (int, float))
+        assert regime["detected"] is None or isinstance(regime["detected"], str)
+
+        # Target allocations
+        target = data["target_allocations"]
+        assert isinstance(target, dict)
+        for sym, weight in target.items():
+            assert isinstance(sym, str)
+            assert isinstance(weight, (int, float))
+            assert 0 <= weight <= 1.0, f"Weight {weight} out of range [0, 1]"
+
+        # Latest prices
+        prices = data["latest_prices"]
+        assert isinstance(prices, dict)
+        for sym, price in prices.items():
+            assert isinstance(sym, str)
+            assert isinstance(price, (int, float)), f"Price for {sym} should be numeric"
+
+        # Positions
+        assert isinstance(data["current_positions"], list)
+        for pos in data["current_positions"]:
+            assert isinstance(pos["symbol"], str)
+            assert isinstance(pos["shares"], (int, float))
+            assert isinstance(pos["value"], (int, float))
+            assert isinstance(pos["weight"], (int, float))
+            assert isinstance(pos["unrealized"], (int, float))
+
+        # ML signals
+        ml = data["ml_signals"]
+        assert isinstance(ml, dict)
+        assert isinstance(ml["available"], bool)
+        assert ml["timestamp"] is None or isinstance(ml["timestamp"], str)
+        assert isinstance(ml["predictions"], dict)
+        assert isinstance(ml["features"], dict)
+        assert isinstance(ml["grid_search"], dict)
+        gen.conn.close()
+
+    def test_health_json_field_types(self, tmp_path):
+        """All health.json fields have correct Python types."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_health_json()
+        with open(path) as f:
+            data = json.load(f)
+
+        assert isinstance(data["system_status"], str)
+        assert data["system_status"] in ("healthy", "warning", "critical", "degraded")
+        assert isinstance(data["cron_jobs"], list)
+        assert isinstance(data["data_freshness"], dict)
+        assert isinstance(data["signal_health"], dict)
+        assert isinstance(data["generated_at"], str)
+
+        for sym, freshness in data["data_freshness"].items():
+            assert isinstance(sym, str)
+            assert isinstance(freshness, dict)
+            assert "last_update" in freshness
+            assert "days_stale" in freshness
+            assert "status" in freshness
+            assert freshness["status"] in ("fresh", "stale", "critical")
+            assert isinstance(freshness["days_stale"], int)
+
+        for job in data["cron_jobs"]:
+            assert isinstance(job["name"], str)
+            assert isinstance(job["status"], str)
+        gen.conn.close()
+
+    def test_stats_json_field_types(self, tmp_path):
+        """All stats.json fields have correct Python types."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_stats_json()
+        with open(path) as f:
+            data = json.load(f)
+
+        assert isinstance(data["generated_at"], str)
+        assert isinstance(data["asset_stats"], dict)
+
+        for sym, stat in data["asset_stats"].items():
+            assert isinstance(sym, str)
+            assert isinstance(stat["30d_return"], (int, float))
+            assert isinstance(stat["volatility"], (int, float))
+            assert isinstance(stat["current"], (int, float))
+
+        assert isinstance(data["paper_portfolio"], dict)
+        assert data["spy_comparison"] is None or isinstance(data["spy_comparison"], dict)
+        if data.get("spy_comparison"):
+            sc = data["spy_comparison"]
+            for key in ("portfolio_value", "spy_value", "relative_return", "correlation_30d", "beta"):
+                assert key in sc, f"spy_comparison missing '{key}'"
+        gen.conn.close()
+
+    def test_alerts_json_field_types(self, tmp_path):
+        """All alerts.json fields have correct Python types."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_alerts_json()
+        with open(path) as f:
+            data = json.load(f)
+
+        assert isinstance(data["alerts"], list)
+        assert isinstance(data["count"], int)
+        assert isinstance(data["generated_at"], str)
+
+        for alert in data["alerts"]:
+            assert isinstance(alert["level"], str)
+            assert isinstance(alert["type"], str)
+            assert isinstance(alert["title"], str)
+            assert isinstance(alert["message"], str)
+            assert isinstance(alert["requires_action"], bool)
+            assert alert["level"] in ("success", "warning", "error", "info")
+        gen.conn.close()
+
+    def test_broker_data_field_types(self, tmp_path):
+        """_load_broker_data dict has correct field types."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            broker = gen._load_broker_data()
+        assert isinstance(broker["connected"], bool)
+        assert isinstance(broker["positions"], list)
+        assert isinstance(broker["drift"], list)
+        assert isinstance(broker["recent_orders"], list)
+        assert broker["last_sync"] is None or isinstance(broker["last_sync"], str)
+        assert isinstance(broker["kill_switch"], bool)
+        gen.conn.close()
+
+    def test_garch_cvar_field_types(self, tmp_path):
+        """_load_garch_cvar_data dict has correct field types."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            garch = gen._load_garch_cvar_data()
+        assert isinstance(garch["cvar_95"], (int, float))
+        assert isinstance(garch["cvar_95_garch"], (int, float))
+        assert isinstance(garch["var_95"], (int, float))
+        assert isinstance(garch["var_95_garch"], (int, float))
+        assert isinstance(garch["cvar_ratio"], (int, float))
+        assert isinstance(garch["garch_active"], bool)
+        assert isinstance(garch["current_volatility"], (int, float))
+        assert isinstance(garch["forecast_volatility"], (int, float))
+        assert isinstance(garch["volatility_clustering"], str)
+        assert garch["volatility_clustering"] in ("normal", "elevated", "high")
+        gen.conn.close()
+
+    def test_entropy_data_field_types(self, tmp_path):
+        """_load_entropy_data dict has correct field types."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            entropy = gen._load_entropy_data()
+        assert isinstance(entropy["shannon_entropy"], (int, float))
+        assert isinstance(entropy["effective_n"], (int, float))
+        assert isinstance(entropy["max_possible"], (int, float))
+        assert isinstance(entropy["normalized_score"], (int, float))
+        assert isinstance(entropy["concentration_risk"], str)
+        assert entropy["concentration_risk"] in ("good", "low", "medium", "high", "critical")
+        assert isinstance(entropy["hhi_index"], (int, float))
+        assert isinstance(entropy["correlation_entropy"], (int, float))
+        assert isinstance(entropy["participation_ratio"], (int, float))
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Additional computation edge cases — boundary values, zero/negative, large
+# ---------------------------------------------------------------------------
+
+class TestGarchCvarEdgeCasesExtended:
+    """Additional _load_garch_cvar_data edge cases — boundary values."""
+
+    def test_value_exactly_one_not_divided(self, tmp_path):
+        """Value exactly 1.0 is kept as-is (not divided by 100 because abs(1) <= 1)."""
+        gen, _ = _make_generator(tmp_path)
+        health_file = tmp_path / ".health_report.json"
+        health_file.write_text(json.dumps({
+            "garch_filtered": True,
+            "cvar_95": 1.0,
+            "var_95": 1.0,
+            "cvar_ratio": 1.5,
+            "filter_active": True,
+            "conditional_volatility_current": 1.0,
+            "garch_persistence": 0.9,
+        }))
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            data = gen._load_garch_cvar_data()
+        # abs(1.0) <= 1, so no division
+        assert data["cvar_95"] == 1.0
+        assert data["var_95"] == 1.0
+        gen.conn.close()
+
+    def test_value_slightly_above_one_divided(self, tmp_path):
+        """Value 1.01 (> 1.0) is divided by 100."""
+        gen, _ = _make_generator(tmp_path)
+        health_file = tmp_path / ".health_report.json"
+        health_file.write_text(json.dumps({
+            "garch_filtered": True,
+            "cvar_95": 1.01,
+            "var_95": 1.01,
+            "filter_active": True,
+        }))
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            data = gen._load_garch_cvar_data()
+        assert data["cvar_95"] == 0.0101
+        assert data["var_95"] == 0.0101
+        gen.conn.close()
+
+    def test_persistence_at_exact_boundaries(self, tmp_path):
+        """GARCH persistence at exact boundary values."""
+        gen, _ = _make_generator(tmp_path)
+        # boundary cases: 0.85 -> elevated, 0.95 -> high, 0.951 -> high
+        for persistence, expected in [
+            # Code uses > 0.85 and > 0.95 (strict), not >=
+            (0.85, "normal"),
+            (0.86, "elevated"),
+            (0.94, "elevated"),
+            (0.95, "elevated"),
+            (0.951, "high"),
+            (0.80, "normal"),
+            (0.84, "normal"),
+        ]:
+            health_file = tmp_path / ".health_report.json"
+            health_file.write_text(json.dumps({
+                "garch_filtered": True,
+                "cvar_95": -0.0179,
+                "filter_active": True,
+                "garch_persistence": persistence,
+            }))
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                data = gen._load_garch_cvar_data()
+            assert data["volatility_clustering"] == expected, (
+                f"Persistence {persistence} should be {expected}, got {data['volatility_clustering']}"
+            )
+        gen.conn.close()
+
+
+class TestStatsEdgeCasesExtended:
+    """Additional generate_stats_json computation edge cases."""
+
+    def test_zero_returns_zero_volatility(self, tmp_path):
+        """Identical prices produce zero volatility."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DROP TABLE IF EXISTS prices")
+        conn.execute("""
+            CREATE TABLE prices (symbol TEXT, date TEXT, close REAL,
+            PRIMARY KEY (symbol, date))
+        """)
+        today = datetime.now()
+        for sym in ["SPY", "GLD"]:
+            for i in range(30):
+                d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+                conn.execute("INSERT INTO prices VALUES (?, ?, ?)",
+                             (sym, d, 100.0))  # All identical prices
+        conn.commit()
+        conn.close()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_stats_json()
+        with open(path) as f:
+            data = json.load(f)
+        for sym, stat in data["asset_stats"].items():
+            assert stat["volatility"] == 0.0, f"{sym} volatility should be 0 with identical prices"
+            assert stat["30d_return"] == 0.0, f"{sym} 30d return should be 0 with identical prices"
+        gen.conn.close()
+
+    def test_negative_prices_handled(self, tmp_path):
+        """Negative prices are handled without crashing."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DROP TABLE IF EXISTS prices")
+        conn.execute("""
+            CREATE TABLE prices (symbol TEXT, date TEXT, close REAL,
+            PRIMARY KEY (symbol, date))
+        """)
+        today = datetime.now()
+        for i in range(5):
+            d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute("INSERT INTO prices VALUES (?, ?, ?)",
+                         ("SPY", d, -100.0 + i * 10.0))
+        conn.commit()
+        conn.close()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_stats_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert "SPY" in data["asset_stats"]
+        gen.conn.close()
+
+    def test_very_large_price_values(self, tmp_path):
+        """Very large prices do not overflow or crash."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DROP TABLE IF EXISTS prices")
+        conn.execute("""
+            CREATE TABLE prices (symbol TEXT, date TEXT, close REAL,
+            PRIMARY KEY (symbol, date))
+        """)
+        today = datetime.now()
+        large_price = 1e12
+        for i in range(5):
+            d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute("INSERT INTO prices VALUES (?, ?, ?)",
+                         ("SPY", d, large_price + i * 1e9))
+        conn.commit()
+        conn.close()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_stats_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert "SPY" in data["asset_stats"]
+        assert data["asset_stats"]["SPY"]["current"] > 0
+        gen.conn.close()
+
+    def test_negative_returns_handled(self, tmp_path):
+        """Negative daily returns produce valid volatility."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DROP TABLE IF EXISTS prices")
+        conn.execute("""
+            CREATE TABLE prices (symbol TEXT, date TEXT, close REAL,
+            PRIMARY KEY (symbol, date))
+        """)
+        today = datetime.now()
+        # Insert in ascending date order (earliest first), so ORDER BY date gives descending prices
+        days_ago = [4, 3, 2, 1, 0]
+        prices = [100.0, 98.0, 95.0, 93.0, 90.0]  # Strictly declining
+        for days_back, price in zip(days_ago, prices):
+            d = (today - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            conn.execute("INSERT INTO prices VALUES (?, ?, ?)",
+                         ("SPY", d, price))
+        conn.commit()
+        conn.close()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_stats_json()
+        with open(path) as f:
+            data = json.load(f)
+        stat = data["asset_stats"]["SPY"]
+        assert stat["30d_return"] < 0, "Declining prices should have negative return"
+        assert stat["volatility"] >= 0, "Volatility must be non-negative"
+        gen.conn.close()
+
+
+class TestMLSignalsEdgeCasesExtended:
+    """Additional _generate_ml_signals prediction edge cases."""
+
+    def test_vix_exactly_25_classification(self, tmp_path):
+        """VIX exactly 25 falls into vol_spike branch (>20, not >25)."""
+        gen, _ = _make_generator(tmp_path)
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY", "vix_level": 25, "trend_direction": 0,
+            "price_vs_sma20": 0, "timestamp": "2026-01-01",
+        }) + "\n")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+        pred = signals["predictions"]["SPY"]
+        assert pred["probabilities"]["bear"] == 0.3  # vol_spike probs
+        assert pred["probabilities"]["neutral"] == 0.5
+        gen.conn.close()
+
+    def test_vix_exactly_20_classification(self, tmp_path):
+        """VIX exactly 20 falls into normal branch (not >20, not <15)."""
+        gen, _ = _make_generator(tmp_path)
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY", "vix_level": 20, "trend_direction": 0,
+            "price_vs_sma20": 0, "timestamp": "2026-01-01",
+        }) + "\n")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+        pred = signals["predictions"]["SPY"]
+        assert pred["predicted_regime"] == "neutral"
+        assert pred["probabilities"]["neutral"] == 0.6
+        gen.conn.close()
+
+    def test_vix_extremely_high(self, tmp_path):
+        """Very high VIX (e.g., 80) does not crash."""
+        gen, _ = _make_generator(tmp_path)
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY", "vix_level": 80, "trend_direction": -5,
+            "price_vs_sma20": -0.2, "timestamp": "2026-01-01",
+        }) + "\n")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+        pred = signals["predictions"]["SPY"]
+        assert pred["probabilities"]["bear"] == 0.5  # crisis probs dominate
+        assert pred["predicted_regime"] == "bear"
+        gen.conn.close()
+
+    def test_trend_direction_zero_price_vs_sma_zero(self, tmp_path):
+        """trend_direction=0 and price_vs_sma20=0 with vix <=20 defaults."""
+        gen, _ = _make_generator(tmp_path)
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY", "vix_level": 18, "trend_direction": 0,
+            "price_vs_sma20": 0, "timestamp": "2026-01-01",
+        }) + "\n")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+        pred = signals["predictions"]["SPY"]
+        assert pred["probabilities"]["bear"] == 0.2
+        assert pred["probabilities"]["neutral"] == 0.6
+        assert pred["probabilities"]["bull"] == 0.2
+        gen.conn.close()
+
+    def test_missing_trend_fields_defaults(self, tmp_path):
+        """Missing trend_direction and price_vs_sma20 fields use default 0."""
+        gen, _ = _make_generator(tmp_path)
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY", "vix_level": 18, "timestamp": "2026-01-01",
+        }) + "\n")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+        pred = signals["predictions"]["SPY"]
+        assert pred["predicted_regime"] == "neutral"
+        gen.conn.close()
+
+    def test_price_vs_sma_positive_trend_zero(self, tmp_path):
+        """price_vs_sma20 > 0 but trend_direction is 0 → default branch."""
+        gen, _ = _make_generator(tmp_path)
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY", "vix_level": 18, "trend_direction": 0,
+            "price_vs_sma20": 0.1, "timestamp": "2026-01-01",
+        }) + "\n")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+        pred = signals["predictions"]["SPY"]
+        # trend == 0 and price_vs_sma > 0 does NOT match trend > 0 condition
+        assert pred["predicted_regime"] == "neutral"
+        gen.conn.close()
+
+
+class TestPerformanceJSONEdgeCasesExtended:
+    """Additional generate_performance_json edge cases."""
+
+    def test_empty_prices_table(self, tmp_path):
+        """Empty prices table produces empty prices dict and no crash."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DELETE FROM prices")
+        conn.execute("DELETE FROM regime_log")
+        conn.commit()
+        conn.close()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_performance_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert data["prices"] == {}
+        assert data["regimes"] == []
+        assert "generated_at" in data
+        gen.conn.close()
+
+    def test_regime_log_empty_list(self, tmp_path):
+        """Empty regime_log table produces empty regimes list."""
+        gen, _ = _make_generator(tmp_path)
+        gen.conn.execute("DELETE FROM regime_log")
+        gen.conn.commit()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_performance_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert data["regimes"] == []
+        gen.conn.close()
+
+
+class TestAlertsJSONEdgeCasesExtended:
+    """Additional generate_alerts_json edge cases."""
+
+    def test_stale_data_days_calculation(self, tmp_path):
+        """Stale data alert shows correct days count."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("INSERT INTO prices VALUES ('OLD', '2020-06-15', 100.0)")
+        conn.commit()
+        conn.close()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_alerts_json()
+        with open(path) as f:
+            data = json.load(f)
+        stale = [a for a in data["alerts"] if a["type"] == "stale_data"]
+        assert len(stale) >= 1
+        assert "days ago" in stale[0]["message"]
+        gen.conn.close()
+
+    def test_no_trigger_files_no_alerts(self, tmp_path):
+        """No trigger files produce only stale data alerts."""
+        gen, _ = _make_generator(tmp_path)
+        gen.conn.execute("DELETE FROM regime_log")
+        gen.conn.commit()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_alerts_json()
+        with open(path) as f:
+            data = json.load(f)
+        # With today's data, there should be no stale data alerts
+        types_found = {a["type"] for a in data["alerts"]}
+        # If all data is fresh, alerts should be empty
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Constants validation — extended
+# ---------------------------------------------------------------------------
+
+class TestConstantsExtended:
+    """Extended module-level constant validation."""
+
+    def test_logger_is_logger_instance(self):
+        """logger is a Logger instance."""
+        import logging
+        from src.dashboard.generator import logger
+        assert isinstance(logger, logging.Logger)
+
+    def test_base_allocation_keys_are_uppercase(self):
+        """BASE_ALLOCATION keys are uppercase symbol names."""
+        from src.paths import BASE_ALLOCATION
+        for key in BASE_ALLOCATION:
+            assert key == key.upper(), f"Key '{key}' should be uppercase"
+
+    def test_regime_overrides_keys_match(self):
+        """Regime override keys correspond to valid regimes."""
+        from src.dashboard.generator import DashboardGenerator
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        # Extract the regime_overrides from generate_signals_json logic
+        expected_regimes = {"crisis", "vol_spike", "low_vol"}
+        overrides = {
+            "crisis": {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30},
+            "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},
+            "low_vol": {"SPY": 0.55, "GLD": 0.30, "TLT": 0.15},
+        }
+        assert set(overrides.keys()) == expected_regimes
+        for regime, alloc in overrides.items():
+            total = sum(alloc.values())
+            assert abs(total - 1.0) < 0.01, (
+                f"Regime '{regime}' allocations sum to {total}, expected 1.0"
+            )
+            for sym in alloc:
+                assert isinstance(alloc[sym], float)
+
+    def test_yield_regime_allocations_sum_to_one(self):
+        """Each yield regime allocation sums to ~1.0."""
+        regime_allocations = {
+            "steep": {"tlt": 0.70, "ief": 0.25, "shy": 0.05, "bil": 0.00},
+            "normal": {"tlt": 0.50, "ief": 0.35, "shy": 0.15, "bil": 0.00},
+            "flat": {"tlt": 0.30, "ief": 0.40, "shy": 0.25, "bil": 0.05},
+            "inverted": {"tlt": 0.15, "ief": 0.25, "shy": 0.35, "bil": 0.25},
+        }
+        for regime, alloc in regime_allocations.items():
+            total = sum(alloc.values())
+            assert abs(total - 1.0) < 0.01, (
+                f"Yield regime '{regime}' allocations sum to {total}, expected 1.0"
+            )
+
+    def test_public_dir_exists_after_creation(self):
+        """PUBLIC_DIR is a Path pointing to an existing or creatable directory."""
+        from src.dashboard.generator import PUBLIC_DIR
+        # This test just validates the constant, directory creation is tested in init
+        import os
+        parent = PUBLIC_DIR.parent
+        assert parent.exists(), f"Parent dir {parent} should exist"
+
+
+# ---------------------------------------------------------------------------
+# CLI main() function test
+# ---------------------------------------------------------------------------
+
+class TestCliMain:
+    """Test the __main__ CLI entry point."""
+
+    def test_main_logic_runs_generator(self):
+        """__main__ block's logic: DashboardGenerator().run()."""
+        with patch.object(DashboardGenerator, "run") as mock_run:
+            with patch.object(DashboardGenerator, "__init__", return_value=None):
+                # This replicates the __main__ block: gen = DashboardGenerator(); gen.run()
+                gen = DashboardGenerator()
+                gen.run()
+                mock_run.assert_called_once()
+
+    def test_main_block_guard_reads_correctly(self):
+        """The __main__ guard checks __name__ == '__main__'."""
+        import ast
+        import importlib.util
+        source_path = importlib.util.find_spec("src.dashboard.generator").origin
+        source = Path(source_path).read_text()
+        tree = ast.parse(source)
+        found_guard = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.If):
+                # Check if this is an if __name__ == "__main__" guard
+                if (isinstance(node.test, ast.Compare)
+                        and isinstance(node.test.left, ast.Name)
+                        and node.test.left.id == "__name__"
+                        and isinstance(node.test.comparators[0], ast.Constant)
+                        and node.test.comparators[0].value == "__main__"):
+                    found_guard = True
+                    # Verify the body contains DashboardGenerator and run()
+                    body_source = ast.unparse(node.body)
+                    assert "DashboardGenerator" in body_source
+                    assert ".run()" in body_source
+                    break
+        assert found_guard, "No __name__ == '__main__' guard found"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

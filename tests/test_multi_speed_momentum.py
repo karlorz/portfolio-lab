@@ -1188,5 +1188,578 @@ class TestBacktesterExtended:
         assert REBALANCE_FREQ == 21
 
 
+# ---------------------------------------------------------------------------
+# __all__ exports validation
+# ---------------------------------------------------------------------------
+
+
+class TestAllExports:
+    """Validate __all__ exports from multi_speed_momentum module."""
+
+    def test_all_names_in_all_exist_in_module(self):
+        """Every name listed in __all__ must be importable from the module."""
+        from src.signals import multi_speed_momentum as msm
+        for name in msm.__all__:
+            assert hasattr(msm, name), f"{name} is in __all__ but not defined in the module"
+
+    def test_all_public_symbols_in_all_or_explicit_excluded(self):
+        """Module-level names without underscore prefix should be in __all__
+        unless they are intentionally excluded (DB_PATH, PRICES_PATH, logger, main).
+        """
+        import types
+        from src.signals import multi_speed_momentum as msm
+
+        private_names = {name for name in dir(msm) if name.startswith('_')}
+        public_names = {
+            name for name in dir(msm)
+            if not name.startswith('_')
+            and not isinstance(getattr(msm, name), types.ModuleType)
+            and not callable(getattr(msm, name))  # exclude functions like main()
+        }
+        # Subset of public names that are intentionally not exported
+        expected_unexported = {'logger', 'DB_PATH', 'PRICES_PATH', 'BASE_ALLOCATION', 'DATA_DIR', 'PRICES_JSON'}
+        for name in public_names:
+            if name not in msm.__all__:
+                assert name in expected_unexported, (
+                    f"{name!r} is a public module-level name but not in __all__ "
+                    f"and not in the excluded set {expected_unexported}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Dataclass field type validation
+# ---------------------------------------------------------------------------
+
+
+class TestDataclassFieldTypes:
+    """Validate that dataclass field types match annotations and to_dict() output."""
+
+    def test_speed_signal_to_dict_value_types(self):
+        """SpeedMomentumSignal.to_dict() values should have correct Python types."""
+        sig = _make_speed_signal()
+        d = sig.to_dict()
+        expected = {
+            'ticker': str, 'tier': str, 'timestamp': str,
+            'lookback_return': float, 'recent_return': float, 'signal': int,
+            'realized_vol': float, 'vol_scaled_position': float,
+            'base_weight': float, 'adjustment': float, 'target_weight': float,
+            'lookback_start_price': float, 'lookback_end_price': float,
+            'formation_days': int,
+        }
+        for field, expected_type in expected.items():
+            assert isinstance(d[field], expected_type), (
+                f"Field {field!r}: expected {expected_type.__name__}, got {type(d[field]).__name__}"
+            )
+
+    def test_ensemble_signal_to_dict_top_level_types(self):
+        """EnsembleSignal.to_dict() top-level fields should have correct types."""
+        fast = _make_speed_signal(tier='fast', signal=1)
+        medium = _make_speed_signal(tier='medium', signal=1)
+        slow = _make_speed_signal(tier='slow', signal=-1)
+        ens = EnsembleSignal(
+            ticker='SPY', timestamp='2026-05-24',
+            fast_signal=fast, medium_signal=medium, slow_signal=slow,
+            ensemble_position=0.5, ensemble_confidence=0.5,
+            base_weight=0.46, adjustment=0.05, target_weight=0.51,
+        )
+        d = ens.to_dict()
+        assert isinstance(d['ticker'], str)
+        assert isinstance(d['timestamp'], str)
+        assert isinstance(d['fast_signal'], dict)
+        assert isinstance(d['medium_signal'], dict)
+        assert isinstance(d['slow_signal'], dict)
+        for key in ('ensemble_position', 'ensemble_confidence', 'base_weight', 'adjustment', 'target_weight'):
+            assert isinstance(d[key], float), f"{key!r} should be float, got {type(d[key])}"
+
+    def test_portfolio_to_dict_value_types(self):
+        """MultiSpeedPortfolio.to_dict() values should have correct types."""
+        portfolio = _make_portfolio()
+        d = portfolio.to_dict()
+        assert isinstance(d['timestamp'], str)
+        assert isinstance(d['base_allocation'], dict)
+        assert isinstance(d['ensemble_adjustments'], dict)
+        assert isinstance(d['target_allocation'], dict)
+        assert isinstance(d['predicted_volatility'], float)
+        assert isinstance(d['max_drawdown_estimate'], float)
+        assert isinstance(d['ensemble_signals'], dict)
+        assert isinstance(d['tier_contributions'], dict)
+        assert isinstance(d['overall_confidence'], float)
+
+
+# ---------------------------------------------------------------------------
+# Additional computation edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestAdditionalEdgeCases:
+    """Boundary values, zero/negative inputs, very large inputs for compute_speed_signal."""
+
+    def test_negative_base_weight_clipped_to_min_weight(self):
+        """A negative base_weight should still produce target_weight >= min_weight."""
+        engine = _make_engine()
+        prices_df = _make_prices_df(n_days=400)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', -0.10, prices_df)
+        assert sig is not None
+        assert sig.base_weight == -0.10
+        assert sig.target_weight >= engine.min_weight
+
+    def test_zero_base_weight_clipped(self):
+        """A zero base_weight should produce target_weight >= min_weight."""
+        engine = _make_engine()
+        prices_df = _make_prices_df(n_days=400)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.0, prices_df)
+        assert sig is not None
+        assert sig.target_weight >= engine.min_weight
+
+    def test_zero_max_deviation_means_no_adjustment(self):
+        """When max_deviation=0, adjustment must always be 0."""
+        engine = _make_engine()
+        engine.max_deviation = 0.0
+        prices_df = _make_prices_df(n_days=400)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is not None
+        assert sig.adjustment == 0.0
+        assert sig.target_weight == 0.46
+
+    def test_very_large_prices_no_overflow(self):
+        """Extremely large prices (1e12 range) should not overflow."""
+        engine = _make_engine()
+        dates = pd.date_range(end=datetime.now(), periods=400, freq='B')
+        prices = [1e12 * (1 + 0.0001 * i) for i in range(400)]
+        prices_df = pd.DataFrame({'SPY': prices}, index=dates)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is not None
+        assert np.isfinite(sig.lookback_return)
+        assert np.isfinite(sig.realized_vol)
+        assert sig.signal in (-1, 0, 1)
+
+    def test_very_small_prices_no_underflow(self):
+        """Extremely small prices (1e-12 range) should not underflow."""
+        engine = _make_engine()
+        dates = pd.date_range(end=datetime.now(), periods=400, freq='B')
+        prices = [1e-12 * (1 + 0.001 * i) for i in range(400)]
+        prices_df = pd.DataFrame({'SPY': prices}, index=dates)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is not None
+        assert np.isfinite(sig.lookback_return)
+        assert sig.signal in (-1, 0, 1)
+
+    def test_all_nan_prices_returns_none(self):
+        """All-NaN prices should return None (returns can't be computed)."""
+        engine = _make_engine()
+        dates = pd.date_range(end=datetime.now(), periods=400, freq='B')
+        prices_df = pd.DataFrame({'SPY': [np.nan] * 400}, index=dates)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is None
+
+    def test_extreme_volatility_no_error(self):
+        """Extremely volatile prices (10% daily moves) should not cause errors."""
+        engine = _make_engine()
+        np.random.seed(42)
+        n = 400
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B')
+        prices = [100.0]
+        for _ in range(n - 1):
+            prices.append(prices[-1] * (1 + np.random.normal(0, 0.10)))
+        prices_df = pd.DataFrame({'SPY': prices}, index=dates)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is not None
+        assert sig.realized_vol > 0
+        assert np.isfinite(sig.vol_scaled_position)
+        assert np.isfinite(sig.adjustment)
+
+    def test_exact_minimum_data_points_for_fast_tier(self):
+        """Exactly fast-tier minimum data points should produce a valid signal."""
+        engine = _make_engine()
+        min_needed = 63 + 5 + 10 + 1  # lookback + skip + vol_window + 1 for pct_change
+        dates = pd.date_range(end=datetime.now(), periods=min_needed, freq='B')
+        prices = [100.0 * (1 + 0.001 * i) for i in range(min_needed)]
+        prices_df = pd.DataFrame({'SPY': prices}, index=dates)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is not None
+        assert sig.signal in (-1, 0, 1)
+
+    def test_one_below_minimum_returns_none(self):
+        """One data point below the required minimum should return None."""
+        engine = _make_engine()
+        one_below = 63 + 5 + 10 - 1  # Exactly 1 less than fast tier needs (78-1=77)
+        dates = pd.date_range(end=datetime.now(), periods=one_below, freq='B')
+        prices = [100.0 * (1 + 0.001 * i) for i in range(one_below)]
+        prices_df = pd.DataFrame({'SPY': prices}, index=dates)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is None
+
+    def test_zero_skip_days_recent_return_zero(self):
+        """Custom tier with skip_days=0 should set recent_return=0.0."""
+        engine = _make_engine()
+        engine.speed_tiers = {
+            'fast': {'lookback_days': 63, 'skip_days': 0, 'vol_window': 10,
+                     'description': 'test'},
+        }
+        prices_df = _make_prices_df(n_days=400)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is not None
+        assert sig.recent_return == 0.0
+
+    def test_very_high_realized_vol_produces_valid_position(self):
+        """Very high vol should produce a finite vol_scaled_position."""
+        engine = _make_engine()
+        np.random.seed(1)
+        n = 400
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B')
+        prices = [100.0]
+        for _ in range(n - 1):
+            prices.append(prices[-1] * (1 + np.random.normal(0, 0.05)))
+        prices_df = pd.DataFrame({'SPY': prices}, index=dates)
+        engine._prices_df = prices_df
+        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
+        assert sig is not None
+        assert sig.realized_vol > 0.0
+        # vol_scaled_position = signal / realized_vol; can exceed +/-1
+        # when vol is low, but must always be finite
+        assert np.isfinite(sig.vol_scaled_position)
+
+
+# ---------------------------------------------------------------------------
+# Constants full validation
+# ---------------------------------------------------------------------------
+
+
+class TestAllConstants:
+    """Validate ALL module-level constants for type, range, and reasonableness."""
+
+    def test_db_path_is_pathlib_path(self):
+        """DB_PATH should be a pathlib.Path instance."""
+        from src.signals.multi_speed_momentum import DB_PATH
+        assert isinstance(DB_PATH, Path)
+
+    def test_prices_path_is_pathlib_path(self):
+        """PRICES_PATH should be a pathlib.Path instance."""
+        from src.signals.multi_speed_momentum import PRICES_PATH
+        assert isinstance(PRICES_PATH, Path)
+
+    def test_rebalance_freq_is_int(self):
+        """REBALANCE_FREQ should be an int."""
+        from src.signals.multi_speed_momentum import REBALANCE_FREQ
+        assert isinstance(REBALANCE_FREQ, int)
+
+    def test_rebalance_freq_reasonable_range(self):
+        """REBALANCE_FREQ should be between 5 and 63 trading days (weekly to quarterly)."""
+        from src.signals.multi_speed_momentum import REBALANCE_FREQ
+        assert 5 <= REBALANCE_FREQ <= 63
+
+    def test_asset_tickers_contains_expected_symbols(self):
+        """ASSET_TICKERS should include all canonical symbols."""
+        from src.signals.multi_speed_momentum import ASSET_TICKERS
+        for symbol in ('SPY', 'GLD', 'TLT', 'DBC', 'CASH'):
+            assert symbol in ASSET_TICKERS, f"{symbol} missing from ASSET_TICKERS"
+
+    def test_asset_tickers_self_mapping(self):
+        """ASSET_TICKERS values should be identical to their keys."""
+        from src.signals.multi_speed_momentum import ASSET_TICKERS
+        for key, value in ASSET_TICKERS.items():
+            assert key == value, f"ASSET_TICKERS[{key!r}] = {value!r}, expected {key!r}"
+
+    def test_all_speed_tier_values_non_negative(self):
+        """All speed tier numeric parameters should be >= 0."""
+        for config in SPEED_TIERS.values():
+            assert config['lookback_days'] >= 0
+            assert config['skip_days'] >= 0
+            assert config['vol_window'] >= 0
+
+    def test_speed_tier_trading_day_reasonableness(self):
+        """Speed tier lookback days should align with calendar conventions."""
+        assert SPEED_TIERS['fast']['lookback_days'] == 63   # ~3 months
+        assert SPEED_TIERS['medium']['lookback_days'] == 126  # ~6 months
+        assert SPEED_TIERS['slow']['lookback_days'] == 252   # ~12 months
+
+    def test_speed_tier_skip_days_reasonableness(self):
+        """Speed tier skip days should be roughly 1 week, 2 weeks, 1 month."""
+        assert SPEED_TIERS['fast']['skip_days'] == 5
+        assert SPEED_TIERS['medium']['skip_days'] == 10
+        assert SPEED_TIERS['slow']['skip_days'] == 21
+
+
+# ---------------------------------------------------------------------------
+# CLI main() function tests
+# ---------------------------------------------------------------------------
+
+
+class TestCLIMain:
+    """Test the CLI main() entry point with mocked arguments."""
+
+    def test_status_prints_system_info(self):
+        """`status` subcommand should print system info without error."""
+        import io
+        from src.signals.multi_speed_momentum import main
+        with patch('sys.argv', ['multi_speed_momentum', 'status']):
+            with patch('sys.stdout', new_callable=io.StringIO) as stdout:
+                main()
+                output = stdout.getvalue()
+            assert 'Multi-Speed Momentum' in output
+            assert 'FAST TIER' in output
+            assert 'MEDIUM TIER' in output
+            assert 'SLOW TIER' in output
+            assert 'Equal risk-weight' in output
+
+    def test_status_shows_prices_path(self):
+        """Status should mention the data source path."""
+        import io
+        from src.signals.multi_speed_momentum import main
+        with patch('sys.argv', ['multi_speed_momentum', 'status']):
+            with patch('sys.stdout', new_callable=io.StringIO) as stdout:
+                main()
+                output = stdout.getvalue()
+            assert 'Data source' in output
+
+    def test_backtest_with_mocked_engine_writes_json(self, tmp_path):
+        """Backtest with mocked backtester should produce JSON output."""
+        import io
+        output_file = tmp_path / 'bt_result.json'
+        mock_result = {
+            'sharpe_ratio': 0.80,
+            'strategy': 'Multi-Speed Momentum Ensemble v2.56',
+            'cagr': 0.106,
+            'volatility': 0.111,
+        }
+
+        with patch('src.signals.multi_speed_momentum.MultiSpeedBacktester') as mock_bt_cls:
+            mock_bt = MagicMock()
+            mock_bt.run_backtest.return_value = mock_result
+            mock_bt_cls.return_value = mock_bt
+
+            with patch('sys.argv', [
+                'multi_speed_momentum', 'backtest', '--portfolio', '46/38/16',
+                '--output', str(output_file),
+            ]):
+                with patch('sys.stdout', new_callable=io.StringIO):
+                    from src.signals.multi_speed_momentum import main
+                    main()
+
+            # Verify backtester received correct base allocation
+            mock_bt_cls.assert_called_once()
+            _, call_kwargs = mock_bt_cls.call_args
+            assert call_kwargs['base_allocation'] == {
+                'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0,
+            }
+
+        assert output_file.exists()
+        saved = json.loads(output_file.read_text())
+        assert saved['sharpe_ratio'] == 0.80
+
+    def test_backtest_with_dates_passed_to_constructor(self):
+        """Backtest with --start and --end should pass dates to constructor."""
+        import io
+        with patch('src.signals.multi_speed_momentum.MultiSpeedBacktester') as mock_bt_cls:
+            mock_bt = MagicMock()
+            mock_bt.run_backtest.return_value = {'sharpe_ratio': 0.5}
+            mock_bt_cls.return_value = mock_bt
+
+            with patch('sys.argv', [
+                'multi_speed_momentum', 'backtest', '--portfolio', '58/32/10',
+                '--start', '2020-01-01', '--end', '2023-12-31', '--freq', '63',
+            ]):
+                with patch('sys.stdout', new_callable=io.StringIO):
+                    from src.signals.multi_speed_momentum import main
+                    main()
+
+            mock_bt_cls.assert_called_once()
+            _, call_kwargs = mock_bt_cls.call_args
+            assert call_kwargs['start_date'] == '2020-01-01'
+            assert call_kwargs['end_date'] == '2023-12-31'
+            assert call_kwargs['rebalance_freq'] == 63
+
+    def test_backtest_with_4_part_portfolio(self):
+        """Backtest with 4-part portfolio should include DBC."""
+        import io
+        with patch('src.signals.multi_speed_momentum.MultiSpeedBacktester') as mock_bt_cls:
+            mock_bt = MagicMock()
+            mock_bt.run_backtest.return_value = {'sharpe_ratio': 0.5}
+            mock_bt_cls.return_value = mock_bt
+
+            with patch('sys.argv', [
+                'multi_speed_momentum', 'backtest', '--portfolio', '46/34/16/4',
+            ]):
+                with patch('sys.stdout', new_callable=io.StringIO):
+                    from src.signals.multi_speed_momentum import main
+                    main()
+
+            _, call_kwargs = mock_bt_cls.call_args
+            assert call_kwargs['base_allocation']['DBC'] == pytest.approx(0.04)
+            assert 'CASH' in call_kwargs['base_allocation']
+
+    def test_live_with_save_db_calls_save_to_db(self, tmp_path):
+        """Live command with --save-db should trigger save_to_db."""
+        import io
+        db_path = tmp_path / 'live_test.db'
+        mock_portfolio = MagicMock()
+        mock_portfolio.to_dict.return_value = {
+            'timestamp': '2026-05-24',
+            'base_allocation': {'SPY': 0.46},
+            'ensemble_adjustments': {},
+            'target_allocation': {'SPY': 0.50, 'CASH': 0.0},
+            'predicted_volatility': 0.12,
+            'max_drawdown_estimate': -0.30,
+            'ensemble_signals': {},
+            'tier_contributions': {},
+            'overall_confidence': 0.70,
+        }
+
+        with patch('src.signals.multi_speed_momentum.MultiSpeedMomentum') as mock_eng_cls:
+            mock_eng = MagicMock()
+            mock_eng.get_current_recommendation.return_value = mock_portfolio
+            mock_eng_cls.return_value = mock_eng
+
+            with patch('src.signals.multi_speed_momentum.DB_PATH', db_path):
+                with patch('sys.argv', [
+                    'multi_speed_momentum', 'live', '--portfolio', '50/30/20', '--save-db',
+                ]):
+                    with patch('sys.stdout', new_callable=io.StringIO):
+                        from src.signals.multi_speed_momentum import main
+                        main()
+
+                mock_eng.save_to_db.assert_called_once_with(mock_portfolio)
+
+    def test_live_with_output_file(self, tmp_path):
+        """Live command with --output should write JSON file."""
+        import io
+        output_file = tmp_path / 'live_out.json'
+        mock_portfolio = MagicMock()
+        mock_portfolio.to_dict.return_value = {
+            'timestamp': '2026-05-24',
+            'base_allocation': {},
+            'ensemble_adjustments': {},
+            'target_allocation': {},
+            'predicted_volatility': 0.0,
+            'max_drawdown_estimate': 0.0,
+            'ensemble_signals': {},
+            'tier_contributions': {},
+            'overall_confidence': 0.0,
+        }
+
+        with patch('src.signals.multi_speed_momentum.MultiSpeedMomentum') as mock_eng_cls:
+            mock_eng = MagicMock()
+            mock_eng.get_current_recommendation.return_value = mock_portfolio
+            mock_eng_cls.return_value = mock_eng
+
+            with patch('sys.argv', [
+                'multi_speed_momentum', 'live', '--portfolio', '46/38/16', '--output', str(output_file),
+            ]):
+                with patch('sys.stdout', new_callable=io.StringIO):
+                    from src.signals.multi_speed_momentum import main
+                    main()
+
+        assert output_file.exists()
+        saved = json.loads(output_file.read_text())
+        assert saved['timestamp'] == '2026-05-24'
+
+    def test_compute_with_mocked_engine(self):
+        """Compute command with mocked engine should not crash."""
+        import io
+        mock_signal = MagicMock()
+        mock_signal.to_dict.return_value = {
+            'ticker': 'SPY', 'tier': 'fast', 'signal': 1,
+        }
+
+        with patch('src.signals.multi_speed_momentum.MultiSpeedMomentum') as mock_eng_cls:
+            mock_eng = MagicMock()
+            mock_eng.compute_speed_signal.return_value = mock_signal
+            mock_eng_cls.return_value = mock_eng
+
+            with patch('sys.argv', [
+                'multi_speed_momentum', 'compute', '--ticker', 'SPY', '--tier', 'fast',
+            ]):
+                with patch('sys.stdout', new_callable=io.StringIO):
+                    from src.signals.multi_speed_momentum import main
+                    main()
+
+            mock_eng.compute_speed_signal.assert_called_once_with('SPY', 'fast', 0.46)
+
+    def test_compute_saves_output_file(self, tmp_path):
+        """Compute command with --output should write JSON file."""
+        import io
+        output_file = tmp_path / 'compute_out.json'
+        mock_signal = MagicMock()
+        mock_signal.to_dict.return_value = {'ticker': 'SPY', 'signal': 1}
+
+        with patch('src.signals.multi_speed_momentum.MultiSpeedMomentum') as mock_eng_cls:
+            mock_eng = MagicMock()
+            mock_eng.compute_speed_signal.return_value = mock_signal
+            mock_eng_cls.return_value = mock_eng
+
+            with patch('sys.argv', [
+                'multi_speed_momentum', 'compute', '--ticker', 'SPY', '--tier', 'fast',
+                '--output', str(output_file),
+            ]):
+                with patch('sys.stdout', new_callable=io.StringIO):
+                    from src.signals.multi_speed_momentum import main
+                    main()
+
+        assert output_file.exists()
+        saved = json.loads(output_file.read_text())
+        assert saved['ticker'] == 'SPY'
+
+    def test_compute_no_signal_prints_error(self):
+        """Compute command when signal is None should print error JSON."""
+        import io
+        with patch('src.signals.multi_speed_momentum.MultiSpeedMomentum') as mock_eng_cls:
+            mock_eng = MagicMock()
+            mock_eng.compute_speed_signal.return_value = None
+            mock_eng_cls.return_value = mock_eng
+
+            with patch('sys.argv', [
+                'multi_speed_momentum', 'compute', '--ticker', 'SPY', '--tier', 'fast',
+            ]):
+                with patch('sys.stdout', new_callable=io.StringIO) as stdout:
+                    from src.signals.multi_speed_momentum import main
+                    main()
+                output = stdout.getvalue()
+                assert 'error' in output.lower()
+
+    def test_invalid_portfolio_raises_value_error(self):
+        """Backtest with invalid portfolio format should raise ValueError."""
+        import io
+        from src.signals.multi_speed_momentum import main, _parse_portfolio_arg
+        with patch('sys.argv', [
+            'multi_speed_momentum', 'backtest', '--portfolio', '100',
+        ]):
+            with patch('sys.stdout', new_callable=io.StringIO):
+                with pytest.raises(ValueError, match="3 or 4"):
+                    main()
+
+    def test_live_portfolio_parsing(self):
+        """Live command should parse portfolio arg into correct allocation."""
+        import io
+        with patch('src.signals.multi_speed_momentum.MultiSpeedMomentum') as mock_eng_cls:
+            mock_eng = MagicMock()
+            mock_portfolio = MagicMock()
+            mock_portfolio.to_dict.return_value = {}
+            mock_eng.get_current_recommendation.return_value = mock_portfolio
+            mock_eng_cls.return_value = mock_eng
+
+            with patch('sys.argv', [
+                'multi_speed_momentum', 'live', '--portfolio', '40/35/25',
+            ]):
+                with patch('sys.stdout', new_callable=io.StringIO):
+                    from src.signals.multi_speed_momentum import main
+                    main()
+
+            mock_eng.get_current_recommendation.assert_called_once()
+            alloc = mock_eng.get_current_recommendation.call_args[0][0]
+            assert alloc['SPY'] == pytest.approx(0.40)
+            assert alloc['GLD'] == pytest.approx(0.35)
+            assert alloc['TLT'] == pytest.approx(0.25)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
