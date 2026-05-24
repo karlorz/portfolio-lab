@@ -14,7 +14,10 @@
 |- **DBC at 4% rejected**: Sharpe -0.057, hurts 2008/2020, marginal help 2022
 |- **Factor rotation is defensive only**: reduces drawdowns, not an alpha generator
 |- **Behavioral sentiment (VIX-proxy) is net-negative**: -0.216 Sharpe, 65.8% false positive rate
-|- **UNIFIED_OVERLAY validated: +0.014 Sharpe vs baseline** — keep current weight (17-21%)
+||- **UNIFIED_OVERLAY validated: +0.014 Sharpe vs baseline** — keep current weight (17-21%)
+||- **Regime gating analysis v961 complete**: UNIFIED_OVERLAY needs gates (OFF in CRISIS/HIGH_VOL/NORMAL), CROSS_ASSET_RV needs adaptive params, CRYPTO_MOMENTUM needs none
+||- **RECOVERY regime confirmed**: 5.5% of market time, Sharpe 4.17 — genuine distinct high-alpha regime
+||- **LOW_VOL detection verified**: 35% detection rate, gates are activatable
 |- **PyPortfolioOpt finds higher theoretical Sharpe**: Max Sharpe 0.87 (weights 40/34/26), HRP 0.93 (weights 29/28/43) vs champion 0.79 (46/38/16)
 |- **Walk-forward validation (20 windows): WFE=1.02, mean OOS Sharpe=0.99** — champion portfolio validated out-of-sample
 |- **Black-Litterman mapper**: maps ensemble biases → BL views with Idzorek confidence from health_scores, tau=0.15
