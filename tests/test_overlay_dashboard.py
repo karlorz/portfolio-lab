@@ -1603,3 +1603,104 @@ class TestOverlayDashboardRiskLevelConstants:
         for alert in alerts:
             assert isinstance(alert, str)
             assert len(alert) > 0
+
+
+# ---------------------------------------------------------------------------
+# Kill Switch Alert -- generate_alerts_json reads kill_switch.json
+# ---------------------------------------------------------------------------
+
+class TestKillSwitchAlerts:
+    """Dashboard alerts when kill_switch.json exists with enabled=True."""
+
+    @pytest.fixture
+    def gen(self, tmp_path, monkeypatch):
+        from src.dashboard import generator as gen_mod
+        from src.dashboard.generator import DashboardGenerator
+
+        monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(gen_mod, "DB_PATH", str(tmp_path / "market.db"))
+        # Create minimal DB for DashboardGenerator init
+        import sqlite3
+        conn = sqlite3.connect(str(tmp_path / "market.db"))
+        conn.execute("CREATE TABLE IF NOT EXISTS prices (symbol TEXT, date TEXT, close REAL)")
+        conn.commit()
+        conn.close()
+        return DashboardGenerator()
+
+    def test_kill_switch_enabled_produces_alert(self, gen, tmp_path, monkeypatch):
+        """kill_switch.json with enabled=True -> error alert with reason."""
+        from src.dashboard import generator as gen_mod
+
+        kill_data = {
+            "enabled": True,
+            "reason": "max_drawdown_-25.0%",
+            "mode": "paper",
+            "timestamp": "2026-05-25T06:00:00",
+        }
+        (tmp_path / "kill_switch.json").write_text(json.dumps(kill_data))
+        monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+
+        alerts_path = gen.generate_alerts_json()
+        with open(alerts_path) as f:
+            output = json.load(f)
+
+        kill_alerts = [a for a in output["alerts"] if a.get("type") == "kill_switch"]
+        assert len(kill_alerts) == 1
+        assert kill_alerts[0]["level"] == "error"
+        assert "PAPER" in kill_alerts[0]["title"]
+        assert kill_alerts[0]["message"] == "max_drawdown_-25.0%"
+        assert kill_alerts[0]["requires_action"] is True
+
+    def test_kill_switch_disabled_no_alert(self, gen, tmp_path, monkeypatch):
+        """kill_switch.json with enabled=False -> no kill_switch alert."""
+        from src.dashboard import generator as gen_mod
+
+        kill_data = {
+            "enabled": False,
+            "reason": "old_breach",
+            "mode": "paper",
+            "timestamp": "2026-05-25T06:00:00",
+        }
+        (tmp_path / "kill_switch.json").write_text(json.dumps(kill_data))
+        monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+
+        alerts_path = gen.generate_alerts_json()
+        with open(alerts_path) as f:
+            output = json.load(f)
+
+        kill_alerts = [a for a in output["alerts"] if a.get("type") == "kill_switch"]
+        assert len(kill_alerts) == 0
+
+    def test_no_kill_switch_file_no_alert(self, gen, tmp_path, monkeypatch):
+        """No kill_switch.json -> no kill_switch alert."""
+        from src.dashboard import generator as gen_mod
+
+        monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+
+        alerts_path = gen.generate_alerts_json()
+        with open(alerts_path) as f:
+            output = json.load(f)
+
+        kill_alerts = [a for a in output["alerts"] if a.get("type") == "kill_switch"]
+        assert len(kill_alerts) == 0
+
+    def test_kill_switch_live_mode_alert_title(self, gen, tmp_path, monkeypatch):
+        """kill_switch.json with mode=live -> LIVE in alert title."""
+        from src.dashboard import generator as gen_mod
+
+        kill_data = {
+            "enabled": True,
+            "reason": "position_limit_exceeded",
+            "mode": "live",
+            "timestamp": "2026-05-25T07:00:00",
+        }
+        (tmp_path / "kill_switch.json").write_text(json.dumps(kill_data))
+        monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+
+        alerts_path = gen.generate_alerts_json()
+        with open(alerts_path) as f:
+            output = json.load(f)
+
+        kill_alerts = [a for a in output["alerts"] if a.get("type") == "kill_switch"]
+        assert len(kill_alerts) == 1
+        assert "LIVE" in kill_alerts[0]["title"]

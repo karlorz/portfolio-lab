@@ -1402,7 +1402,7 @@ class TestKillSwitchTrigger:
         self, mock_vix, mock_regime, mock_prices, mock_sqlite,
         tmp_path, capsys,
     ):
-        """Risk breach -> .kill_switch_paper created with correct JSON."""
+        """Risk breach -> kill_switch.json created with correct JSON."""
         from src.strategy.evaluator import main
 
         with (
@@ -1417,11 +1417,13 @@ class TestKillSwitchTrigger:
 
             main()
 
-        kill_file = tmp_path / ".kill_switch_paper"
+        kill_file = tmp_path / "kill_switch.json"
         assert kill_file.exists()
         with open(kill_file) as f:
             data = json.load(f)
+        assert data["enabled"] is True
         assert data["reason"] == "max_drawdown_-25.0%"
+        assert data["mode"] == "paper"
 
     @patch('src.strategy.evaluator.sqlite_connect')
     @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
@@ -1431,12 +1433,12 @@ class TestKillSwitchTrigger:
         self, mock_vix, mock_regime, mock_prices, mock_sqlite,
         tmp_path, capsys,
     ):
-        """No risk breach -> stale .kill_switch_paper file is deleted."""
+        """No risk breach -> stale kill_switch.json file is deleted."""
         from src.strategy.evaluator import main
 
         # Create stale kill switch file manually
-        stale = tmp_path / ".kill_switch_paper"
-        stale.write_text('{"reason": "old_breach", "timestamp": "2026-01-01T00:00:00"}')
+        stale = tmp_path / "kill_switch.json"
+        stale.write_text('{"enabled": true, "reason": "old_breach", "mode": "paper", "timestamp": "2026-01-01T00:00:00"}')
         assert stale.exists()
 
         with (
@@ -1467,7 +1469,7 @@ class TestKillSwitchTrigger:
         self, mock_vix, mock_regime, mock_prices, mock_sqlite,
         tmp_path, capsys,
     ):
-        """Kill switch JSON has expected structure: reason + timestamp."""
+        """Kill switch JSON has expected structure: enabled + reason + mode + timestamp."""
         from src.strategy.evaluator import main
 
         with (
@@ -1482,13 +1484,55 @@ class TestKillSwitchTrigger:
 
             main()
 
-        kill_file = tmp_path / ".kill_switch_paper"
+        kill_file = tmp_path / "kill_switch.json"
         assert kill_file.exists()
         with open(kill_file) as f:
             data = json.load(f)
+        assert data["enabled"] is True
         assert "reason" in data
+        assert "mode" in data
         assert "timestamp" in data
         assert isinstance(data["reason"], str)
+        assert isinstance(data["mode"], str)
         assert isinstance(data["timestamp"], str)
         assert len(data["reason"]) > 0
         assert len(data["timestamp"]) > 0
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_kill_switch_json_readable_by_order_router(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, capsys,
+    ):
+        """End-to-end: evaluator breach -> kill_switch.json -> order router blocks orders."""
+        from src.strategy.evaluator import main
+        from src.broker.order_router import OrderRouter
+
+        # Step 1: Evaluator writes kill_switch.json on risk breach
+        with (
+            patch('src.strategy.evaluator.DATA_DIR', tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch('src.strategy.evaluator.Portfolio') as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = "max_drawdown_-30.0%"
+            mock_portfolio.total_value.return_value = 75000
+            MockPortfolio.return_value = mock_portfolio
+            main()
+
+        kill_file = tmp_path / "kill_switch.json"
+        assert kill_file.exists(), "evaluator should write kill_switch.json"
+
+        # Step 2: Order router reads kill_switch.json and blocks orders
+        with patch('src.broker.order_router.DATA_DIR', tmp_path):
+            router = OrderRouter(data_dir=str(tmp_path), paper=True)
+            # execute_orders should return "blocked" when kill switch is active
+            with patch.object(router, 'is_ready', return_value=True):
+                result = router.execute_orders(
+                    [{"symbol": "SPY", "side": "buy", "qty": 1}],
+                    dry_run=False,
+                    kill_switch_check=True,
+                )
+            assert result["status"] == "blocked"

@@ -929,11 +929,12 @@ class DashboardGenerator:
                 })
         
         # Check for kill switch
-        for mode in ["paper", "live"]:
-            kill_file = DATA_DIR / f".kill_switch_{mode}"
-            if kill_file.exists():
-                with open(kill_file) as f:
-                    data = json.load(f)
+        kill_file = DATA_DIR / "kill_switch.json"
+        if kill_file.exists():
+            with open(kill_file) as f:
+                data = json.load(f)
+                if data.get("enabled"):
+                    mode = data.get("mode", "unknown")
                     alerts.append({
                         "level": "error",
                         "type": "kill_switch",
