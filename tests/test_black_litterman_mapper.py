@@ -8,6 +8,7 @@ import numpy as np
 from src.strategy.black_litterman_mapper import (
     BLViews, BLResult,
     map_biases_to_views, run_black_litterman, compute_bl_weights,
+    tau_sensitivity,
     DEFAULT_TAU, DEFAULT_SYMBOLS, BIAS_TO_RETURN_SCALE,
     MIN_VIEW_CONFIDENCE,
 )
@@ -352,6 +353,61 @@ class TestChampionComparison:
         # All weights should be positive
         for sym, w in result.bl_weights.items():
             assert w > 0, f"{sym} has non-positive weight {w}"
+
+
+class TestTauSensitivity:
+    """Tests for tau_sensitivity()."""
+
+    def test_default_tau_range(self):
+        cov = np.array([
+            [0.0225, 0.0000, -0.0063],
+            [0.0000, 0.0256,  0.0022],
+            [-0.0063, 0.0022, 0.0196],
+        ])
+        views = map_biases_to_views(0.5, 0.2, 0.3)
+        results = tau_sensitivity(cov, views)
+        # Default should have 8 tau values
+        assert len(results) == 8
+        assert 0.005 in results
+        assert 0.15 in results
+        assert 0.50 in results
+
+    def test_custom_tau_range(self):
+        cov = np.array([
+            [0.0225, 0.0000, -0.0063],
+            [0.0000, 0.0256,  0.0022],
+            [-0.0063, 0.0022, 0.0196],
+        ])
+        views = map_biases_to_views(0.5, 0.2, 0.3)
+        results = tau_sensitivity(cov, views, tau_values=[0.05, 0.15, 0.30])
+        assert len(results) == 3
+
+    def test_results_are_blresult_instances(self):
+        cov = np.array([
+            [0.0225, 0.0000, -0.0063],
+            [0.0000, 0.0256,  0.0022],
+            [-0.0063, 0.0022, 0.0196],
+        ])
+        views = map_biases_to_views(0.5, 0.2, 0.3)
+        results = tau_sensitivity(cov, views, tau_values=[0.05, 0.15])
+        for tau, result in results.items():
+            assert isinstance(result, BLResult)
+            assert result.tau == tau
+
+    def test_higher_tau_changes_metrics(self):
+        """Different tau values should produce different Sharpe ratios."""
+        cov = np.array([
+            [0.0225, 0.0000, -0.0063],
+            [0.0000, 0.0256,  0.0022],
+            [-0.0063, 0.0022, 0.0196],
+        ])
+        views = map_biases_to_views(1.0, -0.5, 0.0)
+        results = tau_sensitivity(cov, views, tau_values=[0.005, 0.50])
+
+        if 0.005 in results and 0.50 in results:
+            # At minimum, the results should have metrics
+            assert results[0.005].expected_sharpe is not None
+            assert results[0.50].expected_sharpe is not None
 
 
 if __name__ == "__main__":

@@ -750,5 +750,77 @@ class TestGetRebalanceConfig:
         assert config['regime_confidence'] == 0.85
 
 
+class TestGetBLViews:
+    """Tests for get_bl_views() — BL view generation from ensemble vote."""
+
+    def test_returns_views_dict(self):
+        voter = EnsembleVoter()
+        result = voter.get_bl_views()
+        assert 'views' in result
+        assert 'tau' in result
+        assert 'prior' in result
+
+    def test_views_is_blviews_instance(self):
+        from src.strategy.black_litterman_mapper import BLViews
+        voter = EnsembleVoter()
+        result = voter.get_bl_views()
+        assert isinstance(result['views'], BLViews)
+
+    def test_default_tau(self):
+        voter = EnsembleVoter()
+        result = voter.get_bl_views()
+        assert result['tau'] == 0.15
+
+    def test_custom_tau(self):
+        voter = EnsembleVoter()
+        result = voter.get_bl_views(tau=0.30)
+        assert result['tau'] == 0.30
+        assert result['views'].tau == 0.30
+
+    def test_with_precomputed_vote(self):
+        voter = EnsembleVoter()
+        vote = EnsembleVote(
+            timestamp=datetime.now().isoformat(),
+            regime=Regime.NORMAL,
+            regime_confidence=0.7,
+            num_sources=6,
+            weighted_consensus=0.5,
+            agreement_ratio=0.8,
+            equity_bias=0.5,
+            duration_bias=-0.2,
+            gold_bias=0.3,
+            action="increase_equity",
+            confidence=0.7,
+            reasoning="Bullish",
+            source_votes=[],
+        )
+        result = voter.get_bl_views(vote=vote)
+        assert result['equity_bias'] == 0.5
+        assert result['duration_bias'] == -0.2
+        assert result['gold_bias'] == 0.3
+
+    def test_views_have_absolute_views(self):
+        voter = EnsembleVoter()
+        result = voter.get_bl_views()
+        views = result['views']
+        assert 'SPY' in views.absolute_views
+        assert 'GLD' in views.absolute_views
+        assert 'TLT' in views.absolute_views
+
+    def test_views_have_confidences(self):
+        voter = EnsembleVoter()
+        result = voter.get_bl_views()
+        views = result['views']
+        assert len(views.view_confidences) == 3
+        for c in views.view_confidences:
+            assert 0.0 <= c <= 1.0
+
+    def test_market_prior(self):
+        voter = EnsembleVoter()
+        result = voter.get_bl_views(prior="market")
+        assert result['prior'] == "market"
+        assert result['views'].prior == "market"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

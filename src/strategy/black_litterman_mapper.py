@@ -330,3 +330,57 @@ def compute_bl_weights(
         views=views,
         risk_free_rate=risk_free_rate,
     )
+
+
+def tau_sensitivity(
+    cov_matrix: np.ndarray,
+    views: BLViews,
+    tau_values: Optional[List[float]] = None,
+    risk_free_rate: float = 0.02,
+    market_caps: Optional[Dict[str, float]] = None,
+    pi: Optional[np.ndarray] = None,
+) -> Dict[float, BLResult]:
+    """Run BL optimization across multiple tau values.
+
+    Validates the tau=0.15 default by showing how weights change
+    as view confidence varies. At low tau, weights approach the prior.
+    At high tau, weights approach pure view-based allocation.
+
+    Args:
+        cov_matrix: NxN covariance matrix.
+        views: BLViews from map_biases_to_views().
+        tau_values: List of tau values to test.
+            Default: [0.005, 0.01, 0.05, 0.10, 0.15, 0.20, 0.30, 0.50].
+        risk_free_rate: Annual risk-free rate.
+        market_caps: Market caps (for market prior).
+        pi: Custom prior returns.
+
+    Returns:
+        Dict mapping tau value to BLResult.
+    """
+    if tau_values is None:
+        tau_values = [0.005, 0.01, 0.05, 0.10, 0.15, 0.20, 0.30, 0.50]
+
+    results = {}
+    for tau in tau_values:
+        # Create a copy of views with modified tau
+        view_copy = BLViews(
+            absolute_views=dict(views.absolute_views),
+            view_confidences=list(views.view_confidences),
+            tau=tau,
+            prior=views.prior,
+            symbols=list(views.symbols),
+        )
+        try:
+            result = run_black_litterman(
+                cov_matrix=cov_matrix,
+                views=view_copy,
+                risk_free_rate=risk_free_rate,
+                market_caps=market_caps,
+                pi=pi,
+            )
+            results[tau] = result
+        except Exception as e:
+            logger.warning("BL optimization failed at tau=%.3f: %s", tau, e)
+
+    return results

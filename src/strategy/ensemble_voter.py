@@ -1195,6 +1195,63 @@ class EnsembleVoter:
             'timestamp': vote.timestamp
         }
 
+    def get_bl_views(
+        self,
+        vote: Optional[EnsembleVote] = None,
+        tau: float = 0.15,
+        prior: str = "equal",
+    ) -> Dict[str, Any]:
+        """Generate Black-Litterman views from ensemble vote.
+
+        Maps equity_bias, duration_bias, and gold_bias from the
+        current ensemble consensus to BL absolute views, with view
+        confidence derived from signal health scores.
+
+        Args:
+            vote: Pre-computed vote (default: compute fresh).
+            tau: BL tau parameter (view weight). Default 0.15.
+            prior: Prior type — "equal" or "market".
+
+        Returns:
+            Dict with 'views' (BLViews), 'tau', 'prior', and
+            'health_scores_used' keys.
+        """
+        from src.strategy.black_litterman_mapper import map_biases_to_views, BLViews
+
+        if vote is None:
+            vote = self.compute_vote()
+
+        # Collect health scores from tracker
+        health_scores = {}
+        tracker = _get_health_tracker()
+        if tracker is not None:
+            try:
+                report = tracker.get_health_report()
+                for source_name, data in report.get('sources', {}).items():
+                    score = data.get('health_score', 0.5)
+                    health_scores[source_name] = score
+            except Exception as e:
+                logger.debug("Could not get health scores for BL views: %s", e)
+
+        views = map_biases_to_views(
+            equity_bias=vote.equity_bias,
+            duration_bias=vote.duration_bias,
+            gold_bias=vote.gold_bias,
+            health_scores=health_scores if health_scores else None,
+            tau=tau,
+            prior=prior,
+        )
+
+        return {
+            'views': views,
+            'tau': tau,
+            'prior': prior,
+            'health_scores_used': health_scores,
+            'equity_bias': vote.equity_bias,
+            'duration_bias': vote.duration_bias,
+            'gold_bias': vote.gold_bias,
+        }
+
 
 def main():
     import argparse
