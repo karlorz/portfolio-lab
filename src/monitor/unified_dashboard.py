@@ -177,9 +177,15 @@ def _get_overlays_section() -> Dict[str, Any]:
     # VIX term structure overlay — read from VIXY hedge state
     vixy = _read_json("vixy_hedge_state.json")
     if vixy:
+        raw_alloc = vixy.get("current_allocation", 0)
+        # allocation can be a scalar or a dict; either is "active" when nonzero
+        if isinstance(raw_alloc, dict):
+            is_active = any(v > 0 for v in raw_alloc.values())
+        else:
+            is_active = raw_alloc > 0
         overlays["vix_term_structure"] = {
-            "active": vixy.get("current_allocation", 0) > 0,
-            "allocation": vixy.get("current_allocation"),
+            "active": is_active,
+            "allocation": raw_alloc,
             "last_shift_date": vixy.get("last_signal_date"),
             "regime": vixy.get("regime"),
         }

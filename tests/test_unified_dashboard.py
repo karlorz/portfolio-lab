@@ -620,3 +620,800 @@ class TestCLI:
                     assert False, "Should have sys.exit(1)"
                 except SystemExit as e:
                     assert e.code == 1
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Health Section Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestHealthSectionEdgeCases:
+    """Additional edge cases for _get_health_section: GARCH flat format, missing fields."""
+
+    def test_garch_flat_healthy(self, tmp_path):
+        report = {
+            "timestamp": "2026-05-16T18:00:00",
+            "tail_severity": "normal",
+            "cvar_ratio": 1.5,
+            "var_95": -1.41,
+            "cvar_95": -2.02,
+        }
+        f = tmp_path / ".health_report.json"
+        f.write_text(json.dumps(report))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_health_section()
+            assert section["available"] is True
+            assert section["status"] == "healthy"
+            assert section["checks_passed"] == 1
+            assert section["checks_total"] == 1
+            assert len(section["alerts"]) == 0
+            assert section["components"]["garch_cvar"]["ok"] is True
+
+    def test_garch_flat_extreme_tail(self, tmp_path):
+        report = {
+            "tail_severity": "extreme",
+            "cvar_ratio": 2.0,
+        }
+        f = tmp_path / ".health_report.json"
+        f.write_text(json.dumps(report))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_health_section()
+            assert section["available"] is True
+            assert section["status"] == "unhealthy"
+            assert len(section["alerts"]) == 1
+            assert "extreme" in section["alerts"][0]
+
+    def test_garch_flat_severe_tail(self, tmp_path):
+        report = {
+            "tail_severity": "severe",
+            "cvar_ratio": 1.0,
+        }
+        f = tmp_path / ".health_report.json"
+        f.write_text(json.dumps(report))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_health_section()
+            assert section["available"] is True
+            assert section["status"] == "unhealthy"
+
+    def test_garch_flat_high_cvar_ratio(self, tmp_path):
+        report = {
+            "tail_severity": "moderate",
+            "cvar_ratio": 4.0,
+        }
+        f = tmp_path / ".health_report.json"
+        f.write_text(json.dumps(report))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_health_section()
+            assert section["available"] is True
+            assert section["status"] == "unhealthy"
+            assert "CVaR ratio: 4.00" in section["alerts"][0]
+
+    def test_garch_flat_missing_tail_defaults_normal(self, tmp_path):
+        report = {"cvar_ratio": 0.5}
+        f = tmp_path / ".health_report.json"
+        f.write_text(json.dumps(report))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_health_section()
+            assert section["available"] is True
+            assert section["status"] == "healthy"
+
+    def test_legacy_empty_checks(self, tmp_path):
+        report = {"status": "healthy", "checks": {}, "alerts": []}
+        f = tmp_path / ".health_report.json"
+        f.write_text(json.dumps(report))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_health_section()
+            assert section["available"] is True
+            assert section["status"] == "healthy"
+            assert section["checks_passed"] == 0
+            assert section["components"] == {}
+
+    def test_legacy_missing_summary(self, tmp_path):
+        report = {"status": "healthy", "checks": {"a": {"status": "ok", "ok": True}}}
+        f = tmp_path / ".health_report.json"
+        f.write_text(json.dumps(report))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_health_section()
+            assert section["available"] is True
+            # Missing summary → defaults to 0
+            assert section["checks_passed"] == 0
+
+    def test_garch_var_cvar_passed_through(self, tmp_path):
+        report = {"tail_severity": "normal", "cvar_ratio": 1.0, "var_95": -2.5, "cvar_95": -3.8}
+        f = tmp_path / ".health_report.json"
+        f.write_text(json.dumps(report))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_health_section()
+            comp = section["components"]["garch_cvar"]
+            assert comp["var_95"] == -2.5
+            assert comp["cvar_95"] == -3.8
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Portfolio Section Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestPortfolioSectionEdgeCases:
+    """Edge cases for _get_portfolio_section: missing cash, zero total, partial fields."""
+
+    def test_missing_cash_key(self, tmp_path):
+        data = {"positions": {"SPY": {"symbol": "SPY", "shares": 10, "value": 10000}}}
+        f = tmp_path / "portfolio_paper.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_portfolio_section()
+            assert section["available"] is True
+            assert section["cash"] == 0.0
+            assert section["total_value"] == 10000.0
+
+    def test_zero_total_value(self, tmp_path):
+        data = {"cash": 0, "positions": {"SPY": {"symbol": "SPY", "shares": 0, "value": 0}}}
+        f = tmp_path / "portfolio_paper.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_portfolio_section()
+            assert section["available"] is True
+            assert section["total_value"] == 0.0
+            assert section["cash_pct"] == 0.0
+            assert section["positions"][0]["weight"] == 0
+
+    def test_partial_position_fields(self, tmp_path):
+        """Position missing avg_price and current_price should not raise."""
+        data = {
+            "cash": 5000,
+            "positions": {
+                "SPY": {"symbol": "SPY", "shares": 10, "value": 10000, "unrealized_pnl": 0},
+            },
+        }
+        f = tmp_path / "portfolio_paper.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_portfolio_section()
+            pos = section["positions"][0]
+            assert pos["avg_price"] is None
+            assert pos["current_price"] is None
+
+    def test_missing_history(self, tmp_path):
+        data = {"cash": 5000, "positions": {}}
+        f = tmp_path / "portfolio_paper.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_portfolio_section()
+            assert section["history_count"] == 0
+
+    def test_negative_cash(self, tmp_path):
+        data = {"cash": -500, "positions": {"SPY": {"symbol": "SPY", "shares": 10, "value": 10000, "unrealized_pnl": 0}}}
+        f = tmp_path / "portfolio_paper.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_portfolio_section()
+            assert section["cash"] == -500.0
+            assert section["total_value"] == 9500.0
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Overlays Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestOverlaysSectionEdgeCases:
+    """Edge cases for _get_overlays_section: inactive, dict allocation, missing VIXY fields."""
+
+    def test_zero_allocation_is_inactive(self, tmp_path):
+        vixy = tmp_path / "vixy_hedge_state.json"
+        vixy.write_text(json.dumps({"current_allocation": 0, "last_signal_date": "2026-01-01", "regime": "contango"}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_overlays_section()
+            assert section["vix_term_structure"]["active"] is False
+            assert section["_meta"]["active_count"] == 0
+
+    def test_negative_allocation_is_inactive(self, tmp_path):
+        vixy = tmp_path / "vixy_hedge_state.json"
+        vixy.write_text(json.dumps({"current_allocation": -0.05, "regime": "backwardation"}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_overlays_section()
+            assert section["vix_term_structure"]["active"] is False
+
+    def test_missing_regime_field(self, tmp_path):
+        vixy = tmp_path / "vixy_hedge_state.json"
+        vixy.write_text(json.dumps({"current_allocation": 0.1, "last_signal_date": "2026-01-01"}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_overlays_section()
+            assert section["vix_term_structure"]["regime"] is None
+
+    def test_dict_allocation_in_overlay(self, tmp_path):
+        """VIXY allocation can be a dict. Verify it passes through as-is."""
+        alloc_dict = {"SPY": 0.4, "GLD": 0.6}
+        vixy = tmp_path / "vixy_hedge_state.json"
+        vixy.write_text(json.dumps({"current_allocation": alloc_dict, "last_signal_date": "2026-01-01", "regime": "contango"}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_overlays_section()
+            assert section["vix_term_structure"]["active"] is True
+            assert section["vix_term_structure"]["allocation"] == alloc_dict
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Risk Section Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestRiskSectionEdgeCases:
+    """Edge cases for _get_risk_section: missing optional fields."""
+
+    def test_missing_optional_fields(self, tmp_path):
+        data = {"timestamp": "2026-05-16T18:00:00", "var_95_daily": -1.5}
+        f = tmp_path / "risk_metrics.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_risk_section()
+            assert section["available"] is True
+            assert section["cvar_95_daily"] is None
+            assert section["garch_active"] is False
+            assert section["garch_filtered"] is False
+
+    def test_garch_active_flag(self, tmp_path):
+        data = {"timestamp": "2026-05-16T18:00:00", "garch_active": True, "garch_filtered": True}
+        f = tmp_path / "risk_metrics.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_risk_section()
+            assert section["garch_active"] is True
+            assert section["garch_filtered"] is True
+
+    def test_all_none_values(self, tmp_path):
+        data = {
+            "timestamp": "2026-05-16T18:00:00",
+            "var_95_daily": None,
+            "cvar_95_daily": None,
+            "cvar_ratio": None,
+        }
+        f = tmp_path / "risk_metrics.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_risk_section()
+            assert section["available"] is True
+            assert section["var_95_daily"] is None
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Cron Section Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestCronSectionEdgeCases:
+    """Edge cases for _get_cron_section: status counting, missing fields."""
+
+    def test_all_ok(self, tmp_path):
+        jobs = {"jobs": [{"name": "a", "status": "ok"}, {"name": "b", "status": "ok"}]}
+        f = tmp_path / "cron_status.json"
+        f.write_text(json.dumps(jobs))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_cron_section()
+            assert section["ok"] == 2
+            assert section["errors"] == 0
+            assert section["pending"] == 0
+
+    def test_all_errors(self, tmp_path):
+        jobs = {"jobs": [{"name": "a", "status": "error"}, {"name": "b", "status": "failed"}]}
+        f = tmp_path / "cron_status.json"
+        f.write_text(json.dumps(jobs))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_cron_section()
+            assert section["ok"] == 0
+            assert section["errors"] == 2
+            assert section["pending"] == 0
+
+    def test_all_pending(self, tmp_path):
+        jobs = {"jobs": [{"name": "a", "status": "pending"}, {"name": "b", "status": "pending"}]}
+        f = tmp_path / "cron_status.json"
+        f.write_text(json.dumps(jobs))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_cron_section()
+            assert section["ok"] == 0
+            assert section["pending"] == 2
+            assert section["errors"] == 0
+
+    def test_mixed_statuses(self, tmp_path):
+        jobs = {
+            "jobs": [
+                {"name": "a", "status": "ok"},
+                {"name": "b", "status": "pending"},
+                {"name": "c", "status": "error"},
+                {"name": "d", "status": "unknown"},
+            ]
+        }
+        f = tmp_path / "cron_status.json"
+        f.write_text(json.dumps(jobs))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_cron_section()
+            assert section["ok"] == 1
+            assert section["pending"] == 1
+            assert section["errors"] == 2
+            assert section["total"] == 4
+
+    def test_jobs_missing_optional_fields(self, tmp_path):
+        jobs = {"jobs": [{"name": "a"}, {"name": "b", "status": "ok"}]}
+        f = tmp_path / "cron_status.json"
+        f.write_text(json.dumps(jobs))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_cron_section()
+            assert section["ok"] == 1
+            assert section["errors"] == 1  # "a" has no status → not ok/pending
+            assert section["jobs"][0]["duration_seconds"] is None
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Adaptive Weights Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestAdaptiveWeightsEdgeCases:
+    """Edge cases for _get_adaptive_weights_section."""
+
+    def test_empty_adjusted_weights(self, tmp_path):
+        data = {
+            "adjusted_weights": {},
+            "baseline_weights": {},
+            "multipliers": {},
+        }
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            assert section["available"] is False
+
+    def test_all_zero_changes(self, tmp_path):
+        data = {
+            "adjusted_weights": {"A": 0.30, "B": 0.20},
+            "baseline_weights": {"A": 0.30, "B": 0.20},
+            "multipliers": {"A": 1.0, "B": 1.0},
+        }
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            assert section["available"] is True
+            assert len(section["top_boosted"]) == 0
+            assert len(section["top_reduced"]) == 0
+            assert all(c["change"] == 0 for c in section["top_changes"])
+
+    def test_missing_baseline_weights(self, tmp_path):
+        data = {
+            "adjusted_weights": {"A": 0.35},
+            "multipliers": {"A": 1.17},
+        }
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            assert section["available"] is True
+            change = section["top_changes"][0]
+            assert change["base_weight"] == 0  # default from baseline.get(k, 0)
+
+    def test_single_source(self, tmp_path):
+        data = {
+            "adjusted_weights": {"ONLY": 0.50},
+            "baseline_weights": {"ONLY": 0.30},
+            "multipliers": {"ONLY": 1.67},
+            "history": [{"ts": "t1"}],
+        }
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            assert section["num_sources"] == 1
+            assert len(section["top_boosted"]) == 1
+            assert len(section["top_reduced"]) == 0
+            assert section["history_count"] == 1
+
+    def test_boosted_and_reduced_by_sign(self, tmp_path):
+        data = {
+            "adjusted_weights": {"X": 0.50, "Y": 0.10, "Z": 0.40},
+            "baseline_weights": {"X": 0.30, "Y": 0.30, "Z": 0.40},
+            "multipliers": {"X": 1.67, "Y": 0.33, "Z": 1.0},
+        }
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            assert [c["source"] for c in section["top_boosted"]] == ["X"]
+            assert [c["source"] for c in section["top_reduced"]] == ["Y"]
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Attribution Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestAttributionSectionEdgeCases:
+    """Edge cases for _get_attribution_section: empty dir, corrupt files, None values."""
+
+    def test_empty_attribution_dir(self, tmp_path):
+        attr_dir = tmp_path / "attribution"
+        attr_dir.mkdir()
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_attribution_section()
+            assert section["available"] is False
+
+    def test_corrupt_attribution_file(self, tmp_path):
+        attr_dir = tmp_path / "attribution"
+        attr_dir.mkdir()
+        f = attr_dir / "attribution_2026-05-16.json"
+        f.write_text("{corrupt json!!!")
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_attribution_section()
+            assert section["available"] is False
+
+    def test_source_with_none_return(self, tmp_path):
+        attr_dir = tmp_path / "attribution"
+        attr_dir.mkdir()
+        data = {
+            "analysis_days": 30,
+            "sources": {
+                "a": {"display_name": "Alpha", "total_return_bps": None},
+                "b": {"display_name": "Beta", "total_return_bps": 50},
+            },
+        }
+        f = attr_dir / "attribution_2026-05-16.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_attribution_section()
+            # Sorted by abs(total_return_bps) descending — None → 0 in abs()
+            assert section["sources"][0]["source"] == "b"  # 50 > 0
+            assert section["sources"][1]["source"] == "a"  # None → 0
+
+    def test_source_missing_display_name(self, tmp_path):
+        attr_dir = tmp_path / "attribution"
+        attr_dir.mkdir()
+        data = {
+            "analysis_days": 30,
+            "sources": {"a": {"total_return_bps": 100}},
+        }
+        f = attr_dir / "attribution_2026-05-16.json"
+        f.write_text(json.dumps(data))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_attribution_section()
+            assert section["sources"][0]["name"] == "a"  # fallback to key
+
+    def test_multiple_attribution_files_picks_latest(self, tmp_path):
+        attr_dir = tmp_path / "attribution"
+        attr_dir.mkdir()
+        older = attr_dir / "attribution_2026-05-15.json"
+        older.write_text(json.dumps({"analysis_days": 60, "sources": {"a": {"display_name": "Old", "total_return_bps": 10}}}))
+        newer = attr_dir / "attribution_2026-05-16.json"
+        newer.write_text(json.dumps({"analysis_days": 90, "sources": {"b": {"display_name": "New", "total_return_bps": 20}}}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_attribution_section()
+            assert section["analysis_days"] == 90
+            assert section["sources"][0]["name"] == "New"
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Formatting Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestFormatHelpersEdgeCases:
+    """Edge cases for _fmt, _fmt_pct, _status_badge."""
+
+    def test_fmt_zero(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(0) == "0"
+        assert _fmt(0.0) == "0.00"
+
+    def test_fmt_negative(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(-3.5) == "-3.50"
+
+    def test_fmt_very_large(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(1_234_567.89) == "1234567.89"
+
+    def test_fmt_string_value(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt("hello") == "hello"
+
+    def test_fmt_pct_zero(self):
+        from src.monitor.unified_dashboard import _fmt_pct
+        assert _fmt_pct(0) == "0.00%"
+
+    def test_fmt_pct_negative(self):
+        from src.monitor.unified_dashboard import _fmt_pct
+        assert _fmt_pct(-5.5) == "-5.50%"
+
+    def test_fmt_with_suffix_none(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(None, "%") == "N/A"
+
+    def test_fmt_bool_values(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(True) == "True"
+
+    def test_status_badge_truthy(self):
+        from src.monitor.unified_dashboard import _status_badge
+        assert _status_badge(1) == "✅"
+        assert _status_badge("yes") == "✅"
+        assert _status_badge("") == "❌"
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: Dashboard Generation Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestDashboardGenerationEdgeCases:
+    """Edge cases for generate_unified_dashboard: empty data dir, field completeness."""
+
+    def test_all_sections_not_available_in_empty_dir(self, tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            dashboard = generate_unified_dashboard()
+            for key in ["health", "portfolio", "risk", "risk_history", "tca", "regime", "attribution", "adaptive_weights", "cron"]:
+                section = dashboard[key]
+                assert "available" in section, f"{key} missing 'available' key"
+                assert section["available"] is False, f"{key} should be unavailable"
+            # Overlays section uses _meta instead of available
+            assert "_meta" in dashboard["overlays"]
+
+    def test_dashboard_version_constant(self):
+        dashboard = generate_unified_dashboard()
+        assert dashboard["dashboard_version"] == "v6.08"
+
+    def test_generated_at_is_populated(self):
+        dashboard = generate_unified_dashboard()
+        assert "generated_at" in dashboard
+        assert dashboard["generated_at"] != ""
+
+    def test_overlays_has_meta_in_output(self, tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            dashboard = generate_unified_dashboard()
+            assert "_meta" in dashboard["overlays"]
+
+    def test_adaptive_weights_not_in_output_when_no_file(self, tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            dashboard = generate_unified_dashboard()
+            assert dashboard["adaptive_weights"]["available"] is False
+
+    def test_all_top_level_keys_present(self):
+        dashboard = generate_unified_dashboard()
+        expected = {
+            "dashboard_version", "generated_at", "generated_at_local",
+            "health", "portfolio", "risk", "risk_history", "tca",
+            "overlays", "regime", "attribution", "adaptive_weights", "cron",
+        }
+        assert set(dashboard.keys()) == expected
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: generate_status_text Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestGenerateStatusTextEdgeCases:
+    """Edge cases for generate_status_text: unavailable sections."""
+
+    def test_all_unavailable(self, tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            text = generate_status_text()
+            assert isinstance(text, str)
+            # Health unavailable → health_ok = False, cron unavailable → cron_ok = False
+            assert "⚠️" in text or "✅" in text
+            assert "val=$0" in text
+            assert "dd=0.0%" in text
+
+    def test_cron_has_errors(self, tmp_path):
+        # Create cron with errors; no health file
+        cs = tmp_path / "cron_status.json"
+        cs.write_text(json.dumps({"jobs": [{"name": "test", "status": "error"}]}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            text = generate_status_text()
+            assert "cron=err" in text
+
+    def test_cron_no_errors(self, tmp_path):
+        cs = tmp_path / "cron_status.json"
+        cs.write_text(json.dumps({"jobs": [{"name": "test", "status": "ok"}]}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            text = generate_status_text()
+            assert "cron=ok" in text
+
+    def test_portfolio_with_value(self, tmp_path):
+        pp = tmp_path / "portfolio_paper.json"
+        pp.write_text(json.dumps({"cash": 25000, "positions": {"SPY": {"symbol": "SPY", "shares": 100, "value": 75000, "unrealized_pnl": 500}}}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            text = generate_status_text()
+            assert "val=$100,000" in text or "val=$100000" in text or "val=100000" in text
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: print_summary Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestPrintSummaryEdgeCases:
+    """Edge cases for print_summary: all unavailable sections, edge display values."""
+
+    def test_all_sections_unavailable(self, tmp_path, capsys):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            dashboard = generate_unified_dashboard()
+            print_summary(dashboard)
+            captured = capsys.readouterr()
+            assert "HEALTH: not available" in captured.out
+            assert "PORTFOLIO: not available" in captured.out
+            assert "RISK: not available" in captured.out
+            assert "REGIME: not available" in captured.out
+            assert "TCA: not available" in captured.out
+            assert "ATTRIBUTION: not available" in captured.out
+            assert "CRON: not available" in captured.out
+
+    def test_dashboard_version_displayed(self, capsys):
+        dashboard = generate_unified_dashboard()
+        print_summary(dashboard)
+        captured = capsys.readouterr()
+        assert "v6.08" in captured.out
+
+    def test_risk_with_deep_drawdown(self, tmp_path, capsys):
+        risk = tmp_path / "risk_metrics.json"
+        risk.write_text(json.dumps({
+            "var_95_daily": -3.0,
+            "cvar_95_daily": -5.0,
+            "cvar_ratio": 2.5,
+            "tail_severity": "severe",
+            "max_drawdown": -35.0,
+            "current_drawdown": -25.0,
+            "volatility_annual": 25.0,
+        }))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            dashboard = generate_unified_dashboard()
+            print_summary(dashboard)
+            captured = capsys.readouterr()
+            assert "🚨" in captured.out  # drawdown badge for < -20
+            assert "SEVERE" in captured.out
+            assert "-25.00%" in captured.out
+
+    def test_overlays_vixy_dict_in_print(self, tmp_path, capsys):
+        vixy = tmp_path / "vixy_hedge_state.json"
+        vixy.write_text(json.dumps({"current_allocation": {"SPY": 0.5, "GLD": 0.5}, "last_signal_date": "2026-01-01", "regime": "contango"}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            dashboard = generate_unified_dashboard()
+            print_summary(dashboard)
+            captured = capsys.readouterr()
+            # Dict allocation branch: prints SPY=50.00% GLD=50.00%
+            assert "SPY=50.00%" in captured.out
+            assert "GLD=50.00%" in captured.out
+
+    def test_overlays_vixy_scalar_in_print(self, tmp_path, capsys):
+        vixy = tmp_path / "vixy_hedge_state.json"
+        vixy.write_text(json.dumps({"current_allocation": 0.15, "last_signal_date": "2026-01-01", "regime": "contango"}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            dashboard = generate_unified_dashboard()
+            print_summary(dashboard)
+            captured = capsys.readouterr()
+            # Scalar allocation branch: prints alloc=15.00%
+            assert "alloc=15.00%" in captured.out
+
+    def test_cron_section_with_mixed_jobs(self, tmp_path, capsys):
+        cs = tmp_path / "cron_status.json"
+        cs.write_text(json.dumps({
+            "jobs": [
+                {"name": "ok-job", "status": "ok", "duration_seconds": 5.0},
+                {"name": "err-job", "status": "error", "duration_seconds": None},
+                {"name": "pending-job", "status": "pending", "duration_seconds": 0},
+            ]
+        }))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            dashboard = generate_unified_dashboard()
+            print_summary(dashboard)
+            captured = capsys.readouterr()
+            assert "1/3 ok" in captured.out
+            assert "1 errors" in captured.out
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: CLI Main Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestCLIEdgeCases:
+    """Edge cases for the main() CLI entry point."""
+
+    def test_no_flag_calls_print_summary(self, tmp_path, capsys):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            test_args = ["unified_dashboard.py"]
+            with patch.object(sys, "argv", test_args):
+                main()
+            captured = capsys.readouterr()
+            assert "UNIFIED DASHBOARD" in captured.out
+
+    def test_json_flag_output(self, tmp_path, capsys):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            test_args = ["unified_dashboard.py", "--json"]
+            with patch.object(sys, "argv", test_args):
+                main()
+            saved = tmp_path / "unified_dashboard.json"
+            assert saved.exists()
+            data = json.loads(saved.read_text())
+            assert "dashboard_version" in data
+
+    def test_save_and_json_both_set(self, tmp_path, capsys):
+        """--save and --json both trigger save; only one save needed."""
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            test_args = ["unified_dashboard.py", "--save", "--json"]
+            with patch.object(sys, "argv", test_args):
+                main()
+            saved = tmp_path / "unified_dashboard.json"
+            assert saved.exists()
+
+    def test_check_flag_saves_and_exits_zero(self, tmp_path):
+        """--check also saves because --save is not passed, but should exit."""
+        hr = tmp_path / ".health_report.json"
+        hr.write_text(json.dumps({"status": "healthy", "checks": {}, "alerts": [], "summary": {"total_checks": 1, "passed": 1, "failed": 0}}))
+        cs = tmp_path / "cron_status.json"
+        cs.write_text(json.dumps({"jobs": [{"name": "test", "status": "ok"}]}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            test_args = ["unified_dashboard.py", "--check"]
+            with patch.object(sys, "argv", test_args):
+                try:
+                    main()
+                    assert False, "Should have sys.exit(0)"
+                except SystemExit as e:
+                    assert e.code == 0
+
+    def test_status_text_flag_returns_string(self, tmp_path, capsys):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            test_args = ["unified_dashboard.py", "--status-text"]
+            with patch.object(sys, "argv", test_args):
+                main()
+            captured = capsys.readouterr()
+            assert len(captured.out) > 0
+
+    def test_check_flag_with_errors_only(self, tmp_path):
+        """Cron has errors; health is fine → should exit 1."""
+        hr = tmp_path / ".health_report.json"
+        hr.write_text(json.dumps({"status": "healthy", "checks": {}, "alerts": [], "summary": {"total_checks": 1, "passed": 1, "failed": 0}}))
+        cs = tmp_path / "cron_status.json"
+        cs.write_text(json.dumps({"jobs": [{"name": "test", "status": "error"}]}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            test_args = ["unified_dashboard.py", "--check"]
+            with patch.object(sys, "argv", test_args):
+                try:
+                    main()
+                    assert False, "Should have sys.exit(1)"
+                except SystemExit as e:
+                    assert e.code == 1
+
+
+# ─────────────────────────────────────────────
+#  Expanded Coverage: _read_json Edge Cases
+# ─────────────────────────────────────────────
+
+
+class TestReadJsonEdgeCases:
+    """Edge cases for _read_json: empty file, non-dict JSON, binary content."""
+
+    def test_empty_file(self, tmp_path):
+        f = tmp_path / "empty.json"
+        f.write_text("")
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            result = _read_json("empty.json")
+            assert result is None
+
+    def test_json_array(self, tmp_path):
+        f = tmp_path / "array.json"
+        f.write_text("[1, 2, 3]")
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            result = _read_json("array.json")
+            assert result == [1, 2, 3]
+
+    def test_json_null(self, tmp_path):
+        f = tmp_path / "null.json"
+        f.write_text("null")
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            result = _read_json("null.json")
+            assert result is None
+
+    def test_json_number(self, tmp_path):
+        f = tmp_path / "number.json"
+        f.write_text("42")
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            result = _read_json("number.json")
+            assert result == 42

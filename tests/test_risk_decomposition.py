@@ -26,6 +26,7 @@ from src.monitor.risk_decomposition import (
     AssetRiskDecomposition,
     PortfolioRiskDecomposition,
     FACTOR_DEFINITIONS,
+    DEFAULT_WINDOW,
     DEFAULT_WEIGHTS,
 )
 
@@ -212,6 +213,33 @@ class TestOLSBeta:
         beta, t_stat, p_val = _ols_beta(x, y)
         assert beta == 0.0
 
+    def test_perfect_fit(self):
+        """All residuals near zero should give infinite t-stat and p=0."""
+        x = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y = 2.0 * x  # Perfect linear relationship with no noise
+        beta, t_stat, p_val = _ols_beta(x, y)
+        assert abs(beta - 2.0) < 0.01
+        assert t_stat == 999.0  # Infinite t-stat sentinel
+        assert p_val == 0.0
+
+    def test_zero_variance_y(self):
+        """Constant y should not crash; should return finite values."""
+        x = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y = np.ones(5) * 100.0
+        beta, t_stat, p_val = _ols_beta(x, y)
+        # No-intercept OLS: with constant y and varying x,
+        # the result depends on the OLS formula; just verify finite
+        assert np.isfinite(beta)
+        assert np.isfinite(t_stat)
+        assert np.isfinite(p_val)
+
+    def test_negative_two_beta(self):
+        """y = -2 * x should give beta = -2."""
+        x = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y = -2.0 * x
+        beta, t_stat, p_val = _ols_beta(x, y)
+        assert abs(beta + 2.0) < 0.01
+
 
 class TestBuildFactorReturns:
     def test_basic(self, synthetic_prices):
@@ -254,6 +282,30 @@ class TestBuildFactorReturns:
         factor_rets = _build_factor_returns(prices)
         assert "crypto" in factor_rets
 
+    def test_all_symbols_missing_for_factor(self):
+        """Factor with no matching symbols should produce empty array."""
+        prices = {"SPY": _make_synthetic_prices(100, 100, 0.01, 42)}
+        factor_rets = _build_factor_returns(prices)
+        # Equity factor needs SPY, which is present
+        assert len(factor_rets["equity"]) > 0
+        # Other factors without data should be empty
+        assert len(factor_rets.get("crypto", np.array([]))) == 0
+
+    def test_no_prices(self):
+        """Empty prices dict should produce empty factor returns for all factors."""
+        factor_rets = _build_factor_returns({})
+        assert all(len(v) == 0 for v in factor_rets.values())
+
+    def test_single_factor_only(self):
+        """Only one factor has data; others should be empty."""
+        prices = {"SPY": _make_synthetic_prices(100, 100, 0.01, 42)}
+        factor_rets = _build_factor_returns(prices)
+        assert len(factor_rets["equity"]) > 0
+        assert len(factor_rets["duration"]) == 0
+        assert len(factor_rets["gold"]) == 0
+        assert len(factor_rets["crypto"]) == 0
+        assert len(factor_rets["fx"]) == 0
+
 
 class TestAlignSeries:
     def test_equal_length(self):
@@ -289,6 +341,21 @@ class TestAlignSeries:
         a, fm = _align_series(asset, factors)
         # Should keep last 3 of asset
         assert np.allclose(a, [3.0, 4.0, 5.0])
+
+    def test_single_factor(self):
+        """Single factor should produce (n, 1) factor matrix."""
+        asset = np.array([1.0, 2.0, 3.0])
+        factors = {"eq": np.array([0.1, 0.2, 0.3])}
+        a, fm = _align_series(asset, factors)
+        assert len(a) == 3
+        assert fm.shape == (3, 1)
+
+    def test_zero_length_asset(self):
+        """Empty asset returns should produce empty output."""
+        asset = np.array([])
+        factors = {"eq": np.array([0.1, 0.2, 0.3])}
+        a, fm = _align_series(asset, factors)
+        assert len(a) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +696,92 @@ class TestPortfolioRiskDecompositionDataclass:
 
 
 # ---------------------------------------------------------------------------
+# Tests: serialization completeness (to_dict field coverage)
+# ---------------------------------------------------------------------------
+
+
+class TestSerializationCompleteness:
+    """Tests for to_dict() field completeness across all dataclasses."""
+
+    def test_factor_beta_fields(self):
+        """FactorBeta should have all 5 fields."""
+        fb = FactorBeta("Equity Beta", 0.85, 12.5, 0.001, True)
+        fields = set(fb.__dataclass_fields__)
+        assert fields == {"factor_name", "beta", "t_stat", "p_value", "significant"}
+
+    def test_asset_decomposition_fields(self):
+        """AssetRiskDecomposition should have all 7 fields."""
+        betas = {"equity": FactorBeta("Equity", 0.9, 15.0, 0.0, True)}
+        ad = AssetRiskDecomposition("SPY", 0.46, 0.85, betas, 0.0001, 0.0005, 0.0006)
+        fields = set(ad.__dataclass_fields__)
+        expected = {"symbol", "weight", "r_squared", "factor_betas", "idiosyncratic_var", "systematic_var", "total_var"}
+        assert fields == expected
+
+    def test_portfolio_decomposition_fields(self):
+        """PortfolioRiskDecomposition should have all 11 fields."""
+        result = PortfolioRiskDecomposition(
+            timestamp="2026-05-16T12:00:00",
+            portfolio_weights={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            total_portfolio_variance=0.0001,
+            total_portfolio_volatility=0.1587,
+            factor_contributions={"equity": 45.0, "duration": 20.0, "gold": 15.0},
+            systematic_pct=80.0,
+            idiosyncratic_pct=20.0,
+            asset_decompositions={},
+            window=60,
+            num_observations=500,
+            factor_correlation_matrix={"Equity": {"Duration": 0.25}},
+        )
+        fields = set(result.__dataclass_fields__)
+        expected = {
+            "timestamp", "portfolio_weights", "total_portfolio_variance",
+            "total_portfolio_volatility", "factor_contributions",
+            "systematic_pct", "idiosyncratic_pct", "asset_decompositions",
+            "window", "num_observations", "factor_correlation_matrix",
+        }
+        assert fields == expected
+
+    def test_to_dict_includes_factor_correlation_matrix(self):
+        """to_dict() should include factor_correlation_matrix when present."""
+        result = PortfolioRiskDecomposition(
+            timestamp="2026-05-16T12:00:00",
+            portfolio_weights={"SPY": 0.46},
+            total_portfolio_variance=0.0001,
+            total_portfolio_volatility=0.1587,
+            factor_contributions={"equity": 100.0},
+            systematic_pct=100.0,
+            idiosyncratic_pct=0.0,
+            asset_decompositions={},
+            window=60,
+            num_observations=500,
+            factor_correlation_matrix={"Equity": {"Equity": 1.0}},
+        )
+        d = result.to_dict()
+        assert "factor_correlation_matrix" in d
+        assert d["factor_correlation_matrix"]["Equity"]["Equity"] == 1.0
+
+    def test_to_dict_round_trip(self, synthetic_prices):
+        """to_dict() -> json -> dict round trip should preserve all fields."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        result = decomposer.decompose()
+        d = result.to_dict()
+        json_str = json.dumps(d, indent=2, default=str)
+        restored = json.loads(json_str)
+        assert restored["timestamp"] == d["timestamp"]
+        assert abs(restored["total_portfolio_volatility"] - d["total_portfolio_volatility"]) < 0.0001
+        assert restored["window"] == d["window"]
+        assert set(restored["factor_contributions"].keys()) == set(d["factor_contributions"].keys())
+        assert set(restored["asset_decompositions"].keys()) == set(d["asset_decompositions"].keys())
+
+    def test_factor_beta_boundary_significance(self):
+        """Significant flag: True for p<0.05, False for p>=0.05."""
+        fb_sig = FactorBeta("Test", 0.5, 2.0, 0.0499, True)
+        fb_nonsig = FactorBeta("Test", 0.5, 1.5, 0.0501, False)
+        assert fb_sig.significant is True
+        assert fb_nonsig.significant is False
+
+
+# ---------------------------------------------------------------------------
 # Tests: edge cases
 # ---------------------------------------------------------------------------
 
@@ -674,6 +827,122 @@ class TestEdgeCases:
         # Both should be reasonable
         assert 0.05 < r60.total_portfolio_volatility < 0.40
         assert 0.05 < r120.total_portfolio_volatility < 0.40
+
+    def test_zero_weight_value_error(self):
+        """Zero total portfolio weight should raise ValueError."""
+        decomposer = RiskDecomposer(prices_data={"SPY": np.array([100.0, 101.0, 102.0])})
+        with pytest.raises(ValueError, match="must sum to > 0"):
+            decomposer.decompose(weights={"SPY": 0.0, "GLD": 0.0})
+
+    def test_constant_prices_asset(self):
+        """Asset with constant prices should produce near-zero betas."""
+        n = 100
+        prices = {
+            "SPY": np.ones(n) * 100.0,
+            "GLD": _make_synthetic_prices(n, 100, 0.01, 42),
+            "TLT": _make_synthetic_prices(n, 100, 0.01, 43),
+            "BTC-USD": _make_synthetic_prices(n, 100, 0.01, 44),
+            "ETH-USD": _make_synthetic_prices(n, 100, 0.01, 45),
+            "EFA": _make_synthetic_prices(n, 100, 0.01, 46),
+        }
+        decomposer = RiskDecomposer(window=60, prices_data=prices)
+        betas = decomposer.estimate_asset_betas("SPY")
+        assert len(betas) > 0
+        for fkey in betas:
+            assert abs(betas[fkey].beta) < 0.5, f"Beta for {fkey} too large: {betas[fkey].beta}"
+
+    def test_two_data_points_asset(self):
+        """Asset with only 2 price points should return None from decompose_asset."""
+        prices = {
+            "SPY": np.array([100.0, 101.0]),
+            "GLD": np.array([100.0, 101.0]),
+            "TLT": np.array([100.0, 101.0]),
+        }
+        decomposer = RiskDecomposer(prices_data=prices)
+        ad = decomposer.decompose_asset("SPY", 0.5)
+        assert ad is None
+
+    def test_single_active_factor_value_error(self):
+        """Only one active factor should raise ValueError from decompose()."""
+        prices = {
+            "SPY": _make_synthetic_prices(100, 100, 0.01, 42),
+        }
+        single_factor = {
+            "equity": {"name": "Equity", "symbols": {"SPY": 1.0}, "description": "", "color": "#000"},
+        }
+        decomposer = RiskDecomposer(window=60, prices_data=prices, factor_definitions=single_factor)
+        with pytest.raises(ValueError, match="at least 2 factors"):
+            decomposer.decompose(weights={"SPY": 1.0})
+
+    def test_estimate_asset_betas_explicit_returns(self, synthetic_prices):
+        """Explicit returns passed to estimate_asset_betas should be used."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        returns = _compute_returns(synthetic_prices["SPY"])
+        betas_explicit = decomposer.estimate_asset_betas("SPY", returns=returns)
+        betas_auto = decomposer.estimate_asset_betas("SPY")
+        assert len(betas_explicit) > 0
+        assert len(betas_explicit) == len(betas_auto)
+        for fkey in betas_explicit:
+            assert abs(betas_explicit[fkey].beta - betas_auto[fkey].beta) < 0.001
+
+    def test_empty_weights_dict(self):
+        """Empty weights dict should raise ValueError (sum is 0)."""
+        prices = {"SPY": _make_synthetic_prices(100, 100, 0.01, 42)}
+        decomposer = RiskDecomposer(prices_data=prices)
+        with pytest.raises(ValueError, match="must sum to > 0"):
+            decomposer.decompose(weights={})
+
+    def test_get_factor_correlations_insufficient_factors(self):
+        """With only one factor available, get_factor_correlations returns empty dict."""
+        prices = {"SPY": _make_synthetic_prices(100, 100, 0.01, 42)}
+        decomposer = RiskDecomposer(window=60, prices_data=prices)
+        corr = decomposer.get_factor_correlations()
+        assert corr == {}
+
+    def test_get_factor_correlations_insufficient_data(self):
+        """With fewer than 2 data points, get_factor_correlations returns empty dict."""
+        prices = {"SPY": np.array([100.0, 101.0])}
+        decomposer = RiskDecomposer(window=60, prices_data=prices)
+        corr = decomposer.get_factor_correlations()
+        assert corr == {}
+
+
+# ---------------------------------------------------------------------------
+# Tests: constants validation
+# ---------------------------------------------------------------------------
+
+
+class TestConstantsValidation:
+    """Validate constants: FACTOR_DEFINITIONS, DEFAULT_WINDOW."""
+
+    def test_factor_definitions_have_required_fields(self):
+        """Each factor definition should have name, symbols, description, color."""
+        required = {"name", "symbols", "description", "color"}
+        for fkey, fdef in FACTOR_DEFINITIONS.items():
+            assert required.issubset(set(fdef.keys())), f"Factor {fkey} missing fields"
+            assert isinstance(fdef["name"], str) and len(fdef["name"]) > 0
+            assert isinstance(fdef["symbols"], dict) and len(fdef["symbols"]) > 0
+            assert isinstance(fdef["description"], str)
+
+    def test_factor_symbols_weights_sum_to_one(self):
+        """Each factor's symbol weights should sum to approximately 1.0."""
+        for fkey, fdef in FACTOR_DEFINITIONS.items():
+            total = sum(fdef["symbols"].values())
+            assert abs(total - 1.0) < 0.01, f"Factor {fkey} symbols sum to {total}, expected 1.0"
+
+    def test_default_window_value(self):
+        """DEFAULT_WINDOW should be 60 trading days."""
+        assert DEFAULT_WINDOW == 60
+
+    def test_factor_count(self):
+        """There should be exactly 5 risk factors defined."""
+        assert len(FACTOR_DEFINITIONS) == 5
+
+    def test_all_factors_have_color(self):
+        """Each factor should have a valid hex color."""
+        for fkey, fdef in FACTOR_DEFINITIONS.items():
+            color = fdef.get("color", "")
+            assert color.startswith("#") and len(color) == 7, f"Factor {fkey} has invalid color: {color}"
 
 
 # ---------------------------------------------------------------------------

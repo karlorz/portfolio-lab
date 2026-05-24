@@ -8,6 +8,7 @@ import json
 import math
 import sys
 import tempfile
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -652,8 +653,663 @@ class TestSignalSnapshotBridge:
         snapshot = gen.get_signal_snapshot()
         assert isinstance(snapshot, SignalSnapshot)
 
+
     def test_snapshot_value_clipped_to_range(self):
         """Snapshot value should be clipped to [-1, 1] by np.clip."""
         gen = AlternativeDataSignalGenerator()
         snapshot = gen.get_signal_snapshot()
         assert -1.0 <= snapshot.value <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Dataclass field completeness tests
+# ---------------------------------------------------------------------------
+
+class TestDataclassFieldCompleteness:
+    """Verify all dataclass fields survive asdict() round-trips."""
+
+    def test_component_signal_to_dict_all_fields(self):
+        """ComponentSignal asdict() includes name, value, confidence, raw_inputs."""
+        sig = ComponentSignal(name="test_sig", value=0.5, confidence=0.75,
+                              raw_inputs={"price": 100.0, "ratio": 1.05})
+        d = asdict(sig)
+        assert d["name"] == "test_sig"
+        assert d["value"] == 0.5
+        assert d["confidence"] == 0.75
+        assert d["raw_inputs"] == {"price": 100.0, "ratio": 1.05}
+        assert set(d.keys()) == {"name", "value", "confidence", "raw_inputs"}
+
+    def test_component_signal_empty_raw_inputs(self):
+        """ComponentSignal with empty raw_inputs survives asdict()."""
+        sig = ComponentSignal(name="empty", value=0.0, confidence=0.0, raw_inputs={})
+        d = asdict(sig)
+        assert d["raw_inputs"] == {}
+
+    def test_alternative_data_composite_to_dict_all_fields(self):
+        """AlternativeDataComposite asdict() includes all 11 fields."""
+        now = datetime.now().isoformat()
+        comp = AlternativeDataComposite(
+            timestamp=now, composite_score=0.3, confidence=0.7,
+            regime="risk_on", z_score=1.0,
+            components={"treasury_curve": 0.5},
+            component_confidences={"treasury_curve": 0.7},
+            weights={"treasury_curve": 0.25},
+            data_freshness_hours=12.0, sources_count=5,
+            symbol_coverage=["SPY", "TLT"],
+        )
+        d = asdict(comp)
+        assert d["timestamp"] == now
+        assert d["composite_score"] == 0.3
+        assert d["confidence"] == 0.7
+        assert d["regime"] == "risk_on"
+        assert d["z_score"] == 1.0
+        assert d["components"] == {"treasury_curve": 0.5}
+        assert d["component_confidences"] == {"treasury_curve": 0.7}
+        assert d["weights"] == {"treasury_curve": 0.25}
+        assert d["data_freshness_hours"] == 12.0
+        assert d["sources_count"] == 5
+        assert d["symbol_coverage"] == ["SPY", "TLT"]
+        assert set(d.keys()) == {
+            "timestamp", "composite_score", "confidence", "regime", "z_score",
+            "components", "component_confidences", "weights",
+            "data_freshness_hours", "sources_count", "symbol_coverage",
+        }
+
+    def test_alternative_data_composite_empty_component_dicts(self):
+        """Composite with empty component dicts still round-trips."""
+        now = datetime.now().isoformat()
+        comp = AlternativeDataComposite(
+            timestamp=now, composite_score=0.0, confidence=0.0,
+            regime="neutral", z_score=0.0,
+            components={}, component_confidences={}, weights={},
+            data_freshness_hours=0.0, sources_count=0, symbol_coverage=[],
+        )
+        d = asdict(comp)
+        assert d["components"] == {}
+        assert d["symbol_coverage"] == []
+
+    def test_ensemble_signal_to_dict_all_fields(self):
+        """EnsembleSignal asdict() includes all 6 fields."""
+        sig = EnsembleSignal(
+            source="alternative_data", regime="bull",
+            probability=0.75, confidence=0.8,
+            timestamp="2025-01-01T00:00:00", raw_data={"score": 0.5},
+        )
+        d = asdict(sig)
+        assert d["source"] == "alternative_data"
+        assert d["regime"] == "bull"
+        assert d["probability"] == 0.75
+        assert d["confidence"] == 0.8
+        assert d["timestamp"] == "2025-01-01T00:00:00"
+        assert d["raw_data"] == {"score": 0.5}
+        assert set(d.keys()) == {"source", "regime", "probability", "confidence",
+                                  "timestamp", "raw_data"}
+
+    def test_ensemble_signal_empty_raw_data(self):
+        """EnsembleSignal with empty raw_data survives asdict()."""
+        sig = EnsembleSignal(
+            source="alternative_data", regime="neutral",
+            probability=0.5, confidence=0.0,
+            timestamp="2025-01-01T00:00:00", raw_data={},
+        )
+        d = asdict(sig)
+        assert d["raw_data"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Constants validation
+# ---------------------------------------------------------------------------
+
+class TestConstantsValidation:
+    """Validate module-level constants."""
+
+    def test_component_weights_sum_to_one(self):
+        """COMPONENT_WEIGHTS must sum to exactly 1.0."""
+        total = sum(COMPONENT_WEIGHTS.values())
+        assert abs(total - 1.0) < 0.001
+
+    def test_component_weights_all_positive(self):
+        """All component weights must be non-negative."""
+        for name, weight in COMPONENT_WEIGHTS.items():
+            assert weight >= 0, f"Weight for {name} is negative: {weight}"
+
+    def test_component_weights_no_zero(self):
+        """No component weight should be exactly zero."""
+        for name, weight in COMPONENT_WEIGHTS.items():
+            assert weight > 0, f"Weight for {name} is zero"
+
+    def test_component_weights_have_expected_keys(self):
+        """COMPONENT_WEIGHTS has exactly the 5 expected keys."""
+        expected = {"treasury_curve", "sector_rotation", "credit_spread",
+                    "tail_risk", "broad_momentum"}
+        assert set(COMPONENT_WEIGHTS.keys()) == expected
+
+    def test_symbols_required_all_present(self):
+        """SYMBOLS_REQUIRED includes all 7 expected tickers."""
+        expected = {"SPY", "TLT", "SHY", "XLF", "XLY", "AGG", "IEF"}
+        assert set(SYMBOLS_REQUIRED) == expected
+
+    def test_symbols_required_no_duplicates(self):
+        """SYMBOLS_REQUIRED has no duplicate entries."""
+        assert len(SYMBOLS_REQUIRED) == len(set(SYMBOLS_REQUIRED))
+
+    def test_component_weights_normalized(self):
+        """Weights within expected decimal precision."""
+        for name, weight in COMPONENT_WEIGHTS.items():
+            # Weights should be clean decimal fractions (multiply to whole number)
+            scaled = weight * 100
+            assert abs(scaled - round(scaled)) < 0.001, \
+                f"Weight {name}={weight} is not a clean centimal fraction"
+
+
+# ---------------------------------------------------------------------------
+# Regime classification boundary conditions
+# ---------------------------------------------------------------------------
+
+class TestRegimeClassificationBoundaries:
+    """Test _determine_regime boundary conditions."""
+
+    def test_regime_risk_on_boundary_above(self, mock_generator):
+        """Score just above +0.15 triggers risk_on."""
+        regime = mock_generator._determine_regime(0.151)
+        assert regime == "risk_on"
+
+    def test_regime_risk_off_boundary_below(self, mock_generator):
+        """Score just below -0.15 triggers risk_off."""
+        regime = mock_generator._determine_regime(-0.151)
+        assert regime == "risk_off"
+
+    def test_regime_neutral_positive_side(self, mock_generator):
+        """Score at +0.15 is still neutral."""
+        regime = mock_generator._determine_regime(0.15)
+        assert regime == "neutral"
+
+    def test_regime_neutral_negative_side(self, mock_generator):
+        """Score at -0.15 is still neutral."""
+        regime = mock_generator._determine_regime(-0.15)
+        assert regime == "neutral"
+
+    def test_regime_neutral_exact_zero(self, mock_generator):
+        """Score exactly 0.0 is neutral."""
+        regime = mock_generator._determine_regime(0.0)
+        assert regime == "neutral"
+
+    def test_regime_risk_on_extreme(self, mock_generator):
+        """Score at extreme +1.0 triggers risk_on."""
+        regime = mock_generator._determine_regime(1.0)
+        assert regime == "risk_on"
+
+    def test_regime_risk_off_extreme(self, mock_generator):
+        """Score at extreme -1.0 triggers risk_off."""
+        regime = mock_generator._determine_regime(-1.0)
+
+    def test_composite_score_extreme_values_do_not_crash(self, mock_generator):
+        """Composite score calculation handles extreme component values gracefully."""
+        components = [
+            ComponentSignal("treasury_curve", 999.0, 1.0, {}),
+            ComponentSignal("sector_rotation", -999.0, 1.0, {}),
+            ComponentSignal("credit_spread", 999.0, 1.0, {}),
+            ComponentSignal("tail_risk", -999.0, 1.0, {}),
+            ComponentSignal("broad_momentum", 999.0, 1.0, {}),
+        ]
+        composite = mock_generator.calculate_composite(components)
+        # calculate_composite does weighted average without clamping;
+        # extreme components produce extreme score but should not crash
+        assert composite is not None
+        assert composite.regime in ("risk_on", "risk_off", "neutral")
+
+
+# ---------------------------------------------------------------------------
+# Validate signal predicate edge cases
+# ---------------------------------------------------------------------------
+
+class TestValidateSignalEdgeCases:
+    """Test validate_signal() boundary conditions."""
+
+    def test_validate_signal_just_under_48_hours(self, mock_generator):
+        """Signal just under 48 hours old should be valid."""
+        boundary = EnsembleSignal(
+            source="alternative_data", regime="bull",
+            probability=0.7, confidence=0.5,
+            timestamp=(datetime.now() - timedelta(hours=47, minutes=59)).isoformat(),
+            raw_data={},
+        )
+        is_valid = mock_generator.validate_signal(boundary)
+        assert is_valid is True
+
+    def test_validate_signal_one_minute_over_48_hours(self, mock_generator):
+        """Signal just over 48 hours old should be invalid."""
+        stale = EnsembleSignal(
+            source="alternative_data", regime="bull",
+            probability=0.7, confidence=0.5,
+            timestamp=(datetime.now() - timedelta(hours=48, minutes=1)).isoformat(),
+            raw_data={},
+        )
+        is_valid = mock_generator.validate_signal(stale)
+        assert is_valid is False
+
+    def test_validate_signal_exactly_0_3_confidence(self, mock_generator):
+        """Signal with confidence exactly 0.3 should be valid."""
+        edge = EnsembleSignal(
+            source="alternative_data", regime="neutral",
+            probability=0.5, confidence=0.3,
+            timestamp=datetime.now().isoformat(),
+            raw_data={},
+        )
+        is_valid = mock_generator.validate_signal(edge)
+        assert is_valid is True
+
+    def test_validate_signal_just_below_0_3_confidence(self, mock_generator):
+        """Signal with confidence just below 0.3 should be invalid."""
+        low = EnsembleSignal(
+            source="alternative_data", regime="neutral",
+            probability=0.5, confidence=0.299,
+            timestamp=datetime.now().isoformat(),
+            raw_data={},
+        )
+        is_valid = mock_generator.validate_signal(low)
+        assert is_valid is False
+
+    def test_validate_signal_max_confidence_stale(self, mock_generator):
+        """Even max confidence fails if signal is too old."""
+        old_high_conf = EnsembleSignal(
+            source="alternative_data", regime="bull",
+            probability=0.9, confidence=1.0,
+            timestamp=(datetime.now() - timedelta(hours=72)).isoformat(),
+            raw_data={},
+        )
+        is_valid = mock_generator.validate_signal(old_high_conf)
+        assert is_valid is False
+
+    def test_validate_signal_zero_confidence_fresh(self, mock_generator):
+        """Fresh signal with zero confidence fails validation."""
+        fresh_low = EnsembleSignal(
+            source="alternative_data", regime="neutral",
+            probability=0.5, confidence=0.0,
+            timestamp=datetime.now().isoformat(),
+            raw_data={},
+        )
+        is_valid = mock_generator.validate_signal(fresh_low)
+        assert is_valid is False
+
+
+# ---------------------------------------------------------------------------
+# SignalSnapshot bridge method edge cases
+# ---------------------------------------------------------------------------
+
+class TestSignalSnapshotBridgeEdgeCases:
+    """Test get_signal_snapshot() edge cases beyond basic regression."""
+
+    def test_snapshot_no_signal_returns_inactive(self, mock_generator, tmp_path):
+        """No saved signal returns inactive snapshot with zero confidence."""
+        mock_generator.signals_dir = tmp_path
+        snapshot = mock_generator.get_signal_snapshot()
+        assert snapshot.is_active is False
+        assert snapshot.value == 0.0
+        assert snapshot.confidence == 0.0
+        assert "unavailable" in snapshot.explanation
+
+    def test_snapshot_negative_composite_score(self, mock_generator, tmp_path):
+        """Negative composite score yields negative snapshot value."""
+        mock_generator.signals_dir = tmp_path
+        # Save a signal with negative score
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=-0.5, confidence=0.8,
+            regime="risk_off", z_score=-1.67,
+            components={"treasury_curve": -0.5},
+            component_confidences={"treasury_curve": 0.8},
+            weights={"treasury_curve": 1.0},
+            data_freshness_hours=12.0, sources_count=1,
+            symbol_coverage=["SPY"],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        assert snapshot.value < 0
+        assert snapshot.is_active is True
+
+    def test_snapshot_positive_composite_score(self, mock_generator, tmp_path):
+        """Positive composite score yields positive snapshot value."""
+        mock_generator.signals_dir = tmp_path
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=0.5, confidence=0.8,
+            regime="risk_on", z_score=1.67,
+            components={"treasury_curve": 0.5},
+            component_confidences={"treasury_curve": 0.8},
+            weights={"treasury_curve": 1.0},
+            data_freshness_hours=12.0, sources_count=1,
+            symbol_coverage=["SPY"],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        assert snapshot.value > 0
+        assert snapshot.is_active is True
+
+    def test_snapshot_zero_score_uses_regime_map_bull(self, mock_generator, tmp_path):
+        """Zero composite with bull regime uses regime fallback value."""
+        mock_generator.signals_dir = tmp_path
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=0.0, confidence=0.8,
+            regime="risk_on", z_score=0.0,
+            components={}, component_confidences={},
+            weights={}, data_freshness_hours=12.0,
+            sources_count=0, symbol_coverage=[],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        # bull regime maps to 0.4 when value is 0
+        assert snapshot.value == 0.4
+
+    def test_snapshot_zero_score_bear_regime(self, mock_generator, tmp_path):
+        """Zero composite with bear regime uses regime fallback -0.4."""
+        mock_generator.signals_dir = tmp_path
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=0.0, confidence=0.8,
+            regime="risk_off", z_score=0.0,
+            components={}, component_confidences={},
+            weights={}, data_freshness_hours=12.0,
+            sources_count=0, symbol_coverage=[],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        # bear regime maps to -0.4 when value is 0
+        assert snapshot.value == -0.4
+
+    def test_snapshot_metadata_includes_regime_and_probability(self, mock_generator, tmp_path):
+        """Snapshot metadata contains regime and probability fields."""
+        mock_generator.signals_dir = tmp_path
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=0.3, confidence=0.75,
+            regime="risk_on", z_score=1.0,
+            components={}, component_confidences={},
+            weights={}, data_freshness_hours=12.0,
+            sources_count=0, symbol_coverage=[],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        assert "regime" in snapshot.metadata
+        assert "probability" in snapshot.metadata
+        assert "raw_data" in snapshot.metadata
+        assert snapshot.metadata["regime"] == "bull"
+
+    def test_snapshot_asset_signals_contains_spy(self, mock_generator, tmp_path):
+        """Snapshot asset_signals includes SPY key."""
+        mock_generator.signals_dir = tmp_path
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=0.3, confidence=0.75,
+            regime="risk_on", z_score=1.0,
+            components={}, component_confidences={},
+            weights={}, data_freshness_hours=12.0,
+            sources_count=0, symbol_coverage=[],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        assert "SPY" in snapshot.asset_signals
+        assert snapshot.asset_signals["SPY"] == snapshot.value
+
+    def test_snapshot_regime_fit_is_all(self, mock_generator, tmp_path):
+        """Snapshot regime_fit should always be 'all'."""
+        mock_generator.signals_dir = tmp_path
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=0.3, confidence=0.75,
+            regime="risk_on", z_score=1.0,
+            components={}, component_confidences={},
+            weights={}, data_freshness_hours=12.0,
+            sources_count=0, symbol_coverage=[],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        assert snapshot.regime_fit == "all"
+
+
+# ---------------------------------------------------------------------------
+# State persistence and retrieval edge cases
+# ---------------------------------------------------------------------------
+
+class TestStatePersistenceEdgeCases:
+    """Test signal state file persistence edge cases."""
+
+    def test_state_file_has_all_required_fields(self, mock_generator, tmp_path):
+        """State JSON includes all 8 expected keys."""
+        original = mock_generator.state_dir
+        mock_generator.state_dir = tmp_path
+        mock_generator.generate_signal()
+        state_file = tmp_path / "alternative_data_state.json"
+        with open(state_file) as f:
+            state = json.load(f)
+        expected_keys = {"last_update", "composite_score", "confidence",
+                         "regime", "z_score", "components",
+                         "component_confidences"}
+        assert expected_keys.issubset(state.keys()), \
+            f"Missing keys: {expected_keys - set(state.keys())}"
+        mock_generator.state_dir = original
+
+    def test_state_field_types(self, mock_generator, tmp_path):
+        """State file fields have correct types."""
+        original = mock_generator.state_dir
+        mock_generator.state_dir = tmp_path
+        mock_generator.generate_signal()
+        state_file = tmp_path / "alternative_data_state.json"
+        with open(state_file) as f:
+            state = json.load(f)
+        assert isinstance(state["last_update"], str)
+        assert isinstance(state["composite_score"], (int, float))
+        assert isinstance(state["confidence"], (int, float))
+        assert isinstance(state["regime"], str)
+        assert isinstance(state["z_score"], (int, float))
+        assert isinstance(state["components"], dict)
+        assert isinstance(state["component_confidences"], dict)
+        mock_generator.state_dir = original
+
+    def test_signal_file_has_all_required_fields(self, mock_generator, tmp_path):
+        """Signal JSON includes all 6 expected ensemble fields."""
+        original = mock_generator.signals_dir
+        mock_generator.signals_dir = tmp_path
+        mock_generator.generate_signal()
+        signal_file = tmp_path / "alternative_data_latest.json"
+        with open(signal_file) as f:
+            s = json.load(f)
+        expected_keys = {"source", "regime", "probability", "confidence",
+                         "timestamp", "raw_data"}
+        assert set(s.keys()) == expected_keys, \
+            f"Expected keys {expected_keys}, got {set(s.keys())}"
+        mock_generator.signals_dir = original
+
+    def test_load_latest_signal_returns_none_for_missing_file(self, mock_generator, tmp_path):
+        """load_latest_signal returns None when no file exists."""
+        mock_generator.signals_dir = tmp_path
+        loaded = mock_generator.load_latest_signal()
+        assert loaded is None
+
+    def test_save_overwrites_existing_signal(self, mock_generator, tmp_path):
+        """Saving a new signal overwrites the previous one."""
+        mock_generator.signals_dir = tmp_path
+        mock_generator.state_dir = tmp_path
+
+        # First signal
+        composite_1 = AlternativeDataComposite(
+            timestamp="2024-01-01T00:00:00", composite_score=0.5, confidence=0.8,
+            regime="risk_on", z_score=1.67,
+            components={"a": 0.5}, component_confidences={"a": 0.8},
+            weights={"a": 1.0}, data_freshness_hours=12.0,
+            sources_count=1, symbol_coverage=["SPY"],
+        )
+        signal_1 = mock_generator.to_ensemble_signal(composite_1)
+        mock_generator._save_signal(composite_1, signal_1)
+
+        # Second signal (newer)
+        composite_2 = AlternativeDataComposite(
+            timestamp="2024-06-01T00:00:00", composite_score=-0.3, confidence=0.6,
+            regime="risk_off", z_score=-1.0,
+            components={"a": -0.3}, component_confidences={"a": 0.6},
+            weights={"a": 1.0}, data_freshness_hours=12.0,
+            sources_count=1, symbol_coverage=["SPY"],
+        )
+        signal_2 = mock_generator.to_ensemble_signal(composite_2)
+        mock_generator._save_signal(composite_2, signal_2)
+
+        # Loaded signal should be the second (overwritten) one
+        loaded = mock_generator.load_latest_signal()
+        assert loaded is not None
+        assert loaded.regime == "bear"
+        assert loaded.probability != signal_1.probability
+
+    def test_save_and_load_roundtrip_fidelity(self, mock_generator, tmp_path):
+        """Save then load produces identical EnsembleSignal fields."""
+        mock_generator.signals_dir = tmp_path
+        mock_generator.state_dir = tmp_path
+
+        original_signal = mock_generator.generate_signal()
+        loaded = mock_generator.load_latest_signal()
+        assert loaded is not None
+        assert loaded.source == original_signal.source
+        assert loaded.regime == original_signal.regime
+        assert loaded.probability == original_signal.probability
+        assert loaded.confidence == original_signal.confidence
+        assert loaded.timestamp == original_signal.timestamp
+
+    def test_state_file_roundtrip_consistency(self, mock_generator, tmp_path):
+        """State file values match the composite that was saved."""
+        mock_generator.signals_dir = tmp_path
+        mock_generator.state_dir = tmp_path
+
+        composite = AlternativeDataComposite(
+            timestamp="2024-03-15T12:00:00", composite_score=0.42, confidence=0.78,
+            regime="risk_on", z_score=1.4,
+            components={"treasury_curve": 0.42},
+            component_confidences={"treasury_curve": 0.78},
+            weights={"treasury_curve": 1.0}, data_freshness_hours=12.0,
+            sources_count=1, symbol_coverage=["SPY"],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+
+        state_file = tmp_path / "alternative_data_state.json"
+        with open(state_file) as f:
+            state = json.load(f)
+
+        assert state["last_update"] == "2024-03-15T12:00:00"
+        assert state["composite_score"] == 0.42
+        assert state["confidence"] == 0.78
+        assert state["regime"] == "risk_on"
+        assert state["z_score"] == 1.4
+        assert state["components"] == {"treasury_curve": 0.42}
+        assert state["component_confidences"] == {"treasury_curve": 0.78}
+
+
+# ---------------------------------------------------------------------------
+# Signal calculation edge cases (component-level)
+# ---------------------------------------------------------------------------
+
+class TestSignalCalculationEdgeCases:
+    """Test component-level edge cases not covered above."""
+
+    def test_treasury_curve_no_tlt_data(self, mock_generator):
+        """No TLT data returns insufficient data fallback."""
+        mock_generator._prices["TLT"] = [{"d": "2025-01-01", "p": 100}]
+        sig = mock_generator._treasury_curve_signal()
+        assert sig.value == 0.0
+        assert sig.confidence == 0.3
+
+    def test_credit_spread_insufficient_ief(self, mock_generator):
+        """Insufficient IEF data returns fallback credit_spread signal."""
+        mock_generator._prices["IEF"] = [{"d": "2025-01-01", "p": 100}]
+        sig = mock_generator._credit_spread_signal()
+        assert sig.value == 0.0
+
+    def test_broad_momentum_barely_enough_data(self, mock_generator):
+        """Exactly 63 SPY days meets minimum for broad_momentum."""
+        spy = mock_generator._prices["SPY"]
+        mock_generator._prices["SPY"] = spy[-63:]
+        sig = mock_generator._broad_momentum_signal()
+        assert -1.0 <= sig.value <= 1.0
+
+    def test_broad_momentum_just_below_threshold(self, mock_generator):
+        """Only 62 SPY days should return insufficient data."""
+        spy = mock_generator._prices["SPY"]
+        mock_generator._prices["SPY"] = spy[-62:]
+        sig = mock_generator._broad_momentum_signal()
+        assert sig.value == 0.0
+        assert sig.confidence == 0.3
+
+    def test_returns_method_with_negative_price(self, mock_generator):
+        """_returns() with zero or negative base price returns None."""
+        prices = [100.0, 110.0, 0.0, 120.0]
+        result = mock_generator._returns(prices, 2)
+        assert result is None
+
+    def test_returns_method_with_insufficient_length(self, mock_generator):
+        """_returns() with insufficient data returns None."""
+        prices = [100.0, 110.0]
+        result = mock_generator._returns(prices, 5)
+        assert result is None
+
+    def test_returns_method_normal_case(self, mock_generator):
+        """_returns() computes correct normal return."""
+        # len >= 4, prices[-1] / prices[-4] - 1 = 120 / 100 - 1 = 0.2
+        prices = [100.0, 105.0, 110.0, 120.0]
+        result = mock_generator._returns(prices, 4)
+        assert result is not None
+        assert abs(result - 0.2) < 0.001
+
+    def test_composite_empty_components(self, mock_generator):
+        """calculate_composite with empty list handles gracefully."""
+        composite = mock_generator.calculate_composite([])
+        assert composite.composite_score == 0.0
+        assert composite.components == {}
+
+    def test_composite_zero_total_weight(self, mock_generator):
+        """Zero total weight defaults to 1.0 to avoid division by zero."""
+        mock_generator.weights = {"nonexistent": 0.0}
+        components = [
+            ComponentSignal("treasury_curve", 0.5, 0.7, {}),
+        ]
+        composite = mock_generator.calculate_composite(components)
+        # The unknown weight key gets 0 weight, total_weight defaults to 1.0
+        assert composite.composite_score == 0.0
+
+    def test_complex_weights_override(self, mock_generator):
+        """Uneven custom weights produce expected composite."""
+        mock_generator.weights = {
+            "treasury_curve": 0.5,
+            "broad_momentum": 0.5,
+            "sector_rotation": 0.0,
+            "credit_spread": 0.0,
+            "tail_risk": 0.0,
+        }
+        components = [
+            ComponentSignal("treasury_curve", 0.2, 0.5, {}),
+            ComponentSignal("broad_momentum", 0.8, 0.9, {}),
+        ]
+        composite = mock_generator.calculate_composite(components)
+        # (0.2 * 0.5 + 0.8 * 0.5) / 1.0 = 0.5
+        assert abs(composite.composite_score - 0.5) < 0.001
+
+    def test_z_score_computation(self, mock_generator):
+        """_compute_z_score divides by 0.3."""
+        z = mock_generator._compute_z_score(0.6)
+        assert abs(z - 2.0) < 0.001
+
+    def test_z_score_computation_negative(self, mock_generator):
+        """_compute_z_score handles negative scores."""
+        z = mock_generator._compute_z_score(-0.3)
+        assert abs(z + 1.0) < 0.001
+
+    def test_z_score_computation_zero(self, mock_generator):
+        """_compute_z_score with zero returns zero."""
+        z = mock_generator._compute_z_score(0.0)
+        assert z == 0.0
+

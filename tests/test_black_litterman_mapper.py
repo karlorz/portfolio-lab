@@ -410,5 +410,116 @@ class TestTauSensitivity:
             assert results[0.50].expected_sharpe is not None
 
 
+class TestBLViewsExtended:
+    """Extended tests for BLViews dataclass."""
+
+    def test_absolute_views_dict(self):
+        v = BLViews(
+            absolute_views={"SPY": 0.10, "GLD": -0.02},
+            view_confidences=[0.7, 0.4],
+        )
+        assert len(v.absolute_views) == 2
+        assert v.absolute_views["SPY"] == 0.10
+
+    def test_view_confidences_length(self):
+        v = BLViews(
+            absolute_views={"SPY": 0.05},
+            view_confidences=[0.6],
+        )
+        assert len(v.view_confidences) == 1
+
+    def test_custom_symbols(self):
+        v = BLViews(
+            absolute_views={"EFA": 0.04},
+            view_confidences=[0.5],
+            symbols=["EFA", "EEM", "SPY"],
+        )
+        assert v.symbols == ["EFA", "EEM", "SPY"]
+
+
+class TestBLResultExtended:
+    """Extended tests for BLResult dataclass."""
+
+    def test_all_fields(self):
+        r = BLResult(
+            posterior_returns={"SPY": 0.08, "GLD": 0.03, "TLT": 0.02},
+            bl_weights={"SPY": 0.60, "GLD": 0.25, "TLT": 0.15},
+            tau=0.15,
+            prior_type="equal",
+            view_confidences=[0.5, 0.5, 0.5],
+            expected_sharpe=0.85,
+            expected_cagr=0.10,
+            expected_volatility=0.12,
+        )
+        assert r.tau == 0.15
+        assert r.posterior_returns["SPY"] == 0.08
+        assert r.bl_weights["SPY"] == 0.60
+        assert r.expected_sharpe == 0.85
+        assert r.expected_cagr == 0.10
+        assert r.prior_type == "equal"
+
+    def test_none_sharpe(self):
+        r = BLResult(
+            posterior_returns={},
+            bl_weights={},
+            tau=0.15,
+            prior_type="equal",
+            view_confidences=[],
+        )
+        assert r.expected_sharpe is None
+        assert r.expected_cagr is None
+
+    def test_extras_default_empty(self):
+        r = BLResult(
+            posterior_returns={}, bl_weights={}, tau=0.15,
+            prior_type="equal", view_confidences=[],
+        )
+        assert r.extras == {}
+
+
+class TestMapBiasesToViewsExtended:
+    """Extended tests for map_biases_to_views."""
+
+    def test_all_zero_biases(self):
+        views = map_biases_to_views(0.0, 0.0, 0.0)
+        assert isinstance(views, BLViews)
+        for val in views.absolute_views.values():
+            assert val == 0.0
+
+    def test_large_equity_bias(self):
+        views = map_biases_to_views(2.0, 0.0, 0.0)
+        assert views.absolute_views.get("SPY", 0) > 0
+
+    def test_negative_gold_bias(self):
+        views = map_biases_to_views(0.0, 0.0, -1.0)
+        assert views.absolute_views.get("GLD", 0) < 0
+
+    def test_positive_duration_bias(self):
+        views = map_biases_to_views(0.0, 1.0, 0.0)
+        assert views.absolute_views.get("TLT", 0) > 0
+
+    def test_confidence_scaled(self):
+        views = map_biases_to_views(0.5, 0.2, 0.3)
+        assert len(views.view_confidences) > 0
+        for c in views.view_confidences:
+            assert c > 0
+
+
+class TestConstants:
+    """Validate module constants."""
+
+    def test_default_tau(self):
+        assert DEFAULT_TAU == 0.15
+
+    def test_default_symbols(self):
+        assert DEFAULT_SYMBOLS == ["SPY", "GLD", "TLT"]
+
+    def test_bias_scale_positive(self):
+        assert BIAS_TO_RETURN_SCALE > 0
+
+    def test_min_view_confidence(self):
+        assert 0 < MIN_VIEW_CONFIDENCE < 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

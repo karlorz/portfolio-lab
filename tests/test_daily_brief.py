@@ -292,3 +292,127 @@ class TestModelValidationSection:
         sections = generate_brief_sections(sample_dashboard)
         mv = [s for s in sections if s.name == "model_validation"][0]
         assert "BL" in mv.data_text
+
+
+class TestSeverityThresholds:
+    """Validate SEVERITY_THRESHOLDS constants."""
+
+    def test_thresholds_exist(self):
+        assert "drawdown_warning" in SEVERITY_THRESHOLDS
+        assert "drawdown_alert" in SEVERITY_THRESHOLDS
+        assert "slippage_warning_bps" in SEVERITY_THRESHOLDS
+        assert "slippage_alert_bps" in SEVERITY_THRESHOLDS
+
+    def test_drawdown_warning_less_severe_than_alert(self):
+        assert SEVERITY_THRESHOLDS["drawdown_warning"] > SEVERITY_THRESHOLDS["drawdown_alert"]
+
+    def test_slippage_warning_less_severe_than_alert(self):
+        assert SEVERITY_THRESHOLDS["slippage_warning_bps"] < SEVERITY_THRESHOLDS["slippage_alert_bps"]
+
+
+class TestBriefSectionDataclass:
+    """Extended tests for BriefSection dataclass."""
+
+    def test_brief_section_all_fields(self):
+        s = BriefSection(
+            name="test", title="Test Section", severity="normal",
+            data_text="Some data", recommendation="Do nothing",
+        )
+        assert s.name == "test"
+        assert s.title == "Test Section"
+        assert s.severity == "normal"
+        assert s.data_text == "Some data"
+        assert s.recommendation == "Do nothing"
+
+    def test_brief_section_default_recommendation(self):
+        s = BriefSection(name="test", title="Test", severity="normal", data_text="data")
+        assert s.recommendation == ""
+
+    def test_brief_section_severity_values(self):
+        for sev in ("normal", "warning", "alert"):
+            s = BriefSection(name="test", title="Test", severity=sev, data_text="data")
+            assert s.severity == sev
+
+
+class TestBriefSectionsExtended:
+    """Extended edge cases for generate_brief_sections."""
+
+    def test_empty_dashboard(self):
+        sections = generate_brief_sections({})
+        assert isinstance(sections, list)
+        assert len(sections) > 0
+
+    def test_missing_portfolio_key(self, sample_dashboard):
+        del sample_dashboard["portfolio"]
+        sections = generate_brief_sections(sample_dashboard)
+        ps = next((s for s in sections if s.name == "portfolio_snapshot"), None)
+        assert ps is not None
+
+    def test_missing_risk_key(self, sample_dashboard):
+        del sample_dashboard["risk"]
+        sections = generate_brief_sections(sample_dashboard)
+        rc = next((s for s in sections if s.name == "risk_check"), None)
+        assert rc is not None
+
+    def test_risk_drawdown_exactly_at_warning(self, sample_dashboard):
+        sample_dashboard["risk"]["current_drawdown"] = SEVERITY_THRESHOLDS["drawdown_warning"]
+        sections = generate_brief_sections(sample_dashboard)
+        rc = next(s for s in sections if s.name == "risk_check")
+        assert rc.severity in ("warning", "alert")
+
+    def test_risk_normal_drawdown(self, sample_dashboard):
+        sample_dashboard["risk"]["current_drawdown"] = -3.0
+        sections = generate_brief_sections(sample_dashboard)
+        rc = next(s for s in sections if s.name == "risk_check")
+        assert rc.severity == "normal"
+
+    def test_portfolio_zero_value(self, sample_dashboard):
+        sample_dashboard["portfolio"]["total_value"] = 0
+        sections = generate_brief_sections(sample_dashboard)
+        ps = next(s for s in sections if s.name == "portfolio_snapshot")
+        assert ps is not None
+
+    def test_regime_stress(self, sample_dashboard):
+        sample_dashboard["regime"]["classifier"]["current_regime"] = "stress"
+        sections = generate_brief_sections(sample_dashboard)
+        sr = next(s for s in sections if s.name == "signal_roundup")
+        assert sr is not None
+
+
+class TestRenderBriefTextExtended:
+    """Extended render_brief_text tests."""
+
+    def test_renders_without_narrative(self, sample_dashboard):
+        sections = generate_brief_sections(sample_dashboard)
+        text = render_brief_text(sections, narrative=None)
+        assert "PORTFOLIO-LAB DAILY BRIEF" in text
+
+    def test_renders_all_section_names(self, sample_dashboard):
+        sections = generate_brief_sections(sample_dashboard)
+        text = render_brief_text(sections)
+        for s in sections:
+            # Titles are rendered uppercase
+            assert s.title.upper() in text
+
+    def test_renders_empty_sections(self):
+        text = render_brief_text([])
+        assert "PORTFOLIO-LAB DAILY BRIEF" in text
+
+
+class TestGenerateDailyBriefExtended:
+    """Extended generate_daily_brief tests."""
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_brief_contains_section_data(self, mock_dashboard, sample_dashboard):
+        mock_dashboard.return_value = sample_dashboard
+        brief = generate_daily_brief()
+        assert len(brief["sections"]) > 0
+        for s in brief["sections"]:
+            assert "name" in s
+            assert "severity" in s
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_brief_severity_normal_when_healthy(self, mock_dashboard, sample_dashboard):
+        mock_dashboard.return_value = sample_dashboard
+        brief = generate_daily_brief()
+        assert brief["severity"] == "normal"
