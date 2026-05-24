@@ -1124,7 +1124,7 @@ class DashboardGenerator:
             gen.save(dashboard)
             return gen.OUTPUT_PATH
         except Exception as e:
-            print(f"  Overlay dashboard: {e}")
+            logger.warning("Overlay dashboard generation failed: %s", e)
             return None
 
     def generate_graduation_json(self) -> Optional[Path]:
@@ -1188,7 +1188,7 @@ class DashboardGenerator:
 
     def run(self):
         """Generate all dashboard files."""
-        print(f"[{datetime.now()}] Generating dashboard data...")
+        logger.info("Generating dashboard data...")
 
         paths = [
             self.generate_performance_json(),
@@ -1207,7 +1207,7 @@ class DashboardGenerator:
 
         for p in paths:
             if p:
-                print(f"  Generated: {p}")
+                logger.info("Generated: %s", p)
 
         # Create index
         index = {
@@ -1218,7 +1218,7 @@ class DashboardGenerator:
             json.dump(index, f)
 
         self.conn.close()
-        print(f"[{datetime.now()}] Dashboard generation complete")
+        logger.info("Dashboard generation complete")
 
 if __name__ == "__main__":
     gen = DashboardGenerator()
