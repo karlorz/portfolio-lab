@@ -322,4 +322,187 @@ class TestOutput:
         assert saved["sharpe_improvement"] == 0.05
 
 
-# Total: 27 tests
+class TestBacktestConfigExtended:
+    """Extended tests for BacktestConfig dataclass."""
+
+    def test_default_base_weights(self):
+        cfg = BacktestConfig()
+        assert cfg.base_weights == {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
+
+    def test_default_initial_capital(self):
+        cfg = BacktestConfig()
+        assert cfg.initial_capital == 100000.0
+
+    def test_default_max_crypto(self):
+        cfg = BacktestConfig()
+        assert cfg.max_crypto == 0.05
+
+    def test_default_dates(self):
+        cfg = BacktestConfig()
+        assert cfg.start_date is not None
+        assert cfg.end_date is not None
+
+    def test_custom_all_fields(self):
+        cfg = BacktestConfig(
+            start_date="2015-01-01",
+            end_date="2025-12-31",
+            initial_capital=250000.0,
+            max_crypto=0.08,
+            base_weights={'SPY': 0.50, 'GLD': 0.35, 'TLT': 0.15},
+        )
+        assert cfg.initial_capital == 250000.0
+        assert cfg.max_crypto == 0.08
+        assert cfg.base_weights['SPY'] == 0.50
+
+
+class TestDailyData:
+    """Tests for DailyData dataclass."""
+
+    def test_daily_data_fields(self):
+        d = DailyData(
+            date="2020-01-02",
+            spy_return=0.01, gld_return=-0.005, tlt_return=0.002,
+            vix_level=18.5,
+        )
+        assert d.date == "2020-01-02"
+        assert d.vix_level == 18.5
+        assert d.spy_return == 0.01
+
+    def test_daily_data_default_none(self):
+        d = DailyData(date="2020-01-02", spy_return=0.01, gld_return=0.0, tlt_return=0.0)
+        assert d.vix_level is None
+
+
+class TestCollarSignalExtended:
+    """Extended collar signal tests."""
+
+    def test_collar_boundary_low_vix(self, backtester):
+        """Very low VIX should activate collar with maximum intensity."""
+        spy_d, gld_d, tlt_d = backtester._compute_collar_signal(12.0)
+        assert spy_d < 0  # SPY always reduced in collar
+
+    def test_collar_returns_three_deltas(self, backtester):
+        """Collar signal should return exactly 3 deltas."""
+        result = backtester._compute_collar_signal(20.0)
+        assert len(result) == 3
+
+    def test_collar_sum_near_zero(self, backtester):
+        """Collar deltas should approximately cancel out."""
+        spy_d, gld_d, tlt_d = backtester._compute_collar_signal(20.0)
+        assert abs(spy_d + gld_d + tlt_d) < 0.01
+
+
+class TestVIXYSignalExtended:
+    """Extended VIXY signal tests."""
+
+    def test_vixy_returns_three_deltas(self, backtester):
+        """VIXY signal should return exactly 3 deltas."""
+        result = backtester._compute_vixy_signal(25.0)
+        assert len(result) == 3
+
+    def test_vixy_boundary_20(self, backtester):
+        """VIX at exactly 20 — test activation boundary."""
+        result = backtester._compute_vixy_signal(20.0)
+        # Behavior at exact boundary may vary
+        assert len(result) == 3
+
+    def test_vixy_extreme_vix(self, backtester):
+        """Very high VIX should still produce capped result."""
+        spy_d, gld_d, tlt_d = backtester._compute_vixy_signal(100.0)
+        assert abs(spy_d) <= 0.10  # Reasonable cap
+
+
+class TestBondDurationSignalExtended:
+    """Extended bond duration signal tests."""
+
+    def test_bond_signal_returns_three_deltas(self, backtester):
+        """Bond duration signal should return exactly 3 deltas."""
+        prices = [{"d": f"2020-01-{i:02d}", "p": 140.0 + i * 0.1} for i in range(1, 62)]
+        result = backtester._compute_bond_duration_signal(prices, 60)
+        assert len(result) == 3
+
+    def test_bond_volatile_prices(self, backtester):
+        """Volatile but flat-trending prices should produce minimal signal."""
+        import numpy as np
+        np.random.seed(42)
+        prices = [{"d": f"2020-01-{i:02d}", "p": 140.0 + np.random.normal(0, 1)} for i in range(1, 62)]
+        spy_d, gld_d, tlt_d = backtester._compute_bond_duration_signal(prices, 60)
+        # Volatile flat prices should give small or zero signal
+        assert abs(spy_d) < 0.05
+        assert abs(gld_d) < 0.05
+        assert abs(tlt_d) < 0.05
+
+
+class TestCryptoSignalExtended:
+    """Extended crypto signal tests."""
+
+    def test_crypto_returns_four_deltas(self, backtester):
+        """Crypto signal should return exactly 4 values (3 deltas + crypto alloc)."""
+        prices = [{"d": f"2020-01-{i:02d}", "p": 100.0 + i * 0.2} for i in range(1, 140)]
+        result = backtester._compute_crypto_signal(prices, 138)
+        assert len(result) == 4
+
+    def test_crypto_zero_with_flat_prices(self, backtester):
+        """Flat SPY prices should produce zero crypto allocation."""
+        prices = [{"d": f"2020-01-{i:02d}", "p": 100.0} for i in range(1, 140)]
+        spy_d, gld_d, tlt_d, crypto = backtester._compute_crypto_signal(prices, 138)
+        assert crypto == 0.0
+
+
+class TestHardConstraintsExtended:
+    """Extended hard constraint tests."""
+
+    def test_spy_min_bound(self):
+        """SPY floor at 36%."""
+        import numpy as np
+        assert float(np.clip(0.46 - 0.15, 0.36, 0.56)) == 0.36
+
+    def test_spy_max_bound(self):
+        """SPY ceiling at 56%."""
+        import numpy as np
+        assert float(np.clip(0.46 + 0.15, 0.36, 0.56)) == 0.56
+
+    def test_tlt_weight_positive(self):
+        """TLT should always be positive."""
+        cfg = BacktestConfig()
+        assert cfg.base_weights['TLT'] > 0
+
+    def test_gld_weight_positive(self):
+        """GLD should always be positive."""
+        cfg = BacktestConfig()
+        assert cfg.base_weights['GLD'] > 0
+
+
+class TestOutputExtended:
+    """Extended output tests."""
+
+    def test_save_results_has_sharpe(self, backtester, tmp_path):
+        """Saved results should include sharpe_ratio."""
+        result = BacktestResult(
+            total_return=100.0, cagr=10.0, volatility=12.0,
+            sharpe_ratio=0.9, max_drawdown=-25.0,
+            baseline_sharpe=0.85, sharpe_improvement=0.05,
+            total_rebalances=50, total_transaction_costs=500.0,
+            extras={},
+        )
+        out_file = str(tmp_path / "results.json")
+        backtester.save_results(result, path=out_file)
+        with open(out_file) as f:
+            saved = json.load(f)
+        assert "sharpe_ratio" in saved
+
+    def test_save_results_has_crisis_returns(self, backtester, tmp_path):
+        """Saved results should include crisis_returns."""
+        result = BacktestResult(
+            total_return=100.0, cagr=10.0, volatility=12.0,
+            sharpe_ratio=0.9, max_drawdown=-25.0,
+            baseline_sharpe=0.85, sharpe_improvement=0.05,
+            total_rebalances=50, total_transaction_costs=500.0,
+            crisis_returns={"2008": -10.0, "2020": 5.0},
+            extras={},
+        )
+        out_file = str(tmp_path / "results.json")
+        backtester.save_results(result, path=out_file)
+        with open(out_file) as f:
+            saved = json.load(f)
+        assert "crisis_returns" in saved

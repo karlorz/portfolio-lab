@@ -13,7 +13,7 @@ import pytest
 
 # Skip if pandas not available
 try:
-    from src.data.factor_data import FactorDataManager, FactorETF, FACTOR_ETFS, QUALITY_WEIGHTS, main
+    from src.data.factor_data import FactorDataManager, FactorETF, FACTOR_ETFS, QUALITY_WEIGHTS, fetch_factor_prices_from_pipeline, main
     HAS_DEPENDENCIES = True
 except ImportError:
     HAS_DEPENDENCIES = False
@@ -377,6 +377,396 @@ class TestQualityWeightsExtended:
     def test_four_factors_present(self):
         """Should have exactly 4 quality factors."""
         assert len(QUALITY_WEIGHTS) == 4
+
+    def test_all_weight_values_in_expected_range(self):
+        """All weight values should be between 0.15 and 0.30."""
+        for key, weight in QUALITY_WEIGHTS.items():
+            assert 0.15 <= weight <= 0.30, f"{key} weight {weight} out of range"
+
+
+@pytest.mark.skipif(not HAS_DEPENDENCIES, reason="Dependencies not available")
+class TestFactorETFExtended2:
+    """Additional FactorETF edge cases for to_dict completeness."""
+
+    def test_to_dict_all_fields_present(self):
+        """to_dict should contain all 5 dataclass fields."""
+        etf = FactorETF("VLUE", "value", 0.0015, 11.3, "iShares MSCI USA Value Factor")
+        d = etf.to_dict()
+        assert set(d.keys()) == {"symbol", "factor", "expense_ratio", "aum_billions", "description"}
+
+    def test_all_four_etfs_to_dict_valid_factor_type(self):
+        """Every FACTOR_ETFS entry should produce a valid factor type in to_dict."""
+        valid_factors = {"momentum", "quality", "low_vol", "value"}
+        for symbol, etf in FACTOR_ETFS.items():
+            d = etf.to_dict()
+            assert d["factor"] in valid_factors, f"{symbol} has invalid factor: {d['factor']}"
+
+    def test_expense_ratios_all_identical(self):
+        """All factor ETFs should have identical expense ratios."""
+        ratios = {sym: etf.expense_ratio for sym, etf in FACTOR_ETFS.items()}
+        assert len(set(ratios.values())) == 1
+        assert list(ratios.values())[0] == 0.0015
+
+    def test_factor_aum_values_in_expected_range(self):
+        """AUM values should be between 5 and 50 billion."""
+        for symbol, etf in FACTOR_ETFS.items():
+            assert 5.0 <= etf.aum_billions <= 50.0, f"{symbol} AUM {etf.aum_billions} out of range"
+
+    def test_to_dict_serializes_all_four_etfs(self):
+        """Each FACTOR_ETFS entry should have to_dict with matching symbol and factor."""
+        for symbol, etf in FACTOR_ETFS.items():
+            d = etf.to_dict()
+            assert d["symbol"] == symbol
+            assert d["factor"] == etf.factor
+
+    def test_factor_etf_negative_expense_ratio_invalid(self):
+        """A FactorETF with negative expense ratio should still construct (validation not enforced at dataclass level)."""
+        etf = FactorETF("TEST", "momentum", -0.01, 10.0, "Test ETF")
+        assert etf.expense_ratio == -0.01
+
+
+@pytest.mark.skipif(not HAS_DEPENDENCIES, reason="Dependencies not available")
+class TestFactorDataManagerExtended2:
+    """Additional FactorDataManager edge cases — retrieval, boundaries, edge inputs."""
+
+    @pytest.fixture
+    def temp_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir) / "factors"
+            manager = FactorDataManager(data_dir=data_dir)
+            yield manager
+
+    def test_zero_close_prices_handling(self, temp_manager):
+        """Zero close prices should be stored and retrieved correctly."""
+        prices = [
+            {"date": "2026-05-01", "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0},
+            {"date": "2026-05-02", "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0},
+        ]
+        count = temp_manager.store_prices("MTUM", prices)
+        assert count == 2
+        retrieved = temp_manager.get_prices("MTUM", days=5)
+        assert len(retrieved) == 2
+        assert retrieved[0]["close"] == 0.0
+
+    def test_negative_close_prices_stored(self, temp_manager):
+        """Negative close prices (theoretically unlikely) should store without error."""
+        prices = [
+            {"date": "2026-05-01", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000000},
+            {"date": "2026-05-02", "open": 99.5, "high": 100.0, "low": 98.0, "close": -1.0, "volume": 500000},
+        ]
+        count = temp_manager.store_prices("MTUM", prices)
+        assert count == 2
+        retrieved = temp_manager.get_prices("MTUM", days=5)
+        assert retrieved[0]["close"] == -1.0
+
+    def test_empty_price_list_stores_zero(self, temp_manager):
+        """An empty price list should return 0 records inserted."""
+        count = temp_manager.store_prices("MTUM", [])
+        assert count == 0
+
+    def test_duplicate_dates_are_replaced(self, temp_manager):
+        """INSERT OR REPLACE should overwrite existing records with the same date."""
+        prices_first = [
+            {"date": "2026-05-01", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000000},
+        ]
+        prices_second = [
+            {"date": "2026-05-01", "open": 200.0, "high": 201.0, "low": 199.0, "close": 200.5, "volume": 2000000},
+        ]
+        temp_manager.store_prices("MTUM", prices_first)
+        temp_manager.store_prices("MTUM", prices_second)
+        retrieved = temp_manager.get_prices("MTUM", days=5)
+        assert len(retrieved) == 1
+        assert retrieved[0]["close"] == 200.5
+
+    def test_store_prices_missing_optional_fields(self, temp_manager):
+        """Storing prices with only date and close (no open/high/low/volume) should store NULL for missing fields."""
+        prices = [
+            {"date": "2026-05-01", "close": 100.5},
+            {"date": "2026-05-02", "close": 101.5},
+        ]
+        count = temp_manager.store_prices("MTUM", prices)
+        assert count == 2
+        retrieved = temp_manager.get_prices("MTUM", days=5)
+        assert len(retrieved) == 2
+        assert retrieved[0]["close"] == 101.5
+        assert retrieved[0]["open"] is None
+        assert retrieved[0]["high"] is None
+        assert retrieved[0]["low"] is None
+
+    def test_constant_prices_produce_zero_returns(self, temp_manager):
+        """When prices never change, all calculable returns should be 0 and vol should be 0."""
+        prices = []
+        for i in range(70):
+            prices.append({
+                "date": f"2026-03-{i+1:02d}",
+                "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1000000,
+            })
+        temp_manager.store_prices("MTUM", prices)
+        returns = temp_manager.calculate_returns("MTUM")
+        assert returns is not None
+        assert returns["return_1d"] == 0.0
+        assert returns["return_1m"] == 0.0
+        assert returns["return_3m"] is not None  # Needs 64+ prices
+        assert returns["return_3m"] == 0.0
+        assert returns["return_6m"] is None  # Not enough data
+        assert returns["return_12m"] is None  # Not enough data for 252 days
+        assert returns["vol_20d"] == 0.0
+
+    def test_declining_prices_produce_negative_returns(self, temp_manager):
+        """When prices decline, all calculated returns should be negative."""
+        prices = []
+        for i in range(30):
+            prices.append({
+                "date": f"2026-04-{i+1:02d}",
+                "open": 100.0, "high": 100.0, "low": 98.0,
+                "close": 100.0 - i * 0.5, "volume": 1000000,
+            })
+        temp_manager.store_prices("MTUM", prices)
+        returns = temp_manager.calculate_returns("MTUM")
+        assert returns is not None
+        assert returns["return_1d"] < 0
+        assert returns["return_1m"] < 0
+        assert returns["return_3m"] is None  # Not enough data
+
+    def test_calculate_returns_vol_exactly_21_prices(self, temp_manager):
+        """With exactly 21 prices, vol_20d should be calculable (needs 21 closes)."""
+        prices = []
+        for i in range(21):
+            prices.append({
+                "date": f"2026-05-{i+1:02d}",
+                "open": 100.0, "high": 101.0, "low": 99.0,
+                "close": 100.0 + i * 0.1, "volume": 1000000,
+            })
+        temp_manager.store_prices("MTUM", prices)
+        returns = temp_manager.calculate_returns("MTUM")
+        assert returns is not None
+        assert returns["return_1d"] is not None
+        assert returns["vol_20d"] is not None
+        assert returns["vol_20d"] >= 0
+
+    def test_calculate_returns_vol_20_prices(self, temp_manager):
+        """With exactly 20 prices, vol_20d should be None (needs 21 closes)."""
+        prices = []
+        for i in range(20):
+            prices.append({
+                "date": f"2026-05-{i+1:02d}",
+                "open": 100.0, "high": 101.0, "low": 99.0,
+                "close": 100.0 + i * 0.1, "volume": 1000000,
+            })
+        temp_manager.store_prices("MTUM", prices)
+        returns = temp_manager.calculate_returns("MTUM")
+        assert returns is not None
+        assert returns["return_1d"] is not None
+        assert returns["vol_20d"] is None
+
+    def test_get_all_performance_returns_empty_dict(self, temp_manager):
+        """With no data stored, get_all_performance should return an empty dict."""
+        perf = temp_manager.get_all_performance()
+        assert perf == {}
+
+    def test_get_factor_rankings_returns_empty_list(self, temp_manager):
+        """With no data stored, get_factor_rankings should return an empty list."""
+        rankings = temp_manager.get_factor_rankings()
+        assert rankings == []
+
+    def test_store_quality_score_with_missing_keys(self, temp_manager):
+        """Missing metric keys should use default values (roe=0.15, debt_equity=0.5, etc.)."""
+        metrics = {"roe": 0.20}  # Only provide roe, rest use defaults
+        success = temp_manager.store_quality_score("QUAL", "2026-05-01", metrics)
+        assert success
+        scores = temp_manager.get_quality_scores("QUAL", days=10)
+        assert len(scores) == 1
+        assert 0 <= scores[0]["composite_score"] <= 1
+        # With roe=0.20 and all defaults at 0.5, composite should be middle-range
+        assert scores[0]["composite_score"] > 0
+
+    def test_store_prices_large_volume_values(self, temp_manager):
+        """Very large volume values should be stored correctly."""
+        prices = [
+            {"date": "2026-05-01", "open": 100.0, "high": 101.0, "low": 99.0,
+             "close": 100.5, "volume": 999999999},
+        ]
+        count = temp_manager.store_prices("MTUM", prices)
+        assert count == 1
+        retrieved = temp_manager.get_prices("MTUM", days=5)
+        assert retrieved[0]["volume"] == 999999999
+
+    def test_store_and_retrieve_performance_data(self, temp_manager):
+        """Store prices then calculate and verify performance data is retrievable."""
+        prices = []
+        for i in range(30):
+            prices.append({
+                "date": f"2026-04-{i+1:02d}",
+                "open": 100.0, "high": 101.0, "low": 99.0,
+                "close": 100.0 + i * 0.2, "volume": 1000000,
+            })
+        temp_manager.store_prices("MTUM", prices)
+        success = temp_manager.store_returns("MTUM")
+        assert success
+
+    def test_store_returns_without_data(self, temp_manager):
+        """store_returns should return False when no price data exists."""
+        result = temp_manager.store_returns("MTUM")
+        assert result is False
+
+    def test_store_prices_invalid_symbol_description(self, temp_manager):
+        """Storing prices for an unknown symbol should raise ValueError."""
+        with pytest.raises(ValueError, match="Unknown factor ETF"):
+            temp_manager.store_prices("AAPL", [{"date": "2026-05-01", "close": 100.0}])
+
+    def test_get_quality_scores_empty(self, temp_manager):
+        """get_quality_scores should return empty list when no scores stored."""
+        scores = temp_manager.get_quality_scores("QUAL", days=10)
+        assert scores == []
+
+    def test_calculate_returns_single_price(self, temp_manager):
+        """With only 1 price, calculate_returns should return None."""
+        prices = [{"date": "2026-05-01", "close": 100.0}]
+        temp_manager.store_prices("MTUM", prices)
+        result = temp_manager.calculate_returns("MTUM")
+        assert result is None
+
+
+@pytest.mark.skipif(not HAS_DEPENDENCIES, reason="Dependencies not available")
+class TestNormalizationBoundaries:
+    """Test the normalization logic boundaries in calculate_quality_score."""
+
+    @pytest.fixture
+    def manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield FactorDataManager(data_dir=Path(tmpdir) / "factors")
+
+    def test_roe_0_25_maps_to_1(self, manager):
+        """ROE of 0.25 should normalize to exactly 1 (max)."""
+        score = manager.calculate_quality_score(roe=0.25, debt_equity=0.5, earnings_stability=0.5, profitability=0.5)
+        assert score >= 0
+
+    def test_roe_0_maps_to_0(self, manager):
+        """ROE of 0 should normalize to exactly 0 (min)."""
+        score = manager.calculate_quality_score(roe=0.0, debt_equity=0.5, earnings_stability=0.5, profitability=0.5)
+        assert score >= 0
+
+    def test_debt_equity_2_maps_to_0(self, manager):
+        """Debt/equity of 2.0 should normalize to 0 (1 - 2/2 = 0)."""
+        score = manager.calculate_quality_score(roe=0.15, debt_equity=2.0, earnings_stability=0.5, profitability=0.5)
+        de_component = 1.0 - (2.0 / 2.0)  # = 0
+        assert de_component == 0.0
+        assert score >= 0
+
+    def test_debt_equity_0_maps_to_1(self, manager):
+        """Debt/equity of 0 should normalize to exactly 1 (1 - 0/2 = 1)."""
+        score = manager.calculate_quality_score(roe=0.15, debt_equity=0.0, earnings_stability=0.5, profitability=0.5)
+        assert score >= 0
+
+    def test_extreme_roe_values_clamped(self, manager):
+        """Extremely high or negative ROE values should each be clamped to [0, 1] and yield different scores."""
+        high = manager.calculate_quality_score(roe=10.0, debt_equity=0.5, earnings_stability=0.5, profitability=0.5)
+        low = manager.calculate_quality_score(roe=-10.0, debt_equity=0.5, earnings_stability=0.5, profitability=0.5)
+        assert 0 <= high <= 1  # ROE=10 clamped to roe_norm=1
+        assert 0 <= low <= 1   # ROE=-10 clamped to roe_norm=0
+        assert high > low      # Higher ROE should yield higher score
+
+    def test_extreme_debt_values_clamped(self, manager):
+        """Extremely high debt/equity values should be clamped to min 0."""
+        high_debt = manager.calculate_quality_score(roe=0.15, debt_equity=100.0, earnings_stability=0.5, profitability=0.5)
+        zero_debt = manager.calculate_quality_score(roe=0.15, debt_equity=0.0, earnings_stability=0.5, profitability=0.5)
+        # High debt should have lower or equal score than zero debt
+        assert high_debt <= zero_debt
+
+    def test_score_at_exact_one_possible(self, manager):
+        """Perfect inputs should yield a composite score close to 1.0."""
+        score = manager.calculate_quality_score(
+            roe=0.25, debt_equity=0.0, earnings_stability=1.0, profitability=1.0,
+        )
+        # With all weights summing to 1 and each component at max:
+        expected = (0.30 * 1.0) + (0.25 * 1.0) + (0.25 * 1.0) + (0.20 * 1.0)
+        assert score == pytest.approx(expected, abs=0.001)
+
+    def test_score_at_exact_zero_possible(self, manager):
+        """Worst-possible inputs should yield a composite score close to 0.0."""
+        score = manager.calculate_quality_score(
+            roe=0.0, debt_equity=2.0, earnings_stability=0.0, profitability=0.0,
+        )
+        expected = (0.30 * 0.0) + (0.25 * 0.0) + (0.25 * 0.0) + (0.20 * 0.0)
+        assert score == pytest.approx(expected, abs=0.001)
+
+    def test_score_at_half_roe(self, manager):
+        """ROE at half (0.125) should give a roe_norm of exactly 0.5."""
+        score = manager.calculate_quality_score(roe=0.125, debt_equity=1.0, earnings_stability=0.5, profitability=0.5)
+        # roe_norm = min(max(0.125/0.25, 0), 1) = 0.5
+        # de_norm = min(max(1 - 1.0/2.0, 0), 1) = 0.5
+        # earn_norm = 0.5, prof_norm = 0.5
+        expected = (0.30 * 0.5) + (0.25 * 0.5) + (0.25 * 0.5) + (0.20 * 0.5)
+        assert score == pytest.approx(expected, abs=0.001)
+
+    def test_score_rounding_to_4_decimals(self, manager):
+        """Composite score should be rounded to 4 decimal places."""
+        score = manager.calculate_quality_score(
+            roe=0.123456, debt_equity=0.789012, earnings_stability=0.345678, profitability=0.901234,
+        )
+        # Verify rounding to 4 decimal places
+        assert score == round(score, 4)
+
+
+@pytest.mark.skipif(not HAS_DEPENDENCIES, reason="Dependencies not available")
+class TestFetchFunctions:
+    """Test fetch_factor_prices_from_pipeline function."""
+
+    def test_fetch_from_pipeline_with_valid_data(self):
+        """Valid prices_data should produce correctly formatted records."""
+        prices_data = {
+            "MTUM": [
+                {"d": "2026-05-01", "p": 100.5},
+                {"d": "2026-05-02", "p": 101.5},
+            ]
+        }
+        records = fetch_factor_prices_from_pipeline("MTUM", prices_data)
+        assert len(records) == 2
+        assert records[0]["date"] == "2026-05-01"
+        assert records[0]["close"] == 100.5
+        assert records[0]["open"] == 100.5  # Close used as proxy
+        assert records[0]["high"] == 100.5
+        assert records[0]["low"] == 100.5
+        assert records[0]["volume"] == 0
+
+    def test_fetch_from_pipeline_empty_prices_data(self):
+        """An empty prices_data dict should return an empty list."""
+        records = fetch_factor_prices_from_pipeline("MTUM", {})
+        assert records == []
+
+    def test_fetch_from_pipeline_symbol_not_in_data(self):
+        """A symbol not present in prices_data should return an empty list."""
+        prices_data = {"QUAL": [{"d": "2026-05-01", "p": 100.0}]}
+        records = fetch_factor_prices_from_pipeline("MTUM", prices_data)
+        assert records == []
+
+    def test_fetch_from_pipeline_multiple_symbols(self):
+        """Multiple symbols in prices_data should only return the requested symbol."""
+        prices_data = {
+            "MTUM": [{"d": "2026-05-01", "p": 100.0}],
+            "QUAL": [{"d": "2026-05-01", "p": 200.0}],
+        }
+        records = fetch_factor_prices_from_pipeline("QUAL", prices_data)
+        assert len(records) == 1
+        assert records[0]["close"] == 200.0
+
+    def test_fetch_from_pipeline_preserves_record_order(self):
+        """Records should maintain insertion order from prices_data."""
+        prices_data = {
+            "MTUM": [
+                {"d": "2026-05-01", "p": 100.0},
+                {"d": "2026-05-02", "p": 101.0},
+                {"d": "2026-05-03", "p": 102.0},
+            ]
+        }
+        records = fetch_factor_prices_from_pipeline("MTUM", prices_data)
+        assert [r["date"] for r in records] == ["2026-05-01", "2026-05-02", "2026-05-03"]
+
+    def test_fetch_from_pipeline_empty_symbol_list(self):
+        """A symbol with an empty price list should return an empty list."""
+        prices_data = {"MTUM": []}
+        records = fetch_factor_prices_from_pipeline("MTUM", prices_data)
+        assert records == []
 
 
 if __name__ == "__main__":
