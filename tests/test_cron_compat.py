@@ -135,3 +135,52 @@ class TestModuleIntegrity:
         from src.cron_compat import IS_HERMES, IS_CRONTAB, IS_MANUAL
         # hermes and crontab should not both be true
         assert not (IS_HERMES and IS_CRONTAB)
+
+
+class TestCronExpectedDurations:
+    """CRON_EXPECTED_DURATIONS mapping integrity."""
+
+    def test_durations_is_dict(self):
+        from src.cron_compat import CRON_EXPECTED_DURATIONS
+        assert isinstance(CRON_EXPECTED_DURATIONS, dict)
+
+    def test_all_targets_have_durations(self):
+        from src.cron_compat import CRON_TARGETS, CRON_EXPECTED_DURATIONS
+        for target in CRON_TARGETS:
+            assert target in CRON_EXPECTED_DURATIONS, f"{target} missing from DURATIONS"
+
+    def test_durations_are_positive(self):
+        from src.cron_compat import CRON_EXPECTED_DURATIONS
+        for target, duration in CRON_EXPECTED_DURATIONS.items():
+            assert duration > 0, f"{target} has non-positive duration"
+
+    def test_durations_are_reasonable(self):
+        """All durations should be under 30 minutes (1800s)."""
+        from src.cron_compat import CRON_EXPECTED_DURATIONS
+        for target, duration in CRON_EXPECTED_DURATIONS.items():
+            assert duration <= 1800, f"{target} duration {duration}s exceeds 30 min"
+
+
+class TestCronGuardConfig:
+    """CRON_GUARD_CONFIG structure."""
+
+    def test_guard_config_is_dict(self):
+        from src.cron_compat import CRON_GUARD_CONFIG
+        assert isinstance(CRON_GUARD_CONFIG, dict)
+
+    def test_has_required_keys(self):
+        from src.cron_compat import CRON_GUARD_CONFIG
+        required_keys = {"max_load", "default_timeout", "memory_mb", "lock_dir"}
+        assert required_keys.issubset(set(CRON_GUARD_CONFIG.keys()))
+
+    def test_memory_limit_at_least_1gb(self):
+        from src.cron_compat import CRON_GUARD_CONFIG
+        assert CRON_GUARD_CONFIG["memory_mb"] >= 1024
+
+    def test_timeout_is_positive(self):
+        from src.cron_compat import CRON_GUARD_CONFIG
+        assert CRON_GUARD_CONFIG["default_timeout"] > 0
+
+    def test_max_load_positive(self):
+        from src.cron_compat import CRON_GUARD_CONFIG
+        assert CRON_GUARD_CONFIG["max_load"] > 0
