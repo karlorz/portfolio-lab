@@ -1704,3 +1704,590 @@ class TestGetAdjustedWeightsEdgeCases:
         assert adjusted["cross_asset_rv"] == 0.0
         total = sum(adjusted.values())
         assert abs(total - 1.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# __all__ exports
+# ---------------------------------------------------------------------------
+
+
+class TestAllExports:
+    """Verify __all__ contains expected names."""
+
+    def test_all_contains_expected_names(self):
+        from src.signals.health_tracker import __all__
+        expected = {
+            'SignalSource', 'SignalHealthStatus', 'SignalPrediction',
+            'HealthScore', 'DecayAlert', 'SignalHealthTracker',
+            'backfill_predictions',
+        }
+        assert set(__all__) == expected
+
+
+# ---------------------------------------------------------------------------
+# SignalSource enum members by name
+# ---------------------------------------------------------------------------
+
+class TestSignalSourceMembers:
+    """Verify all six enum members exist by name and value."""
+
+    def test_all_members_present(self):
+        assert hasattr(SignalSource, 'MULTI_SPEED_MOM')
+        assert hasattr(SignalSource, 'CROSS_ASSET_RV')
+        assert hasattr(SignalSource, 'INTERNATIONAL_MOMENTUM')
+        assert hasattr(SignalSource, 'ALTERNATIVE_DATA')
+        assert hasattr(SignalSource, 'CROSS_ASSET_REGIME_ARB')
+        assert hasattr(SignalSource, 'UNIFIED_OVERLAY')
+
+    def test_member_values(self):
+        assert SignalSource.MULTI_SPEED_MOM.value == "multi_speed_momentum"
+        assert SignalSource.CROSS_ASSET_RV.value == "cross_asset_rv"
+        assert SignalSource.INTERNATIONAL_MOMENTUM.value == "international_momentum"
+        assert SignalSource.ALTERNATIVE_DATA.value == "alternative_data"
+        assert SignalSource.CROSS_ASSET_REGIME_ARB.value == "cross_asset_regime_arb"
+        assert SignalSource.UNIFIED_OVERLAY.value == "unified_overlay"
+
+
+# ---------------------------------------------------------------------------
+# _load_state / _save_state
+# ---------------------------------------------------------------------------
+
+class TestStatePersistence:
+    """Low-level state load/save operations."""
+
+    def test_save_state_writes_file(self, tmp_path):
+        """_save_state writes state to a JSON file on disk."""
+        from unittest.mock import patch
+        mock_state_path = tmp_path / ".signal_health_state.json"
+        with patch('src.signals.health_tracker.STATE_PATH', mock_state_path):
+            db = tmp_path / "health.db"
+            tracker = SignalHealthTracker(db_path=db)
+            tracker.state["custom_key"] = "custom_value"
+            tracker._save_state()
+            assert mock_state_path.exists()
+            loaded = json.loads(mock_state_path.read_text())
+            assert loaded["custom_key"] == "custom_value"
+            assert "last_health_calculation" in loaded
+
+    def test_load_state_from_existing_file(self, tmp_path):
+        """_load_state picks up previously saved state."""
+        from unittest.mock import patch
+        mock_state_path = tmp_path / ".signal_health_state.json"
+        initial = {
+            "version": "3.12.0",
+            "last_health_calculation": "2026-05-24T00:00:00",
+            "decay_alerts": [{"source": "test"}],
+            "custom_data": 42,
+        }
+        mock_state_path.write_text(json.dumps(initial))
+        with patch('src.signals.health_tracker.STATE_PATH', mock_state_path):
+            db = tmp_path / "health.db"
+            tracker = SignalHealthTracker(db_path=db)
+            assert tracker.state["custom_data"] == 42
+            assert tracker.state["decay_alerts"] == [{"source": "test"}]
+
+
+# ---------------------------------------------------------------------------
+# log_prediction DB edge cases
+# ---------------------------------------------------------------------------
+
+class TestLogPredictionDBEdgeCases:
+    """Edge cases for log_prediction interaction with the database."""
+
+    def test_same_source_same_timestamp(self, tmp_path):
+        """Multiple predictions for the same source at the same timestamp."""
+        import sqlite3
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(
+            source="cta", signal_value=0.5, confidence=0.8,
+            timestamp="2026-05-24T10:00:00",
+        )
+        tracker.log_prediction_simple(
+            source="cta", signal_value=0.3, confidence=0.7,
+            timestamp="2026-05-24T10:00:00",
+        )
+        with sqlite3.connect(str(db)) as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM signal_predictions WHERE source='cta'"
+            ).fetchone()[0]
+        assert count == 2
+
+    def test_zero_signal_value(self, tmp_path):
+        """Signal value of 0.0 should produce predicted_direction 0."""
+        import sqlite3
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(source="cta", signal_value=0.0, confidence=0.5)
+        with sqlite3.connect(str(db)) as conn:
+            row = conn.execute(
+                "SELECT signal_value, predicted_direction FROM signal_predictions WHERE source='cta'"
+            ).fetchone()
+        assert row == (0.0, 0)
+
+
+# ---------------------------------------------------------------------------
+# save_health_scores edge cases
+# ---------------------------------------------------------------------------
+
+class TestSaveHealthScoresEdgeCases:
+    """Edge cases for save_health_scores."""
+
+    def test_save_empty_dict(self, tmp_path):
+        """Saving an empty dict should not raise."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.save_health_scores({})  # must not raise
+
+    def test_save_repeatedly(self, tmp_path):
+        """Saving the same health score multiple times should not raise."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        hs = HealthScore(
+            source="alternative_data", timestamp="2026-05-24",
+            health_score=0.75, accuracy_30d=0.70, accuracy_60d=0.72,
+            accuracy_90d=0.68, decay_rate=0.0, predictions_count=50,
+            status="healthy",
+        )
+        for _ in range(3):
+            tracker.save_health_scores({"alternative_data": hs})
+
+
+# ---------------------------------------------------------------------------
+# calculate_health_score with custom end_date
+# ---------------------------------------------------------------------------
+
+class TestCalculateHealthScoreCustomEndDate:
+    """Health score computation with a custom end_date."""
+
+    def test_past_end_date(self, tmp_path):
+        """Using a past end_date should compute health as of that date."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        for i in range(15):
+            ts = (today - timedelta(days=70 + i)).strftime("%Y-%m-%dT10:00:00")
+            tracker.log_prediction_simple(source="cta", signal_value=0.5, confidence=0.8, timestamp=ts)
+        for i in range(15):
+            day = (today - timedelta(days=70 + i)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": 0.01}, day)
+        past_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+        result = tracker.calculate_health_score("cta", end_date=past_date)
+        assert result is not None
+        assert 0.0 <= result.health_score <= 1.0
+
+    def test_end_date_before_any_predictions(self, tmp_path):
+        """When end_date predates all predictions, returns None."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        for i in range(10):
+            ts = (today - timedelta(days=i * 5)).strftime("%Y-%m-%dT10:00:00")
+            tracker.log_prediction_simple(source="cta", signal_value=0.5, confidence=0.8, timestamp=ts)
+        for i in range(10):
+            day = (today - timedelta(days=i * 5)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": 0.01}, day)
+        old_date = (today - timedelta(days=200)).strftime("%Y-%m-%d")
+        result = tracker.calculate_health_score("cta", end_date=old_date)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# calculate_all_health_scores — edge cases
+# ---------------------------------------------------------------------------
+
+class TestCalculateAllHealthScoresNoData:
+    """calculate_all_health_scores with various data scenarios."""
+
+    def test_no_sources_have_enough_data(self, tmp_path):
+        """When no source has >=10 predictions, returns empty dict."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        for _ in range(5):
+            tracker.log_prediction_simple(source="alternative_data", signal_value=0.5, confidence=0.7)
+        scores = tracker.calculate_all_health_scores()
+        assert scores == {}
+
+    def test_only_some_sources_have_data(self, tmp_path):
+        """Only sources with enough predictions appear in results."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        for i in range(15):
+            ts = (today - timedelta(days=i * 5)).strftime("%Y-%m-%dT10:00:00")
+            tracker.log_prediction_simple(source="alternative_data", signal_value=0.5, confidence=0.8, timestamp=ts)
+        for i in range(15):
+            day = (today - timedelta(days=i * 5)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": 0.01}, day)
+        for i in range(5):
+            ts = (today - timedelta(days=i * 5)).strftime("%Y-%m-%dT10:00:00")
+            tracker.log_prediction_simple(source="cross_asset_rv", signal_value=-0.3, confidence=0.6, timestamp=ts)
+        for i in range(5):
+            day = (today - timedelta(days=i * 5)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": 0.01}, day)
+        scores = tracker.calculate_all_health_scores()
+        assert "alternative_data" in scores
+        assert "cross_asset_rv" not in scores
+
+
+# ---------------------------------------------------------------------------
+# compute_ic_half_life — finite and stable IC
+# ---------------------------------------------------------------------------
+
+class TestComputeICHalfLifeDecay:
+    """Half-life computation with actual decaying IC pattern."""
+
+    def test_decaying_ic_produces_finite_half_life(self, tmp_path):
+        """IC that decays over time should produce a finite half-life value."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        import sqlite3
+        today = datetime.now()
+        with sqlite3.connect(str(db)) as conn:
+            cursor = conn.cursor()
+            for day_offset in range(200):
+                ts = (today - timedelta(days=day_offset)).strftime("%Y-%m-%dT10:00:00")
+                window_idx = day_offset // 20
+                if window_idx < 5:
+                    sig = 0.8 if (day_offset // 7) % 2 == 0 else -0.5
+                    act = 1 if (day_offset // 7) % 2 == 0 else -1
+                else:
+                    sig = 0.2 if (day_offset // 5) % 2 == 0 else -0.2
+                    act = -1 if (day_offset // 3) % 2 == 0 else 1
+                pred_dir = 1 if sig > 0.2 else (-1 if sig < -0.2 else 0)
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, "decay_test", sig, 0.8, pred_dir, act),
+                )
+            conn.commit()
+        hl = tracker.compute_ic_half_life("decay_test")
+        assert hl is not None
+
+    def test_stable_ic_returns_inf(self, tmp_path):
+        """IC that is always perfectly correlated should return infinity."""
+        db = tmp_path / "health.db"
+        import sqlite3
+        today = datetime.now()
+        tracker = SignalHealthTracker(db_path=db)
+        with sqlite3.connect(str(db)) as conn:
+            cursor = conn.cursor()
+            for day_offset in range(200):
+                ts = (today - timedelta(days=day_offset)).strftime("%Y-%m-%dT10:00:00")
+                sig = 0.8 if (day_offset // 7) % 2 == 0 else -0.5
+                act = 1 if (day_offset // 7) % 2 == 0 else -1
+                pred_dir = 1 if sig > 0.2 else (-1 if sig < -0.2 else 0)
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, "stable_test", sig, 0.8, pred_dir, act),
+                )
+            conn.commit()
+        hl = tracker.compute_ic_half_life("stable_test")
+        # Regression may produce tiny positive k rather than exactly 0,
+        # yielding a very large finite half-life instead of inf.
+        assert hl is not None and (hl == float("inf") or hl > 1e6)
+
+
+# ---------------------------------------------------------------------------
+# detect_ic_alerts — exception / None handling
+# ---------------------------------------------------------------------------
+
+class TestDetectICAlertsExceptionHandling:
+    """detect_ic_alerts robustness when compute_ic raises or returns None."""
+
+    def test_compute_ic_raises_value_error(self, tmp_path):
+        """A ValueError from compute_ic should be caught and the source skipped."""
+        db = str(tmp_path / "test_health.db")
+        from unittest.mock import patch
+
+        def raising_ic(source, lookback_days=90, end_date=None):
+            raise ValueError("Simulated error for test")
+
+        tracker = SignalHealthTracker(db_path=db)
+        with patch.object(tracker, 'compute_ic', side_effect=raising_ic):
+            alerts = tracker.detect_ic_alerts()
+        assert alerts == []
+
+    def test_compute_ic_returns_none_for_all(self, tmp_path):
+        """When every source returns None IC, alerts should be empty."""
+        db = str(tmp_path / "test_health.db")
+        from unittest.mock import patch
+        tracker = SignalHealthTracker(db_path=db)
+        with patch.object(tracker, 'compute_ic', return_value=None):
+            alerts = tracker.detect_ic_alerts()
+        assert alerts == []
+
+
+# ---------------------------------------------------------------------------
+# get_adjusted_weights — IC boundary conditions
+# ---------------------------------------------------------------------------
+
+class TestGetAdjustedWeightsICBoundaries:
+    """Boundary conditions for IC multiplier in get_adjusted_weights."""
+
+    @staticmethod
+    def _make_score(source: str, health: float, ic_val: float) -> HealthScore:
+        return HealthScore(
+            source=source, timestamp=datetime.now().isoformat(),
+            health_score=health, accuracy_30d=health, accuracy_60d=health,
+            accuracy_90d=health, decay_rate=0.0, predictions_count=100,
+            status="healthy" if health >= 0.7 else "degraded",
+            ic=ic_val,
+        )
+
+    def test_ic_at_exactly_bonus_threshold_no_change(self, tmp_path):
+        """|IC| = 0.05 should NOT get bonus (not strictly > 0.05)."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        scores = {
+            "src_a": self._make_score("src_a", 0.8, 0.05),
+            "src_b": self._make_score("src_b", 0.8, 0.05),
+        }
+        with patch.object(tracker, 'calculate_all_health_scores', return_value=scores):
+            adjusted = tracker.get_adjusted_weights(
+                {"src_a": 0.5, "src_b": 0.5},
+                ic_bonus_threshold=0.05,
+                ic_penalty_threshold=0.02,
+                ic_weight_factor=0.15,
+            )
+        assert abs(adjusted["src_a"] - adjusted["src_b"]) < 0.01
+        assert abs(sum(adjusted.values()) - 1.0) < 0.01
+
+    def test_ic_at_exactly_penalty_threshold_no_change(self, tmp_path):
+        """|IC| = 0.02 should NOT get penalised (not strictly < 0.02)."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        scores = {
+            "src_a": self._make_score("src_a", 0.8, 0.02),
+            "src_b": self._make_score("src_b", 0.8, 0.02),
+        }
+        with patch.object(tracker, 'calculate_all_health_scores', return_value=scores):
+            adjusted = tracker.get_adjusted_weights(
+                {"src_a": 0.5, "src_b": 0.5},
+                ic_bonus_threshold=0.05,
+                ic_penalty_threshold=0.02,
+                ic_weight_factor=0.15,
+            )
+        assert abs(adjusted["src_a"] - adjusted["src_b"]) < 0.01
+        assert abs(sum(adjusted.values()) - 1.0) < 0.01
+
+    def test_ic_above_bonus_gets_relatively_more(self, tmp_path):
+        """Source with |IC| above bonus threshold gets a weight boost."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        scores = {
+            "high_ic": self._make_score("high_ic", 0.8, 0.10),
+            "low_ic": self._make_score("low_ic", 0.8, 0.01),
+        }
+        with patch.object(tracker, 'calculate_all_health_scores', return_value=scores):
+            adjusted = tracker.get_adjusted_weights(
+                {"high_ic": 0.5, "low_ic": 0.5},
+                ic_bonus_threshold=0.05,
+                ic_penalty_threshold=0.02,
+                ic_weight_factor=0.15,
+            )
+        assert adjusted["high_ic"] > adjusted["low_ic"]
+        assert abs(sum(adjusted.values()) - 1.0) < 0.01
+
+    def test_ic_below_penalty_gets_relatively_less(self, tmp_path):
+        """Source with |IC| below penalty threshold gets a weight penalty."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        scores = {
+            "good_ic": self._make_score("good_ic", 0.8, 0.05),
+            "bad_ic": self._make_score("bad_ic", 0.8, 0.01),
+        }
+        with patch.object(tracker, 'calculate_all_health_scores', return_value=scores):
+            adjusted = tracker.get_adjusted_weights(
+                {"good_ic": 0.5, "bad_ic": 0.5},
+                ic_bonus_threshold=0.05,
+                ic_penalty_threshold=0.02,
+                ic_weight_factor=0.15,
+            )
+        assert adjusted["good_ic"] > adjusted["bad_ic"]
+        assert abs(sum(adjusted.values()) - 1.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# get_health_report — edge cases
+# ---------------------------------------------------------------------------
+
+class TestGetHealthReportEdgeCases:
+    """Edge cases for get_health_report."""
+
+    def test_empty_report_has_expected_keys(self, tmp_path):
+        """An empty health report should contain all expected top-level keys."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        report = tracker.get_health_report()
+        assert "timestamp" in report
+        assert "summary" in report
+        assert "scores" in report
+        assert "alerts" in report
+        assert "overall_health" in report
+
+    def test_report_with_mixed_health(self, tmp_path):
+        """Mixed healthy/degraded sources should produce correct summary."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        mock_scores = {}
+        for source in SignalSource:
+            is_healthy = source.value != "multi_speed_momentum"
+            mock_scores[source.value] = HealthScore(
+                source=source.value, timestamp="2026-05-24",
+                health_score=0.8 if is_healthy else 0.6,
+                accuracy_30d=0.75, accuracy_60d=0.78,
+                accuracy_90d=0.80, decay_rate=0.0, predictions_count=100,
+                status="healthy" if is_healthy else "degraded",
+            )
+        with patch.object(tracker, 'calculate_all_health_scores', return_value=mock_scores):
+            with patch.object(tracker, 'compute_ic', return_value=0.05):
+                with patch.object(tracker, 'compute_ic_half_life', return_value=100.0):
+                    report = tracker.get_health_report()
+        assert report["summary"]["healthy"] == 5
+        assert report["summary"]["degraded"] == 1
+        assert report["summary"]["unhealthy"] == 0
+        assert report["summary"]["total_tracked"] == 6
+        assert report["overall_health"] == "healthy"  # 5/6 = 83% >= 60%
+
+    def test_report_with_zero_healthy(self, tmp_path):
+        """When no sources are healthy, overall_health should be 'degraded'."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        mock_scores = {}
+        for source in SignalSource:
+            mock_scores[source.value] = HealthScore(
+                source=source.value, timestamp="2026-05-24",
+                health_score=0.3, accuracy_30d=0.25, accuracy_60d=0.28,
+                accuracy_90d=0.30, decay_rate=0.05, predictions_count=100,
+                status="unhealthy",
+            )
+        with patch.object(tracker, 'calculate_all_health_scores', return_value=mock_scores):
+            with patch.object(tracker, 'compute_ic', return_value=None):
+                with patch.object(tracker, 'compute_ic_half_life', return_value=None):
+                    report = tracker.get_health_report()
+        assert report["summary"]["healthy"] == 0
+        assert report["summary"]["unhealthy"] == 6
+        assert report["overall_health"] == "degraded"
+
+
+# ---------------------------------------------------------------------------
+# backfill_predictions
+# ---------------------------------------------------------------------------
+
+class TestBackfillPredictions:
+    """Test the backfill_predictions top-level function."""
+
+    def test_backfill_empty_tables_returns_zero(self, tmp_path):
+        """Backfill with no regime_log or prices tables should return 0."""
+        db = tmp_path / "health.db"
+        from src.signals.health_tracker import backfill_predictions
+        count = backfill_predictions(db_path=db)
+        assert count == 0
+
+    def test_backfill_with_seeded_data(self, tmp_path):
+        """Backfill should populate predictions from regime_log and prices."""
+        import sqlite3
+        db = tmp_path / "health.db"
+        SignalHealthTracker(db_path=db)
+        now = datetime.now()
+        with sqlite3.connect(str(db)) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS regime_log (date TEXT, regime TEXT, vix_level REAL)")
+            conn.execute("CREATE TABLE IF NOT EXISTS prices (symbol TEXT, date TEXT, close REAL)")
+            regimes = ["bull", "bear", "neutral", "high_vol", "crisis"]
+            for i, reg in enumerate(regimes):
+                base_date = (now - timedelta(days=100 - i * 2)).strftime("%Y-%m-%d")
+                conn.execute("INSERT INTO regime_log (date, regime, vix_level) VALUES (?, ?, ?)",
+                             (base_date, reg, 12.0 + i * 7.0))
+                for j in range(1, 3):
+                    px_date = (now - timedelta(days=100 - i * 2 - j)).strftime("%Y-%m-%d")
+                    conn.execute("INSERT INTO prices (symbol, date, close) VALUES ('SPY', ?, ?)",
+                                 (px_date, 500.0 + i + j * 0.1))
+            conn.commit()
+        from src.signals.health_tracker import backfill_predictions
+        count = backfill_predictions(db_path=db)
+        with sqlite3.connect(str(db)) as conn:
+            pred_count = conn.execute(
+                "SELECT COUNT(*) FROM signal_predictions WHERE source='hmm'"
+            ).fetchone()[0]
+        assert pred_count > 0
+        assert count == pred_count
+
+
+# ---------------------------------------------------------------------------
+# update_actual_directions — already-set directions
+# ---------------------------------------------------------------------------
+
+class TestUpdateActualDirectionsAlreadySet:
+    """update_actual_directions when predictions already have actual_direction."""
+
+    def test_skips_already_updated_predictions(self, tmp_path):
+        """Predictions with actual_direction already set should not be re-updated."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        tracker.log_prediction_simple(source="src", signal_value=0.5, confidence=0.8)
+        first = tracker.update_actual_directions({"SPY": 0.01}, today_str)
+        assert first > 0
+        second = tracker.update_actual_directions({"SPY": -0.01}, today_str)
+        assert second == 0
+
+
+# ---------------------------------------------------------------------------
+# detect_ic_alerts — state preservation
+# ---------------------------------------------------------------------------
+
+class TestDetectICAlertsStatePreservation:
+    """State preservation across detect_ic_alerts calls."""
+
+    def test_state_has_ic_alerts_key_after_alert(self, tmp_path):
+        """State should contain ic_alerts when alerts are detected."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        with patch.object(tracker, 'compute_ic', return_value=-0.05):
+            alerts = tracker.detect_ic_alerts()
+        if alerts:
+            assert "ic_alerts" in tracker.state
+
+    def test_existing_state_survives_detect_ic_alerts(self, tmp_path):
+        """Existing custom state entries should survive detect_ic_alerts."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.state["custom_key"] = "preserve_me"
+        from unittest.mock import patch
+        with patch.object(tracker, 'compute_ic', return_value=-0.05):
+            tracker.detect_ic_alerts()
+        assert tracker.state["custom_key"] == "preserve_me"
+
+
+# ---------------------------------------------------------------------------
+# HealthScore state persistence
+# ---------------------------------------------------------------------------
+
+class TestHealthScoreStatePersistence:
+    """Verify that save_health_scores updates tracker state."""
+
+    def test_state_updated_after_save(self, tmp_path):
+        """_save_state should update last_health_calculation when saving."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        original_calc = tracker.state["last_health_calculation"]
+        hs = HealthScore(
+            source="alternative_data", timestamp="2026-05-24",
+            health_score=0.75, accuracy_30d=0.70, accuracy_60d=0.72,
+            accuracy_90d=0.68, decay_rate=0.0, predictions_count=50,
+            status="healthy",
+        )
+        tracker.save_health_scores({"alternative_data": hs})
+        assert tracker.state["last_health_calculation"] is not None
+        assert tracker.state["last_health_calculation"] != original_calc

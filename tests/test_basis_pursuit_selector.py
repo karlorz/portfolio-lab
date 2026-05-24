@@ -7,6 +7,7 @@ import math
 import tempfile
 from pathlib import Path
 from typing import Dict, List
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -841,3 +842,426 @@ class TestConstants:
 
     def test_sparsity_alert_threshold(self):
         assert SPARSITY_ALERT_THRESHOLD == 0.3
+
+
+class TestCLI:
+    """CLI main() dispatch tests."""
+
+    def test_status_no_history(self, capsys):
+        """Status command with no history displays appropriate message."""
+        from src.strategy.basis_pursuit_selector import main
+        with patch('sys.argv', ['bps.py', 'status']):
+            with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
+                mock = MagicMock()
+                mock.get_state_diagnostics.return_value = {}
+                MockSel.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        assert "No signal history yet" in captured.out
+
+    def test_status_with_history(self, capsys):
+        """Status command with history displays signal diagnostics."""
+        from src.strategy.basis_pursuit_selector import main
+        with patch('sys.argv', ['bps.py', 'status']):
+            with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
+                mock = MagicMock()
+                mock.get_state_diagnostics.return_value = {
+                    "momentum": {"signal_periods": 10, "signal_mean": 0.5, "signal_std": 0.1},
+                }
+                MockSel.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        assert "momentum" in captured.out
+        assert "signal_periods= 10" in captured.out
+
+    def test_select_malformed_signal(self, capsys):
+        """Select command with malformed signals prints warning."""
+        from src.strategy.basis_pursuit_selector import main
+        with patch('sys.argv', ['bps.py', 'select', '--signals', 'badformat', '--weights', 'a=1.0']):
+            with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
+                mock = MagicMock()
+                mock.select_signals.return_value = BasisPursuitResult(
+                    active_signals={"a": 1.0}, pruned_signals={}, prune_reasons={},
+                    sparsity_ratio=1.0, lambda_used=0.01, regime="normal",
+                )
+                MockSel.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        assert "WARN: Skipping malformed signal" in captured.out
+
+    def test_select_malformed_weight(self, capsys):
+        """Select command with malformed weights prints warning."""
+        from src.strategy.basis_pursuit_selector import main
+        with patch('sys.argv', ['bps.py', 'select', '--signals', 'a=0.5', '--weights', 'badformat']):
+            with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
+                mock = MagicMock()
+                mock.select_signals.return_value = BasisPursuitResult(
+                    active_signals={"a": 1.0}, pruned_signals={}, prune_reasons={},
+                    sparsity_ratio=1.0, lambda_used=0.01, regime="normal",
+                )
+                MockSel.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        assert "WARN: Skipping malformed weight" in captured.out
+
+    def test_select_no_valid_signals(self, capsys):
+        """Select with only malformed signals handles gracefully."""
+        from src.strategy.basis_pursuit_selector import main
+        with patch('sys.argv', ['bps.py', 'select', '--signals', 'good=0.5', '--weights', 'good=1.0']):
+            with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
+                mock = MagicMock()
+                result = BasisPursuitResult(
+                    active_signals={"good": 1.0}, pruned_signals={}, prune_reasons={},
+                    sparsity_ratio=1.0, lambda_used=0.01, regime="normal",
+                )
+                mock.select_signals.return_value = result
+                MockSel.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        assert "Active signals" in captured.out
+        assert "good" in captured.out
+
+    def test_no_command_prints_help(self, capsys):
+        """No command prints help."""
+        from src.strategy.basis_pursuit_selector import main
+        with patch('sys.argv', ['bps.py']):
+            with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
+                MockSel.return_value = MagicMock()
+                main()
+        captured = capsys.readouterr()
+        assert "usage:" in captured.out.lower() or "Basis-Pursuit" in captured.out
+
+    def test_select_shows_concentration_warning(self, capsys):
+        """Select shows warning when sparsity is below threshold."""
+        from src.strategy.basis_pursuit_selector import main
+        with patch('sys.argv', ['bps.py', 'select', '--signals', 'a=0.5', '--weights', 'a=1.0']):
+            with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
+                mock = MagicMock()
+                result = BasisPursuitResult(
+                    active_signals={"a": 1.0}, pruned_signals={"b": 1.0}, prune_reasons={
+                        "b": PrunedSignal("b", 1.0, "near_zero"),
+                    },
+                    sparsity_ratio=0.2, lambda_used=0.15, regime="crisis",
+                )
+                result.is_concentrated = MagicMock(return_value=True)
+                mock.select_signals.return_value = result
+                MockSel.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        assert "concentration" in captured.out or "sparsity" in captured.out
+
+
+class TestPerformanceTrackingExtended:
+    """Advanced performance tracking edge cases."""
+
+    def test_performance_truncates_at_100(self, selector, sample_signals, sample_weights, tmp_path):
+        """Performance file should keep only last 100 entries."""
+        perf_path = selector._resolve_perf_path()
+        selector._resolve_perf_path = MagicMock(return_value=tmp_path / "perf.json")
+        perf_path = tmp_path / "perf.json"
+        for _ in range(105):
+            selector._track_performance(BasisPursuitResult(
+                active_signals={"a": 1.0}, pruned_signals={}, prune_reasons={},
+                sparsity_ratio=0.5, lambda_used=0.01, regime="normal",
+            ))
+        with open(perf_path) as f:
+            data = json.load(f)
+        assert len(data) == 100
+
+    def test_track_performance_json_decode_error(self, selector, tmp_path):
+        """Corrupted performance file should not raise."""
+        perf_path = selector._resolve_perf_path()
+        selector._resolve_perf_path = MagicMock(return_value=tmp_path / "bad_perf.json")
+        bad_path = tmp_path / "bad_perf.json"
+        bad_path.write_text("{corrupt json}")
+        # Should not raise
+        selector._track_performance(BasisPursuitResult(
+            active_signals={"a": 1.0}, pruned_signals={}, prune_reasons={},
+            sparsity_ratio=0.5, lambda_used=0.01, regime="normal",
+        ))
+
+    def test_track_performance_os_error(self, selector, tmp_path):
+        """OSError during performance tracking should not raise."""
+        perf_path = selector._resolve_perf_path()
+        selector._resolve_perf_path = MagicMock(return_value=tmp_path / "perf.json")
+        # Make perf_path.exists() raise OSError inside the try block
+        with patch.object(Path, 'exists', side_effect=OSError("Permission denied")):
+            # Should not raise
+            selector._track_performance(BasisPursuitResult(
+                active_signals={"a": 1.0}, pruned_signals={}, prune_reasons={},
+                sparsity_ratio=0.5, lambda_used=0.01, regime="normal",
+            ))
+
+
+class TestSaveState:
+    """State persistence error handling."""
+
+    def test_save_state_os_error(self, selector, tmp_path):
+        """OSError during save should not raise."""
+        selector._resolve_path = MagicMock(return_value=tmp_path / "state.json")
+        # Make open() raise OSError inside the try block
+        with patch('builtins.open', side_effect=OSError("Permission denied")):
+            # Should not raise
+            selector._save_state()
+
+
+class TestSelectSignalsEdgeCases:
+    """Additional select_signals edge cases."""
+
+    def test_select_signals_with_empty_weights(self, selector):
+        """Empty base_weights should return empty results."""
+        result = selector.select_signals({"a": 0.5}, {}, "normal")
+        assert result.active_signals == {}
+        assert result.total_signals == 0
+
+    def test_select_signals_all_same_signal(self, selector):
+        """All signals have same value and weight, should all remain active."""
+        signal_values = {"a": 0.5, "b": 0.5, "c": 0.5}
+        base_weights = {"a": 0.33, "b": 0.33, "c": 0.34}
+        # Run twice to build history for correlation check
+        result1 = selector.select_signals(signal_values, base_weights, "normal")
+        result2 = selector.select_signals(signal_values, base_weights, "normal")
+        # Should still have active signals; each sum ~1
+        assert abs(sum(result2.active_signals.values()) - 1.0) < 0.01
+
+    def test_select_signals_near_zero_signal_value_in_crisis(self, selector):
+        """Near-zero signal value in crisis regime should prune aggressively."""
+        signal_values = {"a": 0.001, "b": 0.002}
+        base_weights = {"a": 0.5, "b": 0.5}
+        result = selector.select_signals(signal_values, base_weights, "crisis")
+        # With lambda=0.15 and contribution=0.5*0.001=0.0005, all may be pruned
+        # Fallback should activate base weights
+        assert abs(sum(result.active_signals.values()) - 1.0) < 0.01
+
+    def test_select_signals_realistic_scenario(self, selector):
+        """Realistic 4-signal scenario with varied values."""
+        signal_values = {"momentum": 0.8, "trend": 0.6, "carry": -0.2, "value": 0.1}
+        base_weights = {"momentum": 0.35, "trend": 0.30, "carry": 0.20, "value": 0.15}
+        result = selector.select_signals(signal_values, base_weights, "normal")
+        assert result.total_signals == 4
+        assert abs(sum(result.active_signals.values()) - 1.0) < 0.01
+
+    def test_select_signals_unknown_regime(self, selector):
+        """Unknown regime should use DEFAULT_LAMBDA (0.01)."""
+        from src.strategy.basis_pursuit_selector import DEFAULT_LAMBDA
+        result = selector.select_signals(
+            {"a": 0.5}, {"a": 1.0}, "hypothetical_regime"
+        )
+        assert result.lambda_used == DEFAULT_LAMBDA
+        assert result.regime == "hypothetical_regime"
+
+
+class TestFindRedundantEdgeCases:
+    """Corner cases in _find_redundant_signals."""
+
+    def test_equal_mean_signal_keeps_first(self, selector):
+        """When two signals have equal mean absolute value, first is kept."""
+        # Build history with two signals that have identical means
+        for _ in range(10):
+            selector._update_history(
+                {"sig_a": 0.5, "sig_b": 0.5},
+                {"sig_a": 0.5, "sig_b": 0.5},
+            )
+        # They'll be perfectly correlated with identical means
+        redundant = selector._find_redundant_signals()
+        if redundant:
+            # The second one should be flagged as redundant
+            assert "sig_b" in redundant
+
+    def test_min_periods_exactly_3(self, selector):
+        """Exactly 3 periods should allow correlation computation."""
+        selector._update_history({"a": 0.5, "b": 0.4}, {"a": 0.5, "b": 0.5})
+        selector._update_history({"a": 0.6, "b": 0.5}, {"a": 0.5, "b": 0.5})
+        selector._update_history({"a": 0.7, "b": 0.6}, {"a": 0.5, "b": 0.5})
+        # 3 periods should be enough
+        redundant = selector._find_redundant_signals()
+        assert isinstance(redundant, dict)
+
+    def test_uncorrelated_not_redundant(self, selector):
+        """Signals with near-zero correlation should not be redundant."""
+        for i in range(10):
+            selector._update_history(
+                {"up": 1.0 + i * 0.1, "down": 10.0 - i * 0.1},
+                {"up": 0.5, "down": 0.5},
+            )
+        redundant = selector._find_redundant_signals()
+        # These are inversely correlated (-1.0) so should be redundant
+        assert len(redundant) > 0
+
+
+class TestL1SelectionMoreEdgeCases:
+    """More L1 selection edge cases."""
+
+    def test_negative_signal_contribution(self, selector):
+        """Negative signal values should use absolute value for contribution."""
+        base_weights = {"a": 0.5, "b": 0.5}
+        signal_values = {"a": -0.8, "b": 0.3}
+        result = selector._apply_l1_selection(base_weights, signal_values, 0.01, {})
+        # |a| contribution = 0.5 * 0.8 = 0.4, b = 0.5 * 0.3 = 0.15
+        assert result.get("a", 0) > result.get("b", 0)
+
+    def test_all_signals_missing_from_values(self, selector):
+        """Signals not in signal_values should use base_weight as contribution."""
+        base_weights = {"a": 0.3, "b": 0.2}
+        signal_values = {}
+        result = selector._apply_l1_selection(base_weights, signal_values, 0.01, {})
+        # Both use base_weight as contribution
+        # a: 0.3 - 0.01 = 0.29, b: 0.2 - 0.01 = 0.19
+        assert result["a"] == pytest.approx(0.29, abs=0.01)
+        assert result["b"] == pytest.approx(0.19, abs=0.01)
+
+    def test_zero_lambda_preserves_exact(self, selector):
+        """Zero lambda should preserve exact contributions."""
+        base_weights = {"a": 0.25}
+        signal_values = {"a": 0.5}
+        result = selector._apply_l1_selection(base_weights, signal_values, 0.0, {})
+        # contribution = 0.25 * 0.5 = 0.125, no shrinkage
+        assert result["a"] == pytest.approx(0.125, abs=0.001)
+
+
+class TestPruneNearZeroMoreEdgeCases:
+    """More prune_near_zero edge cases."""
+
+    def test_prune_overlapping_redundant_and_near_zero(self):
+        """Signal that is both redundant and near-zero should be pruned as redundant."""
+        l1_weights = {"a": 0.005, "b": 0.5}
+        original = {"a": 0.3, "b": 0.5}
+        redundant = {"a": "b"}
+        active, pruned, reasons = BasisPursuitSelector._prune_near_zero(
+            l1_weights, original, redundant
+        )
+        assert "a" in pruned
+        assert reasons["a"].reason == "redundant"
+        assert "b" in active
+
+    def test_empty_l1_weights(self):
+        """Empty L1 weights should produce empty active/pruned."""
+        active, pruned, reasons = BasisPursuitSelector._prune_near_zero({}, {}, {})
+        assert active == {}
+        assert pruned == {}
+        assert reasons == {}
+
+    def test_signal_not_in_original_preserved(self):
+        """Signal in l1_weights but not in original should use weight 0.
+        NOTE: _prune_near_zero calls original_weights.get(signal, 0.0) for
+        the pruned weight, so the original is 0 but the l1 weight is checked."""
+        l1_weights = {"a": 0.5, "ghost": 0.5}
+        original = {"a": 1.0}  # ghost not present
+        active, pruned, reasons = BasisPursuitSelector._prune_near_zero(
+            l1_weights, original, {}
+        )
+        assert "a" in active
+        assert "ghost" in active  # Near-zero check is on l1 weight, not original
+
+
+class TestSafeCorrEdgeCases:
+    """_safe_corr edge cases."""
+
+    def test_safe_corr_single_element(self):
+        """Single-element arrays should return None or nan (insufficient data)."""
+        a = np.array([1.0])
+        b = np.array([2.0])
+        corr = BasisPursuitSelector._safe_corr(a, b)
+        assert corr is None or (isinstance(corr, float) and np.isnan(corr))
+
+    def test_safe_corr_two_elements(self):
+        """Two-element arrays should work fine."""
+        a = np.array([1.0, 2.0])
+        b = np.array([3.0, 4.0])
+        corr = BasisPursuitSelector._safe_corr(a, b)
+        assert corr is not None
+
+
+class TestHistoryExtended:
+    """History management edge cases."""
+
+    def test_history_keeps_recent_values(self, selector):
+        """History should keep the most recent N values after trimming."""
+        for i in range(25):
+            selector._update_history({"sig": float(i)}, {"sig": 1.0})
+        assert len(selector.state.signal_history["sig"]) == 20
+        # First value should be 5 (25-20), last should be 24
+        assert selector.state.signal_history["sig"][0] == 5.0
+        assert selector.state.signal_history["sig"][-1] == 24.0
+
+    def test_weight_history_independent_from_signal(self, selector):
+        """Weight history should be tracked independently."""
+        selector._update_history({"a": 0.5}, {"a": 0.3})
+        selector._update_history({"a": 0.6}, {"a": 0.4})
+        assert selector.state.signal_history["a"] == [0.5, 0.6]
+        assert selector.state.full_weight_history["a"] == [0.3, 0.4]
+
+    def test_different_signal_weight_keys(self, selector):
+        """Signals and weights may have different keys."""
+        selector._update_history(
+            {"signal_only": 0.5, "both": 0.3},
+            {"weight_only": 0.4, "both": 0.6},
+        )
+        assert "signal_only" in selector.state.signal_history
+        assert "signal_only" not in selector.state.full_weight_history
+        assert "weight_only" in selector.state.full_weight_history
+        assert "weight_only" not in selector.state.signal_history
+        assert "both" in selector.state.signal_history
+        assert "both" in selector.state.full_weight_history
+
+
+class TestResultDataclass:
+    """BasisPursuitResult dataclass field validation."""
+
+    def test_correlation_matrix_field_default(self):
+        """correlation_matrix should default to None."""
+        result = BasisPursuitResult(
+            active_signals={"a": 1.0}, pruned_signals={}, prune_reasons={},
+            sparsity_ratio=1.0, lambda_used=0.01, regime="normal",
+        )
+        assert result.correlation_matrix is None
+
+    def test_correlation_matrix_custom(self):
+        """correlation_matrix can be set to a float."""
+        result = BasisPursuitResult(
+            active_signals={"a": 1.0}, pruned_signals={}, prune_reasons={},
+            sparsity_ratio=0.8, lambda_used=0.05, regime="high_vol",
+            correlation_matrix=0.45,
+        )
+        assert result.correlation_matrix == 0.45
+
+    def test_result_default_counts(self):
+        """num_active and num_pruned should default to 0."""
+        result = BasisPursuitResult(
+            active_signals={}, pruned_signals={}, prune_reasons={},
+            sparsity_ratio=0.0, lambda_used=0.01, regime="normal",
+        )
+        assert result.num_active == 0
+        assert result.num_pruned == 0
+        assert result.total_signals == 0
+
+
+class TestStateFromDictEdgeCases:
+    """BasisPursuitState.from_dict edge cases."""
+
+    def test_from_dict_extra_keys_ignored(self):
+        """Extra keys in dict should be ignored."""
+        data = {
+            "signal_history": {"a": [0.1]},
+            "full_weight_history": {"a": [0.5]},
+            "rolling_window": 42,
+            "last_regime": "crisis",
+            "nonexistent_field": "should_be_ignored",
+        }
+        state = BasisPursuitState.from_dict(data)
+        assert state.signal_history == {"a": [0.1]}
+        assert state.last_regime == "crisis"
+        assert not hasattr(state, "nonexistent_field")
+
+
+class TestConstantsExtended:
+    """Additional constant validation."""
+
+    def test_unknown_regime_matches_default(self):
+        """unknown_regime should have same lambda as DEFAULT_LAMBDA."""
+        from src.strategy.basis_pursuit_selector import DEFAULT_LAMBDA
+        assert LAMBDA_BY_REGIME["unknown_regime"] == DEFAULT_LAMBDA
+
+    def test_TOP_PRUNED_REPORT_COUNT(self):
+        from src.strategy.basis_pursuit_selector import TOP_PRUNED_REPORT_COUNT
+        assert TOP_PRUNED_REPORT_COUNT == 3

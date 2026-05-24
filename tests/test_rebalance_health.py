@@ -4,6 +4,7 @@ import json
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 import pytest
 from src.monitor.rebalance_health import (
     _parse_order_file,
@@ -316,3 +317,551 @@ class TestParseOrderFileExtended:
             result = _parse_order_file(path)
         assert result is not None
         assert result["orders"] == 1
+
+
+class TestParseOrderFileEdge:
+    """Edge cases for _parse_order_file."""
+
+    def test_non_list_json_body(self):
+        """JSON body that is a dict (not a list) should return None."""
+        body = {"symbol": "SPY", "side": "buy", "estimated_value": 1000}
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", body)
+            result = _parse_order_file(path)
+        assert result is None
+
+    def test_non_dict_items_in_list(self):
+        """List with non-dict items should be handled gracefully (o.get crashes on non-dict).
+
+        The source uses o.get() which only works on dicts, so non-dict items
+        cause AttributeError. This test verifies the function fails safely.
+        """
+        orders = ["SPY", 42, None]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            with pytest.raises(AttributeError):
+                _parse_order_file(path)
+        # NOTE: _parse_order_file does not catch AttributeError; source fix
+        # would be needed for graceful handling of non-dict list items.
+
+    def test_frontmatter_only_no_body(self):
+        """File with only frontmatter (ends with second ---) should return None."""
+        content = "---\ntitle: Test\n---"
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "order_history_20260511_143008_abc.json"
+            path.write_text(content)
+            result = _parse_order_file(path)
+        assert result is None
+
+    def test_empty_body_after_frontmatter(self):
+        """Frontmatter with empty/whitespace body should return None."""
+        content = "---\ntitle: Test\n---\n   \n"
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "order_history_20260511_143008_abc.json"
+            path.write_text(content)
+            result = _parse_order_file(path)
+        assert result is None
+
+    def test_file_not_found(self):
+        """Non-existent file path should return None."""
+        path = Path("/tmp/nonexistent_path_for_test_xyz.json")
+        result = _parse_order_file(path)
+        assert result is None
+
+    def test_no_timestamp_parts_in_filename(self):
+        """Filename with no date-parsable parts should fall back to mtime."""
+        orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 500, "reason": "rebalance"}]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "reports_data_2026", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["orders"] == 1
+        # Falls back to mtime, so date should be today
+        assert "date" in result
+
+    def test_minimal_filename_two_parts(self):
+        """Filename stem with only 2 underscore parts should still parse."""
+        orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 500, "reason": "rebalance"}]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["date"] == "2026-05-11"
+        assert result["time"] == "00:00"
+
+    def test_side_not_buy_or_sell(self):
+        """Side values that are neither 'buy' nor 'sell' should not be counted."""
+        orders = [
+            {"symbol": "SPY", "side": "hold", "estimated_value": 1000, "reason": "rebalance"},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["buy_count"] == 0
+        assert result["sell_count"] == 0
+
+    def test_missing_symbol_key(self):
+        """Order without symbol key should use '?'."""
+        orders = [{"side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["symbols"] == ["?"]
+
+    def test_negative_estimated_value(self):
+        """Negative estimated_value should be included in total."""
+        orders = [
+            {"symbol": "SPY", "side": "sell", "estimated_value": -500, "reason": "rebalance"},
+            {"symbol": "GLD", "side": "buy", "estimated_value": 1000, "reason": "rebalance"},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["total_value"] == 500.0
+        assert result["sell_count"] == 1
+
+    def test_zero_estimated_value(self):
+        """Zero estimated_values should sum correctly."""
+        orders = [
+            {"symbol": "SPY", "side": "buy", "estimated_value": 0, "reason": "rebalance"},
+            {"symbol": "GLD", "side": "buy", "estimated_value": 0, "reason": "drift"},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["total_value"] == 0.0
+        assert result["buy_count"] == 2
+
+    def test_reason_empty_string(self):
+        """Reason as empty string should be included in reasons set."""
+        orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": ""}]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert "" in result["reasons"]
+
+    def test_mixed_case_side(self):
+        """Side values are case-sensitive — 'Buy' should not count as 'buy'."""
+        orders = [{"symbol": "SPY", "side": "Buy", "estimated_value": 1000, "reason": "rebalance"}]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["buy_count"] == 0
+        assert result["sell_count"] == 0
+
+    def test_multiple_symbols_sorted(self):
+        """Symbols should be returned in sorted order."""
+        orders = [
+            {"symbol": "TLT", "side": "buy", "estimated_value": 1000, "reason": "rebalance"},
+            {"symbol": "GLD", "side": "sell", "estimated_value": 500, "reason": "drift"},
+            {"symbol": "SPY", "side": "buy", "estimated_value": 2000, "reason": "rebalance"},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["symbols"] == ["GLD", "SPY", "TLT"]
+
+    def test_reason_default_when_missing(self):
+        """Missing reason key should default to 'rebalance'."""
+        orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000}]
+        with tempfile.TemporaryDirectory() as d:
+            path = _make_order_file(Path(d), "order_history_20260511_143008_abc", orders)
+            result = _parse_order_file(path)
+        assert result is not None
+        assert result["reasons"] == ["rebalance"]
+
+
+class TestGenerateEdge:
+    """Edge cases for generate()."""
+
+    def test_single_execution_no_compliance(self):
+        """Single execution means no compliance pairs to check."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260501_120000_aaa", orders)
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["total_executions"] == 1
+        assert result["schedule_compliance"]["total"] == 0
+        # With zero pairs, compliance_pct = on_time / max(total, 1) = 0/1 = 0.0
+        assert result["schedule_compliance"]["compliance_pct"] == 0.0
+
+    def test_more_than_ten_executions(self):
+        """With 12 executions, recent should show only the last 10."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                # Create 12 order files spaced 30 days apart
+                for i in range(12):
+                    day = 1 + i * 31  # ~monthly spacing
+                    date_str = f"2026{day:03d}"
+                    _make_order_file(
+                        Path(d),
+                        f"order_history_{date_str}_120000_{i:03d}",
+                        orders,
+                    )
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["total_executions"] == 12
+        assert len(result["execution_history"]) == 10  # Only last 10
+
+    def test_exactly_ten_executions(self):
+        """With exactly 10 executions, recent should show all 10."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                for i in range(10):
+                    day = 1 + i * 31
+                    date_str = f"2026{day:03d}"
+                    _make_order_file(
+                        Path(d),
+                        f"order_history_{date_str}_120000_{i:03d}",
+                        orders,
+                    )
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["total_executions"] == 10
+        assert len(result["execution_history"]) == 10  # All 10
+
+    def test_compliance_25_days_boundary(self):
+        """25 days between orders should be on_time (inclusive boundary)."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260401_120000_aaa", orders)
+                _make_order_file(Path(d), "order_history_20260426_120000_bbb", orders)  # +25 days
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["schedule_compliance"]["on_time"] == 1
+        assert result["schedule_compliance"]["delayed"] == 0
+
+    def test_compliance_35_days_boundary(self):
+        """35 days between orders should be on_time (inclusive boundary)."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260401_120000_aaa", orders)
+                _make_order_file(Path(d), "order_history_20260506_120000_bbb", orders)  # +35 days
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["schedule_compliance"]["on_time"] == 1
+        assert result["schedule_compliance"]["delayed"] == 0
+
+    def test_compliance_24_days_below(self):
+        """24 days between orders should be delayed (below 25-day threshold)."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260401_120000_aaa", orders)
+                _make_order_file(Path(d), "order_history_20260425_120000_bbb", orders)  # +24 days
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["schedule_compliance"]["delayed"] == 1
+        assert result["schedule_compliance"]["on_time"] == 0
+
+    def test_compliance_36_days_above(self):
+        """36 days between orders should be delayed (above 35-day threshold)."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260401_120000_aaa", orders)
+                _make_order_file(Path(d), "order_history_20260507_120000_bbb", orders)  # +36 days
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["schedule_compliance"]["delayed"] == 1
+        assert result["schedule_compliance"]["on_time"] == 0
+
+    def test_compliance_all_on_time_100_pct(self):
+        """All on-time intervals should yield 100% compliance."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260101_120000_aaa", orders)
+                _make_order_file(Path(d), "order_history_20260201_120000_bbb", orders)  # 31 days
+                _make_order_file(Path(d), "order_history_20260301_120000_ccc", orders)  # 28 days
+                _make_order_file(Path(d), "order_history_20260401_120000_ddd", orders)  # 31 days
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["schedule_compliance"]["compliance_pct"] == 100.0
+        assert result["schedule_compliance"]["total"] == 3
+
+    def test_compliance_all_delayed_0_pct(self):
+        """All delayed intervals should yield 0% compliance."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260101_120000_aaa", orders)
+                _make_order_file(Path(d), "order_history_20260301_120000_bbb", orders)  # 59 days
+                _make_order_file(Path(d), "order_history_20260501_120000_ccc", orders)  # 61 days
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["schedule_compliance"]["compliance_pct"] == 0.0
+
+    def test_non_order_files_in_orders_dir(self):
+        """Non-JSON files in ORDERS_DIR should be ignored."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                # Create a valid order file
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260501_120000_aaa", orders)
+                # Create non-JSON files that should be ignored
+                (Path(d) / "readme.txt").write_text("hello")
+                (Path(d) / "data.yaml").write_text("key: value")
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["total_executions"] == 1  # Only the valid JSON file
+
+    def test_invalid_order_files_matching_glob(self):
+        """Files matching glob but with bad content should be skipped."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                # Two invalid files matching the glob
+                (Path(d) / "order_history_20260501_120000_bad.json").write_text("not json {{{")
+                (Path(d) / "order_history_20260502_120000_empty.json").write_text("[]")
+                # One valid file
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260503_120000_good", orders)
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["total_executions"] == 1  # Only the valid file counted
+
+    def test_same_day_dedup_three_entries(self):
+        """Three entries on the same day should deduplicate to one for compliance."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                # Three orders on April 1 at different times
+                _make_order_file(Path(d), "order_history_20260401_090000_aaa", orders)
+                _make_order_file(Path(d), "order_history_20260401_120000_bbb", orders)
+                _make_order_file(Path(d), "order_history_20260401_140000_ccc", orders)
+                # One order on May 1
+                _make_order_file(Path(d), "order_history_20260501_120000_ddd", orders)
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert result["total_executions"] == 4  # All 4 in history
+        # 1 compliance pair (Apr 1 → May 1), deduped from 3 same-day entries
+        assert result["schedule_compliance"]["total"] == 1
+
+    def test_next_rebalance_no_history(self):
+        """Without history, next_rebalance defaults to ~30 days from now."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                rh.ORDERS_DIR.mkdir(parents=True, exist_ok=True)
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        # next_rebalance.date should be ~30 days from today
+        assert "next_rebalance" in result
+        # days_until should be close to 30
+        assert -1 <= result["next_rebalance"]["days_until"] <= 31
+
+    def test_generated_field_format(self):
+        """The 'generated' field should be a valid ISO timestamp."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260501_120000_aaa", orders)
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        assert "generated" in result
+        # Verify it's a parseable ISO datetime
+        dt = datetime.fromisoformat(result["generated"])
+        assert isinstance(dt, datetime)
+
+    def test_compliance_with_three_intervals_mixed(self):
+        """Mixed on-time and delayed intervals should compute correct pct."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rh.ORDERS_DIR = Path(d)
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                _make_order_file(Path(d), "order_history_20260101_120000_a01", orders)
+                _make_order_file(Path(d), "order_history_20260201_120000_b02", orders)  # 31d on_time
+                _make_order_file(Path(d), "order_history_20260301_120000_c03", orders)  # 28d on_time
+                _make_order_file(Path(d), "order_history_20260515_120000_d04", orders)  # 75d delayed
+                _make_order_file(Path(d), "order_history_20260615_120000_e05", orders)  # 31d on_time
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+        # 3 on_time + 1 delayed = 4 pairs, 75%
+        assert result["schedule_compliance"]["on_time"] == 3
+        assert result["schedule_compliance"]["delayed"] == 1
+        assert result["schedule_compliance"]["compliance_pct"] == 75.0
+
+
+class TestMain:
+    """Tests for the main() function."""
+
+    def test_main_writes_output_file(self, tmp_path):
+        """main() should write rebalance_health.json to OUTPUT_PATH and public dir."""
+        import src.monitor.rebalance_health as rh
+        data_dir = tmp_path / "data"
+        public_dir = tmp_path / "public"
+        orders_dir = data_dir / "historical_orders"
+        orders_dir.mkdir(parents=True)
+        public_dir.mkdir(parents=True)
+
+        orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+        _make_order_file(orders_dir, "order_history_20260511_143008_abc", orders)
+
+        output_path = data_dir / "rebalance_health.json"
+        with (
+            patch.object(rh, 'DATA_DIR', data_dir),
+            patch.object(rh, 'PUBLIC_DATA_DIR', public_dir),
+            patch.object(rh, 'OUTPUT_PATH', output_path),
+            patch.object(rh, 'ORDERS_DIR', orders_dir),
+        ):
+            rh.main()
+
+        assert output_path.exists()
+        assert (public_dir / "rebalance_health.json").exists()
+
+        # Verify content
+        with open(output_path) as f:
+            data = json.load(f)
+        assert data["total_executions"] == 1
+        assert data["schedule_compliance"]["total"] == 0
+
+    def test_main_writes_public_data(self, tmp_path):
+        """The public data copy should match the data dir copy."""
+        import src.monitor.rebalance_health as rh
+        data_dir = tmp_path / "data"
+        public_dir = tmp_path / "public"
+        orders_dir = data_dir / "historical_orders"
+        orders_dir.mkdir(parents=True)
+        public_dir.mkdir(parents=True)
+
+        orders = [{"symbol": "TLT", "side": "sell", "estimated_value": 2000, "reason": "drift"}]
+        _make_order_file(orders_dir, "order_history_20260510_100000_xyz", orders)
+
+        output_path = data_dir / "rebalance_health.json"
+        with (
+            patch.object(rh, 'DATA_DIR', data_dir),
+            patch.object(rh, 'PUBLIC_DATA_DIR', public_dir),
+            patch.object(rh, 'OUTPUT_PATH', output_path),
+            patch.object(rh, 'ORDERS_DIR', orders_dir),
+        ):
+            rh.main()
+
+        with open(output_path) as f:
+            data_content = json.load(f)
+        with open(public_dir / "rebalance_health.json") as f:
+            public_content = json.load(f)
+        assert data_content == public_content
+
+    def test_main_output_format(
+        self, tmp_path, capsys
+    ):
+        """main() should print expected summary lines."""
+        import src.monitor.rebalance_health as rh
+        data_dir = tmp_path / "data"
+        public_dir = tmp_path / "public"
+        orders_dir = data_dir / "historical_orders"
+        orders_dir.mkdir(parents=True)
+        public_dir.mkdir(parents=True)
+
+        orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+        _make_order_file(orders_dir, "order_history_20260511_143008_abc", orders)
+
+        output_path = data_dir / "rebalance_health.json"
+        with (
+            patch.object(rh, 'DATA_DIR', data_dir),
+            patch.object(rh, 'PUBLIC_DATA_DIR', public_dir),
+            patch.object(rh, 'OUTPUT_PATH', output_path),
+            patch.object(rh, 'ORDERS_DIR', orders_dir),
+        ):
+            rh.main()
+
+        captured = capsys.readouterr()
+        assert "Rebalance health data exported" in captured.out
+        assert "Executions:" in captured.out
+        assert "Next rebalance:" in captured.out
+        assert "Compliance:" in captured.out
+
+    def test_main_with_no_orders(self, tmp_path):
+        """main() should handle empty ORDERS_DIR gracefully."""
+        import src.monitor.rebalance_health as rh
+        data_dir = tmp_path / "data"
+        public_dir = tmp_path / "public"
+        orders_dir = data_dir / "historical_orders"
+        orders_dir.mkdir(parents=True)
+        public_dir.mkdir(parents=True)
+
+        output_path = data_dir / "rebalance_health.json"
+        with (
+            patch.object(rh, 'DATA_DIR', data_dir),
+            patch.object(rh, 'PUBLIC_DATA_DIR', public_dir),
+            patch.object(rh, 'OUTPUT_PATH', output_path),
+            patch.object(rh, 'ORDERS_DIR', orders_dir),
+        ):
+            rh.main()
+
+        assert output_path.exists()
+        with open(output_path) as f:
+            data = json.load(f)
+        assert data["total_executions"] == 0
+

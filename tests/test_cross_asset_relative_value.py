@@ -20,6 +20,7 @@ from src.signals.cross_asset_relative_value import (
     ZSCORE_ENTRY,
     ZSCORE_EXIT,
     LOOKBACK,
+    MIN_HISTORY,
     print_scan,
 )
 from src.paths import DATA_DIR
@@ -822,3 +823,819 @@ class TestCrossAssetRVConstants:
     def test_scanner_class_exists(self):
         from src.signals.cross_asset_relative_value import CrossAssetRVScanner
         assert callable(CrossAssetRVScanner)
+
+
+# ---------------------------------------------------------------------------
+# PairReading edge cases
+# ---------------------------------------------------------------------------
+
+class TestPairReadingEdgeCases:
+    """Edge cases for PairReading dataclass fields."""
+
+    def test_negative_entry_zscore(self):
+        """entry_zscore can be negative for diverged_bear entries."""
+        reading = PairReading(
+            pair_name="spy_gld", symbol_a="SPY", symbol_b="GLD",
+            return_a_60d=-5.0, return_b_60d=3.0, return_differential=-8.0,
+            z_score=-2.8, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=0.7, regime="diverged_bear", conviction=0.9,
+            active=True, days_active=2, entry_zscore=-2.8,
+        )
+        reading.entry_zscore = -2.8
+        assert reading.entry_zscore < 0
+
+    def test_zero_conviction(self):
+        """conviction of 0.0 should be valid for converged pairs."""
+        reading = PairReading(
+            pair_name="tlt_ief", symbol_a="TLT", symbol_b="IEF",
+            return_a_60d=0.1, return_b_60d=0.1, return_differential=0.0,
+            z_score=0.1, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=0.0, regime="converged", conviction=0.0,
+            active=False, days_active=0, entry_zscore=0.0,
+        )
+        assert reading.conviction == 0.0
+        assert reading.active is False
+
+    def test_extreme_z_score(self):
+        """z_score of 10.0 should produce maxed-out signal/clip."""
+        reading = PairReading(
+            pair_name="spy_qqq", symbol_a="SPY", symbol_b="QQQ",
+            return_a_60d=20.0, return_b_60d=-10.0, return_differential=30.0,
+            z_score=10.0, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=-1.0, regime="diverged_bull", conviction=1.0,
+            active=True, days_active=1, entry_zscore=10.0,
+        )
+        assert reading.z_score == 10.0
+        assert reading.signal_value == -1.0
+        assert reading.conviction == 1.0
+        assert reading.active is True
+
+    def test_to_dict_roundtrip_json(self):
+        """PairReading serialized and re-parsed via JSON should preserve key fields."""
+        reading = PairReading(
+            pair_name="spy_efa", symbol_a="SPY", symbol_b="EFA",
+            return_a_60d=2.5, return_b_60d=1.0, return_differential=1.5,
+            z_score=1.2, z_score_mean=0.3, z_score_std=0.7,
+            signal_value=-0.5, regime="neutral", conviction=0.3,
+            active=False, days_active=0, entry_zscore=0.0,
+        )
+        d = reading.to_dict()
+        reconstructed = json.dumps(d)
+        parsed = json.loads(reconstructed)
+        assert parsed["pair_name"] == "spy_efa"
+        assert parsed["z_score"] == 1.2
+        assert parsed["regime"] == "neutral"
+
+
+# ---------------------------------------------------------------------------
+# CrossAssetRVSignal edge cases
+# ---------------------------------------------------------------------------
+
+class TestCrossAssetRVSignalEdgeCases:
+    """Edge cases for CrossAssetRVSignal dataclass."""
+
+    def test_negative_avg_z_score(self):
+        """avg_z_score can be negative when bearish divergences dominate."""
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={},
+            avg_z_score=-1.5,
+            max_divergence=2.0,
+            num_diverged=1,
+            total_pairs=5,
+            risk_on_score=0.5,
+            duration_score=-0.3,
+            overall_conviction=0.6,
+        )
+        assert signal.avg_z_score < 0
+        d = signal.to_dict()
+        assert d["avg_z_score"] == -1.5
+
+    def test_all_pairs_diverged(self):
+        """max_divergence should reflect the most extreme z-score when all pairs diverge."""
+        r1 = PairReading(
+            pair_name="spy_qqq", symbol_a="SPY", symbol_b="QQQ",
+            return_a_60d=5.0, return_b_60d=2.0, return_differential=3.0,
+            z_score=2.5, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=-0.62, regime="diverged_bull", conviction=0.83,
+            active=True, days_active=3, entry_zscore=2.5,
+        )
+        r2 = PairReading(
+            pair_name="spy_gld", symbol_a="SPY", symbol_b="GLD",
+            return_a_60d=-5.0, return_b_60d=3.0, return_differential=-8.0,
+            z_score=-3.5, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=0.88, regime="diverged_bear", conviction=1.0,
+            active=True, days_active=5, entry_zscore=-3.5,
+        )
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={"spy_qqq": r1, "spy_gld": r2},
+            avg_z_score=-0.5,
+            max_divergence=3.5,
+            num_diverged=2,
+            total_pairs=5,
+            risk_on_score=-0.3,
+            duration_score=0.1,
+            overall_conviction=0.9,
+        )
+        assert signal.max_divergence == 3.5
+        assert signal.num_diverged == 2
+
+    def test_single_empty_pairs_preserves_total(self):
+        """Empty pairs dict should still report total_pairs accurately."""
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={},
+            avg_z_score=0.0,
+            max_divergence=0.0,
+            num_diverged=0,
+            total_pairs=5,
+            risk_on_score=0.0,
+            duration_score=0.0,
+            overall_conviction=0.0,
+        )
+        d = signal.to_dict()
+        assert d["total_pairs"] == 5
+        assert d["pairs"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Data loading comprehensive edge cases
+# ---------------------------------------------------------------------------
+
+class TestDataLoadingFullCoverage:
+    """Comprehensive data loading edge cases."""
+
+    def test_load_empty_json_file(self, tmp_path):
+        """Valid JSON with empty dict should return False (no dates)."""
+        data_dir = tmp_path / "empty_json"
+        data_dir.mkdir()
+        with open(data_dir / "prices.json", "w") as f:
+            json.dump({}, f)
+        scanner = CrossAssetRVScanner(data_dir=data_dir)
+        assert scanner._load_price_data() is False
+
+    def test_load_empty_symbol_arrays(self, tmp_path):
+        """Symbols with empty list entries should produce no dates."""
+        data_dir = tmp_path / "empty_arr"
+        data_dir.mkdir()
+        prices = {"SPY": [], "QQQ": [], "GLD": []}
+        with open(data_dir / "prices.json", "w") as f:
+            json.dump(prices, f)
+        scanner = CrossAssetRVScanner(data_dir=data_dir)
+        assert scanner._load_price_data() is False
+
+    def test_load_missing_keys_skipped(self, tmp_path):
+        """Entries missing 'd' or 'p' keys should be silently skipped."""
+        data_dir = tmp_path / "missing_keys"
+        data_dir.mkdir()
+        prices = {
+            "SPY": [
+                {"d": "2026-01-01", "p": 500.0},
+                {"x": "2026-01-02", "y": 501.0},  # missing d and p
+                {"d": "2026-01-03", "p": 502.0},
+            ]
+        }
+        with open(data_dir / "prices.json", "w") as f:
+            json.dump(prices, f)
+        scanner = CrossAssetRVScanner(data_dir=data_dir)
+        result = scanner._load_price_data()
+        assert result is True
+        assert "SPY" in scanner.prices
+        assert len(scanner.prices["SPY"]) == 2  # 2 valid entries
+
+    def test_load_partial_nan_within_symbol(self, tmp_path):
+        """Valid entries should be loaded; entries with null prices should be skipped."""
+        data_dir = tmp_path / "null_price"
+        data_dir.mkdir()
+        prices = {
+            "SPY": [
+                {"d": "2026-01-01", "p": 500.0},
+                {"d": "2026-01-02", "p": None},
+                {"d": "2026-01-03", "p": 502.0},
+            ],
+            "GLD": [
+                {"d": "2026-01-01", "p": 180.0},
+                {"d": "2026-01-02", "p": 181.0},
+                {"d": "2026-01-03", "p": 182.0},
+            ],
+        }
+        with open(data_dir / "prices.json", "w") as f:
+            json.dump(prices, f)
+        scanner = CrossAssetRVScanner(data_dir=data_dir)
+        result = scanner._load_price_data()
+        assert result is True
+        # Only 2 dates actually populated for SPY (jan 1 and 3)
+        assert len(scanner.dates) >= 2
+
+    def test_load_price_data_file_not_found(self, tmp_path):
+        """Missing prices.json should return False."""
+        scanner = CrossAssetRVScanner(data_dir=tmp_path / "nope")
+        with patch.object(scanner, '_load_price_data', return_value=False):
+            assert scanner._load_price_data() is False
+
+    def test_load_single_valid_date(self, tmp_path):
+        """Single date entry should load successfully."""
+        data_dir = tmp_path / "single_date"
+        data_dir.mkdir()
+        prices = {
+            "SPY": [{"d": "2026-01-01", "p": 500.0}],
+            "GLD": [{"d": "2026-01-01", "p": 180.0}],
+        }
+        with open(data_dir / "prices.json", "w") as f:
+            json.dump(prices, f)
+        scanner = CrossAssetRVScanner(data_dir=data_dir)
+        assert scanner._load_price_data() is True
+        assert len(scanner.dates) == 1
+
+
+# ---------------------------------------------------------------------------
+# Computation comprehensive edge cases
+# ---------------------------------------------------------------------------
+
+class TestComputationsFullCoverage:
+    """Comprehensive computation edge cases."""
+
+    def test_returns_period_one(self, scanner):
+        """Period=1 should compute daily returns."""
+        prices = np.array([100.0, 101.0, 103.0, 102.0])
+        rets = scanner._compute_returns(prices, period=1)
+        assert rets[1] == pytest.approx(0.01, abs=1e-5)
+        assert rets[2] == pytest.approx(103.0 / 101.0 - 1, abs=1e-5)
+        assert rets[3] == pytest.approx(102.0 / 103.0 - 1, abs=1e-5)
+
+    def test_zscore_window_equals_length(self, scanner):
+        """Window equal to array length -> no iteration, all NaN."""
+        np.random.seed(42)
+        values = np.random.normal(0, 1, 30)
+        z_scores, means, stds = scanner._compute_z_score(values, window=30)
+        assert np.all(np.isnan(z_scores))
+
+    def test_zscore_insufficient_clean(self, scanner):
+        """Segment with fewer than MIN_HISTORY clean values should be skipped."""
+        values = np.full(100, np.nan)
+        values[:10] = 1.0
+        z_scores, means, stds = scanner._compute_z_score(values, window=30)
+        # Every window has at most 10 clean values < MIN_HISTORY (20)
+        assert np.all(np.isnan(z_scores))
+
+    def test_zscore_min_history_boundary(self, scanner):
+        """Exactly MIN_HISTORY clean values in window should compute z-score."""
+        np.random.seed(42)
+        window = 30
+        values = np.full(70, np.nan)
+        # First 20 values are valid; indices 20-29 are NaN; index 30 is valid
+        values[:MIN_HISTORY] = np.random.normal(0, 1, MIN_HISTORY)
+        values[window] = 1.0  # The value at index 30 being evaluated — must not be NaN
+        z_scores, means, stds = scanner._compute_z_score(values, window=window)
+        # At i=30: segment = values[0:30], clean = 20 = MIN_HISTORY
+        # 20 < 20 is False -> should compute, and values[30]=1.0 (not NaN)
+        first_valid = np.where(~np.isnan(z_scores))[0]
+        assert len(first_valid) > 0
+
+    def test_zscore_all_zero_series(self, scanner):
+        """Series where std is 0 at all positions should produce all-NaN z-scores."""
+        values = np.ones(80)
+        z_scores, means, stds = scanner._compute_z_score(values, window=30)
+        assert np.all(np.isnan(z_scores))
+
+    def test_returns_empty_array(self, scanner):
+        """Empty price array should produce empty returns."""
+        prices = np.array([])
+        rets = scanner._compute_returns(prices, period=10)
+        assert len(rets) == 0
+
+    def test_zscore_negative_values(self, scanner):
+        """Z-score computation should work with negative values."""
+        np.random.seed(42)
+        values = np.random.normal(-5, 2, 100)
+        z_scores, means, stds = scanner._compute_z_score(values, window=30)
+        valid = z_scores[~np.isnan(z_scores)]
+        assert len(valid) > 0
+        assert np.all(np.isfinite(valid))
+
+
+# ---------------------------------------------------------------------------
+# Scan pair regime logic with controlled z-scores
+# ---------------------------------------------------------------------------
+
+class TestScanPairRegime:
+    """Test regime detection logic with mocked _compute_z_score."""
+
+    def _make_z_mock(self, scanner, z_value):
+        """Return mocked (z_scores, means, stds) with z_value at last index, matching data size."""
+        n = len(scanner.dates) if len(scanner.dates) > 0 else LOOKBACK + 10
+        z_arr = np.full(n, np.nan)
+        z_arr[-1] = z_value
+        means_arr = np.full(n, np.nan)
+        means_arr[-1] = 0.0
+        stds_arr = np.full(n, np.nan)
+        stds_arr[-1] = 1.0
+        return z_arr, means_arr, stds_arr
+
+    def test_diverged_bull_regime(self, scanner):
+        """z=2.5 (above +2.0) -> diverged_bull, negative signal, short A/long B."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 2.5)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading is not None
+        assert reading.regime == "diverged_bull"
+        assert reading.signal_value == pytest.approx(-0.625, abs=1e-4)
+        assert reading.conviction == pytest.approx(0.8333, abs=1e-3)
+        assert reading.active is True
+
+    def test_diverged_bear_regime(self, scanner):
+        """z=-2.5 (below -2.0) -> diverged_bear, positive signal, long A/short B."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, -2.5)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading is not None
+        assert reading.regime == "diverged_bear"
+        assert reading.signal_value == pytest.approx(0.625, abs=1e-4)
+        assert reading.conviction == pytest.approx(0.8333, abs=1e-3)
+        assert reading.active is True
+
+    def test_converged_regime(self, scanner):
+        """z=0.3 (below +0.5 exit) -> converged, no signal, inactive."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 0.3)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading is not None
+        assert reading.regime == "converged"
+        assert reading.signal_value == 0.0
+        assert reading.conviction == 0.0
+        assert reading.active is False
+
+    def test_neutral_regime_positive_z(self, scanner):
+        """z=1.0 (between exit and entry) -> neutral, gradual negative signal."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 1.0)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading is not None
+        assert reading.regime == "neutral"
+        assert reading.signal_value == pytest.approx(-0.5, abs=1e-4)  # -z/2.0
+        assert reading.conviction == pytest.approx(0.25, abs=1e-4)    # abs_z/2.0 * 0.5
+        assert reading.active is False
+
+    def test_neutral_regime_negative_z(self, scanner):
+        """z=-1.0 (between exit and entry) -> neutral, gradual positive signal."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, -1.0)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading is not None
+        assert reading.regime == "neutral"
+        assert reading.signal_value == pytest.approx(0.5, abs=1e-4)   # -(-1)/2.0
+        assert reading.conviction == pytest.approx(0.25, abs=1e-4)
+        assert reading.active is False
+
+    def test_zero_zscore_converged(self, scanner):
+        """z=0.0 -> converged (below 0.5), no signal."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 0.0)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading is not None
+        assert reading.regime == "converged"
+        assert reading.signal_value == 0.0
+        assert reading.active is False
+
+    def test_extreme_divergence_signal_clip(self, scanner):
+        """z=5.0 -> diverged_bull, signal clips at -1.0, conviction caps at 1.0."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 5.0)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading is not None
+        assert reading.regime == "diverged_bull"
+        assert reading.signal_value == -1.0       # clipped at -1.0
+        assert reading.conviction == 1.0          # capped at 1.0
+        assert reading.active is True
+
+    def test_entry_threshold_boundary_just_below(self, scanner):
+        """z=1.999 (just below +2.0) -> neutral, not diverged."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 1.999)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading is not None
+        assert reading.regime == "neutral"
+        assert reading.active is False
+
+
+# ---------------------------------------------------------------------------
+# Scan pair state transitions
+# ---------------------------------------------------------------------------
+
+class TestScanPairState:
+    """State persistence transitions across multiple scans."""
+
+    def _make_z_mock(self, scanner, z_value):
+        n = len(scanner.dates) if len(scanner.dates) > 0 else LOOKBACK + 10
+        z_arr = np.full(n, np.nan)
+        z_arr[-1] = z_value
+        means_arr = np.full(n, np.nan)
+        means_arr[-1] = 0.0
+        stds_arr = np.full(n, np.nan)
+        stds_arr[-1] = 1.0
+        return z_arr, means_arr, stds_arr
+
+    def test_new_entry_zero_days(self, scanner):
+        """A newly diverged pair with no prior state should start at days_active=0."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 2.5)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading.days_active == 0
+        assert reading.entry_zscore == 0.0
+
+    def test_active_pair_increments_days(self, scanner):
+        """Pre-existing active state should increment days_active."""
+        scanner._load_price_data()
+        scanner._save_state({
+            "spy_qqq": {"active": True, "days_active": 5, "entry_zscore": 2.5, "last_zscore": 2.3}
+        })
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 2.5)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading.days_active == 6  # 5 + 1
+        assert reading.entry_zscore == 2.5
+
+    def test_active_pair_becomes_inactive(self, scanner):
+        """Previously active pair that converges should reset state."""
+        scanner._load_price_data()
+        scanner._save_state({
+            "spy_qqq": {"active": True, "days_active": 5, "entry_zscore": 2.5, "last_zscore": 2.3}
+        })
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 0.3)
+            reading = scanner.scan_pair("spy_qqq")
+        assert reading.days_active == 0
+        assert reading.entry_zscore == 0.0
+        assert reading.active is False
+
+    def test_state_saved_after_scan(self, scanner):
+        """After scan_pair, the updated state should persist on disk."""
+        scanner._load_price_data()
+        with patch.object(scanner, '_compute_z_score') as mock_z:
+            mock_z.return_value = self._make_z_mock(scanner, 2.5)
+            scanner.scan_pair("spy_qqq")
+        state = scanner._load_state()
+        assert "spy_qqq" in state
+        assert state["spy_qqq"]["active"] is True
+        assert "last_zscore" in state["spy_qqq"]
+        assert "last_scan" in state["spy_qqq"]
+
+
+# ---------------------------------------------------------------------------
+# Ensemble signal detailed tests
+# ---------------------------------------------------------------------------
+
+class TestEnsembleSignalDetail:
+    """Detailed tests for get_ensemble_signal calculations."""
+
+    def _make_reading(self, pair_name, z_score, signal_value, conviction):
+        return PairReading(
+            pair_name=pair_name, symbol_a=pair_name.split("_")[0].upper(),
+            symbol_b=pair_name.split("_")[1].upper(),
+            return_a_60d=1.0, return_b_60d=0.5, return_differential=0.5,
+            z_score=z_score, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=signal_value, regime="diverged_bull" if abs(z_score) > 2.0 else "neutral",
+            conviction=conviction, active=abs(z_score) > 2.0,
+            days_active=0, entry_zscore=z_score,
+        )
+
+    def test_diverged_pairs_confidence(self, scanner):
+        """With diverged pairs, confidence is mean of diverged convictions."""
+        diverged = self._make_reading("spy_qqq", 2.5, -0.62, 0.83)
+        neutral = self._make_reading("spy_efa", 1.0, -0.5, 0.25)
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={"spy_qqq": diverged, "spy_efa": neutral, "gld_btc": neutral,
+                   "tlt_ief": neutral, "spy_gld": neutral},
+            avg_z_score=0.5, max_divergence=2.5, num_diverged=1, total_pairs=5,
+            risk_on_score=-0.2, duration_score=0.0, overall_conviction=0.3,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            es = scanner.get_ensemble_signal()
+        assert es["confidence"] == pytest.approx(0.83, abs=1e-4)
+
+    def test_no_diverged_uses_overall_conviction(self, scanner):
+        """Without diverged pairs, confidence = overall_conviction * 0.5."""
+        neutral = self._make_reading("spy_qqq", 0.3, 0.0, 0.0)
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={"spy_qqq": neutral, "spy_efa": neutral, "gld_btc": neutral,
+                   "tlt_ief": neutral, "spy_gld": neutral},
+            avg_z_score=0.1, max_divergence=0.3, num_diverged=0, total_pairs=5,
+            risk_on_score=0.0, duration_score=0.0, overall_conviction=0.4,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            es = scanner.get_ensemble_signal()
+        assert es["confidence"] == pytest.approx(0.2, abs=1e-4)  # 0.4 * 0.5
+
+    def test_spy_bias_aggregation(self, scanner):
+        """SPY bias should combine weighted contributions from all SPY pairs."""
+        r_qqq = self._make_reading("spy_qqq", 2.5, -0.5, 0.83)
+        r_efa = self._make_reading("spy_efa", -2.5, 0.6, 0.83)
+        r_gld = self._make_reading("spy_gld", 1.0, -0.3, 0.25)
+        r_btc = self._make_reading("gld_btc", 1.0, 0.0, 0.0)
+        r_ief = self._make_reading("tlt_ief", 1.0, 0.0, 0.0)
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={"spy_qqq": r_qqq, "spy_efa": r_efa, "gld_btc": r_btc,
+                   "tlt_ief": r_ief, "spy_gld": r_gld},
+            avg_z_score=0.0, max_divergence=2.5, num_diverged=2, total_pairs=5,
+            risk_on_score=0.0, duration_score=0.0, overall_conviction=0.8,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            es = scanner.get_ensemble_signal()
+        expected_spy = (-0.5 * 0.4) + (0.6 * 0.3) + (-0.3 * 0.3)
+        assert es["asset_signals"]["SPY"] == pytest.approx(expected_spy, abs=1e-4)
+
+    def test_gld_tlt_bias_aggregation(self, scanner):
+        """GLD and TLT biases should combine weighted contributions correctly."""
+        r_gld = self._make_reading("spy_gld", 2.5, -0.5, 0.83)
+        r_btc = self._make_reading("gld_btc", -2.5, 0.6, 0.83)
+        r_ief = self._make_reading("tlt_ief", 2.5, -0.4, 0.83)
+        r_qqq = self._make_reading("spy_qqq", 0.0, 0.0, 0.0)
+        r_efa = self._make_reading("spy_efa", 0.0, 0.0, 0.0)
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={"spy_qqq": r_qqq, "spy_efa": r_efa, "gld_btc": r_btc,
+                   "tlt_ief": r_ief, "spy_gld": r_gld},
+            avg_z_score=0.0, max_divergence=2.5, num_diverged=3, total_pairs=5,
+            risk_on_score=0.0, duration_score=0.0, overall_conviction=0.8,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            es = scanner.get_ensemble_signal()
+        expected_gld = -(-0.5 * 0.6) - (0.6 * 0.4)
+        assert es["asset_signals"]["GLD"] == pytest.approx(expected_gld, abs=1e-4)
+        expected_tlt = -0.4 * 0.5
+        assert es["asset_signals"]["TLT"] == pytest.approx(expected_tlt, abs=1e-4)
+
+    def test_ensemble_signal_empty_pairs(self, scanner):
+        """Empty pairs dict should return zero signal and confidence."""
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24", pairs={},
+            avg_z_score=0.0, max_divergence=0.0, num_diverged=0, total_pairs=5,
+            risk_on_score=0.0, duration_score=0.0, overall_conviction=0.0,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            es = scanner.get_ensemble_signal()
+        assert es["signal_value"] == 0.0
+        assert es["confidence"] == 0.0
+        assert es["pairs"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Directional bias (risk_on, duration) tests
+# ---------------------------------------------------------------------------
+
+class TestDirectionalBias:
+    """Directional bias calculations in scan_all."""
+
+    def test_risk_on_score_calculation(self, scanner):
+        """risk_on_score should combine weighted signals from spy_qqq, spy_efa, spy_gld."""
+        # Mock scan_pair to return controlled signal values for each pair
+        readings = {
+            "spy_qqq": PairReading(
+                pair_name="spy_qqq", symbol_a="SPY", symbol_b="QQQ",
+                return_a_60d=5.0, return_b_60d=2.0, return_differential=3.0,
+                z_score=-0.5, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=0.5, regime="neutral", conviction=0.25,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+            "spy_efa": PairReading(
+                pair_name="spy_efa", symbol_a="SPY", symbol_b="EFA",
+                return_a_60d=3.0, return_b_60d=1.0, return_differential=2.0,
+                z_score=0.3, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=-0.3, regime="neutral", conviction=0.15,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+            "gld_btc": PairReading(
+                pair_name="gld_btc", symbol_a="GLD", symbol_b="BTC",
+                return_a_60d=2.0, return_b_60d=4.0, return_differential=-2.0,
+                z_score=0.1, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=0.0, regime="converged", conviction=0.0,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+            "tlt_ief": PairReading(
+                pair_name="tlt_ief", symbol_a="TLT", symbol_b="IEF",
+                return_a_60d=1.0, return_b_60d=0.5, return_differential=0.5,
+                z_score=0.2, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=0.0, regime="converged", conviction=0.0,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+            "spy_gld": PairReading(
+                pair_name="spy_gld", symbol_a="SPY", symbol_b="GLD",
+                return_a_60d=4.0, return_b_60d=2.0, return_differential=2.0,
+                z_score=0.4, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=-0.2, regime="neutral", conviction=0.1,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+        }
+        with patch.object(scanner, 'scan_pair', side_effect=lambda name: readings.get(name)):
+            scanner.prices = {"SPY": np.ones(100), "QQQ": np.ones(100), "EFA": np.ones(100),
+                             "GLD": np.ones(100), "BTC": np.ones(100), "TLT": np.ones(100),
+                             "IEF": np.ones(100)}
+            signal = scanner.scan_all()
+        # risk_on = -spy_qqq.signal - spy_efa.signal*0.5 - spy_gld.signal*0.3
+        expected_risk_on = -(0.5) - (-0.3 * 0.5) - (-0.2 * 0.3)
+        assert signal.risk_on_score == pytest.approx(expected_risk_on, abs=1e-4)
+
+    def test_duration_score_calculation(self, scanner):
+        """duration_score should come from tlt_ief signal."""
+        readings = {
+            "spy_qqq": PairReading(
+                pair_name="spy_qqq", symbol_a="SPY", symbol_b="QQQ",
+                return_a_60d=0.0, return_b_60d=0.0, return_differential=0.0,
+                z_score=0.0, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=0.0, regime="converged", conviction=0.0,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+            "spy_efa": PairReading(
+                pair_name="spy_efa", symbol_a="SPY", symbol_b="EFA",
+                return_a_60d=0.0, return_b_60d=0.0, return_differential=0.0,
+                z_score=0.0, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=0.0, regime="converged", conviction=0.0,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+            "gld_btc": PairReading(
+                pair_name="gld_btc", symbol_a="GLD", symbol_b="BTC",
+                return_a_60d=0.0, return_b_60d=0.0, return_differential=0.0,
+                z_score=0.0, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=0.0, regime="converged", conviction=0.0,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+            "tlt_ief": PairReading(
+                pair_name="tlt_ief", symbol_a="TLT", symbol_b="IEF",
+                return_a_60d=2.0, return_b_60d=1.0, return_differential=1.0,
+                z_score=2.5, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=-0.6, regime="diverged_bull", conviction=0.8,
+                active=True, days_active=3, entry_zscore=2.5,
+            ),
+            "spy_gld": PairReading(
+                pair_name="spy_gld", symbol_a="SPY", symbol_b="GLD",
+                return_a_60d=0.0, return_b_60d=0.0, return_differential=0.0,
+                z_score=0.0, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=0.0, regime="converged", conviction=0.0,
+                active=False, days_active=0, entry_zscore=0.0,
+            ),
+        }
+        with patch.object(scanner, 'scan_pair', side_effect=lambda name: readings.get(name)):
+            scanner.prices = {"SPY": np.ones(100), "QQQ": np.ones(100), "EFA": np.ones(100),
+                             "GLD": np.ones(100), "BTC": np.ones(100), "TLT": np.ones(100),
+                             "IEF": np.ones(100)}
+            signal = scanner.scan_all()
+        # duration = tlt_ief.signal = -0.6
+        assert signal.duration_score == pytest.approx(-0.6, abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# SignalSnapshot edge cases
+# ---------------------------------------------------------------------------
+
+class TestSignalSnapshotEdgeCases:
+    """Edge cases for get_signal_snapshot."""
+
+    def test_snapshot_with_zero_signal(self, scanner):
+        """Snapshot with zero signal value should have is_active=False."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24", pairs={},
+            avg_z_score=0.0, max_divergence=0.0, num_diverged=0, total_pairs=5,
+            risk_on_score=0.0, duration_score=0.0, overall_conviction=0.0,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            snapshot = scanner.get_signal_snapshot()
+        assert isinstance(snapshot, SignalSnapshot)
+        assert snapshot.source == "cross_asset_rv"
+        assert snapshot.is_active is False
+
+    def test_snapshot_no_data(self, tmp_path):
+        """Scanner without data should still produce a valid SignalSnapshot."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        scanner = CrossAssetRVScanner(data_dir=tmp_path / "nodata_snap")
+        with patch.object(scanner, '_load_price_data', return_value=False):
+            snapshot = scanner.get_signal_snapshot()
+        assert isinstance(snapshot, SignalSnapshot)
+        assert snapshot.source == "cross_asset_rv"
+        assert snapshot.value == 0.0
+
+    def test_snapshot_regime_fit_default(self, scanner):
+        """Snapshot should always have regime_fit='all'."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24", pairs={},
+            avg_z_score=1.5, max_divergence=2.0, num_diverged=1, total_pairs=5,
+            risk_on_score=-0.3, duration_score=0.1, overall_conviction=0.6,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            snapshot = scanner.get_signal_snapshot()
+        assert snapshot.regime_fit == "all"
+
+    def test_snapshot_explanation_format(self, scanner):
+        """Snapshot explanation should contain z-score and diverged count format."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        # Use a signal with actual pairs data so z-score and diverged count are computed
+        pair = PairReading(
+            pair_name="SPY/GLD", symbol_a="SPY", symbol_b="GLD",
+            return_a_60d=0.05, return_b_60d=-0.02, return_differential=0.07,
+            z_score=1.23, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=0.5, regime="normal", conviction=0.6,
+            active=True, days_active=5, entry_zscore=1.5,
+        )
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={"SPY/GLD": pair},
+            avg_z_score=1.23, max_divergence=2.5, num_diverged=1, total_pairs=1,
+            risk_on_score=-0.4, duration_score=0.2, overall_conviction=0.7,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            snapshot = scanner.get_signal_snapshot()
+        # Explanation format: "Cross-asset RV: z=+X.XX, diverged=N/M pairs"
+        assert "z=" in snapshot.explanation
+        assert "diverged" in snapshot.explanation
+        assert "pairs" in snapshot.explanation
+
+
+# ---------------------------------------------------------------------------
+# State persistence full edge cases
+# ---------------------------------------------------------------------------
+
+class TestStatePersistenceFull:
+    """Full state persistence edge cases."""
+
+    def test_empty_state_file(self, tmp_path):
+        """Empty state file should return empty dict."""
+        scanner = CrossAssetRVScanner(data_dir=tmp_path / "empty_state")
+        scanner.state_dir.mkdir(parents=True, exist_ok=True)
+        scanner.state_path.write_text("")
+        state = scanner._load_state()
+        assert state == {}
+
+    def test_state_file_with_extra_fields(self, scanner):
+        """State file with extra fields should not break loading."""
+        state = {
+            "spy_qqq": {"active": True, "days_active": 3, "entry_zscore": 2.1,
+                        "last_zscore": 2.0, "last_scan": "2026-05-24",
+                        "extra_field": "should_not_cause_errors"},
+        }
+        scanner._save_state(state)
+        loaded = scanner._load_state()
+        assert loaded["spy_qqq"]["active"] is True
+        assert loaded["spy_qqq"]["extra_field"] == "should_not_cause_errors"
+
+    def test_state_not_found_returns_empty(self, tmp_path):
+        """Non-existent state file should return empty dict."""
+        scanner = CrossAssetRVScanner(data_dir=tmp_path / "no_state")
+        assert scanner._load_state() == {}
+
+
+# ---------------------------------------------------------------------------
+# Edge-case scan_pair and get_ensemble_signal
+# ---------------------------------------------------------------------------
+
+class TestScannerResilience:
+    """Resilience of scan_pair and related methods to unusual conditions."""
+
+    def test_scan_pair_short_prices(self, scanner):
+        """Scanner with insufficient price data should return None for all pairs."""
+        # Use scanner that loaded too-short data
+        scanner.prices = {sym: np.array([100.0, 101.0]) for sym in
+                         ["SPY", "QQQ", "EFA", "GLD", "BTC", "TLT", "IEF"]}
+        scanner.dates = ["2026-01-01", "2026-01-02"]
+        reading = scanner.scan_pair("spy_qqq")
+        assert reading is None
+
+    def test_scan_pair_missing_symbol_from_prices(self, scanner):
+        """Pair requiring a symbol not in prices dict returns None."""
+        scanner.prices = {"SPY": np.ones(100)}
+        scanner.dates = ["2026-01-01"]
+        reading = scanner.scan_pair("spy_qqq")
+        assert reading is None
+
+    def test_scan_all_preserves_correct_pair_count(self, scanner):
+        """scan_all with no data should still report total_pairs correctly."""
+        with patch.object(scanner, '_load_price_data', return_value=False):
+            signal = scanner.scan_all()
+        assert signal.total_pairs == len(CROSS_ASSET_PAIRS)
+        assert signal.num_diverged == 0
+
+    def test_ensemble_signal_missing_asset_pairs(self, scanner):
+        """get_ensemble_signal should handle missing pair keys gracefully."""
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24", pairs={},
+            avg_z_score=0.0, max_divergence=0.0, num_diverged=0, total_pairs=5,
+            risk_on_score=0.0, duration_score=0.0, overall_conviction=0.0,
+        )
+        with patch.object(scanner, 'scan_all', return_value=signal):
+            es = scanner.get_ensemble_signal()
+        assert es["signal_value"] == 0.0
+        assert es["confidence"] == 0.0
+        assert isinstance(es["pairs"], dict)

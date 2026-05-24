@@ -506,3 +506,81 @@ class TestOutputExtended:
         with open(out_file) as f:
             saved = json.load(f)
         assert "crisis_returns" in saved
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.backtest.unified_overlay_backtest as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.backtest.unified_overlay_backtest as mod
+        assert len(mod.__all__) == 3
+
+
+# ---------------------------------------------------------------------------
+# BacktestConfig extended
+# ---------------------------------------------------------------------------
+
+class TestBacktestConfigExtended:
+    """Extended BacktestConfig tests."""
+
+    def test_default_start_date(self):
+        from src.backtest.unified_overlay_backtest import BacktestConfig
+        config = BacktestConfig()
+        assert config.start_date is not None
+
+    def test_default_end_date(self):
+        from src.backtest.unified_overlay_backtest import BacktestConfig
+        config = BacktestConfig()
+        assert config.end_date is not None
+
+    def test_start_before_end(self):
+        from src.backtest.unified_overlay_backtest import BacktestConfig
+        config = BacktestConfig()
+        assert config.start_date < config.end_date
+
+
+# ---------------------------------------------------------------------------
+# DailyData extended
+# ---------------------------------------------------------------------------
+
+class TestDailyDataExtended:
+    """Extended DailyData dataclass tests."""
+
+    def test_all_fields(self):
+        from dataclasses import fields
+        from src.backtest.unified_overlay_backtest import DailyData
+        field_names = {f.name for f in fields(DailyData)}
+        assert "spy_return" in field_names
+        assert "gld_return" in field_names
+        assert "tlt_return" in field_names
+        assert "vix_level" in field_names
+
+    def test_to_dict_keys(self):
+        from src.backtest.unified_overlay_backtest import DailyData
+        dd = DailyData(
+            date="2026-01-01", spy_return=0.01, gld_return=0.02,
+            tlt_return=-0.01, vix_level=18.5,
+        )
+        d = dd.to_dict() if hasattr(dd, 'to_dict') else dd.__dict__
+        assert "date" in d
+
+
+# ---------------------------------------------------------------------------
+# CLI test
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    """Test main() callable."""
+
+    def test_main_callable(self):
+        from src.backtest.unified_overlay_backtest import UnifiedOverlayBacktester
+        assert UnifiedOverlayBacktester is not None

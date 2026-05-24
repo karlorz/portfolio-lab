@@ -6,6 +6,7 @@ walk_forward_test, and stress_test.
 """
 import math
 import json
+import logging
 
 import pytest
 from datetime import datetime, timedelta
@@ -950,7 +951,6 @@ class TestPrintResults:
     def test_print_results_empty_walkforward(self, capsys):
         """print_results should not crash with empty walk_forward_windows."""
         result = _make_empty_result()
-        # This should not raise
         print_results(result)
         captured = capsys.readouterr()
         assert 'WALK-FORWARD' in captured.out

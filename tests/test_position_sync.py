@@ -604,5 +604,373 @@ class TestReconcileToBrokerExtended:
         assert result["status"] == "not_configured"
 
 
+# ---------------------------------------------------------------------------
+# NEW: Constructor, get_local_positions, and get_broker_positions coverage
+# ---------------------------------------------------------------------------
+
+
+class TestConstructor:
+    """PositionSync constructor."""
+
+    def test_default_constructor_paths(self):
+        """Default constructor uses MARKET_DB / DATA_DIR."""
+        from src.paths import MARKET_DB, DATA_DIR
+        sync = PositionSync.__new__(PositionSync)
+        PositionSync.__init__(sync)
+        assert sync.db_path == str(MARKET_DB)
+        assert sync.data_dir == str(DATA_DIR)
+        assert sync.sync_log_path.endswith("position_sync.jsonl")
+
+    def test_custom_paths(self):
+        """Custom db_path and data_dir are respected."""
+        sync = PositionSync.__new__(PositionSync)
+        PositionSync.__init__(sync, db_path="/custom/db.sqlite", data_dir="/custom/data")
+        assert sync.db_path == "/custom/db.sqlite"
+        assert sync.data_dir == "/custom/data"
+        assert "/custom/data/position_sync.jsonl" in sync.sync_log_path
+
+
+class TestGetLocalPositions:
+    """get_local_positions with various DB states."""
+
+    def test_missing_db_file(self):
+        """Non-existent DB file returns empty dict."""
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = "/nonexistent/path/market.db"
+        result = sync.get_local_positions()
+        assert result == {}
+
+    def test_empty_positions_table(self, tmp_path):
+        """DB with no positions table returns empty dict."""
+        import sqlite3
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = str(tmp_path / "empty.db")
+        sqlite3.connect(sync.db_path).close()
+        result = sync.get_local_positions()
+        assert result == {}
+
+    def test_all_zero_qty_filtered(self, tmp_path):
+        """Positions with qty=0 should not be returned."""
+        import sqlite3
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = str(tmp_path / "zeros.db")
+        conn = sqlite3.connect(sync.db_path)
+        conn.execute("CREATE TABLE positions (symbol TEXT PRIMARY KEY, qty REAL, avg_price REAL, current_price REAL, market_value REAL, updated_at TEXT)")
+        conn.execute("INSERT INTO positions VALUES ('SPY', 0, 500, 510, 0, '2024-01-01')")
+        conn.commit()
+        conn.close()
+        result = sync.get_local_positions()
+        assert result == {}
+
+    def test_none_values_handled(self, tmp_path):
+        """NULL values in numeric columns should be converted to 0.0."""
+        import sqlite3
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = str(tmp_path / "nulls.db")
+        conn = sqlite3.connect(sync.db_path)
+        conn.execute("CREATE TABLE positions (symbol TEXT PRIMARY KEY, qty REAL, avg_price REAL, current_price REAL, market_value REAL, updated_at TEXT)")
+        conn.execute("INSERT INTO positions VALUES ('SPY', 100, NULL, NULL, NULL, NULL)")
+        conn.commit()
+        conn.close()
+        result = sync.get_local_positions()
+        assert "SPY" in result
+        assert result["SPY"]["qty"] == 100.0
+        assert result["SPY"]["avg_price"] == 0.0
+        assert result["SPY"]["current_price"] == 0.0
+        assert result["SPY"]["market_value"] == 0.0
+
+    def test_valid_position_returned(self, tmp_path):
+        """Valid position with non-zero qty is returned correctly."""
+        import sqlite3
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = str(tmp_path / "valid.db")
+        conn = sqlite3.connect(sync.db_path)
+        conn.execute("CREATE TABLE positions (symbol TEXT PRIMARY KEY, qty REAL, avg_price REAL, current_price REAL, market_value REAL, updated_at TEXT)")
+        conn.execute("INSERT INTO positions VALUES ('SPY', 100, 500.0, 510.0, 51000.0, '2024-06-01T12:00:00')")
+        conn.commit()
+        conn.close()
+        result = sync.get_local_positions()
+        assert result["SPY"]["qty"] == 100.0
+        assert result["SPY"]["avg_price"] == 500.0
+        assert result["SPY"]["current_price"] == 510.0
+        assert result["SPY"]["market_value"] == 51000.0
+        assert result["SPY"]["updated_at"] == "2024-06-01T12:00:00"
+
+
+class TestGetBrokerPositions:
+    """get_broker_positions error and edge cases."""
+
+    def _make_sync(self):
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = ":memory:"
+        sync.data_dir = "/tmp"
+        sync.sync_log_path = "/tmp/test_sync.jsonl"
+        return sync
+
+    def test_not_ready_returns_empty(self):
+        """When client not ready, returns empty dict."""
+        sync = self._make_sync()
+        sync.client = MagicMock()
+        sync.client.is_ready.return_value = False
+        result = sync.get_broker_positions()
+        assert result == {}
+
+    def test_exception_returns_empty(self):
+        """Exception from get_positions returns empty dict."""
+        sync = self._make_sync()
+        sync.client = MagicMock()
+        sync.client.is_ready.return_value = True
+        sync.client.get_positions.side_effect = Exception("Connection failed")
+        result = sync.get_broker_positions()
+        assert result == {}
+
+    def test_empty_list_returns_empty_dict(self):
+        """Empty list from broker returns empty dict."""
+        sync = self._make_sync()
+        sync.client = MagicMock()
+        sync.client.is_ready.return_value = True
+        sync.client.get_positions.return_value = []
+        result = sync.get_broker_positions()
+        assert result == {}
+
+
+class TestCalculateDriftMoreEdgeCases:
+    """Additional calculate_drift edge cases beyond existing coverage."""
+
+    def _make_sync(self):
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = ":memory:"
+        sync.data_dir = "/tmp"
+        sync.sync_log_path = "/tmp/test_sync.jsonl"
+        return sync
+
+    def test_value_threshold_just_above(self):
+        """Value_delta just above $1 should trigger drift."""
+        sync = self._make_sync()
+        local = {"SPY": {"qty": 100, "market_value": 50000}}
+        broker = {"SPY": MagicMock(qty=100, market_value=50001.01)}
+        drift = sync.calculate_drift(local, broker)
+        assert len(drift) == 1
+        assert drift[0].value_delta == pytest.approx(1.01, abs=0.01)
+
+    def test_qty_threshold_just_above(self):
+        """qty_delta just above 0.001 should trigger drift."""
+        sync = self._make_sync()
+        local = {"SPY": {"qty": 100, "market_value": 50000}}
+        broker = {"SPY": MagicMock(qty=100.002, market_value=50000)}
+        drift = sync.calculate_drift(local, broker)
+        assert len(drift) == 1
+        assert drift[0].qty_delta == pytest.approx(0.002, abs=0.0001)
+
+    def test_missing_market_value_in_local(self):
+        """Local position missing market_value field should use 0."""
+        sync = self._make_sync()
+        local = {"SPY": {"qty": 100}}  # No market_value key
+        broker = {"SPY": MagicMock(qty=100, market_value=50000)}
+        drift = sync.calculate_drift(local, broker)
+        # local value defaults to 0, broker_value=50000, value_delta=50000 > 1.0
+        assert len(drift) == 1
+        assert drift[0].local_value == 0.0
+        assert drift[0].drift_pct == 1.0
+
+    def test_large_position_values(self):
+        """Very large position values should not overflow."""
+        sync = self._make_sync()
+        local = {"SPY": {"qty": 1e6, "market_value": 5e8}}
+        broker = {"SPY": MagicMock(qty=1.001e6, market_value=5.005e8)}
+        drift = sync.calculate_drift(local, broker)
+        assert len(drift) == 1
+        assert drift[0].qty_delta == 1000.0
+        assert drift[0].value_delta == 500000.0
+
+    def test_both_sides_zero_value(self):
+        """Both local and broker have zero value should produce 0% drift."""
+        sync = self._make_sync()
+        local = {"SPY": {"qty": 0, "market_value": 0}}
+        broker = {"SPY": MagicMock(qty=0, market_value=0)}
+        drift = sync.calculate_drift(local, broker)
+        assert len(drift) == 0
+
+
+class TestSyncLogging:
+    """sync() log file creation and dry-run isolation."""
+
+    def _make_sync(self):
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = ":memory:"
+        sync.data_dir = "/tmp"
+        sync.sync_log_path = "/tmp/test_sync.jsonl"
+        sync.client = MagicMock()
+        return sync
+
+    def test_sync_writes_log_when_not_dry_run(self, tmp_path):
+        """Non-dry-run sync should write to sync log."""
+        sync = self._make_sync()
+        sync.client.is_ready.return_value = True
+        sync.client.get_account.return_value = {"equity": "100000", "cash": "5000", "buying_power": "200000"}
+        sync.client.paper = True
+        sync.client.get_positions.return_value = []
+        sync.sync_log_path = str(tmp_path / "sync.jsonl")
+        sync.data_dir = str(tmp_path)
+        sync.get_local_positions = lambda: {}
+        sync.get_broker_positions = lambda: {}
+        result = sync.sync(dry_run=False)
+        assert result["status"] == "success"
+        log_path = tmp_path / "sync.jsonl"
+        assert log_path.exists()
+        contents = log_path.read_text().strip()
+        assert len(contents) > 0
+        log_entry = json.loads(contents)
+        assert log_entry["status"] == "success"
+
+    def test_sync_with_missing_account_fields(self):
+        """Account response missing fields should be handled."""
+        sync = self._make_sync()
+        sync.client.is_ready.return_value = True
+        sync.client.paper = True
+        sync.client.get_account.return_value = {}  # missing equity/cash/buying_power
+        sync.client.get_positions.return_value = []
+        sync.get_local_positions = lambda: {}
+        sync.get_broker_positions = lambda: {}
+        result = sync.sync(dry_run=True)
+        assert result["status"] == "success"
+        # Missing account fields should be None
+        assert result["account"]["equity"] is None
+
+    def test_sync_with_no_drift_max_symbol(self):
+        """When drift count is 0, max_drift_symbol should be None."""
+        sync = self._make_sync()
+        sync.client.is_ready.return_value = True
+        sync.client.paper = True
+        sync.client.get_account.return_value = {"equity": "100000", "cash": "5000", "buying_power": "200000"}
+        sync.client.get_positions.return_value = []
+        sync.get_local_positions = lambda: {}
+        sync.get_broker_positions = lambda: {}
+        result = sync.sync(dry_run=True)
+        assert result["drift"]["max_drift_symbol"] is None
+        assert result["drift"]["max_drift_pct"] == 0.0
+
+    def test_sync_creates_data_dir(self, tmp_path):
+        """sync() should create data_dir if it doesn't exist."""
+        sync = self._make_sync()
+        nested = tmp_path / "a" / "b" / "c"
+        sync.client.is_ready.return_value = True
+        sync.client.paper = True
+        sync.client.get_account.return_value = {"equity": "0", "cash": "0", "buying_power": "0"}
+        sync.client.get_positions.return_value = []
+        sync.sync_log_path = str(nested / "sync.jsonl")
+        sync.data_dir = str(nested)
+        sync.get_local_positions = lambda: {}
+        sync.get_broker_positions = lambda: {}
+        result = sync.sync(dry_run=False)
+        assert result["status"] == "success"
+        assert nested.exists()
+
+
+class TestReconcileExtended:
+    """More reconcile_to_broker edge cases."""
+
+    def test_reconcile_empty_broker_positions(self, tmp_path):
+        """Empty broker positions should not remove any local (no-op)."""
+        import sqlite3
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = str(tmp_path / "empty_broker.db")
+        sync.client = MagicMock()
+        sync.client.is_ready.return_value = True
+        sync.get_broker_positions = MagicMock(return_value={})
+        conn = sqlite3.connect(sync.db_path)
+        conn.execute("CREATE TABLE positions (symbol TEXT PRIMARY KEY, qty REAL, avg_price REAL, current_price REAL, market_value REAL, updated_at TEXT)")
+        conn.execute("INSERT INTO positions VALUES ('SPY', 100, 500, 510, 51000, '2024-01-01')")
+        conn.commit()
+        conn.close()
+        result = sync.reconcile_to_broker()
+        assert result["status"] == "success"
+        # Position should be removed since broker has no positions
+        assert result["positions_removed"] == 1
+
+    def test_reconcile_db_error(self):
+        """Error during DB operations should return error status."""
+        sync = PositionSync.__new__(PositionSync)
+        sync.db_path = "/nonexistent_dir/nope.db"
+        sync.client = MagicMock()
+        sync.client.is_ready.return_value = True
+        pos = MagicMock()
+        pos.qty = 100
+        pos.avg_entry_price = 500.0
+        pos.current_price = 510.0
+        pos.market_value = 51000.0
+        sync.get_broker_positions = MagicMock(return_value={"SPY": pos})
+        result = sync.reconcile_to_broker()
+        assert result["status"] == "error"
+
+
+class TestCLIExtended:
+    """Extended CLI command tests."""
+
+    def test_sync_dry_run_flag(self, capsys):
+        """--dry-run flag should be passed to sync()."""
+        from src.broker.position_sync import main
+        with patch('sys.argv', ['position_sync.py', 'sync', '--dry-run']):
+            with patch('src.broker.position_sync.PositionSync') as MockSync:
+                mock = MagicMock()
+                mock.sync.return_value = {"status": "success", "drift": {"count": 0}}
+                MockSync.return_value = mock
+                main()
+                mock.sync.assert_called_once_with(dry_run=True)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+        assert data["status"] == "success"
+
+    def test_reconcile_command(self, capsys):
+        """Reconcile command calls reconcile_to_broker()."""
+        from src.broker.position_sync import main
+        with patch('sys.argv', ['position_sync.py', 'reconcile']):
+            with patch('src.broker.position_sync.PositionSync') as MockSync:
+                mock = MagicMock()
+                mock.reconcile_to_broker.return_value = {
+                    "status": "success", "timestamp": "2024-01-01",
+                    "positions_updated": 2, "positions_removed": 0,
+                }
+                MockSync.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+        assert data["status"] == "success"
+        assert data["positions_updated"] == 2
+
+    def test_drift_with_error_response(self, capsys):
+        """Drift command when sync returns error should display message."""
+        from src.broker.position_sync import main
+        with patch('sys.argv', ['position_sync.py', 'drift']):
+            with patch('src.broker.position_sync.PositionSync') as MockSync:
+                mock = MagicMock()
+                mock.sync.return_value = {"status": "error", "message": "API failure"}
+                MockSync.return_value = mock
+                main()
+        captured = capsys.readouterr()
+        assert "Error: API failure" in captured.out
+
+    def test_sync_command_no_args(self, capsys):
+        """sync command without args calls sync() with defaults."""
+        from src.broker.position_sync import main
+        with patch('sys.argv', ['position_sync.py', 'sync']):
+            with patch('src.broker.position_sync.PositionSync') as MockSync:
+                mock = MagicMock()
+                mock.sync.return_value = {"status": "success"}
+                MockSync.return_value = mock
+                main()
+                mock.sync.assert_called_once_with(dry_run=False)
+
+
+class TestModuleExports:
+    """__all__ exports."""
+
+    def test_all_exports(self):
+        from src.broker.position_sync import __all__
+        assert "PositionDrift" in __all__
+        assert "PositionSync" in __all__
+        assert len(__all__) == 2
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

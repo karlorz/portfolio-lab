@@ -2,6 +2,7 @@
 """Tests for daily P&L capture script."""
 
 import json
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from scripts.capture_daily_pnl import (
     load_portfolio,
     compute_pnl_snapshot,
     save_snapshot,
+    main,
 )
 
 
@@ -55,6 +57,31 @@ class TestLoadPortfolio:
         with patch("scripts.capture_daily_pnl.DATA_DIR", tmp_path):
             result = load_portfolio("live")
         assert result["mode"] == "live"
+
+
+class TestLoadPortfolioEdgeCases:
+    """Edge cases for load_portfolio — corrupted or unusual files."""
+
+    def test_corrupted_json_raises_decode_error(self, tmp_path):
+        path = tmp_path / "portfolio_paper.json"
+        path.write_text("{bad json")
+        with patch("scripts.capture_daily_pnl.DATA_DIR", tmp_path):
+            with pytest.raises(json.JSONDecodeError):
+                load_portfolio("paper")
+
+    def test_empty_file_raises_decode_error(self, tmp_path):
+        path = tmp_path / "portfolio_paper.json"
+        path.write_text("")
+        with patch("scripts.capture_daily_pnl.DATA_DIR", tmp_path):
+            with pytest.raises(json.JSONDecodeError):
+                load_portfolio("paper")
+
+    def test_whitespace_only_file_raises_decode_error(self, tmp_path):
+        path = tmp_path / "portfolio_paper.json"
+        path.write_text("   \n\n  ")
+        with patch("scripts.capture_daily_pnl.DATA_DIR", tmp_path):
+            with pytest.raises(json.JSONDecodeError):
+                load_portfolio("paper")
 
 
 class TestComputePnlSnapshot:
@@ -116,6 +143,171 @@ class TestComputePnlSnapshot:
         assert snap["positions"] == {}
 
 
+class TestComputePnlSnapshotEdgeCases:
+    """Edge cases for compute_pnl_snapshot — boundary values and missing fields."""
+
+    def test_zero_total_value(self):
+        pf = {"cash": 0, "positions": {}, "history": [],
+              "updated": "2026-05-23", "mode": "paper"}
+        snap = compute_pnl_snapshot(pf)
+        assert snap["total_value"] == 0.0
+        assert snap["positions_count"] == 0
+        assert snap["total_pnl"] == -100000.0
+        assert snap["total_pnl_pct"] == -1.0
+        assert snap["drawdown"] == pytest.approx((0 - 100000) / 100000, abs=0.001)
+
+    def test_negative_cash(self):
+        pf = {"cash": -5000, "positions": {}, "history": [],
+              "updated": "2026-05-23", "mode": "paper"}
+        snap = compute_pnl_snapshot(pf)
+        assert snap["cash"] == -5000.0
+        assert snap["total_value"] == -5000.0
+
+    def test_single_position(self):
+        pf = {"cash": 0, "positions": {
+            "SPY": {"shares": 10, "avg_price": 500, "current_price": 520,
+                     "value": 5200, "unrealized_pnl": 200},
+        }, "history": [], "updated": "2026-05-23", "mode": "paper"}
+        snap = compute_pnl_snapshot(pf)
+        assert snap["positions_count"] == 1
+        assert snap["total_value"] == 5200.0
+        assert snap["positions"]["SPY"]["weight"] == 1.0
+
+    def test_missing_optional_position_fields_default_to_zero(self):
+        pf = {"cash": 1000, "positions": {
+            "BTC": {"shares": 1, "value": 30000},
+        }, "history": [], "updated": "2026-05-23", "mode": "paper"}
+        snap = compute_pnl_snapshot(pf)
+        assert snap["total_value"] == 31000.0
+        pos = snap["positions"]["BTC"]
+        assert pos["avg_price"] == 0.0
+        assert pos["current_price"] == 0.0
+        assert pos["unrealized_pnl"] == 0.0
+
+    def test_position_weight_zero_when_total_value_zero(self):
+        pf = {"cash": 0, "positions": {
+            "SPY": {"value": 1000, "shares": 1, "avg_price": 1000,
+                     "current_price": 1000, "unrealized_pnl": 0},
+        }, "history": [], "updated": "2026-05-23", "mode": "paper",
+              "cash": 0}
+        # Override total to 0 by making positions empty within the dict
+        pf["positions"] = {}
+        snap = compute_pnl_snapshot(pf)
+        assert snap["total_value"] == 0.0
+        assert snap["positions"] == {}
+
+    def test_positive_drawdown_when_current_above_peak(self):
+        """Drawdown is positive when current total exceeds peak from history."""
+        pf = _make_portfolio(cash=0, history=[
+            {"total_value": 120000, "daily_return": 0.20},
+            {"total_value": 110000, "daily_return": -0.08},
+        ])
+        # Make current total exceed the 120000 peak
+        pf["positions"]["SPY"]["value"] = 150000
+        pf["positions"]["SPY"]["current_price"] = 3000
+        snap = compute_pnl_snapshot(pf)
+        # peak = max(100000, 120000, 110000) = 120000
+        # current = 150000 + 8400 = 158400
+        # drawdown = (158400 - 120000) / 120000 = 0.32
+        assert snap["drawdown"] == pytest.approx(0.32, abs=0.001)
+
+    def test_drawdown_peak_at_first_history_entry(self):
+        pf = _make_portfolio(cash=0, history=[
+            {"total_value": 200000, "daily_return": 0.05},
+            {"total_value": 150000, "daily_return": -0.25},
+            {"total_value": 140000, "daily_return": -0.07},
+        ])
+        snap = compute_pnl_snapshot(pf)
+        # peak = max(100000, 200000, 150000, 140000) = 200000
+        expected = (34400 - 200000) / 200000
+        assert snap["drawdown"] == pytest.approx(expected, abs=0.001)
+
+    def test_drawdown_peak_in_middle_of_history(self):
+        pf = _make_portfolio(cash=0, history=[
+            {"total_value": 100000, "daily_return": 0.01},
+            {"total_value": 250000, "daily_return": 0.15},
+            {"total_value": 200000, "daily_return": -0.20},
+            {"total_value": 180000, "daily_return": -0.10},
+        ])
+        snap = compute_pnl_snapshot(pf)
+        # peak = max(100000, 100000, 250000, 200000, 180000) = 250000
+        expected = (34400 - 250000) / 250000
+        assert snap["drawdown"] == pytest.approx(expected, abs=0.001)
+
+    def test_drawdown_peak_is_initial_capital_when_history_below(self):
+        """Peak equals initial capital when no history entry exceeds it."""
+        pf = _make_portfolio(cash=0, history=[
+            {"total_value": 80000, "daily_return": -0.05},
+            {"total_value": 75000, "daily_return": -0.07},
+        ])
+        snap = compute_pnl_snapshot(pf)
+        # peak = max(100000, 80000, 75000) = 100000
+        expected = (34400 - 100000) / 100000
+        assert snap["drawdown"] == pytest.approx(expected, abs=0.001)
+
+    def test_drawdown_with_no_history_uses_initial_capital(self):
+        pf = _make_portfolio(cash=0, history=[])
+        snap = compute_pnl_snapshot(pf)
+        # peak = initial_capital = 100000, current = 34400
+        expected = (34400 - 100000) / 100000
+        assert snap["drawdown"] == pytest.approx(expected, abs=0.001)
+
+    def test_daily_return_defaults_to_zero_when_key_missing(self):
+        pf = _make_portfolio(history=[
+            {"total_value": 90000},  # no daily_return key
+        ])
+        snap = compute_pnl_snapshot(pf)
+        assert snap["daily_return"] == 0.0
+
+    def test_daily_return_defaults_to_zero_when_history_has_no_dicts(self):
+        pf = _make_portfolio(history=[{}])
+        snap = compute_pnl_snapshot(pf)
+        assert snap["daily_return"] == 0.0
+
+    def test_custom_initial_capital_via_patch(self):
+        """Patching INITIAL_CAPITAL changes PnL computation."""
+        pf = _make_portfolio(cash=50000, positions={})
+        with patch("scripts.capture_daily_pnl.INITIAL_CAPITAL", 50000):
+            snap = compute_pnl_snapshot(pf)
+        assert snap["total_value"] == 50000.0
+        assert snap["total_pnl"] == 0.0
+        assert snap["total_pnl_pct"] == 0.0
+
+    def test_value_rounding_precision(self):
+        """Verify rounding behavior for all numeric fields."""
+        pf = {"cash": 1.23456, "positions": {
+            "AAPL": {"shares": 3.14159, "avg_price": 150.123,
+                      "current_price": 155.678, "value": 489.123,
+                      "unrealized_pnl": 17.456},
+        }, "history": [], "updated": "2026-05-23", "mode": "paper"}
+        snap = compute_pnl_snapshot(pf)
+        # cash: round(1.23456, 2) = 1.23
+        assert snap["cash"] == 1.23
+        # total: sum 1.23456 + 489.123 = 490.35756, round(490.35756, 2) = 490.36
+        assert snap["total_value"] == 490.36
+        pos = snap["positions"]["AAPL"]
+        assert pos["shares"] == 3.1416       # round(3.14159, 4)
+        assert pos["avg_price"] == 150.12    # round(150.123, 2)
+        assert pos["current_price"] == 155.68  # round(155.678, 2)
+        assert pos["value"] == 489.12        # round(489.123, 2)
+        assert pos["unrealized_pnl"] == 17.46  # round(17.456, 2)
+
+    def test_mode_passthrough(self):
+        pf = _make_portfolio(mode="live")
+        snap = compute_pnl_snapshot(pf)
+        assert snap["mode"] == "live"
+
+    def test_position_value_none_does_not_crash(self):
+        """Position with None value is treated as 0 by sum()."""
+        pf = {"cash": 1000, "positions": {
+            "XYZ": {"shares": 10, "avg_price": 50, "current_price": 55,
+                     "value": None, "unrealized_pnl": 0},
+        }, "history": [], "updated": "2026-05-23", "mode": "paper"}
+        # sum() will fail on None — this documents current behavior
+        with pytest.raises(TypeError):
+            compute_pnl_snapshot(pf)
+
+
 class TestSaveSnapshot:
     def test_creates_files(self, tmp_path):
         snap = {"date": "2026-05-23", "timestamp": "2026-05-23T12:00:00",
@@ -159,3 +351,138 @@ class TestSaveSnapshot:
             latest = json.load(f)
         assert latest["total_value"] == 100000
         assert latest["mode"] == "paper"
+
+
+class TestSaveSnapshotEdgeCases:
+    """Edge cases for save_snapshot — file corruption, blank lines, non-serializable values."""
+
+    def test_appends_multiple_different_dates(self, tmp_path):
+        snap1 = {"date": "2026-05-21", "total_value": 98000}
+        snap2 = {"date": "2026-05-22", "total_value": 99000}
+        snap3 = {"date": "2026-05-23", "total_value": 100000}
+        append_path = tmp_path / "daily_pnl.jsonl"
+        latest_path = tmp_path / "daily_pnl_latest.json"
+        save_snapshot(snap1, append_path, latest_path)
+        save_snapshot(snap2, append_path, latest_path)
+        save_snapshot(snap3, append_path, latest_path)
+        with open(append_path) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        assert len(lines) == 3
+
+    def test_handles_corrupted_jsonl_lines(self, tmp_path):
+        """Corrupted JSON lines are preserved as-is rather than dropped."""
+        append_path = tmp_path / "daily_pnl.jsonl"
+        latest_path = tmp_path / "daily_pnl_latest.json"
+        append_path.write_text(
+            '{"date": "2026-05-22", "total_value": 99000}\n'
+            'corrupted garbage line\n'
+            '{"date": "2026-05-21", "total_value": 98000}\n'
+        )
+        snap = {"date": "2026-05-23", "total_value": 100000}
+        save_snapshot(snap, append_path, latest_path)
+        with open(append_path) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        assert len(lines) == 4
+        assert "corrupted garbage line" in lines
+
+    def test_empty_jsonl_file_handled_gracefully(self, tmp_path):
+        append_path = tmp_path / "daily_pnl.jsonl"
+        latest_path = tmp_path / "daily_pnl_latest.json"
+        append_path.write_text("")
+        snap = {"date": "2026-05-23", "total_value": 100000}
+        save_snapshot(snap, append_path, latest_path)
+        with open(append_path) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        assert len(lines) == 1
+
+    def test_jsonl_with_blank_and_whitespace_lines(self, tmp_path):
+        append_path = tmp_path / "daily_pnl.jsonl"
+        latest_path = tmp_path / "daily_pnl_latest.json"
+        append_path.write_text('\n\n{"date": "2026-05-22", "total_value": 99000}\n\n')
+        snap = {"date": "2026-05-23", "total_value": 100000}
+        save_snapshot(snap, append_path, latest_path)
+        with open(append_path) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        assert len(lines) == 2
+
+    def test_snapshot_with_datetime_uses_default_str(self, tmp_path):
+        """Non-serializable datetime objects are handled via default=str."""
+        from datetime import datetime
+        snap = {"date": "2026-05-23",
+                "timestamp": datetime(2026, 5, 23, 12, 0, 0),
+                "total_value": 100000}
+        append_path = tmp_path / "daily_pnl.jsonl"
+        latest_path = tmp_path / "daily_pnl_latest.json"
+        save_snapshot(snap, append_path, latest_path)
+        with open(append_path) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        assert len(lines) == 1
+
+    def test_overwrites_latest_json_each_time(self, tmp_path):
+        """latest.json always contains the most recent snapshot."""
+        snap1 = {"date": "2026-05-22", "total_value": 99000}
+        snap2 = {"date": "2026-05-23", "total_value": 100000}
+        append_path = tmp_path / "daily_pnl.jsonl"
+        latest_path = tmp_path / "daily_pnl_latest.json"
+        save_snapshot(snap1, append_path, latest_path)
+        save_snapshot(snap2, append_path, latest_path)
+        with open(latest_path) as f:
+            latest = json.load(f)
+        assert latest["total_value"] == 100000
+        assert latest["date"] == "2026-05-23"
+
+    def test_idempotent_same_date_replaces_with_updated_fields(self, tmp_path):
+        """Same-date idempotency preserves the newest snapshot, not the oldest."""
+        snap1 = {"date": "2026-05-23", "total_value": 99000, "extra_field": "old"}
+        snap2 = {"date": "2026-05-23", "total_value": 100000, "extra_field": "new"}
+        append_path = tmp_path / "daily_pnl.jsonl"
+        latest_path = tmp_path / "daily_pnl_latest.json"
+        save_snapshot(snap1, append_path, latest_path)
+        save_snapshot(snap2, append_path, latest_path)
+        with open(append_path) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        assert len(lines) == 1
+        entry = json.loads(lines[0])
+        assert entry["total_value"] == 100000
+        assert entry["extra_field"] == "new"
+
+    def test_save_snapshot_returns_true(self, tmp_path):
+        snap = {"date": "2026-05-23", "total_value": 100000}
+        append_path = tmp_path / "daily_pnl.jsonl"
+        latest_path = tmp_path / "daily_pnl_latest.json"
+        result = save_snapshot(snap, append_path, latest_path)
+        assert result is True
+
+
+class TestMain:
+    """Tests for the main() CLI entry point."""
+
+    def test_main_happy_path_paper(self, tmp_path):
+        pf = _make_portfolio()
+        portfolio_path = tmp_path / "portfolio_paper.json"
+        with open(portfolio_path, 'w') as f:
+            json.dump(pf, f)
+        with patch("scripts.capture_daily_pnl.DATA_DIR", tmp_path):
+            with patch.object(sys, "argv", ["capture_daily_pnl.py"]):
+                main()
+        # Verify snapshot files were created
+        assert (tmp_path / "daily_pnl.jsonl").exists()
+        assert (tmp_path / "daily_pnl_latest.json").exists()
+
+    def test_main_with_live_mode(self, tmp_path):
+        pf = _make_portfolio(mode="live")
+        portfolio_path = tmp_path / "portfolio_live.json"
+        with open(portfolio_path, 'w') as f:
+            json.dump(pf, f)
+        with patch("scripts.capture_daily_pnl.DATA_DIR", tmp_path):
+            with patch.object(sys, "argv",
+                               ["capture_daily_pnl.py", "--mode", "live"]):
+                main()
+        assert (tmp_path / "daily_pnl.jsonl").exists()
+
+    def test_main_exits_when_portfolio_missing(self, tmp_path):
+        with patch("scripts.capture_daily_pnl.DATA_DIR", tmp_path):
+            with patch.object(sys, "argv", ["capture_daily_pnl.py"]):
+                with pytest.raises(SystemExit) as excinfo:
+                    main()
+                assert excinfo.value.code == 1

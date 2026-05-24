@@ -546,3 +546,86 @@ class TestCLI:
         monkeypatch.setattr("pathlib.Path.exists", lambda self: False)
         with patch("sys.argv", ["cross_asset_rv_backtest.py", "run", "--save"]):
             main()
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.backtest.cross_asset_rv_backtest as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.backtest.cross_asset_rv_backtest as mod
+        assert len(mod.__all__) == 2
+
+
+# ---------------------------------------------------------------------------
+# BacktestConfig extended
+# ---------------------------------------------------------------------------
+
+class TestBacktestConfigExtended:
+    """Extended BacktestConfig dataclass tests."""
+
+    def test_default_z_score_window(self):
+        config = BacktestConfig()
+        assert config.z_score_window == 60
+
+    def test_default_max_shift(self):
+        config = BacktestConfig()
+        assert config.max_shift == 0.04
+
+    def test_custom_config(self):
+        config = BacktestConfig(z_score_window=30, max_shift=0.02)
+        assert config.z_score_window == 30
+        assert config.max_shift == 0.02
+
+
+# ---------------------------------------------------------------------------
+# CrossAssetRVBacktester extended
+# ---------------------------------------------------------------------------
+
+class TestBacktesterExtended:
+    """Extended CrossAssetRVBacktester tests."""
+
+    def test_init_with_default_config(self):
+        bt = CrossAssetRVBacktester()
+        assert bt.config is not None
+
+    def test_init_with_custom_config(self):
+        config = BacktestConfig(z_score_window=30)
+        bt = CrossAssetRVBacktester(config)
+        assert bt.config.z_score_window == 30
+
+    def test_load_data_missing_file(self):
+        bt = CrossAssetRVBacktester()
+        result = bt.load_data("/nonexistent/path.json")
+        assert result is False
+
+    def test_print_report(self, capsys):
+        bt = CrossAssetRVBacktester()
+        from src.backtest.metrics import BacktestResult
+        result = BacktestResult(
+            total_return=100.0, cagr=0.10, volatility=0.11,
+            sharpe_ratio=0.79, max_drawdown=-0.25, total_rebalances=10,
+            baseline_sharpe=0.72, extras={"scenario": "test"},
+        )
+        bt.print_report(result)
+        captured = capsys.readouterr()
+        assert len(captured.out) > 0
+
+    def test_save_results(self, tmp_path):
+        bt = CrossAssetRVBacktester()
+        from src.backtest.metrics import BacktestResult
+        result = BacktestResult(
+            total_return=100.0, cagr=0.10, volatility=0.11,
+            sharpe_ratio=0.79, max_drawdown=-0.25, total_rebalances=10,
+            baseline_sharpe=0.72, extras={"scenario": "test"},
+        )
+        bt.save_results(result, str(tmp_path / "results.json"))
+        assert (tmp_path / "results.json").exists()

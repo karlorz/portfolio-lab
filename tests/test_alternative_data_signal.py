@@ -5,6 +5,7 @@ Tests the refactored signal generator that uses only existing pipeline data.
 """
 
 import json
+import logging
 import math
 import sys
 import tempfile
@@ -503,42 +504,40 @@ class TestCLI:
     def test_status_without_signal(self, mock_generator, tmp_path, monkeypatch, capsys):
         """--status with no signal shows appropriate message."""
         import src.signals.alternative_data_signal as mod
-        
+
         # Clear any existing signal
         mock_generator.signals_dir = tmp_path
-        
+
         original_gen = mod.AlternativeDataSignalGenerator
         mod.AlternativeDataSignalGenerator = lambda: mock_generator
-        
+
         monkeypatch.setattr(sys, 'argv', ['alt_signal.py', '--status'])
         try:
             mod.main()
         except SystemExit:
             pass
-        
-        captured = capsys.readouterr()
-        assert "No signal found" in captured.out
-        
+
+        assert "No signal found" in capsys.readouterr().out
+
         mod.AlternativeDataSignalGenerator = original_gen
 
     def test_validate_without_signal(self, mock_generator, tmp_path, monkeypatch, capsys):
         """--validate with no signal shows appropriate message."""
         import src.signals.alternative_data_signal as mod
-        
+
         mock_generator.signals_dir = tmp_path
-        
+
         original_gen = mod.AlternativeDataSignalGenerator
         mod.AlternativeDataSignalGenerator = lambda: mock_generator
-        
+
         monkeypatch.setattr(sys, 'argv', ['alt_signal.py', '--validate'])
         try:
             mod.main()
         except SystemExit:
             pass
-        
-        captured = capsys.readouterr()
-        assert "No signal to validate" in captured.out
-        
+
+        assert "No signal to validate" in capsys.readouterr().out
+
         mod.AlternativeDataSignalGenerator = original_gen
 
 
