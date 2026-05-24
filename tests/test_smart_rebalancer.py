@@ -500,3 +500,65 @@ class TestEstimatePerSymbolCost:
         assert cost > 0
         # Should be in reasonable range (1-30 bps)
         assert 1.0 <= cost <= 30.0
+
+
+# ---------------------------------------------------------------------------
+# Regime-adaptive drift thresholds
+# ---------------------------------------------------------------------------
+
+class TestRegimeAdaptiveDriftThresholds:
+
+    def test_config_has_regime_thresholds(self):
+        ctrl = SmartRebalancingController()
+        thresholds = ctrl.config['drift_threshold_by_regime']
+        assert 'low_vol' in thresholds
+        assert 'normal' in thresholds
+        assert 'high_vol' in thresholds
+        assert 'crisis' in thresholds
+
+    def test_regime_thresholds_ordering(self):
+        """Crisis threshold should be tighter than normal, normal tighter than low_vol."""
+        thresholds = SmartRebalancingController.DEFAULT_CONFIG['drift_threshold_by_regime']
+        assert thresholds['crisis'] < thresholds['high_vol']
+        assert thresholds['high_vol'] < thresholds['normal']
+        assert thresholds['normal'] < thresholds['low_vol']
+
+    def test_normal_equals_default(self):
+        thresholds = SmartRebalancingController.DEFAULT_CONFIG['drift_threshold_by_regime']
+        default = SmartRebalancingController.DEFAULT_CONFIG['drift_threshold']
+        assert thresholds['normal'] == default
+
+    def test_crisis_regime_triggers_sooner(self):
+        """With crisis regime, a 6% drift triggers rebalance that would be skipped normally."""
+        ctrl = SmartRebalancingController()
+        # 6% drift on SPY: holdings slightly off
+        portfolio = _drifted_portfolio(0.06)
+        market = _make_market(vpin=0.30)
+
+        # Without regime — default 10% threshold, 6% drift should skip
+        result_normal = ctrl.should_rebalance(portfolio, market, regime=None)
+        assert result_normal.decision == RebalanceDecision.SKIP_LOW_DRIFT
+
+        # With crisis regime — 5% threshold, 6% drift should trigger
+        result_crisis = ctrl.should_rebalance(portfolio, market, regime='crisis')
+        assert result_crisis.decision != RebalanceDecision.SKIP_LOW_DRIFT
+
+    def test_low_vol_regime_allows_more_drift(self):
+        """With low_vol regime, a 12% drift triggers rebalance that would normally trigger."""
+        ctrl = SmartRebalancingController()
+        # 12% drift — triggers with default 10% threshold
+        portfolio = _drifted_portfolio(0.12)
+        market = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 13, 12, 0)
+
+        result_low = ctrl.should_rebalance(portfolio, market, now=now, regime='low_vol')
+        # low_vol threshold is 15%, so 12% drift should be skipped
+        assert result_low.decision == RebalanceDecision.SKIP_LOW_DRIFT
+
+    def test_unknown_regime_falls_back_to_default(self):
+        ctrl = SmartRebalancingController()
+        portfolio = _drifted_portfolio(0.08)
+        market = _make_market(vpin=0.30)
+        result = ctrl.should_rebalance(portfolio, market, regime='unknown_regime')
+        # Default 10% threshold, 8% drift → skip
+        assert result.decision == RebalanceDecision.SKIP_LOW_DRIFT

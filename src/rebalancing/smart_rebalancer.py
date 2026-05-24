@@ -127,6 +127,12 @@ class SmartRebalancingController:
 
     DEFAULT_CONFIG = {
         'drift_threshold': 0.10,
+        'drift_threshold_by_regime': {
+            'low_vol': 0.15,   # Calm market: tolerate more drift
+            'normal': 0.10,    # Default
+            'high_vol': 0.07,  # Volatile: rebalance sooner
+            'crisis': 0.05,    # Crisis: tight tracking
+        },
         'urgency_levels': {
             'emergency': 0.95,   # Drift > 20%
             'high': 0.70,        # Drift 15-20%
@@ -290,26 +296,39 @@ class SmartRebalancingController:
         portfolio: PortfolioSnapshot,
         market: MarketConditions,
         now: Optional[datetime] = None,
+        regime: Optional[str] = None,
     ) -> RebalanceDecisionResult:
         """
         Core decision engine: should we rebalance now, defer, or skip?
 
         Decision flow:
-        1. Check drift threshold (skip if below)
+        1. Check drift threshold (skip if below, regime-adaptive)
         2. Calculate urgency from drift
         3. Check VPIN toxicity (defer if high and not urgent)
         4. Check timing window (defer if low urgency and outside window)
         5. Check cost budget (defer if over budget)
         6. Safety overrides (force if drift > 25%)
+
+        Args:
+            regime: Optional market regime ('low_vol', 'normal', 'high_vol',
+                     'crisis'). When provided, overrides drift_threshold with
+                     the regime-specific value from drift_threshold_by_regime.
         """
         if now is None:
             now = datetime.now()
+
+        # Resolve regime-adaptive drift threshold
+        regime_thresholds = self.config.get('drift_threshold_by_regime', {})
+        if regime and regime in regime_thresholds:
+            drift_threshold = regime_thresholds[regime]
+        else:
+            drift_threshold = self.config['drift_threshold']
 
         # Step 1: Drift check
         max_drift, drift_details = self.calculate_drift(portfolio)
         self.config['safety']['min_drift_override']
 
-        if max_drift < self.config['drift_threshold']:
+        if max_drift < drift_threshold:
             return RebalanceDecisionResult(
                 decision=RebalanceDecision.SKIP_LOW_DRIFT,
                 urgency=UrgencyLevel.LOW,
@@ -317,7 +336,7 @@ class SmartRebalancingController:
                 drift_details=drift_details,
                 vpin=market.vpin,
                 estimated_cost_bps=0,
-                reason=f"drift_below_threshold ({max_drift:.1%} < {self.config['drift_threshold']:.1%})",
+                reason=f"drift_below_threshold ({max_drift:.1%} < {drift_threshold:.1%})",
             )
 
         # Step 2: Urgency
