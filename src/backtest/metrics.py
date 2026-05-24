@@ -13,6 +13,12 @@ from typing import Any, Dict, List, Optional
 
 from src.paths import BASE_ALLOCATION
 
+# ── Module-level constants ──────────────────────────────────────────
+TRADING_DAYS_PER_YEAR: int = 252
+DEFAULT_CRISIS_YEARS: List[str] = ['2008', '2020', '2022']
+REBALANCE_FREQUENCY_DAYS: int = 21   # Monthly (~21 trading days)
+DEFAULT_TRANSACTION_COST_BPS: float = 10.0
+
 # ── Shared Dataclass Consolidation (v953) ───────────────────────────
 # These replace duplicated definitions across 14+ backtest files.
 # Backtest-specific extras use the 'extras' dict to avoid field clashes.
@@ -33,9 +39,9 @@ class BacktestConfig:
     base_weights: Dict[str, float] = field(default_factory=lambda: dict(BASE_ALLOCATION))
 
     # Rebalancing
-    rebalance_frequency_days: int = 21  # monthly (21 trading days)
+    rebalance_frequency_days: int = REBALANCE_FREQUENCY_DAYS  # monthly (~21 trading days)
     rebalance_frequency: str = "monthly"  # string alias for compatibility
-    transaction_cost_bps: float = 10.0
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS
 
     # Backtest-specific extras (shift limits, thresholds, lookbacks, etc.)
     extras: Dict[str, Any] = field(default_factory=dict)
@@ -127,7 +133,7 @@ class CrisisReturns:
 def compute_metrics(
     equity_curve: List[float],
     initial_capital: float,
-    trading_days_per_year: int = 252,
+    trading_days_per_year: int = TRADING_DAYS_PER_YEAR,
 ) -> BacktestMetrics:
     """Compute core portfolio metrics from an equity curve.
 
@@ -209,7 +215,7 @@ def compute_crisis_returns(
         {year: max_drawdown_pct} dict (negative values = losses).
     """
     if crisis_years is None:
-        crisis_years = ['2008', '2020', '2022']
+        crisis_years = DEFAULT_CRISIS_YEARS
     if base_weights is None:
         base_weights = BASE_ALLOCATION
 
