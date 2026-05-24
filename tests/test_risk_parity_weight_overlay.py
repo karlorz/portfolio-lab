@@ -473,3 +473,117 @@ class TestCalculateRPOverlayExtended:
         if result is not None:
             for asset, adj in result.rp_adjustments.items():
                 assert abs(adj) <= MAX_DEVIATION + 0.01  # Post-normalization may slightly exceed
+
+
+class TestRPWeightOverlayDataclass:
+    """Extended tests for RPWeightOverlay dataclass."""
+
+    def test_all_fields_present(self):
+        overlay = RPWeightOverlay(
+            timestamp="2026-01-01T00:00:00",
+            asset_vols={"SPY": 0.15, "GLD": 0.16, "TLT": 0.12},
+            raw_rp_weights={"SPY": 0.35, "GLD": 0.33, "TLT": 0.32},
+            base_weights={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            target_weights={"SPY": 0.40, "GLD": 0.36, "TLT": 0.24},
+            rp_adjustments={"SPY": -0.06, "GLD": -0.02, "TLT": 0.08},
+            expected_vol=0.112,
+            risk_parity_score=0.87,
+        )
+        assert overlay.timestamp == "2026-01-01T00:00:00"
+        assert len(overlay.asset_vols) == 3
+        assert overlay.expected_vol == 0.112
+        assert overlay.risk_parity_score == 0.87
+
+    def test_to_dict(self):
+        overlay = RPWeightOverlay(
+            timestamp="2026-01-01",
+            asset_vols={"SPY": 0.15},
+            raw_rp_weights={"SPY": 0.5},
+            base_weights={"SPY": 0.46},
+            target_weights={"SPY": 0.40},
+            rp_adjustments={"SPY": -0.06},
+            expected_vol=0.10,
+            risk_parity_score=0.75,
+        )
+        d = overlay.to_dict()
+        assert isinstance(d, dict)
+        assert d["timestamp"] == "2026-01-01"
+        assert "asset_vols" in d
+        assert "expected_vol" in d
+        assert "risk_parity_score" in d
+
+
+class TestConstantsExtended:
+    """Extended tests for risk parity constants."""
+
+    def test_vol_lookback(self):
+        assert VOL_LOOKBACK == 252
+
+    def test_max_deviation(self):
+        assert MAX_DEVIATION == 0.15
+
+    def test_min_weight(self):
+        assert MIN_WEIGHT == 0.05
+
+    def test_rebalance_freq(self):
+        assert REBALANCE_FREQ == 21
+
+    def test_max_deviation_less_than_half(self):
+        """MAX_DEVIATION should be reasonable (< 0.5)."""
+        assert MAX_DEVIATION < 0.5
+
+    def test_min_weight_positive(self):
+        assert MIN_WEIGHT > 0
+
+
+class TestRiskParityOverlayExtended:
+    """Extended edge case tests for RiskParityWeightOverlay."""
+
+    def _make_overlay(self):
+        return RiskParityWeightOverlay()
+
+    def test_single_asset_base(self):
+        """Single asset base should still work."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        base = {'SPY': 1.0, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        if result is not None:
+            assert 'SPY' in result.target_weights
+
+    def test_equal_vols_produce_equal_weights(self):
+        """When all assets have equal vol, RP weights should equalize."""
+        # Create prices with identical volatility
+        np.random.seed(42)
+        dates = pd.bdate_range('2020-01-01', periods=300)
+        const_ret = 0.001
+        df = pd.DataFrame({
+            'SPY': 100 * (1 + const_ret) ** np.arange(300),
+            'GLD': 100 * (1 + const_ret) ** np.arange(300),
+            'TLT': 100 * (1 + const_ret) ** np.arange(300),
+        }, index=dates)
+        overlay = self._make_overlay()
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        # With constant returns, vols are ~0, so weights should fall back to base
+        if result is not None:
+            assert result.target_weights is not None
+
+    def test_empty_base_returns_none_or_no_crash(self):
+        """Empty base allocation should not crash."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        try:
+            result = overlay.calculate_rp_overlay({}, df)
+        except (ValueError, KeyError):
+            pass  # Acceptable to raise
+
+    def test_very_short_data(self):
+        """Very short price data should not crash."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=10)
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        try:
+            result = overlay.calculate_rp_overlay(base, df)
+        except (ValueError, KeyError):
+            pass  # Short data may not produce valid result

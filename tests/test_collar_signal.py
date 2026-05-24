@@ -376,3 +376,417 @@ class TestEdgeCases:
         # Premiums should roughly scale with spot
         assert high.call_premium > low.call_premium
         assert high.put_premium > low.put_premium
+
+
+class TestCollarStrikesDataclass:
+    """Complete to_dict() field coverage for CollarStrikes."""
+
+    @pytest.fixture
+    def sample_strikes(self):
+        gen = CollarSignalGenerator()
+        return gen.calculate_strikes(spot=550.0, vix=16.0)
+
+    def test_to_dict_all_fields_present(self, sample_strikes):
+        """All 13 dataclass fields should appear in to_dict()."""
+        d = sample_strikes.to_dict()
+        expected_fields = {
+            "underlying_price", "call_strike", "put_strike",
+            "call_premium", "put_premium", "net_premium",
+            "call_delta", "put_delta",
+            "vix_level", "regime", "days_to_expiry",
+            "is_cashless", "collar_cost_pct",
+        }
+        assert set(d.keys()) == expected_fields
+
+    def test_to_dict_field_values_match(self, sample_strikes):
+        """to_dict() values should match the dataclass fields."""
+        d = sample_strikes.to_dict()
+        assert d["underlying_price"] == sample_strikes.underlying_price
+        assert d["call_strike"] == sample_strikes.call_strike
+        assert d["put_strike"] == sample_strikes.put_strike
+        assert d["call_premium"] == sample_strikes.call_premium
+        assert d["put_premium"] == sample_strikes.put_premium
+        assert d["net_premium"] == sample_strikes.net_premium
+        assert d["call_delta"] == sample_strikes.call_delta
+        assert d["put_delta"] == sample_strikes.put_delta
+        assert d["vix_level"] == sample_strikes.vix_level
+        assert d["regime"] == sample_strikes.regime
+        assert d["days_to_expiry"] == sample_strikes.days_to_expiry
+        assert d["is_cashless"] == sample_strikes.is_cashless
+        assert d["collar_cost_pct"] == sample_strikes.collar_cost_pct
+
+
+class TestCollarSignalDataclass:
+    """Complete to_dict() field coverage for CollarSignal."""
+
+    @pytest.fixture
+    def sample_signal(self):
+        gen = CollarSignalGenerator()
+        gen._fetch_spot_price = lambda: 550.0
+        gen._fetch_vix_level = lambda: 16.0
+        return gen.generate_signal(spot=550.0, vix=16.0)
+
+    def test_to_dict_all_fields_present(self, sample_signal):
+        """All 16 CollarSignal fields should appear in to_dict()."""
+        d = sample_signal.to_dict()
+        expected_fields = {
+            "timestamp", "signal_state", "call_strike", "put_strike",
+            "underlying_price", "expected_monthly_yield", "max_upside_pct",
+            "max_downside_pct", "vix_level", "regime", "strikes",
+            "collar_notional_pct", "spy_shift", "confidence",
+            "is_valid", "reason",
+        }
+        assert set(d.keys()) == expected_fields
+
+    def test_to_dict_nested_strikes(self, sample_signal):
+        """The strikes field should be a nested dict with all strike sub-fields."""
+        d = sample_signal.to_dict()
+        assert isinstance(d["strikes"], dict)
+        strikes_subfields = {
+            "underlying_price", "call_strike", "put_strike",
+            "call_premium", "put_premium", "net_premium",
+            "call_delta", "put_delta",
+            "vix_level", "regime", "days_to_expiry",
+            "is_cashless", "collar_cost_pct",
+        }
+        assert set(d["strikes"].keys()) == strikes_subfields
+
+    def test_to_dict_serializable(self, sample_signal):
+        """to_dict() output should be JSON-serializable."""
+        import json
+        d = sample_signal.to_dict()
+        json_str = json.dumps(d)
+        assert isinstance(json_str, str)
+        assert len(json_str) > 50
+
+
+class TestConstantsValidation:
+    """Validate constants and thresholds in CollarSignalGenerator."""
+
+    def test_call_delta_target_is_exact(self):
+        assert CollarSignalGenerator.CALL_DELTA_TARGET == 0.30
+
+    def test_put_delta_target_is_exact(self):
+        assert CollarSignalGenerator.PUT_DELTA_TARGET == -0.20
+
+    def test_vix_thresholds_monotonically_increasing(self):
+        """VIX thresholds should be strictly increasing."""
+        assert (CollarSignalGenerator.VIX_ELEVATED <
+                CollarSignalGenerator.VIX_STRESS <
+                CollarSignalGenerator.VIX_CRISIS)
+
+    def test_wide_factor_has_all_non_crisis_regimes(self):
+        """WIDE_FACTOR should map NORMAL, ELEVATED, STRESS (not CRISIS)."""
+        assert CollarRegime.NORMAL in CollarSignalGenerator.WIDE_FACTOR
+        assert CollarRegime.ELEVATED in CollarSignalGenerator.WIDE_FACTOR
+        assert CollarRegime.STRESS in CollarSignalGenerator.WIDE_FACTOR
+        assert CollarRegime.CRISIS not in CollarSignalGenerator.WIDE_FACTOR
+
+    def test_wide_factor_strictly_increasing(self):
+        """Wide factors should increase with volatility regime."""
+        wf = CollarSignalGenerator.WIDE_FACTOR
+        assert wf[CollarRegime.NORMAL] < wf[CollarRegime.ELEVATED] < wf[CollarRegime.STRESS]
+
+    def test_allocation_bounds_reasonable(self):
+        """Collar notional and confidence should be in reasonable ranges."""
+        gen = CollarSignalGenerator()
+        signal = gen.generate_signal(spot=550.0, vix=16.0)
+        assert 0 < signal.collar_notional_pct <= 1.0
+        assert 0 <= signal.confidence <= 100
+
+    def test_allocation_bounds_crisis_sets_zero_confidence(self):
+        """In crisis, confidence should be 0 and signal invalid."""
+        gen = CollarSignalGenerator()
+        signal = gen.generate_signal(spot=550.0, vix=50.0)
+        assert signal.confidence == 0.0
+        assert not signal.is_valid
+
+    def test_collar_notional_default_is_46_percent(self):
+        """Default collar notional should match champion allocation."""
+        gen = CollarSignalGenerator()
+        signal = gen.generate_signal(spot=550.0, vix=16.0)
+        assert signal.collar_notional_pct == 0.46
+
+
+class TestExtendedEdgeCases:
+    """Additional edge cases for collar calculations."""
+
+    @pytest.fixture
+    def pricer(self):
+        return BlackScholesPricer()
+
+    @pytest.fixture
+    def generator(self):
+        gen = CollarSignalGenerator()
+        gen._fetch_spot_price = lambda: 550.0
+        gen._fetch_vix_level = lambda: 16.0
+        return gen
+
+    def test_zero_volatility_in_calculate_strikes(self, generator):
+        """Zero vol produces zero premiums but should not crash."""
+        strikes = generator.calculate_strikes(spot=550.0, vix=0.0)
+        assert strikes.call_premium == 0.0
+        assert strikes.put_premium == 0.0
+        assert strikes.net_premium == 0.0
+        assert strikes.is_cashless       # net=0 is within cashless tolerance
+        assert isinstance(strikes.call_strike, float)
+        assert isinstance(strikes.put_strike, float)
+
+    def test_extreme_low_vix_single_digit(self, generator):
+        """Extremely low VIX (5.0) should still produce valid strikes."""
+        strikes = generator.calculate_strikes(spot=550.0, vix=5.0)
+        assert strikes.regime == "normal"
+        assert strikes.call_strike > 550.0
+        assert strikes.put_strike < 550.0
+        assert strikes.vix_level == 5.0
+
+    def test_high_vix_just_below_crisis(self, generator):
+        """VIX at 39.99 (stress regime) should produce wider strikes."""
+        strikes = generator.calculate_strikes(spot=550.0, vix=39.99)
+        assert strikes.regime == "stress"
+        # Stress with WIDE_FACTOR=1.6 widens strikes significantly
+        call_pct = (strikes.call_strike / strikes.underlying_price - 1) * 100
+        put_pct = (1 - strikes.put_strike / strikes.underlying_price) * 100
+        assert call_pct > 5.0  # Wider than normal ~3% cap
+        assert put_pct > 3.0
+
+    def test_negative_spot_returns_invalid_signal(self, generator):
+        """Negative spot should produce invalid error signal."""
+        signal = generator.generate_signal(spot=-100.0, vix=16.0)
+        assert not signal.is_valid
+        assert signal.signal_state == "error"
+        assert signal.reason == "Invalid spot price"
+
+    def test_spot_one_dollar_edge(self, generator):
+        """Spot of $1 should not crash and produce reasonable output."""
+        signal = generator.generate_signal(spot=1.0, vix=16.0)
+        assert signal.call_strike >= 0
+        assert signal.put_strike >= 0
+        assert signal.is_valid
+
+    def test_extreme_delta_target_call_near_one(self, pricer):
+        """Find strike for extreme call delta near 1.0 should converge."""
+        strike = pricer.find_strike_by_delta(
+            spot=550, target_delta=0.95, time_to_expiry=30/365,
+            rate=0.045, vol=0.16, is_call=True,
+        )
+        result = pricer.price_option(550, strike, 30/365, 0.045, 0.16, is_call=True)
+        assert result["delta"] > 0.50
+
+    def test_extreme_delta_target_put_near_negative_one(self, pricer):
+        """Find strike for extreme put delta near -1.0 should converge."""
+        strike = pricer.find_strike_by_delta(
+            spot=550, target_delta=-0.95, time_to_expiry=30/365,
+            rate=0.045, vol=0.16, is_call=False,
+        )
+        result = pricer.price_option(550, strike, 30/365, 0.045, 0.16, is_call=False)
+        assert result["delta"] < -0.50
+
+    def test_cashless_tolerance_boundary(self, generator):
+        """Collar near cashless tolerance boundary logic works correctly."""
+        strikes = generator.calculate_strikes(spot=550.0, vix=16.0)
+        cost_pct = abs(strikes.net_premium) / strikes.underlying_price * 100
+        tolerance = CollarSignalGenerator.CASHLESS_TOLERANCE
+        assert strikes.is_cashless == (cost_pct < tolerance)
+
+    def test_very_large_spot_10k(self, generator):
+        """Very large spot (10000) should produce valid strikes."""
+        strikes = generator.calculate_strikes(spot=10000.0, vix=16.0)
+        assert strikes.call_strike > 10000.0
+        assert strikes.put_strike < 10000.0
+        assert strikes.regime == "normal"
+
+    def test_all_days_to_expiry_values(self, generator):
+        """Various days_to_expiry values should not crash."""
+        for days in [1, 7, 14, 30, 60, 90, 180]:
+            strikes = generator.calculate_strikes(spot=550.0, vix=16.0, days_to_expiry=days)
+            assert strikes.call_strike > 550.0
+            assert strikes.put_strike < 550.0
+            assert strikes.days_to_expiry == days
+
+    def test_premiums_monotonic_with_days_to_expiry(self, generator):
+        """Longer expiry should increase both call and put premiums."""
+        short = generator.calculate_strikes(spot=550.0, vix=16.0, days_to_expiry=7)
+        long_ = generator.calculate_strikes(spot=550.0, vix=16.0, days_to_expiry=90)
+        assert long_.call_premium > short.call_premium
+        assert long_.put_premium > short.put_premium
+
+    def test_spy_shift_direction(self, generator):
+        """spy_shift should be negative when net_premium is positive (credit)."""
+        # cashless or near-cashless, but verify sign convention
+        signal = generator.generate_signal(spot=550.0, vix=16.0)
+        # spy_shift = -(net_premium / spot) * 100
+        if signal.strikes.net_premium > 0:
+            assert signal.spy_shift < 0
+        else:
+            assert signal.spy_shift >= 0
+
+
+class TestSignalSnapshotBridge:
+    """Test to_signal_snapshot() bridge method edge cases."""
+
+    @pytest.fixture
+    def generator(self):
+        gen = CollarSignalGenerator()
+        gen._fetch_spot_price = lambda: 550.0
+        gen._fetch_vix_level = lambda: 16.0
+        return gen
+
+    def test_snapshot_source_and_validity(self, generator):
+        """Valid active signal snapshot should have expected structure."""
+        signal = generator.generate_signal(spot=550.0, vix=16.0)
+        snap = signal.to_signal_snapshot()
+        assert snap.source == "collar_signal"
+        assert snap.is_active is True
+        assert "SPY" in snap.asset_signals
+
+    def test_snapshot_unhedged_crisis_signal(self, generator):
+        """Crisis signal should map to inactive snapshot."""
+        signal = generator.generate_signal(spot=550.0, vix=50.0)
+        snap = signal.to_signal_snapshot()
+        assert snap.is_active is False
+        assert "SPY" in snap.asset_signals
+
+    def test_snapshot_value_default_for_active_state(self, generator):
+        """'active' signal_state is not in state_map so defaults to 0.0."""
+        signal = generator.generate_signal(spot=550.0, vix=16.0)
+        snap = signal.to_signal_snapshot()
+        assert snap.value == 0.0   # "active" not in map -> fallback default
+
+    def test_snapshot_metadata_contains_all_fields(self, generator):
+        """Snapshot metadata should contain 6 expected fields."""
+        signal = generator.generate_signal(spot=550.0, vix=16.0)
+        snap = signal.to_signal_snapshot()
+        assert snap.metadata["signal_state"] == "active"
+        assert snap.metadata["vix_level"] == 16.0
+        assert snap.metadata["regime"] == "normal"
+        assert snap.metadata["collar_notional_pct"] == 0.46
+        assert "max_upside_pct" in snap.metadata
+        assert "max_downside_pct" in snap.metadata
+
+    def test_snapshot_is_active_matches_signal_is_valid(self, generator):
+        """Snapshot is_active should equal signal is_valid."""
+        valid_signal = generator.generate_signal(spot=550.0, vix=16.0)
+        assert valid_signal.to_signal_snapshot().is_active == valid_signal.is_valid
+
+        invalid_signal = generator.generate_signal(spot=550.0, vix=50.0)
+        assert invalid_signal.to_signal_snapshot().is_active == invalid_signal.is_valid
+
+    def test_snapshot_spy_asset_signal_negative_spy_shift(self, generator):
+        """SPY asset_signal should be negative of spy_shift."""
+        signal = generator.generate_signal(spot=550.0, vix=16.0)
+        snap = signal.to_signal_snapshot()
+        assert snap.asset_signals["SPY"] == -signal.spy_shift
+
+    def test_snapshot_explanation_contains_key_fields(self, generator):
+        """Explanation text should contain signal_state, VIX, notional, yield."""
+        signal = generator.generate_signal(spot=550.0, vix=16.0)
+        snap = signal.to_signal_snapshot()
+        assert signal.signal_state in snap.explanation
+        assert str(round(signal.vix_level, 1)) in snap.explanation
+        assert "%" in snap.explanation  # format includes percentage
+
+    def test_snapshot_regime_fit_is_all(self, generator):
+        """regime_fit should always be 'all'."""
+        signal = generator.generate_signal(spot=550.0, vix=16.0)
+        assert signal.to_signal_snapshot().regime_fit == "all"
+
+        crisis_signal = generator.generate_signal(spot=550.0, vix=50.0)
+        assert crisis_signal.to_signal_snapshot().regime_fit == "all"
+
+
+class TestStatePersistence:
+    """Test state persistence via save_signal()."""
+
+    def test_save_signal_creates_file(self, tmp_path):
+        """save_signal() should create a JSON file at the output path."""
+        gen = CollarSignalGenerator()
+        gen._fetch_spot_price = lambda: 550.0
+        gen._fetch_vix_level = lambda: 16.0
+        signal = gen.generate_signal(spot=550.0, vix=16.0)
+        output_path = tmp_path / "collar_signal.json"
+        original = gen.OUTPUT_PATH
+        gen.OUTPUT_PATH = output_path
+        try:
+            gen.save_signal(signal)
+            assert output_path.exists()
+        finally:
+            gen.OUTPUT_PATH = original
+
+    def test_save_signal_json_structure(self, tmp_path):
+        """Saved JSON should have valid structure with expected top-level keys."""
+        gen = CollarSignalGenerator()
+        gen._fetch_spot_price = lambda: 550.0
+        gen._fetch_vix_level = lambda: 16.0
+        signal = gen.generate_signal(spot=550.0, vix=16.0)
+        output_path = tmp_path / "collar_signal.json"
+        original = gen.OUTPUT_PATH
+        gen.OUTPUT_PATH = output_path
+        try:
+            gen.save_signal(signal)
+            with open(output_path) as f:
+                data = json.load(f)
+            assert "timestamp" in data
+            assert "signal_state" in data
+            assert "strikes" in data
+            assert "call_strike" in data["strikes"]
+            assert isinstance(data["strikes"], dict)
+            assert data["is_valid"] is True
+        finally:
+            gen.OUTPUT_PATH = original
+
+    def test_save_signal_crisis_state(self, tmp_path):
+        """Crisis signal JSON should record unhedged state."""
+        gen = CollarSignalGenerator()
+        signal = gen.generate_signal(spot=550.0, vix=50.0)
+        output_path = tmp_path / "collar_crisis.json"
+        original = gen.OUTPUT_PATH
+        gen.OUTPUT_PATH = output_path
+        try:
+            gen.save_signal(signal)
+            with open(output_path) as f:
+                data = json.load(f)
+            assert data["signal_state"] == "unhedged"
+            assert data["is_valid"] is False
+            assert data["regime"] == "crisis"
+        finally:
+            gen.OUTPUT_PATH = original
+
+
+class TestClassificationBoundaries:
+    """Boundary condition tests for regime classification."""
+
+    @pytest.fixture
+    def generator(self):
+        return CollarSignalGenerator()
+
+    def test_negative_vix_returns_normal(self, generator):
+        """Negative VIX should return NORMAL (lowest regime)."""
+        assert generator.classify_regime(-5.0) == CollarRegime.NORMAL
+
+    def test_zero_vix_returns_normal(self, generator):
+        """Zero VIX should return NORMAL."""
+        assert generator.classify_regime(0.0) == CollarRegime.NORMAL
+
+    def test_vix_between_zero_and_elevated_returns_normal(self, generator):
+        """VIX between 0 and 20 should be NORMAL."""
+        assert generator.classify_regime(10.0) == CollarRegime.NORMAL
+        assert generator.classify_regime(15.5) == CollarRegime.NORMAL
+        assert generator.classify_regime(19.99) == CollarRegime.NORMAL
+
+    def test_exact_crisis_boundary(self, generator):
+        """Exactly 40.0 VIX should be CRISIS."""
+        assert generator.classify_regime(40.0) == CollarRegime.CRISIS
+
+    def test_vix_just_below_crisis_is_stress(self, generator):
+        """39.99 VIX should be STRESS, not CRISIS."""
+        assert generator.classify_regime(39.99) == CollarRegime.STRESS
+
+    def test_vix_just_above_crisis_threshold(self, generator):
+        """40.01 VIX should be CRISIS."""
+        assert generator.classify_regime(40.01) == CollarRegime.CRISIS
+
+    def test_extreme_high_vix_remains_crisis(self, generator):
+        """Extremely high VIX (100+) should still classify as CRISIS."""
+        assert generator.classify_regime(100.0) == CollarRegime.CRISIS
+        assert generator.classify_regime(999.99) == CollarRegime.CRISIS

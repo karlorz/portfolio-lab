@@ -336,10 +336,10 @@ class CollarSignalGenerator:
 
         call_premium = call_result["price"]
         put_premium = put_result["price"]
-        net = call_premium - put_premium
-        cost_pct = net / spot * 100 if spot > 0 else 0
+        net = float(call_premium - put_premium)
+        cost_pct = float(net / spot * 100) if spot > 0 else 0
 
-        is_cashless = abs(net) / spot * 100 < self.CASHLESS_TOLERANCE if spot > 0 else False
+        is_cashless = bool(abs(net) / spot * 100 < self.CASHLESS_TOLERANCE) if spot > 0 else False
 
         return CollarStrikes(
             underlying_price=spot, call_strike=call_strike, put_strike=put_strike,

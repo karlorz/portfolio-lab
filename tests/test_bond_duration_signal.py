@@ -2,8 +2,10 @@
 Tests for Bond Duration Rotation Signal Generator (v4.80)
 """
 
+import json
 import pytest
 from datetime import datetime, date
+from dataclasses import asdict
 
 from src.signals.bond_duration_signal import (
     BondDurationCalculator,
@@ -14,6 +16,7 @@ from src.signals.bond_duration_signal import (
     DurationPosition,
     generate_bond_duration_signal,
 )
+from src.signals.signal_snapshot import SignalSnapshot
 
 
 class TestYieldCurveClassification:
@@ -311,3 +314,426 @@ class TestEdgeCases:
             1.0, 10.0, RateDirection.FALLING, YieldCurveRegime.STEEP
         )
         assert abs(tlt + ief + shy - 1.0) < 0.01
+
+
+# ── New test classes: 23 additional tests covering 7 areas ──────────────
+
+class TestBondDurationSignalDataclass:
+    """Area 1: to_dict() field completeness and enum values."""
+
+    def test_to_dict_all_fields(self):
+        """to_dict() should contain all 17 BondDurationSignal fields."""
+        signal = generate_bond_duration_signal(yield_10y=4.5, yield_2y=4.0)
+        d = signal.to_dict()
+        expected_keys = {
+            "timestamp", "yield_10y", "yield_2y", "spread_10y2y",
+            "curve_regime", "real_rate", "real_rate_regime",
+            "rate_6m_ago", "rate_change_6m", "rate_direction",
+            "tlt_weight", "ief_weight", "shy_weight",
+            "effective_duration", "position", "confidence", "is_valid",
+            "reason",
+        }
+        assert set(d.keys()) == expected_keys, f"Missing keys: {expected_keys - set(d.keys())}"
+
+    def test_to_dict_values_match(self):
+        """Field values survive round-trip through to_dict()."""
+        signal = generate_bond_duration_signal(
+            yield_10y=5.0, yield_2y=4.5, real_rate=2.5, rate_change_6m=-0.5
+        )
+        d = signal.to_dict()
+        assert d["yield_10y"] == signal.yield_10y
+        assert d["yield_2y"] == signal.yield_2y
+        assert d["spread_10y2y"] == signal.spread_10y2y
+        assert d["curve_regime"] == signal.curve_regime
+        assert d["real_rate"] == signal.real_rate
+        assert d["real_rate_regime"] == signal.real_rate_regime
+        assert d["tlt_weight"] == signal.tlt_weight
+        assert d["ief_weight"] == signal.ief_weight
+        assert d["shy_weight"] == signal.shy_weight
+        assert d["effective_duration"] == signal.effective_duration
+        assert d["position"] == signal.position
+        assert d["confidence"] == signal.confidence
+        assert d["is_valid"] == signal.is_valid
+        assert d["reason"] == signal.reason
+
+    def test_duration_position_enum_values(self):
+        assert DurationPosition.LONG.value == "long"
+        assert DurationPosition.INTERMEDIATE.value == "intermediate"
+        assert DurationPosition.SHORT.value == "short"
+        assert DurationPosition.BLEND.value == "blend"
+
+    def test_yield_curve_regime_enum_values(self):
+        assert YieldCurveRegime.STEEP.value == "steep"
+        assert YieldCurveRegime.NORMAL.value == "normal"
+        assert YieldCurveRegime.FLAT.value == "flat"
+        assert YieldCurveRegime.INVERTED.value == "inverted"
+
+
+class TestConstants:
+    """Area 4: Constants validation."""
+
+    def test_calculator_thresholds_consistent(self):
+        """Threshold hierarchy: steep > flat > inverted."""
+        calc = BondDurationCalculator()
+        assert calc.SPREAD_STEEP > calc.SPREAD_FLAT > calc.SPREAD_INVERTED
+        assert calc.SPREAD_FLAT > 0
+        assert calc.SPREAD_INVERTED == 0.0
+
+    def test_duration_mappings_positive(self):
+        """All duration constants should be positive."""
+        calc = BondDurationCalculator()
+        for etf, dur in calc.DURATION.items():
+            assert dur > 0, f"{etf} duration must be positive"
+        assert calc.DURATION["TLT"] > calc.DURATION["IEF"] > calc.DURATION["SHY"]
+
+    def test_mom_lookback_positive(self):
+        """MOM_LOOKBACK_DAYS should be ~6 months of trading days."""
+        calc = BondDurationCalculator()
+        assert calc.MOM_LOOKBACK_DAYS == 126
+        assert 120 <= calc.MOM_LOOKBACK_DAYS <= 130
+
+    def test_real_rate_thresholds_ordered(self):
+        """Attractive threshold should be above unattractive threshold."""
+        calc = BondDurationCalculator()
+        assert calc.REAL_ATTRACTIVE > calc.REAL_UNATTRACTIVE
+        assert calc.REAL_UNATTRACTIVE == 0.0
+
+
+class TestPreciseBoundaries:
+    """Area 3 + 6: Exact boundary values for classifier predicates."""
+
+    @pytest.fixture
+    def calc(self):
+        return BondDurationCalculator()
+
+    def test_classify_curve_at_exactly_one_point_zero(self, calc):
+        """Spread == 1.0% should be NORMAL (>= operator)."""
+        assert calc.classify_curve(1.0) == YieldCurveRegime.NORMAL
+
+    def test_classify_curve_at_exactly_zero_point_three(self, calc):
+        """Spread == 0.3% should be NORMAL (>= operator)."""
+        assert calc.classify_curve(0.3) == YieldCurveRegime.NORMAL
+
+    def test_classify_curve_at_epsilon_above_zero(self, calc):
+        """Spread == 0.001% should be FLAT (> 0.0)."""
+        assert calc.classify_curve(0.001) == YieldCurveRegime.FLAT
+
+    def test_classify_real_rate_at_boundaries(self, calc):
+        """Exactly 0.0% and 2.0% should both be NEUTRAL (>=)."""
+        assert calc.classify_real_rate(0.0) == "neutral"
+        assert calc.classify_real_rate(2.0) == "neutral"
+
+    def test_classify_real_rate_epsilon_above_attractive(self, calc):
+        """2.001% should be attractive (> 2.0)."""
+        assert calc.classify_real_rate(2.001) == "attractive"
+
+    def test_classify_real_rate_epsilon_below_unattractive(self, calc):
+        """-0.001% should be unattractive (< 0.0)."""
+        assert calc.classify_real_rate(-0.001) == "unattractive"
+
+
+class TestDurationAllocationEdgeCases:
+    """Area 2 + 6: Additional allocation boundary combos."""
+
+    @pytest.fixture
+    def calc(self):
+        return BondDurationCalculator()
+
+    def test_flat_falling_intermediate(self, calc):
+        """FLAT + FALLING should produce INTERMEDIATE (IEF-heavy)."""
+        tlt, ief, shy, pos = calc.compute_duration_allocation(
+            0.15, 1.0, RateDirection.FALLING, YieldCurveRegime.FLAT
+        )
+        assert pos == "intermediate"
+        assert ief > tlt
+
+    def test_normal_rising_intermediate(self, calc):
+        """NORMAL + RISING should produce INTERMEDIATE (SHY-heavy)."""
+        tlt, ief, shy, pos = calc.compute_duration_allocation(
+            0.5, 1.0, RateDirection.RISING, YieldCurveRegime.NORMAL
+        )
+        assert pos == "intermediate"
+        assert shy > tlt
+
+    def test_inverted_stable_max_shy(self, calc):
+        """INVERTED + STABLE: 0% TLT, 70% SHY."""
+        tlt, ief, shy, pos = calc.compute_duration_allocation(
+            -0.3, 1.0, RateDirection.STABLE, YieldCurveRegime.INVERTED
+        )
+        assert tlt == 0.0
+        assert shy == 0.70
+        assert pos == "short"
+
+    def test_steep_rising_intermediate(self, calc):
+        """STEEP + RISING should produce INTERMEDIATE."""
+        tlt, ief, shy, pos = calc.compute_duration_allocation(
+            1.5, 1.0, RateDirection.RISING, YieldCurveRegime.STEEP
+        )
+        assert pos == "intermediate"
+        assert 0.25 <= tlt <= 0.35
+
+    def test_real_rate_boost_clamped_by_shy(self, calc):
+        """When shy < 0.15, boost = shy (partial shift)."""
+        # FLAT + STABLE: shy=0.50 initially
+        tlt, ief, shy, pos = calc.compute_duration_allocation(
+            0.15, 3.0, RateDirection.STABLE, YieldCurveRegime.FLAT
+        )
+        # Base: 0.10/0.40/0.50, boost = min(0.15, 0.50) = 0.15
+        # Result: TLT=0.25, SHY=0.35
+        assert abs(tlt - 0.25) < 0.01
+        assert abs(shy - 0.35) < 0.01
+
+    def test_real_rate_boost_skipped_when_already_long(self, calc):
+        """When pos is already LONG, real-rate boost does NOT apply."""
+        # STEEP + FALLING → LONG regardless of real_rate
+        tlt_base, _, shy_base, pos = calc.compute_duration_allocation(
+            1.5, 1.0, RateDirection.FALLING, YieldCurveRegime.STEEP
+        )
+        assert pos == "long"
+        tlt_boosted, _, shy_boosted, _ = calc.compute_duration_allocation(
+            1.5, 3.0, RateDirection.FALLING, YieldCurveRegime.STEEP
+        )
+        # Both should be identical since pos is already LONG
+        assert tlt_base == tlt_boosted
+        assert shy_base == shy_boosted
+
+    def test_real_rate_boost_not_applied_at_boundary(self, calc):
+        """real_rate == 2.0 (neutral) should NOT trigger boost (not > 2.0)."""
+        tlt_normal, _, shy_normal, _ = calc.compute_duration_allocation(
+            0.5, 2.0, RateDirection.STABLE, YieldCurveRegime.NORMAL
+        )
+        tlt_boosted, _, shy_boosted, _ = calc.compute_duration_allocation(
+            0.5, 2.001, RateDirection.STABLE, YieldCurveRegime.NORMAL
+        )
+        # Exactly at 2.0 → no boost; 2.001 → boost
+        assert tlt_boosted > tlt_normal
+        assert shy_boosted < shy_normal
+
+
+class TestSnapshotBridge:
+    """Area 5: to_signal_snapshot() bridge method."""
+
+    @pytest.fixture
+    def generator(self):
+        return BondDurationSignalGenerator()
+
+    def test_to_signal_snapshot_returns_snapshot(self, generator):
+        """to_signal_snapshot() returns SignalSnapshot with correct base fields."""
+        signal = generator.generate_signal(yield_10y=5.0, yield_2y=4.0)
+        snap = signal.to_signal_snapshot()
+        assert isinstance(snap, SignalSnapshot)
+        assert snap.source == "bond_duration_signal"
+        assert snap.timestamp == signal.timestamp
+        assert snap.confidence == signal.confidence
+        assert snap.is_active == signal.is_valid
+
+    def test_to_signal_snapshot_asset_signals(self, generator):
+        """Asset signals should map TLT/IEF/SHY weights."""
+        signal = generator.generate_signal(yield_10y=5.0, yield_2y=4.0)
+        snap = signal.to_signal_snapshot()
+        assert "TLT" in snap.asset_signals
+        assert "IEF" in snap.asset_signals
+        assert "SHY" in snap.asset_signals
+        assert snap.asset_signals["TLT"] == signal.tlt_weight
+        assert snap.asset_signals["IEF"] == signal.ief_weight
+        assert snap.asset_signals["SHY"] == signal.shy_weight
+
+    def test_to_signal_snapshot_position_maps_value(self, generator):
+        """Position should map to directional value: short=-0.5, long=0.5."""
+        # Long case
+        sig_long = generator.generate_signal(
+            yield_10y=5.0, yield_2y=3.5, rate_change_6m=-0.8
+        )
+        assert sig_long.position == "long"
+        assert sig_long.to_signal_snapshot().value == 0.5
+
+        # Short case
+        sig_short = generator.generate_signal(
+            yield_10y=4.0, yield_2y=4.5, rate_change_6m=0.5
+        )
+        assert sig_short.position == "short"
+        assert sig_short.to_signal_snapshot().value == -0.5
+
+        # Blend case: force by creating signal directly
+        import copy
+        sig_blend = copy.deepcopy(sig_long)
+        sig_blend.position = "blend"
+        assert sig_blend.to_signal_snapshot().value == 0.0
+
+    def test_to_signal_snapshot_explanation_format(self, generator):
+        """Explanation string should contain key diagnostic fields."""
+        signal = generator.generate_signal(yield_10y=5.0, yield_2y=4.0)
+        snap = signal.to_signal_snapshot()
+        assert signal.curve_regime in snap.explanation
+        assert signal.real_rate_regime in snap.explanation
+        assert signal.position in snap.explanation
+        assert "Bond Duration:" in snap.explanation
+
+    def test_to_signal_snapshot_metadata_keys(self, generator):
+        """Metadata should contain all 5 diagnostic keys."""
+        signal = generator.generate_signal(yield_10y=5.0, yield_2y=4.0)
+        snap = signal.to_signal_snapshot()
+        meta_keys = {"curve_regime", "real_rate_regime", "position",
+                      "effective_duration", "spread_10y2y"}
+        assert set(snap.metadata.keys()) == meta_keys
+
+
+class TestConfidenceBoundaries:
+    """Area 6: Confidence boundary conditions."""
+
+    @pytest.fixture
+    def generator(self):
+        return BondDurationSignalGenerator()
+
+    def test_confidence_inverted_rising_90(self, generator):
+        """INVERTED + RISING → confidence 90.0 (max bearish conviction)."""
+        signal = generator.generate_signal(
+            yield_10y=3.5, yield_2y=4.0, rate_change_6m=0.5
+        )
+        assert signal.curve_regime == "inverted"
+        assert signal.rate_direction == "rising"
+        assert signal.confidence == 90.0
+
+    def test_confidence_steep_falling_90(self, generator):
+        """STEEP + FALLING → confidence 90.0 (max bullish conviction)."""
+        signal = generator.generate_signal(
+            yield_10y=5.0, yield_2y=3.5, rate_change_6m=-0.8
+        )
+        assert signal.curve_regime == "steep"
+        assert signal.rate_direction == "falling"
+        assert signal.confidence == 90.0
+
+    def test_confidence_near_flat_spread_55(self, generator):
+        """Spread < 15bps → confidence 55.0 (uncertain)."""
+        signal = generator.generate_signal(
+            yield_10y=4.05, yield_2y=4.00, rate_change_6m=0.1
+        )
+        # spread = 0.05 = 5bps < 15bps
+        assert signal.spread_10y2y == 0.05
+        assert signal.confidence == 55.0
+
+    def test_confidence_normal_regime_70(self, generator):
+        """Normal conditions → confidence 70.0 (baseline)."""
+        # NORMAL + STABLE, spread = 0.50, not near-flat (<0.15)
+        signal = generator.generate_signal(
+            yield_10y=5.0, yield_2y=4.5, rate_change_6m=0.0
+        )
+        assert signal.curve_regime == "normal"
+        assert signal.spread_10y2y > 0.15
+        assert signal.confidence == 70.0
+
+    def test_confidence_above_flat_threshold_not_near_flattening(self, generator):
+        """Spread = 50bps (NORMAL, >=0.30), safely >= 15bps → conf 70, not 55."""
+        signal = generator.generate_signal(
+            yield_10y=5.0, yield_2y=4.5, rate_change_6m=0.0
+        )
+        assert signal.curve_regime == "normal"
+        assert signal.spread_10y2y == 0.50
+        assert signal.confidence == 70.0
+
+
+class TestSaveSignal:
+    """Area 7: State persistence edge cases."""
+
+    def test_save_signal_creates_file(self, tmp_path):
+        """save_signal() should create a JSON file at OUTPUT_PATH."""
+        generator = BondDurationSignalGenerator()
+        output = tmp_path / "bond_duration_test.json"
+        generator.OUTPUT_PATH = output
+        assert not output.exists()
+        signal = generator.generate_signal(yield_10y=4.5, yield_2y=4.0)
+        generator.save_signal(signal)
+        assert output.exists()
+        assert output.stat().st_size > 0
+
+    def test_save_signal_content_matches(self, tmp_path):
+        """Saved JSON content should match signal.to_dict()."""
+        generator = BondDurationSignalGenerator()
+        output = tmp_path / "bond_duration_test.json"
+        generator.OUTPUT_PATH = output
+        signal = generator.generate_signal(yield_10y=5.0, yield_2y=4.5)
+        generator.save_signal(signal)
+        with open(output) as f:
+            saved = json.load(f)
+        expected = signal.to_dict()
+        # Compare all fields except timestamp (serialized vs in-memory may differ
+        # by microseconds)
+        for key in expected:
+            if key != "timestamp":
+                assert saved[key] == expected[key], f"Mismatch for key '{key}'"
+
+    def test_save_signal_timestamp_present(self, tmp_path):
+        """Saved JSON should include an ISO-format timestamp."""
+        generator = BondDurationSignalGenerator()
+        output = tmp_path / "bond_duration_test.json"
+        generator.OUTPUT_PATH = output
+        signal = generator.generate_signal(yield_10y=4.5, yield_2y=4.0)
+        generator.save_signal(signal)
+        with open(output) as f:
+            saved = json.load(f)
+        assert "timestamp" in saved
+        assert "T" in saved["timestamp"]  # ISO-8601 contains T separator
+
+
+class TestGenerateSignalEdgeCases:
+    """Area 2 + 6: Edge cases in signal generation."""
+
+    @pytest.fixture
+    def generator(self):
+        return BondDurationSignalGenerator()
+
+    def test_generate_with_zero_yields(self, generator):
+        """Zero yields produce inverted curve (spread=0), confidence=55 (flat)."""
+        signal = generator.generate_signal(
+            yield_10y=0.0, yield_2y=0.0, real_rate=-2.0, rate_change_6m=0.0
+        )
+        assert signal.spread_10y2y == 0.0
+        assert signal.curve_regime == "inverted"
+        # spread = 0.0 < 0.15 → near flat → confidence 55
+        assert signal.confidence == 55.0
+
+    def test_generate_with_negative_real_rate(self, generator):
+        """Negative real rate → unattractive regime."""
+        signal = generator.generate_signal(
+            yield_10y=4.5, yield_2y=4.0, real_rate=-1.5, rate_change_6m=0.2
+        )
+        assert signal.real_rate_regime == "unattractive"
+        assert signal.is_valid
+
+    def test_generate_partial_params_none_2y(self, generator):
+        """When yield_2y is None, generator falls back to default."""
+        signal = generator.generate_signal(
+            yield_10y=5.0, yield_2y=None, real_rate=2.0, rate_change_6m=0.1
+        )
+        assert isinstance(signal, BondDurationSignal)
+        assert signal.yield_10y == 5.0
+        assert signal.is_valid
+
+    def test_generate_all_defaults(self, generator):
+        """Call with no arguments uses built-in defaults."""
+        signal = generator.generate_signal()
+        assert isinstance(signal, BondDurationSignal)
+        assert signal.is_valid
+        # Default: yield_10y=4.50, yield_2y=4.00, real_rate=2.00, rate_change_6m=0.15
+        assert signal.yield_10y == 4.50
+        assert signal.yield_2y == 4.00
+
+    def test_generate_with_only_real_rate(self, generator):
+        """real_rate overrides auto-estimate when real_rate is 0.0 (falsy!)."""
+        # This tests the None check: real_rate=0.0 is falsy but not None
+        signal = generator.generate_signal(
+            yield_10y=5.0, yield_2y=4.0, real_rate=0.0, rate_change_6m=0.0
+        )
+        assert signal.real_rate == 0.0
+        assert signal.real_rate_regime == "neutral"
+
+    def test_generate_flat_rising_confidence_70_not_55(self, generator):
+        """FLAT + RISING, spread >= 0.15 (above near-flat threshold) → conf 70."""
+        signal = generator.generate_signal(
+            yield_10y=4.2, yield_2y=4.0, real_rate=1.0, rate_change_6m=0.5
+        )
+        # spread ≈ 0.2, safely >= 0.15 threshold
+        assert signal.spread_10y2y >= 0.19
+        assert signal.curve_regime == "flat"
+        assert signal.rate_direction == "rising"
+        assert signal.confidence == 70.0  # NOT 55
