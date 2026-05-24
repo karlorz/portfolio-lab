@@ -658,8 +658,8 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'backtest':
-        print("Running Combined Strategy Backtest...")
-        print("This may take 2-3 minutes...")
+        logger.info("Running Combined Strategy Backtest...")
+        logger.info("This may take 2-3 minutes...")
 
         backtester = CombinedStrategyBacktester()
         result = backtester.run_backtest(

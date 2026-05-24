@@ -132,6 +132,20 @@ def _inject_sdk_stubs():
         _sc_mod.anthropic = saved_anthropic
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_env_keys():
+    """Remove API key env vars set by this module so they don't leak.
+
+    Lines 13-14 set OPENAI_API_KEY / ANTHROPIC_API_KEY via setdefault
+    so that SentimentAnalyzer can be imported.  Without cleanup, these
+    keys persist and cause other test files (e.g. test_regime_sentiment)
+    to attempt real client initialization with a None openai module.
+    """
+    yield
+    for key in _KEYS_SET_BY_US:
+        os.environ.pop(key, None)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
