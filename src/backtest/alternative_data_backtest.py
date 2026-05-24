@@ -117,7 +117,7 @@ class AlternativeDataBacktester:
             logger.error("No price data found at %s", prices_path)
             return False
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Failed to load data: %s", e)
             return False
 

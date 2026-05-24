@@ -104,7 +104,7 @@ class MultiSpeedMomentumBacktester:
             logger.info("Loaded %d days of price data", len(self.data))
             return True
 
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
             logger.error("Failed to load data: %s", exc)
             return False
 
@@ -197,7 +197,7 @@ class MultiSpeedMomentumBacktester:
                 signal = self._signal_engine.get_signal_for_ticker(ticker, end_date)
                 if signal is not None:
                     return float(np.clip(signal, -1.0, 1.0))
-            except Exception as exc:
+            except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as exc:
                 logger.warning("MultiSpeedMomentum signal failed for %s on %s: %s", ticker, end_date, exc)
 
         # -- Fallback: simple 12-month momentum proxy --

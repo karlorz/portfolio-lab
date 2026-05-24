@@ -332,7 +332,7 @@ class AdaptiveEnsembleWeights:
             with open(self.state_file, "w") as f:
                 json.dump(state, f, indent=2, default=str)
             logger.debug("Saved adaptive weights state to %s", self.state_file)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.warning("Failed to save adaptive weights state: %s", e)
 
     def _load_state(self) -> bool:
@@ -349,7 +349,7 @@ class AdaptiveEnsembleWeights:
             self.base_weights = state.get("baseline_weights", self.base_weights)
             logger.debug("Loaded adaptive weights state from %s", self.state_file)
             return True
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to load adaptive weights state: %s", e)
             return False
 
@@ -394,7 +394,7 @@ def _get_base_weights_from_voter() -> Dict[str, float]:
         from src.strategy.ensemble_voter import REGIME_WEIGHTS, Regime
         weights = REGIME_WEIGHTS.get(Regime.NORMAL, {})
         return {k.value if hasattr(k, 'value') else str(k): v for k, v in weights.items()}
-    except Exception as e:
+    except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
         logger.warning("Could not load base weights from voter: %s", e)
         return {}
 

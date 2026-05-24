@@ -83,7 +83,7 @@ class CombinedOverlayBacktest:
                                 "prices": sym_df["close"].tolist(),
                             }
                     return data
-            except Exception as e:
+            except (ImportError, OSError, KeyError, ValueError, TypeError, RuntimeError) as e:
                 logger.warning("Database load failed: %s", e)
 
         # Generate synthetic data spanning 2006-2026

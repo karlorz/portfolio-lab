@@ -118,7 +118,7 @@ class CombinedStrategyBacktester:
             try:
                 self.hmm_manager = PortfolioRegimeManager(base_allocation=self.base_allocation)
                 self.hmm_manager.detector.load()
-            except Exception as e:
+            except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logging.warning(f"HMM regime detector unavailable: {e}")
                 self.hmm_manager = None
         self.fed_overlay = FedPolicyOverlay()
@@ -160,7 +160,7 @@ class CombinedStrategyBacktester:
 
             return True
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, RuntimeError) as e:
             logger.info(f"Error loading prices: {e}")
             return False
 

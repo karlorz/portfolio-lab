@@ -502,7 +502,7 @@ def main():
                 gen = VIXTermStructureGenerator()
                 spot = gen.get_vix_spot()
                 vix = spot if spot else 18.0
-            except Exception as e:
+            except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logger.warning("Failed to get VIX spot from term structure, defaulting to 18.0: %s", e)
                 vix = 18.0  # Default for development
 
@@ -563,7 +563,7 @@ def _run_backtest(sizer: VIXYHedgeSizer, start_date: str):
         print(f"  Hedge efficiency:  {sizer.compute_hedge_efficiency(avg_alloc, 20):.2f}x")
     except ImportError:
         print("Backtest requires pandas and VIX history. Run 'recommend' for single-point analysis.")
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
         print(f"Backtest error: {e}")
 
 

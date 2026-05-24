@@ -282,7 +282,7 @@ def generate_sector_signals(historical_path: Path, vix: float = 0, regime: str =
             "rebalanceReason": allocation["rebalanceReason"]
         }
         
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
         print(f"Error generating sector signals: {e}")
         return None
 

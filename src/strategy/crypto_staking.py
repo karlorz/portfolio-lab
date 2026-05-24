@@ -121,7 +121,7 @@ class ETHStakingModel:
             try:
                 with open(STATE_FILE) as f:
                     return json.load(f)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load staking state: %s", e)
         return {}
 

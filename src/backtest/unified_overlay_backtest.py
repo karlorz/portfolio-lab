@@ -99,7 +99,7 @@ class UnifiedOverlayBacktester:
             logger.info("Loaded %d days of price data", len(self.data))
             return True
 
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
             logger.error("Failed to load data: %s", exc)
             return False
 

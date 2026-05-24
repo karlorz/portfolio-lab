@@ -642,7 +642,7 @@ Examples:
                     n_sims=args.sims
                 )
                 results.append(result)
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
                 print(f"Error processing {portfolio_str}: {e}", file=__import__('sys').stderr)
         
         # Sort by CAR25 descending

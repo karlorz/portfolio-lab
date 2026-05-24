@@ -180,7 +180,7 @@ class EnsembleBacktestEngine:
                     "regime": composite.regime,
                     "sources": composite.sources
                 }
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
                 logger.warning("Signal failed for %s, using neutral: %s", asset, e)
                 signals[asset] = {
                     "score": 0.0,

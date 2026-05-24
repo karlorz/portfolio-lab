@@ -163,7 +163,7 @@ class CrossAssetRegimeArbBacktester:
             logger.error("No price data found")
             return False
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Failed to load data: %s", e)
             return False
 

@@ -235,7 +235,7 @@ def run_black_litterman(
         raw_weights = ef.max_sharpe(risk_free_rate=risk_free_rate)
         cleaned = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=risk_free_rate)
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
         logger.warning("BL EfficientFrontier.max_sharpe failed: %s", e)
         # Fallback: BL weights from posterior (no EF optimization)
         raw_weights = bl.bl_weights()
@@ -383,7 +383,7 @@ def tau_sensitivity(
                 pi=pi,
             )
             results[tau] = result
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
             logger.warning("BL optimization failed at tau=%.3f: %s", tau, e)
 
     return results
