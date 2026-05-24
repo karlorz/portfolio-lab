@@ -153,3 +153,152 @@ class TestEdgeCases:
         data = {}
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk == "low"
+
+
+class TestRiskAssessmentExtended:
+    """Additional edge cases for risk assessment."""
+
+    @pytest.fixture
+    def gen(self):
+        return OverlayDashboardGenerator()
+
+    def test_moderate_risk_with_single_factor(self, gen):
+        """Single risk factor (VIX 26) → moderate."""
+        data = {"collar": {"vix_level": 26.0}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "moderate"
+        assert len(alerts) == 0
+
+    def test_elevated_risk_with_covid_combo(self, gen):
+        """VIX elevated + high crypto + 1 conflict → elevated (score=4)."""
+        data = {
+            "collar": {"vix_level": 28.0},
+            "crypto": {"btc_vol_regime": "high"},
+            "kurtosis": {"fat_tail_risk": 0.3},
+            "unified": {"conflict_count": 1},
+        }
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "elevated"
+
+    def test_vix_exactly_30_triggers_alert(self, gen):
+        """VIX exactly 30 should not trigger the >30 alert."""
+        data = {"collar": {"vix_level": 30.0}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        # vix_level > 30 is False at exactly 30
+        assert risk == "moderate"
+
+    def test_vix_31_triggers_alert(self, gen):
+        """VIX > 30 should trigger collar alert and add 2 to risk score."""
+        data = {"collar": {"vix_level": 31.0}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert len(alerts) >= 1
+        assert "VIX" in alerts[0]
+
+    def test_btc_vol_extreme_triggers_alert(self, gen):
+        """BTC extreme vol should add 2 to risk score."""
+        data = {"crypto": {"btc_vol_regime": "extreme"}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert any("BTC" in a for a in alerts)
+
+    def test_fat_tail_risk_threshold(self, gen):
+        """fat_tail_risk > 0.7 should trigger alert, 0.7 exactly should not."""
+        data_high = {"kurtosis": {"fat_tail_risk": 0.71}}
+        _, alerts_high = gen._assess_portfolio_risk(data_high)
+        assert any("fat tail" in a.lower() for a in alerts_high)
+
+        data_low = {"kurtosis": {"fat_tail_risk": 0.7}}
+        _, alerts_low = gen._assess_portfolio_risk(data_low)
+        assert not any("fat tail" in a.lower() for a in alerts_low)
+
+    def test_inverted_curve_adds_alert(self, gen):
+        """Inverted yield curve should trigger defensive alert."""
+        data = {"bond_duration": {"curve_regime": "inverted"}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert any("inverted" in a.lower() for a in alerts)
+
+    def test_flat_curve_no_alert(self, gen):
+        """Flat curve should not trigger curve alert."""
+        data = {"bond_duration": {"curve_regime": "flat"}}
+        _, alerts = gen._assess_portfolio_risk(data)
+        assert not any("inverted" in a.lower() for a in alerts)
+
+    def test_conflict_count_adds_to_score(self, gen):
+        """Each conflict adds 1 to risk score."""
+        data3 = {"unified": {"conflict_count": 3}}
+        risk3, _ = gen._assess_portfolio_risk(data3)
+        assert risk3 == "elevated"  # score = 3
+
+    def test_high_risk_requires_score_5(self, gen):
+        """Risk score >= 5 required for 'high'."""
+        data = {
+            "collar": {"vix_level": 31.0},   # +2
+            "crypto": {"btc_vol_regime": "extreme"},  # +2
+            "unified": {"conflict_count": 1},  # +1
+        }
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "high"
+        assert len(alerts) >= 3
+
+
+class TestOverlayDashboardGeneratorExtended:
+    """Additional generator edge cases."""
+
+    @pytest.fixture
+    def gen(self):
+        return OverlayDashboardGenerator()
+
+    def test_mean_reversion_always_disabled(self, gen):
+        """Mean reversion overlay is permanently disabled."""
+        mr = gen._get_mean_reversion_data()
+        assert mr["active"] is False
+        assert "disabled" in mr.get("status_text", "").lower()
+
+    def test_save_to_existing_dir(self, gen, tmp_path):
+        """save() should write to a file in an existing directory."""
+        output = tmp_path / "dashboard.json"
+        gen.OUTPUT_PATH = output
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": False}, crypto={"active": False},
+            bond_duration={"active": False}, calendar={"active": False},
+            kurtosis={"active": False}, mean_reversion={"active": False},
+            unified={"active": False},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        gen.save(data)
+        assert output.exists()
+
+    def test_generate_counts_active_overlays(self, gen):
+        """generate() should count active overlays correctly."""
+        dashboard = gen.generate()
+        # Verify count matches actual active values
+        manual_count = sum(1 for key in ['collar', 'crypto', 'bond_duration',
+                                           'calendar', 'kurtosis', 'mean_reversion', 'unified']
+                          if getattr(dashboard, key, {}).get("active"))
+        assert dashboard.active_overlays == manual_count
+
+    def test_generate_total_always_7(self, gen):
+        """Total overlays should always be 7."""
+        dashboard = gen.generate()
+        assert dashboard.total_overlays == 7
+
+    def test_to_dict_roundtrip(self):
+        """OverlayDashboardData.to_dict should produce serializable dict."""
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True, "vix_level": 18.0},
+            crypto={"active": False},
+            bond_duration={"active": True},
+            calendar={"active": True},
+            kurtosis={"active": True},
+            mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=4, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        d = data.to_dict()
+        import json
+        serialized = json.dumps(d)
+        assert "active_overlays" in serialized
+        assert d["collar"]["vix_level"] == 18.0

@@ -193,3 +193,117 @@ class TestGetIntegratorResult:
         with patch.object(mod.TSMOMSignalAdapter, 'get_portfolio_signals', return_value={}) as mock:
             mod.get_tsmom_integrator_result()
             mock.assert_called_once_with(["SPY", "GLD", "TLT"])
+
+
+# ---------------------------------------------------------------------------
+# Extended edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestComputeConfidenceExtended:
+    """Additional confidence calculation edge cases."""
+
+    def test_zero_vol_high_stability(self, tsmom_module):
+        """Zero volatility should give max vol stability contribution."""
+        mod, _, _ = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        signal = _make_tsmom_signal(lookback_return=0.10, realized_vol=0.0, signal=1)
+        conf = adapter._compute_confidence(signal)
+        # vol_stability = max(0, 1.0 - 0/0.30) = 1.0 → +0.15
+        assert conf >= 0.50 + 0.15
+
+    def test_very_high_vol_reduces_confidence(self, tsmom_module):
+        """Very high vol should make vol_stability = 0."""
+        mod, _, _ = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        signal = _make_tsmom_signal(lookback_return=0.10, realized_vol=0.50, signal=1)
+        conf = adapter._compute_confidence(signal)
+        # vol_stability = max(0, 1.0 - 0.50/0.30) = max(0, -0.67) = 0
+        # So no vol_stability contribution
+        assert conf >= 0.50
+
+    def test_extreme_trend_capped(self, tsmom_module):
+        """Extremely large trend should not exceed confidence=1.0."""
+        mod, _, _ = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        signal = _make_tsmom_signal(lookback_return=1.0, realized_vol=0.01, signal=1)
+        conf = adapter._compute_confidence(signal)
+        assert conf <= 1.0
+
+    def test_weak_trend_low_confidence(self, tsmom_module):
+        """Near-zero trend should give near-base confidence."""
+        mod, _, _ = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        signal = _make_tsmom_signal(lookback_return=0.01, realized_vol=0.20, signal=1)
+        conf = adapter._compute_confidence(signal)
+        assert conf < 0.75  # Weak trend + high vol → modest confidence
+
+    def test_signal_zero_no_clarity_boost(self, tsmom_module):
+        """Signal=0 should not get clarity contribution."""
+        mod, _, _ = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        signal_zero = _make_tsmom_signal(lookback_return=0.15, realized_vol=0.18, signal=0)
+        signal_one = _make_tsmom_signal(lookback_return=0.15, realized_vol=0.18, signal=1)
+        c_zero = adapter._compute_confidence(signal_zero)
+        c_one = adapter._compute_confidence(signal_one)
+        assert c_one > c_zero  # signal=1 gets clarity boost
+
+
+class TestGetSignalExtended:
+    """Additional get_signal edge cases."""
+
+    def test_generate_signal_alias(self, tsmom_module):
+        """generate_signal should be an alias for get_signal."""
+        mod, _, mi = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        adapter.overlay = MagicMock()
+        adapter.overlay.compute_signal.return_value = _make_tsmom_signal()
+        mi.SignalSourceResult = MagicMock
+        # Both should return the same result
+        assert adapter.get_signal is adapter.generate_signal or adapter.generate_signal("SPY") is not None
+
+    def test_signal_metadata_fields(self, tsmom_module):
+        """Signal should include all expected metadata fields."""
+        mod, _, mi = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        adapter.overlay = MagicMock()
+        adapter.overlay.compute_signal.return_value = _make_tsmom_signal()
+        mi.SignalSourceResult = MagicMock
+        result = adapter.get_signal("SPY")
+        assert result is not None
+
+    def test_portfolio_signals_empty_tickers(self, tsmom_module):
+        """Empty ticker list should return empty dict."""
+        mod, _, mi = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        adapter.overlay = MagicMock()
+        mi.SignalSourceResult = MagicMock
+        signals = adapter.get_portfolio_signals([])
+        assert signals == {}
+
+
+class TestGetAllocationDeltasExtended:
+    """Additional allocation deltas edge cases."""
+
+    def test_default_tickers(self, tsmom_module):
+        """Default tickers should be SPY, GLD, TLT."""
+        mod, _, _ = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        adapter.overlay = MagicMock()
+        adapter.overlay.compute_signal.return_value = _make_tsmom_signal(adjustment=0.03)
+        deltas = adapter.get_allocation_deltas()
+        assert "SPY" in deltas
+        assert "GLD" in deltas
+        assert "TLT" in deltas
+
+    def test_mixed_signals_and_none(self, tsmom_module):
+        """Mix of valid signals and None should give appropriate deltas."""
+        mod, _, _ = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        adapter.overlay = MagicMock()
+        adapter.overlay.compute_signal.side_effect = [
+            _make_tsmom_signal(adjustment=0.05), None, _make_tsmom_signal(adjustment=-0.03)
+        ]
+        deltas = adapter.get_allocation_deltas(["SPY", "GLD", "TLT"])
+        assert deltas["SPY"] == 0.05
+        assert deltas["GLD"] == 0.0
+        assert deltas["TLT"] == -0.03

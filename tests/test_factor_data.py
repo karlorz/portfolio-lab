@@ -263,5 +263,121 @@ def test_import_without_dependencies():
         pass
 
 
+@pytest.mark.skipif(not HAS_DEPENDENCIES, reason="Dependencies not available")
+class TestFactorETFExtended:
+    """Additional FactorETF edge cases."""
+
+    def test_all_factor_etfs_have_positive_aum(self):
+        """All FACTOR_ETFS should have positive AUM."""
+        for symbol, etf in FACTOR_ETFS.items():
+            assert etf.aum_billions > 0, f"{symbol} has non-positive AUM"
+
+    def test_all_factor_etfs_have_description(self):
+        """All FACTOR_ETFS should have a description."""
+        for symbol, etf in FACTOR_ETFS.items():
+            assert len(etf.description) > 0, f"{symbol} missing description"
+
+    def test_to_dict_roundtrip(self):
+        """to_dict should produce serializable output."""
+        etf = FactorETF(
+            symbol="USMV", factor="low_vol", expense_ratio=0.0015,
+            aum_billions=30.0, description="Min Vol ETF"
+        )
+        d = etf.to_dict()
+        serialized = json.dumps(d)
+        assert "USMV" in serialized
+
+
+@pytest.mark.skipif(not HAS_DEPENDENCIES, reason="Dependencies not available")
+class TestFactorDataManagerExtended:
+    """Additional FactorDataManager edge cases."""
+
+    @pytest.fixture
+    def temp_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir) / "factors"
+            manager = FactorDataManager(data_dir=data_dir)
+            yield manager
+
+    def test_quality_score_boundaries(self, temp_manager):
+        """Quality score should be between 0 and 1 for any inputs."""
+        # Perfect quality
+        high = temp_manager.calculate_quality_score(
+            roe=1.0, debt_equity=0.0, earnings_stability=1.0, profitability=1.0
+        )
+        assert 0 <= high <= 1.0
+
+        # Terrible quality
+        low = temp_manager.calculate_quality_score(
+            roe=-0.5, debt_equity=10.0, earnings_stability=0.0, profitability=0.0
+        )
+        assert 0 <= low <= 1.0
+
+    def test_quality_score_higher_for_better_inputs(self, temp_manager):
+        """Better inputs should yield higher quality scores."""
+        good = temp_manager.calculate_quality_score(
+            roe=0.25, debt_equity=0.3, earnings_stability=0.9, profitability=0.85
+        )
+        bad = temp_manager.calculate_quality_score(
+            roe=0.05, debt_equity=1.5, earnings_stability=0.3, profitability=0.2
+        )
+        assert good > bad
+
+    def test_store_prices_multiple_symbols(self, temp_manager):
+        """Should store and retrieve prices for multiple symbols independently."""
+        for symbol in ["MTUM", "QUAL", "USMV", "VLUE"]:
+            prices = [
+                {"date": "2026-05-01", "open": 100, "high": 101, "low": 99,
+                 "close": 100.5 + hash(symbol) % 10, "volume": 1000000},
+            ]
+            temp_manager.store_prices(symbol, prices)
+
+        for symbol in ["MTUM", "QUAL", "USMV", "VLUE"]:
+            retrieved = temp_manager.get_prices(symbol, days=5)
+            assert len(retrieved) == 1
+
+    def test_get_prices_nonexistent_symbol(self, temp_manager):
+        """Getting prices for a valid symbol with no data should return empty."""
+        result = temp_manager.get_prices("MTUM", days=10)
+        assert result == []
+
+    def test_calculate_returns_with_few_prices(self, temp_manager):
+        """Fewer prices than needed should still return partial results or None."""
+        prices = [{"date": f"2026-05-{i+1:02d}", "open": 100, "high": 101,
+                    "low": 99, "close": 100.0 + i, "volume": 1000000} for i in range(5)]
+        temp_manager.store_prices("MTUM", prices)
+        result = temp_manager.calculate_returns("MTUM")
+        # May return None or partial result depending on implementation
+        # Just verify it doesn't crash
+        assert result is None or isinstance(result, dict)
+
+    def test_metadata_path_exists(self, temp_manager):
+        """Metadata path should exist after initialization."""
+        assert temp_manager.metadata_path.exists()
+
+    def test_db_path_under_data_dir(self, temp_manager):
+        """Database path should be under the data directory."""
+        assert str(temp_manager.db_path).startswith(str(temp_manager.data_dir))
+
+
+@pytest.mark.skipif(not HAS_DEPENDENCIES, reason="Dependencies not available")
+class TestQualityWeightsExtended:
+    """Additional quality weights tests."""
+
+    def test_all_quality_weight_keys(self):
+        """Quality weights should have expected keys."""
+        expected_keys = {"roe", "debt_equity", "earnings_stability", "profitability"}
+        assert set(QUALITY_WEIGHTS.keys()) == expected_keys
+
+    def test_all_weights_positive(self):
+        """All quality weights should be positive."""
+        for key, weight in QUALITY_WEIGHTS.items():
+            assert weight > 0, f"{key} has non-positive weight"
+
+    def test_four_factors_present(self):
+        """Should have exactly 4 quality factors."""
+        assert len(QUALITY_WEIGHTS) == 4
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

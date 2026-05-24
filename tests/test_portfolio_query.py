@@ -164,3 +164,136 @@ class TestSupportedQueryTypes:
 
     def test_has_tca_queries(self):
         assert any("slippage" in q for q in SUPPORTED_QUERY_TYPES["costs"])
+
+
+class TestBuildQueryContextExtended:
+    """Additional edge cases for build_query_context."""
+
+    def test_context_includes_regime(self, sample_dashboard):
+        context = build_query_context(sample_dashboard)
+        assert "Regime" in context
+        assert "normal" in context
+
+    def test_context_includes_tca(self, sample_dashboard):
+        context = build_query_context(sample_dashboard)
+        assert "slippage" in context.lower()
+        assert "5.2" in context
+
+    def test_context_includes_attribution(self, sample_dashboard):
+        context = build_query_context(sample_dashboard)
+        assert "TSFM" in context or "12.5" in context
+
+    def test_empty_dashboard(self):
+        context = build_query_context({})
+        assert isinstance(context, str)
+
+    def test_unavailable_sections_marked(self):
+        dashboard = {
+            "portfolio": {"available": False},
+            "risk": {"available": False},
+        }
+        context = build_query_context(dashboard)
+        assert "not available" in context.lower()
+
+    def test_health_with_alerts(self):
+        dashboard = {
+            "health": {"available": True, "alerts": ["VIX spike", "Drawdown breach"]},
+        }
+        context = build_query_context(dashboard)
+        assert "VIX spike" in context
+
+    def test_health_no_alerts_omits_line(self):
+        dashboard = {
+            "health": {"available": True, "alerts": []},
+        }
+        context = build_query_context(dashboard)
+        # "Alerts:" should not appear when there are no alerts
+        assert "Alerts:" not in context
+
+
+class TestFallbackAnswerExtended:
+    """Additional edge cases for fallback_answer."""
+
+    def test_portfolio_value_query(self, sample_dashboard):
+        answer = fallback_answer("what is the portfolio value", sample_dashboard)
+        assert "250,000" in answer
+
+    def test_how_much_query(self, sample_dashboard):
+        answer = fallback_answer("how much is my portfolio worth", sample_dashboard)
+        assert "250,000" in answer
+
+    def test_signal_bearish_query(self, sample_dashboard):
+        answer = fallback_answer("which signals are bearish", sample_dashboard)
+        assert "Bearish" in answer
+
+    def test_signal_attribution_query(self, sample_dashboard):
+        answer = fallback_answer("show me signal attribution", sample_dashboard)
+        # Should produce bearish/bullish breakdown
+        assert "Bullish" in answer or "bearish" in answer.lower()
+
+    def test_no_attribution_data(self):
+        dashboard = {
+            "portfolio": {"available": True, "positions": []},
+            "attribution": {},
+        }
+        answer = fallback_answer("which signals are bullish", dashboard)
+        assert "not available" in answer.lower()
+
+    def test_volatility_query(self, sample_dashboard):
+        answer = fallback_answer("what is my volatility", sample_dashboard)
+        assert "11.5" in answer
+
+    def test_diversification_query(self, sample_dashboard):
+        answer = fallback_answer("how diversified am i", sample_dashboard)
+        assert "drawdown" in answer.lower() or "volatility" in answer.lower()
+
+    def test_cost_slippage_query(self, sample_dashboard):
+        answer = fallback_answer("what are my trading costs", sample_dashboard)
+        assert "5.2" in answer
+
+    def test_empty_overlays(self):
+        dashboard = {
+            "overlays": {"_meta": {"active_count": 0}},
+        }
+        answer = fallback_answer("which overlays are active", dashboard)
+        assert isinstance(answer, str)
+
+    def test_overlay_inactive_status(self):
+        dashboard = {
+            "overlays": {
+                "collar": {"active": False},
+                "crypto": {"active": True},
+            },
+        }
+        answer = fallback_answer("which overlays are active", dashboard)
+        assert "crypto" in answer.lower()
+        assert "collar" in answer.lower()
+
+
+class TestAnswerQueryExtended:
+    """Additional edge cases for answer_query."""
+
+    def test_anthropic_not_available(self, sample_dashboard):
+        """When ANTHROPIC_AVAILABLE is False, always uses fallback."""
+        with patch("src.chat.portfolio_query.ANTHROPIC_AVAILABLE", False):
+            result = answer_query("What is my equity exposure?", sample_dashboard)
+            assert "SPY" in result
+
+    def test_none_dashboard_generates_one(self):
+        """When dashboard is None, should try to generate one."""
+        with patch("src.monitor.unified_dashboard.generate_unified_dashboard") as mock_gen:
+            mock_gen.return_value = {
+                "portfolio": {"available": True, "total_value": 100000, "positions": [
+                    {"symbol": "SPY", "weight": 50.0, "value": 50000},
+                ]},
+            }
+            with patch("src.chat.portfolio_query.ANTHROPIC_AVAILABLE", False):
+                result = answer_query("What is my equity exposure?")
+                assert "SPY" in result
+
+    def test_dashboard_generation_failure(self):
+        """If dashboard generation fails, should use empty fallback."""
+        with patch("src.monitor.unified_dashboard.generate_unified_dashboard", side_effect=Exception("DB error")):
+            with patch("src.chat.portfolio_query.ANTHROPIC_AVAILABLE", False):
+                result = answer_query("What is my equity exposure?")
+                assert isinstance(result, str)  # Should not crash

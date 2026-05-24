@@ -253,3 +253,105 @@ class TestTimedeltaImport:
         with patch.object(allocator, 'generate_allocation', return_value=mock_alloc):
             result = allocator.run_backtest('2026-01-01', '2026-01-03')
         assert 'days' in result and result['days'] == 3
+
+
+class TestVolParityAllocationExtended:
+    """Additional VolParityAllocation edge cases."""
+
+    def test_total_allocation_with_varied_weights(self):
+        a = _make_allocation(spy_pct=50.0, gld_pct=25.0, tlt_pct=10.0,
+                             vix_short_pct=5.0, vix_tail_pct=2.0, cash_pct=8.0)
+        assert a.total_allocation == pytest.approx(100.0)
+
+    def test_rebalance_triggered_flag(self):
+        a = _make_allocation(rebalance_triggered=True, rebalance_reason="Drift exceeded 10%")
+        assert a.rebalance_triggered is True
+        assert "Drift" in a.rebalance_reason
+
+    def test_to_dict_includes_all_fields(self):
+        a = _make_allocation()
+        d = a.to_dict()
+        expected_keys = {
+            "date", "target_volatility", "spy_pct", "gld_pct", "tlt_pct",
+            "core_vol_contribution", "vix_short_pct", "vix_tail_pct",
+            "vix_vol_contribution", "cash_pct", "expected_portfolio_vol",
+            "expected_max_dd", "rebalance_triggered", "rebalance_reason",
+        }
+        assert expected_keys.issubset(set(d.keys()))
+
+
+class TestCalculateCoreAllocationExtended:
+    """Additional core allocation edge cases."""
+
+    def _make_allocator(self):
+        allocator = VolatilityParityAllocator.__new__(VolatilityParityAllocator)
+        allocator.target_vol = 10.0
+        return allocator
+
+    def test_weights_sum_to_one(self):
+        allocator = self._make_allocator()
+        for vix in [10, 15, 20, 25, 30, 35, 40]:
+            signal = _make_convexity_signal(vix_level=vix)
+            weights, _ = allocator.calculate_core_allocation(signal)
+            assert sum(weights.values()) == pytest.approx(1.0)
+
+    def test_higher_vix_reduces_spy(self):
+        allocator = self._make_allocator()
+        signal_low = _make_convexity_signal(vix_level=15)
+        signal_high = _make_convexity_signal(vix_level=35)
+        _, _ = allocator.calculate_core_allocation(signal_low)
+        weights_high, _ = allocator.calculate_core_allocation(signal_high)
+        # Stress regime should have lower SPY than base
+        assert weights_high["SPY"] < 0.46
+
+    def test_higher_vix_increases_gld(self):
+        allocator = self._make_allocator()
+        signal_high = _make_convexity_signal(vix_level=35)
+        weights, _ = allocator.calculate_core_allocation(signal_high)
+        assert weights["GLD"] > 0.38  # More gold in stress
+
+    def test_low_vix_increases_spy(self):
+        allocator = self._make_allocator()
+        signal = _make_convexity_signal(vix_level=12)
+        weights, _ = allocator.calculate_core_allocation(signal)
+        assert weights["SPY"] > 0.46  # More equity in low vol
+
+
+class TestCalculateVixAllocationExtended:
+    """Additional VIX allocation edge cases."""
+
+    def _make_allocator(self):
+        allocator = VolatilityParityAllocator.__new__(VolatilityParityAllocator)
+        allocator.target_vol = 10.0
+        return allocator
+
+    def test_zero_allocation_pct(self):
+        """Zero convexity allocation should give zero short."""
+        allocator = self._make_allocator()
+        signal = _make_convexity_signal(vix_level=20, allocation_pct=0.0)
+        short, tail, vol = allocator.calculate_vix_allocation(signal)
+        assert short == 0.0
+
+    def test_mid_range_vix_tail(self):
+        """VIX 20 should use proportional tail sizing."""
+        allocator = self._make_allocator()
+        signal = _make_convexity_signal(vix_level=20, allocation_pct=3.0)
+        short, tail, vol = allocator.calculate_vix_allocation(signal)
+        # tail = min(2.0, 3.0 * 0.4) = 1.2
+        assert tail == pytest.approx(1.2)
+
+    def test_vol_contribution_type(self):
+        """VIX vol contribution should be a float."""
+        allocator = self._make_allocator()
+        signal = _make_convexity_signal(vix_level=20, allocation_pct=3.0)
+        _, _, vol = allocator.calculate_vix_allocation(signal)
+        assert isinstance(vol, float)
+
+    def test_higher_short_increases_vol(self):
+        """Higher allocation_pct should increase VIX vol contribution."""
+        allocator = self._make_allocator()
+        signal_low = _make_convexity_signal(vix_level=20, allocation_pct=1.0)
+        signal_high = _make_convexity_signal(vix_level=20, allocation_pct=5.0)
+        _, _, vol_low = allocator.calculate_vix_allocation(signal_low)
+        _, _, vol_high = allocator.calculate_vix_allocation(signal_high)
+        assert vol_high > vol_low

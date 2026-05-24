@@ -145,3 +145,141 @@ class TestEdgeCases:
         assert result.baseline_max_dd < 0  # Max DD should be negative
         for row in result.rows:
             assert row.max_dd < 0
+
+
+class TestDBCSweepRowExtended:
+    """Additional DBCSweepRow edge cases."""
+
+    def test_all_fields_present(self):
+        row = DBCSweepRow(
+            dbc_weight=0.04, funded_from="spy",
+            cagr=10.5, vol=11.2, sharpe=0.78, max_dd=-24.5,
+            sharpe_delta=-0.01, crisis_2008=-12.0,
+            crisis_2020=-7.0, crisis_2022=-13.0,
+            avg_dbc_return=3.2,
+        )
+        d = row.to_dict()
+        assert set(d.keys()) >= {
+            "dbc_weight", "funded_from", "cagr", "vol", "sharpe",
+            "max_dd", "sharpe_delta", "crisis_2008", "crisis_2020",
+            "crisis_2022", "avg_dbc_return",
+        }
+
+
+class TestDBCSweepResultExtended:
+    """Additional DBCSweepResult edge cases."""
+
+    @pytest.fixture
+    def sweep(self):
+        return DBCWeightSweep()
+
+    def test_result_to_dict_includes_all_fields(self, sweep):
+        result = sweep.run_sweep()
+        d = result.to_dict()
+        assert "timestamp" in d
+        assert "baseline_cagr" in d
+        assert "baseline_sharpe" in d
+        assert "best_weight" in d
+        assert "best_source" in d
+        assert "recommendation" in d
+        assert "is_worthwhile" in d
+
+    def test_result_to_dict_rows_are_dicts(self, sweep):
+        result = sweep.run_sweep()
+        d = result.to_dict()
+        for row in d["rows"]:
+            assert isinstance(row, dict)
+            assert "dbc_weight" in row
+
+    def test_best_sharpe_delta(self, sweep):
+        result = sweep.run_sweep()
+        assert isinstance(result.best_sharpe_delta, float)
+
+
+class TestSimulatePortfolioExtended:
+    """Additional _simulate_portfolio edge cases."""
+
+    @pytest.fixture
+    def sweep(self):
+        return DBCWeightSweep()
+
+    def test_funded_from_spy(self, sweep):
+        """Funding DBC from SPY should reduce SPY weight."""
+        data = sweep._generate_test_data()
+        spy_r = sweep._compute_returns(data["SPY"])
+        gld_r = sweep._compute_returns(data["GLD"])
+        tlt_r = sweep._compute_returns(data["TLT"])
+        dbc_r = sweep._compute_returns(data["DBC"])
+        cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+            spy_r, gld_r, tlt_r, dbc_r, 0.03, "spy"
+        )
+        assert cagr != 0
+        assert vol > 0
+
+    def test_funded_from_tlt(self, sweep):
+        """Funding DBC from TLT should reduce TLT weight."""
+        data = sweep._generate_test_data()
+        spy_r = sweep._compute_returns(data["SPY"])
+        gld_r = sweep._compute_returns(data["GLD"])
+        tlt_r = sweep._compute_returns(data["TLT"])
+        dbc_r = sweep._compute_returns(data["DBC"])
+        cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+            spy_r, gld_r, tlt_r, dbc_r, 0.03, "tlt"
+        )
+        assert cagr != 0
+        assert vol > 0
+
+    def test_constant_returns_give_high_sharpe(self, sweep):
+        """Constant returns produce very low vol → high Sharpe or zero division."""
+        n = 100
+        const_r = [0.001] * n
+        cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+            const_r, const_r, const_r, const_r, 0.03, "gld"
+        )
+        # With constant returns, vol should be near 0 and Sharpe very high or 0
+        assert sharpe >= 0
+
+
+class TestSweepRecommendation:
+    """Test recommendation logic based on Sharpe delta."""
+
+    @pytest.fixture
+    def sweep(self):
+        return DBCWeightSweep()
+
+    def test_recommendation_is_string(self, sweep):
+        result = sweep.run_sweep()
+        assert isinstance(result.recommendation, str)
+        assert len(result.recommendation) > 10
+
+    def test_is_worthwhile_is_bool(self, sweep):
+        result = sweep.run_sweep()
+        assert isinstance(result.is_worthwhile, bool)
+
+    def test_best_source_valid(self, sweep):
+        result = sweep.run_sweep()
+        assert result.best_source in ("gld", "spy", "tlt", "none")
+
+    def test_rows_contain_all_combinations(self, sweep):
+        """Should have 6 weights × 3 sources = 18 rows."""
+        result = sweep.run_sweep()
+        assert len(result.rows) == 18
+
+    def test_crisis_values_are_negative(self, sweep):
+        """Crisis proxy values should be negative."""
+        result = sweep.run_sweep()
+        for row in result.rows:
+            assert row.crisis_2008 < 0
+
+    def test_sharpe_delta_distribution(self, sweep):
+        """Some deltas should be positive, some negative, or all near zero."""
+        result = sweep.run_sweep()
+        deltas = [r.sharpe_delta for r in result.rows]
+        # At least some should be non-zero (either direction)
+        assert any(d != 0 for d in deltas)
+
+    def test_compute_returns_simple(self, sweep):
+        """_compute_returns should produce correct returns."""
+        rets = sweep._compute_returns([100.0, 110.0, 99.0])
+        assert abs(rets[0] - 0.10) < 1e-10
+        assert abs(rets[1] - (-0.10)) < 1e-10

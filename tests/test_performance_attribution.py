@@ -481,3 +481,603 @@ class TestPatchSaveVote:
     def test_patch_function_exists(self):
         """patch_save_vote should be callable (integration test would need EnsembleVoter)."""
         assert callable(patch_save_vote)
+
+
+# ---------------------------------------------------------------------------
+# Extended edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestComputeHitRateExtended:
+    """Additional edge cases for _compute_hit_rate."""
+
+    def test_neutral_signal_flat_return_boundary(self, attributor):
+        """Neutral signal, return exactly at flat boundary (0.001)."""
+        # abs(return) < 0.001 → hit for neutral
+        assert attributor._compute_hit_rate(0.0, 0.0009) is True
+        assert attributor._compute_hit_rate(0.0, -0.0009) is True
+
+    def test_neutral_signal_above_flat_boundary(self, attributor):
+        """Neutral signal, return just above flat boundary."""
+        assert attributor._compute_hit_rate(0.0, 0.001) is False
+        assert attributor._compute_hit_rate(0.0, -0.001) is False
+
+    def test_signal_at_neutral_threshold(self, attributor):
+        """Signal value exactly at |0.05| neutral threshold."""
+        # |value| = 0.05 → NOT neutral (abs < 0.05 is neutral)
+        assert attributor._compute_hit_rate(0.05, 0.01) is True
+        assert attributor._compute_hit_rate(-0.05, -0.01) is True
+
+    def test_signal_just_below_neutral_threshold(self, attributor):
+        """Signal value just below |0.05| neutral threshold."""
+        # |value| < 0.05 → neutral, uses flat-market logic
+        assert attributor._compute_hit_rate(0.049, 0.0005) is True
+        assert attributor._compute_hit_rate(0.049, 0.02) is False
+
+
+class TestComputeSourceAttributionExtended:
+    """Additional edge cases for _compute_source_attribution."""
+
+    def test_string_values_converted(self, attributor):
+        """String value/weight fields should be converted to float."""
+        signals = [
+            {
+                "source": "multi_speed_momentum",
+                "timestamp": "2026-05-15",
+                "value": "0.5",
+                "confidence": "0.8",
+                "weight": "0.2",
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib.source == "multi_speed_momentum"
+        assert attrib.total_readings == 1
+        assert attrib.avg_weight > 0
+
+    def test_invalid_string_value_skipped(self, attributor):
+        """Non-numeric string values should be skipped."""
+        signals = [
+            {
+                "source": "multi_speed_momentum",
+                "timestamp": "2026-05-15",
+                "value": "not_a_number",
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        # Value conversion fails → signal skipped (total=0, but readings=1)
+        assert attrib.total_readings == 1
+        assert attrib.active_days == 0
+
+    def test_invalid_string_weight_defaults_zero(self, attributor):
+        """Non-numeric string weight should default to 0."""
+        signals = [
+            {
+                "source": "multi_speed_momentum",
+                "timestamp": "2026-05-15",
+                "value": 0.5,
+                "confidence": 0.8,
+                "weight": "bad",
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib.avg_weight == 0.0
+
+    def test_missing_date_in_returns(self, attributor):
+        """Signals with dates not in daily_returns should be skipped."""
+        signals = [
+            {
+                "source": "multi_speed_momentum",
+                "timestamp": "2026-01-01",
+                "value": 0.5,
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib.active_days == 0
+        assert attrib.hit_rate == 0.0
+
+    def test_none_daily_return_skipped(self, attributor):
+        """daily_return=None should be skipped."""
+        signals = [
+            {
+                "source": "multi_speed_momentum",
+                "timestamp": "2026-05-15",
+                "value": 0.5,
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": None}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib.active_days == 0
+
+    def test_consecutive_losses_tracked(self, attributor):
+        """Consecutive loss streak should be tracked."""
+        signals = []
+        daily_returns = {}
+        for i in range(6):
+            d = f"2026-05-{10+i:02d}"
+            signals.append({
+                "source": "multi_speed_momentum",
+                "timestamp": d,
+                "value": 0.5,
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            })
+            daily_returns[d] = {"daily_return": -0.01}  # All negative
+
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib.max_consecutive_losses == 6
+
+    def test_consecutive_losses_reset_on_win(self, attributor):
+        """Win after loss streak resets consecutive counter."""
+        signals = []
+        daily_returns = {}
+        for i, ret in enumerate([-0.01, -0.01, 0.005, -0.01, -0.01, -0.01]):
+            d = f"2026-05-{10+i:02d}"
+            signals.append({
+                "source": "multi_speed_momentum",
+                "timestamp": d,
+                "value": 0.5,
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            })
+            daily_returns[d] = {"daily_return": ret}
+
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        # 2 losses, then win, then 3 losses → max = 3
+        assert attrib.max_consecutive_losses == 3
+
+    def test_neutral_signal_contribution_path(self, attributor):
+        """Neutral signals (|value| <= 0.05) use weight-scaled contribution."""
+        signals = [
+            {
+                "source": "multi_speed_momentum",
+                "timestamp": "2026-05-15",
+                "value": 0.03,  # Below 0.05 threshold
+                "confidence": 0.8,
+                "weight": 0.25,
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        # Neutral path: contribution = ret * 10000 * weight * 2
+        expected_bps = 0.01 * 10000 * 0.25 * 2
+        assert attrib.avg_return_bps == round(expected_bps, 2)
+
+    def test_unknown_source_uses_fallback_meta(self, attributor):
+        """Source not in SIGNAL_SOURCE_META gets fallback name/category."""
+        signals = [
+            {
+                "source": "custom_signal",
+                "timestamp": "2026-05-15",
+                "value": 0.5,
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib.display_name == "custom_signal"
+        assert attrib.category == "other"
+
+    def test_sharpe_contribution_single_observation(self, attributor):
+        """With only one matching observation, sharpe_contribution should be 0."""
+        signals = [
+            {
+                "source": "multi_speed_momentum",
+                "timestamp": "2026-05-15",
+                "value": 0.5,
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib.sharpe_contribution == 0.0
+
+    def test_sharpe_contribution_multiple_observations(self, attributor):
+        """With multiple observations and varying returns, sharpe > 0 possible."""
+        signals = []
+        daily_returns = {}
+        for i in range(10):
+            d = f"2026-05-{10+i:02d}"
+            signals.append({
+                "source": "multi_speed_momentum",
+                "timestamp": d,
+                "value": 0.5,
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            })
+            daily_returns[d] = {"daily_return": 0.001 * (i + 1)}
+
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib.sharpe_contribution != 0.0
+
+    def test_directional_signal_contribution_path(self, attributor):
+        """Directional signals (|value| > 0.05) use value-scaled contribution."""
+        signals = [
+            {
+                "source": "multi_speed_momentum",
+                "timestamp": "2026-05-15",
+                "value": 0.5,  # Above 0.05 threshold
+                "confidence": 0.8,
+                "weight": 0.2,
+                "regime_fit": "all",
+                "explanation": "",
+            },
+        ]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib = attributor._compute_source_attribution(signals, daily_returns)
+        # Directional path: contribution = ret * 10000 * abs(value)
+        expected_bps = 0.01 * 10000 * 0.5
+        assert attrib.avg_return_bps == round(expected_bps, 2)
+
+
+class TestCorrelationMatrixExtended:
+    """Additional edge cases for _compute_correlation_matrix."""
+
+    def test_single_source_returns_zero(self, attributor):
+        """Single source → no pairwise correlation → 0.0."""
+        source_data = {
+            "src_a": [{"timestamp": "2026-05-15T10:00:00", "value": 0.5}],
+        }
+        result = attributor._compute_correlation_matrix(source_data)
+        assert result == {"src_a": 0.0}
+
+    def test_fewer_than_five_dates_returns_zero(self, attributor):
+        """Less than 5 unique dates → returns 0.0 for each source."""
+        source_data = {
+            "src_a": [{"timestamp": "2026-05-15T10:00:00", "value": 0.5},
+                      {"timestamp": "2026-05-16T10:00:00", "value": -0.3}],
+            "src_b": [{"timestamp": "2026-05-15T10:00:00", "value": 0.2},
+                      {"timestamp": "2026-05-16T10:00:00", "value": 0.1}],
+        }
+        result = attributor._compute_correlation_matrix(source_data)
+        assert result["src_a"] == 0.0
+        assert result["src_b"] == 0.0
+
+    def test_string_values_converted(self, attributor):
+        """String values should be converted to float in correlation matrix."""
+        source_data = {
+            "src_a": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00", "value": str(0.1 * i)}
+                      for i in range(6)],
+            "src_b": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00", "value": str(0.2 * i)}
+                      for i in range(6)],
+        }
+        result = attributor._compute_correlation_matrix(source_data)
+        assert "src_a" in result
+        assert "src_b" in result
+        # Both should have finite correlation
+        assert np.isfinite(result["src_a"])
+        assert np.isfinite(result["src_b"])
+
+    def test_five_plus_dates_produces_correlation(self, attributor):
+        """5+ dates with 2 sources should produce nonzero correlation."""
+        source_data = {
+            "src_a": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00", "value": 0.1 * i}
+                      for i in range(10)],
+            "src_b": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00", "value": 0.05 * i}
+                      for i in range(10)],
+        }
+        result = attributor._compute_correlation_matrix(source_data)
+        # Both sources are positively trending → correlation should be positive
+        assert result["src_a"] > 0
+        assert result["src_b"] > 0
+
+
+class TestSaveLoadReportExtended:
+    """Additional edge cases for save_report / load_latest_report."""
+
+    def test_load_corrupt_json_returns_none(self, attributor):
+        """Corrupt JSON file should return None gracefully."""
+        report = attributor.generate_report(days=30)
+        attributor.save_report(report)
+
+        # Corrupt the saved file
+        files = sorted(attributor.attribution_dir.glob("attribution_*.json"), reverse=True)
+        assert len(files) > 0
+        with open(files[0], "w") as f:
+            f.write("{invalid json content")
+
+        result = attributor.load_latest_report()
+        assert result is None
+
+    def test_load_latest_picks_most_recent(self, attributor):
+        """When multiple reports exist, load the most recent."""
+        # Save two reports with different timestamps
+        src = SourceAttribution(
+            source="first", display_name="First", category="trend",
+            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
+            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
+            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
+        )
+        report1 = AttributionReport(
+            timestamp="2026-01-01T00:00:00",
+            start_date="2025-10-01", end_date="2026-01-01", analysis_days=90,
+            sources={"first": src}, best_source=None, worst_source=None,
+            avg_hit_rate=0.5, avg_correlation=0.0,
+            avg_active_sources_per_day=1.0, total_sources_tracked=1,
+            degradation_signals=[], top_performers=[],
+        )
+
+        src2 = SourceAttribution(
+            source="second", display_name="Second", category="meanrev",
+            total_readings=2, active_days=2, hit_rate=0.6, win_rate=0.6,
+            avg_return_bps=2.0, total_return_bps=4.0, sharpe_contribution=0.1,
+            max_consecutive_losses=1, avg_correlation=0.1, avg_weight=0.2,
+        )
+        report2 = AttributionReport(
+            timestamp="2026-02-01T00:00:00",
+            start_date="2025-11-01", end_date="2026-02-01", analysis_days=90,
+            sources={"second": src2}, best_source=None, worst_source=None,
+            avg_hit_rate=0.6, avg_correlation=0.1,
+            avg_active_sources_per_day=2.0, total_sources_tracked=1,
+            degradation_signals=[], top_performers=[],
+        )
+
+        attributor.save_report(report1)
+        attributor.save_report(report2)
+
+        loaded = attributor.load_latest_report()
+        assert loaded is not None
+        # "2026-02-01" > "2026-01-01" → second report should load
+        assert "second" in loaded.sources
+
+    def test_save_creates_attribution_dir(self, tmpdir):
+        """save_report should create attribution_dir if missing."""
+        data_dir = Path(tmpdir) / "new_data"
+        data_dir.mkdir()
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        # Remove attribution_dir to test creation
+        import shutil
+        if attributor.attribution_dir.exists():
+            shutil.rmtree(attributor.attribution_dir)
+
+        src = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
+            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
+            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
+        )
+        report = AttributionReport(
+            timestamp="2026-01-01T00:00:00",
+            start_date="2025-10-01", end_date="2026-01-01", analysis_days=90,
+            sources={"test": src}, best_source=None, worst_source=None,
+            avg_hit_rate=0.5, avg_correlation=0.0,
+            avg_active_sources_per_day=1.0, total_sources_tracked=1,
+            degradation_signals=[], top_performers=[],
+        )
+        path = attributor.save_report(report)
+        assert path.exists()
+        assert attributor.attribution_dir.exists()
+
+
+class TestSourceAttributionExtended:
+    """Additional edge cases for SourceAttribution dataclass."""
+
+    def test_current_weight_regime_default(self):
+        """current_weight_regime should default to 'normal'."""
+        sa = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
+            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
+            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
+        )
+        assert sa.current_weight_regime == "normal"
+
+    def test_current_weight_regime_custom(self):
+        """current_weight_regime can be set to other values."""
+        sa = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
+            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
+            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
+            current_weight_regime="crisis",
+        )
+        assert sa.current_weight_regime == "crisis"
+
+    def test_to_dict_includes_weight_regime(self):
+        """to_dict should include current_weight_regime."""
+        sa = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
+            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
+            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
+            current_weight_regime="high_vol",
+        )
+        d = sa.to_dict()
+        assert d["current_weight_regime"] == "high_vol"
+
+
+class TestAttributionReportExtended:
+    """Additional edge cases for AttributionReport dataclass."""
+
+    def test_to_dict(self):
+        """to_dict should produce a complete dict."""
+        src = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
+            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
+            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
+        )
+        report = AttributionReport(
+            timestamp="2026-01-01T00:00:00",
+            start_date="2025-10-01", end_date="2026-01-01", analysis_days=90,
+            sources={"test": src}, best_source="test", worst_source=None,
+            avg_hit_rate=0.5, avg_correlation=0.0,
+            avg_active_sources_per_day=1.0, total_sources_tracked=1,
+            degradation_signals=[], top_performers=["test"],
+        )
+        d = report.to_dict()
+        assert isinstance(d, dict)
+        assert d["best_source"] == "test"
+        assert "sources" in d
+        assert d["degradation_signals"] == []
+
+
+class TestPrintReportExtended:
+    """Additional print_report edge cases."""
+
+    def test_print_report_with_degradation(self, capsys):
+        """Print report with degradation signals."""
+        src = SourceAttribution(
+            source="bad_sig", display_name="Bad Signal", category="trend",
+            total_readings=20, active_days=18, hit_rate=0.35, win_rate=0.3,
+            avg_return_bps=-2.0, total_return_bps=-36.0, sharpe_contribution=-0.5,
+            max_consecutive_losses=8, avg_correlation=0.4, avg_weight=0.1,
+        )
+        report = AttributionReport(
+            timestamp="2026-01-01T00:00:00",
+            start_date="2025-10-01", end_date="2026-01-01", analysis_days=90,
+            sources={"bad_sig": src}, best_source=None, worst_source="bad_sig",
+            avg_hit_rate=0.35, avg_correlation=0.4,
+            avg_active_sources_per_day=1.0, total_sources_tracked=1,
+            degradation_signals=["bad_sig"], top_performers=[],
+        )
+        print_report(report)
+        captured = capsys.readouterr()
+        assert "DEGRADATION" in captured.out
+        assert "Bad Signal" in captured.out
+
+    def test_print_report_best_and_worst(self, capsys):
+        """Print report with both best and worst sources."""
+        best = SourceAttribution(
+            source="good", display_name="Good Source", category="trend",
+            total_readings=50, active_days=45, hit_rate=0.7, win_rate=0.65,
+            avg_return_bps=3.0, total_return_bps=135.0, sharpe_contribution=1.2,
+            max_consecutive_losses=2, avg_correlation=0.1, avg_weight=0.2,
+        )
+        worst = SourceAttribution(
+            source="bad", display_name="Bad Source", category="meanrev",
+            total_readings=50, active_days=45, hit_rate=0.3, win_rate=0.25,
+            avg_return_bps=-1.5, total_return_bps=-67.5, sharpe_contribution=-0.8,
+            max_consecutive_losses=10, avg_correlation=0.3, avg_weight=0.1,
+        )
+        report = AttributionReport(
+            timestamp="2026-01-01T00:00:00",
+            start_date="2025-10-01", end_date="2026-01-01", analysis_days=90,
+            sources={"good": best, "bad": worst},
+            best_source="good", worst_source="bad",
+            avg_hit_rate=0.5, avg_correlation=0.2,
+            avg_active_sources_per_day=2.0, total_sources_tracked=2,
+            degradation_signals=["bad"], top_performers=["good"],
+        )
+        print_report(report)
+        captured = capsys.readouterr()
+        assert "Best source" in captured.out
+        assert "Worst source" in captured.out
+        assert "Good Source" in captured.out
+        assert "Bad Source" in captured.out
+
+
+class TestGetPaperTradingReturnsExtended:
+    """Additional edge cases for _get_paper_trading_returns."""
+
+    def test_fallback_json_performance_file(self, tmpdir):
+        """When no paper_trading.db exists, fallback to JSON performance file."""
+        data_dir = Path(tmpdir) / "data"
+        data_dir.mkdir()
+        logs_dir = data_dir / "logs"
+        logs_dir.mkdir()
+
+        # Create a JSON performance file
+        perf_file = logs_dir / "performance_summary_2026-01-01.json"
+        perf_data = {
+            "daily_returns": [
+                {"date": "2026-01-01", "return": 0.005, "cumulative": 0.005},
+                {"date": "2026-01-02", "return": -0.003, "cumulative": 0.002},
+            ]
+        }
+        with open(perf_file, "w") as f:
+            json.dump(perf_data, f)
+
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        # The fallback uses global DATA_DIR, so patch it to our tmp dir
+        from src.monitor import performance_attribution as pa
+        original_data_dir = pa.DATA_DIR
+        try:
+            pa.DATA_DIR = data_dir
+            returns = attributor._get_paper_trading_returns(days=30)
+            assert len(returns) == 2
+            assert returns["2026-01-01"]["daily_return"] == 0.005
+            assert returns["2026-01-02"]["cumulative_return"] == 0.002
+        finally:
+            pa.DATA_DIR = original_data_dir
+
+    def test_corrupt_json_performance_file(self, tmpdir):
+        """Corrupt JSON file should be handled gracefully."""
+        data_dir = Path(tmpdir) / "data"
+        data_dir.mkdir()
+        logs_dir = data_dir / "logs"
+        logs_dir.mkdir()
+
+        perf_file = logs_dir / "performance_summary_2026-01-01.json"
+        with open(perf_file, "w") as f:
+            f.write("not valid json")
+
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        returns = attributor._get_paper_trading_returns(days=30)
+        assert isinstance(returns, dict)
+        assert len(returns) == 0
+
+
+class TestGenerateReportExtended:
+    """Additional edge cases for generate_report."""
+
+    def test_report_with_only_ensemble_votes(self, tmpdir):
+        """Report with only ensemble_votes (no source readings) should work."""
+        data_dir = Path(tmpdir) / "data"
+        data_dir.mkdir()
+
+        # Create DB with only ensemble_votes
+        db_path = data_dir / "ensemble_signals.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE ensemble_votes (
+                timestamp TEXT PRIMARY KEY, regime TEXT, regime_confidence REAL,
+                num_sources INTEGER, consensus REAL, agreement_ratio REAL,
+                equity_bias REAL, duration_bias REAL, gold_bias REAL,
+                action TEXT, confidence REAL, reasoning TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO ensemble_votes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("2026-05-15 10:00:00", "normal", 0.7, 6, 0.25, 0.65,
+              0.3, -0.1, 0.05, "neutral", 0.6, "test"))
+        # No source_readings table
+        conn.commit()
+        conn.close()
+
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        report = attributor.generate_report(days=30)
+        assert isinstance(report, AttributionReport)
+        assert len(report.sources) == 0
