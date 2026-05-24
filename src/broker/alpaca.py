@@ -294,7 +294,7 @@ class AlpacaClient:
             else:
                 result = client.close_position(symbol)
             return Order.from_alpaca(result)
-        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError) as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             raise RuntimeError(f"Failed to close position {symbol}: {e}")
 
     def close_all_positions(self) -> List[Order]:
@@ -303,7 +303,7 @@ class AlpacaClient:
         try:
             results = client.close_all_positions(cancel_orders=True)
             return [Order.from_alpaca(o) for o in results]
-        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError) as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             raise RuntimeError(f"Failed to close all positions: {e}")
     
     def get_clock(self) -> Dict[str, Any]:
