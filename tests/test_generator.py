@@ -306,8 +306,8 @@ class TestAlertsJSON:
     def test_kill_switch_alert(self, tmp_path):
         """Kill switch file generates alert."""
         gen, _ = _make_generator(tmp_path)
-        kill_file = tmp_path / ".kill_switch_paper"
-        kill_file.write_text(json.dumps({"enabled": True, "reason": "test", "timestamp": datetime.now().isoformat()}))
+        kill_file = tmp_path / "kill_switch.json"
+        kill_file.write_text(json.dumps({"enabled": True, "reason": "test", "mode": "paper", "timestamp": datetime.now().isoformat()}))
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 path = gen.generate_alerts_json()

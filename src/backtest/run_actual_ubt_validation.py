@@ -142,86 +142,86 @@ def calculate_correlation(returns1, returns2):
     return np.corrcoef(r1, r2)[0, 1]
 
 def main():
-    print('[INFO] Loading historical data...')
+    logger.info('Loading historical data...')
     data = load_historical_data()
-    
+
     symbols = list(data)
-    print(f'[INFO] Available symbols: {", ".join(symbols[:10])}...')
-    
+    logger.info('Available symbols: %s...', ", ".join(symbols[:10]))
+
     has_ubt = 'UBT' in symbols
     has_tmf = 'TMF' in symbols
     has_tlt = 'TLT' in symbols
-    
-    print(f'[INFO] UBT available: {has_ubt}, TMF available: {has_tmf}, TLT available: {has_tlt}')
-    
+
+    logger.info('UBT available: %s, TMF available: %s, TLT available: %s', has_ubt, has_tmf, has_tlt)
+
     if not has_tlt:
-        print('[ERROR] TLT data required but not found')
+        logger.error('TLT data required but not found')
         return
-    
+
     # Extract data
     tlt_dates, tlt_prices = extract_prices(data, 'TLT')
     ubt_dates, ubt_prices = extract_prices(data, 'UBT') if has_ubt else (None, None)
     tmf_dates, tmf_prices = extract_prices(data, 'TMF') if has_tmf else (None, None)
-    
-    print(f'[INFO] TLT: {len(tlt_prices)} days')
+
+    logger.info('TLT: %d days', len(tlt_prices))
     if ubt_dates:
-        print(f'[INFO] UBT: {len(ubt_prices)} days ({ubt_dates[0]} to {ubt_dates[-1]})')
+        logger.info('UBT: %d days (%s to %s)', len(ubt_prices), ubt_dates[0], ubt_dates[-1])
     if tmf_dates:
-        print(f'[INFO] TMF: {len(tmf_prices)} days ({tmf_dates[0]} to {tmf_dates[-1]})')
-    
+        logger.info('TMF: %d days (%s to %s)', len(tmf_prices), tmf_dates[0], tmf_dates[-1])
+
     # Find overlaps
     results = []
-    
+
     # Scenario 1: TLT baseline
-    print('\n[INFO] Calculating TLT baseline...')
+    logger.info('Calculating TLT baseline...')
     tlt_returns = calculate_returns(tlt_prices)
     tlt_metrics = calculate_metrics(tlt_returns, tlt_dates[1:], 'Baseline_TLT')
     results.append(tlt_metrics)
-    
+
     # Scenario 2: UBT actual
     if has_ubt and ubt_dates:
-        print('[INFO] Calculating UBT actual returns...')
+        logger.info('Calculating UBT actual returns...')
         overlap = find_overlap(tlt_dates, ubt_dates)
         if overlap:
             start, end, days = overlap
-            print(f'[INFO] TLT-UBT overlap: {days} days ({start} to {end})')
-            
+            logger.info('TLT-UBT overlap: %d days (%s to %s)', days, start, end)
+
             aligned_dates, aligned_tlt, aligned_ubt = align_series(
                 tlt_dates, tlt_prices, ubt_dates, ubt_prices
             )
-            
+
             tlt_overlap_returns = calculate_returns(aligned_tlt)
             ubt_returns = calculate_returns(aligned_ubt)
-            
+
             ubt_metrics = calculate_metrics(
-                ubt_returns, aligned_dates[1:], 'Actual_UBT', 
+                ubt_returns, aligned_dates[1:], 'Actual_UBT',
                 tlt_overlap_returns, expected_multiple=2
             )
             results.append(ubt_metrics)
-    
+
     # Scenario 3: TMF actual
     if has_tmf and tmf_dates:
-        print('[INFO] Calculating TMF actual returns...')
+        logger.info('Calculating TMF actual returns...')
         overlap = find_overlap(tlt_dates, tmf_dates)
         if overlap:
             start, end, days = overlap
-            print(f'[INFO] TLT-TMF overlap: {days} days ({start} to {end})')
-            
+            logger.info('TLT-TMF overlap: %d days (%s to %s)', days, start, end)
+
             aligned_dates, aligned_tlt, aligned_tmf = align_series(
                 tlt_dates, tlt_prices, tmf_dates, tmf_prices
             )
-            
+
             tlt_overlap_returns = calculate_returns(aligned_tlt)
             tmf_returns = calculate_returns(aligned_tmf)
-            
+
             tmf_metrics = calculate_metrics(
                 tmf_returns, aligned_dates[1:], 'Actual_TMF',
                 tlt_overlap_returns, expected_multiple=3
             )
             results.append(tmf_metrics)
-    
+
     # Calculate synthetic comparison
-    print('\n[INFO] Calculating synthetic returns for comparison...')
+    logger.info('Calculating synthetic returns for comparison...')
     tlt_for_syn = tlt_returns[:min(len(tlt_returns), 2520)]  # 10 years
     [r * 2 - 0.0080/252 for r in tlt_for_syn]
     [r * 3 - 0.0091/252 for r in tlt_for_syn]
@@ -301,7 +301,7 @@ def main():
     with open(output_path, 'w') as f:
         json.dump(report, f, indent=2)
     
-    print(f'\n[SUCCESS] Validation complete! Results saved to: {output_path}')
+    logger.info('Validation complete! Results saved to: %s', output_path)
     print('\n=== VALIDATION SUMMARY ===')
     print(f"Data Quality:")
     print(f"  TLT: {report['dataQuality']['tltDays']} days")

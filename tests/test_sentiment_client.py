@@ -13,6 +13,13 @@ import pytest
 os.environ.setdefault("OPENAI_API_KEY", "test-key-openai")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-anthropic")
 
+# Track whether we set these keys so we can clean them up
+_KEYS_SET_BY_US = []
+if os.environ.get("OPENAI_API_KEY") == "test-key-openai":
+    _KEYS_SET_BY_US.append("OPENAI_API_KEY")
+if os.environ.get("ANTHROPIC_API_KEY") == "test-key-anthropic":
+    _KEYS_SET_BY_US.append("ANTHROPIC_API_KEY")
+
 # Other test files (e.g. test_sentiment_analyzer.py) may replace
 # sys.modules["src.llm.sentiment_client"] with a MagicMock during
 # collection.  If that happened, restore the real module so our
@@ -23,8 +30,6 @@ if _SC_KEY in sys.modules:
     # A real module has __spec__; a MagicMock does not.
     if not hasattr(_existing, "__spec__") or _existing.__spec__ is None:
         del sys.modules[_SC_KEY]
-        # Clear the parent package so it re-discovers the real module
-        sys.modules.pop("src.llm", None)
         importlib.invalidate_caches()
 
 import src.llm.sentiment_client as _sc_mod

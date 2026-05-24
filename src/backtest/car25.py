@@ -12,6 +12,7 @@ Companion metric: Correlation to SPY benchmark
 """
 
 import json
+import logging
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
@@ -19,6 +20,8 @@ from pathlib import Path
 
 from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
 from src.paths import DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = ['DEFAULT_SIMULATIONS', 'DEFAULT_HORIZON_YEARS', 'DEFAULT_RISK_TOLERANCE', 'DEFAULT_CONFIDENCE', 'DEFAULT_BLOCK_SIZE', 'TRADING_DAYS_PER_YEAR', 'MAX_ITERATIONS', 'F_TOLERANCE', 'SafeFResult', 'CAR25Result', 'MarketCorrelationResult', 'CAR25FullResult', 'block_bootstrap_returns', 'simulate_equity_curve', 'calculate_max_drawdown', 'safe_f', 'car25', 'market_correlation', 'load_prices_data', 'calculate_portfolio_returns', 'parse_portfolio_string', 'compute_car25_for_portfolio', 'print_car25_result']
@@ -643,7 +646,7 @@ Examples:
                 )
                 results.append(result)
             except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
-                print(f"Error processing {portfolio_str}: {e}", file=__import__('sys').stderr)
+                logger.error("Error processing %s: %s", portfolio_str, e)
         
         # Sort by CAR25 descending
         results.sort(key=lambda r: r.car25.car25, reverse=True)

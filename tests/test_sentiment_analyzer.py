@@ -6,13 +6,16 @@ import pytest
 import json
 import sys
 import os
+import importlib
 import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock, Mock
 from collections import deque
 
-# Create mock SentimentAnalyzer and SentimentResult before importing the module
+# Create mock SentimentAnalyzer and SentimentResult — these are used by the
+# fixture that manages sys.modules isolation, so they must be defined at
+# module level (but the sys.modules injection happens inside the fixture).
 class _MockSentimentResult:
     """Mock SentimentResult that matches the real class interface."""
     def __init__(self, sentiment="neutral", confidence=0.75,
@@ -47,37 +50,61 @@ class _MockSentimentAnalyzer:
             return _MockSentimentResult(sentiment="neutral", confidence=0.5)
 
 
-# Inject mocks before importing the module under test, but preserve the
-# original module so we don't pollute other test files that need the
-# real src.llm.sentiment_client (e.g. test_sentiment_client.py).
-_original_sentiment_client = sys.modules.get("src.llm.sentiment_client")
+# Placeholder names — populated by the _isolate_sentiment_client fixture.
+# Tests reference these names; they are injected into globals() by the
+# fixture so that all test methods can use them without a fixture parameter.
+AggregatedSentiment = None
+SentimentAggregator = None
+SentimentAnalyzerPipeline = None
+demo = None
 
-sys.modules["src.llm.sentiment_client"] = MagicMock()
-sys.modules["src.llm.sentiment_client"].SentimentAnalyzer = _MockSentimentAnalyzer
-sys.modules["src.llm.sentiment_client"].SentimentResult = _MockSentimentResult
-
-from src.strategy.sentiment_analyzer import (
-    AggregatedSentiment,
-    SentimentAggregator,
-    SentimentAnalyzerPipeline,
-    demo,
-)
-
-
-# ---------------------------------------------------------------------------
-# Cleanup: restore original src.llm.sentiment_client after all tests in this
-# module finish, so that other test files (e.g. test_sentiment_client.py) see
-# the real module instead of our MagicMock stand-in.
-# ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module", autouse=True)
-def _restore_sentiment_client_module():
-    """Restore the real src.llm.sentiment_client after this module's tests."""
+def _isolate_sentiment_client():
+    """Isolate sys.modules so the mock sentiment_client doesn't leak.
+
+    Pattern: save originals → inject mocks → import → yield → restore.
+    This is the same pattern as test_tsmom_integration.py, but using
+    autouse + globals() injection so 127 test methods don't each need
+    a fixture parameter.
+    """
+    # Save originals
+    _saved = {}
+    for key in ("src.llm.sentiment_client", "src.strategy.sentiment_analyzer"):
+        _saved[key] = sys.modules.get(key)
+
+    # Inject mocks
+    sys.modules["src.llm.sentiment_client"] = MagicMock()
+    sys.modules["src.llm.sentiment_client"].SentimentAnalyzer = _MockSentimentAnalyzer
+    sys.modules["src.llm.sentiment_client"].SentimentResult = _MockSentimentResult
+
+    # Force re-import so it picks up the mock
+    sys.modules.pop("src.strategy.sentiment_analyzer", None)
+
+    import src.strategy.sentiment_analyzer as sa_mod
+    globals().update({
+        "AggregatedSentiment": sa_mod.AggregatedSentiment,
+        "SentimentAggregator": sa_mod.SentimentAggregator,
+        "SentimentAnalyzerPipeline": sa_mod.SentimentAnalyzerPipeline,
+        "demo": sa_mod.demo,
+    })
+
     yield
-    if _original_sentiment_client is not None:
-        sys.modules["src.llm.sentiment_client"] = _original_sentiment_client
-    else:
-        sys.modules.pop("src.llm.sentiment_client", None)
+
+    # Restore originals
+    for key, orig in _saved.items():
+        if orig is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = orig
+
+    # Reset globals to avoid stale references
+    globals().update({
+        "AggregatedSentiment": None,
+        "SentimentAggregator": None,
+        "SentimentAnalyzerPipeline": None,
+        "demo": None,
+    })
 
 
 class TestAggregatedSentiment:
