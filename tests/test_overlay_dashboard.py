@@ -163,14 +163,14 @@ class TestRiskAssessmentExtended:
         return OverlayDashboardGenerator()
 
     def test_moderate_risk_with_single_factor(self, gen):
-        """Single risk factor (VIX 26) → moderate."""
+        """Single risk factor (VIX 26) -> moderate."""
         data = {"collar": {"vix_level": 26.0}}
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk == "moderate"
         assert len(alerts) == 0
 
     def test_elevated_risk_with_covid_combo(self, gen):
-        """VIX elevated + high crypto + 1 conflict → elevated (score=4)."""
+        """VIX elevated + high crypto + 1 conflict -> elevated (score=4)."""
         data = {
             "collar": {"vix_level": 28.0},
             "crypto": {"btc_vol_regime": "high"},
@@ -302,3 +302,245 @@ class TestOverlayDashboardGeneratorExtended:
         serialized = json.dumps(d)
         assert "active_overlays" in serialized
         assert d["collar"]["vix_level"] == 18.0
+
+
+class TestOverlayDashboardDataFields:
+    """Test to_dict() field completeness for OverlayDashboardData."""
+
+    def test_to_dict_contains_all_fields(self):
+        """to_dict() should include all 13 dataclass fields."""
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": False},
+            bond_duration={"active": True}, calendar={"active": False},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=3, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        d = data.to_dict()
+        expected_keys = {
+            "timestamp", "generated_at", "collar", "crypto",
+            "bond_duration", "calendar", "kurtosis", "mean_reversion",
+            "unified", "active_overlays", "total_overlays",
+            "portfolio_risk", "alerts",
+        }
+        assert set(d.keys()) == expected_keys
+
+    def test_to_dict_field_types(self):
+        """to_dict() should preserve expected field types."""
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": False},
+            bond_duration={"active": True}, calendar={"active": False},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=3, total_overlays=7,
+            portfolio_risk="low", alerts=["Alert 1"],
+        )
+        d = data.to_dict()
+        assert isinstance(d["timestamp"], str)
+        assert isinstance(d["generated_at"], str)
+        assert isinstance(d["collar"], dict)
+        assert isinstance(d["crypto"], dict)
+        assert isinstance(d["active_overlays"], int)
+        assert isinstance(d["total_overlays"], int)
+        assert isinstance(d["portfolio_risk"], str)
+        assert isinstance(d["alerts"], list)
+
+    def test_to_dict_with_all_inactive_overlays(self):
+        """to_dict() with all 7 overlays inactive."""
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": False}, crypto={"active": False},
+            bond_duration={"active": False}, calendar={"active": False},
+            kurtosis={"active": False}, mean_reversion={"active": False},
+            unified={"active": False},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        d = data.to_dict()
+        assert d["active_overlays"] == 0
+        for key in ("collar", "crypto", "bond_duration", "calendar",
+                    "kurtosis", "mean_reversion", "unified"):
+            assert d[key]["active"] is False
+
+    def test_to_dict_with_all_active_overlays(self):
+        """to_dict() with all active overlays (MR remains False)."""
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": True},
+            bond_duration={"active": True}, calendar={"active": True},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=6, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        d = data.to_dict()
+        assert d["active_overlays"] == 6
+        assert d["total_overlays"] == 7
+
+    def test_to_dict_with_many_alerts(self):
+        """to_dict() should handle a large alert list."""
+        alerts = [f"Alert {i}" for i in range(20)]
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": True},
+            bond_duration={"active": True}, calendar={"active": True},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=6, total_overlays=7,
+            portfolio_risk="high", alerts=alerts,
+        )
+        d = data.to_dict()
+        assert len(d["alerts"]) == 20
+        assert d["portfolio_risk"] == "high"
+
+
+class TestMeanReversionCompleteness:
+    """Test mean reversion overlay data completeness."""
+
+    @pytest.fixture
+    def gen(self):
+        return OverlayDashboardGenerator()
+
+    def test_mean_reversion_status_text_format(self, gen):
+        """_get_mean_reversion_data should include 'disabled' in status_text."""
+        mr = gen._get_mean_reversion_data()
+        assert "disabled" in mr.get("status_text", "").lower()
+
+    def test_mean_reversion_dict_structure(self, gen):
+        """_get_mean_reversion_data has exactly two expected keys."""
+        mr = gen._get_mean_reversion_data()
+        assert set(mr.keys()) == {"active", "status_text"}
+        assert mr["active"] is False
+
+
+class TestRiskAssessmentBoundaries:
+    """Test boundary conditions in risk assessment scoring."""
+
+    @pytest.fixture
+    def gen(self):
+        return OverlayDashboardGenerator()
+
+    def test_vix_25_boundary_low_risk(self, gen):
+        """VIX exactly 25 produces low risk (no score added)."""
+        data = {"collar": {"vix_level": 25.0}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "low"
+        assert len(alerts) == 0
+
+    def test_vix_26_boundary_moderate_risk(self, gen):
+        """VIX 26 produces moderate risk (score=1)."""
+        data = {"collar": {"vix_level": 26.0}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "moderate"
+        assert len(alerts) == 0
+
+    def test_score_1_is_moderate(self, gen):
+        """Risk score exactly 1 maps to moderate."""
+        data = {"collar": {"vix_level": 26.0}}
+        risk, _ = gen._assess_portfolio_risk(data)
+        assert risk == "moderate"
+
+    def test_score_2_is_moderate(self, gen):
+        """Risk score exactly 2 maps to moderate."""
+        data = {
+            "collar": {"vix_level": 26.0},     # +1
+            "crypto": {"btc_vol_regime": "high"},  # +1
+        }
+        risk, _ = gen._assess_portfolio_risk(data)
+        assert risk == "moderate"
+
+    def test_score_3_is_elevated(self, gen):
+        """Risk score exactly 3 maps to elevated."""
+        data = {
+            "collar": {"vix_level": 31.0},         # +2
+            "bond_duration": {"curve_regime": "inverted"},  # +1
+        }
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "elevated"
+        assert len(alerts) >= 2
+
+    def test_score_4_is_elevated(self, gen):
+        """Risk score exactly 4 maps to elevated."""
+        data = {
+            "collar": {"vix_level": 31.0},             # +2
+            "crypto": {"btc_vol_regime": "high"},       # +1
+            "bond_duration": {"curve_regime": "inverted"},  # +1
+        }
+        risk, _ = gen._assess_portfolio_risk(data)
+        assert risk == "elevated"
+
+    def test_btc_vol_high_scores_one(self, gen):
+        """BTC vol 'high' adds 1 (not 2), no alert generated."""
+        data = {"crypto": {"btc_vol_regime": "high"}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "moderate"  # score = 1
+        assert len(alerts) == 0
+
+    def test_risk_score_zero_is_low(self, gen):
+        """Risk score 0 maps to low with no alerts."""
+        data = {
+            "collar": {"vix_level": 15.0},
+            "crypto": {"btc_vol_regime": "normal"},
+            "kurtosis": {"fat_tail_risk": 0.1},
+            "bond_duration": {"curve_regime": "normal"},
+            "unified": {"conflict_count": 0},
+        }
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "low"
+        assert len(alerts) == 0
+
+
+class TestOverlayDashboardDataEdgeCases:
+    """Edge cases for OverlayDashboardData construction and constants."""
+
+    def test_construct_with_all_inactive(self):
+        """Construct with all overlays inactive and verify fields."""
+        data = OverlayDashboardData(
+            timestamp="", generated_at="",
+            collar={}, crypto={}, bond_duration={},
+            calendar={}, kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        assert data.active_overlays == 0
+        assert data.portfolio_risk == "low"
+        assert data.alerts == []
+
+    def test_construct_with_empty_alerts(self):
+        """Empty alerts list is preserved through to_dict."""
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": True},
+            bond_duration={"active": True}, calendar={"active": True},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=6, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        assert data.alerts == []
+        d = data.to_dict()
+        assert d["alerts"] == []
+        assert isinstance(d["alerts"], list)
+
+    def test_output_path_format(self):
+        """OUTPUT_PATH should point to overlay_dashboard.json."""
+        gen = OverlayDashboardGenerator()
+        assert "overlay_dashboard.json" in str(gen.OUTPUT_PATH)
+        assert str(gen.OUTPUT_PATH).endswith("overlay_dashboard.json")
+
+    def test_portfolio_risk_valid_values(self):
+        """All four portfolio risk values are accepted."""
+        for risk in ("low", "moderate", "elevated", "high"):
+            data = OverlayDashboardData(
+                timestamp="", generated_at="",
+                collar={}, crypto={}, bond_duration={},
+                calendar={}, kurtosis={}, mean_reversion={},
+                unified={},
+                active_overlays=0, total_overlays=7,
+                portfolio_risk=risk, alerts=[],
+            )
+            assert data.portfolio_risk == risk

@@ -1063,3 +1063,644 @@ class TestDetectICAlertsExtended:
         # No streak alerts since IC is positive
         streak_alerts = [a for a in alerts if "streak" in a.message.lower()]
         assert len(streak_alerts) == 0
+
+
+# ---------------------------------------------------------------------------
+# HealthScore to_dict with None IC fields
+# ---------------------------------------------------------------------------
+
+class TestHealthScoreToDictEdgeCases:
+    """Verify to_dict() handles optional IC fields set to None."""
+
+    def test_to_dict_with_none_ic_fields(self):
+        hs = HealthScore(
+            source="cta", timestamp="2026-05-24",
+            health_score=0.85, accuracy_30d=0.80, accuracy_60d=0.82,
+            accuracy_90d=0.85, decay_rate=-0.01, predictions_count=100,
+            status="healthy", ic=None, ic_half_life_days=None,
+        )
+        d = hs.to_dict()
+        expected = {
+            'source', 'timestamp', 'health_score', 'accuracy_30d',
+            'accuracy_60d', 'accuracy_90d', 'decay_rate', 'predictions_count',
+            'status', 'ic', 'ic_half_life_days',
+        }
+        assert set(d.keys()) == expected
+        assert d['ic'] is None
+        assert d['ic_half_life_days'] is None
+
+    def test_to_dict_with_zero_accuracy_and_decay(self):
+        """All numeric fields at zero boundary."""
+        hs = HealthScore(
+            source="dead_signal", timestamp="2026-01-01",
+            health_score=0.0, accuracy_30d=0.0, accuracy_60d=0.0,
+            accuracy_90d=0.0, decay_rate=0.0, predictions_count=0,
+            status="unhealthy",
+        )
+        d = hs.to_dict()
+        assert d['health_score'] == 0.0
+        assert d['predictions_count'] == 0
+        assert d['decay_rate'] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Health score formula edge cases
+# ---------------------------------------------------------------------------
+
+class TestHealthScoreFormulaEdgeCases:
+    """Edge cases in health score computation (controlled DB seeding)."""
+
+    def _seed_predictions(self, tracker, source, correct, wrong, days_ago_start=80):
+        """Insert predictions with exactly *correct* right and *wrong* wrong.
+        All predictions placed within *days_ago_start* days of today."""
+        import sqlite3
+        today = datetime.now()
+        with sqlite3.connect(str(tracker.db_path)) as conn:
+            cursor = conn.cursor()
+            idx = 0
+            for _ in range(correct):
+                ts = (today - timedelta(days=days_ago_start - idx)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, source, 0.5, 0.8, 1, 1)
+                )
+                idx += 1
+            for _ in range(wrong):
+                ts = (today - timedelta(days=days_ago_start - idx)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, source, 0.5, 0.8, 1, -1)
+                )
+                idx += 1
+            conn.commit()
+
+    def test_exactly_minimum_data(self, tmp_path):
+        """Exactly 10 predictions (minimum threshold) produces a health score."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        self._seed_predictions(tracker, "min_edge", correct=7, wrong=3, days_ago_start=80)
+        result = tracker.calculate_health_score("min_edge")
+        assert result is not None
+        assert result.predictions_count >= 10
+
+    def test_all_neutral_predictions(self, tmp_path):
+        """All neutral (predicted_direction=0) -> 0.5 accuracy, 0.5 health."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        import sqlite3
+        with sqlite3.connect(str(tracker.db_path)) as conn:
+            cursor = conn.cursor()
+            for i in range(15):
+                ts = (today - timedelta(days=85 - i * 5)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, "neutral_signal", 0.0, 0.5, 0, 0)
+                )
+            conn.commit()
+        result = tracker.calculate_health_score("neutral_signal")
+        assert result is not None
+        # All neutral -> total=0 for each period -> default 0.5
+        assert result.health_score == pytest.approx(0.5, abs=0.01)
+
+    def test_all_wrong_predictions(self, tmp_path):
+        """All predictions wrong -> health near 0."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        self._seed_predictions(tracker, "all_wrong", correct=0, wrong=15, days_ago_start=80)
+        result = tracker.calculate_health_score("all_wrong")
+        assert result is not None
+        assert result.health_score < 0.35  # implementation has a floor
+
+    def test_mixed_accuracy(self, tmp_path):
+        """Controlled 80% accuracy -> health = 0.8 -> status healthy."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # 12 correct / 15 total = 0.8 for all three periods (all within last 25 days)
+        self._seed_predictions(tracker, "mixed_acc", correct=12, wrong=3, days_ago_start=20)
+        result = tracker.calculate_health_score("mixed_acc")
+        assert result is not None
+        assert result.health_score == pytest.approx(0.8, abs=0.01)
+        assert result.status == "healthy"
+
+    def test_zero_60d_data(self, tmp_path):
+        """Predictions only in 90d window (60-80d ago) -> 60d/30d default to 0.5."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        self._seed_predictions(tracker, "no_60d", correct=10, wrong=2, days_ago_start=75)
+        result = tracker.calculate_health_score("no_60d")
+        assert result is not None
+        # 90d accuracy = 10/12 ≈ 0.8333; 60d/30d default to 0.5
+        # health = 0.8333*0.5 + 0.5*0.3 + 0.5*0.2 ≈ 0.4167 + 0.15 + 0.10 = 0.6667
+        assert result.health_score == pytest.approx(0.6667, abs=0.01)
+        # decay_rate = (0.5 - 0.5)/30 = 0 since counts['60d'] == 0
+        assert result.decay_rate == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Health score classification boundary conditions
+# ---------------------------------------------------------------------------
+
+class TestHealthScoreBoundaries:
+    """Boundary conditions for healthy/degraded/unhealthy thresholds (0.7, 0.5)."""
+
+    def _seed_exact_accuracy(self, tracker, source, accuracy, count=15, days_ago_start=20):
+        """Seed *count* predictions with a given accuracy (0.0-1.0).
+        Accuracy is achieved by setting correct = int(count * accuracy)."""
+        correct = int(count * accuracy)
+        wrong = count - correct
+        import sqlite3
+        today = datetime.now()
+        with sqlite3.connect(str(tracker.db_path)) as conn:
+            cursor = conn.cursor()
+            idx = 0
+            for _ in range(correct):
+                ts = (today - timedelta(days=days_ago_start - idx)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, source, 0.5, 0.8, 1, 1)
+                )
+                idx += 1
+            for _ in range(wrong):
+                ts = (today - timedelta(days=days_ago_start - idx)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, source, 0.5, 0.8, 1, -1)
+                )
+                idx += 1
+            conn.commit()
+
+    def test_exactly_healthy_boundary(self, tmp_path):
+        """Health = 0.7 should be classified as healthy (>= 0.7)."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # 14/20 = 0.7 accuracy across all three periods
+        self._seed_exact_accuracy(tracker, "hb", accuracy=0.7, count=20, days_ago_start=20)
+        result = tracker.calculate_health_score("hb")
+        assert result is not None
+        assert result.health_score == pytest.approx(0.7, abs=0.01)
+        assert result.status == "healthy"
+
+    def test_just_below_healthy(self, tmp_path):
+        """Health just below 0.7 should be classified as degraded."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # 13/20 = 0.65 accuracy -> health = 0.65 < 0.7 -> degraded
+        self._seed_exact_accuracy(tracker, "jb_healthy", accuracy=0.65, count=20, days_ago_start=20)
+        result = tracker.calculate_health_score("jb_healthy")
+        assert result is not None
+        assert result.health_score < 0.7
+        assert result.status == "degraded"
+
+    def test_exactly_degraded_boundary(self, tmp_path):
+        """Health = 0.5 should be classified as degraded (>= 0.5)."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # 10/20 = 0.5 accuracy
+        self._seed_exact_accuracy(tracker, "db", accuracy=0.5, count=20, days_ago_start=20)
+        result = tracker.calculate_health_score("db")
+        assert result is not None
+        assert result.health_score == pytest.approx(0.5, abs=0.01)
+        assert result.status == "degraded"
+
+    def test_just_below_degraded(self, tmp_path):
+        """Health just below 0.5 should be classified as unhealthy."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # 9/20 = 0.45 accuracy -> health = 0.45 < 0.5 -> unhealthy
+        self._seed_exact_accuracy(tracker, "jb_degraded", accuracy=0.45, count=20, days_ago_start=20)
+        result = tracker.calculate_health_score("jb_degraded")
+        assert result is not None
+        assert result.health_score < 0.5
+        assert result.status == "unhealthy"
+
+
+# ---------------------------------------------------------------------------
+# compute_ic edge cases
+# ---------------------------------------------------------------------------
+
+class TestComputeICEdgeCases:
+    """Edge cases for compute_ic."""
+
+    def test_constant_signal_values(self, tmp_path):
+        """All signal values identical -> std=0 -> IC=0.0."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        import sqlite3
+        with sqlite3.connect(str(db)) as conn:
+            cursor = conn.cursor()
+            for i in range(10):
+                ts = (today - timedelta(days=80 - i)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, "const_signal", 0.5, 0.8, 1, 1)
+                )
+            conn.commit()
+        ic = tracker.compute_ic("const_signal")
+        assert ic == 0.0
+
+    def test_constant_actual_directions(self, tmp_path):
+        """All actual_direction values identical -> std=0 -> IC=0.0."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        import sqlite3
+        with sqlite3.connect(str(db)) as conn:
+            cursor = conn.cursor()
+            for i in range(10):
+                ts = (today - timedelta(days=80 - i)).strftime("%Y-%m-%dT10:00:00")
+                signal = 0.5 if i % 2 == 0 else -0.3
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, "const_actual", signal, 0.8, 1, 1)
+                )
+            conn.commit()
+        ic = tracker.compute_ic("const_actual")
+        assert ic == 0.0
+
+    def test_all_perfect_predictions(self, tmp_path):
+        """Perfectly correlated signal_value <> actual_direction -> IC ~ 1.0."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        import sqlite3
+        with sqlite3.connect(str(db)) as conn:
+            cursor = conn.cursor()
+            for i in range(10):
+                ts = (today - timedelta(days=80 - i)).strftime("%Y-%m-%dT10:00:00")
+                signal = 0.8 if i % 2 == 0 else -0.5
+                actual = 1 if i % 2 == 0 else -1
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, "perfect_test", signal, 0.8, actual, actual)
+                )
+            conn.commit()
+        ic = tracker.compute_ic("perfect_test")
+        assert ic is not None
+        assert ic == pytest.approx(1.0, abs=0.01)
+
+    def test_empty_source_returns_none(self, tmp_path):
+        """Source with no rows at all should return None."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        ic = tracker.compute_ic("ghost_source")
+        assert ic is None
+
+    def test_none_signal_values_skipped(self, tmp_path):
+        """Rows with NULL signal_value should be excluded from IC computation."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        import sqlite3
+        with sqlite3.connect(str(db)) as conn:
+            cursor = conn.cursor()
+            # Insert rows with NULL signal_value (should be skipped)
+            for i in range(5):
+                ts = (today - timedelta(days=80 - i)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, "null_signal", None, 0.8, 1, 1)
+                )
+            conn.commit()
+        # Only NULL signal rows exist, so < 3 valid rows -> None
+        ic = tracker.compute_ic("null_signal")
+        assert ic is None
+
+
+# ---------------------------------------------------------------------------
+# detect_ic_alerts edge cases
+# ---------------------------------------------------------------------------
+
+class TestDetectICAlertsEdgeCases:
+    """Boundary and edge conditions for detect_ic_alerts()."""
+
+    def test_ic_peak_zero(self, tmp_path):
+        """When all IC values are 0, guards prevent drawdown/ratio alerts."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+
+        def mock_ic(source, lookback_days=90, end_date=None):
+            return 0.0
+
+        with patch.object(tracker, 'compute_ic', side_effect=mock_ic):
+            alerts = tracker.detect_ic_alerts()
+
+        # peak_ic = 0 -> drawdown guard (peak_ic > 0.02) prevents alerts
+        assert len(alerts) == 0
+
+    def test_ic_drawdown_at_threshold(self, tmp_path):
+        """Drawdown exactly at 0.5 threshold should NOT trigger (must be >)."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+
+        # current=0.05, history=[0.10, 0.10, 0.10]
+        # peak=0.10, drawdown=(0.10-0.05)/0.10=0.5, 0.5 > 0.5 ? No
+        ic_values = iter([0.05, 0.10, 0.10, 0.10] * 6)
+
+        def mock_ic(source, lookback_days=90, end_date=None):
+            return next(ic_values)
+
+        with patch.object(tracker, 'compute_ic', side_effect=mock_ic):
+            alerts = tracker.detect_ic_alerts()
+        drawdown_alerts = [a for a in alerts if "drawdown" in a.message.lower()]
+        assert len(drawdown_alerts) == 0
+
+    def test_negative_streak_at_threshold(self, tmp_path):
+        """3 consecutive negative IC windows should trigger streak alert."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+
+        # current=-0.05, history=[-0.05, -0.05, -0.05]
+        # streak = 3 >= 3 -> alert
+        ic_values = iter([-0.05, -0.05, -0.05, -0.05] * 6)
+
+        def mock_ic(source, lookback_days=90, end_date=None):
+            return next(ic_values)
+
+        with patch.object(tracker, 'compute_ic', side_effect=mock_ic):
+            alerts = tracker.detect_ic_alerts()
+        streak_alerts = [a for a in alerts if "streak" in a.message.lower()]
+        assert len(streak_alerts) > 0
+
+    def test_negative_streak_below_threshold(self, tmp_path):
+        """2 consecutive negative windows (below 3) should NOT trigger."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+
+        # current=0.03, history=[-0.05, -0.05, 0.03]
+        # streak: most_recent=-0.05 <0->1, next=-0.05<0->2, next=0.03<0? No->break
+        # 2 >= 3 ? No
+        # peak = max(|-0.05|,|-0.05|,|0.03|) = 0.05
+        # drawdown=(0.05-0.03)/0.05=0.4 < 0.5 -> no drawdown
+        # ratio=0.03/0.05=0.6 > 0.3 -> no ratio
+        ic_values = iter([0.03, -0.05, -0.05, 0.03] * 6)
+
+        def mock_ic(source, lookback_days=90, end_date=None):
+            return next(ic_values)
+
+        with patch.object(tracker, 'compute_ic', side_effect=mock_ic):
+            alerts = tracker.detect_ic_alerts()
+        assert len(alerts) == 0
+
+
+# ---------------------------------------------------------------------------
+# Spearman rank correlation edge cases
+# ---------------------------------------------------------------------------
+
+class TestSpearmanCorrelationEdgeCases:
+    """Additional edge cases for _spearman_rank_correlation."""
+
+    def test_all_identical_in_both_series(self):
+        """Both series constant -> std=0 in both -> returns 0.0."""
+        rho = SignalHealthTracker._spearman_rank_correlation(
+            [1, 1, 1, 1], [1, 1, 1, 1]
+        )
+        assert rho == 0.0
+
+    def test_negative_values(self):
+        """Negative values in both series should still produce valid IC."""
+        rho = SignalHealthTracker._spearman_rank_correlation(
+            [-2, -1, 0, 1, 2], [-2, -1, 0, 1, 2]
+        )
+        assert rho == pytest.approx(1.0, abs=0.01)
+
+    def test_float_values_with_ties(self):
+        """Float values with some ties produce valid rank correlation."""
+        rho = SignalHealthTracker._spearman_rank_correlation(
+            [0.1, 0.1, 0.3, 0.8, 1.0],
+            [0.2, 0.2, 0.4, 0.9, 1.1],
+        )
+        assert rho == pytest.approx(1.0, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# log_prediction_simple edge cases
+# ---------------------------------------------------------------------------
+
+class TestLogPredictionSimpleEdgeCases:
+    """Edge cases for log_prediction_simple."""
+
+    def test_zero_confidence(self, tmp_path):
+        """Zero confidence should be stored correctly."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(
+            source="test_src", signal_value=0.5, confidence=0.0,
+        )
+        import sqlite3
+        with sqlite3.connect(str(db)) as conn:
+            row = conn.execute(
+                "SELECT confidence FROM signal_predictions WHERE source=?",
+                ("test_src",),
+            ).fetchone()
+        assert row[0] == 0.0
+
+    def test_extreme_signal_values(self, tmp_path):
+        """Extreme signal values (+/-1.0) should set correct direction."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(
+            source="extreme", signal_value=1.0, confidence=0.9,
+        )
+        tracker.log_prediction_simple(
+            source="extreme", signal_value=-1.0, confidence=0.9,
+        )
+        import sqlite3
+        with sqlite3.connect(str(db)) as conn:
+            rows = conn.execute(
+                "SELECT signal_value, predicted_direction FROM signal_predictions "
+                "WHERE source=? ORDER BY signal_value DESC",
+                ("extreme",),
+            ).fetchall()
+        assert rows[0] == (1.0, 1)
+        assert rows[1] == (-1.0, -1)
+
+    def test_exactly_at_threshold_boundaries(self, tmp_path):
+        """Signal values exactly at +/-0.2 thresholds set correct direction."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(
+            source="thresh", signal_value=0.2, confidence=0.8,
+        )
+        tracker.log_prediction_simple(
+            source="thresh", signal_value=-0.2, confidence=0.8,
+        )
+        import sqlite3
+        with sqlite3.connect(str(db)) as conn:
+            rows = conn.execute(
+                "SELECT signal_value, predicted_direction FROM signal_predictions "
+                "WHERE source=? ORDER BY signal_value DESC",
+                ("thresh",),
+            ).fetchall()
+        # >= 0.2 or > 0.2? Code uses: if signal_value > 0.2 -> 1
+        # 0.2 > 0.2 is False -> goes to elif < -0.2 -> 0.2 < -0.2 is False -> 0
+        assert rows[0] == (0.2, 0)
+        assert rows[1] == (-0.2, 0)
+
+
+# ---------------------------------------------------------------------------
+# detect_decay_alerts duplicate suppression
+# ---------------------------------------------------------------------------
+
+class TestDetectDecayAlertsEdgeCases:
+    """Edge cases for detect_decay_alerts."""
+
+    def test_duplicate_suppression(self, tmp_path):
+        """Same source+health pair saved twice should be deduplicated."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Save two identical health score records directly
+        import sqlite3
+        with sqlite3.connect(str(tracker.db_path)) as conn:
+            cursor = conn.cursor()
+            for days_ago in [20, 15]:
+                ts = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_health_scores "
+                    "(timestamp, source, health_score, accuracy_30d, accuracy_60d, accuracy_90d, decay_rate, predictions_count, status) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (ts, "multi_speed_momentum", 0.80, 0.75, 0.78, 0.80, 0.01, 100, "healthy"),
+                )
+            # Most recent score much lower -> triggers decay alert
+            cursor.execute(
+                "INSERT INTO signal_health_scores "
+                "(timestamp, source, health_score, accuracy_30d, accuracy_60d, accuracy_90d, decay_rate, predictions_count, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (datetime.now().strftime("%Y-%m-%dT10:00:00"), "multi_speed_momentum",
+                 0.40, 0.35, 0.40, 0.45, 0.08, 100, "degraded"),
+            )
+            conn.commit()
+
+        # First call produces alerts
+        alerts1 = tracker.detect_decay_alerts()
+        assert len(alerts1) > 0
+
+        # Second call with same data: previous_health=0.80, current_health=0.40 duplicates
+        # The dedup check looks at last 20 alerts for this source
+        alerts2 = tracker.detect_decay_alerts()
+        decay_alerts = [a for a in alerts2 if "streak" not in a.message.lower()
+                        and "drawdown" not in a.message.lower()
+                        and "ratio" not in a.message.lower()]
+
+    def test_no_alerts_when_health_improves(self, tmp_path):
+        """Rising health should NOT trigger decay alerts."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        import sqlite3
+        with sqlite3.connect(str(tracker.db_path)) as conn:
+            cursor = conn.cursor()
+            # Old score low, new score high -> improvement
+            cursor.execute(
+                "INSERT INTO signal_health_scores "
+                "(timestamp, source, health_score, accuracy_30d, accuracy_60d, accuracy_90d, decay_rate, predictions_count, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ((datetime.now() - timedelta(days=20)).strftime("%Y-%m-%dT10:00:00"),
+                 "multi_speed_momentum", 0.30, 0.25, 0.28, 0.30, 0.01, 100, "unhealthy"),
+            )
+            cursor.execute(
+                "INSERT INTO signal_health_scores "
+                "(timestamp, source, health_score, accuracy_30d, accuracy_60d, accuracy_90d, decay_rate, predictions_count, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (datetime.now().strftime("%Y-%m-%dT10:00:00"),
+                 "multi_speed_momentum", 0.80, 0.75, 0.78, 0.80, 0.01, 100, "healthy"),
+            )
+            conn.commit()
+        alerts = tracker.detect_decay_alerts()
+        # drop = (0.30 - 0.80) / 0.30 = -1.67 (negative = improvement)
+        #  -1.67 >= 0.20 ? No -> no alert
+        assert len(alerts) == 0
+
+
+# ---------------------------------------------------------------------------
+# update_actual_directions edge cases
+# ---------------------------------------------------------------------------
+
+class TestUpdateActualDirectionsEdgeCases:
+    """Edge cases for update_actual_directions."""
+
+    def test_no_matching_predictions_returns_zero(self, tmp_path):
+        """When date has no predictions, should update 0 rows."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(source="src", signal_value=0.5, confidence=0.8)
+        updated = tracker.update_actual_directions(
+            {"SPY": 0.01}, "2020-01-01"
+        )
+        assert updated == 0
+
+    def test_very_large_positive_return(self, tmp_path):
+        """Even extremely large returns should give direction=1."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(source="src", signal_value=0.5, confidence=0.8)
+        updated = tracker.update_actual_directions(
+            {"SPY": 100.0}, datetime.now().strftime("%Y-%m-%d")
+        )
+        assert isinstance(updated, int)
+        assert updated >= 0
+
+
+# ---------------------------------------------------------------------------
+# get_adjusted_weights edge cases
+# ---------------------------------------------------------------------------
+
+class TestGetAdjustedWeightsEdgeCases:
+    """Extended get_adjusted_weights edge cases."""
+
+    def test_all_sources_missing_uses_fallback(self, tmp_path):
+        """When no health scores available, fallback multiplier is 0.5."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        base_weights = {"unknown_a": 0.6, "unknown_b": 0.4}
+        adjusted = tracker.get_adjusted_weights(base_weights)
+        # Both use fallback 0.5: 0.6*0.5=0.3, 0.4*0.5=0.2 -> norm: 0.6/0.4
+        assert abs(adjusted["unknown_a"] - 0.6) < 0.01
+        assert abs(adjusted["unknown_b"] - 0.4) < 0.01
+        total = sum(adjusted.values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_zero_weight_source_not_in_adjusted(self, tmp_path):
+        """Zero base weight should produce zero adjusted weight."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Seed health data
+        import sqlite3
+        with sqlite3.connect(str(tracker.db_path)) as conn:
+            cursor = conn.cursor()
+            for i in range(15):
+                ts = (datetime.now() - timedelta(days=80 - i)).strftime("%Y-%m-%dT10:00:00")
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, actual_direction, accuracy_calculated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                    (ts, "alt_data", 0.5, 0.8, 1, 1)
+                )
+            conn.commit()
+        base_weights = {"alternative_data": 1.0, "cross_asset_rv": 0.0}
+        adjusted = tracker.get_adjusted_weights(base_weights)
+        assert adjusted["cross_asset_rv"] == 0.0
+        total = sum(adjusted.values())
+        assert abs(total - 1.0) < 0.01

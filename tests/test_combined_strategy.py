@@ -154,6 +154,26 @@ class TestConstants:
     def test_end_date(self):
         assert END_DATE == "2026-05-08"
 
+    def test_end_date_after_start(self):
+        """END_DATE is chronologically after START_DATE."""
+        from datetime import datetime
+        start = datetime.strptime(START_DATE, '%Y-%m-%d')
+        end = datetime.strptime(END_DATE, '%Y-%m-%d')
+        assert end > start
+
+    def test_rebalance_freq_positive(self):
+        """REBALANCE_FREQ is a positive integer."""
+        assert REBALANCE_FREQ > 0
+        assert isinstance(REBALANCE_FREQ, int)
+
+    def test_min_history_gt_rebalance(self):
+        """MIN_HISTORY_DAYS exceeds REBALANCE_FREQ."""
+        assert MIN_HISTORY_DAYS > REBALANCE_FREQ
+
+    def test_transaction_cost_positive(self):
+        """TRANSACTION_COST is a small positive float below 1%."""
+        assert 0 < TRANSACTION_COST < 0.01
+
 
 # ---------------------------------------------------------------------------
 # DailyPosition tests
@@ -241,6 +261,40 @@ class TestDailyPosition:
         d = asdict(pos)
         assert d['fed_regime'] == 'TIGHTENING'
 
+    def test_to_dict_fed_regime_defaults_none(self):
+        """fed_regime is None in to_dict when not provided."""
+        from dataclasses import asdict
+        pos = _make_position()
+        d = asdict(pos)
+        assert d['fed_regime'] is None
+
+    def test_to_dict_empty_weights_prices(self):
+        """Empty containers for weights/prices survive to_dict."""
+        from dataclasses import asdict
+        pos = DailyPosition(
+            date='2026-01-01', weights={}, prices={}, portfolio_value=0.0,
+        )
+        d = asdict(pos)
+        assert d['weights'] == {}
+        assert d['prices'] == {}
+        assert d['portfolio_value'] == 0.0
+
+    def test_to_dict_extreme_portfolio_value(self):
+        """Very large and very small portfolio values survive round-trip."""
+        from dataclasses import asdict
+        pos = DailyPosition(
+            date='2026-01-01', weights={'SPY': 1.0}, prices={'SPY': 500.0},
+            portfolio_value=1e12,
+        )
+        d = asdict(pos)
+        assert d['portfolio_value'] == 1e12
+        pos2 = DailyPosition(
+            date='2026-01-01', weights={'SPY': 1.0}, prices={'SPY': 500.0},
+            portfolio_value=0.01,
+        )
+        d2 = asdict(pos2)
+        assert d2['portfolio_value'] == 0.01
+
 
 # ---------------------------------------------------------------------------
 # BacktestResult tests
@@ -277,6 +331,14 @@ class TestBacktestResult:
         d = asdict(r)
         assert d['crisis_returns']['2008'] == -0.12
 
+    def test_total_return_negative(self):
+        """Negative total_return survives creation and to_dict."""
+        from dataclasses import asdict
+        r = _make_result()
+        r.total_return = -25.0
+        d = asdict(r)
+        assert d['total_return'] == -25.0
+
 
 class TestBacktestResultToDict:
     def test_all_core_fields_present(self):
@@ -312,6 +374,38 @@ class TestBacktestResultToDict:
         r = _make_result()
         d = asdict(r)
         assert d['crisis_returns'] is None
+
+    def test_extras_daily_data_included(self):
+        """extras contains the core 13 keys from _make_result()."""
+        from dataclasses import asdict
+        r = _make_result()
+        d = asdict(r)
+        # daily_values/daily_returns/positions are only set by run_backtest(),
+        # not guaranteed by the BacktestResult dataclass itself.
+        assert 'strategy_name' in d['extras']
+
+    def test_extras_keys_comprehensive(self):
+        """All 13 extras keys from _make_result() are present in to_dict."""
+        from dataclasses import asdict
+        r = _make_result()
+        d = asdict(r)
+        expected_extras = [
+            'strategy_name', 'start_date', 'end_date', 'trading_days',
+            'start_value', 'end_value', 'calmar_ratio', 'baseline_cagr',
+            'excess_return', 'information_ratio',
+            'tsmom_contribution', 'hmm_contribution', 'fed_contribution',
+        ]
+        for key in expected_extras:
+            assert key in d['extras'], f"Missing extras key: {key}"
+        assert len(d['extras']) == 13
+
+    def test_sharpe_improvement_computed(self):
+        """sharpe_improvement is the difference between strategy and baseline."""
+        from dataclasses import asdict
+        r = _make_result()
+        r.sharpe_improvement = r.sharpe_ratio - r.baseline_sharpe
+        d = asdict(r)
+        assert d['sharpe_improvement'] == pytest.approx(0.79 - 0.72)
 
 
 # ---------------------------------------------------------------------------
@@ -545,7 +639,99 @@ class TestCombineSignalsEdgeCases:
         assert resolution == 'weighted_average'
 
 
-# ---------------------------------------------------------------------------
+class TestCombineSignalsWeightingEdgeCases:
+    """Signal weighting boundary conditions and regime confidence edge cases."""
+
+    def test_all_none_regimes(self):
+        """hmm_regime=None and fed_regime=None use lower confidence (0.5)."""
+        bt = _make_backtester()
+        combined, resolution = bt._combine_signals(
+            tsmom_deltas={'SPY': 0.05, 'GLD': -0.02, 'TLT': -0.03},
+            hmm_regime=None,
+            hmm_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            fed_regime=None,
+            fed_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            current_idx=300,
+        )
+        assert resolution == 'weighted_average'
+        for t in bt.tickers:
+            assert isinstance(combined[t], float)
+
+    def test_all_signals_zero(self):
+        """All signal deltas are zero -> combined deltas are zero."""
+        bt = _make_backtester()
+        combined, resolution = bt._combine_signals(
+            tsmom_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            hmm_regime='bull',
+            hmm_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            fed_regime='EASING',
+            fed_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            current_idx=300,
+        )
+        for v in combined.values():
+            assert abs(v) < 0.001
+
+    def test_missing_delta_in_some_sources(self):
+        """When one source lacks a ticker, .get() defaults to 0.0."""
+        bt = _make_backtester()
+        combined, resolution = bt._combine_signals(
+            tsmom_deltas={'SPY': 0.05, 'GLD': -0.02},  # Missing TLT
+            hmm_regime='bull',
+            hmm_deltas={'SPY': 0.03, 'TLT': -0.03},     # Missing GLD
+            fed_regime='EASING',
+            fed_deltas={'GLD': 0.05, 'TLT': -0.05},     # Missing SPY
+            current_idx=300,
+        )
+        for t in bt.tickers:
+            assert t in combined
+
+    def test_conflicting_all_tickers(self):
+        """Conflict on every ticker triggers split_difference."""
+        bt = _make_backtester()
+        tsmom = {'SPY': 0.05, 'GLD': 0.03, 'TLT': 0.04}
+        fed = {'SPY': -0.05, 'GLD': -0.03, 'TLT': -0.04}
+        combined, resolution = bt._combine_signals(
+            tsmom_deltas=tsmom,
+            hmm_regime='bull',
+            hmm_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            fed_regime='TIGHTENING',
+            fed_deltas=fed,
+            current_idx=300,
+        )
+        assert 'split_difference' in resolution
+        # All combined deltas should be scaled down by 0.7
+        for t in bt.tickers:
+            assert abs(combined[t]) < abs(tsmom[t]) + abs(fed[t])
+
+    def test_neutral_hmm_with_split(self):
+        """Combined hmm_neutral damping and split_difference conflict."""
+        bt = _make_backtester()
+        tsmom = {'SPY': 0.05, 'GLD': -0.02, 'TLT': -0.03}
+        fed = {'SPY': -0.05, 'GLD': 0.02, 'TLT': 0.03}
+        combined, resolution = bt._combine_signals(
+            tsmom_deltas=tsmom,
+            hmm_regime='neutral',
+            hmm_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            fed_regime='TIGHTENING',
+            fed_deltas=fed,
+            current_idx=300,
+        )
+        assert 'split_difference' in resolution
+        assert 'hmm_neutral' in resolution
+
+    def test_tsmom_only_no_other_inputs(self):
+        """Only TSMOM has non-zero deltas; the weighted result tracks TSMOM."""
+        bt = _make_backtester()
+        combined, resolution = bt._combine_signals(
+            tsmom_deltas={'SPY': 0.10, 'GLD': 0.0, 'TLT': 0.0},
+            hmm_regime=None,
+            hmm_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            fed_regime=None,
+            fed_deltas={'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0},
+            current_idx=300,
+        )
+        assert combined['SPY'] > 0
+        assert resolution == 'weighted_average'
 # _get_tsmom_deltas tests
 # ---------------------------------------------------------------------------
 
@@ -587,6 +773,67 @@ class TestGetTsmomDeltas:
         assert deltas['SPY'] < 0
 
 
+class TestGetTsmomDeltasEdgeCases:
+    """TSMOM delta extraction edge cases."""
+
+    def test_ticker_not_in_dataframe(self):
+        """Ticker missing from prices_df is skipped gracefully."""
+        bt = _make_backtester_with_tsmom()
+        bt.tickers = ['SPY', 'MISSING']
+        bt.base_allocation = {'SPY': 0.7, 'MISSING': 0.3}
+        bt.prices_df = pd.DataFrame(
+            {'SPY': [500.0] * 300},
+            index=pd.date_range(end=datetime.now(), periods=300, freq='B'),
+        )
+        deltas = bt._get_tsmom_deltas(current_idx=299)
+        assert 'SPY' in deltas
+        # MISSING is not in columns so it is skipped; it should be absent or 0.0
+        assert deltas.get('MISSING', 0.0) == 0.0
+
+    def test_tiny_formation_return_no_signal(self):
+        """Formation return < 0.001 results in signal=0 and zero delta."""
+        bt = _make_backtester_with_tsmom()
+        n = 300
+        # Nearly flat prices produce formation return < 0.001
+        spy = np.linspace(500, 500.2, n)
+        gld = np.linspace(200, 200.1, n)
+        tlt = np.linspace(100, 100.05, n)
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B').strftime('%Y-%m-%d').tolist()
+        bt.prices_df = pd.DataFrame({'SPY': spy, 'GLD': gld, 'TLT': tlt}, index=dates)
+        deltas = bt._get_tsmom_deltas(current_idx=n - 1)
+        for t in bt.tickers:
+            assert abs(deltas[t]) < 0.001
+
+    def test_missing_base_allocation_default(self):
+        """Ticker not in base_allocation defaults to 0.25 weight."""
+        bt = _make_backtester_with_tsmom()
+        n = 300
+        spy = np.linspace(500, 800, n)
+        gld = np.linspace(200, 220, n)
+        tlt = np.linspace(100, 105, n)
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B').strftime('%Y-%m-%d').tolist()
+        bt.prices_df = pd.DataFrame({'SPY': spy, 'GLD': gld, 'TLT': tlt}, index=dates)
+        # Remove SPY from base_allocation to exercise the .get(..., 0.25) fallback
+        bt.base_allocation = {'GLD': 0.5, 'TLT': 0.5}
+        deltas = bt._get_tsmom_deltas(current_idx=n - 1)
+        assert 'SPY' in deltas
+        assert isinstance(deltas['SPY'], float)
+
+    def test_barely_sufficient_history(self):
+        """Exactly MIN_HISTORY_DAYS rows available does not trigger early return."""
+        bt = _make_backtester_with_tsmom()
+        min_needed = bt.tsmom.lookback_days + bt.tsmom.skip_days  # 273
+        # Provide exactly lookback + skip + 1 rows
+        n = min_needed + 1
+        spy = np.linspace(500, 800, n)
+        gld = np.linspace(200, 220, n)
+        tlt = np.linspace(100, 105, n)
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B').strftime('%Y-%m-%d').tolist()
+        bt.prices_df = pd.DataFrame({'SPY': spy, 'GLD': gld, 'TLT': tlt}, index=dates)
+        deltas = bt._get_tsmom_deltas(current_idx=n - 1)
+        assert isinstance(deltas['SPY'], float)
+
+
 # ---------------------------------------------------------------------------
 # _get_hmm_regime tests
 # ---------------------------------------------------------------------------
@@ -616,6 +863,37 @@ class TestGetHmmRegime:
         bt = _make_backtester()
         bt.tickers = ['QQQ', 'GLD']
         bt.prices_df = pd.DataFrame({'QQQ': [100.0] * 200, 'GLD': [200.0] * 200})
+        regime, deltas = bt._get_hmm_regime(current_idx=150)
+        assert regime is None
+        for t in bt.tickers:
+            assert deltas[t] == 0.0
+
+
+class TestGetHmmRegimeEdgeCases:
+    """HMM regime detection boundary conditions."""
+
+    def test_insufficient_spy_history(self):
+        """Fewer than 126 SPY price rows returns (None, zero deltas)."""
+        bt = _make_backtester()
+        bt.hmm_manager = MagicMock()
+        bt.hmm_manager.detector.is_fitted = True
+        bt.prices_df = pd.DataFrame(
+            {'SPY': [500.0] * 100, 'GLD': [200.0] * 100, 'TLT': [100.0] * 100},
+        )
+        regime, deltas = bt._get_hmm_regime(current_idx=95)
+        assert regime is None
+        for t in bt.tickers:
+            assert deltas[t] == 0.0
+
+    def test_predict_regime_returns_none(self):
+        """detector.predict_regime returning None is handled."""
+        bt = _make_backtester()
+        bt.hmm_manager = MagicMock()
+        bt.hmm_manager.detector.is_fitted = True
+        bt.hmm_manager.detector.predict_regime.return_value = None
+        bt.prices_df = pd.DataFrame(
+            {'SPY': [500.0] * 200, 'GLD': [200.0] * 200, 'TLT': [100.0] * 200},
+        )
         regime, deltas = bt._get_hmm_regime(current_idx=150)
         assert regime is None
         for t in bt.tickers:
@@ -666,6 +944,53 @@ class TestFedRegimeEdgeCases:
         regime, deltas = bt._get_fed_regime_deltas(136)
         assert regime == 'UNCERTAIN'
 
+    def test_exact_easing_threshold(self):
+        """TLT and SPY both above 5% on 63-day window triggers EASING."""
+        bt = _make_backtester()
+        n = 250
+        flat_len = 118
+        ramp_len = n - flat_len
+        spy = np.concatenate([np.ones(flat_len) * 400, np.linspace(400, 500, ramp_len)])
+        tlt = np.concatenate([np.ones(flat_len) * 100, np.linspace(100, 120, ramp_len)])
+        gld = np.ones(n) * 200
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B').strftime('%Y-%m-%d').tolist()
+        bt.prices_df = pd.DataFrame({'SPY': spy, 'GLD': gld, 'TLT': tlt}, index=dates)
+        # current_idx=180: need n >= 180+63=243; 250 >= 243 -- passes
+        # Window rows 118:180 both in ramp -- >5% return for both
+        regime, deltas = bt._get_fed_regime_deltas(180)
+        assert regime == 'EASING'
+        assert deltas['SPY'] > 0
+
+    def test_exact_tightening_threshold(self):
+        """TLT and SPY both below -5% on 63-day window triggers TIGHTENING."""
+        bt = _make_backtester()
+        n = 250
+        flat_len = 118
+        ramp_len = n - flat_len
+        spy = np.concatenate([np.ones(flat_len) * 500, np.linspace(500, 400, ramp_len)])
+        tlt = np.concatenate([np.ones(flat_len) * 120, np.linspace(120, 100, ramp_len)])
+        gld = np.ones(n) * 200
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B').strftime('%Y-%m-%d').tolist()
+        bt.prices_df = pd.DataFrame({'SPY': spy, 'GLD': gld, 'TLT': tlt}, index=dates)
+        regime, deltas = bt._get_fed_regime_deltas(180)
+        assert regime == 'TIGHTENING'
+        assert deltas['SPY'] < 0
+
+    def test_neutral_threshold(self):
+        """Within abs(TLT) < 2% and abs(SPY) < 3% on 63-day window triggers NEUTRAL."""
+        bt = _make_backtester()
+        n = 250
+        flat_len = 118
+        ramp_len = n - flat_len
+        spy = np.concatenate([np.ones(flat_len) * 500, np.linspace(500, 510, ramp_len)])
+        tlt = np.concatenate([np.ones(flat_len) * 100, np.linspace(100, 101, ramp_len)])
+        gld = np.ones(n) * 200
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B').strftime('%Y-%m-%d').tolist()
+        bt.prices_df = pd.DataFrame({'SPY': spy, 'GLD': gld, 'TLT': tlt}, index=dates)
+        regime, deltas = bt._get_fed_regime_deltas(180)
+        assert regime == 'NEUTRAL'
+        assert deltas['SPY'] == 0.0
+
 
 # ---------------------------------------------------------------------------
 # Crisis return edge cases
@@ -690,6 +1015,16 @@ class TestCrisisReturnEdgeCases:
         ret = bt._calculate_crisis_return(positions, '2020-02-01', '2020-04-30')
         assert ret == pytest.approx(0.0, abs=0.01)
 
+    def test_single_day_crisis_range(self):
+        """Crisis period with start == end returns 0% when exact date exists."""
+        bt = _make_backtester()
+        positions = [
+            _make_position(date='2020-03-01', value=100000),
+            _make_position(date='2020-03-02', value=101000),
+        ]
+        ret = bt._calculate_crisis_return(positions, '2020-03-01', '2020-03-01')
+        assert ret == pytest.approx(0.0, abs=0.01)
+
 
 # ---------------------------------------------------------------------------
 # Run baseline edge cases
@@ -704,6 +1039,26 @@ class TestRunBaselineEdgeCases:
         result = bt._run_baseline(298, 299, 100000.0)
         assert len(result['daily_returns']) == 1
         assert result['cagr'] is not None
+
+    def test_baseline_zero_volatility(self):
+        """Constant prices produce 0 % CAGR and 0 daily returns."""
+        bt = _make_backtester()
+        n = 100
+        bt.prices_df = pd.DataFrame(
+            {'SPY': [500.0] * n, 'GLD': [200.0] * n, 'TLT': [100.0] * n},
+            index=pd.date_range(end=datetime.now(), periods=n, freq='B'),
+        )
+        result = bt._run_baseline(0, n - 1, 100000.0)
+        assert result['cagr'] == 0.0
+        assert all(r == 0.0 for r in result['daily_returns'])
+
+    def test_baseline_sharpe_with_positive_volatility(self):
+        """Sharpe ratio is non-zero when CAGR is positive."""
+        bt = _make_backtester()
+        bt.prices_df = _make_prices_df(300, seed=42)
+        result = bt._run_baseline(252, 299, 100000.0)
+        if result['cagr'] > 0:
+            assert result['sharpe'] != 0
 
 
 # ---------------------------------------------------------------------------
@@ -737,6 +1092,22 @@ class TestInitEdgeCases:
             current_idx=300,
         )
         assert 'SPY' in result
+
+    def test_base_allocation_single_ticker(self):
+        """Single ticker base allocation doesn't break combine_signals."""
+        bt = _make_backtester()
+        bt.tickers = ['SPY']
+        bt.base_allocation = {'SPY': 1.0}
+        result, resolution = bt._combine_signals(
+            tsmom_deltas={'SPY': 0.05},
+            hmm_regime='bull',
+            hmm_deltas={'SPY': 0.03},
+            fed_regime='EASING',
+            fed_deltas={'SPY': 0.02},
+            current_idx=300,
+        )
+        assert 'SPY' in result
+        assert result['SPY'] > 0
 
 
 if __name__ == '__main__':

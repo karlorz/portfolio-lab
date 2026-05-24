@@ -3,6 +3,7 @@ Tests for DBC Commodity Weight Sweep (v4.90)
 """
 
 import json
+import math
 import pytest
 import numpy as np
 from pathlib import Path
@@ -224,6 +225,72 @@ class TestEdgeCases:
         for row in result.rows:
             assert row.max_dd < 0
 
+    def test_max_dbc_weight_produces_valid_result(self, sweep):
+        """Maximum sweep weight (6%) should produce valid numeric results."""
+        data = sweep._generate_test_data()
+        spy_r = sweep._compute_returns(data["SPY"])
+        gld_r = sweep._compute_returns(data["GLD"])
+        tlt_r = sweep._compute_returns(data["TLT"])
+        dbc_r = sweep._compute_returns(data["DBC"])
+
+        for source in ("gld", "spy", "tlt"):
+            cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+                spy_r, gld_r, tlt_r, dbc_r, 0.06, source
+            )
+            assert isinstance(cagr, float) and not math.isnan(cagr)
+            assert vol > 0
+            assert dd < 0
+
+    def test_all_sources_produce_different_results(self, sweep):
+        """Same DBC weight funded from different sources should produce different results."""
+        data = sweep._generate_test_data()
+        spy_r = sweep._compute_returns(data["SPY"])
+        gld_r = sweep._compute_returns(data["GLD"])
+        tlt_r = sweep._compute_returns(data["TLT"])
+        dbc_r = sweep._compute_returns(data["DBC"])
+
+        results = {}
+        for source in ("gld", "spy", "tlt"):
+            cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+                spy_r, gld_r, tlt_r, dbc_r, 0.03, source
+            )
+            results[source] = (cagr, vol, sharpe)
+
+        # At least one metric should differ across sources
+        cagrs = {r[0] for r in results.values()}
+        vols = {r[1] for r in results.values()}
+        sharpes = {r[2] for r in results.values()}
+        assert len(cagrs) > 1 or len(vols) > 1 or len(sharpes) > 1
+
+    def test_negative_only_returns(self, sweep):
+        """All-negative daily returns produce negative CAGR."""
+        n = 200
+        neg_rets = [-0.005] * n
+        cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+            neg_rets, neg_rets, neg_rets, neg_rets, 0.03, "gld"
+        )
+        assert cagr < 0
+        assert vol >= 0  # constant returns produce zero vol
+        assert sharpe < 0
+        assert dd < 0
+
+    def test_zero_weight_is_identity_across_sources(self, sweep):
+        """Zero DBC weight should produce identical results regardless of funded_from."""
+        data = sweep._generate_test_data()
+        spy_r = sweep._compute_returns(data["SPY"])
+        gld_r = sweep._compute_returns(data["GLD"])
+        tlt_r = sweep._compute_returns(data["TLT"])
+        dbc_r = sweep._compute_returns(data["DBC"])
+
+        results = []
+        for source in ("gld", "spy", "tlt"):
+            results.append(sweep._simulate_portfolio(
+                spy_r, gld_r, tlt_r, dbc_r, 0.0, source
+            ))
+
+        for i in range(1, len(results)):
+            assert results[0] == results[i]
+
 
 class TestDBCSweepRowExtended:
     """Additional DBCSweepRow edge cases."""
@@ -242,6 +309,33 @@ class TestDBCSweepRowExtended:
             "max_dd", "sharpe_delta", "crisis_2008", "crisis_2020",
             "crisis_2022", "avg_dbc_return",
         }
+
+    def test_zero_dbc_weight_row(self):
+        """A row with zero DBC weight is valid and serializable."""
+        row = DBCSweepRow(
+            dbc_weight=0.0, funded_from="gld",
+            cagr=10.6, vol=11.1, sharpe=0.79, max_dd=-26.2,
+            sharpe_delta=0.0, crisis_2008=-12.3,
+            crisis_2020=-7.1, crisis_2022=-13.0,
+            avg_dbc_return=0.0,
+        )
+        d = row.to_dict()
+        assert d["dbc_weight"] == 0.0
+        assert d["sharpe_delta"] == 0.0
+
+    def test_negative_sharpe_delta_row(self):
+        """Row with negative Sharpe delta serializes correctly."""
+        row = DBCSweepRow(
+            dbc_weight=0.06, funded_from="tlt",
+            cagr=9.0, vol=11.8, sharpe=0.64, max_dd=-30.0,
+            sharpe_delta=-0.15, crisis_2008=-15.0,
+            crisis_2020=-9.0, crisis_2022=-16.0,
+            avg_dbc_return=2.0,
+        )
+        d = row.to_dict()
+        assert d["sharpe_delta"] == -0.15
+        assert d["sharpe"] == 0.64
+        assert d["max_dd"] == -30.0
 
 
 class TestDBCSweepResultExtended:
@@ -272,6 +366,53 @@ class TestDBCSweepResultExtended:
     def test_best_sharpe_delta(self, sweep):
         result = sweep.run_sweep()
         assert isinstance(result.best_sharpe_delta, float)
+
+    def test_result_to_dict_field_completeness(self, sweep):
+        """to_dict() contains all DBCSweepResult fields with correct types."""
+        result = sweep.run_sweep()
+        d = result.to_dict()
+        expected_keys = {
+            "timestamp", "baseline_cagr", "baseline_vol", "baseline_sharpe",
+            "baseline_max_dd", "rows", "best_weight", "best_source",
+            "best_sharpe", "best_sharpe_delta", "recommendation", "is_worthwhile",
+        }
+        assert set(d.keys()) == expected_keys
+        assert isinstance(d["timestamp"], str)
+        assert isinstance(d["baseline_cagr"], float)
+        assert isinstance(d["baseline_vol"], float)
+        assert isinstance(d["baseline_sharpe"], float)
+        assert isinstance(d["baseline_max_dd"], float)
+        assert isinstance(d["is_worthwhile"], bool)
+        assert isinstance(d["best_sharpe_delta"], float)
+
+    def test_result_to_dict_rows_have_all_fields(self, sweep):
+        """Each row in to_dict() rows list has all 11 fields."""
+        result = sweep.run_sweep()
+        d = result.to_dict()
+        row_fields = {
+            "dbc_weight", "funded_from", "cagr", "vol", "sharpe",
+            "max_dd", "sharpe_delta", "crisis_2008", "crisis_2020",
+            "crisis_2022", "avg_dbc_return",
+        }
+        for row in d["rows"]:
+            assert set(row.keys()) == row_fields
+
+    def test_result_baseline_metrics_are_finite(self, sweep):
+        """All baseline metrics should be finite numbers."""
+        result = sweep.run_sweep()
+        assert math.isfinite(result.baseline_cagr)
+        assert math.isfinite(result.baseline_vol)
+        assert math.isfinite(result.baseline_sharpe)
+        assert math.isfinite(result.baseline_max_dd)
+
+    def test_result_best_metrics_reference_a_row(self, sweep):
+        """best_weight and best_source must match at least one row."""
+        result = sweep.run_sweep()
+        found = any(
+            r.dbc_weight == result.best_weight and r.funded_from == result.best_source
+            for r in result.rows
+        )
+        assert found or result.best_weight == 0.0
 
 
 class TestSimulatePortfolioExtended:
@@ -317,6 +458,58 @@ class TestSimulatePortfolioExtended:
         # With constant returns, vol should be near 0 and Sharpe very high or 0
         assert sharpe >= 0
 
+    def test_single_day_returns(self, sweep):
+        """A single trading day should still produce valid metrics."""
+        single_ret = [0.005]
+        cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+            single_ret, single_ret, single_ret, single_ret, 0.03, "gld"
+        )
+        assert isinstance(cagr, float)
+        assert vol >= 0
+        assert dd <= 0
+
+    def test_extreme_positive_returns(self, sweep):
+        """Extreme positive daily returns produce high CAGR."""
+        n = 100
+        # Slightly varied returns so std > 0
+        high_rets = [0.05 + 0.001 * (i % 5 - 2) for i in range(n)]
+        cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+            high_rets, high_rets, high_rets, high_rets, 0.06, "spy"
+        )
+        assert cagr > 100  # 5% daily * 252 = ~1260% annualized
+        assert vol > 0
+        assert sharpe > 0
+
+    def test_mixed_returns_no_nan(self, sweep):
+        """Mix of positive and negative returns should not produce NaN."""
+        n = 500
+        rng = np.random.RandomState(99)
+        mixed = list(rng.normal(0.0002, 0.015, n))
+        cagr, vol, sharpe, dd = sweep._simulate_portfolio(
+            mixed, mixed, mixed, mixed, 0.04, "tlt"
+        )
+        assert not math.isnan(cagr)
+        assert not math.isnan(vol)
+        assert not math.isnan(sharpe)
+        assert not math.isnan(dd)
+
+    def test_weight_funded_from_tlt_differs_from_gld(self, sweep):
+        """Same weight funded from TLT vs GLD should give different vol."""
+        data = sweep._generate_test_data()
+        spy_r = sweep._compute_returns(data["SPY"])
+        gld_r = sweep._compute_returns(data["GLD"])
+        tlt_r = sweep._compute_returns(data["TLT"])
+        dbc_r = sweep._compute_returns(data["DBC"])
+
+        _, v_gld, _, _ = sweep._simulate_portfolio(
+            spy_r, gld_r, tlt_r, dbc_r, 0.05, "gld"
+        )
+        _, v_tlt, _, _ = sweep._simulate_portfolio(
+            spy_r, gld_r, tlt_r, dbc_r, 0.05, "tlt"
+        )
+        # Vol should differ because GLD (0.012 daily vol) differs from TLT (0.010 daily vol)
+        assert v_gld != v_tlt
+
 
 class TestSweepRecommendation:
     """Test recommendation logic based on Sharpe delta."""
@@ -361,3 +554,36 @@ class TestSweepRecommendation:
         rets = sweep._compute_returns([100.0, 110.0, 99.0])
         assert abs(rets[0] - 0.10) < 1e-10
         assert abs(rets[1] - (-0.10)) < 1e-10
+
+    def test_best_weight_in_sweep_set(self, sweep):
+        """best_weight must be 0 or one of the sweep weights."""
+        result = sweep.run_sweep()
+        valid_weights = {0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06}
+        assert result.best_weight in valid_weights
+
+    def test_crisis_2008_is_worst_crisis(self, sweep):
+        """crisis_2008 should be the most negative crisis value (proxy for worst 5% of returns)."""
+        result = sweep.run_sweep()
+        for row in result.rows:
+            # crisis_2008 is based on worst 5%, so it should be <= crisis_2020 and crisis_2022
+            # which are approximate fractions of crisis_2008
+            assert row.crisis_2008 <= row.crisis_2020
+            assert row.crisis_2008 <= row.crisis_2022
+
+    def test_avg_dbc_return_is_reasonable(self, sweep):
+        """Average DBC return should be a plausible annualized value."""
+        result = sweep.run_sweep()
+        for row in result.rows:
+            assert -50 < row.avg_dbc_return < 50
+
+    def test_vol_is_reasonable(self, sweep):
+        """Portfolio vol should be within a plausible range."""
+        result = sweep.run_sweep()
+        for row in result.rows:
+            assert 5 < row.vol < 50
+
+    def test_cagr_is_reasonable(self, sweep):
+        """Portfolio CAGR should be within a plausible range."""
+        result = sweep.run_sweep()
+        for row in result.rows:
+            assert -50 < row.cagr < 100

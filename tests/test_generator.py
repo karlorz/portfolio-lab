@@ -1433,5 +1433,361 @@ class TestRunEdgeCases:
         gen.conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Analytics JSON tests
+# ---------------------------------------------------------------------------
+
+class TestGenerateAnalyticsJSON:
+    """Test generate_analytics_json."""
+
+    def test_generates_file(self, tmp_path):
+        """Creates analytics.json even via fallback when dependencies unavailable."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_analytics_json()
+        assert path.exists()
+        with open(path) as f:
+            data = json.load(f)
+        assert "status" in data
+        gen.conn.close()
+
+    def test_fallback_has_generated_at(self, tmp_path):
+        """Fallback error report includes generated_at."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_analytics_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert "generated_at" in data
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Graduation JSON tests
+# ---------------------------------------------------------------------------
+
+class TestGenerateGraduationJSON:
+    """Test generate_graduation_json."""
+
+    def test_generates_file_with_graduation_data(self, tmp_path):
+        """Creates graduation.json with expected top-level keys."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_graduation_json()
+        assert path is not None
+        assert path.exists()
+        with open(path) as f:
+            data = json.load(f)
+        assert "readiness_score" in data
+        assert "is_graduation_ready" in data
+        assert "criteria" in data
+        assert "generated_at" in data
+        gen.conn.close()
+
+    def test_graduation_has_criteria_items(self, tmp_path):
+        """Each criterion has name, passed, value, required, description."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_graduation_json()
+        with open(path) as f:
+            data = json.load(f)
+        for criterion in data["criteria"]:
+            assert "name" in criterion
+            assert "passed" in criterion
+            assert "value" in criterion
+            assert "required" in criterion
+            assert "description" in criterion
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Overlay JSON tests
+# ---------------------------------------------------------------------------
+
+class TestGenerateOverlayJSON:
+    """Test generate_overlay_json."""
+
+    def test_returns_path_or_none(self, tmp_path):
+        """Returns a Path when overlay generator succeeds, or None otherwise."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                result = gen.generate_overlay_json()
+        # Either a Path (success) or None (graceful failure) is acceptable
+        assert result is None or isinstance(result, Path)
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# GARCH-CVaR edge cases (continued)
+# ---------------------------------------------------------------------------
+
+class TestGarchCvarEdgeCases:
+    """Additional _load_garch_cvar_data edge cases."""
+
+    def test_flat_format_empty_dict(self, tmp_path):
+        """Empty health report file returns all defaults."""
+        gen, _ = _make_generator(tmp_path)
+        health_file = tmp_path / ".health_report.json"
+        health_file.write_text("{}")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            data = gen._load_garch_cvar_data()
+        assert data["cvar_95"] == -0.0179
+        assert data["garch_active"] is True
+        assert data["volatility_clustering"] == "elevated"
+        gen.conn.close()
+
+    def test_flat_format_zero_values(self, tmp_path):
+        """Zero values in health report are handled correctly."""
+        gen, _ = _make_generator(tmp_path)
+        health_file = tmp_path / ".health_report.json"
+        health_file.write_text(json.dumps({
+            "garch_filtered": True,
+            "cvar_95": 0.0,
+            "var_95": 0.0,
+            "cvar_ratio": 0.0,
+            "filter_active": False,
+            "conditional_volatility_current": 0.0,
+            "garch_persistence": 0.0,
+        }))
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            data = gen._load_garch_cvar_data()
+        assert data["cvar_95"] == 0.0
+        assert data["var_95"] == 0.0
+        assert data["cvar_ratio"] == 0.0
+        assert data["garch_active"] is False
+        assert data["volatility_clustering"] == "normal"
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Entropy edge cases (continued)
+# ---------------------------------------------------------------------------
+
+class TestEntropyEdgeCases:
+    """Additional _load_entropy_data edge cases."""
+
+    def test_concentration_risk_exact_boundaries(self, tmp_path):
+        """Normalized score at exact boundaries maps to correct risk labels."""
+        gen, _ = _make_generator(tmp_path)
+        boundaries = [(91, "good"), (71, "low"), (51, "medium"), (31, "high"), (0, "critical")]
+        for score, expected in boundaries:
+            health_file = tmp_path / ".health_report.json"
+            health_file.write_text(json.dumps({
+                "checks": {
+                    "portfolio_entropy": {
+                        "metrics": {
+                            "shannon_entropy": 1.0,
+                            "effective_n": 2.5,
+                            "normalized_score": score,
+                            "hhi_index": 0.38,
+                        }
+                    }
+                }
+            }))
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                data = gen._load_entropy_data()
+            assert data["concentration_risk"] == expected, (
+                f"Score {score} should be {expected}, got {data['concentration_risk']}"
+            )
+        gen.conn.close()
+
+    def test_empty_health_file_returns_defaults(self, tmp_path):
+        """Empty JSON health file returns default entropy values."""
+        gen, _ = _make_generator(tmp_path)
+        health_file = tmp_path / ".health_report.json"
+        health_file.write_text("{}")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            data = gen._load_entropy_data()
+        assert data["shannon_entropy"] == 1.02
+        assert data["concentration_risk"] == "good"
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Signals JSON edge cases (continued)
+# ---------------------------------------------------------------------------
+
+class TestSignalsJSONAdditionalEdgeCases:
+    """Additional generate_signals_json edge cases."""
+
+    def test_vix_at_low_vol_boundary(self, tmp_path):
+        """VIX at 14 (just below 15) classifies as low_vol."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("INSERT INTO prices VALUES ('^VIX', ?, ?)",
+                     (datetime.now().strftime("%Y-%m-%d"), 14.0))
+        conn.commit()
+        conn.close()
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps(
+            [{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]
+        ))
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    path = gen.generate_signals_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert data["regime"]["regime"] == "low_vol"
+        gen.conn.close()
+
+    def test_vix_at_crisis_boundary(self, tmp_path):
+        """VIX at 26 (just above 25) classifies as crisis."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("INSERT INTO prices VALUES ('^VIX', ?, ?)",
+                     (datetime.now().strftime("%Y-%m-%d"), 26.0))
+        conn.commit()
+        conn.close()
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps(
+            [{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]
+        ))
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    path = gen.generate_signals_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert data["regime"]["regime"] == "crisis"
+        gen.conn.close()
+
+    def test_empty_positions_in_portfolio_state(self, tmp_path):
+        """Portfolio state with empty positions generates valid output."""
+        gen, _ = _make_generator(tmp_path)
+        state_file = tmp_path / "portfolio_paper.json"
+        state_file.write_text(json.dumps({
+            "positions": {},
+            "cash": 50000.0
+        }))
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps(
+            [{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]
+        ))
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    path = gen.generate_signals_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert data["cash"] == 50000.0
+        assert data["total_value"] == 50000.0
+        assert data["current_positions"] == []
+        gen.conn.close()
+
+    def test_all_optional_keys_present(self, tmp_path):
+        """signals.json output contains all optional section keys."""
+        gen, _ = _make_generator(tmp_path)
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps(
+            [{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]
+        ))
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    path = gen.generate_signals_json()
+        with open(path) as f:
+            data = json.load(f)
+        all_keys = {
+            "timestamp", "regime", "target_allocations", "current_positions",
+            "cash", "total_value", "latest_prices", "recent_orders", "ml_signals",
+            "factor_rotation", "yield_curve", "duration_allocation",
+            "convexity_harvest", "volatility_parity", "llm_sentiment",
+            "ensemble_voting", "sector_rotation", "alternative_data",
+            "behavioral_sentiment", "stacking_ensemble", "factor_rotation_dashboard",
+            "smart_rebalance", "broker", "garch_cvar", "entropy", "bond_momentum",
+        }
+        assert all_keys.issubset(set(data.keys())), (
+            f"Missing keys: {all_keys - set(data.keys())}"
+        )
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# ML signals edge cases (continued)
+# ---------------------------------------------------------------------------
+
+class TestMlSignalsAdditionalEdgeCases:
+    """Additional _generate_ml_signals edge cases."""
+
+    def test_grid_search_empty_file(self, tmp_path):
+        """Empty grid search results file returns empty grid_search dict."""
+        gen, _ = _make_generator(tmp_path)
+        grid_file = tmp_path / "grid_search_results.jsonl"
+        grid_file.write_text("")
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY", "vix_level": 15, "trend_direction": 0,
+            "price_vs_sma20": 0, "timestamp": "2026-01-01",
+        }) + "\n")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+        assert signals["available"] is True
+        assert signals["grid_search"] == {}
+        gen.conn.close()
+
+    def test_vix_at_vol_spike_boundary_ml_prediction(self, tmp_path):
+        """VIX at 21 (just above 20) triggers vol_spike probability distribution."""
+        gen, _ = _make_generator(tmp_path)
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY", "vix_level": 21, "trend_direction": 0,
+            "price_vs_sma20": 0, "timestamp": "2026-01-01",
+        }) + "\n")
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+        pred = signals["predictions"]["SPY"]
+        assert pred["probabilities"]["bear"] == 0.3
+        assert pred["probabilities"]["neutral"] == 0.5
+        assert pred["probabilities"]["bull"] == 0.2
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Stats JSON edge cases (continued)
+# ---------------------------------------------------------------------------
+
+class TestStatsJSONAdditionalEdgeCases:
+    """Additional generate_stats_json edge cases."""
+
+    def test_no_vix_in_prices(self, tmp_path):
+        """Missing VIX symbol in prices does not crash stats generation."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DELETE FROM prices WHERE symbol = '^VIX'")
+        conn.commit()
+        conn.close()
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_stats_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert "asset_stats" in data
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Constants validation (continued)
+# ---------------------------------------------------------------------------
+
+class TestConstantsAdditional:
+    """Additional module-level constant validation."""
+
+    def test_data_dir_is_path_instance(self):
+        """DATA_DIR is a Path instance."""
+        from src.dashboard.generator import DATA_DIR
+        assert isinstance(DATA_DIR, Path)
+
+    def test_db_path_is_path_instance(self):
+        """DB_PATH is a Path instance."""
+        from src.dashboard.generator import DB_PATH
+        assert isinstance(DB_PATH, Path)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

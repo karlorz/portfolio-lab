@@ -721,6 +721,525 @@ class TestEdgeCases:
         assert result is False
 
 
+# ── Dataclass to_dict Field Completeness Tests ───────────────────────────
+
+
+class TestDataclassToDict:
+    """Test dataclass asdict() field completeness for all dataclass types."""
+
+    def test_backtest_config_all_fields_present(self):
+        """BacktestConfig.asdict() should include all inherited and local fields."""
+        from dataclasses import asdict
+
+        config = BacktestConfig()
+        d = asdict(config)
+        # Inherited from _BaseConfig
+        assert "start_date" in d
+        assert "end_date" in d
+        assert "initial_capital" in d
+        assert "base_weights" in d
+        assert "rebalance_frequency" in d
+        assert "rebalance_frequency_days" in d
+        assert "transaction_cost_bps" in d
+        assert "transaction_costs_by_symbol" in d
+        # Local fields
+        assert "max_signal_shift" in d
+        assert "min_holding_period" in d
+        assert "vix_bull_threshold" in d
+        assert "vix_bear_threshold" in d
+        assert "vix_crisis_threshold" in d
+
+    def test_backtest_config_field_values(self):
+        """Local field defaults are correctly serialised via asdict()."""
+        from dataclasses import asdict
+
+        d = asdict(BacktestConfig())
+        assert d["max_signal_shift"] == 0.05
+        assert d["min_holding_period"] == 20
+        assert d["vix_bull_threshold"] == 15.0
+        assert d["vix_bear_threshold"] == 20.0
+        assert d["vix_crisis_threshold"] == 30.0
+
+    def test_daily_return_minimal_asdict(self):
+        """DailyReturn without vix_spot should still include vix_spot=None."""
+        from dataclasses import asdict
+
+        dr = DailyReturn(
+            date="2020-01-02", spy_return=0.01, gld_return=-0.005, tlt_return=0.002
+        )
+        d = asdict(dr)
+        assert d["date"] == "2020-01-02"
+        assert d["spy_return"] == 0.01
+        assert d["gld_return"] == -0.005
+        assert d["tlt_return"] == 0.002
+        assert d["vix_spot"] is None
+        assert set(d.keys()) == {
+            "date",
+            "spy_return",
+            "gld_return",
+            "tlt_return",
+            "vix_spot",
+        }
+
+    def test_daily_return_with_vix_asdict(self):
+        """DailyReturn with vix_spot set should serialise it."""
+        from dataclasses import asdict
+
+        dr = DailyReturn(
+            date="2020-03-15",
+            spy_return=-0.03,
+            gld_return=0.02,
+            tlt_return=0.01,
+            vix_spot=35.0,
+        )
+        d = asdict(dr)
+        assert d["vix_spot"] == 35.0
+
+
+# ── Constants Validation Tests ────────────────────────────────────────────
+
+
+class TestConstants:
+    """Test hardcoded constant values and invariants."""
+
+    def test_regime_signal_map_exhaustive_keys(self):
+        """REGIME_SIGNAL_MAP should have exactly the four expected regimes."""
+        keys = set(AlternativeDataBacktester.REGIME_SIGNAL_MAP.keys())
+        assert keys == {"bull", "bear", "neutral", "crisis"}
+
+    def test_vix_threshold_ordering(self):
+        """vix thresholds must be strictly increasing: bull < bear < crisis."""
+        config = BacktestConfig()
+        assert config.vix_bull_threshold < config.vix_bear_threshold
+        assert config.vix_bear_threshold < config.vix_crisis_threshold
+
+    def test_min_holding_period_and_max_signal_shift_defaults(self):
+        """Extra config fields should have documented defaults."""
+        config = BacktestConfig()
+        assert config.min_holding_period == 20
+        assert config.max_signal_shift == 0.05
+
+
+# ── Backtest Execution Edge Cases ─────────────────────────────────────────
+
+
+class TestBacktestExecutionEdgeCases:
+    """Edge cases in backtest execution (zero signals, missing data, etc.)."""
+
+    def _make_controlled_data(
+        self,
+        n_days: int = 252,
+        spy_ret: float = 0.0,
+        gld_ret: float = 0.0005,
+        tlt_ret: float = 0.0003,
+        start_date: str = "2020-01-01",
+    ):
+        """Generate deterministic DailyReturn list with controlled returns."""
+        from datetime import timedelta
+
+        data = []
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        for i in range(n_days):
+            d = start + timedelta(days=i)
+            data.append(
+                DailyReturn(
+                    date=d.strftime("%Y-%m-%d"),
+                    spy_return=spy_ret,
+                    gld_return=gld_ret,
+                    tlt_return=tlt_ret,
+                )
+            )
+        return data
+
+    def test_backtest_all_zero_signals(self):
+        """All-zero signal should produce overlay_active_months=0 and Sharpe identical to baseline."""
+        data = self._make_controlled_data(n_days=300, spy_ret=0.0)
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.extras["overlay_active_months"] == 0
+        assert result.extras["overlay_active_pct"] == 0.0
+        # Baseline and overlay Sharpe should be identical (zero signal = no overlay alpha)
+        assert abs(result.sharpe_ratio - result.baseline_sharpe) < 0.01
+
+    def test_no_data_in_date_range_returns_none(self):
+        """Data exists but none within backtest period -> None."""
+        data = self._make_controlled_data(n_days=100, start_date="2020-01-01")
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2025-01-01", end_date="2025-06-01")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is None
+
+    def test_single_data_point_backtest(self):
+        """Single day of data should produce a valid result."""
+        data = [
+            DailyReturn(
+                date="2020-06-15",
+                spy_return=0.001,
+                gld_return=0.0005,
+                tlt_return=0.0003,
+            )
+        ]
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-06-01", end_date="2020-06-30")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+
+    def test_backtest_extreme_negative_market(self):
+        """Consistently negative SPY returns produce crisis allocation and negative CAGR."""
+        data = self._make_controlled_data(
+            n_days=300, spy_ret=-0.005, gld_ret=0.0, tlt_ret=0.0
+        )
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.cagr < 0
+
+    def test_regime_distribution_counts_plausible(self):
+        """Total regime counts should not exceed number of data days."""
+        data = self._make_controlled_data(n_days=200, spy_ret=0.001)
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        total_regime = sum(result.extras["regime_distribution"].values())
+        assert total_regime > 0
+        assert total_regime <= len(data)
+
+    def test_backtest_transaction_cost_non_negative(self):
+        """Transaction costs should never be negative."""
+        data = TestRunBacktest._make_synthetic_data(
+            TestRunBacktest(), n_days=200
+        )
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-06-01")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.total_transaction_costs >= 0.0
+
+
+# ── Performance Metric Edge Cases ─────────────────────────────────────────
+
+
+class TestMetricsEdgeCases:
+    """Edge cases for performance metric calculations."""
+
+    def test_calculate_metrics_uniform_returns(self):
+        """All identical returns -> zero volatility -> Sharpe handled gracefully."""
+        returns = [0.001] * 252
+        metrics = AlternativeDataBacktester._calculate_metrics(returns)
+        assert metrics["cagr"] > 0
+        assert isinstance(metrics["sharpe"], (int, float))
+        # Zero variance produces Sharpe=0 (division-by-zero guard); that is valid
+
+    def test_annualize_regime_returns_all_empty(self):
+        """All regime lists empty -> all zeros returned."""
+        regime_returns = {
+            "bull": [],
+            "bear": [],
+            "neutral": [],
+            "crisis": [],
+        }
+        result = AlternativeDataBacktester._annualize_regime_returns(
+            regime_returns
+        )
+        for regime in ("bull", "bear", "neutral", "crisis"):
+            assert result[regime] == 0.0
+
+    def test_annualize_regime_returns_unknown_key(self):
+        """Unknown regime keys are preserved and computed."""
+        regime_returns = {"unknown_key": [0.001] * 10}
+        result = AlternativeDataBacktester._annualize_regime_returns(
+            regime_returns
+        )
+        assert "unknown_key" in result
+        assert result["unknown_key"] > 0
+
+    def test_annualize_returns_single_day(self):
+        """Single-day return annualises to extreme value (n_years=1/252)."""
+        result = AlternativeDataBacktester._annualize_returns([0.01])
+        # (1.01^(252) - 1) * 100 ~= 1030%
+        assert result > 100
+
+    def test_annualize_returns_exactly_one_year(self):
+        """Exactly 252 trading days should be one year of annualisation."""
+        result = AlternativeDataBacktester._annualize_returns([0.001] * 252)
+        # (1.001^252 - 1) * 100 ~= 28.6%
+        assert 20 < result < 40
+
+    def test_annualize_returns_all_zero_returns(self):
+        """All-zero daily returns -> zero annualized return."""
+        result = AlternativeDataBacktester._annualize_returns([0.0] * 252)
+        assert result == 0.0
+
+    def test_calculate_metrics_mixed_sign_returns(self):
+        """Returns with both positive and negative values should produce valid metrics."""
+        returns = [0.005, -0.003, 0.007, -0.001, 0.002] * 50
+        metrics = AlternativeDataBacktester._calculate_metrics(returns)
+        assert isinstance(metrics["cagr"], float)
+        assert metrics["volatility"] > 0
+        assert isinstance(metrics["sharpe"], float)
+        assert metrics["max_dd"] < 0  # There were negative returns, so drawdown exists
+
+
+# ── Signal Boundary Conditions ────────────────────────────────────────────
+
+
+class TestSignalBoundaries:
+    """Boundary conditions for regime and signal classification."""
+
+    def test_boundary_bull_neutral_exact(self):
+        """spy_60d_return=0.075 -> composite_score=0.15; NOT > 0.15 -> neutral."""
+        bt = AlternativeDataBacktester()
+        assert bt.infer_regime_from_spy_return(0.075) == "neutral"
+
+    def test_boundary_just_above_bull(self):
+        """spy_60d_return just above 0.075 -> composite_score > 0.15 -> bull."""
+        bt = AlternativeDataBacktester()
+        assert bt.infer_regime_from_spy_return(0.0750001) == "bull"
+
+    def test_boundary_neutral_bear_exact(self):
+        """spy_60d_return=-0.075 -> composite_score=-0.15; NOT < -0.15 -> neutral."""
+        bt = AlternativeDataBacktester()
+        assert bt.infer_regime_from_spy_return(-0.075) == "neutral"
+
+    def test_boundary_just_below_bear(self):
+        """spy_60d_return just below -0.075 -> composite_score < -0.15 -> bear."""
+        bt = AlternativeDataBacktester()
+        assert bt.infer_regime_from_spy_return(-0.0750001) == "bear"
+
+    def test_get_signal_and_regime_exactly_60_days(self):
+        """Exactly 60 data points triggers the >=60 code path."""
+        bt = AlternativeDataBacktester(BacktestConfig(start_date="2020-01-01", end_date="2020-06-01"))
+        day = DailyReturn(
+            date="2020-03-15", spy_return=0.01, gld_return=0.0, tlt_return=0.0
+        )
+        past_60d = [0.002] * 60
+        regime, signal = bt.get_signal_and_regime(day, past_60d)
+        assert regime in ("bull", "neutral")
+        assert -1.0 <= signal <= 1.0
+
+    def test_get_signal_and_regime_single_datum(self):
+        """Only 1 data point uses the <60 code path (all available data)."""
+        bt = AlternativeDataBacktester(BacktestConfig(start_date="2020-01-01", end_date="2020-06-01"))
+        day = DailyReturn(
+            date="2020-03-15", spy_return=0.01, gld_return=0.0, tlt_return=0.0
+        )
+        past_60d = [0.05]  # Single high return
+        regime, signal = bt.get_signal_and_regime(day, past_60d)
+        # composite_score = clip(0.05 * 2.0, -1, 1) = 0.10 < 0.15 -> neutral
+        assert regime == "neutral"
+        assert signal == pytest.approx(0.10, abs=1e-6)
+
+    def test_get_signal_and_regime_empty_buffer(self):
+        """Empty past_60d list should not crash (all available = [])."""
+        bt = AlternativeDataBacktester(BacktestConfig(start_date="2020-01-01", end_date="2020-06-01"))
+        day = DailyReturn(
+            date="2020-03-15", spy_return=0.01, gld_return=0.0, tlt_return=0.0
+        )
+        regime, signal = bt.get_signal_and_regime(day, [])
+        # np.prod(1 + []) - 1 = 1 - 1 = 0, signal = 0, regime = neutral
+        assert regime == "neutral"
+        assert signal == 0.0
+
+    def test_extreme_positive_signal_clipping(self):
+        """100% 60-day return clips to signal=1.0."""
+        bt = AlternativeDataBacktester()
+        result = bt.infer_regime_from_spy_return(1.0)
+        assert result == "bull"
+
+    def test_extreme_negative_signal_clipping(self):
+        """-100% 60-day return clips to signal=-1.0."""
+        bt = AlternativeDataBacktester()
+        result = bt.infer_regime_from_spy_return(-1.0)
+        assert result == "bear"
+
+
+# ── Utility / Helper Edge Cases ───────────────────────────────────────────
+
+
+class TestHelpersEdgeCases:
+    """Edge cases for utility, helper, and data-processing methods."""
+
+    def test_process_price_data_empty_dict(self):
+        """Empty prices_data leaves data empty (logs error about missing SPY)."""
+        bt = AlternativeDataBacktester()
+        bt._process_price_data({})
+        assert bt.data == []
+
+    def test_process_price_data_missing_spy(self, caplog):
+        """Missing SPY logs error and leaves data empty."""
+        import logging
+
+        caplog.set_level(logging.ERROR)
+        bt = AlternativeDataBacktester()
+        bt._process_price_data(
+            {"GLD": [{"d": "2020-01-02", "p": 100.0}]}
+        )
+        assert bt.data == []
+        assert "No SPY data" in caplog.text
+
+    def test_process_price_data_partial_missing_symbols(self):
+        """Missing TLT means no days pass the all() check -> empty data."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [
+                {"d": "2020-01-02", "p": 100.0},
+                {"d": "2020-01-03", "p": 101.0},
+            ],
+            "GLD": [
+                {"d": "2020-01-02", "p": 50.0},
+                {"d": "2020-01-03", "p": 51.0},
+            ],
+            # TLT missing entirely
+        }
+        bt._process_price_data(prices)
+        assert bt.data == []
+
+    def test_process_price_data_all_symbols_present(self):
+        """All three symbols with consecutive days should produce daily returns."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [
+                {"d": "2020-01-02", "p": 100.0},
+                {"d": "2020-01-03", "p": 101.0},
+            ],
+            "GLD": [
+                {"d": "2020-01-02", "p": 50.0},
+                {"d": "2020-01-03", "p": 49.0},
+            ],
+            "TLT": [
+                {"d": "2020-01-02", "p": 80.0},
+                {"d": "2020-01-03", "p": 81.0},
+            ],
+        }
+        bt._process_price_data(prices)
+        assert len(bt.data) == 1
+        assert bt.data[0].date == "2020-01-03"
+        assert bt.data[0].spy_return == pytest.approx(0.01)
+        assert bt.data[0].gld_return == pytest.approx(-0.02)
+        assert bt.data[0].tlt_return == pytest.approx(0.0125)
+
+    def test_is_rebalance_day_mid_month_same_month(self):
+        """Day 15 in same month as last rebalance -> not a rebalance day."""
+        assert not AlternativeDataBacktester._is_rebalance_day(
+            "2020-06-15", "2020-06-01"
+        )
+
+    def test_is_rebalance_day_last_day_of_month(self):
+        """Day 28+ in same month as last rebalance -> not a rebalance day."""
+        assert not AlternativeDataBacktester._is_rebalance_day(
+            "2020-02-28", "2020-02-01"
+        )
+
+    def test_is_rebalance_day_day4_no_prior(self):
+        """Day 4 with no prior rebalance -> not a rebalance day."""
+        assert not AlternativeDataBacktester._is_rebalance_day(
+            "2020-01-04", None
+        )
+
+    def test_print_report_empty_result(self, capsys):
+        """print_report with all-zero result should not crash."""
+        result = BacktestResult(
+            total_return=0.0,
+            cagr=0.0,
+            volatility=0.0,
+            sharpe_ratio=0.0,
+            max_drawdown=0.0,
+            total_rebalances=0,
+            total_transaction_costs=0.0,
+            baseline_sharpe=0.0,
+            sharpe_improvement=0.0,
+            crisis_returns=None,
+            extras={
+                "overlay_active_months": 0,
+                "overlay_active_pct": 0.0,
+                "avg_rebalance_size": 0.0,
+                "regime_distribution": {},
+                "regime_returns": {},
+                "equity_curve": [],
+            },
+        )
+        bt = AlternativeDataBacktester()
+        bt.print_report(result)
+        captured = capsys.readouterr()
+        assert "ALTERNATIVE DATA" in captured.out
+        assert "SUCCESS CRITERIA" in captured.out
+
+    def test_print_report_mismatch_verdict(self, capsys):
+        """print_report shows MISMATCH when signal sign differs from regime return."""
+        result = BacktestResult(
+            total_return=-5.0,
+            cagr=-2.0,
+            volatility=15.0,
+            sharpe_ratio=-0.2,
+            max_drawdown=-30.0,
+            total_rebalances=100,
+            total_transaction_costs=50.0,
+            baseline_sharpe=0.3,
+            sharpe_improvement=-0.5,
+            crisis_returns={"2008": 5.0},
+            extras={
+                "overlay_active_months": 10,
+                "overlay_active_pct": 20.0,
+                "avg_rebalance_size": 0.03,
+                "regime_distribution": {
+                    "bull": 100,
+                    "bear": 100,
+                    "neutral": 100,
+                    "crisis": 100,
+                },
+                "regime_returns": {
+                    "bull": -5.0,
+                    "bear": 3.0,
+                    "neutral": 0.5,
+                    "crisis": 2.0,
+                },
+                "equity_curve": [
+                    {
+                        "date": "2020-01-02",
+                        "baseline": 100000.0,
+                        "overlay": 95000.0,
+                    }
+                ],
+            },
+        )
+        bt = AlternativeDataBacktester()
+        bt.print_report(result)
+        captured = capsys.readouterr()
+        assert "MISMATCH" in captured.out  # bull signal=+0.4 but bull return=-5.0
+
+    def test_transaction_cost_deduction(self):
+        """Transaction costs are deducted from overlay capital (cost > 0 when turnover > 0)."""
+        data = TestRunBacktest._make_synthetic_data(
+            TestRunBacktest(), n_days=200
+        )
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-06-01")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        # With 200 days of data and monthly rebalancing, there should be some rebalances
+        assert result.total_rebalances > 0
+        # Costs should be positive
+        assert result.total_transaction_costs > 0
+
+
 # ── CLI Tests ───────────────────────────────────────────────────────────
 
 

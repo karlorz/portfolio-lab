@@ -1055,26 +1055,27 @@ class TestBehavioralSentimentBacktest:
         assert stats["false_positives"] == 0
 
     def test_false_positive_rate_with_sell_signals_upward_market(self):
-        """False positive rate is 100% for sell signals when prices always go up."""
+        """False positive rate is >0 for sell signals when prices always go up."""
         from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
 
-        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(100)]
+        n = 100
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(n)]
         prices = {
             "SPY": {d: 100.0 * (1.001 ** i) for i, d in enumerate(dates)},
             "GLD": {d: 100.0 * (1.0005 ** i) for i, d in enumerate(dates)},
             "TLT": {d: 100.0 * (1.0003 ** i) for i, d in enumerate(dates)},
         }
-        # All sell signals — with upward prices, all should be false positives
-        signal_map = {
-            d: {"date": d, "signal_type": "sell", "equity_shift_pct": -2.0, "regime_suppressed": False}
-            for d in dates
-        }
+        # Only set sell signals on first 80 dates (need 20-day lookahead space)
+        signal_map = {}
+        for i, d in enumerate(dates):
+            if i < n - 20:
+                signal_map[d] = {"date": d, "signal_type": "sell", "equity_shift_pct": -2.0, "regime_suppressed": False}
 
         bt = BehavioralSentimentBacktest()
         _, _, stats = bt._simulate(dates, prices, signal_map)
 
         assert stats["total_non_neutral"] > 0
-        assert stats["false_positives"] > 0  # At least some are false positives
+        assert stats["false_positives"] > 0  # All sell signals are false when prices go up
 
     # ==================================================================
     # VIX regime boundary conditions
