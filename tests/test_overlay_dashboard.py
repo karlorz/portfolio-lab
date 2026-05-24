@@ -6,6 +6,7 @@ import json
 import pytest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from src.dashboard.overlay_dashboard import (
     OverlayDashboardGenerator,
@@ -544,3 +545,1061 @@ class TestOverlayDashboardDataEdgeCases:
                 portfolio_risk=risk, alerts=[],
             )
             assert data.portfolio_risk == risk
+
+
+class TestOverlayDashboardExports:
+    """Test public API exports and __all__ coverage."""
+
+    def test_module_has_public_names(self):
+        from src.dashboard import overlay_dashboard as mod
+        assert hasattr(mod, "OverlayDashboardData")
+        assert hasattr(mod, "OverlayDashboardGenerator")
+        assert hasattr(mod, "generate_overlay_dashboard")
+        assert hasattr(mod, "main")
+
+    def test_init_exports_all_modules(self):
+        from src.dashboard import __all__ as dashboard_all
+        assert "overlay_dashboard" in dashboard_all
+        assert "generator" in dashboard_all
+
+    def test_from_import_star_works(self):
+        exec("from src.dashboard.overlay_dashboard import *")
+        import src.dashboard.overlay_dashboard as mod
+        public = {n for n in dir(mod) if not n.startswith("_")}
+        assert "OverlayDashboardData" in public
+        assert "OverlayDashboardGenerator" in public
+        assert "generate_overlay_dashboard" in public
+        assert "main" in public
+
+    def test_convenience_function_importable(self):
+        from src.dashboard.overlay_dashboard import generate_overlay_dashboard
+        assert callable(generate_overlay_dashboard)
+
+
+class TestOverlayDashboardConstants:
+    """Test module-level constants validation."""
+
+    def test_output_path_ends_with_dashboard_json(self):
+        gen = OverlayDashboardGenerator()
+        assert "overlay_dashboard.json" in str(gen.OUTPUT_PATH)
+        assert str(gen.OUTPUT_PATH).endswith("overlay_dashboard.json")
+
+    def test_output_path_is_under_data_dir(self):
+        from src.paths import DATA_DIR
+        gen = OverlayDashboardGenerator()
+        assert str(gen.OUTPUT_PATH).startswith(str(DATA_DIR))
+
+    def test_total_overlays_constant(self):
+        """Total overlays count should match the number of overlay dict fields."""
+        gen = OverlayDashboardGenerator()
+        from dataclasses import fields
+        overlay_fields = [f for f in fields(OverlayDashboardData)
+                         if f.type == dict]
+        dashboard = OverlayDashboardData(
+            timestamp="", generated_at="",
+            collar={}, crypto={}, bond_duration={},
+            calendar={}, kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=0, total_overlays=len(overlay_fields),
+            portfolio_risk="low", alerts=[],
+        )
+        assert dashboard.total_overlays == len(overlay_fields)
+
+
+class TestOverlayDashboardCLI:
+    """Test CLI entry point with capsys."""
+
+    def test_main_prints_header(self, capsys):
+        with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
+            mock_gen.return_value = OverlayDashboardData(
+                timestamp="2026-01-01", generated_at="2026-01-01",
+                collar={"active": True}, crypto={"active": False},
+                bond_duration={"active": True}, calendar={"active": False},
+                kurtosis={"active": True}, mean_reversion={"active": False},
+                unified={"active": True},
+                active_overlays=4, total_overlays=7,
+                portfolio_risk="moderate", alerts=[],
+            )
+            with patch("sys.argv", ["overlay_dashboard.py"]):
+                from src.dashboard.overlay_dashboard import main
+                main()
+
+        captured = capsys.readouterr()
+        assert "OVERLAY DASHBOARD v4.91" in captured.out
+        assert "Active: 4/7" in captured.out
+        assert "MODERATE" in captured.out
+
+    def test_main_prints_no_alerts_when_empty(self, capsys):
+        with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
+            mock_gen.return_value = OverlayDashboardData(
+                timestamp="2026-01-01", generated_at="2026-01-01",
+                collar={}, crypto={}, bond_duration={},
+                calendar={}, kurtosis={}, mean_reversion={},
+                unified={},
+                active_overlays=0, total_overlays=7,
+                portfolio_risk="low", alerts=[],
+            )
+            with patch("sys.argv", ["overlay_dashboard.py"]):
+                from src.dashboard.overlay_dashboard import main
+                main()
+
+        captured = capsys.readouterr()
+        assert "No alerts" in captured.out
+        assert "all systems normal" in captured.out
+
+    def test_main_prints_alerts_when_present(self, capsys):
+        with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
+            mock_gen.return_value = OverlayDashboardData(
+                timestamp="2026-01-01", generated_at="2026-01-01",
+                collar={"active": True, "vix_level": 35.0},
+                crypto={"active": False}, bond_duration={"active": True},
+                calendar={"active": False}, kurtosis={"active": True},
+                mean_reversion={"active": False}, unified={"active": True},
+                active_overlays=4, total_overlays=7,
+                portfolio_risk="high",
+                alerts=["VIX elevated (35) \u2014 collar active", "BTC vol extreme"],
+            )
+            with patch("sys.argv", ["overlay_dashboard.py"]):
+                from src.dashboard.overlay_dashboard import main
+                main()
+
+        captured = capsys.readouterr()
+        assert "VIX elevated" in captured.out
+        assert "BTC vol extreme" in captured.out
+
+    def test_main_save_flag_triggers_save(self, capsys):
+        mock_save = MagicMock()
+        with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
+            mock_gen.return_value = OverlayDashboardData(
+                timestamp="2026-01-01", generated_at="2026-01-01",
+                collar={"active": True}, crypto={"active": False},
+                bond_duration={"active": True}, calendar={"active": False},
+                kurtosis={"active": True}, mean_reversion={"active": False},
+                unified={"active": True},
+                active_overlays=4, total_overlays=7,
+                portfolio_risk="low", alerts=[],
+            )
+            with patch.object(OverlayDashboardGenerator, "save", mock_save):
+                with patch("sys.argv", ["overlay_dashboard.py", "--save"]):
+                    from src.dashboard.overlay_dashboard import main
+                    main()
+
+        captured = capsys.readouterr()
+        mock_save.assert_called_once()
+        assert "Saved to" in captured.out
+
+    def test_main_no_save_flag_no_save(self, capsys):
+        mock_save = MagicMock()
+        with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
+            mock_gen.return_value = OverlayDashboardData(
+                timestamp="2026-01-01", generated_at="2026-01-01",
+                collar={}, crypto={}, bond_duration={},
+                calendar={}, kurtosis={}, mean_reversion={},
+                unified={},
+                active_overlays=0, total_overlays=7,
+                portfolio_risk="low", alerts=[],
+            )
+            with patch.object(OverlayDashboardGenerator, "save", mock_save):
+                with patch("sys.argv", ["overlay_dashboard.py"]):
+                    from src.dashboard.overlay_dashboard import main
+                    main()
+
+        mock_save.assert_not_called()
+
+    def test_main_shows_active_and_inactive_overlays(self, capsys):
+        with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
+            collar = {"active": True, "status_text": "Collar: protective"}
+            crypto = {"active": False, "error": "Crypto signal unavailable"}
+            mock_gen.return_value = OverlayDashboardData(
+                timestamp="2026-01-01", generated_at="2026-01-01",
+                collar=collar, crypto=crypto,
+                bond_duration={"active": True}, calendar={"active": False},
+                kurtosis={"active": True}, mean_reversion={"active": False, "status_text": "MR: disabled"},
+                unified={"active": True},
+                active_overlays=4, total_overlays=7,
+                portfolio_risk="low", alerts=[],
+            )
+            with patch("sys.argv", ["overlay_dashboard.py"]):
+                from src.dashboard.overlay_dashboard import main
+                main()
+
+        captured = capsys.readouterr()
+        assert "Collar: protective" in captured.out
+        assert "Crypto signal unavailable" in captured.out
+        assert "MR: disabled" in captured.out
+
+
+class TestOverlayDashboardDataclassValidation:
+    """Validate dataclass fields via dataclasses.fields()."""
+
+    def test_all_fields_present(self):
+        import dataclasses
+        field_names = {f.name for f in dataclasses.fields(OverlayDashboardData)}
+        expected = {
+            "timestamp", "generated_at", "collar", "crypto",
+            "bond_duration", "calendar", "kurtosis", "mean_reversion",
+            "unified", "active_overlays", "total_overlays",
+            "portfolio_risk", "alerts",
+        }
+        assert field_names == expected
+        assert len(field_names) == 13
+
+    def test_dict_fields_have_dict_type(self):
+        import dataclasses
+        import typing
+        expected_type = typing.Dict[str, typing.Any]
+        for f in dataclasses.fields(OverlayDashboardData):
+            if f.name in ("collar", "crypto", "bond_duration", "calendar",
+                          "kurtosis", "mean_reversion", "unified"):
+                assert f.type == expected_type, (
+                    f"Field {f.name} has type {f.type}, expected {expected_type}"
+                )
+
+    def test_int_fields_have_int_type(self):
+        import dataclasses
+        for f in dataclasses.fields(OverlayDashboardData):
+            if f.name in ("active_overlays", "total_overlays"):
+                assert f.type == int
+
+    def test_str_fields_have_str_type(self):
+        import dataclasses
+        for f in dataclasses.fields(OverlayDashboardData):
+            if f.name in ("timestamp", "generated_at", "portfolio_risk"):
+                assert f.type == str
+
+    def test_alerts_field_is_list_of_str(self):
+        import dataclasses
+        import typing
+        f = next(f for f in dataclasses.fields(OverlayDashboardData)
+                 if f.name == "alerts")
+        assert f.type == typing.List[str]
+
+    def test_no_defaults_on_required_fields(self):
+        """All fields are required (no default values)."""
+        import dataclasses
+        for f in dataclasses.fields(OverlayDashboardData):
+            assert f.default is dataclasses.MISSING
+            assert f.default_factory is dataclasses.MISSING
+
+    def test_fields_are_positional(self):
+        """Fields should be init=True, repr=True."""
+        import dataclasses
+        for f in dataclasses.fields(OverlayDashboardData):
+            assert f.init is True
+            assert f.repr is True
+
+    def test_asdict_matches_field_count(self):
+        import dataclasses
+        data = OverlayDashboardData(
+            timestamp="t", generated_at="g",
+            collar={}, crypto={}, bond_duration={},
+            calendar={}, kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        d = dataclasses.asdict(data)
+        assert len(d) == len(dataclasses.fields(OverlayDashboardData))
+
+
+class TestRiskAssessmentSpecialValues:
+    """Test risk assessment with NaN, Inf, negative, extreme values."""
+
+    @pytest.fixture
+    def gen(self):
+        return OverlayDashboardGenerator()
+
+    def test_vix_nan_does_not_trigger(self, gen):
+        """NaN > 30 is False, NaN > 25 is False, so risk score stays 0."""
+        import math
+        data = {"collar": {"vix_level": float("nan")}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "low"
+        assert len(alerts) == 0
+
+    def test_vix_inf_triggers_alert(self, gen):
+        """Inf > 30 is True, score=2 -> moderate with alert."""
+        import math
+        data = {"collar": {"vix_level": float("inf")}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "moderate"
+        assert len(alerts) >= 1
+
+    def test_vix_neg_one_treated_as_low(self, gen):
+        """Negative VIX is treated as 0 via .get default, low risk."""
+        data = {"collar": {"vix_level": -1.0}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "low"
+        assert len(alerts) == 0
+
+    def test_vix_extreme_100(self, gen):
+        """VIX = 100 triggers alert and adds 2 to risk score."""
+        data = {"collar": {"vix_level": 100.0}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert len(alerts) >= 1
+        assert "VIX" in alerts[0]
+
+    def test_fat_tail_nan_treated_as_low(self, gen):
+        """NaN > 0.7 is False, so no alert."""
+        import math
+        data = {"kurtosis": {"fat_tail_risk": float("nan")}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert len(alerts) == 0
+
+    def test_fat_tail_inf_triggers_alert(self, gen):
+        """Inf > 0.7 is True, should trigger alert."""
+        import math
+        data = {"kurtosis": {"fat_tail_risk": float("inf")}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert any("fat tail" in a.lower() for a in alerts)
+
+    def test_fat_tail_neg_one_treated_as_low(self, gen):
+        """Negative fat_tail_risk is treated as low."""
+        data = {"kurtosis": {"fat_tail_risk": -1.0}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert len(alerts) == 0
+        assert risk == "low"
+
+    def test_all_risk_factors_maxed(self, gen):
+        """All risk factors at max should produce score >= 5 (high)."""
+        data = {
+            "collar": {"vix_level": 31.0},
+            "crypto": {"btc_vol_regime": "extreme"},
+            "kurtosis": {"fat_tail_risk": 0.71},
+            "bond_duration": {"curve_regime": "inverted"},
+            "unified": {"conflict_count": 3},
+        }
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "high"
+        assert len(alerts) >= 4
+
+
+class TestRiskAssessmentTypeErrors:
+    """Test risk assessment with unexpected types."""
+
+    @pytest.fixture
+    def gen(self):
+        return OverlayDashboardGenerator()
+
+    def test_vix_level_as_string_raises_type_error(self, gen):
+        """String vix_level crashes comparison with int. Python 3 raises TypeError."""
+        data = {"collar": {"vix_level": "high"}}
+        with pytest.raises(TypeError):
+            gen._assess_portfolio_risk(data)
+
+    def test_btc_vol_regime_unknown_value(self, gen):
+        """Unknown btc_vol_regime value is not 'extreme' or 'high', no score."""
+        data = {"crypto": {"btc_vol_regime": "unknown"}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "low"
+        assert len(alerts) == 0
+
+    def test_conflict_count_as_string_raises_type_error(self, gen):
+        """String conflict_count crashes comparison with int. Python 3 raises TypeError."""
+        data = {"unified": {"conflict_count": "lots"}}
+        with pytest.raises(TypeError):
+            gen._assess_portfolio_risk(data)
+
+    def test_curve_regime_case_sensitive(self, gen):
+        """Curve regime comparison is case-sensitive. 'Inverted' != 'inverted'."""
+        data = {"bond_duration": {"curve_regime": "Inverted"}}
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert len(alerts) == 0
+        assert risk == "low"
+
+    def test_none_values_raise_type_error(self, gen):
+        """None values crash comparison with int. Python 3 raises TypeError."""
+        data = {
+            "collar": {"vix_level": None},
+            "crypto": {"btc_vol_regime": None},
+            "kurtosis": {"fat_tail_risk": None},
+            "bond_duration": {"curve_regime": None},
+            "unified": {"conflict_count": None},
+        }
+        with pytest.raises(TypeError):
+            gen._assess_portfolio_risk(data)
+
+    def test_fat_tail_as_string_raises_type_error(self, gen):
+        """fat_tail_risk as string crashes comparison with float."""
+        data = {
+            "collar": {"vix_level": 31.0},
+            "crypto": {"btc_vol_regime": 123},
+            "kurtosis": {"fat_tail_risk": "high"},
+            "bond_duration": {"curve_regime": "inverted"},
+        }
+        with pytest.raises(TypeError):
+            gen._assess_portfolio_risk(data)
+
+
+class TestRiskAssessmentBoundaryGrid:
+    """Systematic boundary testing for risk assessment scores."""
+
+    @pytest.fixture
+    def gen(self):
+        return OverlayDashboardGenerator()
+
+    def test_vix_boundaries_all_levels(self, gen):
+        """Test vix_level at every boundary: 0, 24, 25, 26, 30, 31, 100.
+        VIX > 30 gives score +2 -> moderate (not elevated)."""
+        cases = [
+            (0, "low", 0),
+            (24, "low", 0),
+            (25, "low", 0),
+            (26, "moderate", 0),
+            (30, "moderate", 0),
+            (31, "moderate", 1),
+            (100, "moderate", 1),
+        ]
+        for vix, expected_risk, expected_alert_count in cases:
+            data = {"collar": {"vix_level": float(vix)}}
+            risk, alerts = gen._assess_portfolio_risk(data)
+            assert risk == expected_risk, (
+                f"VIX={vix}: expected {expected_risk}, got {risk}"
+            )
+            assert len(alerts) == expected_alert_count, (
+                f"VIX={vix}: expected {expected_alert_count} alerts, got {len(alerts)}"
+            )
+
+    def test_btc_vol_all_regimes(self, gen):
+        """Test all btc_vol_regime values."""
+        cases = [
+            ("normal", "low", 0),
+            ("high", "moderate", 0),
+            ("extreme", "moderate", 1),
+        ]
+        for regime, expected_risk, expected_alerts in cases:
+            data = {"crypto": {"btc_vol_regime": regime}}
+            risk, alerts = gen._assess_portfolio_risk(data)
+            assert risk == expected_risk
+            assert len(alerts) == expected_alerts
+
+    def test_fat_tail_boundaries(self, gen):
+        """Test fat_tail_risk at every boundary."""
+        cases = [
+            (0.0, 0),
+            (0.69, 0),
+            (0.70, 0),
+            (0.71, 1),
+            (1.0, 1),
+            (2.0, 1),
+        ]
+        for risk_val, expected_alerts in cases:
+            data = {"kurtosis": {"fat_tail_risk": risk_val}}
+            _, alerts = gen._assess_portfolio_risk(data)
+            assert len(alerts) == expected_alerts, (
+                f"fat_tail_risk={risk_val}: expected {expected_alerts} alerts, got {len(alerts)}"
+            )
+
+    def test_risk_score_bucket_boundaries(self, gen):
+        """Test each risk_score bucket boundary: 0, 1, 2, 3, 4, 5+."""
+        cases = [
+            (0, "low"),
+            (1, "moderate"),
+            (2, "moderate"),
+            (3, "elevated"),
+            (4, "elevated"),
+            (5, "high"),
+            (10, "high"),
+        ]
+        for score, expected_level in cases:
+            data = {"unified": {"conflict_count": score}}
+            risk, _ = gen._assess_portfolio_risk(data)
+            assert risk == expected_level, (
+                f"score={score}: expected {expected_level}, got {risk}"
+            )
+
+
+class TestGenerateWithMockedSignals:
+    """Test generate() with all signal methods mocked."""
+
+    def test_generate_works_with_all_mocked(self):
+        gen = OverlayDashboardGenerator()
+        gen._get_collar_data = MagicMock(return_value={"active": True, "vix_level": 16.0})
+        gen._get_crypto_data = MagicMock(return_value={"active": False, "btc_vol_regime": "normal"})
+        gen._get_bond_duration_data = MagicMock(return_value={"active": True, "curve_regime": "normal"})
+        gen._get_calendar_data = MagicMock(return_value={"active": True})
+        gen._get_kurtosis_data = MagicMock(return_value={"active": True, "fat_tail_risk": 0.1})
+        gen._get_mean_reversion_data = MagicMock(return_value={"active": False})
+        gen._get_unified_data = MagicMock(return_value={"active": True, "conflict_count": 0})
+
+        dashboard = gen.generate()
+        assert isinstance(dashboard, OverlayDashboardData)
+        assert dashboard.active_overlays == 5
+        assert dashboard.total_overlays == 7
+        assert dashboard.portfolio_risk == "low"
+
+    def test_generate_all_inactive(self):
+        gen = OverlayDashboardGenerator()
+        for method_name in ["_get_collar_data", "_get_crypto_data", "_get_bond_duration_data",
+                             "_get_calendar_data", "_get_kurtosis_data", "_get_mean_reversion_data",
+                             "_get_unified_data"]:
+            setattr(gen, method_name, MagicMock(return_value={"active": False}))
+
+        dashboard = gen.generate()
+        assert dashboard.active_overlays == 0
+        assert dashboard.total_overlays == 7
+        assert dashboard.portfolio_risk == "low"
+
+    def test_generate_all_active_high_risk(self):
+        gen = OverlayDashboardGenerator()
+        gen._get_collar_data = MagicMock(return_value={"active": True, "vix_level": 35.0})
+        gen._get_crypto_data = MagicMock(return_value={"active": True, "btc_vol_regime": "extreme"})
+        gen._get_bond_duration_data = MagicMock(return_value={"active": True, "curve_regime": "inverted"})
+        gen._get_calendar_data = MagicMock(return_value={"active": True})
+        gen._get_kurtosis_data = MagicMock(return_value={"active": True, "fat_tail_risk": 0.9})
+        gen._get_mean_reversion_data = MagicMock(return_value={"active": False})
+        gen._get_unified_data = MagicMock(return_value={"active": True, "conflict_count": 2})
+
+        dashboard = gen.generate()
+        assert dashboard.active_overlays == 6
+        assert dashboard.portfolio_risk == "high"
+        assert len(dashboard.alerts) >= 4
+
+    def test_generate_risk_score_bucket_low(self):
+        gen = OverlayDashboardGenerator()
+        gen._get_collar_data = MagicMock(return_value={"active": True, "vix_level": 15.0})
+        gen._get_crypto_data = MagicMock(return_value={"active": False, "btc_vol_regime": "normal"})
+        gen._get_bond_duration_data = MagicMock(return_value={"active": True, "curve_regime": "normal"})
+        gen._get_calendar_data = MagicMock(return_value={"active": False})
+        gen._get_kurtosis_data = MagicMock(return_value={"active": True, "fat_tail_risk": 0.1})
+        gen._get_mean_reversion_data = MagicMock(return_value={"active": False})
+        gen._get_unified_data = MagicMock(return_value={"active": True, "conflict_count": 0})
+
+        dashboard = gen.generate()
+        assert dashboard.portfolio_risk == "low"
+
+    def test_generate_risk_score_bucket_moderate(self):
+        gen = OverlayDashboardGenerator()
+        gen._get_collar_data = MagicMock(return_value={"active": True, "vix_level": 26.0})
+        gen._get_crypto_data = MagicMock(return_value={"active": False, "btc_vol_regime": "normal"})
+        gen._get_bond_duration_data = MagicMock(return_value={"active": True, "curve_regime": "normal"})
+        gen._get_calendar_data = MagicMock(return_value={"active": False})
+        gen._get_kurtosis_data = MagicMock(return_value={"active": True, "fat_tail_risk": 0.1})
+        gen._get_mean_reversion_data = MagicMock(return_value={"active": False})
+        gen._get_unified_data = MagicMock(return_value={"active": True, "conflict_count": 1})
+
+        dashboard = gen.generate()
+        assert dashboard.portfolio_risk == "moderate"
+
+    def test_generate_risk_score_bucket_elevated(self):
+        gen = OverlayDashboardGenerator()
+        gen._get_collar_data = MagicMock(return_value={"active": True, "vix_level": 31.0})
+        gen._get_crypto_data = MagicMock(return_value={"active": False, "btc_vol_regime": "normal"})
+        gen._get_bond_duration_data = MagicMock(return_value={"active": True, "curve_regime": "inverted"})
+        gen._get_calendar_data = MagicMock(return_value={"active": False})
+        gen._get_kurtosis_data = MagicMock(return_value={"active": True, "fat_tail_risk": 0.1})
+        gen._get_mean_reversion_data = MagicMock(return_value={"active": False})
+        gen._get_unified_data = MagicMock(return_value={"active": True, "conflict_count": 1})
+
+        dashboard = gen.generate()
+        assert dashboard.portfolio_risk == "elevated"
+
+    def test_generate_with_partial_active_overlays(self):
+        """Verify active count with exactly 2 active overlays."""
+        gen = OverlayDashboardGenerator()
+        gen._get_collar_data = MagicMock(return_value={"active": True})
+        gen._get_crypto_data = MagicMock(return_value={"active": False})
+        gen._get_bond_duration_data = MagicMock(return_value={"active": False})
+        gen._get_calendar_data = MagicMock(return_value={"active": False})
+        gen._get_kurtosis_data = MagicMock(return_value={"active": False})
+        gen._get_mean_reversion_data = MagicMock(return_value={"active": False})
+        gen._get_unified_data = MagicMock(return_value={"active": True})
+
+        dashboard = gen.generate()
+        assert dashboard.active_overlays == 2
+
+
+class TestSaveEdgeCases:
+    """Test save() method with various edge conditions."""
+
+    def test_save_creates_file(self, tmp_path):
+        gen = OverlayDashboardGenerator()
+        output = tmp_path / "test_dashboard.json"
+        gen.OUTPUT_PATH = output
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": False},
+            bond_duration={"active": True}, calendar={"active": False},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=4, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        gen.save(data)
+        assert output.exists()
+        content = output.read_text()
+        assert "active_overlays" in content
+        assert "portfolio_risk" in content
+
+    def test_save_overwrites_existing(self, tmp_path):
+        gen = OverlayDashboardGenerator()
+        output = tmp_path / "test_dashboard.json"
+        output.write_text('{"old": "data"}')
+        gen.OUTPUT_PATH = output
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={}, crypto={}, bond_duration={},
+            calendar={}, kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        gen.save(data)
+        content = output.read_text()
+        assert "old" not in content
+        assert "active_overlays" in content
+
+    def test_save_to_deeply_nested_dir(self, tmp_path):
+        gen = OverlayDashboardGenerator()
+        output = tmp_path / "a" / "b" / "c" / "dashboard.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        gen.OUTPUT_PATH = output
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": False},
+            bond_duration={"active": True}, calendar={"active": False},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=4, total_overlays=7,
+            portfolio_risk="moderate", alerts=["Test"],
+        )
+        gen.save(data)
+        assert output.exists()
+        content = output.read_text()
+        assert "moderate" in content
+        assert "Test" in content
+
+    def test_save_json_is_valid(self, tmp_path):
+        import json as json_mod
+        gen = OverlayDashboardGenerator()
+        output = tmp_path / "valid.json"
+        gen.OUTPUT_PATH = output
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": False},
+            bond_duration={"active": True}, calendar={"active": False},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=4, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        gen.save(data)
+        parsed = json_mod.loads(output.read_text())
+        assert parsed["active_overlays"] == 4
+        assert parsed["total_overlays"] == 7
+
+    def test_save_called_twice_produces_same_result(self, tmp_path):
+        gen = OverlayDashboardGenerator()
+        output = tmp_path / "twice.json"
+        gen.OUTPUT_PATH = output
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": False},
+            bond_duration={"active": True}, calendar={"active": False},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=4, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        gen.save(data)
+        first_content = output.read_text()
+        gen.save(data)
+        second_content = output.read_text()
+        assert first_content == second_content
+
+
+class TestDataCollectionWithMocks:
+    """Test individual _get_*_data methods with mocked signal modules."""
+
+    @patch("src.signals.collar_signal.generate_collar_signal")
+    def test_get_collar_data_success(self, mock_collar):
+        mock_signal = MagicMock()
+        mock_signal.is_valid = True
+        mock_signal.regime = "protective"
+        mock_signal.call_strike = 560.0
+        mock_signal.put_strike = 540.0
+        mock_signal.strikes.net_premium = 0.05
+        mock_signal.strikes.is_cashless = True
+        mock_signal.max_upside_pct = 0.02
+        mock_signal.max_downside_pct = -0.03
+        mock_signal.vix_level = 16.0
+        mock_signal.confidence = 0.8
+        mock_collar.return_value = mock_signal
+
+        gen = OverlayDashboardGenerator()
+        result = gen._get_collar_data()
+        assert result["active"] is True
+        assert result["regime"] == "protective"
+        assert result["vix_level"] == 16.0
+        assert result["net_premium"] == 0.05
+
+    @patch("src.signals.collar_signal.generate_collar_signal",
+           side_effect=ValueError("Signal collapsed"))
+    def test_get_collar_data_error(self, mock_collar):
+        gen = OverlayDashboardGenerator()
+        result = gen._get_collar_data()
+        assert result["active"] is False
+        assert "Signal collapsed" in result["error"]
+
+    @patch("src.signals.crypto_momentum.generate_crypto_signal")
+    def test_get_crypto_data_success(self, mock_crypto):
+        mock_signal = MagicMock()
+        mock_signal.is_valid = True
+        mock_signal.btc_signal.target_weight = 0.05
+        mock_signal.eth_signal.target_weight = 0.02
+        mock_signal.composite_weight = 0.07
+        mock_signal.btc_signal.momentum_6m = 0.15
+        mock_signal.eth_signal.momentum_6m = 0.08
+        mock_signal.btc_signal.vol_regime = "normal"
+        mock_signal.eth_signal.vol_regime = "normal"
+        mock_signal.confidence = 0.7
+        mock_crypto.return_value = mock_signal
+
+        gen = OverlayDashboardGenerator()
+        result = gen._get_crypto_data()
+        assert result["active"] is True
+        assert result["total_crypto"] == 0.07
+        assert result["btc_vol_regime"] == "normal"
+
+    @patch("src.signals.crypto_momentum.generate_crypto_signal",
+           side_effect=RuntimeError("BTC data unavailable"))
+    def test_get_crypto_data_error(self, mock_crypto):
+        gen = OverlayDashboardGenerator()
+        result = gen._get_crypto_data()
+        assert result["active"] is False
+        assert "error" in result
+
+    @patch("src.signals.bond_duration_signal.generate_bond_duration_signal")
+    def test_get_bond_duration_data_success(self, mock_bond):
+        mock_signal = MagicMock()
+        mock_signal.is_valid = True
+        mock_signal.yield_10y = 4.5
+        mock_signal.yield_2y = 4.0
+        mock_signal.spread_10y2y = 0.5
+        mock_signal.curve_regime = "normal"
+        mock_signal.rate_direction = "stable"
+        mock_signal.tlt_weight = 0.5
+        mock_signal.ief_weight = 0.35
+        mock_signal.shy_weight = 0.15
+        mock_signal.effective_duration = 6.5
+        mock_signal.position = "neutral"
+        mock_signal.confidence = 0.75
+        mock_bond.return_value = mock_signal
+
+        gen = OverlayDashboardGenerator()
+        result = gen._get_bond_duration_data()
+        assert result["active"] is True
+        assert result["curve_regime"] == "normal"
+        assert result["effective_duration"] == 6.5
+
+    @patch("src.signals.bond_duration_signal.generate_bond_duration_signal",
+           side_effect=ConnectionError("Yield data stale"))
+    def test_get_bond_duration_data_error(self, mock_bond):
+        gen = OverlayDashboardGenerator()
+        result = gen._get_bond_duration_data()
+        assert result["active"] is False
+        assert "error" in result
+
+
+class TestDataCollectionCalendarKurtosisUnified:
+    """Test calendar, kurtosis, and unified data collection with mocks."""
+
+    @patch("src.signals.calendar_seasonality.check_calendar")
+    def test_get_calendar_data_success(self, mock_cal):
+        mock_signal = MagicMock()
+        mock_signal.is_trading_day = True
+        mock_signal.urgency_modifier = 1.2
+        mock_signal.active_windows = ["Halloween", "January"]
+        mock_signal.next_window = "Christmas"
+        mock_signal.days_to_next_window = 5
+        mock_signal.recommendation = "hold"
+        mock_signal.effect = "bullish"
+        mock_cal.return_value = mock_signal
+
+        gen = OverlayDashboardGenerator()
+        result = gen._get_calendar_data()
+        assert result["active"] is True
+        assert result["modifier"] == 1.2
+        assert len(result["active_windows"]) == 2
+
+    @patch("src.signals.calendar_seasonality.check_calendar",
+           side_effect=OSError("Calendar file missing"))
+    def test_get_calendar_data_error(self, mock_cal):
+        gen = OverlayDashboardGenerator()
+        result = gen._get_calendar_data()
+        assert result["active"] is False
+        assert "error" in result
+
+    @patch("src.regime.kurtosis_regime.detect_kurtosis_regime")
+    def test_get_kurtosis_data_success(self, mock_kurt):
+        mock_signal = MagicMock()
+        mock_signal.kurtosis_20d = 3.5
+        mock_signal.kurtosis_60d = 3.2
+        mock_signal.ker_ratio = 1.1
+        mock_signal.regime = "normal"
+        mock_signal.is_transitioning = False
+        mock_signal.strategy_preference = "momentum"
+        mock_signal.tsom_weight = 0.6
+        mock_signal.mr_weight = 0.4
+        mock_signal.fat_tail_risk = 0.3
+        mock_kurt.return_value = mock_signal
+
+        gen = OverlayDashboardGenerator()
+        result = gen._get_kurtosis_data()
+        assert result["active"] is True
+        assert result["regime"] == "normal"
+        assert result["fat_tail_risk"] == 0.3
+
+    @patch("src.regime.kurtosis_regime.detect_kurtosis_regime",
+           side_effect=ImportError("Kurtosis module not found"))
+    def test_get_kurtosis_data_error(self, mock_kurt):
+        gen = OverlayDashboardGenerator()
+        result = gen._get_kurtosis_data()
+        assert result["active"] is False
+        assert "error" in result
+
+    @patch("src.strategy.unified_orchestrator.get_unified_recommendation")
+    def test_get_unified_data_success(self, mock_unified):
+        mock_rec = MagicMock()
+        mock_rec.spy = 0.46
+        mock_rec.gld = 0.38
+        mock_rec.tlt = 0.16
+        mock_rec.ief = 0.0
+        mock_rec.shy = 0.0
+        mock_rec.btc = 0.0
+        mock_rec.eth = 0.0
+        mock_rec.estimated_sharpe = 0.79
+        mock_rec.conflict_count = 0
+        mock_rec.calendar_modifier = 1.0
+        mock_rec.execution_recommendation = "hold"
+        mock_unified.return_value = mock_rec
+
+        gen = OverlayDashboardGenerator()
+        result = gen._get_unified_data()
+        assert result["active"] is True
+        assert result["spy"] == 0.46
+        assert result["estimated_sharpe"] == 0.79
+
+    @patch("src.strategy.unified_orchestrator.get_unified_recommendation",
+           side_effect=KeyError("Missing recommendation"))
+    def test_get_unified_data_error(self, mock_unified):
+        gen = OverlayDashboardGenerator()
+        result = gen._get_unified_data()
+        assert result["active"] is False
+        assert "error" in result
+
+
+class TestOverlayDashboardDataSerialization:
+    """Test serialization edge cases for OverlayDashboardData."""
+
+    def test_to_dict_with_nested_dicts(self):
+        """to_dict() preserves nested dict structures."""
+        collar_data = {
+            "active": True,
+            "regime": "protective",
+            "call_strike": 560.0,
+            "put_strike": 540.0,
+            "nested": {"key": "value"},
+        }
+        data = OverlayDashboardData(
+            timestamp="t", generated_at="g",
+            collar=collar_data, crypto={},
+            bond_duration={}, calendar={},
+            kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=1, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        d = data.to_dict()
+        assert d["collar"]["regime"] == "protective"
+        assert d["collar"]["nested"]["key"] == "value"
+
+    def test_to_dict_is_independent_copy(self):
+        """to_dict() should return a copy, not the original."""
+        data = OverlayDashboardData(
+            timestamp="t", generated_at="g",
+            collar={"active": True}, crypto={},
+            bond_duration={}, calendar={},
+            kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=1, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        d = data.to_dict()
+        d["collar"]["active"] = False
+        assert data.collar["active"] is True
+
+    def test_json_round_trip(self):
+        """to_dict() -> json.dumps -> json.loads preserves data."""
+        import json as json_mod
+        data = OverlayDashboardData(
+            timestamp="2026-05-24T12:00:00", generated_at="2026-05-24T12:00:00",
+            collar={"active": True, "vix_level": 16.5},
+            crypto={"active": False},
+            bond_duration={"active": True, "curve_regime": "normal"},
+            calendar={"active": True},
+            kurtosis={"active": True, "fat_tail_risk": 0.3},
+            mean_reversion={"active": False},
+            unified={"active": True, "conflict_count": 0},
+            active_overlays=5, total_overlays=7,
+            portfolio_risk="low",
+            alerts=["Test alert"],
+        )
+        serialized = json_mod.dumps(data.to_dict())
+        parsed = json_mod.loads(serialized)
+        assert parsed["active_overlays"] == 5
+        assert parsed["portfolio_risk"] == "low"
+        assert parsed["collar"]["vix_level"] == 16.5
+
+    def test_to_dict_empty_alerts_is_empty_list(self):
+        data = OverlayDashboardData(
+            timestamp="t", generated_at="g",
+            collar={}, crypto={}, bond_duration={},
+            calendar={}, kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        d = data.to_dict()
+        assert d["alerts"] == []
+        assert isinstance(d["alerts"], list)
+
+    def test_to_dict_with_large_alerts_serializable(self):
+        import json as json_mod
+        alerts = [f"A{i}" for i in range(100)]
+        data = OverlayDashboardData(
+            timestamp="t", generated_at="g",
+            collar={}, crypto={}, bond_duration={},
+            calendar={}, kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="high", alerts=alerts,
+        )
+        serialized = json_mod.dumps(data.to_dict())
+        parsed = json_mod.loads(serialized)
+        assert len(parsed["alerts"]) == 100
+
+
+class TestMeanReversionDataEdgeCases:
+    """Additional mean reversion data tests."""
+
+    def test_mean_reversion_always_returns_same(self):
+        """_get_mean_reversion_data is stateless and always returns same dict."""
+        gen1 = OverlayDashboardGenerator()
+        gen2 = OverlayDashboardGenerator()
+        assert gen1._get_mean_reversion_data() == gen2._get_mean_reversion_data()
+
+    def test_mean_reversion_not_active_regardless(self):
+        """_get_mean_reversion_data never returns active=True."""
+        gen = OverlayDashboardGenerator()
+        for _ in range(10):
+            result = gen._get_mean_reversion_data()
+            assert result["active"] is False
+            assert "status_text" in result
+
+
+class TestGeneratorInitEdgeCases:
+    """Test generator initialization edge cases."""
+
+    def test_init_creates_output_dir(self, tmp_path):
+        gen = OverlayDashboardGenerator()
+        assert gen.OUTPUT_PATH.parent.exists()
+
+    def test_multiple_generators_independent_data(self):
+        """Two generators should both produce valid dashboards."""
+        from src.dashboard.overlay_dashboard import (
+            OverlayDashboardGenerator as OGen,
+        )
+        gen1 = OGen()
+        gen2 = OGen()
+        d1 = gen1.generate()
+        d2 = gen2.generate()
+        assert isinstance(d1, OverlayDashboardData)
+        assert isinstance(d2, OverlayDashboardData)
+        assert d1.total_overlays == d2.total_overlays
+
+    def test_generate_output_path_differs_by_env(self, tmp_path):
+        """Different instances can have different OUTPUT_PATH."""
+        gen1 = OverlayDashboardGenerator()
+        gen2 = OverlayDashboardGenerator()
+        gen2.OUTPUT_PATH = tmp_path / "alt_dashboard.json"
+        assert gen1.OUTPUT_PATH != gen2.OUTPUT_PATH
+
+
+class TestOverlayDashboardDataDefaults:
+    """Test that OverlayDashboardData constructor accepts all expected values."""
+
+    def test_construct_with_all_empty_dicts(self):
+        """Constructor accepts empty dicts for all overlay fields."""
+        data = OverlayDashboardData(
+            timestamp="", generated_at="",
+            collar={}, crypto={}, bond_duration={},
+            calendar={}, kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        assert data.collar == {}
+        assert data.crypto == {}
+        assert data.bond_duration == {}
+
+    def test_construct_with_minimal_dicts(self):
+        """Constructor accepts minimal dicts (just 'active' key)."""
+        data = OverlayDashboardData(
+            timestamp="2026-01-01", generated_at="2026-01-01",
+            collar={"active": True}, crypto={"active": False},
+            bond_duration={"active": True}, calendar={"active": False},
+            kurtosis={"active": True}, mean_reversion={"active": False},
+            unified={"active": True},
+            active_overlays=4, total_overlays=7,
+            portfolio_risk="moderate", alerts=["warn"],
+        )
+        assert data.collar["active"] is True
+        assert data.mean_reversion["active"] is False
+        assert data.active_overlays == 4
+
+    def test_construct_with_integer_timestamps(self):
+        """Timestamp fields accept any string, including empty."""
+        data = OverlayDashboardData(
+            timestamp="", generated_at="",
+            collar={}, crypto={}, bond_duration={},
+            calendar={}, kurtosis={}, mean_reversion={},
+            unified={},
+            active_overlays=0, total_overlays=7,
+            portfolio_risk="low", alerts=[],
+        )
+        assert data.timestamp == ""
+        assert data.generated_at == ""
+
+
+class TestOverlayDashboardRiskLevelConstants:
+    """Test that risk level string constants match expected values."""
+
+    def test_risk_level_strings_are_lowercase(self):
+        gen = OverlayDashboardGenerator()
+        valid = {"low", "moderate", "elevated", "high"}
+        data_all_low = {
+            "collar": {"vix_level": 15.0},
+            "crypto": {"btc_vol_regime": "normal"},
+            "kurtosis": {"fat_tail_risk": 0.1},
+            "bond_duration": {"curve_regime": "normal"},
+            "unified": {"conflict_count": 0},
+        }
+        risk, _ = gen._assess_portfolio_risk(data_all_low)
+        assert risk in valid
+        assert risk.islower()
+
+    def test_alert_list_contains_strings(self):
+        gen = OverlayDashboardGenerator()
+        data = {
+            "collar": {"vix_level": 35.0},
+            "crypto": {"btc_vol_regime": "extreme"},
+            "kurtosis": {"fat_tail_risk": 0.9},
+            "bond_duration": {"curve_regime": "inverted"},
+            "unified": {"conflict_count": 2},
+        }
+        _, alerts = gen._assess_portfolio_risk(data)
+        assert len(alerts) >= 4
+        for alert in alerts:
+            assert isinstance(alert, str)
+            assert len(alert) > 0

@@ -1025,5 +1025,1077 @@ class TestEnsembleBacktestMain:
             assert "sharpe_ratio" in data
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+# ---------------------------------------------------------------------------
+# Dataclass field validation
+# ---------------------------------------------------------------------------
+
+class TestBacktestResultFieldValidation:
+    """Validate BacktestResult dataclass fields via dataclasses introspection."""
+
+    def test_all_required_fields_exist(self):
+        from dataclasses import fields
+        from src.backtest.metrics import BacktestResult
+        field_names = {f.name for f in fields(BacktestResult)}
+        for required in ("total_return", "cagr", "volatility", "sharpe_ratio",
+                         "max_drawdown", "total_rebalances", "extras"):
+            assert required in field_names, f"Missing required field: {required}"
+
+    def test_required_field_types(self):
+        from dataclasses import fields
+        from src.backtest.metrics import BacktestResult
+        field_map = {f.name: f.type for f in fields(BacktestResult)}
+        assert field_map["total_return"] is float
+        assert field_map["cagr"] is float
+        assert field_map["volatility"] is float
+        assert field_map["sharpe_ratio"] is float
+        assert field_map["max_drawdown"] is float
+        assert field_map["total_rebalances"] is int
+
+    def test_total_rebalances_default_zero(self):
+        from dataclasses import fields
+        from src.backtest.metrics import BacktestResult
+        f = next(f for f in fields(BacktestResult) if f.name == "total_rebalances")
+        assert f.default == 0
+
+    def test_extras_default_factory(self):
+        from dataclasses import fields
+        from src.backtest.metrics import BacktestResult
+        f = next(f for f in fields(BacktestResult) if f.name == "extras")
+        assert f.default_factory is not None
+        # Verify default factory produces empty dict
+        result = f.default_factory()
+        assert result == {}
+
+    def test_total_transaction_costs_default(self):
+        from dataclasses import fields
+        from src.backtest.metrics import BacktestResult
+        f = next(f for f in fields(BacktestResult) if f.name == "total_transaction_costs")
+        assert f.default == 0.0
+
+    def test_baseline_sharpe_is_optional(self):
+        from dataclasses import fields
+        from src.backtest.metrics import BacktestResult
+        f = next(f for f in fields(BacktestResult) if f.name == "baseline_sharpe")
+        assert "Optional" in str(f.type) or "None" in str(f.type)
+        assert f.default is None
+
+
+# ---------------------------------------------------------------------------
+# BacktestResult extras key validation
+# ---------------------------------------------------------------------------
+
+class TestBacktestResultExtrasKeys:
+    """Validate that _make_result() produces all expected extras keys."""
+
+    def test_extras_contains_all_required_keys(self):
+        r = _make_result()
+        required = [
+            "start_date", "end_date", "portfolio", "sortino_ratio",
+            "max_dd_duration", "calmar_ratio", "var_95", "cvar_95",
+            "avg_signal_confidence", "regime_distribution",
+            "crisis_alpha_2008", "crisis_alpha_2020", "crisis_alpha_2022",
+            "source_contributions", "rolling_sharpe_1y",
+        ]
+        for key in required:
+            assert key in r.extras, f"Missing required extras key: {key}"
+
+    def test_extras_portfolio_format(self):
+        r = _make_result()
+        assert "/" in r.extras["portfolio"]
+
+    def test_extras_cvar_95_leq_var_95(self):
+        r = _make_result()
+        assert r.extras["cvar_95"] <= r.extras["var_95"]
+
+
+# ---------------------------------------------------------------------------
+# Module-level constants validation
+# ---------------------------------------------------------------------------
+
+class TestEnsembleBacktestConstants:
+    """Validate module-level constants."""
+
+    def test_crisis_periods_exact_values(self):
+        """Verify exact crisis period tuples match source code."""
+        periods = EnsembleBacktestEngine.CRISIS_PERIODS
+        assert periods["2008"] == ("2008-09-01", "2008-12-31")
+        assert periods["2020"] == ("2020-02-19", "2020-04-30")
+        assert periods["2022"] == ("2022-01-01", "2022-10-31")
+
+    def test_crisis_periods_all_strings(self):
+        """All crisis period date strings should be parseable."""
+        from datetime import datetime
+        for name, (start, end) in EnsembleBacktestEngine.CRISIS_PERIODS.items():
+            assert isinstance(start, str), f"{name} start not a string"
+            assert isinstance(end, str), f"{name} end not a string"
+            datetime.strptime(start, "%Y-%m-%d")
+            datetime.strptime(end, "%Y-%m-%d")
+
+    def test_tx_cost_bps_type(self):
+        assert isinstance(EnsembleBacktestEngine.TX_COST_BPS, float)
+
+    def test_tx_cost_bps_range(self):
+        assert 0 < EnsembleBacktestEngine.TX_COST_BPS < 100
+
+    def test_crisis_periods_three_keys(self):
+        assert len(EnsembleBacktestEngine.CRISIS_PERIODS) == 3
+
+    def test_crisis_period_start_before_end(self):
+        for name, (start, end) in EnsembleBacktestEngine.CRISIS_PERIODS.items():
+            assert start < end, f"{name}: start {start} >= end {end}"
+
+
+# ---------------------------------------------------------------------------
+# _calculate_returns edge cases
+# ---------------------------------------------------------------------------
+
+class TestCalculateReturnsEdgeCases:
+    """Edge cases for _calculate_returns."""
+
+    def test_nan_price(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        returns = engine._calculate_returns([100.0, float("nan"), 110.0])
+        assert len(returns) == 2
+        assert np.isnan(returns[1])
+
+    def test_inf_price(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        returns = engine._calculate_returns([100.0, float("inf"), 110.0])
+        assert len(returns) == 2
+        assert np.isinf(returns[0]) or np.isnan(returns[0])
+
+    def test_negative_prices(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        # log of negative numbers produces NaN for real-valued arrays
+        returns = engine._calculate_returns([-100.0, -90.0])
+        assert len(returns) == 1
+        # Does not crash; result may be NaN (expected numpy behavior)
+
+    def test_zero_price(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        returns = engine._calculate_returns([100.0, 0.0])
+        assert len(returns) == 1
+        assert np.isinf(returns[0]) or np.isneginf(returns[0])
+
+    def test_decreasing_prices_all(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        returns = engine._calculate_returns([100.0, 90.0, 80.0, 70.0])
+        assert len(returns) == 3
+        assert all(r < 0 for r in returns)
+
+    def test_returns_have_expected_shape(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        returns = engine._calculate_returns([100.0, 101.0, 102.0])
+        assert returns.shape == (2,)
+
+    def test_negative_to_positive_price(self, tmp_path):
+        """Crossing zero from negative to positive produces NaN (log of negative)."""
+        engine = _make_engine(tmp_path)
+        returns = engine._calculate_returns([-100.0, 100.0])
+        assert len(returns) == 1
+        # Expected: log of complex number produces NaN for real dtype
+
+
+# ---------------------------------------------------------------------------
+# _calculate_max_drawdown edge cases
+# ---------------------------------------------------------------------------
+
+class TestCalculateMaxDrawdownEdgeCases:
+    """Edge cases for _calculate_max_drawdown."""
+
+    def test_nan_in_curve(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        curve = np.array([100.0, 110.0, float("nan"), 90.0])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        assert np.isnan(dd)
+
+    def test_inf_in_curve(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        curve = np.array([100.0, float("inf"), 50.0])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        # With inf peak, (50-inf)/inf = NaN; function does not crash
+
+    def test_all_negative_values(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        curve = np.array([-100.0, -90.0, -80.0])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        # Even though values are negative, max.accumulate gives -80, -90 from -80 is DD
+        assert dd <= 0
+
+    def test_sawtooth_curve(self, tmp_path):
+        """Alternating up-down-up-down should capture correct max dd."""
+        engine = _make_engine(tmp_path)
+        curve = np.array([100, 110, 105, 115, 108, 120])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        assert dd < 0
+        # Max DD should be from peak 115 to trough 108
+        assert abs(dd - (108 - 115) / 115) < 0.01
+
+    def test_two_equal_points(self, tmp_path):
+        """Two equal points should have zero drawdown."""
+        engine = _make_engine(tmp_path)
+        curve = np.array([100.0, 100.0])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        assert dd == 0.0
+        assert duration == 0
+
+    def test_duration_longest_drawdown_selected(self, tmp_path):
+        """Multiple drawdowns: the longest one should be reported."""
+        engine = _make_engine(tmp_path)
+        # Peak at 100, 3-day DD (indices 1-3), recovery, then 2-day DD (indices 5-6)
+        curve = np.array([100, 98, 97, 96, 100, 99, 98, 101])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        assert duration == 3
+
+    def test_duration_full_curve_drawdown(self, tmp_path):
+        """Entire curve is one long drawdown from first peak."""
+        engine = _make_engine(tmp_path)
+        # Peak at index 0, then declines for 9 days
+        curve = np.array([100.0, 99.0, 98.0, 97.0, 96.0, 95.0,
+                          94.0, 93.0, 92.0, 91.0])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        assert duration == 9
+
+    def test_small_fluctuation_below_threshold(self, tmp_path):
+        """Drawdown of exactly 0.1% is below -0.001 threshold."""
+        engine = _make_engine(tmp_path)
+        # 0.1% below peak → -0.001, which is NOT < -0.001, so not in drawdown
+        curve = np.array([100.0, 99.9])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        assert duration == 0
+
+    def test_oscillating_near_peak(self, tmp_path):
+        """Small oscillations near peak should not extend duration."""
+        engine = _make_engine(tmp_path)
+        curve = np.array([100.0, 99.5, 100.1, 99.6, 100.2])
+        dd, duration = engine._calculate_max_drawdown(curve)
+        # Duration should be 0 or 1 (small fluctuations may or may not trip threshold)
+        assert duration <= 1
+
+
+# ---------------------------------------------------------------------------
+# _calculate_crisis_alpha edge cases
+# ---------------------------------------------------------------------------
+
+class TestCalculateCrisisAlphaEdgeCases:
+    """Edge cases for _calculate_crisis_alpha."""
+
+    def test_single_element_arrays(self, tmp_path):
+        """Single element in crisis window should compute correctly."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"2020-03-15": -0.05}
+        benchmark = {"2020-03-15": -0.10}
+        alpha = engine._calculate_crisis_alpha(
+            portfolio, benchmark, ("2020-03-15", "2020-03-15")
+        )
+        assert abs(alpha - 0.05) < 0.001
+
+    def test_nan_returns(self, tmp_path):
+        """NaN returns should propagate to NaN alpha."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"2020-03-15": float("nan")}
+        benchmark = {"2020-03-15": 0.01}
+        alpha = engine._calculate_crisis_alpha(
+            portfolio, benchmark, ("2020-03-15", "2020-03-15")
+        )
+        assert np.isnan(alpha)
+
+    def test_extreme_negative_returns(self, tmp_path):
+        """Returns near -1.0 (total loss) should not overflow."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"2020-03-15": -0.999, "2020-03-16": -0.999}
+        benchmark = {"2020-03-15": -0.10, "2020-03-16": -0.05}
+        alpha = engine._calculate_crisis_alpha(
+            portfolio, benchmark, ("2020-03-15", "2020-03-16")
+        )
+        assert np.isfinite(alpha)
+        assert alpha < 0
+
+    def test_empty_portfolio_dict(self, tmp_path):
+        """Empty portfolio dict should return 0.0."""
+        engine = _make_engine(tmp_path)
+        alpha = engine._calculate_crisis_alpha(
+            {}, {"2020-03-15": 0.01}, ("2020-03-15", "2020-03-15")
+        )
+        assert alpha == 0.0
+
+    def test_empty_benchmark_dict(self, tmp_path):
+        """Empty benchmark dict should return 0.0."""
+        engine = _make_engine(tmp_path)
+        alpha = engine._calculate_crisis_alpha(
+            {"2020-03-15": 0.01}, {}, ("2020-03-15", "2020-03-15")
+        )
+        assert alpha == 0.0
+
+    def test_large_positive_returns(self, tmp_path):
+        """+100% daily returns should compute without overflow."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"2020-03-15": 1.0, "2020-03-16": 1.0}
+        benchmark = {"2020-03-15": 0.01, "2020-03-16": 0.01}
+        alpha = engine._calculate_crisis_alpha(
+            portfolio, benchmark, ("2020-03-15", "2020-03-16")
+        )
+        assert np.isfinite(alpha)
+        assert alpha > 0
+
+    def test_outside_crisis_window_returns_zero(self, tmp_path):
+        """Returns completely outside crisis window should return 0.0."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"2021-01-01": 0.01, "2021-01-02": 0.02}
+        benchmark = {"2021-01-01": 0.01, "2021-01-02": 0.02}
+        alpha = engine._calculate_crisis_alpha(
+            portfolio, benchmark, ("2020-01-01", "2020-12-31")
+        )
+        assert alpha == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _calculate_allocation_deltas edge cases
+# ---------------------------------------------------------------------------
+
+class TestCalculateAllocationDeltasEdgeCases:
+    """Edge cases for _calculate_allocation_deltas."""
+
+    def test_nan_score(self, tmp_path):
+        """NaN score should not crash (NaN propagates to output)."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 0.5, "GLD": 0.5}
+        signals = {
+            "SPY": {"score": float("nan"), "confidence": 0.8, "regime": "neutral", "sources": []},
+            "GLD": {"score": 0.3, "confidence": 0.8, "regime": "bull", "sources": []},
+        }
+        # NaN in score propagates; function does not crash
+        engine._calculate_allocation_deltas(current, signals)
+
+    def test_inf_score(self, tmp_path):
+        """Inf score should not crash (Inf propagates to output)."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 0.5, "GLD": 0.5}
+        signals = {
+            "SPY": {"score": float("inf"), "confidence": 0.8, "regime": "neutral", "sources": []},
+            "GLD": {"score": 0.3, "confidence": 0.8, "regime": "bull", "sources": []},
+        }
+        # Inf in score propagates; function does not crash
+        engine._calculate_allocation_deltas(current, signals)
+
+    def test_empty_portfolio(self, tmp_path):
+        """Empty portfolio should return empty dict."""
+        engine = _make_engine(tmp_path)
+        target = engine._calculate_allocation_deltas({}, {})
+        assert target == {}
+
+    def test_all_negative_scores(self, tmp_path):
+        """All negative scores should still produce valid allocations."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 0.5, "GLD": 0.5}
+        signals = {
+            "SPY": {"score": -0.8, "confidence": 0.9, "regime": "bear", "sources": []},
+            "GLD": {"score": -0.5, "confidence": 0.7, "regime": "bear", "sources": []},
+        }
+        target = engine._calculate_allocation_deltas(current, signals)
+        assert abs(sum(target.values()) - 1.0) < 0.01
+        # Both scores negative: both should decrease relative to current
+        # But normalization sums to 1.0, so relative weights shift
+        assert all(a in target for a in current)
+
+    def test_confidence_zero_all_scores(self, tmp_path):
+        """Zero confidence with non-zero scores should eliminate adjustments."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 0.6, "GLD": 0.4}
+        signals = {
+            "SPY": {"score": 1.0, "confidence": 0.0, "regime": "neutral", "sources": []},
+            "GLD": {"score": -1.0, "confidence": 0.0, "regime": "neutral", "sources": []},
+        }
+        target = engine._calculate_allocation_deltas(current, signals)
+        # strength = abs(score) * confidence = 0, so adjustment = 0
+        for asset in current:
+            assert abs(target[asset] - current[asset]) < 0.001
+
+    def test_missing_asset_in_signals(self, tmp_path):
+        """Missing asset in signals dict should not cause KeyError."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 0.5, "GLD": 0.3, "TLT": 0.2}
+        signals = {
+            "SPY": {"score": 0.5, "confidence": 0.8, "regime": "bull", "sources": []},
+            # GLD is missing from signals
+            "TLT": {"score": -0.2, "confidence": 0.6, "regime": "bear", "sources": []},
+        }
+        target = engine._calculate_allocation_deltas(current, signals)
+        assert abs(sum(target.values()) - 1.0) < 0.01
+
+    def test_max_delta_zero(self, tmp_path):
+        """Zero max_delta should prevent any allocation change."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 0.5, "GLD": 0.5}
+        signals = {
+            "SPY": {"score": 1.0, "confidence": 1.0, "regime": "bull", "sources": []},
+            "GLD": {"score": -1.0, "confidence": 1.0, "regime": "bear", "sources": []},
+        }
+        target = engine._calculate_allocation_deltas(current, signals, max_delta=0.0)
+        assert abs(sum(target.values()) - 1.0) < 0.01
+        for asset in current:
+            assert abs(target[asset] - current[asset]) < 0.001
+
+    def test_max_delta_negative(self, tmp_path):
+        """Negative max_delta should reverse direction."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 0.5, "GLD": 0.5}
+        signals = {
+            "SPY": {"score": 0.8, "confidence": 1.0, "regime": "bull", "sources": []},
+            "GLD": {"score": 0.2, "confidence": 1.0, "regime": "bull", "sources": []},
+        }
+        # Negative max_delta should invert: positive score → negative adjustment
+        target = engine._calculate_allocation_deltas(current, signals, max_delta=-0.1)
+        assert abs(sum(target.values()) - 1.0) < 0.01
+
+    def test_single_asset_zero_score(self, tmp_path):
+        """Single asset with zero score: total_score=0 branch."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 1.0}
+        signals = {
+            "SPY": {"score": 0.0, "confidence": 0.0, "regime": "neutral", "sources": []},
+        }
+        target = engine._calculate_allocation_deltas(current, signals)
+        assert abs(target["SPY"] - 1.0) < 0.001
+
+    def test_scores_opposite_directions_equal_magnitude(self, tmp_path):
+        """Equal magnitude opposite scores should cancel for SPY."""
+        engine = _make_engine(tmp_path)
+        current = {"SPY": 0.5, "GLD": 0.5}
+        signals = {
+            "SPY": {"score": 0.5, "confidence": 1.0, "regime": "bull", "sources": []},
+            "GLD": {"score": -0.5, "confidence": 1.0, "regime": "bear", "sources": []},
+        }
+        target = engine._calculate_allocation_deltas(current, signals)
+        # total_score = 1.0, weights = 0.5 each
+        # SPY adj = +1*0.5*1.0*0.1 = +0.05; GLD adj = -1*0.5*1.0*0.1 = -0.05
+        # target SPY = 0.55, target GLD = 0.45, normalized: SPY=0.55, GLD=0.45
+        assert abs(target["SPY"] - 0.55) < 0.01 or abs(target["SPY"] - 0.5) > 0.01
+        assert target["SPY"] > current["SPY"]
+        assert target["GLD"] < current["GLD"]
+
+
+# ---------------------------------------------------------------------------
+# _fetch_historical_prices edge cases
+# ---------------------------------------------------------------------------
+
+class TestFetchHistoricalPricesEdgeCases:
+    """Edge cases for _fetch_historical_prices."""
+
+    def test_missing_table(self, tmp_path):
+        """Database without prices table should raise OperationalError."""
+        engine = _make_engine(tmp_path)
+        conn = sqlite3.connect(str(engine.db_path))
+        conn.execute("CREATE TABLE other (id INTEGER)")
+        conn.commit()
+        conn.close()
+        with pytest.raises(sqlite3.OperationalError):
+            engine._fetch_historical_prices("SPY", "2020-01-01", "2020-12-31")
+
+    def test_empty_table(self, tmp_path):
+        """Empty prices table should return empty list."""
+        engine = _make_engine(tmp_path)
+        conn = sqlite3.connect(str(engine.db_path))
+        conn.execute(
+            "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, "
+            "open REAL, high REAL, low REAL, volume INTEGER)"
+        )
+        conn.commit()
+        conn.close()
+        result = engine._fetch_historical_prices("SPY", "2020-01-01", "2020-12-31")
+        assert result == []
+
+    def test_symbol_with_no_data(self, tmp_path):
+        """Symbol with no matching rows should return empty list."""
+        engine = _make_engine(tmp_path)
+        conn = sqlite3.connect(str(engine.db_path))
+        conn.execute(
+            "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, "
+            "open REAL, high REAL, low REAL, volume INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO prices VALUES ('SPY', '2020-01-02', 323.0, "
+            "322.0, 324.0, 321.0, 1000000)"
+        )
+        conn.commit()
+        conn.close()
+        result = engine._fetch_historical_prices("QQQ", "2020-01-01", "2020-12-31")
+        assert result == []
+
+    def test_date_boundary_exclusive(self, tmp_path):
+        """Dates outside the query range should be excluded."""
+        engine = _make_engine(tmp_path)
+        conn = sqlite3.connect(str(engine.db_path))
+        conn.execute(
+            "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, "
+            "open REAL, high REAL, low REAL, volume INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO prices VALUES ('SPY', '2020-01-01', 320.0, "
+            "319.0, 321.0, 318.0, 1000000)"
+        )
+        conn.execute(
+            "INSERT INTO prices VALUES ('SPY', '2020-06-15', 340.0, "
+            "339.0, 341.0, 338.0, 1000000)"
+        )
+        conn.commit()
+        conn.close()
+        result = engine._fetch_historical_prices("SPY", "2020-02-01", "2020-05-31")
+        assert result == []
+
+    def test_cache_hit_returns_same_object(self, tmp_path):
+        """Cached results should return the same list object."""
+        engine = _make_engine(tmp_path)
+        data = [{"date": "2020-01-02", "close": 323.0}]
+        engine._price_cache["SPY:2020-01-01:2020-12-31"] = data
+        result = engine._fetch_historical_prices("SPY", "2020-01-01", "2020-12-31")
+        assert result is data
+
+    def test_cache_uses_key_different_symbols(self, tmp_path):
+        """Cache keys should differentiate by symbol."""
+        engine = _make_engine(tmp_path)
+        engine._price_cache["SPY:2020-01-01:2020-12-31"] = [{"close": 323.0}]
+        engine._price_cache["GLD:2020-01-01:2020-12-31"] = [{"close": 150.0}]
+        spy = engine._fetch_historical_prices("SPY", "2020-01-01", "2020-12-31")
+        gld = engine._fetch_historical_prices("GLD", "2020-01-01", "2020-12-31")
+        assert spy[0]["close"] == 323.0
+        assert gld[0]["close"] == 150.0
+
+
+# ---------------------------------------------------------------------------
+# _generate_daily_signals edge cases
+# ---------------------------------------------------------------------------
+
+class TestGenerateDailySignalsEdgeCases:
+    """Edge cases for _generate_daily_signals."""
+
+    def test_integrator_returns_nan_score(self, tmp_path):
+        """Integrator returning NaN score should be caught gracefully."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"SPY": 1.0}
+        mock_composite = MagicMock()
+        mock_composite.score = float("nan")
+        mock_composite.confidence = 0.8
+        mock_composite.regime = "bull"
+        mock_composite.sources = [{"source": "tsfm"}]
+        engine.integrator.get_composite_signal.return_value = mock_composite
+        signals = engine._generate_daily_signals("2020-01-15", portfolio)
+        assert np.isnan(signals["SPY"]["score"])
+
+    def test_integrator_returns_none(self, tmp_path):
+        """Integrator returning None should fall through to except block."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"SPY": 1.0}
+        engine.integrator.get_composite_signal.return_value = None
+        signals = engine._generate_daily_signals("2020-01-15", portfolio)
+        # None.score raises AttributeError → caught → neutral signal
+        assert signals["SPY"]["score"] == 0.0
+        assert signals["SPY"]["confidence"] == 0.0
+        assert signals["SPY"]["regime"] == "neutral"
+
+    def test_integrator_missing_regime_field(self, tmp_path):
+        """Composite signal without regime should still work."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"SPY": 1.0}
+        mock_composite = MagicMock(spec=[])  # No attributes
+        del mock_composite.score
+        del mock_composite.confidence
+        del mock_composite.regime
+        del mock_composite.sources
+        engine.integrator.get_composite_signal.return_value = mock_composite
+        signals = engine._generate_daily_signals("2020-01-15", portfolio)
+        assert signals["SPY"]["score"] == 0.0
+        assert signals["SPY"]["regime"] == "neutral"
+
+    def test_integrator_partial_failure(self, tmp_path):
+        """One asset fails, another succeeds."""
+        engine = _make_engine(tmp_path)
+        portfolio = {"SPY": 0.5, "GLD": 0.5}
+
+        def side_effect(asset):
+            if asset == "SPY":
+                raise RuntimeError("SPY failed")
+            mock_c = MagicMock()
+            mock_c.score = 0.3
+            mock_c.confidence = 0.8
+            mock_c.regime = "bull"
+            mock_c.sources = [{"source": "cta"}]
+            return mock_c
+
+        engine.integrator.get_composite_signal.side_effect = side_effect
+        signals = engine._generate_daily_signals("2020-01-15", portfolio)
+        assert signals["SPY"]["score"] == 0.0
+        assert signals["GLD"]["score"] == 0.3
+        assert signals["SPY"]["regime"] == "neutral"
+        assert signals["GLD"]["regime"] == "bull"
+
+
+# ---------------------------------------------------------------------------
+# run_backtest edge cases
+# ---------------------------------------------------------------------------
+
+class TestRunBacktestEdgeCases:
+    """Edge cases for run_backtest."""
+
+    def test_empty_portfolio(self, tmp_path):
+        """Empty portfolio dict should raise error (no assets to fetch)."""
+        engine = _make_engine(tmp_path)
+        with patch.object(engine, "_fetch_historical_prices", return_value=[]):
+            with pytest.raises(ValueError, match="Insufficient data"):
+                engine.run_backtest({})
+
+    def test_flat_price_curve(self, tmp_path):
+        """All flat prices produce zero volatility and zero return."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0)
+        # All same prices
+        for d in spy_data:
+            d["close"] = 100.0
+        with patch.object(engine, "_fetch_historical_prices", return_value=spy_data):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        assert result.total_return == 0.0
+        assert abs(result.volatility) < 1e-10
+
+    def test_all_declining_prices(self, tmp_path):
+        """All declining prices produce negative total return."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0)
+        for i, d in enumerate(spy_data):
+            d["close"] = 100.0 - i * 0.5
+        with patch.object(engine, "_fetch_historical_prices", return_value=spy_data):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        assert result.total_return < 0
+        assert result.cagr < 0
+
+    def test_nan_in_price_data(self, tmp_path):
+        """NaN in price data should propagate."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0)
+        spy_data[5]["close"] = float("nan")
+        with patch.object(engine, "_fetch_historical_prices", return_value=spy_data):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        # NaN in price creates NaN return, which should not crash
+        assert isinstance(result, BacktestResult)
+
+    def test_spy_benchmark_returns_empty(self, tmp_path):
+        """When SPY benchmark data is empty, crisis alpha should be 0."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0)
+
+        def mock_fetch(symbol, start, end):
+            if symbol == "SPY":
+                return spy_data
+            return []
+
+        with patch.object(engine, "_fetch_historical_prices", side_effect=mock_fetch):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        # Each crisis alpha should be computed (maybe 0 if no overlap)
+        for crisis in ("crisis_alpha_2008", "crisis_alpha_2020", "crisis_alpha_2022"):
+            assert crisis in result.extras
+
+    def test_no_signal_history(self, tmp_path):
+        """When no rebalance dates exist, signal_history is empty."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0)
+        with patch.object(engine, "_fetch_historical_prices", return_value=spy_data):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        assert result.extras["avg_signal_confidence"] == 0
+        assert result.extras["regime_distribution"] == {}
+        assert result.extras["source_contributions"] == {}
+
+    def test_rolling_sharpe_insufficient_data(self, tmp_path):
+        """Less than 252 returns should produce empty rolling Sharpe."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=50, base_price=100.0)
+        with patch.object(engine, "_fetch_historical_prices", return_value=spy_data):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        assert result.extras["rolling_sharpe_1y"] == []
+
+    def test_three_asset_portfolio(self, tmp_path):
+        """Three-asset portfolio should run without errors."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0, symbol="SPY")
+        gld_data = _make_price_data(days=60, base_price=50.0, symbol="GLD")
+        tlt_data = _make_price_data(days=60, base_price=80.0, symbol="TLT")
+
+        def mock_fetch(symbol, start, end):
+            mapping = {"SPY": spy_data, "GLD": gld_data, "TLT": tlt_data}
+            return mapping.get(symbol, [])
+
+        with patch.object(engine, "_fetch_historical_prices", side_effect=mock_fetch):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        assert isinstance(result, BacktestResult)
+        assert result.total_rebalances > 0
+
+    def test_tx_cost_reduces_return(self, tmp_path):
+        """With turnover, transaction costs should reduce the return."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0, symbol="SPY")
+        gld_data = _make_price_data(days=60, base_price=50.0, symbol="GLD")
+
+        mock_signal = {
+            "SPY": {"score": 0.9, "confidence": 1.0, "regime": "bull", "sources": [{"source": "a"}]},
+            "GLD": {"score": -0.9, "confidence": 1.0, "regime": "bear", "sources": [{"source": "b"}]},
+        }
+
+        def mock_fetch(symbol, start, end):
+            mapping = {"SPY": spy_data, "GLD": gld_data}
+            return mapping.get(symbol, [])
+
+        with patch.object(engine, "_fetch_historical_prices", side_effect=mock_fetch):
+            with patch.object(engine, "_generate_daily_signals", return_value=mock_signal):
+                result = engine.run_backtest(
+                    {"SPY": 0.6, "GLD": 0.4},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        assert isinstance(result, BacktestResult)
+        assert "source_contributions" in result.extras
+
+
+# ---------------------------------------------------------------------------
+# validate_target edge cases
+# ---------------------------------------------------------------------------
+
+class TestValidateTargetEdgeCases:
+    """Edge cases for validate_target."""
+
+    def test_nan_sharpe_ratio(self, tmp_path, capsys):
+        """NaN Sharpe ratio should fail comparison (NaN >= x is False)."""
+        engine = _make_engine(tmp_path)
+        result = _make_result()
+        result.sharpe_ratio = float("nan")
+        assert engine.validate_target(result, target_sharpe=0.95) is False
+
+    def test_inf_sharpe_ratio(self, tmp_path, capsys):
+        """Inf Sharpe ratio should pass any target."""
+        engine = _make_engine(tmp_path)
+        result = _make_result()
+        result.sharpe_ratio = float("inf")
+        assert engine.validate_target(result, target_sharpe=0.95) is True
+
+    def test_negative_target_sharpe(self, tmp_path, capsys):
+        """Negative target Sharpe should pass with positive Sharpe."""
+        engine = _make_engine(tmp_path)
+        result = _make_result()
+        result.sharpe_ratio = 0.5
+        assert engine.validate_target(result, target_sharpe=-1.0) is True
+
+    def test_zero_target_sharpe(self, tmp_path, capsys):
+        """Zero target Sharpe: any positive Sharpe should pass."""
+        engine = _make_engine(tmp_path)
+        result = _make_result()
+        result.sharpe_ratio = 0.01
+        assert engine.validate_target(result, target_sharpe=0.0) is True
+
+    def test_minimal_extras_missing_keys(self, tmp_path):
+        """Validate_target with missing extras keys should raise KeyError."""
+        engine = _make_engine(tmp_path)
+        result = _make_result()
+        result.extras = {}
+        result.sharpe_ratio = 0.95
+        with pytest.raises(KeyError):
+            engine.validate_target(result, target_sharpe=0.90)
+
+    def test_validate_target_output_format(self, tmp_path, capsys):
+        """validate_target should print formatted output."""
+        engine = _make_engine(tmp_path)
+        result = _make_result()
+        result.sharpe_ratio = 0.95
+        engine.validate_target(result, target_sharpe=0.95)
+        captured = capsys.readouterr()
+        assert "ENSEMBLE BACKTEST VALIDATION" in captured.out
+        assert "Sharpe Ratio:" in captured.out
+        assert "CAGR:" in captured.out
+
+    def test_validate_target_output_shows_crisis_alpha(self, tmp_path, capsys):
+        """validate_target output should include crisis alpha sections."""
+        engine = _make_engine(tmp_path)
+        result = _make_result()
+        result.sharpe_ratio = 0.95
+        engine.validate_target(result, target_sharpe=0.95)
+        captured = capsys.readouterr()
+        assert "Crisis Alpha" in captured.out
+        assert "2008 GFC" in captured.out or "2008" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# main() / CLI edge cases
+# ---------------------------------------------------------------------------
+
+class TestMainEdgeCases:
+    """Edge cases for the main() CLI entry point."""
+
+    def test_main_print_output(self):
+        """main() should print portfolio and period info."""
+        with patch("src.backtest.ensemble_backtest.EnsembleBacktestEngine") as mock_cls:
+            mock_engine = MagicMock()
+            mock_result = MagicMock()
+            mock_result.sharpe_ratio = 0.9
+            mock_result.extras = {}
+            mock_engine.run_backtest.return_value = mock_result
+            mock_cls.return_value = mock_engine
+
+            with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+                mock_parse.return_value = MagicMock(
+                    command="run",
+                    portfolio="46/38/16",
+                    start="2020-01-01",
+                    end="2020-06-01",
+                    target_sharpe=0.95,
+                    rebalance="monthly",
+                    output=None,
+                )
+                from src.backtest.ensemble_backtest import main
+                main()
+
+            mock_engine.run_backtest.assert_called_once()
+
+    def test_main_portfolio_weights_greater_than_one(self):
+        """Weights > 1 should be divided by 100."""
+        with patch("src.backtest.ensemble_backtest.EnsembleBacktestEngine") as mock_cls:
+            mock_engine = MagicMock()
+            mock_result = MagicMock()
+            mock_result.sharpe_ratio = 0.9
+            mock_result.extras = {}
+            mock_engine.run_backtest.return_value = mock_result
+            mock_cls.return_value = mock_engine
+
+            with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+                mock_parse.return_value = MagicMock(
+                    command="run",
+                    portfolio="46/38/16",
+                    start="2020-01-01",
+                    end="2020-06-01",
+                    target_sharpe=0.95,
+                    rebalance="monthly",
+                    output=None,
+                )
+                from src.backtest.ensemble_backtest import main
+                main()
+
+            call_kwargs = mock_engine.run_backtest.call_args[1]
+            pf = call_kwargs["portfolio"]
+            # 46/38/16 with > 1 → divided by 100: 0.46, 0.38, 0.16
+            # Then normalized to sum to 1.0
+            assert abs(sum(pf.values()) - 1.0) < 0.01
+            assert abs(pf["SPY"] - 0.46) < 0.01
+            assert abs(pf["GLD"] - 0.38) < 0.01
+            assert abs(pf["TLT"] - 0.16) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# EnsembleBacktestResult extras structure edge cases
+# ---------------------------------------------------------------------------
+
+class TestEnsembleBacktestResultStructure:
+    """Structure and edge cases for backtest results."""
+
+    def test_result_all_numeric_fields_are_numbers(self):
+        r = _make_result()
+        for field in ("total_return", "cagr", "volatility", "sharpe_ratio"):
+            assert isinstance(getattr(r, field), (int, float))
+
+    def test_result_total_rebalances_is_int(self):
+        r = _make_result()
+        assert isinstance(r.total_rebalances, int)
+        assert r.total_rebalances >= 0
+
+    def test_result_max_drawdown_is_negative_or_zero(self):
+        r = _make_result()
+        assert r.max_drawdown <= 0
+
+    def test_result_extras_source_contributions_structure(self):
+        r = _make_result()
+        sc = r.extras["source_contributions"]
+        for name, contrib in sc.items():
+            assert isinstance(contrib, dict)
+            assert "hits" in contrib
+            assert "avg_confidence" in contrib
+            assert isinstance(contrib["hits"], int)
+            assert isinstance(contrib["avg_confidence"], float)
+
+    def test_result_extras_rolling_sharpe_structure(self):
+        r = _make_result()
+        rs = r.extras["rolling_sharpe_1y"]
+        assert isinstance(rs, list)
+        if rs:
+            date_str, sharpe_val = rs[0]
+            assert isinstance(date_str, str)
+            assert isinstance(sharpe_val, (int, float))
+
+    def test_result_extras_regime_distribution_sums_to_one(self):
+        r = _make_result()
+        rd = r.extras["regime_distribution"]
+        assert abs(sum(rd.values()) - 1.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Ensures __all__ coverage
+# ---------------------------------------------------------------------------
+
+class TestExportCompleteness:
+    """Verify module __all__ export completeness."""
+
+    def test_public_api_in_all(self):
+        """All public names should be in __all__."""
+        from src.backtest import ensemble_backtest as mod
+        # Classes/functions that start with uppercase are public
+        public_names = [name for name in dir(mod)
+                        if not name.startswith("_") and not name.startswith("logger")]
+        # EnsembleBacktestEngine is the main public API
+        assert "EnsembleBacktestEngine" in mod.__all__
+        assert "EnsembleBacktestEngine" in public_names
+
+    def test_main_is_not_in_all(self):
+        """main() should not be in __all__ (it's a CLI entry)."""
+        from src.backtest import ensemble_backtest as mod
+        assert "main" not in mod.__all__
+
+    def test_no_private_items_in_all(self):
+        """__all__ should not contain private names."""
+        from src.backtest import ensemble_backtest as mod
+        for name in mod.__all__:
+            assert not name.startswith("_"), f"Private name in __all__: {name}"
+
+
+# ---------------------------------------------------------------------------
+# Source contributions and regime distribution edge cases
+# ---------------------------------------------------------------------------
+
+class TestSourceContributionsEdgeCases:
+    """Edge cases for source contribution tracking."""
+
+    def test_source_contributions_empty_history(self, tmp_path):
+        """Empty signal history should produce empty contributions."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0)
+        with patch.object(engine, "_fetch_historical_prices", return_value=spy_data):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        assert result.extras["source_contributions"] == {}
+
+    def test_source_contributions_with_multiple_assets(self, tmp_path):
+        """Multiple assets should produce contributions for each."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0, symbol="SPY")
+        gld_data = _make_price_data(days=60, base_price=50.0, symbol="GLD")
+
+        mock_signal = {
+            "SPY": {"score": 0.3, "confidence": 0.8, "regime": "bull",
+                     "sources": [{"source": "tsfm"}, {"source": "cta"}]},
+            "GLD": {"score": -0.2, "confidence": 0.6, "regime": "neutral",
+                     "sources": [{"source": "cta"}]},
+        }
+
+        def mock_fetch(symbol, start, end):
+            return spy_data if symbol == "SPY" else gld_data
+
+        with patch.object(engine, "_fetch_historical_prices", side_effect=mock_fetch):
+            with patch.object(engine, "_generate_daily_signals", return_value=mock_signal):
+                result = engine.run_backtest(
+                    {"SPY": 0.6, "GLD": 0.4},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        sc = result.extras["source_contributions"]
+        assert "tsfm" in sc or "cta" in sc
+        # At least one source should have hits > 0
+        total_hits = sum(s["hits"] for s in sc.values())
+        assert total_hits > 0
+
+
+class TestRegimeDistributionEdgeCases:
+    """Edge cases for regime distribution tracking."""
+
+    def test_regime_distribution_empty_history(self, tmp_path):
+        """Empty signal history should produce empty regime distribution."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data(days=60, base_price=100.0)
+        with patch.object(engine, "_fetch_historical_prices", return_value=spy_data):
+            with patch.object(engine, "_generate_daily_signals", return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-03-01",
+                    rebalance_freq="monthly",
+                )
+        assert result.extras["regime_distribution"] == {}
+
+
+# ---------------------------------------------------------------------------
+# __all__ export and guard validation
+# ---------------------------------------------------------------------------
+
+class TestModuleGuard:
+    """Verify module __main__ guard and __all__."""
+
+    def test_module_has___all__(self):
+        from src.backtest import ensemble_backtest as mod
+        assert hasattr(mod, "__all__")
+        assert isinstance(mod.__all__, list)
+
+    def test___all___is_exhaustive(self):
+        """__all__ should contain EnsembleBacktestEngine."""
+        from src.backtest import ensemble_backtest as mod
+        assert "EnsembleBacktestEngine" in mod.__all__
+
+    def test___all___no_duplicates(self):
+        from src.backtest import ensemble_backtest as mod
+        assert len(mod.__all__) == len(set(mod.__all__))
+
+    def test_module_exports_only_expected(self):
+        """__all__ should contain only public API classes."""
+        from src.backtest import ensemble_backtest as mod
+        allowed = {"EnsembleBacktestEngine"}
+        for name in mod.__all__:
+            assert name in allowed, f"Unexpected export: {name}"

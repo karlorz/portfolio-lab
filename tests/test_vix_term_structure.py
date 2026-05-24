@@ -1145,9 +1145,9 @@ class TestDataclassFieldValidation:
         assert fields["confidence"] is float
         # Bool field
         assert fields["is_valid"] is bool
-        # Optional float fields
-        assert fields["vix3m"] is Optional[float]
-        assert fields["vix6m"] is Optional[float]
+        # Optional float fields (use == not is — Optional creates new Union objects)
+        assert fields["vix3m"] == Optional[float]
+        assert fields["vix6m"] == Optional[float]
 
     def test_vix_term_structure_signal_no_defaults(self):
         """Verify VIXTermStructureSignal has no default values (all required)."""

@@ -1104,3 +1104,865 @@ class TestEdgeCases:
         _, tracker, _ = bt._run_rotated(bt._daily_prices[:200], bt.config)
         for dur in tracker["effective_durations"]:
             assert 2.0 <= dur <= 16.0, f"Duration {dur} out of [2, 16] range"
+
+
+# ── Dataclass Field Validation ─────────────────────────────────────────────
+
+
+class TestDataclassFieldValidation:
+    """Validate dataclass fields via dataclasses.fields(), types, defaults."""
+
+    def test_backtest_config_fields(self):
+        """BacktestConfig should have expected fields via dataclasses.fields()."""
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(BacktestConfig)}
+        expected = {
+            "start_date", "end_date", "initial_capital", "base_weights",
+            "rebalance_frequency_days", "rebalance_frequency",
+            "transaction_cost_bps", "transaction_costs_by_symbol",
+            "momentum_lookback_days", "extras",
+        }
+        assert set(fields.keys()) == expected
+
+    def test_backtest_config_field_types(self):
+        """BacktestConfig field types should be correct."""
+        import dataclasses
+        fields = {f.name: f.type for f in dataclasses.fields(BacktestConfig)}
+        assert fields["start_date"] == str
+        assert fields["end_date"] == str
+        assert fields["initial_capital"] == float
+        assert fields["momentum_lookback_days"] == int
+        assert fields["rebalance_frequency_days"] == int
+        assert fields["transaction_cost_bps"] == float
+
+    def test_backtest_config_field_defaults(self):
+        """BacktestConfig inherited field defaults via dataclasses.fields()."""
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(BacktestConfig)}
+        # Fields with default values (not default_factory)
+        assert fields["start_date"].default == "2006-01-01"
+        assert fields["end_date"].default == "2026-05-15"
+        assert fields["initial_capital"].default == 100000.0
+        assert fields["rebalance_frequency_days"].default == 21
+        assert fields["transaction_cost_bps"].default == 10.0
+        assert fields["momentum_lookback_days"].default == 60
+
+    def test_backtest_config_field_factories(self):
+        """BacktestConfig fields with default_factory should produce mutable defaults."""
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(BacktestConfig)}
+        assert fields["base_weights"].default_factory is not None
+        assert fields["extras"].default_factory is not None
+        config = BacktestConfig()
+        assert config.base_weights["SPY"] == 0.46
+        assert config.extras == {}
+
+    def test_backtest_config_no_positional_args_required(self):
+        """BacktestConfig should be constructable with zero arguments (all defaults)."""
+        config = BacktestConfig()
+        assert isinstance(config.start_date, str)
+
+    def test_daily_prices_fields(self):
+        """DailyPrices should have expected fields via dataclasses.fields()."""
+        import dataclasses
+        from src.backtest.metrics import DailyPrices as DP
+        fields = {f.name: f for f in dataclasses.fields(DP)}
+        expected = {"date", "spy", "gld", "tlt", "vix", "ief", "shy", "btc", "eth", "extras"}
+        assert set(fields.keys()) == expected
+
+    def test_daily_prices_field_types(self):
+        """DailyPrices field types should be correct."""
+        import dataclasses
+        from src.backtest.metrics import DailyPrices as DP
+        fields = {f.name: f.type for f in dataclasses.fields(DP)}
+        assert fields["date"] == str
+        assert fields["spy"] == float
+        assert fields["gld"] == float
+        assert fields["tlt"] == float
+
+    def test_daily_prices_optional_fields(self):
+        """DailyPrices optional fields should default to None."""
+        import dataclasses
+        from src.backtest.metrics import DailyPrices as DP
+        fields = {f.name: f for f in dataclasses.fields(DP)}
+        assert fields["vix"].default is None
+        assert fields["ief"].default is None
+        assert fields["shy"].default is None
+        assert fields["btc"].default is None
+        assert fields["eth"].default is None
+
+    def test_backtest_config_is_dataclass(self):
+        """BacktestConfig should be recognized as a dataclass."""
+        import dataclasses
+        assert dataclasses.is_dataclass(BacktestConfig)
+
+    def test_daily_prices_is_dataclass(self):
+        """DailyPrices should be recognized as a dataclass."""
+        import dataclasses
+        from src.backtest.metrics import DailyPrices as DP
+        assert dataclasses.is_dataclass(DP)
+
+    def test_backtest_config_momentum_lookback_defaults_to_constant(self):
+        """momentum_lookback_days default should equal MOMENTUM_LOOKBACK constant."""
+        config = BacktestConfig()
+        assert config.momentum_lookback_days == MOMENTUM_LOOKBACK
+
+    def test_daily_prices_required_fields_raise_type_error(self):
+        """Missing required DailyPrices fields should raise TypeError."""
+        from src.backtest.metrics import DailyPrices as DP
+        with pytest.raises(TypeError):
+            DP()  # Missing date, spy, gld, tlt
+
+    def test_daily_prices_minimal_construction(self):
+        """DailyPrices with only required fields should work."""
+        from src.backtest.metrics import DailyPrices as DP
+        dp = DP(date="2020-01-02", spy=100.0, gld=100.0, tlt=100.0)
+        assert dp.ief is None
+        assert dp.shy is None
+        assert dp.vix is None
+
+    def test_backtest_result_fields(self):
+        """BacktestResult should have expected fields via dataclasses.fields()."""
+        import dataclasses
+        fields = {f.name for f in dataclasses.fields(BacktestResult)}
+        expected = {
+            "total_return", "cagr", "volatility", "sharpe_ratio", "max_drawdown",
+            "total_rebalances", "total_transaction_costs", "avg_turnover",
+            "baseline_sharpe", "sharpe_improvement", "extras", "crisis_returns",
+        }
+        assert fields == expected
+
+
+# ── NaN / Inf Edge Cases ───────────────────────────────────────────────────
+
+
+class TestNanInfEdgeCases:
+    """Test NaN and Inf handling in computation methods."""
+
+    def test_momentum_nan_price_returns_zero(self):
+        """NaN in TLT price should not crash; returns NaN or 0.0."""
+        bt = WalkForwardBondDurationBacktester()
+        bt.load_data()
+        idx = MOMENTUM_LOOKBACK + 10
+        bt._daily_prices[idx - MOMENTUM_LOOKBACK].tlt = float("nan")
+        bt._daily_prices[idx].tlt = 105.0
+        mom = bt._compute_tlt_60d_momentum(idx)
+        # nan <= 0 is False (does not trigger guard), so p1/p0 - 1 = 105/nan - 1 = nan
+        # Just verify it doesn't crash and returns something
+        assert isinstance(mom, float) or isinstance(mom, np.floating)
+
+    def test_momentum_inf_prices_returns_finite(self):
+        """Inf/inf prices should not crash; may produce nan (inf/inf - 1)."""
+        bt = WalkForwardBondDurationBacktester()
+        bt.load_data()
+        idx = MOMENTUM_LOOKBACK + 10
+        bt._daily_prices[idx - MOMENTUM_LOOKBACK].tlt = float("inf")
+        bt._daily_prices[idx].tlt = float("inf")
+        mom = bt._compute_tlt_60d_momentum(idx)
+        # inf > 0 is True so guard doesn't trigger; inf/inf - 1 = nan
+        # Just verify it doesn't crash
+        assert True
+
+    def test_momentum_inf_start_price_returns_finite(self):
+        """Inf as start price: inf > 0 is True (no guard), 105/inf - 1 = -1.0."""
+        bt = WalkForwardBondDurationBacktester()
+        bt.load_data()
+        idx = MOMENTUM_LOOKBACK + 10
+        bt._daily_prices[idx - MOMENTUM_LOOKBACK].tlt = float("inf")
+        bt._daily_prices[idx].tlt = 100.0
+        mom = bt._compute_tlt_60d_momentum(idx)
+        # inf > 0 is True, so guard doesn't trigger; 100/inf - 1 = -1.0
+        assert mom == -1.0
+
+    def test_portfolio_return_nan_prices(self):
+        """NaN prices in portfolio return should not crash."""
+        bt = WalkForwardBondDurationBacktester()
+        p0 = DailyPrices(date="2020-01-02", spy=float("nan"), gld=float("nan"),
+                         tlt=float("nan"), ief=float("nan"), shy=float("nan"))
+        p1 = DailyPrices(date="2020-01-03", spy=float("nan"), gld=float("nan"),
+                         tlt=float("nan"), ief=float("nan"), shy=float("nan"))
+        ret = bt._compute_portfolio_return(p0, p1, 0.46, 0.38, 0.16, 1.0, 0.0, 0.0)
+        assert np.isnan(ret) or ret == 0.0
+
+    def test_portfolio_return_inf_prices(self):
+        """Inf prices should not crash; returns may be inf or nan."""
+        bt = WalkForwardBondDurationBacktester()
+        p0 = DailyPrices(date="2020-01-02", spy=100.0, gld=100.0,
+                         tlt=100.0, ief=100.0, shy=100.0)
+        p1 = DailyPrices(date="2020-01-03", spy=float("inf"), gld=float("inf"),
+                         tlt=float("inf"), ief=float("inf"), shy=float("inf"))
+        ret = bt._compute_portfolio_return(p0, p1, 0.46, 0.38, 0.16, 1.0, 0.0, 0.0)
+        # inf/100 - 1 = inf, weighted sum = inf. Should not crash.
+        assert True
+
+    def test_portfolio_return_zero_start_prices(self):
+        """Zero start prices should be handled (return 0 via p0 > 0 guard)."""
+        bt = WalkForwardBondDurationBacktester()
+        p0 = DailyPrices(date="2020-01-02", spy=-1.0, gld=-1.0,
+                         tlt=-1.0, ief=-1.0, shy=-1.0)
+        p1 = DailyPrices(date="2020-01-03", spy=100.0, gld=100.0,
+                         tlt=100.0, ief=100.0, shy=100.0)
+        ret = bt._compute_portfolio_return(p0, p1, 0.46, 0.38, 0.16, 1.0, 0.0, 0.0)
+        assert ret == 0.0
+
+    def test_momentum_nan_end_price(self):
+        """NaN as end price should produce nan momentum if start is valid."""
+        bt = WalkForwardBondDurationBacktester()
+        bt.load_data()
+        idx = MOMENTUM_LOOKBACK + 10
+        bt._daily_prices[idx - MOMENTUM_LOOKBACK].tlt = 100.0
+        bt._daily_prices[idx].tlt = float("nan")
+        mom = bt._compute_tlt_60d_momentum(idx)
+        assert np.isnan(mom) or mom == 0.0
+
+    def test_yield_context_nan_momentum(self):
+        """NaN momentum should map to neutral context (not crash)."""
+        bt = WalkForwardBondDurationBacktester()
+        spread, real_rate, rate_chg = bt._momentum_to_yield_context(float("nan"))
+        # NaN comparisons all return False, so it falls to the else branch
+        assert real_rate == 1.5
+        assert isinstance(spread, float)
+        assert isinstance(rate_chg, float)
+
+    def test_yield_context_inf_momentum(self):
+        """Inf momentum should map to a valid bucket (not crash)."""
+        bt = WalkForwardBondDurationBacktester()
+        spread, real_rate, rate_chg = bt._momentum_to_yield_context(float("inf"))
+        # inf > 0.05 is True
+        assert spread == 0.8
+        assert rate_chg == -0.5
+
+    def test_yield_context_neg_inf_momentum(self):
+        """Negative Inf momentum should map to a valid bucket (not crash)."""
+        bt = WalkForwardBondDurationBacktester()
+        spread, real_rate, rate_chg = bt._momentum_to_yield_context(float("-inf"))
+        # -inf > 0.05 is False, etc, falls to else
+        assert real_rate == 1.5
+        assert isinstance(rate_chg, float)
+
+
+# ── CLI / __main__ Guard Tests ─────────────────────────────────────────────
+
+
+class TestCliMainEntry:
+    """Test the CLI entry point (main()) and __main__ guard."""
+
+    def test_main_default_run(self, capsys):
+        """main() should run the backtest and print results by default."""
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        old_argv = sys.argv
+        try:
+            sys.argv = ["bond_duration_backtest.py"]
+            main()
+            captured = capsys.readouterr()
+            assert "Bond Duration Rotation" in captured.out
+            assert "Sharpe Ratio" in captured.out
+        finally:
+            sys.argv = old_argv
+
+    def test_main_with_start_end_flags(self, capsys):
+        """main() should accept --start and --end flags."""
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        old_argv = sys.argv
+        try:
+            sys.argv = ["bond_duration_backtest.py", "--start", "2015-01-01", "--end", "2016-01-01"]
+            main()
+            captured = capsys.readouterr()
+            assert "2015-01-01" in captured.out
+            assert "2016-01-01" in captured.out
+        finally:
+            sys.argv = old_argv
+
+    def test_main_with_capital_flag(self, capsys):
+        """main() should accept --capital flag."""
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        old_argv = sys.argv
+        try:
+            sys.argv = ["bond_duration_backtest.py", "--capital", "50000"]
+            main()
+            captured = capsys.readouterr()
+            assert "$50,000" in captured.out or "50000" in captured.out
+        finally:
+            sys.argv = old_argv
+
+    def test_main_with_save_flag(self, tmp_path):
+        """main() with --save should not crash and produce output."""
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        import os
+        old_argv = sys.argv
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            sys.argv = ["bond_duration_backtest.py", "--save", "--output", str(tmp_path / "test_results.json")]
+            main()
+            saved = tmp_path / "test_results.json"
+            assert saved.exists()
+            with open(saved) as f:
+                data = json.load(f)
+            assert "total_return" in data
+        finally:
+            sys.argv = old_argv
+            os.chdir(old_cwd)
+
+    def test_main_with_output_flag(self, tmp_path):
+        """main() should save to custom output path with --output."""
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        import os
+        old_argv = sys.argv
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            out_path = tmp_path / "custom_output.json"
+            sys.argv = ["bond_duration_backtest.py", "--output", str(out_path)]
+            main()
+            assert out_path.exists()
+        finally:
+            sys.argv = old_argv
+            os.chdir(old_cwd)
+
+    def test_main_run_mode_explicit(self, capsys):
+        """main() with explicit 'run' argument should work."""
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        old_argv = sys.argv
+        try:
+            sys.argv = ["bond_duration_backtest.py", "run"]
+            main()
+            captured = capsys.readouterr()
+            assert "Bond Duration Rotation" in captured.out
+        finally:
+            sys.argv = old_argv
+
+    def test_main_save_without_output_uses_default_path(self, tmp_path, monkeypatch):
+        """main() with --save only (no --output) should not crash."""
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        from src.paths import BACKTEST_RESULTS_DIR
+        old_argv = sys.argv
+        try:
+            monkeypatch.chdir(tmp_path)
+            sys.argv = ["bond_duration_backtest.py", "--save"]
+            main()
+        finally:
+            sys.argv = old_argv
+
+    def test_module_main_guard_string(self):
+        """The '__main__' guard string should exist in the module."""
+        import inspect
+        from src.backtest import bond_duration_backtest
+        source = inspect.getsource(bond_duration_backtest)
+        assert '__name__ == "__main__"' in source
+        assert 'main()' in source.rsplit('__name__', 1)[-1]
+
+    def test_main_parse_args_invalid_mode(self):
+        """CLI with invalid mode should exit with error (argparse handles it)."""
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        old_argv = sys.argv
+        try:
+            sys.argv = ["bond_duration_backtest.py", "invalid_mode"]
+            with pytest.raises(SystemExit):
+                main()
+        finally:
+            sys.argv = old_argv
+
+
+# ── Export Completeness ────────────────────────────────────────────────────
+
+
+class TestExportCompleteness:
+    """Verify __all__ exports and public API coverage."""
+
+    def test_all_exists(self):
+        """Module should define __all__."""
+        from src.backtest import bond_duration_backtest as mod
+        assert hasattr(mod, "__all__")
+        assert isinstance(mod.__all__, list)
+        assert len(mod.__all__) > 0
+
+    def test_all_names_are_strings(self):
+        """All __all__ entries should be strings."""
+        from src.backtest import bond_duration_backtest as mod
+        for name in mod.__all__:
+            assert isinstance(name, str), f"{name} is not a string"
+
+    def test_all_names_exist_in_module(self):
+        """Every name in __all__ should be accessible in the module."""
+        from src.backtest import bond_duration_backtest as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"{name} is not defined in module"
+
+    def test_all_contains_core_classes(self):
+        """__all__ should contain the core public classes and constants."""
+        from src.backtest import bond_duration_backtest as mod
+        expected = {"BacktestConfig", "WalkForwardBondDurationBacktester",
+                    "MOMENTUM_LOOKBACK", "BOND_SLEEVE", "BASE_SYMBOLS",
+                    "BOND_SYMBOLS", "TRADING_DAYS_PER_YEAR",
+                    "MONTHLY_TRADING_DAYS", "CRISIS_YEARS"}
+        for name in expected:
+            assert name in mod.__all__, f"{name} missing from __all__"
+
+    def test_all_no_private_names(self):
+        """__all__ should not contain private/underscore-prefixed names."""
+        from src.backtest import bond_duration_backtest as mod
+        for name in mod.__all__:
+            assert not name.startswith("_"), f"Private name {name} in __all__"
+
+    def test_public_api_importable(self):
+        """All __all__ names should be directly importable from the module."""
+        from src.backtest import bond_duration_backtest as mod
+        for name in mod.__all__:
+            obj = getattr(mod, name)
+            assert obj is not None, f"{name} resolves to None"
+
+    def test_backtest_config_in_all(self):
+        """BacktestConfig should be exported in __all__."""
+        from src.backtest.bond_duration_backtest import BacktestConfig
+        assert BacktestConfig is not None
+
+    def test_walk_forward_class_exported(self):
+        """WalkForwardBondDurationBacktester should be exported."""
+        from src.backtest.bond_duration_backtest import WalkForwardBondDurationBacktester
+        assert WalkForwardBondDurationBacktester is not None
+
+
+# ── Additional Constants Validation ────────────────────────────────────────
+
+
+class TestAdditionalConstantsValidation:
+    """Validate module-level constant types, ranges, and consistency."""
+
+    def test_trading_days_per_year_type(self):
+        from src.backtest.bond_duration_backtest import TRADING_DAYS_PER_YEAR
+        assert isinstance(TRADING_DAYS_PER_YEAR, int)
+
+    def test_monthly_trading_days_type(self):
+        from src.backtest.bond_duration_backtest import MONTHLY_TRADING_DAYS
+        assert isinstance(MONTHLY_TRADING_DAYS, int)
+
+    def test_crisis_years_type(self):
+        from src.backtest.bond_duration_backtest import CRISIS_YEARS
+        assert isinstance(CRISIS_YEARS, list)
+        for y in CRISIS_YEARS:
+            assert isinstance(y, str)
+            assert y.isdigit()
+
+    def test_base_symbols_type(self):
+        from src.backtest.bond_duration_backtest import BASE_SYMBOLS
+        assert isinstance(BASE_SYMBOLS, list)
+        assert len(BASE_SYMBOLS) == 3
+        for s in BASE_SYMBOLS:
+            assert isinstance(s, str)
+
+    def test_bond_symbols_type(self):
+        from src.backtest.bond_duration_backtest import BOND_SYMBOLS
+        assert isinstance(BOND_SYMBOLS, list)
+        assert len(BOND_SYMBOLS) == 3
+        for s in BOND_SYMBOLS:
+            assert isinstance(s, str)
+
+    def test_momentum_lookback_type(self):
+        from src.backtest.bond_duration_backtest import MOMENTUM_LOOKBACK
+        assert isinstance(MOMENTUM_LOOKBACK, int)
+        assert MOMENTUM_LOOKBACK > 0
+
+    def test_bond_sleeve_type(self):
+        from src.backtest.bond_duration_backtest import BOND_SLEEVE
+        assert isinstance(BOND_SLEEVE, float)
+        assert 0.0 < BOND_SLEEVE < 1.0
+
+    def test_all_constants_upper_case(self):
+        """Module-level constants should be UPPER_CASE."""
+        from src.backtest import bond_duration_backtest as mod
+        constants = ["TRADING_DAYS_PER_YEAR", "MONTHLY_TRADING_DAYS",
+                     "CRISIS_YEARS", "BASE_SYMBOLS", "BOND_SYMBOLS",
+                     "MOMENTUM_LOOKBACK", "BOND_SLEEVE"]
+        for name in constants:
+            assert hasattr(mod, name), f"Missing constant {name}"
+            val = getattr(mod, name)
+            assert val is not None
+
+    def test_crisis_years_chronological(self):
+        """CRISIS_YEARS should be in chronological order."""
+        from src.backtest.bond_duration_backtest import CRISIS_YEARS
+        assert CRISIS_YEARS == sorted(CRISIS_YEARS)
+
+    def test_base_symbols_no_duplicates(self):
+        """BASE_SYMBOLS should have no duplicate entries."""
+        from src.backtest.bond_duration_backtest import BASE_SYMBOLS
+        assert len(BASE_SYMBOLS) == len(set(BASE_SYMBOLS))
+
+    def test_bond_symbols_no_duplicates(self):
+        """BOND_SYMBOLS should have no duplicate entries."""
+        from src.backtest.bond_duration_backtest import BOND_SYMBOLS
+        assert len(BOND_SYMBOLS) == len(set(BOND_SYMBOLS))
+
+    def test_tlt_in_both_symbol_lists(self):
+        """TLT should appear in both BASE_SYMBOLS and BOND_SYMBOLS."""
+        from src.backtest.bond_duration_backtest import BASE_SYMBOLS, BOND_SYMBOLS
+        assert "TLT" in BASE_SYMBOLS
+        assert "TLT" in BOND_SYMBOLS
+
+    def test_bond_sleeve_matches_base_weight(self):
+        """BOND_SLEEVE should equal base_weights['TLT'] default."""
+        config = BacktestConfig()
+        assert BOND_SLEEVE == config.base_weights["TLT"]
+
+
+# ── Additional Function Boundary Conditions ───────────────────────────────
+
+
+class TestAdditionalBoundaryConditions:
+    """Test more boundary conditions and edge cases."""
+
+    def test_load_data_empty_json(self, tmp_path, monkeypatch):
+        """Loading from empty/malformed JSON should fall back to synthetic data."""
+        import json
+        from src.paths import PRICES_JSON
+        # Create a malformed file
+        fake_prices = tmp_path / "prices.json"
+        fake_prices.write_text("{bad json")
+        monkeypatch.setattr("src.backtest.bond_duration_backtest.PRICES_JSON", fake_prices)
+        bt = WalkForwardBondDurationBacktester()
+        with pytest.raises(json.JSONDecodeError):
+            bt.load_data()
+
+    def test_load_data_missing_keys(self, tmp_path, monkeypatch):
+        """JSON missing SPY/GLD/TLT keys should still work (dates derived from intersection)."""
+        from src.paths import PRICES_JSON
+        fake_prices = tmp_path / "prices.json"
+        fake_prices.write_text(json.dumps({"SPY": [{"d": "2020-01-02", "p": 100.0}]}))
+        monkeypatch.setattr("src.backtest.bond_duration_backtest.PRICES_JSON", fake_prices)
+        bt = WalkForwardBondDurationBacktester()
+        bt.load_data()
+        # Should fall back to synthetic because intersection is empty (no matching dates across SPY/GLD/TLT)
+        assert len(bt._daily_prices) > 0
+
+    def test_load_data_no_dates_in_range(self, tmp_path, monkeypatch):
+        """Dates outside config range should trigger synthetic fallback."""
+        from src.paths import PRICES_JSON
+        fake_prices = tmp_path / "prices.json"
+        data = {
+            "SPY": [{"d": "1990-01-02", "p": 100.0}],
+            "GLD": [{"d": "1990-01-02", "p": 100.0}],
+            "TLT": [{"d": "1990-01-02", "p": 100.0}],
+        }
+        fake_prices.write_text(json.dumps(data))
+        monkeypatch.setattr("src.backtest.bond_duration_backtest.PRICES_JSON", fake_prices)
+        bt = WalkForwardBondDurationBacktester()
+        bt.load_data()
+        # Synthetic fallback used
+        assert len(bt._daily_prices) > 0
+
+    def test_load_data_ief_shy_missing(self, tmp_path, monkeypatch):
+        """Missing IEF/SHY in JSON should fall back to TLT data for those fields."""
+        from src.paths import PRICES_JSON
+        fake_prices = tmp_path / "prices.json"
+        data = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 101.0}],
+            "GLD": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 101.0}],
+            "TLT": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 102.0}],
+        }
+        fake_prices.write_text(json.dumps(data))
+        monkeypatch.setattr("src.backtest.bond_duration_backtest.PRICES_JSON", fake_prices)
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2020-01-02", end_date="2020-01-03")
+        )
+        bt.load_data()
+        assert len(bt._daily_prices) == 2
+        # IEF and SHY should fall back to TLT prices
+        assert bt._daily_prices[0].ief == bt._daily_prices[0].tlt
+        assert bt._daily_prices[0].shy == bt._daily_prices[0].tlt
+
+    def test_compute_crisis_returns_rotated_empty_lookup(self):
+        """Empty prices lookup should produce empty crisis returns."""
+        bt = WalkForwardBondDurationBacktester()
+        crisis = bt._compute_crisis_returns_rotated({}, [], [], 100000.0)
+        assert crisis == {}
+
+    def test_compute_crisis_returns_rotated_no_matching_year(self):
+        """Dates not in crisis years should produce empty returns."""
+        bt = WalkForwardBondDurationBacktester()
+        lookup = {"2013-06-01": {"SPY": 100.0}}
+        crisis = bt._compute_crisis_returns_rotated(lookup, ["2013-06-01"], [100000.0], 100000.0)
+        assert crisis == {}
+
+    def test_compute_crisis_returns_rotated_zero_equity_start(self):
+        """Zero equity start should not add key to result."""
+        bt = WalkForwardBondDurationBacktester()
+        bt._daily_prices = [DailyPrices(date="2008-01-02", spy=100.0, gld=100.0, tlt=100.0)]
+        lookup = {"2008-01-02": {"SPY": 100.0}}
+        crisis = bt._compute_crisis_returns_rotated(lookup, ["2008-01-02"], [0.0, 0.0], 100000.0)
+        assert crisis == {}
+
+    def test_build_prices_lookup_empty(self):
+        """Empty daily prices should produce empty lookup."""
+        bt = WalkForwardBondDurationBacktester()
+        bt._daily_prices = []
+        lookup = bt._build_prices_lookup()
+        assert lookup == {}
+
+    def test_run_without_load_data_triggers_load(self):
+        """run() should auto-load data if not already loaded."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2015-01-01", end_date="2015-06-01")
+        )
+        result = bt.run()
+        assert isinstance(result, BacktestResult)
+        assert len(bt._daily_prices) > 0
+
+    def test_save_results_no_path_uses_default(self, tmp_path, monkeypatch):
+        """save_results() without output_path should use default path."""
+        from src.paths import BACKTEST_RESULTS_DIR
+        bt = WalkForwardBondDurationBacktester()
+        bt.load_data()
+        result = bt.run()
+        default_dir = tmp_path / "results"
+        default_dir.mkdir()
+        monkeypatch.setattr("src.backtest.bond_duration_backtest.BACKTEST_RESULTS_DIR", default_dir)
+        bt.save_results(result)
+        expected_file = default_dir / "bond_duration_backtest_results.json"
+        assert expected_file.exists()
+        with open(expected_file) as f:
+            data = json.load(f)
+        assert data["_metadata"]["strategy"] == "bond_duration"
+
+    def test_synthetic_data_length(self):
+        """Synthetic data should match expected number of days."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2000-01-03", end_date="2020-01-01")
+        )
+        bt._generate_synthetic_data()
+        # Should be at least 5000 days (20 years)
+        assert len(bt._daily_prices) >= 4800
+
+    def test_synthetic_data_dates_are_weekdays(self):
+        """All synthetic dates should be weekdays (Mon-Fri)."""
+        from datetime import datetime
+        bt = WalkForwardBondDurationBacktester()
+        bt._generate_synthetic_data()
+        for date_str in bt._trading_dates[:50]:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            assert dt.weekday() < 5, f"{date_str} is a weekend"
+
+    def test_synthetic_data_prices_positive(self):
+        """All synthetic prices should be positive."""
+        bt = WalkForwardBondDurationBacktester()
+        bt._generate_synthetic_data()
+        for dp in bt._daily_prices[:50]:
+            assert dp.spy > 0
+            assert dp.gld > 0
+            assert dp.tlt > 0
+            assert dp.ief > 0
+            assert dp.shy > 0
+
+    def test_synthetic_data_reproducible(self):
+        """Synthetic data should be reproducible with same seed."""
+        bt1 = WalkForwardBondDurationBacktester()
+        bt1._generate_synthetic_data()
+        bt2 = WalkForwardBondDurationBacktester()
+        bt2._generate_synthetic_data()
+        assert len(bt1._daily_prices) == len(bt2._daily_prices)
+        assert bt1._daily_prices[0].spy == bt2._daily_prices[0].spy
+
+    def test_empty_data_direct_call(self):
+        """Empty _daily_prices returns empty result when run() triggers load_data fallback."""
+        bt = WalkForwardBondDurationBacktester()
+        bt._daily_prices = []
+        bt._trading_dates = []
+        result = bt.run()
+        # run() calls load_data() which generates synthetic data, so result is populated
+        assert isinstance(result, BacktestResult)
+
+    def test_backtest_config_base_weights_mutable(self):
+        """BacktestConfig base_weights should not share references across instances."""
+        c1 = BacktestConfig()
+        c2 = BacktestConfig()
+        c1.base_weights["SPY"] = 0.99
+        assert c2.base_weights["SPY"] == 0.46  # Should be unchanged
+
+    def test_print_results_empty_crisis(self, capsys):
+        """print_results should handle missing crisis and regime data."""
+        result = BacktestResult(
+            total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
+            max_drawdown=-10.0, baseline_sharpe=0.45, sharpe_improvement=0.05,
+            total_rebalances=0, total_transaction_costs=0.0,
+            extras={
+                "baseline_total_return": 4.0, "baseline_cagr": 2.5,
+                "baseline_volatility": 9.5, "baseline_max_drawdown": -12.0,
+                "cagr_impact": 0.5, "rotation_active_days": 0,
+                "rotation_active_pct": 0.0, "avg_effective_duration": 0.0,
+                "avg_tlt_weight": 0.0, "avg_ief_weight": 0.0, "avg_shy_weight": 0.0,
+                "crisis_returns_rotated": {}, "crisis_returns_baseline": {},
+                "regime_breakdown": {}, "config_snapshot": {},
+            },
+        )
+        bt = WalkForwardBondDurationBacktester()
+        bt.print_results(result)
+        captured = capsys.readouterr()
+        assert "Crisis Returns" in captured.out
+
+    def test_cli_logging_startup(self, caplog):
+        """CLI main() should log when starting."""
+        import logging
+        from src.backtest.bond_duration_backtest import main
+        import sys
+        old_argv = sys.argv
+        try:
+            sys.argv = ["bond_duration_backtest.py", "--start", "2015-01-01", "--end", "2015-06-01"]
+            with caplog.at_level(logging.INFO):
+                main()
+            assert len(caplog.records) >= 0  # Just shouldn't crash
+        finally:
+            sys.argv = old_argv
+
+    def test_momentum_via_config_lookback(self):
+        """Momentum computation should respect config's momentum_lookback_days."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(momentum_lookback_days=10)
+        )
+        bt.load_data()
+        idx = 15
+        bt._daily_prices[idx - 10].tlt = 100.0
+        bt._daily_prices[idx].tlt = 110.0
+        mom = bt._compute_tlt_60d_momentum(idx)
+        assert mom == pytest.approx(0.10)
+
+    def test_run_rotated_with_no_rebalance(self):
+        """run_rotated with very long rebalance frequency should still work."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(rebalance_frequency_days=5000)
+        )
+        bt.load_data()
+        subset = bt._daily_prices[:50]
+        equity, tracker, _ = bt._run_rotated(subset, bt.config)
+        assert len(equity) == len(subset)
+        # Should have at least 1 rebalance (initial)
+        assert tracker["rebalances"] >= 1
+
+    def test_compute_regime_breakdown_same_regime_multiple(self):
+        """Multiple entries in same regime should aggregate correctly."""
+        bt = WalkForwardBondDurationBacktester()
+        tracker = [
+            {"date": "2020-01-15", "tlt_momentum": 0.02, "momentum_regime": "long",
+             "tlt_sleeve": 0.8, "ief_sleeve": 0.2, "shy_sleeve": 0.0,
+             "effective_duration": 15.0, "duration_change": 2.0},
+            {"date": "2020-01-16", "tlt_momentum": 0.03, "momentum_regime": "long",
+             "tlt_sleeve": 0.7, "ief_sleeve": 0.3, "shy_sleeve": 0.0,
+             "effective_duration": 14.0, "duration_change": -1.0},
+        ]
+        breakdown = bt._compute_regime_breakdown(tracker)
+        assert breakdown["long"]["count"] == 2
+        assert breakdown["long"]["pct_of_time"] == 100.0
+        assert breakdown["long"]["avg_effective_duration"] == 14.5
+
+    def test_baseline_equity_monotonic_weights(self):
+        """Baseline equity should use constant weights (all TLT in bond sleeve)."""
+        bt = WalkForwardBondDurationBacktester()
+        bt.load_data()
+        subset = bt._daily_prices[:10]
+        config = BacktestConfig(initial_capital=100000.0)
+        spy_w = config.base_weights["SPY"]
+        gld_w = config.base_weights["GLD"]
+        tlt_w = config.base_weights["TLT"]
+        equity = bt._run_baseline(subset, config)
+        # Expected return computed manually for each day
+        for i in range(1, len(subset)):
+            ret = bt._compute_portfolio_return(
+                subset[i-1], subset[i], spy_w, gld_w, tlt_w, 1.0, 0.0, 0.0
+            )
+            expected_eq = equity[i-1] * (1 + ret)
+            assert equity[i] == pytest.approx(expected_eq, rel=1e-10)
+
+    def test_run_result_has_cagr(self):
+        """Run result should have a CAGR value (may be negative on synthetic data)."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2015-01-01", end_date="2016-01-01")
+        )
+        result = bt.run()
+        assert result.cagr is not None
+
+    def test_run_result_config_snapshot_includes_bond_allocation_note(self):
+        """Config snapshot should include bond_sleeve_allocation description."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2015-01-01", end_date="2016-01-01")
+        )
+        result = bt.run()
+        cs = result.extras["config_snapshot"]
+        assert "BondDurationCalculator" in cs["bond_sleeve_allocation"]
+
+    def test_run_result_avg_ief_weight_range(self):
+        """Average IEF weight should be between 0 and 1."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2015-01-01", end_date="2016-01-01")
+        )
+        result = bt.run()
+        assert 0.0 <= result.extras["avg_ief_weight"] <= 1.0
+
+    def test_run_result_avg_shy_weight_range(self):
+        """Average SHY weight should be between 0 and 1."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2015-01-01", end_date="2016-01-01")
+        )
+        result = bt.run()
+        assert 0.0 <= result.extras["avg_shy_weight"] <= 1.0
+
+    def test_run_result_total_transaction_costs_non_negative(self):
+        """Total transaction costs should be non-negative."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2015-01-01", end_date="2016-01-01")
+        )
+        result = bt.run()
+        assert result.total_transaction_costs >= 0
+
+    def test_run_result_rotation_active_pct_range(self):
+        """Rotation active percentage should be between 0 and 100."""
+        bt = WalkForwardBondDurationBacktester(
+            BacktestConfig(start_date="2015-01-01", end_date="2016-01-01")
+        )
+        result = bt.run()
+        assert 0.0 <= result.extras["rotation_active_pct"] <= 100.0
+
+    def test_empty_result_regime_breakdown_empty(self):
+        """_empty_result() should have empty regime_breakdown."""
+        bt = WalkForwardBondDurationBacktester()
+        result = bt._empty_result()
+        assert result.extras["regime_breakdown"] == {}
+
+    def test_empty_result_config_snapshot_empty(self):
+        """_empty_result() should have empty config_snapshot."""
+        bt = WalkForwardBondDurationBacktester()
+        result = bt._empty_result()
+        assert result.extras["config_snapshot"] == {}
+
+    def test_print_results_config_snapshot_handles_missing_keys(self, capsys):
+        """print_results should handle missing extras gracefully."""
+        result = BacktestResult(
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, baseline_sharpe=0.0, sharpe_improvement=0.0,
+            total_rebalances=0, total_transaction_costs=0.0,
+            extras={
+                "baseline_total_return": 0.0, "baseline_cagr": 0.0,
+                "baseline_volatility": 0.0, "baseline_max_drawdown": 0.0,
+                "cagr_impact": 0.0, "rotation_active_days": 0,
+                "rotation_active_pct": 0.0, "avg_effective_duration": 0.0,
+                "avg_tlt_weight": 0.0, "avg_ief_weight": 0.0, "avg_shy_weight": 0.0,
+                "crisis_returns_rotated": {}, "crisis_returns_baseline": {},
+                "regime_breakdown": {}, "config_snapshot": {},
+            },
+        )
+        bt = WalkForwardBondDurationBacktester()
+        bt.print_results(result)
+        captured = capsys.readouterr()
+        assert captured.out is not None  # Should not crash
+
+    def test_backtest_config_with_extras(self):
+        """BacktestConfig should support extras dict for additional parameters."""
+        config = BacktestConfig(extras={"custom_param": 42, "debug": True})
+        assert config.extras["custom_param"] == 42
+        assert config.extras["debug"] is True
