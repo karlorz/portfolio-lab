@@ -203,7 +203,7 @@ class UnifiedOrchestrator:
             try:
                 with open(self.STATE_FILE) as f:
                     return json.load(f)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
                 logger.error("Failed to load state file %s: %s", self.STATE_FILE, e)
         return {"last_unified": None, "conflict_history": []}
 
@@ -226,7 +226,7 @@ class UnifiedOrchestrator:
                 row = cursor.fetchone()
             if row and len(row) > 0 and row[0] > 0:
                 return float(row[0])
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.warning("Could not fetch VIX from DB: %s", e)
         return 16.0  # fallback
 
@@ -285,7 +285,7 @@ class UnifiedOrchestrator:
                     reason=f"Collar: {collar.regime} (VIX={vix_level:.1f}), "
                            f"{'cashless' if collar.strikes.is_cashless else 'debit'}",
                 )]
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Collar overlay unavailable: %s", e)
         return []
 
@@ -316,7 +316,7 @@ class UnifiedOrchestrator:
                     reason=f"VIXY: {vixy_signal.regime} ({vixy_signal.allocation_pct:.1f}%), "
                            f"efficiency {vixy_signal.hedge_efficiency:.2f}x",
                 )]
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("VIXY overlay unavailable: %s", e)
         return []
 
@@ -344,7 +344,7 @@ class UnifiedOrchestrator:
                     reason=f"Crypto: {crypto.signal_state}, {crypto.composite_weight:.1%} weight"
                            + (f", 6m mom={btc_mom:+.1%}" if btc_mom is not None else ""),
                 )]
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Crypto overlay unavailable: %s", e)
         return []
 
@@ -370,7 +370,7 @@ class UnifiedOrchestrator:
                     confidence=bond.confidence,
                     reason=f"Bond: {bond.position} ({bond.curve_regime}/{bond.rate_direction})",
                 )]
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Bond duration overlay unavailable: %s", e)
         return []
 
@@ -390,7 +390,7 @@ class UnifiedOrchestrator:
                 confidence=85.0,
                 reason=f"Calendar: {mod:.2f}x urgency modifier",
             )]
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Calendar overlay unavailable: %s", e)
         return []
 
@@ -614,7 +614,7 @@ class UnifiedOrchestrator:
                 tau=0.15,
             )
             return {k: round(v, 4) for k, v in result.bl_weights.items()}
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, ImportError) as e:
             logger.warning("BL comparison unavailable: %s", e)
             return None
 

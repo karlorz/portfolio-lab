@@ -137,7 +137,7 @@ class AdaptiveSizer:
             with open(prices_path) as f:
                 self.prices = json.load(f)
             return self.prices
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error("Failed to load prices: %s", e)
             return None
 
@@ -169,7 +169,7 @@ class AdaptiveSizer:
                 if regime not in REGIME_ADJUSTMENTS:
                     return "unknown", 0.3
                 return regime, float(conf)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to load regime state: %s", e)
 
         # Fallback: VIX-based live detection (no stale state file available)
@@ -182,7 +182,7 @@ class AdaptiveSizer:
                     regime = get_current_regime(conn)
                 if regime in REGIME_ADJUSTMENTS:
                     return regime, 0.8
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, ImportError) as e:
             logger.warning("VIX-based regime detection unavailable: %s", e)
 
         return "unknown", 0.3
@@ -194,7 +194,7 @@ class AdaptiveSizer:
             if cb_path.exists():
                 state = json.loads(cb_path.read_text())
                 return state.get("severity", "ok")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error("Failed to load circuit breaker state: %s", e)
         return "ok"
 
@@ -207,7 +207,7 @@ class AdaptiveSizer:
                 signal = float(state.get("composite_signal", state.get("weighted_consensus", 0.0)))
                 agreement = float(state.get("agreement_ratio", 0.5))
                 return signal, agreement
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Failed to load ensemble signal from %s: %s", ev_path, e)
         return 0.0, 0.5
 
@@ -410,7 +410,7 @@ class AdaptiveSizer:
         try:
             state = json.loads(self.state_path.read_text())
             self.last_allocation = state.get("last_allocation", dict(BASE_ALLOCATION))
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning("Failed to load sizing state: %s", e)
 
     def _save_state(self, decision: SizingDecision):
@@ -430,7 +430,7 @@ class AdaptiveSizer:
         }
         try:
             self.state_path.write_text(json.dumps(state, indent=2, default=str))
-        except Exception as e:
+        except (OSError, TypeError) as e:
             logger.warning("Failed to save sizing state: %s", e)
 
     # ── Status Report ────────────────────────────────────────────────────────

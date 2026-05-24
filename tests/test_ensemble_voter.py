@@ -1469,7 +1469,7 @@ class TestApplyGoalRiskBudget:
     @patch('src.config.goals.get_risk_budget_multiplier')
     def test_exception_fallback(self, mock_get_rbm, mock_load_goals):
         """Exception in goals module should return base allocation unchanged."""
-        mock_load_goals.side_effect = Exception("Unexpected error")
+        mock_load_goals.side_effect = OSError("Unexpected error")
         voter = EnsembleVoter()
         base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
         result = voter.apply_goal_risk_budget(base)
@@ -1720,7 +1720,7 @@ class TestGetBLViewsAdditional:
         """Error in health tracker should not crash get_bl_views."""
         voter = EnsembleVoter()
         mock_tracker = MagicMock()
-        mock_tracker.get_health_report.side_effect = Exception("Tracker crashed")
+        mock_tracker.get_health_report.side_effect = ValueError("Tracker crashed")
         with patch('src.strategy.ensemble_voter._get_health_tracker',
                    return_value=mock_tracker):
             result = voter.get_bl_views()

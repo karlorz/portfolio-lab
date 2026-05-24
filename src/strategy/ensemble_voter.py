@@ -55,7 +55,7 @@ def _get_health_tracker():
         try:
             from src.signals.health_tracker import SignalHealthTracker
             _health_tracker = SignalHealthTracker()
-        except Exception as e:
+        except (ImportError, OSError, KeyError, ValueError, TypeError) as e:
             logger.warning("SignalHealthTracker unavailable: %s", e)
     return _health_tracker
 
@@ -548,7 +548,7 @@ class EnsembleVoter:
                 readings[SignalSource.MULTI_SPEED_MOM] = snapshot.to_signal_reading()
         except ImportError:
             pass
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Multi-speed momentum unavailable: %s", e)
 
     def _collect_cross_asset_rv_signal(self, readings: Dict) -> None:
@@ -561,7 +561,7 @@ class EnsembleVoter:
                 readings[SignalSource.CROSS_ASSET_RV] = snapshot.to_signal_reading()
         except ImportError:
             pass
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Cross-asset RV unavailable: %s", e)
 
     def _collect_intl_momentum_signal(
@@ -603,7 +603,7 @@ class EnsembleVoter:
                             readings[SignalSource.INTERNATIONAL_MOMENTUM] = snapshot.to_signal_reading()
         except ImportError:
             pass
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("International momentum unavailable: %s", e)
 
     def _collect_alt_data_signal(
@@ -620,7 +620,7 @@ class EnsembleVoter:
                 readings[SignalSource.ALTERNATIVE_DATA] = snapshot.to_signal_reading()
         except ImportError:
             pass
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Alternative data unavailable: %s", e)
 
     def _collect_regime_arb_signal(self, readings: Dict, active_sources, regime: Optional[Regime]) -> None:
@@ -635,7 +635,7 @@ class EnsembleVoter:
                 readings[SignalSource.CROSS_ASSET_REGIME_ARB] = snapshot.to_signal_reading()
         except ImportError:
             logger.warning("Cross-asset regime arb module not available")
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Cross-asset regime arb unavailable: %s", e)
 
     def _collect_unified_overlay_signal(
@@ -651,7 +651,7 @@ class EnsembleVoter:
             readings[SignalSource.UNIFIED_OVERLAY] = unified_reading
         except ImportError:
             pass
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Unified overlay unavailable: %s", e)
 
     def get_blended_weights(self, regime_name: str) -> dict:
@@ -729,7 +729,7 @@ class EnsembleVoter:
             from src.config.goals import load_goals, get_risk_budget_multiplier
             goals = load_goals()
             risk_mult = get_risk_budget_multiplier(goals)
-        except Exception as e:
+        except (ImportError, OSError, KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
             logger.warning("Failed to load goals for risk budget, using risk_mult=1.0: %s", e)
             risk_mult = 1.0
 
@@ -902,7 +902,7 @@ class EnsembleVoter:
             if adaptive_weights_enum:
                 logger.info("Using adaptive ensemble weights for regime=%s", regime.value)
                 return adaptive_weights_enum
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, ZeroDivisionError, OSError) as e:
             logger.warning("Could not apply adaptive ensemble weights: %s", e)
         return weights
 
@@ -931,7 +931,7 @@ class EnsembleVoter:
             total = sum(adjusted_weights.values())
             if total > 0:
                 weights = {k: v / total for k, v in adjusted_weights.items()}
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Could not apply health-adjusted weights: %s", e)
         return weights
 
@@ -972,7 +972,7 @@ class EnsembleVoter:
                     else ""
                 )
                 logger.debug("Basis-pursuit selection applied%s", sparsity_msg)
-            except Exception as bp_e:
+            except (ImportError, KeyError, ValueError, TypeError, AttributeError, ZeroDivisionError) as bp_e:
                 logger.warning("Could not apply basis-pursuit selection: %s", bp_e)
 
             # --- v8.03: Regret-Weighted Adjustment ---
@@ -990,7 +990,7 @@ class EnsembleVoter:
                         ', '.join(rw_result.signals_with_high_regret),
                         rw_result.avg_regret
                     )
-            except Exception as rw_e:
+            except (ImportError, KeyError, ValueError, TypeError, AttributeError, OSError) as rw_e:
                 logger.warning("Could not apply regret-weighted adjustment: %s", rw_e)
 
             # Apply turnover adjustment
@@ -1017,7 +1017,7 @@ class EnsembleVoter:
                 len(signal_values),
                 ', '.join(f'{s}={turnover_adjusted.get(enum, 0):.4f}' for enum, s in [(e, e.value) for e in weights])
             )
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, ZeroDivisionError, OSError) as e:
             logger.warning("Could not apply turnover-aware weights: %s", e)
         return weights
 
@@ -1043,7 +1043,7 @@ class EnsembleVoter:
                         signal_value=reading.value,
                         confidence=reading.confidence,
                     )
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, sqlite3.Error) as e:
             logger.warning("Health tracking log failed: %s", e)
 
         return weighted_signals
@@ -1175,7 +1175,7 @@ class EnsembleVoter:
             rw_selector = RegretWeightedSelector()
             rw_selector.state.last_ensemble_decision = weighted_consensus
             rw_selector._save_state()
-        except Exception as rw_e:
+        except (ImportError, OSError, KeyError, ValueError, TypeError, AttributeError) as rw_e:
             logger.warning("Could not persist ensemble decision to regret-weighted state: %s", rw_e)
 
         # Check for IC-based signal decay alerts
@@ -1186,7 +1186,7 @@ class EnsembleVoter:
                 if alerts:
                     alert_names = [a.source for a in alerts]
                     logger.warning("IC decay alerts detected: %s", alert_names)
-        except Exception as ic_e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, sqlite3.Error) as ic_e:
             logger.warning("IC alert check failed: %s", ic_e)
 
         # Save to DB
@@ -1327,7 +1327,7 @@ class EnsembleVoter:
                 for source_name, data in report.get('sources', {}).items():
                     score = data.get('health_score', 0.5)
                     health_scores[source_name] = score
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, AttributeError, OSError, sqlite3.Error) as e:
                 logger.warning("Could not get health scores for BL views: %s", e)
 
         views = map_biases_to_views(
