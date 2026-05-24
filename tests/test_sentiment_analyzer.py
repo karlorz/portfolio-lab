@@ -608,8 +608,6 @@ class TestDemo:
         # This triggers TypeError from AggregatedSentiment(**data), not KeyError
         bad_file = tmp_path / "sentiment_partial.json"
         bad_file.write_text(json.dumps({"timestamp": datetime.now().isoformat()}))
-        # Should NOT crash — TypeError from missing fields is caught by the broadened except
-        # Note: this currently WILL crash because TypeError is not in the except tuple
-        # This test documents the current behavior (crash expected)
-        with pytest.raises(TypeError):
-            pipe.load_sentiment_history(days=365)
+        # TypeError is now caught by the broadened except tuple — returns empty list gracefully
+        history = pipe.load_sentiment_history(days=365)
+        assert history == []

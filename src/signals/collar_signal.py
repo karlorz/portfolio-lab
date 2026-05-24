@@ -19,7 +19,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Dict
 
-from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR
+from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR, sqlite_connect
 
 
 

@@ -363,7 +363,7 @@ class SentimentAnalyzerPipeline:
                     ts = datetime.fromisoformat(data["timestamp"])
                     if ts > cutoff:
                         history.append(AggregatedSentiment(**data))
-            except (IOError, OSError, json.JSONDecodeError, KeyError):
+            except (IOError, OSError, json.JSONDecodeError, KeyError, TypeError):
                 logger.warning("Failed to load sentiment file %s, skipping", filepath)
                 continue
         

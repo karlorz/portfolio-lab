@@ -209,7 +209,7 @@ class DashboardGenerator:
                     "recommendation": result.get("recommendation", {}),
                 }
         except Exception as e:
-            logger.debug("Factor rotation not available: %s", e)
+            logger.warning("Factor rotation not available: %s", e)
 
         # Add yield curve data from yields.json
         yield_curve_data = self._get_yield_curve_data()
@@ -231,7 +231,7 @@ class DashboardGenerator:
             if vol_parity_data:
                 vol_parity_signal = vol_parity_data.get('allocation')
         except Exception as e:
-            logger.debug("Convexity harvest / vol parity not available: %s", e)
+            logger.warning("Convexity harvest / vol parity not available: %s", e)
         
         # Add LLM sentiment signals (v2.30 Phase 5)
         sentiment_signal = None
@@ -253,7 +253,7 @@ class DashboardGenerator:
             )
             sentiment_signal = sentiment_signal.to_dict()
         except Exception as e:
-            logger.debug("LLM sentiment not available: %s", e)
+            logger.warning("LLM sentiment not available: %s", e)
         
         # Add ensemble voting signals (v2.20 Phase 3)
         ensemble_signal = None
@@ -272,7 +272,7 @@ class DashboardGenerator:
                     "confidence": ensemble_result.confidence,
                 }
         except Exception as e:
-            logger.debug("Ensemble voting not available: %s", e)
+            logger.warning("Ensemble voting not available: %s", e)
         
         # Add sector rotation momentum signals (v2.40 Phase 5)
         sector_momentum_signal = None
@@ -280,7 +280,7 @@ class DashboardGenerator:
             sector_momentum_signal = self._generate_sector_momentum_signals()
         except Exception as e:
             # Sector momentum not available yet
-            logger.debug("Sector momentum not available: %s", e)
+            logger.warning("Sector momentum not available: %s", e)
         
         # Add smart rebalancing status (v2.90)
         smart_rebalance_data = None
@@ -371,7 +371,7 @@ class DashboardGenerator:
                         "data_freshness_hours": safe_get(alt_data_raw, "raw_data", "data_freshness_hours")
                     }
         except Exception as e:
-            logger.debug("Alternative data signal not available: %s", e)
+            logger.warning("Alternative data signal not available: %s", e)
         
         # Load broker data (Phase 4: live trading prep)
         broker_data = self._load_broker_data()
@@ -426,7 +426,7 @@ class DashboardGenerator:
                 ),
             }
         except Exception as e:
-            logger.debug("Behavioral sentiment not available: %s", e)
+            logger.warning("Behavioral sentiment not available: %s", e)
 
         # Stacking ensemble dashboard data (v3.10)
         stacking_ensemble_dashboard = None
@@ -456,7 +456,7 @@ class DashboardGenerator:
                 ),
             }
         except Exception as e:
-            logger.debug("Stacking ensemble not available: %s", e)
+            logger.warning("Stacking ensemble not available: %s", e)
 
         # Factor rotation dashboard data (v3.00)
         factor_rotation_dashboard = None
@@ -478,7 +478,7 @@ class DashboardGenerator:
                     ),
                 }
         except Exception as e:
-            logger.debug("Factor rotation dashboard not available: %s", e)
+            logger.warning("Factor rotation dashboard not available: %s", e)
 
         output = {
             "timestamp": datetime.now().isoformat(),
@@ -605,7 +605,7 @@ class DashboardGenerator:
                     garch_cvar["cvar_ratio"] = cvar_check.get("cvar_ratio", 1.51)
                     garch_cvar["garch_active"] = cvar_check.get("garch_active", True)
         except Exception as e:
-            logger.debug("Using default values: %s", e)
+            logger.warning("Using default values: %s", e)
 
         return garch_cvar
 
@@ -649,7 +649,7 @@ class DashboardGenerator:
                         else:
                             entropy["concentration_risk"] = "critical"
         except Exception as e:
-            logger.debug("Using default values: %s", e)
+            logger.warning("Using default values: %s", e)
         
         return entropy
 
