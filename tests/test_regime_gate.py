@@ -143,3 +143,123 @@ class TestGetActiveSignalNames:
         ]
         active = gate.get_active_signal_names(all_signals, "NORMAL")
         assert len(active) == 3
+
+
+class TestBehavioralSentimentGating:
+    """Tests for behavioral_sentiment gate rule: OFF in NORMAL/HIGH_VOL/CRISIS."""
+
+    def test_off_in_normal(self):
+        gate = RegimeGate()
+        assert not gate.is_active("behavioral_sentiment", "NORMAL")
+
+    def test_off_in_high_vol(self):
+        gate = RegimeGate()
+        assert not gate.is_active("behavioral_sentiment", "HIGH_VOL")
+
+    def test_off_in_crisis(self):
+        gate = RegimeGate()
+        assert not gate.is_active("behavioral_sentiment", "CRISIS")
+
+    def test_on_in_low_vol(self):
+        gate = RegimeGate()
+        assert gate.is_active("behavioral_sentiment", "LOW_VOL")
+
+
+class TestCrossAssetRegimeArbGating:
+    """Tests for cross_asset_regime_arb gate rule: OFF in LOW_VOL."""
+
+    def test_off_in_low_vol(self):
+        gate = RegimeGate()
+        assert not gate.is_active("cross_asset_regime_arb", "LOW_VOL")
+
+    def test_on_in_normal(self):
+        gate = RegimeGate()
+        assert gate.is_active("cross_asset_regime_arb", "NORMAL")
+
+    def test_on_in_high_vol(self):
+        gate = RegimeGate()
+        assert gate.is_active("cross_asset_regime_arb", "HIGH_VOL")
+
+    def test_on_in_crisis(self):
+        gate = RegimeGate()
+        assert gate.is_active("cross_asset_regime_arb", "CRISIS")
+
+
+class TestUpdateFromPerformance:
+    """Tests for data-driven gate rule updates from rolling Sharpe."""
+
+    def test_gates_off_signal_with_negative_sharpe(self):
+        gate = RegimeGate()
+        # Start with no rules for 'my_signal'
+        assert gate.is_active("my_signal", "NORMAL")
+        gate.update_from_performance({"NORMAL": {"my_signal": -0.5}})
+        assert not gate.is_active("my_signal", "NORMAL")
+
+    def test_re_enables_signal_with_positive_sharpe(self):
+        custom = {"my_signal": {"NORMAL", "HIGH_VOL"}}
+        gate = RegimeGate(gate_rules=custom)
+        gate.update_from_performance({
+            "NORMAL": {"my_signal": 0.3},
+            "HIGH_VOL": {"my_signal": -0.1},
+        })
+        assert gate.is_active("my_signal", "NORMAL")
+        assert not gate.is_active("my_signal", "HIGH_VOL")
+
+    def test_removes_empty_signal_entry_when_all_reenabled(self):
+        custom = {"my_signal": {"NORMAL"}}
+        gate = RegimeGate(gate_rules=custom)
+        gate.update_from_performance({"NORMAL": {"my_signal": 0.5}})
+        assert "my_signal" not in gate.gate_rules
+
+    def test_sharpe_at_threshold_is_on(self):
+        gate = RegimeGate()
+        gate.update_from_performance({"NORMAL": {"my_signal": 0.0}})
+        assert gate.is_active("my_signal", "NORMAL")
+
+    def test_sharpe_below_custom_threshold_is_off(self):
+        gate = RegimeGate()
+        gate.update_from_performance(
+            {"NORMAL": {"my_signal": 0.3}},
+            sharpe_threshold=0.5,
+        )
+        assert not gate.is_active("my_signal", "NORMAL")
+
+    def test_normalizes_signal_names(self):
+        gate = RegimeGate()
+        gate.update_from_performance({"NORMAL": {"Multi Speed Momentum": -0.5}})
+        # MSM already off in HIGH_VOL/CRISIS; this adds NORMAL
+        assert not gate.is_active("multi_speed_momentum", "NORMAL")
+
+    def test_does_not_affect_other_regimes(self):
+        gate = RegimeGate()
+        gate.update_from_performance({"CRISIS": {"my_signal": -1.0}})
+        assert not gate.is_active("my_signal", "CRISIS")
+        assert gate.is_active("my_signal", "NORMAL")
+
+
+class TestGetGateSummary:
+    """Tests for gate summary diagnostic output."""
+
+    def test_returns_sorted_regimes(self):
+        gate = RegimeGate()
+        summary = gate.get_gate_summary()
+        assert summary["multi_speed_momentum"] == ["CRISIS", "HIGH_VOL"]
+
+    def test_includes_behavioral_sentiment(self):
+        gate = RegimeGate()
+        summary = gate.get_gate_summary()
+        assert "behavioral_sentiment" in summary
+        assert summary["behavioral_sentiment"] == ["CRISIS", "HIGH_VOL", "NORMAL"]
+
+    def test_includes_cross_asset_regime_arb(self):
+        gate = RegimeGate()
+        summary = gate.get_gate_summary()
+        assert "cross_asset_regime_arb" in summary
+        assert summary["cross_asset_regime_arb"] == ["LOW_VOL"]
+
+    def test_empty_after_all_reenabled(self):
+        custom = {"my_signal": {"NORMAL"}}
+        gate = RegimeGate(gate_rules=custom)
+        gate.update_from_performance({"NORMAL": {"my_signal": 0.5}})
+        summary = gate.get_gate_summary()
+        assert "my_signal" not in summary

@@ -5,13 +5,17 @@ negative-Sharpe signals per regime (regime-mismatch), while the bandit
 optimizes allocation among positive survivors. Gating and weighting are
 complementary, not competing.
 
-Gating rules derived from deep research (2026-05-23):
+Gating rules derived from deep research (2026-05-23/24):
 - MULTI_SPEED_MOM: OFF in HIGH_VOL and CRISIS (Sharpe -0.5 or worse)
 - INTERNATIONAL_MOMENTUM: OFF in CRISIS (correlated with equity drawdowns)
-- All other signals: ON in all regimes
+- BEHAVIORAL_SENTIMENT: OFF in NORMAL/HIGH_VOL/CRISIS (-0.216 Sharpe, 65.8% FP)
+- CROSS_ASSET_REGIME_ARB: OFF in LOW_VOL (marginal when markets are calm)
 
 Hysteresis: minimum 20-day dwell time per regime prevents chattering
 on rapid regime transitions (AlphaCrafter, Yuan et al. 2026).
+
+Data-driven updates: update_from_performance() can refine gate rules
+based on rolling per-signal Sharpe by regime from the health tracker.
 """
 from typing import Dict, List, Optional, Set
 
@@ -31,9 +35,18 @@ class RegimeGate:
     # Gating rules: signal_name -> set of regimes where signal is OFF
     # Based on regime-signal Sharpe analysis from deep research.
     # A signal not in this dict is ON in all regimes.
+    #
+    # Updated 2026-05-24 with comprehensive rules from signal-ensemble
+    # optimization deep research:
+    # - MSM: net-negative (-0.012 Sharpe) overall; OFF in HIGH_VOL and CRISIS
+    # - INTL_MOM: correlated with equity drawdowns in CRISIS
+    # - BEHAVIORAL_SENTIMENT: -0.216 Sharpe, 65.8% false positive rate
+    # - CROSS_ASSET_REGIME_ARB: marginal in LOW_VOL sideways markets
     GATE_RULES: Dict[str, Set[str]] = {
         "multi_speed_momentum": {"HIGH_VOL", "CRISIS"},
         "international_momentum": {"CRISIS"},
+        "behavioral_sentiment": {"NORMAL", "HIGH_VOL", "CRISIS"},  # net-negative in all but LOW_VOL
+        "cross_asset_regime_arb": {"LOW_VOL"},  # marginal when markets are calm
     }
 
     # Minimum days in a regime before allowing gate changes (hysteresis)
@@ -44,7 +57,7 @@ class RegimeGate:
         gate_rules: Optional[Dict[str, Set[str]]] = None,
         min_dwell_days: int = DEFAULT_MIN_DWELL_DAYS,
     ):
-        self.gate_rules = gate_rules or dict(self.GATE_RULES)
+        self.gate_rules = gate_rules or {k: set(v) for k, v in self.GATE_RULES.items()}
         self.min_dwell_days = min_dwell_days
 
     def is_active(self, signal_name: str, regime_name: str) -> bool:
@@ -115,3 +128,44 @@ class RegimeGate:
             sig for sig in all_signals
             if self.is_active(sig, regime_name)
         ]
+
+    def update_from_performance(
+        self,
+        regime_signal_sharpe: Dict[str, Dict[str, float]],
+        sharpe_threshold: float = 0.0,
+    ) -> None:
+        """Update gate rules from rolling per-signal Sharpe by regime.
+
+        This enables data-driven gate refinement: if a signal has negative
+        rolling Sharpe in a regime, it's gated OFF. If it recovers, it's
+        re-enabled (subject to hysteresis).
+
+        Args:
+            regime_signal_sharpe: {regime: {signal: sharpe_ratio}}.
+                Computed from health tracker's IC data or attribution.
+            sharpe_threshold: Minimum Sharpe to keep a signal ON.
+                Default 0.0 means any positive Sharpe passes.
+        """
+        for regime, signals in regime_signal_sharpe.items():
+            for signal, sharpe in signals.items():
+                signal_name = signal.lower().replace(" ", "_")
+                if sharpe < sharpe_threshold:
+                    # Gate OFF: add regime to signal's off-set
+                    if signal_name not in self.gate_rules:
+                        self.gate_rules[signal_name] = set()
+                    self.gate_rules[signal_name].add(regime)
+                else:
+                    # Gate ON: remove regime from signal's off-set
+                    if signal_name in self.gate_rules:
+                        self.gate_rules[signal_name].discard(regime)
+                        # Remove empty entries
+                        if not self.gate_rules[signal_name]:
+                            del self.gate_rules[signal_name]
+
+    def get_gate_summary(self) -> Dict[str, List[str]]:
+        """Return a summary of all gate rules for logging/diagnostics.
+
+        Returns:
+            Dict of {signal_name: [list of OFF regimes]}.
+        """
+        return {sig: sorted(regimes) for sig, regimes in self.gate_rules.items()}
