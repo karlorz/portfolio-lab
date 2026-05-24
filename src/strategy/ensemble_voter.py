@@ -32,7 +32,7 @@ import sqlite3
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 from enum import Enum
@@ -607,6 +607,26 @@ class EnsembleVoter:
         # Convert back to SignalSource keys
         value_to_source = {s.value: s for s in SignalSource}
         return {value_to_source[k]: v for k, v in blended.items() if k in value_to_source}
+
+    def get_rebalance_config(self) -> Dict[str, Any]:
+        """
+        Return current regime and rebalancing parameters for the
+        SmartRebalanceGate/Controller to use regime-adaptive thresholds.
+
+        Returns:
+            Dict with 'regime' key (e.g. 'normal', 'crisis', 'high_vol',
+            'low_vol', 'recovery') for the rebalancing controller.
+        """
+        regime_map = {
+            Regime.NORMAL: 'normal',
+            Regime.HIGH_VOL: 'high_vol',
+            Regime.CRISIS: 'crisis',
+            Regime.RECOVERY: 'recovery',
+        }
+        return {
+            'regime': regime_map.get(self.current_regime, 'normal'),
+            'regime_confidence': self.current_regime_confidence,
+        }
 
     def update_bandit(self, signal_value: str, regime_name: str, daily_return: float):
         """Update bandit with observed return for a signal in a regime."""

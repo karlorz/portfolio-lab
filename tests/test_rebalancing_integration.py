@@ -232,5 +232,35 @@ class TestCreateGateFromConfig:
         assert isinstance(gate, SmartRebalanceGate)
 
 
+# ---------------------------------------------------------------------------
+# update_regime
+# ---------------------------------------------------------------------------
+
+class TestUpdateRegime:
+
+    def test_update_regime_stores_value(self):
+        gate = SmartRebalanceGate()
+        gate.update_regime('crisis')
+        assert gate._regime == 'crisis'
+
+    def test_regime_propagated_to_controller(self):
+        gate = SmartRebalanceGate()
+        gate.update_regime('crisis')
+        # Evaluate with a portfolio that has ~15% drift on SPY
+        result = gate.evaluate(
+            current_holdings={'SPY': 60000, 'GLD': 28000, 'TLT': 12000},
+            target_allocations={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
+            total_value=100000,
+            vpin=0.30,
+            now=datetime(2026, 5, 13, 12, 0),
+        )
+        # With crisis regime (5% threshold), 15% drift should trigger
+        assert result.should_execute is True
+
+    def test_no_regime_defaults_to_normal(self):
+        gate = SmartRebalanceGate()
+        assert gate._regime is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -719,5 +719,36 @@ class TestPersistVote:
             assert row[0] >= 1
 
 
+# ---------------------------------------------------------------------------
+# get_rebalance_config
+# ---------------------------------------------------------------------------
+
+class TestGetRebalanceConfig:
+
+    def test_returns_regime_key(self):
+        voter = EnsembleVoter()
+        config = voter.get_rebalance_config()
+        assert 'regime' in config
+        assert config['regime'] == 'normal'
+
+    def test_crisis_regime(self):
+        voter = EnsembleVoter()
+        voter.current_regime = Regime.CRISIS
+        config = voter.get_rebalance_config()
+        assert config['regime'] == 'crisis'
+
+    def test_high_vol_regime(self):
+        voter = EnsembleVoter()
+        voter.current_regime = Regime.HIGH_VOL
+        config = voter.get_rebalance_config()
+        assert config['regime'] == 'high_vol'
+
+    def test_includes_regime_confidence(self):
+        voter = EnsembleVoter()
+        voter.current_regime_confidence = 0.85
+        config = voter.get_rebalance_config()
+        assert config['regime_confidence'] == 0.85
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

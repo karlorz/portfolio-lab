@@ -66,11 +66,16 @@ class SmartRebalanceGate:
     def __init__(self, config_path: Optional[str] = None):
         self.controller = SmartRebalancingController(config_path)
         self._vpin_cache: Dict[str, float] = {}
+        self._regime: Optional[str] = None
         self._vpin_engine = VPINEngine(symbols=['SPY', 'GLD', 'TLT']) if _VPIN_AVAILABLE else None
 
     def update_vpin(self, vpin: float):
         """Update current VPIN reading (from v2.65 or synthetic)."""
         self._vpin_cache['current'] = vpin
+
+    def update_regime(self, regime: str):
+        """Update current market regime for adaptive thresholds."""
+        self._regime = regime
 
     def _compute_vpin(self, symbol: str = 'SPY') -> float:
         """Compute VPIN from recent market data via VPINEngine."""
@@ -140,8 +145,10 @@ class SmartRebalanceGate:
         # Create market conditions
         market = MarketConditions(vpin=vpin, timestamp=now)
 
-        # Get decision from controller
-        result = self.controller.should_rebalance(portfolio, market, now=now)
+        # Get decision from controller (with regime-adaptive thresholds)
+        result = self.controller.should_rebalance(
+            portfolio, market, now=now, regime=self._regime
+        )
 
         should_execute = result.decision in (
             RebalanceDecision.EXECUTE,
