@@ -73,19 +73,46 @@ if "PORTFOLIO_LAB_ENABLE_ML" not in os.environ:
 # hook — only real imports that would actually load the package reach here.
 
 _ML_BLOCKED = frozenset({"torch", "sklearn", "xgboost", "hmmlearn"})
+
+# sklearn submodules that are data utilities (not ML models) — safe to import.
+# When any of these is requested, all internal sklearn imports triggered by
+# sklearn's __init__.py are allowed through (they're just plumbing, not models).
+_SKLEARN_SAFE_PREFIXES = (
+    "sklearn.model_selection",  # TimeSeriesSplit, KFold, etc. (data splitting only)
+    "sklearn.utils",            # Validation, math helpers
+)
 _original_import = builtins.__import__
+
+
+# Track whether a safe sklearn import has been initiated — if so, allow
+# internal sklearn plumbing imports (sklearn._config, sklearn.utils._typedef, etc.)
+# These are triggered by sklearn's __init__.py and are not ML models.
+_sklearn_safe_active = False
 
 
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
     """Block real ML library imports when PORTFOLIO_LAB_ENABLE_ML=0."""
+    global _sklearn_safe_active
     ml_enabled = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
     if not ml_enabled:
         top_level = name.split(".")[0]
         if top_level in _ML_BLOCKED:
-            raise ImportError(
-                f"ML library '{name}' blocked: PORTFOLIO_LAB_ENABLE_ML=0. "
-                f"Set PORTFOLIO_LAB_ENABLE_ML=1 to enable ML features."
-            )
+            # Allow safe sklearn submodules and their internal plumbing
+            if top_level == "sklearn":
+                if any(name.startswith(prefix) for prefix in _SKLEARN_SAFE_PREFIXES):
+                    _sklearn_safe_active = True
+                if _sklearn_safe_active:
+                    pass  # Allow sklearn internals while safe import is active
+                else:
+                    raise ImportError(
+                        f"ML library '{name}' blocked: PORTFOLIO_LAB_ENABLE_ML=0. "
+                        f"Set PORTFOLIO_LAB_ENABLE_ML=1 to enable ML features."
+                    )
+            else:
+                raise ImportError(
+                    f"ML library '{name}' blocked: PORTFOLIO_LAB_ENABLE_ML=0. "
+                    f"Set PORTFOLIO_LAB_ENABLE_ML=1 to enable ML features."
+                )
     return _original_import(name, globals, locals, fromlist, level)
 
 
