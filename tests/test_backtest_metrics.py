@@ -31,6 +31,26 @@ class TestBacktestConfig:
         assert cfg.transaction_cost_bps == 10.0
         assert cfg.extras == {}
 
+    def test_per_etf_cost_dict_present(self):
+        cfg = BacktestConfig()
+        costs = cfg.transaction_costs_by_symbol
+        assert isinstance(costs, dict)
+        assert costs['SPY'] == 2.0
+        assert costs['GLD'] == 5.0
+        assert costs['TLT'] == 8.0
+        assert costs['DBC'] == 10.0
+
+    def test_per_etf_cost_dict_covers_core_symbols(self):
+        cfg = BacktestConfig()
+        costs = cfg.transaction_costs_by_symbol
+        for sym in ['SPY', 'GLD', 'TLT', 'IEF', 'QQQ']:
+            assert sym in costs, f"{sym} missing from transaction_costs_by_symbol"
+
+    def test_per_etf_costs_all_positive(self):
+        cfg = BacktestConfig()
+        for sym, cost in cfg.transaction_costs_by_symbol.items():
+            assert cost > 0, f"{sym} has non-positive cost {cost}"
+
     def test_base_weights_are_canonical(self):
         """Base weights must match BASE_ALLOCATION from src.paths."""
         cfg = BacktestConfig()

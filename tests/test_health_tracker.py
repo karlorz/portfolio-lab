@@ -406,24 +406,38 @@ class TestGetAdjustedWeights:
 
     def test_high_ic_gets_bonus_weight(self, tmp_path):
         """Source with high IC should get relatively more weight than same-health source with low IC."""
+        from unittest.mock import patch
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
-        # Both sources get 25 predictions (same health), but we verify the IC bonus path works
-        for _ in range(25):
-            tracker.log_prediction_simple(source="alternative_data", signal_value=0.5, confidence=0.8)
-            tracker.log_prediction_simple(source="cross_asset_rv", signal_value=-0.4, confidence=0.6)
-        base_weights = {
-            "alternative_data": 0.50,
-            "cross_asset_rv": 0.50,
-        }
-        adjusted = tracker.get_adjusted_weights(
-            base_weights,
-            ic_bonus_threshold=0.05,
-            ic_penalty_threshold=0.02,
+
+        # Both sources have same health_score but different IC
+        high_ic_score = HealthScore(
+            source="alternative_data", timestamp=datetime.now().isoformat(),
+            health_score=0.80, accuracy_30d=0.75, accuracy_60d=0.78,
+            accuracy_90d=0.80, decay_rate=0.0, predictions_count=100,
+            status="healthy", ic=0.10,
         )
-        assert isinstance(adjusted, dict)
-        total = sum(adjusted.values())
-        assert abs(total - 1.0) < 0.01
+        low_ic_score = HealthScore(
+            source="cross_asset_rv", timestamp=datetime.now().isoformat(),
+            health_score=0.80, accuracy_30d=0.75, accuracy_60d=0.78,
+            accuracy_90d=0.80, decay_rate=0.0, predictions_count=100,
+            status="healthy", ic=0.01,
+        )
+
+        with patch.object(tracker, 'calculate_all_health_scores', return_value={
+            "alternative_data": high_ic_score,
+            "cross_asset_rv": low_ic_score,
+        }):
+            base_weights = {"alternative_data": 0.50, "cross_asset_rv": 0.50}
+            adjusted = tracker.get_adjusted_weights(
+                base_weights,
+                ic_bonus_threshold=0.05,
+                ic_penalty_threshold=0.02,
+            )
+            # High IC source should get relatively more weight
+            assert adjusted["alternative_data"] > adjusted["cross_asset_rv"]
+            total = sum(adjusted.values())
+            assert abs(total - 1.0) < 0.01
 
 
 class TestDecayAlertDataclass:
