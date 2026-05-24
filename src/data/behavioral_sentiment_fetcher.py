@@ -140,6 +140,10 @@ class BehavioralSentimentFetcher:
         # Instance-level VIX cache to avoid redundant yfinance calls
         self._vix_cache: Optional[Tuple[float, float]] = None
         self._vix_cache_time: Optional[datetime] = None
+        self._skew_cache: Optional[float] = None
+        self._skew_cache_time: Optional[datetime] = None
+        self._cpce_cache: Optional[float] = None
+        self._cpce_cache_time: Optional[datetime] = None
         self._init_cache()
     
     def _init_cache(self):
@@ -259,35 +263,58 @@ class BehavioralSentimentFetcher:
         return result
     
     def _fetch_skew_index(self) -> float:
-        """Fetch CBOE SKEW Index from Yahoo Finance via yfinance"""
+        """Fetch CBOE SKEW Index from Yahoo Finance via yfinance (cached 60s)"""
+        # Instance-level cache: at most one real fetch per 60 seconds
+        now = datetime.now()
+        if self._skew_cache is not None and self._skew_cache_time is not None:
+            age = now - self._skew_cache_time
+            if age.total_seconds() < 60:
+                return self._skew_cache
+
         try:
             ticker = yf.Ticker("^SKEW")
             hist = ticker.history(period="1d")
             if not hist.empty:
                 raw = float(hist["Close"].iloc[-1])
                 if not math.isnan(raw):
+                    self._skew_cache = raw
+                    self._skew_cache_time = now
                     return raw
         except Exception as e:
             logger.warning("yfinance fetch failed for ^SKEW: %s", e)
 
         # Estimate SKEW from VIX if unavailable
         vix, _ = self._fetch_vix_data()
-        # SKEW approx 100 + (VIX - 15) * 2
-        return 100 + max(0, (vix - 15)) * 2
+        estimate = 100 + max(0, (vix - 15)) * 2
+        self._skew_cache = estimate
+        self._skew_cache_time = now
+        return estimate
     
     def _fetch_put_call_ratio(self) -> float:
-        """Fetch CBOE equity put/call ratio from Yahoo Finance via yfinance"""
+        """Fetch CBOE equity put/call ratio from Yahoo Finance via yfinance (cached 60s)"""
+        # Instance-level cache: at most one real fetch per 60 seconds
+        now = datetime.now()
+        if self._cpce_cache is not None and self._cpce_cache_time is not None:
+            age = now - self._cpce_cache_time
+            if age.total_seconds() < 60:
+                return self._cpce_cache
+
         try:
             ticker = yf.Ticker("^CPCE")
             hist = ticker.history(period="5d")
             if not hist.empty and "Close" in hist.columns:
                 closes = hist["Close"].dropna().tolist()
                 if closes:
-                    return sum(closes) / len(closes)
+                    result = sum(closes) / len(closes)
+                    self._cpce_cache = result
+                    self._cpce_cache_time = now
+                    return result
         except Exception as e:
             logger.warning("yfinance fetch failed for ^CPCE: %s", e)
 
-        return 0.65  # Historical average
+        self._cpce_cache = 0.65  # Historical average
+        self._cpce_cache_time = now
+        return 0.65
     
     def _estimate_retail_flow(self) -> RetailFlow:
         """Estimate retail positioning from available data"""
