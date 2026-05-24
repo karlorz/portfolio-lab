@@ -32,6 +32,10 @@ from pathlib import Path
 
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = ['SignalSource', 'Signal', 'RegimeContext', 'HistoricalAccuracy', 'FeatureVector', 'StackingFeatureEngine', 'StackingAccuracyTracker', 'demo', 'main']
 
 class SignalSource(Enum):
@@ -452,9 +456,9 @@ def demo():
     """Demonstrate feature engineering with synthetic signals."""
     import time
     
-    print("=" * 70)
-    print("Portfolio-Lab v3.10: Stacking Feature Engine Demo")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("Portfolio-Lab v3.10: Stacking Feature Engine Demo")
+    logger.info("=" * 70)
     
     # Initialize engine
     engine = StackingFeatureEngine()
@@ -520,55 +524,55 @@ def demo():
     # Get historical accuracies
     historical_accuracy = tracker.get_all_accuracies(datetime.now())
     
-    print("\n1. Creating Feature Vector...")
+    logger.info("\n1. Creating Feature Vector...")
     start = time.time()
     feature_vector = engine.create_features(signals, regime_context, historical_accuracy)
     elapsed_ms = (time.time() - start) * 1000
     
-    print(f"   ✓ Feature vector created in {elapsed_ms:.2f}ms")
-    print(f"   ✓ Dimensions: {feature_vector.dimension_count}")
+    logger.info(f"   ✓ Feature vector created in {elapsed_ms:.2f}ms")
+    logger.info(f"   ✓ Dimensions: {feature_vector.dimension_count}")
     
-    print("\n2. Converting to NumPy...")
+    logger.info("\n2. Converting to NumPy...")
     features_np = engine.to_numpy(feature_vector)
-    print(f"   ✓ Shape: {features_np.shape}")
-    print(f"   ✓ Dtype: {features_np.dtype}")
-    print(f"   ✓ Memory: {features_np.nbytes} bytes")
+    logger.info(f"   ✓ Shape: {features_np.shape}")
+    logger.info(f"   ✓ Dtype: {features_np.dtype}")
+    logger.info(f"   ✓ Memory: {features_np.nbytes} bytes")
     
-    print("\n3. Feature Breakdown:")
-    print(f"   - Base signals (6): mean={np.mean(list(feature_vector.base_values.values())):.3f}")
-    print(f"   - Multiplicative interactions (15): range [{min(feature_vector.multiplicative.values()):.3f}, {max(feature_vector.multiplicative.values()):.3f}]")
-    print(f"   - Disagreement features (15): range [{min(feature_vector.disagreement.values()):.3f}, {max(feature_vector.disagreement.values()):.3f}]")
-    print(f"   - Average features (15): range [{min(feature_vector.averages.values()):.3f}, {max(feature_vector.averages.values()):.3f}]")
-    print(f"   - Regime context (2): VIX={feature_vector.vix_normalized:.3f}, trend={feature_vector.trend_strength:.3f}")
-    print(f"   - Historical accuracy (6): mean={np.mean(list(feature_vector.accuracy_values.values())):.3f}")
+    logger.info("\n3. Feature Breakdown:")
+    logger.info(f"   - Base signals (6): mean={np.mean(list(feature_vector.base_values.values())):.3f}")
+    logger.info(f"   - Multiplicative interactions (15): range [{min(feature_vector.multiplicative.values()):.3f}, {max(feature_vector.multiplicative.values()):.3f}]")
+    logger.info(f"   - Disagreement features (15): range [{min(feature_vector.disagreement.values()):.3f}, {max(feature_vector.disagreement.values()):.3f}]")
+    logger.info(f"   - Average features (15): range [{min(feature_vector.averages.values()):.3f}, {max(feature_vector.averages.values()):.3f}]")
+    logger.info(f"   - Regime context (2): VIX={feature_vector.vix_normalized:.3f}, trend={feature_vector.trend_strength:.3f}")
+    logger.info(f"   - Historical accuracy (6): mean={np.mean(list(feature_vector.accuracy_values.values())):.3f}")
     
-    print("\n4. Feature Names Sample (first 20):")
+    logger.info("\n4. Feature Names Sample (first 20):")
     names = engine.get_feature_names()
     for name in names[:20]:
-        print(f"   - {name}")
-    print(f"   ... and {len(names)-20} more")
+        logger.info(f"   - {name}")
+    logger.info(f"   ... and {len(names)-20} more")
     
-    print("\n5. Explanation Summary:")
+    logger.info("\n5. Explanation Summary:")
     explanation = engine.explain_features(feature_vector, top_n=5)
-    print(f"   Timestamp: {explanation['timestamp']}")
-    print(f"   Base signals: {explanation['base_signals_summary']['bullish_count']} bullish, "
+    logger.info(f"   Timestamp: {explanation['timestamp']}")
+    logger.info(f"   Base signals: {explanation['base_signals_summary']['bullish_count']} bullish, "
           f"{explanation['base_signals_summary']['bearish_count']} bearish, "
           f"{explanation['base_signals_summary']['neutral_count']} neutral")
-    print(f"   Volatility regime: {explanation['regime_context']['volatility_regime']}")
-    print(f"   Historical accuracy (mean): {explanation['historical_accuracy']['mean_accuracy']:.3f}")
-    print(f"   Best performer: {explanation['historical_accuracy']['best_performer']}")
+    logger.info(f"   Volatility regime: {explanation['regime_context']['volatility_regime']}")
+    logger.info(f"   Historical accuracy (mean): {explanation['historical_accuracy']['mean_accuracy']:.3f}")
+    logger.info(f"   Best performer: {explanation['historical_accuracy']['best_performer']}")
     
-    print("\n6. Top 5 Synergistic Pairs (multiplicative):")
+    logger.info("\n6. Top 5 Synergistic Pairs (multiplicative):")
     for pair, value in explanation['pairwise_interactions']['high_synergy']:
-        print(f"   - {pair}: {value:.3f}")
+        logger.info(f"   - {pair}: {value:.3f}")
     
-    print("\n7. Top 5 Disagreeing Pairs:")
+    logger.info("\n7. Top 5 Disagreeing Pairs:")
     for pair, value in explanation['pairwise_interactions']['high_disagreement']:
-        print(f"   - {pair}: {value:.3f}")
+        logger.info(f"   - {pair}: {value:.3f}")
     
-    print("\n" + "=" * 70)
-    print("Demo complete. Performance target: <10ms ✓" if elapsed_ms < 10 else "Demo complete. Performance: >10ms")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("Demo complete. Performance target: <10ms ✓" if elapsed_ms < 10 else "Demo complete. Performance: >10ms")
+    logger.info("=" * 70)
     
     return feature_vector, features_np
 

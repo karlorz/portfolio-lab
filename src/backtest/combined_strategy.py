@@ -61,6 +61,10 @@ from src.signals.fed_policy_overlay import FedPolicyOverlay
 
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = ['TRANSACTION_COST', 'REBALANCE_FREQ', 'MIN_HISTORY_DAYS', 'START_DATE', 'END_DATE', 'DailyPosition', 'CombinedStrategyBacktester']
 
 # Paths
@@ -126,7 +130,7 @@ class CombinedStrategyBacktester:
     def load_prices(self) -> bool:
         """Load and align price data for all tickers."""
         if not PRICES_PATH.exists():
-            print(f"Error: Price data not found at {PRICES_PATH}")
+            logger.info(f"Error: Price data not found at {PRICES_PATH}")
             return False
 
         try:
@@ -143,7 +147,7 @@ class CombinedStrategyBacktester:
                         all_prices[ticker] = pd.Series(prices, index=pd.to_datetime(dates))
 
             if not all_prices:
-                print("Error: No valid price data loaded")
+                logger.info("Error: No valid price data loaded")
                 return False
 
             # Combine into DataFrame
@@ -151,13 +155,13 @@ class CombinedStrategyBacktester:
             self.prices_df.dropna(inplace=True)
             self.dates = [d.strftime('%Y-%m-%d') for d in self.prices_df.index]
 
-            print(f"Loaded {len(self.prices_df)} days of price data")
-            print(f"Date range: {self.dates[0]} to {self.dates[-1]}")
+            logger.info(f"Loaded {len(self.prices_df)} days of price data")
+            logger.info(f"Date range: {self.dates[0]} to {self.dates[-1]}")
 
             return True
 
         except Exception as e:
-            print(f"Error loading prices: {e}")
+            logger.info(f"Error loading prices: {e}")
             return False
 
     def _get_tsmom_deltas(
@@ -410,8 +414,8 @@ class CombinedStrategyBacktester:
         # Ensure we have enough history for TSMOM
         start_idx = max(start_idx, MIN_HISTORY_DAYS)
 
-        print(f"Backtest range: {self.dates[start_idx]} to {self.dates[end_idx]}")
-        print(f"Trading days: {end_idx - start_idx + 1}")
+        logger.info(f"Backtest range: {self.dates[start_idx]} to {self.dates[end_idx]}")
+        logger.info(f"Trading days: {end_idx - start_idx + 1}")
 
         # Initialize
         portfolio_value = initial_value
@@ -472,13 +476,13 @@ class CombinedStrategyBacktester:
                 rebalance_executed = True
 
                 if verbose and rebalances <= 10:
-                    print(f"Rebalance {rebalances}: {current_date}")
-                    print(f"  TSMOM: {tsmom_deltas}")
-                    print(f"  HMM: {hmm_regime} -> {hmm_deltas}")
-                    print(f"  Fed: {fed_regime} -> {fed_deltas}")
-                    print(f"  Combined: {combined_deltas}")
-                    print(f"  New weights: {current_weights}")
-                    print(f"  Turnover: {turnover:.2%}")
+                    logger.info(f"Rebalance {rebalances}: {current_date}")
+                    logger.info(f"  TSMOM: {tsmom_deltas}")
+                    logger.info(f"  HMM: {hmm_regime} -> {hmm_deltas}")
+                    logger.info(f"  Fed: {fed_regime} -> {fed_deltas}")
+                    logger.info(f"  Combined: {combined_deltas}")
+                    logger.info(f"  New weights: {current_weights}")
+                    logger.info(f"  Turnover: {turnover:.2%}")
 
             # Record position
             positions.append(DailyPosition(

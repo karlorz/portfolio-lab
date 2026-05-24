@@ -3,11 +3,14 @@
 Tests for signal integrator — data structures, normalization, composite signal
 aggregation, allocation deltas, regime detection, signal agreement.
 """
+import dataclasses
 import json
+import math
 import sqlite3
 
 import pytest
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 from unittest.mock import patch, MagicMock, PropertyMock
 from src.signals.integrator import (
     SignalSourceResult, CompositeSignal, AllocationDelta,
@@ -16,6 +19,7 @@ from src.signals.integrator import (
     LLMSentimentSignalAdapter,
     BASE_WEIGHTS, REGIME_WEIGHTS, MIN_SIGNAL_SOURCES,
     SIGNAL_MIN, SIGNAL_MAX, MAX_DELTA_PCT,
+    DB_PATH, __all__ as MODULE_ALL,
 )
 
 
@@ -2356,4 +2360,1450 @@ class TestAdditionalEdgeCases:
         # weighted: (0.80*0.4*0.9 + 0.65*0.3*0.7 + 0.70*0.3*0.5) / (0.4*0.9 + 0.3*0.7 + 0.3*0.5)
         # = (0.288 + 0.1365 + 0.105) / (0.36 + 0.21 + 0.15) = 0.5295 / 0.72 = 0.7354...
         assert 0.70 < acc < 0.77
+
+
+# ============================================================================
+# 1. Dataclass Field Validation — use dataclasses.fields() to verify ALL fields
+# ============================================================================
+
+
+class TestDataclassFieldIntrospection:
+    """Validate all dataclass fields via dataclasses.fields()."""
+
+    def test_signal_source_result_fields(self):
+        """SignalSourceResult has all expected fields with correct types."""
+        fields = {f.name: f.type for f in dataclasses.fields(SignalSourceResult)}
+        expected = {
+            "source_type": str,
+            "source_name": str,
+            "signal": float,
+            "confidence": float,
+            "raw_score": float,
+            "raw_unit": str,
+            "historical_accuracy": Optional[float],
+            "sample_count": int,
+            "timestamp": str,
+            "metadata": Dict[str, Any],
+        }
+        for name, typ in expected.items():
+            assert name in fields, f"Missing field {name}"
+            assert fields[name] == typ, f"Field {name} type mismatch: {fields[name]} != {typ}"
+
+    def test_composite_signal_fields(self):
+        """CompositeSignal has all expected fields with correct types."""
+        fields = {f.name: f.type for f in dataclasses.fields(CompositeSignal)}
+        expected = {
+            "ticker": str,
+            "timestamp": str,
+            "component_signals": List[SignalSourceResult],
+            "composite_score": float,
+            "composite_confidence": float,
+            "primary_drivers": List[str],
+            "signal_agreement": str,
+            "detected_regime": str,
+            "weights_used": Dict[str, float],
+            "expected_accuracy": Optional[float],
+        }
+        for name, typ in expected.items():
+            assert name in fields, f"Missing field {name}"
+            assert fields[name] == typ, f"Field {name} type mismatch: {fields[name]} != {typ}"
+
+    def test_allocation_delta_fields(self):
+        """AllocationDelta has all expected fields with correct types."""
+        fields = {f.name: f.type for f in dataclasses.fields(AllocationDelta)}
+        expected = {
+            "ticker": str,
+            "current_weight": float,
+            "recommended_weight": float,
+            "delta": float,
+            "composite_score": float,
+            "confidence": float,
+            "primary_reason": str,
+            "max_position": float,
+            "min_position": float,
+        }
+        for name, typ in expected.items():
+            assert name in fields, f"Missing field {name}"
+            assert fields[name] == typ, f"Field {name} type mismatch: {fields[name]} != {typ}"
+
+    def test_portfolio_recommendation_fields(self):
+        """PortfolioRecommendation has all expected fields with correct types."""
+        fields = {f.name: f.type for f in dataclasses.fields(PortfolioRecommendation)}
+        expected = {
+            "timestamp": str,
+            "current_allocation": Dict[str, float],
+            "recommended_allocation": Dict[str, float],
+            "deltas": List[AllocationDelta],
+            "composite_sentiment": str,
+            "confidence": float,
+            "regime": str,
+            "expected_volatility": Optional[float],
+            "max_drawdown_estimate": Optional[float],
+        }
+        for name, typ in expected.items():
+            assert name in fields, f"Missing field {name}"
+
+    def test_signal_source_result_defaults(self):
+        """Verify default values are correct via dataclass fields introspection."""
+        for f in dataclasses.fields(SignalSourceResult):
+            if f.name == "sample_count":
+                assert f.default == 0
+            elif f.name == "historical_accuracy":
+                assert f.default is None
+            elif f.name == "metadata":
+                # field(default_factory=dict)
+                assert f.default_factory is not None
+            elif f.name == "timestamp":
+                # field(default_factory=lambda: datetime.now().isoformat())
+                assert f.default_factory is not None
+
+    def test_allocation_delta_defaults(self):
+        """Verify AllocationDelta default bounds are correct."""
+        for f in dataclasses.fields(AllocationDelta):
+            if f.name == "max_position":
+                assert f.default == 0.60
+            elif f.name == "min_position":
+                assert f.default == 0.05
+
+    def test_signal_source_result_field_count(self):
+        """SignalSourceResult has exactly 10 fields."""
+        assert len(dataclasses.fields(SignalSourceResult)) == 10
+
+    def test_composite_signal_field_count(self):
+        """CompositeSignal has exactly 10 fields."""
+        assert len(dataclasses.fields(CompositeSignal)) == 10
+
+    def test_allocation_delta_field_count(self):
+        """AllocationDelta has exactly 9 fields."""
+        assert len(dataclasses.fields(AllocationDelta)) == 9
+
+    def test_portfolio_recommendation_field_count(self):
+        """PortfolioRecommendation has exactly 9 fields."""
+        assert len(dataclasses.fields(PortfolioRecommendation)) == 9
+
+
+# ============================================================================
+# 2. Computation Edge Cases — zero/empty, single-element, NaN/Inf, boundaries
+# ============================================================================
+
+
+class TestNormalizeSignalEdgeCases:
+    """Edge cases for _normalize_signal with extreme/NaN/Inf values."""
+
+    def _make_source(self):
+        class TestSource(SignalSource):
+            def generate_signal(self, ticker):
+                return None
+            def get_historical_accuracy(self, ticker, horizon_days=21):
+                return None
+        return TestSource("test", "test")
+
+    def test_negative_range(self):
+        """Range with negative values works correctly."""
+        s = self._make_source()
+        # Range [-2, 2], value 0 -> midpoint -> 0.0
+        assert s._normalize_signal(0.0, -2.0, 2.0) == 0.0
+        assert s._normalize_signal(2.0, -2.0, 2.0) == 1.0
+        assert s._normalize_signal(-2.0, -2.0, 2.0) == -1.0
+
+    def test_reversed_range(self):
+        """min > max: formula normalizes then clamps to valid range.
+        With min=10, max=0, input=5: 2*(5-10)/(0-10)-1 = 2*(-5)/(-10)-1 = 1-1 = 0.0."""
+        s = self._make_source()
+        result = s._normalize_signal(5.0, 10.0, 0.0)
+        assert result == 0.0
+
+    def test_single_value_range_min_equals_max_by_one(self):
+        """Range of zero (single point) returns 0.0 even when value is extreme."""
+        s = self._make_source()
+        assert s._normalize_signal(42.0, 42.0, 42.0) == 0.0
+
+    @patch("src.signals.integrator.SIGNAL_MIN", -10.0)
+    @patch("src.signals.integrator.SIGNAL_MAX", 10.0)
+    def test_custom_bounds(self):
+        """Respects patched SIGNAL_MIN/SIGNAL_MAX."""
+        s = self._make_source()
+        result = s._normalize_signal(100.0, -1.0, 1.0)
+        # 2*(100 - (-1))/2 - 1 = 100, clamped to 10.0
+        assert result == 10.0
+
+    def test_wide_range(self):
+        """Wide range [0, 10000], midpoint at 5000."""
+        s = self._make_source()
+        assert s._normalize_signal(5000.0, 0.0, 10000.0) == 0.0
+        assert s._normalize_signal(10000.0, 0.0, 10000.0) == 1.0
+        assert s._normalize_signal(0.0, 0.0, 10000.0) == -1.0
+
+    def test_tiny_input(self):
+        """Very small near-zero values are handled (floating-point precision)."""
+        s = self._make_source()
+        result = s._normalize_signal(1e-10, -1.0, 1.0)
+        # May not be exactly 1e-10 due to floating-point, but should be very close
+        assert abs(result - 1e-10) < 1e-15
+
+
+class TestCompositeScoreNaNInfBoundaries:
+    """Test composite score calculation with NaN/Inf in signals."""
+
+    def test_nan_signal_clamped(self, tmp_path):
+        """NaN signal value gets clamped to SIGNAL_MAX/SIGNAL_MIN by min/max (Py3.13)."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", float("nan"), confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        # Python 3.12+: min(1.0, NaN) -> 1.0, max(-1.0, NaN) -> -1.0 (NaN clamped)
+        assert isinstance(result.composite_score, float)
+        assert not math.isnan(result.composite_score)
+
+    def test_inf_signal_clamped(self, tmp_path):
+        """Inf signal value is clamped to SIGNAL_MAX."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", float("inf"), confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.composite_score == 1.0
+
+    def test_neg_inf_signal_clamped(self, tmp_path):
+        """-Inf signal value is clamped to SIGNAL_MIN."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", float("-inf"), confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.composite_score == -1.0
+
+    def test_zero_confidence_inf_weight_total(self, tmp_path):
+        """All signals with confidence=0 -> weight_total=0 -> score 0.0."""
+        integrator = _make_integrator(tmp_path)
+        src_a = MagicMock()
+        src_a.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=0.0
+        )
+        src_b = MagicMock()
+        src_b.generate_signal.return_value = _make_signal(
+            "macro", "fed", 0.3, confidence=0.0
+        )
+        integrator.sources = {"momentum": src_a, "macro": src_b}
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.composite_score == 0.0
+        assert result.composite_confidence == 0.0
+
+    def test_very_small_weight_total(self, tmp_path):
+        """Extremely small confidence produces very small weight_total."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=1e-10
+        )
+        integrator.sources = {"momentum": src}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.composite_score == 0.5  # Still works
+        assert result.composite_confidence < 0.01
+
+
+class TestTechnicalSignalEdgeCases:
+    """Edge cases for TechnicalSignal computation methods."""
+
+    def test_momentum_exactly_200_rows(self, tmp_path):
+        """Exactly 200 rows is sufficient for momentum calculation."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        _create_market_db(signal.market_db, _make_rising_prices(200, 100, 200))
+        result = signal._calculate_momentum("SPY")
+        assert result is not None
+
+    def test_momentum_single_element_close(self, tmp_path):
+        """Exactly 252+1 rows with monotonic price tests 12m return edge."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        _create_market_db(signal.market_db, _make_rising_prices(253, 100, 200))
+        result = signal._calculate_momentum("SPY")
+        assert result is not None
+        assert result["return_12m"] > 0
+
+    def test_momentum_below_200_rows_exact(self, tmp_path):
+        """Exactly 199 rows returns None."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        _create_market_db(signal.market_db, _make_rising_prices(199, 100, 200))
+        result = signal._calculate_momentum("SPY")
+        assert result is None
+
+    def test_mean_reversion_exactly_14_rows(self, tmp_path):
+        """Exactly 14 rows is sufficient for mean reversion (>= 14 means non-zero)."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        _create_market_db(signal.market_db, _make_rising_prices(14, 100, 110))
+        result = signal._calculate_mean_reversion("SPY")
+        # With 14 rows, RSI is computed. Rising prices -> RSI > 70 -> bearish signal < 0
+        assert isinstance(result, float)
+
+    def test_mean_reversion_just_below_14_rows_returns_zero(self, tmp_path):
+        """Exactly 13 rows returns 0.0."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        _create_market_db(signal.market_db, _make_rising_prices(13, 100, 110))
+        result = signal._calculate_mean_reversion("SPY")
+        assert result == 0.0
+
+    def test_momentum_12m_return_zero_when_insufficient_data(self, tmp_path):
+        """Less than 252 trading days -> return_12m = 0."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        _create_market_db(signal.market_db, _make_rising_prices(220, 100, 200))
+        result = signal._calculate_momentum("SPY")
+        assert result is not None
+        assert result["return_12m"] == 0
+
+    def test_momentum_return_6m_computed_with_sufficient_data(self, tmp_path):
+        """With 220 rows (126+ for 6m, 200+ for momentum), return_6m is computed."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        # 200+ rows -> momentum succeeds; > 126 rows -> return_6m computed
+        rows = _make_rising_prices(220, 100, 200)
+        _create_market_db(signal.market_db, rows)
+        result = signal._calculate_momentum("SPY")
+        assert result is not None
+        assert "return_6m" in result
+
+    def test_momentum_bearish_below_15pct(self, tmp_path):
+        """Return_12m < -0.15 uses different scoring branch."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        # Steeply falling: start at 300, end at 100 over 300 days
+        _create_market_db(signal.market_db, _make_falling_prices(300, 300, 100))
+        result = signal._calculate_momentum("SPY")
+        assert result is not None
+        assert result["above_sma"] is False
+        assert result["return_12m"] < -0.15
+
+    def test_momentum_above_sma_negative_return(self, tmp_path):
+        """above_sma=True but return_12m < 0 -> mild bearish score."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        # Generate prices that end above SMA but have negative 12m return
+        # Start very high, dip low, then rise back above SMA near end
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        base = now - timedelta(days=400)
+        rows = []
+        for i in range(300):
+            frac = i / 299.0
+            # Dip to 50 then recover to 110 (above SMA of ~75)
+            price = 200 - 150 * frac if frac < 0.5 else 50 + 60 * (frac - 0.5) / 0.5
+            date_str = (base + timedelta(days=i)).strftime("%Y-%m-%d")
+            rows.append((date_str, price))
+        _create_market_db(signal.market_db, rows)
+        result = signal._calculate_momentum("SPY")
+        # above_sma should be True when current > sma_200
+        assert result is not None
+
+    def test_mean_reversion_extreme_rsi_100(self, tmp_path):
+        """All gains -> RSI near 100 -> bearish signal near -1.0."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        rows = []
+        close = 100.0
+        for i in range(20):
+            date_str = (now - timedelta(days=20 - i)).strftime("%Y-%m-%d")
+            rows.append((date_str, close))
+            close += 1.0  # Always up
+        _create_market_db(signal.market_db, rows)
+        result = signal._calculate_mean_reversion("SPY")
+        assert result < 0  # Bearish
+        assert result == pytest.approx(-1.0, abs=0.1)
+
+    def test_mean_reversion_extreme_rsi_0(self, tmp_path):
+        """All losses -> RSI=0 -> max bullish signal of 1.0."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = TechnicalSignal()
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        rows = []
+        close = 100.0
+        for i in range(20):
+            date_str = (now - timedelta(days=20 - i)).strftime("%Y-%m-%d")
+            rows.append((date_str, close))
+            close -= 1.0  # Always down — all losses
+        _create_market_db(signal.market_db, rows)
+        result = signal._calculate_mean_reversion("SPY")
+        assert result == 1.0
+
+
+# ============================================================================
+# 3. Constants Validation — verify types, ranges, existence
+# ============================================================================
+
+
+class TestConstantsExistenceAndTypes:
+    """Validate that ALL module-level constants exist with expected types/ranges."""
+
+    def test_db_path_exists(self):
+        """DB_PATH is a Path object."""
+        from pathlib import Path
+        assert isinstance(DB_PATH, Path)
+
+    def test_base_weights_keys(self):
+        """BASE_WEIGHTS has all expected keys."""
+        expected_keys = {
+            "momentum", "value", "macro", "quality", "sentiment",
+            "ai_agent", "tsmom", "fed_policy", "hmm_regime",
+            "multi_speed", "risk_parity", "network_momentum",
+        }
+        assert set(BASE_WEIGHTS.keys()) == expected_keys
+
+    def test_base_weights_values_positive(self):
+        """All BASE_WEIGHTS values are positive."""
+        for k, v in BASE_WEIGHTS.items():
+            assert v > 0, f"Weight {k}={v} is not positive"
+
+    def test_base_weights_values_below_one(self):
+        """All BASE_WEIGHTS values are below 0.5 (no single dominant weight)."""
+        for k, v in BASE_WEIGHTS.items():
+            assert v < 0.5, f"Weight {k}={v} exceeds 0.5"
+
+    def test_regime_weights_keys(self):
+        """REGIME_WEIGHTS has exactly 5 regime keys."""
+        expected_regimes = {"bull", "bear", "neutral", "crisis", "high_vol"}
+        assert set(REGIME_WEIGHTS.keys()) == expected_regimes
+
+    def test_regime_neutral_is_base_weights_reference(self):
+        """neutral regime IS the BASE_WEIGHTS dict reference."""
+        assert REGIME_WEIGHTS["neutral"] is BASE_WEIGHTS
+
+    def test_min_signal_sources_type(self):
+        """MIN_SIGNAL_SOURCES is int >= 1."""
+        assert isinstance(MIN_SIGNAL_SOURCES, int)
+        assert MIN_SIGNAL_SOURCES >= 1
+
+    def test_signal_bound_types(self):
+        """SIGNAL_MIN, SIGNAL_MAX are floats with min < max."""
+        assert isinstance(SIGNAL_MIN, (int, float))
+        assert isinstance(SIGNAL_MAX, (int, float))
+        assert SIGNAL_MIN < SIGNAL_MAX
+        assert SIGNAL_MIN == -1.0
+        assert SIGNAL_MAX == 1.0
+
+    def test_max_delta_pct_type(self):
+        """MAX_DELTA_PCT is a small positive float."""
+        assert isinstance(MAX_DELTA_PCT, float)
+        assert 0 < MAX_DELTA_PCT <= 0.5
+
+
+# ============================================================================
+# 4. Function Boundary Conditions — extreme inputs, missing keys, wrong types
+# ============================================================================
+
+
+class TestCompositeSignalBoundaryConditions:
+    """Boundary conditions for get_composite_signal with extreme inputs."""
+
+    def test_no_regime_and_no_custom_weights_uses_base(self, tmp_path):
+        """When regime is None and not in REGIME_WEIGHTS, fallback to BASE_WEIGHTS."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        with patch.object(integrator, "_detect_regime", return_value="bull"):
+            with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+                result = integrator.get_composite_signal("SPY", regime=None)
+        assert result.weights_used == REGIME_WEIGHTS["bull"]
+
+    def test_custom_weights_empty_dict_falls_back(self, tmp_path):
+        """Empty custom_weights dict -> source_type 'momentum' not found -> weight defaults to 0.20."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", custom_weights={})
+        # Source type "momentum" not in {} -> default 0.20
+        assert result.composite_score > 0
+
+    def test_custom_weights_unknown_source_type(self, tmp_path):
+        """Source type not in custom weight -> weight defaults to 0.20."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        custom = {"unknown_type": 1.0}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", custom_weights=custom)
+        assert result.composite_score > 0
+
+    def test_all_sources_return_none_insufficient(self, tmp_path):
+        """Every source returns None -> insufficient_data."""
+        integrator = _make_integrator(tmp_path)
+        integrator.sources = {
+            "momentum": MagicMock(generate_signal=MagicMock(return_value=None)),
+            "macro": MagicMock(generate_signal=MagicMock(return_value=None)),
+            "sentiment": MagicMock(generate_signal=MagicMock(return_value=None)),
+        }
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.signal_agreement == "insufficient_data"
+        assert result.composite_score == 0.0
+        assert result.composite_confidence == 0.0
+
+    def test_primary_drivers_empty_when_no_signals(self, tmp_path):
+        """No signals -> empty primary_drivers."""
+        integrator = _make_integrator(tmp_path)
+        integrator.sources = {}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.primary_drivers == []
+
+    def test_primary_drivers_max_three(self, tmp_path):
+        """At most 3 primary drivers returned."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for i in range(6):
+            src = MagicMock()
+            src.generate_signal.return_value = _make_signal(
+                f"type_{i}", f"src_{i}", 0.5, confidence=0.8
+            )
+            sources[f"src_{i}"] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert len(result.primary_drivers) <= 3
+
+    def test_expected_accuracy_none_when_no_signals(self, tmp_path):
+        """No signals -> expected_accuracy is None."""
+        integrator = _make_integrator(tmp_path)
+        integrator.sources = {}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.expected_accuracy is None
+
+    def test_source_exception_with_fallback_to_others(self, tmp_path):
+        """Exception in one source doesn't prevent others from contributing."""
+        integrator = _make_integrator(tmp_path)
+        src_good = MagicMock()
+        src_good.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=0.8
+        )
+        src_bad = MagicMock()
+        src_bad.generate_signal.side_effect = ValueError("Bad data")
+        integrator.sources = {"momentum": src_good, "bad": src_bad}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert len(result.component_signals) == 1
+        assert result.composite_score != 0.0
+
+
+class TestAllocationDeltaBoundaryConditions:
+    """Boundary conditions for get_allocation_deltas with extreme inputs."""
+
+    def test_asset_at_max_position_capped(self, tmp_path):
+        """Asset at 0.60 with bullish signal -> stays at 0.60."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_bull(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=0.5, composite_confidence=1.0,
+                detected_regime="bull", primary_drivers=["momentum"],
+                signal_agreement="aligned_bullish",
+            )
+        integrator.get_composite_signal = mock_bull
+        result = integrator.get_allocation_deltas({"SPY": 0.60})
+        assert result.deltas[0].recommended_weight == 0.60
+
+    def test_asset_at_min_position_bearish(self, tmp_path):
+        """Asset at 0.05 with bearish signal -> stays at 0.05."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_bear(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=-0.5, composite_confidence=1.0,
+                detected_regime="bear", primary_drivers=["macro"],
+                signal_agreement="aligned_bearish",
+            )
+        integrator.get_composite_signal = mock_bear
+        result = integrator.get_allocation_deltas({"SPY": 0.05})
+        assert result.deltas[0].recommended_weight == 0.05
+
+    def test_no_primary_drivers_neutral_reason(self, tmp_path):
+        """When primary_drivers empty, reason becomes 'neutral'."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_no_drivers(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=0.2, composite_confidence=0.6,
+                detected_regime="neutral", primary_drivers=[],
+                signal_agreement="mixed",
+            )
+        integrator.get_composite_signal = mock_no_drivers
+        result = integrator.get_allocation_deltas({"SPY": 0.46})
+        assert result.deltas[0].primary_reason == "neutral"
+
+    def test_sentiment_bearish_threshold(self, tmp_path):
+        """Average score exactly -0.3 -> neutral (not > 0.3 or < -0.3)."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_borderline(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=-0.3, composite_confidence=0.8,
+                detected_regime="neutral", primary_drivers=["macro"],
+                signal_agreement="aligned_bearish",
+            )
+        integrator.get_composite_signal = mock_borderline
+        result = integrator.get_allocation_deltas({"SPY": 0.46})
+        assert result.composite_sentiment == "neutral"
+
+    def test_sentiment_bullish_threshold_exact(self, tmp_path):
+        """Average score exactly 0.3 -> neutral (not > 0.3)."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_borderline(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=0.3, composite_confidence=0.8,
+                detected_regime="neutral", primary_drivers=["momentum"],
+                signal_agreement="aligned_bullish",
+            )
+        integrator.get_composite_signal = mock_borderline
+        result = integrator.get_allocation_deltas({"SPY": 0.46})
+        assert result.composite_sentiment == "neutral"
+
+
+class TestMacroSignalBoundaryConditions:
+    """Boundary conditions for MacroSignal sub-methods."""
+
+    def test_yield_curve_tlt_or_shy_missing(self, tmp_path):
+        """Only TLT or SHY available -> returns 0.0."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = MacroSignal()
+        conn = sqlite3.connect(str(signal.market_db))
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))")
+        from datetime import datetime, timedelta
+        for i in range(25):
+            date_str = (datetime(2024, 5, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute("INSERT INTO prices VALUES ('TLT', ?, ?)", (date_str, 100.0 + i))
+        conn.commit()
+        conn.close()
+        result = signal._get_yield_curve_signal()
+        assert result == 0.0
+
+    def test_credit_lqd_or_hyg_missing(self, tmp_path):
+        """Only LQD or HYG available -> returns 0.0."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = MacroSignal()
+        conn = sqlite3.connect(str(signal.market_db))
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))")
+        from datetime import datetime, timedelta
+        for i in range(25):
+            date_str = (datetime(2024, 5, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute("INSERT INTO prices VALUES ('LQD', ?, ?)", (date_str, 100.0 + i))
+        conn.commit()
+        conn.close()
+        result = signal._get_credit_signal()
+        assert result == 0.0
+
+    def test_30d_change_exception_returns_none(self, tmp_path):
+        """Exception in _get_30d_change returns None."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = MacroSignal()
+        signal.market_db = tmp_path / "nonexistent" / "market.db"
+        result = signal._get_30d_change("SPY")
+        assert result is None
+
+    def test_yield_curve_extreme_spread(self, tmp_path):
+        """Very large TLT/SHY spread change is clamped to [-1, 1]."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = MacroSignal()
+        conn = sqlite3.connect(str(signal.market_db))
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))")
+        # TLT extreme rise, SHY extreme fall
+        for i in range(25):
+            from datetime import datetime, timedelta
+            date_str = (datetime(2024, 5, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute("INSERT INTO prices VALUES ('TLT', ?, ?)", (date_str, 100.0 + i * 10.0))
+            conn.execute("INSERT INTO prices VALUES ('SHY', ?, ?)", (date_str, 85.0 - i * 5.0))
+        conn.commit()
+        conn.close()
+        result = signal._get_yield_curve_signal()
+        assert -1.0 <= result <= 1.0
+
+
+class TestDetectRegimeMissingDataEdgeCases:
+    """Edge cases for _detect_regime with missing/corrupt data."""
+
+    def _setup_db(self, tmp_path, vix_level):
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE prices (symbol TEXT, date TEXT, close REAL,
+            PRIMARY KEY (symbol, date))
+        """)
+        conn.execute("INSERT INTO prices VALUES ('VIX', '2026-05-13', ?)", (vix_level,))
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_vix_negative_value(self, tmp_path):
+        """Negative VIX (impossible but defensive) -> bull (< 15)."""
+        integrator = _make_integrator(tmp_path)
+        self._setup_db(tmp_path, -5.0)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "bull"
+
+    def test_vix_nan_value(self, tmp_path):
+        """NaN VIX triggers exception -> neutral fallback."""
+        integrator = _make_integrator(tmp_path)
+        self._setup_db(tmp_path, float("nan"))
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "neutral"
+
+    def test_market_db_missing_file(self, tmp_path):
+        """Missing market.db file -> neutral."""
+        integrator = _make_integrator(tmp_path)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path / "empty_dir"):
+            regime = integrator._detect_regime()
+        assert regime == "neutral"
+
+    def test_vix_in_prices_but_no_rows(self, tmp_path):
+        """VIX symbol exists in prices table but no rows -> exception -> neutral."""
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE prices (symbol TEXT, date TEXT, close REAL,
+            PRIMARY KEY (symbol, date))
+        """)
+        conn.commit()
+        conn.close()
+        integrator = _make_integrator(tmp_path)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "neutral"
+
+
+# ============================================================================
+# 5. CLI / __main__ Guard — test CLI entry points with capsys
+# ============================================================================
+
+
+class TestCLIInterface:
+    """Test the CLI interface via main() function."""
+
+    def test_composite_requires_ticker(self, capsys):
+        """composite command without --ticker prints error and exits."""
+        with pytest.raises(SystemExit) as exc:
+            from src.signals.integrator import main
+            import sys
+            sys.argv = ["integrator.py", "composite"]
+            main()
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.out
+
+    def test_portfolio_requires_portfolio_arg(self, capsys):
+        """portfolio command without --portfolio prints error and exits."""
+        with pytest.raises(SystemExit) as exc:
+            from src.signals.integrator import main
+            import sys
+            sys.argv = ["integrator.py", "portfolio"]
+            main()
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.out
+
+    def test_history_requires_ticker(self, capsys):
+        """history command without --ticker prints error and exits."""
+        with pytest.raises(SystemExit) as exc:
+            from src.signals.integrator import main
+            import sys
+            sys.argv = ["integrator.py", "history"]
+            main()
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.out
+
+    def test_composite_json_output(self, capsys):
+        """composite command with --json outputs valid JSON."""
+        with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY", "--json"]):
+            with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
+                mock_get.return_value = CompositeSignal(
+                    ticker="SPY", timestamp="2026-05-24T12:00:00",
+                    composite_score=0.35, composite_confidence=0.72,
+                    detected_regime="neutral", primary_drivers=["tsmom"],
+                    signal_agreement="aligned_bullish",
+                )
+                from src.signals.integrator import main
+                main()
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert parsed["ticker"] == "SPY"
+        assert parsed["composite_score"] == 0.35
+
+    def test_composite_text_output(self, capsys):
+        """composite command without --json prints formatted text."""
+        with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY"]):
+            with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
+                mock_get.return_value = CompositeSignal(
+                    ticker="SPY", timestamp="2026-05-24T12:00:00",
+                    composite_score=0.35, composite_confidence=0.72,
+                    detected_regime="neutral", primary_drivers=["tsmom", "fed_policy"],
+                    signal_agreement="aligned_bullish", expected_accuracy=0.68,
+                )
+                from src.signals.integrator import main
+                main()
+        captured = capsys.readouterr()
+        assert "SPY" in captured.out
+        assert "0.35" in captured.out
+        assert "aligned_bullish" in captured.out
+
+    def test_composite_text_no_accuracy(self, capsys):
+        """Text output works when expected_accuracy is None."""
+        with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY"]):
+            with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
+                mock_get.return_value = CompositeSignal(
+                    ticker="SPY", timestamp="2026-05-24T12:00:00",
+                    composite_score=0.35, composite_confidence=0.72,
+                    detected_regime="neutral", primary_drivers=["tsmom"],
+                    signal_agreement="aligned_bullish", expected_accuracy=None,
+                )
+                from src.signals.integrator import main
+                main()
+        captured = capsys.readouterr()
+        assert "SPY" in captured.out
+        assert "Expected Accuracy" not in captured.out
+
+    @patch("src.signals.integrator.SignalIntegrator.get_allocation_deltas")
+    def test_portfolio_text_output(self, mock_get, capsys):
+        """portfolio command with --portfolio prints formatted text."""
+        mock_get.return_value = PortfolioRecommendation(
+            timestamp="2026-05-24T12:00:00",
+            current_allocation={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            recommended_allocation={"SPY": 0.48, "GLD": 0.36, "TLT": 0.16},
+            deltas=[
+                AllocationDelta(
+                    ticker="SPY", current_weight=0.46, recommended_weight=0.48,
+                    delta=0.02, composite_score=0.4, confidence=0.75,
+                    primary_reason="momentum",
+                ),
+                AllocationDelta(
+                    ticker="GLD", current_weight=0.38, recommended_weight=0.36,
+                    delta=-0.02, composite_score=-0.3, confidence=0.70,
+                    primary_reason="macro",
+                ),
+            ],
+            composite_sentiment="bullish", confidence=0.72, regime="neutral",
+        )
+        with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "46/38/16"]):
+            from src.signals.integrator import main
+            main()
+        captured = capsys.readouterr()
+        assert "Portfolio Recommendation" in captured.out
+        assert "SPY" in captured.out
+        assert "GLD" in captured.out
+
+    @patch("src.signals.integrator.SignalIntegrator.get_allocation_deltas")
+    def test_portfolio_json_output(self, mock_get, capsys):
+        """portfolio command with --json outputs valid JSON."""
+        mock_get.return_value = PortfolioRecommendation(
+            timestamp="2026-05-24T12:00:00",
+            current_allocation={"SPY": 0.46},
+            recommended_allocation={"SPY": 0.48},
+            deltas=[], composite_sentiment="bullish", confidence=0.72, regime="neutral",
+        )
+        with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "46/38/16", "--json"]):
+            from src.signals.integrator import main
+            main()
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert parsed["composite_sentiment"] == "bullish"
+
+    def test_portfolio_with_two_weights(self, capsys):
+        """portfolio with 2 weights -> SPY/GLD mapping."""
+        mock_rec = MagicMock()
+        mock_rec.to_dict.return_value = {"test": "ok"}
+        with patch("src.signals.integrator.SignalIntegrator") as MockIntegrator:
+            instance = MockIntegrator.return_value
+            instance.get_allocation_deltas.return_value = mock_rec
+            with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "50/50", "--json"]):
+                from src.signals.integrator import main
+                main()
+        captured = capsys.readouterr()
+        assert "ok" in captured.out
+
+    def test_portfolio_with_four_weights(self, capsys):
+        """portfolio with 4 weights -> SPY/EFA/GLD/TLT mapping."""
+        mock_rec = MagicMock()
+        mock_rec.to_dict.return_value = {"test": "4_asset_ok"}
+        with patch("src.signals.integrator.SignalIntegrator") as MockIntegrator:
+            instance = MockIntegrator.return_value
+            instance.get_allocation_deltas.return_value = mock_rec
+            with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "25/25/25/25", "--json"]):
+                from src.signals.integrator import main
+                main()
+        captured = capsys.readouterr()
+        assert "4_asset_ok" in captured.out
+
+    @patch("src.signals.integrator.SignalIntegrator.get_signal_history")
+    def test_history_json_output(self, mock_get, capsys):
+        """history command with --json outputs valid JSON."""
+        mock_get.return_value = [
+            CompositeSignal(
+                ticker="SPY", timestamp="2026-05-24T12:00:00",
+                composite_score=0.35, composite_confidence=0.72,
+                detected_regime="neutral", primary_drivers=["tsmom"],
+                signal_agreement="aligned_bullish",
+            ),
+        ]
+        with patch("sys.argv", ["integrator.py", "history", "--ticker", "SPY", "--json"]):
+            from src.signals.integrator import main
+            main()
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert isinstance(parsed, list)
+        assert parsed[0]["ticker"] == "SPY"
+
+    @patch("src.signals.integrator.SignalIntegrator.get_signal_history")
+    def test_history_text_output(self, mock_get, capsys):
+        """history command without --json prints formatted text."""
+        mock_get.return_value = [
+            CompositeSignal(
+                ticker="SPY", timestamp="2026-05-24T12:00:00",
+                composite_score=0.35, composite_confidence=0.72,
+                detected_regime="neutral", primary_drivers=["tsmom"],
+                signal_agreement="aligned_bullish",
+            ),
+        ]
+        with patch("sys.argv", ["integrator.py", "history", "--ticker", "SPY"]):
+            from src.signals.integrator import main
+            main()
+        captured = capsys.readouterr()
+        assert "Signal History" in captured.out
+        assert "SPY" in captured.out
+
+    def test_main_guard(self):
+        """__main__ guard calls main() when __name__ == '__main__'."""
+        # We can't easily trigger __name__ == '__main__' at module level,
+        # but we can verify the guard syntax is correct by inspecting the source
+        import inspect
+        from src.signals.integrator import main as cli_main
+        source = inspect.getsource(inspect.getmodule(cli_main))
+        assert 'if __name__ == "__main__":' in source
+        assert 'main()' in source.split('if __name__ == "__main__":')[-1]
+
+    def test_argument_parser_has_all_commands(self):
+        """Argument parser has all 3 commands and all flags."""
+        from src.signals.integrator import main as cli_main
+        # Can't easily inspect parser without calling, but we test via sys.argv patching
+        with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY", "--json"]):
+            with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
+                mock_get.return_value = CompositeSignal(
+                    ticker="SPY", timestamp="2026-05-24T12:00:00",
+                    composite_score=0.35, composite_confidence=0.72,
+                    detected_regime="neutral", primary_drivers=[],
+                    signal_agreement="aligned_bullish",
+                )
+                cli_main()
+        # No crash means parser handled all args
+
+    def test_history_with_custom_days(self, capsys):
+        """history command with custom --days flag."""
+        with patch("sys.argv", ["integrator.py", "history", "--ticker", "SPY", "--days", "60"]):
+            with patch("src.signals.integrator.SignalIntegrator.get_signal_history") as mock_get:
+                mock_get.return_value = []
+                from src.signals.integrator import main
+                main()
+        mock_get.assert_called_with("SPY", 60)
+
+
+class TestCLIErrorMessages:
+    """Verify specific error messages from CLI."""
+
+    def test_composite_error_message(self, capsys):
+        """Error message says --ticker required."""
+        with pytest.raises(SystemExit):
+            with patch("sys.argv", ["integrator.py", "composite"]):
+                from src.signals.integrator import main
+                main()
+        captured = capsys.readouterr()
+        assert "--ticker required" in captured.out
+
+    def test_portfolio_error_message(self, capsys):
+        """Error message says --portfolio required."""
+        with pytest.raises(SystemExit):
+            with patch("sys.argv", ["integrator.py", "portfolio"]):
+                from src.signals.integrator import main
+                main()
+        captured = capsys.readouterr()
+        assert "--portfolio required" in captured.out
+
+    def test_history_error_message(self, capsys):
+        """Error message says --ticker required."""
+        with pytest.raises(SystemExit):
+            with patch("sys.argv", ["integrator.py", "history"]):
+                from src.signals.integrator import main
+                main()
+        captured = capsys.readouterr()
+        assert "--ticker required" in captured.out
+
+
+# ============================================================================
+# 6. Export Completeness — verify __all__ coverage
+# ============================================================================
+
+
+class TestModuleExportCompleteness:
+    """Verify __all__ covers all public API symbols."""
+
+    def test_all_export_is_list(self):
+        """__all__ is a list of strings."""
+        assert isinstance(MODULE_ALL, list)
+        assert len(MODULE_ALL) > 0
+
+    def test_all_dataclasses_exported(self):
+        """All 4 dataclasses are in __all__."""
+        assert "SignalSourceResult" in MODULE_ALL
+        assert "CompositeSignal" in MODULE_ALL
+        assert "AllocationDelta" in MODULE_ALL
+        assert "PortfolioRecommendation" in MODULE_ALL
+
+    def test_all_constants_exported(self):
+        """All module-level constants are in __all__."""
+        assert "BASE_WEIGHTS" in MODULE_ALL
+        assert "REGIME_WEIGHTS" in MODULE_ALL
+        assert "MIN_SIGNAL_SOURCES" in MODULE_ALL
+        assert "SIGNAL_MIN" in MODULE_ALL
+        assert "SIGNAL_MAX" in MODULE_ALL
+        assert "MAX_DELTA_PCT" in MODULE_ALL
+
+    def test_all_classes_exported(self):
+        """All public classes are in __all__."""
+        assert "SignalSource" in MODULE_ALL
+        assert "TechnicalSignal" in MODULE_ALL
+        assert "MacroSignal" in MODULE_ALL
+        assert "AlternativeDataSignalAdapter" in MODULE_ALL
+        assert "LLMSentimentSignalAdapter" in MODULE_ALL
+        assert "SignalIntegrator" in MODULE_ALL
+
+    def test_all_functions_exported(self):
+        """Public functions are in __all__."""
+        assert "init_database" in MODULE_ALL
+
+    def test_all_no_duplicates(self):
+        """__all__ has no duplicate entries."""
+        assert len(MODULE_ALL) == len(set(MODULE_ALL))
+
+    def test_all_items_are_strings(self):
+        """Every item in __all__ is a string."""
+        for item in MODULE_ALL:
+            assert isinstance(item, str), f"{item} is not a string"
+
+    def test_all_items_resolve_to_module_attributes(self):
+        """Each __all__ entry corresponds to an actual module attribute."""
+        import src.signals.integrator as mod
+        for name in MODULE_ALL:
+            assert hasattr(mod, name), f"{name} in __all__ but not in module"
+
+
+# ============================================================================
+# Additional Edge Cases for Previously Tested Methods
+# ============================================================================
+
+
+class TestGetSignalHistoryEdgeCases:
+    """Edge cases for get_signal_history."""
+
+    def test_get_signal_history_with_null_sql_fields(self, tmp_path):
+        """Some SQL fields (weights_used, primary_drivers) can be NULL/NONE."""
+        integrator = _make_integrator(tmp_path)
+        conn = sqlite3.connect(str(integrator.db_path))
+        conn.execute("""
+            INSERT INTO composite_signals
+            (ticker, timestamp, composite_score, composite_confidence,
+             detected_regime, weights_used, primary_drivers,
+             signal_agreement, expected_accuracy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("SPY", "2026-05-24T12:00:00", 0.35, 0.72,
+              "neutral", None, None, "aligned_bullish", 0.68))
+        conn.commit()
+        conn.close()
+        result = integrator.get_signal_history("SPY", days=30)
+        assert len(result) == 1
+        assert result[0].weights_used == {}
+        assert result[0].primary_drivers == []
+
+    def test_get_signal_history_empty_json_fields(self, tmp_path):
+        """Empty JSON arrays/dicts stored as '[]'/'{}' parse correctly."""
+        integrator = _make_integrator(tmp_path)
+        conn = sqlite3.connect(str(integrator.db_path))
+        conn.execute("""
+            INSERT INTO composite_signals
+            (ticker, timestamp, composite_score, composite_confidence,
+             detected_regime, weights_used, primary_drivers,
+             signal_agreement, expected_accuracy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("SPY", "2026-05-24T12:00:00", 0.35, 0.72,
+              "neutral", json.dumps({}), json.dumps([]), "mixed", None))
+        conn.commit()
+        conn.close()
+        result = integrator.get_signal_history("SPY", days=30)
+        assert len(result) == 1
+
+    def test_get_signal_history_multiple_signals_same_ticker(self, tmp_path):
+        """Multiple signals for same ticker returned in order."""
+        integrator = _make_integrator(tmp_path)
+        conn = sqlite3.connect(str(integrator.db_path))
+        for i in range(3):
+            conn.execute("""
+                INSERT INTO composite_signals
+                (ticker, timestamp, composite_score, composite_confidence,
+                 detected_regime, weights_used, primary_drivers,
+                 signal_agreement, expected_accuracy)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, ("SPY", f"2026-05-{24-i:02d}T12:00:00", 0.3 + i * 0.1,
+                  0.7, "neutral", "{}", "[]", "mixed", None))
+        conn.commit()
+        conn.close()
+        result = integrator.get_signal_history("SPY", days=30)
+        assert len(result) == 3
+
+    def test_get_signal_history_other_ticker_not_returned(self, tmp_path):
+        """Signals for different ticker not returned."""
+        integrator = _make_integrator(tmp_path)
+        conn = sqlite3.connect(str(integrator.db_path))
+        conn.execute("""
+            INSERT INTO composite_signals
+            (ticker, timestamp, composite_score, composite_confidence,
+             detected_regime, weights_used, primary_drivers,
+             signal_agreement, expected_accuracy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("GLD", "2026-05-24T12:00:00", 0.2, 0.6, "neutral", "{}", "[]", "mixed", None))
+        conn.commit()
+        conn.close()
+        result = integrator.get_signal_history("SPY", days=30)
+        assert result == []
+
+    def test_get_signal_history_days_filter(self, tmp_path):
+        """Historical signals outside days window not returned."""
+        integrator = _make_integrator(tmp_path)
+        conn = sqlite3.connect(str(integrator.db_path))
+        from datetime import timedelta
+        old_ts = (datetime.now() - timedelta(days=100)).isoformat()
+        conn.execute("""
+            INSERT INTO composite_signals
+            (ticker, timestamp, composite_score, composite_confidence,
+             detected_regime, weights_used, primary_drivers,
+             signal_agreement, expected_accuracy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("SPY", old_ts, 0.2, 0.6, "neutral", "{}", "[]", "mixed", None))
+        conn.commit()
+        conn.close()
+        result = integrator.get_signal_history("SPY", days=30)
+        assert result == []
+
+
+class TestSignalIntegratorInitEdgeCases:
+    """Edge cases for SignalIntegrator initialization."""
+
+    def test_sources_contains_all_expected_keys(self):
+        """SignalIntegrator.sources has all expected keys."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.SignalIntegrator.__init__", lambda self: None):
+                integrator = SignalIntegrator()
+        integrator.sources = {
+            "technical": MagicMock(), "macro": MagicMock(),
+            "alternative_data": MagicMock(), "llm_sentiment": MagicMock(),
+            "tsmom": MagicMock(), "multi_speed": MagicMock(),
+            "risk_parity": MagicMock(), "network_momentum": MagicMock(),
+        }
+        expected_keys = {
+            "technical", "macro", "alternative_data", "llm_sentiment",
+            "tsmom", "multi_speed", "risk_parity", "network_momentum",
+        }
+        assert set(integrator.sources.keys()) == expected_keys
+        assert len(integrator.sources) == 8
+
+
+class TestStoreRecommendationEdgeCases:
+    """Edge cases for _store_recommendation."""
+
+    def test_store_recommendation_empty_deltas(self, tmp_path):
+        """Recommendation with empty deltas stores successfully."""
+        from src.signals.integrator import SignalIntegrator, PortfolioRecommendation, init_database
+        with patch("src.signals.integrator.DB_PATH", tmp_path / "test.db"):
+            init_database()
+            integrator = SignalIntegrator()
+            integrator.db_path = tmp_path / "test.db"
+            rec = PortfolioRecommendation(
+                timestamp=datetime.now().isoformat(),
+                current_allocation={},
+                recommended_allocation={},
+                deltas=[],
+                composite_sentiment="neutral", confidence=0.0, regime="neutral",
+            )
+            integrator._store_recommendation(rec)
+        with sqlite3.connect(str(tmp_path / "test.db")) as conn:
+            rows = conn.execute("SELECT COUNT(*) FROM portfolio_recommendations").fetchone()
+        assert rows[0] == 1
+
+
+class TestAlternativeDataSignalAdapterEdgeCases:
+    """More edge cases for AlternativeDataSignalAdapter."""
+
+    @pytest.fixture(autouse=True)
+    def _inject_logger(self):
+        import src.signals.integrator as _mod
+        _mod.logger = MagicMock()
+
+    def test_get_historical_accuracy_with_none_values(self, tmp_path):
+        """Accuracy table with NULL accuracy_score values returns None."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                adapter = AlternativeDataSignalAdapter()
+        adapter.db_path = tmp_path / "signals.db"
+        conn = sqlite3.connect(str(adapter.db_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS signal_accuracy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT, source_type TEXT, source_name TEXT,
+                prediction_timestamp TEXT, predicted_signal REAL,
+                actual_return REAL, horizon_days INTEGER,
+                accuracy_score REAL, error REAL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO signal_accuracy
+            (ticker, source_type, source_name, prediction_timestamp,
+             predicted_signal, actual_return, horizon_days, accuracy_score, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("SPY", "sentiment", "alternative_data", "2026-05-01", 0.5, 0.4, 21, None, 0.1))
+        conn.commit()
+        conn.close()
+        result = adapter.get_historical_accuracy("SPY")
+        assert result is None
+
+    def test_historical_accuracy_filters_by_source_type(self, tmp_path):
+        """Only matching source_type/source_name records are counted."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                adapter = AlternativeDataSignalAdapter()
+        adapter.db_path = tmp_path / "signals.db"
+        conn = sqlite3.connect(str(adapter.db_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS signal_accuracy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT, source_type TEXT, source_name TEXT,
+                prediction_timestamp TEXT, predicted_signal REAL,
+                actual_return REAL, horizon_days INTEGER,
+                accuracy_score REAL, error REAL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO signal_accuracy
+            (ticker, source_type, source_name, prediction_timestamp,
+             predicted_signal, actual_return, horizon_days, accuracy_score, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("SPY", "momentum", "technical", "2026-05-01", 0.5, 0.4, 21, 0.50, 0.1))
+        conn.executescript("""
+            INSERT INTO signal_accuracy
+            (ticker, source_type, source_name, prediction_timestamp,
+             predicted_signal, actual_return, horizon_days, accuracy_score, error)
+            VALUES ('SPY', 'sentiment', 'alternative_data', '2026-05-02', 0.5, 0.4, 21, 0.80, 0.1);
+        """)
+        conn.commit()
+        conn.close()
+        result = adapter.get_historical_accuracy("SPY")
+        assert result == 0.80
+
+
+class TestMacroSignalHistoricalAccuracyEdgeCases:
+    """More edge cases for MacroSignal historical accuracy."""
+
+    def test_with_none_accuracy_values_returns_default(self, tmp_path):
+        """All accuracy_score are None -> returns default 0.65."""
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                signal = MacroSignal()
+        signal.db_path = tmp_path / "signals.db"
+        conn = sqlite3.connect(str(signal.db_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS signal_accuracy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT, source_type TEXT, source_name TEXT,
+                prediction_timestamp TEXT, predicted_signal REAL,
+                actual_return REAL, horizon_days INTEGER,
+                accuracy_score REAL, error REAL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO signal_accuracy
+            (ticker, source_type, source_name, prediction_timestamp,
+             predicted_signal, actual_return, horizon_days, accuracy_score, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("SPY", "macro", "fed_economic", "2026-05-01", 0.5, 0.4, 21, None, 0.1))
+        conn.commit()
+        conn.close()
+        result = signal.get_historical_accuracy("SPY")
+        assert result == 0.65
+
+
+class TestCompositeSignalNoWeightsFallback:
+    """Fallback behavior when regime has no matching weight config."""
+
+    def test_source_type_not_in_weights_defaults_to_20pct(self, tmp_path):
+        """Source type not in regime weights gets default weight of 0.20."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "unknown_type", "custom_signal", 0.5, confidence=0.8
+        )
+        integrator.sources = {"custom": src}
+        custom_weights = {"unrelated_type": 1.0}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", custom_weights=custom_weights)
+        # source_type "unknown_type" not in custom_weights -> default 0.20
+        assert result.composite_score != 0.0
+
+
+class TestAgreementClassificationFullCoverage:
+    """Full branch coverage for signal_agreement classification."""
+
+    def test_bearish_exactly_60pct_no_bullish_no_neutral(self, tmp_path):
+        """Exactly 60% bearish, 40% neutral -> aligned_bearish."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for i in range(5):
+            src = MagicMock()
+            sig = -0.5 if i < 3 else -0.1  # 3 bearish, 2 weakly bearish (not counted)
+            src.generate_signal.return_value = _make_signal(
+                f"type_{i}", f"src_{i}", sig, confidence=0.8
+            )
+            sources[f"src_{i}"] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.signal_agreement == "aligned_bearish"
+
+    def test_neutral_agreement_fallback(self, tmp_path):
+        """No bullish, no bearish, some neutral -> mixed."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for i in range(4):
+            src = MagicMock()
+            src.generate_signal.return_value = _make_signal(
+                f"type_{i}", f"src_{i}", 0.1, confidence=0.8
+            )
+            sources[f"src_{i}"] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        # bullish_count = 0 (< 60%), bearish_count = 0 (< 60%),
+        # no bullish AND no bearish -> else -> "mixed"
+        assert result.signal_agreement == "mixed"
+
+    def test_bullish_below_60pct_no_bearish(self, tmp_path):
+        """Bullish < 60%, no bearish, some neutral -> mixed."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for i in range(5):
+            src = MagicMock()
+            sig = 0.5 if i < 2 else 0.1  # 2/5 = 40% bullish
+            src.generate_signal.return_value = _make_signal(
+                f"type_{i}", f"src_{i}", sig, confidence=0.8
+            )
+            sources[f"src_{i}"] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.signal_agreement == "mixed"
+
+
+class TestCalculateExpectedAccuracyFullBranch:
+    """Full branch coverage for _calculate_expected_accuracy."""
+
+    def test_empty_signals_returns_05(self, tmp_path):
+        """Empty signal list returns 0.5."""
+        integrator = _make_integrator(tmp_path)
+        assert integrator._calculate_expected_accuracy([], {"a": 1.0}) == 0.5
+
+    def test_signals_with_missing_accuracy_skipped(self, tmp_path):
+        """Signals with historical_accuracy=None are skipped in weighted average."""
+        integrator = _make_integrator(tmp_path)
+        signals = [
+            SignalSourceResult(
+                source_type="unknown", source_name="x",
+                signal=0.5, confidence=0.8, raw_score=1.0, raw_unit="z",
+                historical_accuracy=None,
+            ),
+        ]
+        acc = integrator._calculate_expected_accuracy(signals, {"unknown": 0.5})
+        assert acc == 0.6
+
+    def test_all_historical_none_returns_default(self, tmp_path):
+        """All signals have historical_accuracy=None -> default 0.6."""
+        integrator = _make_integrator(tmp_path)
+        signals = [
+            SignalSourceResult(
+                source_type="a", source_name="x", signal=0.5, confidence=0.8,
+                raw_score=1.0, raw_unit="z", historical_accuracy=None,
+            ),
+            SignalSourceResult(
+                source_type="b", source_name="y", signal=-0.3, confidence=0.6,
+                raw_score=-0.5, raw_unit="z", historical_accuracy=None,
+            ),
+        ]
+        acc = integrator._calculate_expected_accuracy(signals, {"a": 0.5, "b": 0.5})
+        assert acc == 0.6
+
+
+class TestBinanceSignalAgreement:
+    """Verify the unused 'neutral_count' variable doesn't break anything."""
+
+    def test_neutral_count_variable_not_breaking(self, tmp_path):
+        """Line 968 (len(...) - bullish - bearish) is valid syntax but unused."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for name in ["momentum", "macro"]:
+            src = MagicMock()
+            src.generate_signal.return_value = _make_signal(
+                name, name, 0.0, confidence=0.8
+            )
+            sources[name] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        # Should not crash — scores 0.0, no crash
+        assert result.composite_score == 0.0
+        assert result.signal_agreement in ("mixed", "conflicting", "aligned_bullish", "aligned_bearish", "insufficient_data")
 

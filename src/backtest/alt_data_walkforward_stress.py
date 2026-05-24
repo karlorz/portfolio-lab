@@ -19,6 +19,10 @@ from src.paths import PRICES_JSON, SIGNALS_DIR, BASE_ALLOCATION as WEIGHTS
 
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = ['DailyReturn', 'WindowResult', 'StressResult', 'FullBacktestResult', 'REGIME_SHIFTS', 'STRESS_PERIODS', 'load_price_data', 'load_alt_signals', 'build_daily_returns', 'compute_metrics', 'walk_forward_test', 'stress_test', 'run_full_backtest', 'print_results', 'save_results']
 
 @dataclass
@@ -413,42 +417,42 @@ def run_full_backtest(
     confidence_threshold: float = 0.3,
 ) -> FullBacktestResult:
     """Run complete Phase 4.2 + 4.3 backtest."""
-    print("=" * 70)
-    print("v2.60 Alternative Data - Phase 4.2-4.3 Walk-Forward & Stress Test")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("v2.60 Alternative Data - Phase 4.2-4.3 Walk-Forward & Stress Test")
+    logger.info("=" * 70)
 
     # Load data
-    print("\n[1/5] Loading price data...")
+    logger.info("\n[1/5] Loading price data...")
     prices = load_price_data(price_filepath)
-    print(f"  Loaded {len(prices)} symbols")
+    logger.info(f"  Loaded {len(prices)} symbols")
 
-    print("[2/5] Loading alternative data signals...")
+    logger.info("[2/5] Loading alternative data signals...")
     alt_signals = load_alt_signals(alt_signal_filepath)
-    print(f"  Loaded {len(alt_signals)} daily signals")
+    logger.info(f"  Loaded {len(alt_signals)} daily signals")
 
     # Build daily returns (2020-2026, matching alt data range)
-    print("[3/5] Building daily returns with alt-data overlay...")
+    logger.info("[3/5] Building daily returns with alt-data overlay...")
     daily_returns = build_daily_returns(
         prices, alt_signals,
         start_date='2020-01-01',
         end_date='2026-05-08',
         confidence_threshold=confidence_threshold,
     )
-    print(f"  Built {len(daily_returns)} daily return records")
+    logger.info(f"  Built {len(daily_returns)} daily return records")
 
     if len(daily_returns) < 100:
-        print("ERROR: Insufficient data for backtest")
+        logger.info("ERROR: Insufficient data for backtest")
         return None
 
     # Walk-forward test
-    print("[4/5] Running walk-forward validation (3yr train / 1yr test)...")
+    logger.info("[4/5] Running walk-forward validation (3yr train / 1yr test)...")
     wf_windows = walk_forward_test(daily_returns, train_years=3, test_years=1)
-    print(f"  Completed {len(wf_windows)} walk-forward windows")
+    logger.info(f"  Completed {len(wf_windows)} walk-forward windows")
 
     # Stress test
-    print("[5/5] Running stress tests...")
+    logger.info("[5/5] Running stress tests...")
     stress_results = stress_test(daily_returns, alt_signals)
-    print(f"  Completed {len(stress_results)} stress test periods")
+    logger.info(f"  Completed {len(stress_results)} stress test periods")
 
     # Compute overall metrics
     all_base = [dr.baseline_return for dr in daily_returns]
@@ -490,39 +494,39 @@ def run_full_backtest(
 
 def print_results(result: FullBacktestResult):
     """Print formatted backtest results."""
-    print("\n" + "=" * 70)
-    print("WALK-FORWARD VALIDATION RESULTS")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("WALK-FORWARD VALIDATION RESULTS")
+    logger.info("=" * 70)
 
     if result.walk_forward_windows:
-        print(f"\n{'Window':<50} {'Base':>6} {'Overlay':>7} {'Delta':>6}")
-        print("-" * 70)
+        logger.info(f"\n{'Window':<50} {'Base':>6} {'Overlay':>7} {'Delta':>6}")
+        logger.info("-" * 70)
         for w in result.walk_forward_windows:
-            print(f"  {w.label:<48} {w.baseline_sharpe:>6.3f} {w.overlay_sharpe:>7.3f} {w.sharpe_delta:>+6.3f}")
-        print("-" * 70)
-        print(f"  {'Average':<48} {'':>6} {'':>7} {result.avg_sharpe_delta:>+6.3f}")
-        print(f"  Windows improved: {result.pct_windows_improved}%")
+            logger.info(f"  {w.label:<48} {w.baseline_sharpe:>6.3f} {w.overlay_sharpe:>7.3f} {w.sharpe_delta:>+6.3f}")
+        logger.info("-" * 70)
+        logger.info(f"  {'Average':<48} {'':>6} {'':>7} {result.avg_sharpe_delta:>+6.3f}")
+        logger.info(f"  Windows improved: {result.pct_windows_improved}%")
 
-    print("\n" + "=" * 70)
-    print("STRESS TEST RESULTS")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("STRESS TEST RESULTS")
+    logger.info("=" * 70)
 
     if result.stress_tests:
         for s in result.stress_tests:
-            print(f"\n  [{s.period}] {s.description}")
-            print(f"    Period: {s.start_date} to {s.end_date}")
-            print(f"    Baseline return: {s.baseline_return:+.2f}%  |  Overlay: {s.overlay_return:+.2f}%  |  Delta: {s.overlay_return - s.baseline_return:+.2f}pp")
-            print(f"    Baseline MaxDD:  {s.baseline_max_dd:.2f}%   |  Overlay: {s.overlay_max_dd:.2f}%   |  Delta: {s.overlay_max_dd - s.baseline_max_dd:+.2f}pp")
-            print(f"    Signal accuracy: {s.signal_accuracy}%  |  Avg confidence: {s.avg_confidence:.3f}")
+            logger.info(f"\n  [{s.period}] {s.description}")
+            logger.info(f"    Period: {s.start_date} to {s.end_date}")
+            logger.info(f"    Baseline return: {s.baseline_return:+.2f}%  |  Overlay: {s.overlay_return:+.2f}%  |  Delta: {s.overlay_return - s.baseline_return:+.2f}pp")
+            logger.info(f"    Baseline MaxDD:  {s.baseline_max_dd:.2f}%   |  Overlay: {s.overlay_max_dd:.2f}%   |  Delta: {s.overlay_max_dd - s.baseline_max_dd:+.2f}pp")
+            logger.info(f"    Signal accuracy: {s.signal_accuracy}%  |  Avg confidence: {s.avg_confidence:.3f}")
 
-    print("\n" + "=" * 70)
-    print("OVERALL RESULTS (2020-2026)")
-    print("=" * 70)
-    print(f"  Baseline (46/38/16) Sharpe: {result.overall_baseline_sharpe:.3f}")
-    print(f"  Overlay (alt-data) Sharpe:  {result.overall_overlay_sharpe:.3f}")
-    print(f"  Sharpe delta:               {result.overall_sharpe_delta:+.3f}")
-    print(f"  Target (+0.03):             {'MET' if result.target_met else 'NOT MET'}")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("OVERALL RESULTS (2020-2026)")
+    logger.info("=" * 70)
+    logger.info(f"  Baseline (46/38/16) Sharpe: {result.overall_baseline_sharpe:.3f}")
+    logger.info(f"  Overlay (alt-data) Sharpe:  {result.overall_overlay_sharpe:.3f}")
+    logger.info(f"  Sharpe delta:               {result.overall_sharpe_delta:+.3f}")
+    logger.info(f"  Target (+0.03):             {'MET' if result.target_met else 'NOT MET'}")
+    logger.info("=" * 70)
 
 
 def save_results(result: FullBacktestResult):
@@ -581,7 +585,7 @@ def save_results(result: FullBacktestResult):
     output_path = str(SIGNALS_DIR / "alt_data_walkforward_stress_results.json")
     with open(output_path, 'w') as f:
         json.dump(output, f, indent=2)
-    print(f"\nResults saved to {output_path}")
+    logger.info(f"\nResults saved to {output_path}")
 
 
 if __name__ == '__main__':

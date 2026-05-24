@@ -28,6 +28,10 @@ from src.strategy.sentiment_analyzer import (
     SentimentAnalyzerPipeline
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = [
     'RegimeSentiment', 'CombinedRegimeSignal', 'RegimeSentimentIntegrator',
     'RegimeSentimentPipeline',
@@ -404,9 +408,9 @@ class RegimeSentimentPipeline:
 
 def demo():
     """Demo the regime-sentiment integration."""
-    print("=" * 70)
-    print("Portfolio-Lab v2.30 Phase 3: Regime-Sentiment Integration Demo")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("Portfolio-Lab v2.30 Phase 3: Regime-Sentiment Integration Demo")
+    logger.info("=" * 70)
     
     pipeline = RegimeSentimentPipeline()
     
@@ -424,8 +428,8 @@ def demo():
         "Economic indicators suggest soft landing scenario",
     ]
     
-    print(f"\nTechnical Regime: {technical_regime} (confidence: {technical_confidence})")
-    print(f"Sentiment Sources: {len(news_texts)} news, 0 earnings, {len(macro_texts)} macro")
+    logger.info(f"\nTechnical Regime: {technical_regime} (confidence: {technical_confidence})")
+    logger.info(f"Sentiment Sources: {len(news_texts)} news, 0 earnings, {len(macro_texts)} macro")
     
     # Get combined signal
     signal = pipeline.get_combined_signal(
@@ -435,40 +439,40 @@ def demo():
         macro_texts=macro_texts,
     )
     
-    print(f"\n{'─' * 70}")
-    print("COMBINED REGIME SIGNAL")
-    print(f"{'─' * 70}")
-    print(f"Timestamp: {signal.timestamp}")
-    print(f"\nComponent Scores:")
-    print(f"  Technical Regime: {signal.technical_regime} (conf: {signal.technical_confidence:.2%})")
-    print(f"  Sentiment Regime: {signal.sentiment_regime} (conf: {signal.sentiment_confidence:.2%})")
-    print(f"\nWeighting Applied:")
-    print(f"  Technical Weight: {signal.technical_weight:.1%}")
-    print(f"  Sentiment Weight: {signal.sentiment_weight:.1%}")
-    print(f"\nCombined Result:")
-    print(f"  Score: {signal.combined_score:+.4f}")
-    print(f"  Regime: {signal.combined_regime.upper()}")
-    print(f"{'─' * 70}")
-    print(f"Risk Management:")
-    print(f"  Circuit Breaker: {signal.circuit_breaker_level.upper()}")
-    print(f"  Position Scale: {signal.position_scaling_factor:.1%}")
-    print(f"{'─' * 70}")
-    print(f"Allocation Tilts:")
-    print(f"  Equity (SPY): {signal.equity_tilt:+.4f}")
-    print(f"  Bond Duration (TLT): {signal.bond_duration_tilt:+.4f}")
-    print(f"  Gold (GLD): {signal.gold_tilt:+.4f}")
+    logger.info(f"\n{'─' * 70}")
+    logger.info("COMBINED REGIME SIGNAL")
+    logger.info(f"{'─' * 70}")
+    logger.info(f"Timestamp: {signal.timestamp}")
+    logger.info(f"\nComponent Scores:")
+    logger.info(f"  Technical Regime: {signal.technical_regime} (conf: {signal.technical_confidence:.2%})")
+    logger.info(f"  Sentiment Regime: {signal.sentiment_regime} (conf: {signal.sentiment_confidence:.2%})")
+    logger.info(f"\nWeighting Applied:")
+    logger.info(f"  Technical Weight: {signal.technical_weight:.1%}")
+    logger.info(f"  Sentiment Weight: {signal.sentiment_weight:.1%}")
+    logger.info(f"\nCombined Result:")
+    logger.info(f"  Score: {signal.combined_score:+.4f}")
+    logger.info(f"  Regime: {signal.combined_regime.upper()}")
+    logger.info(f"{'─' * 70}")
+    logger.info(f"Risk Management:")
+    logger.info(f"  Circuit Breaker: {signal.circuit_breaker_level.upper()}")
+    logger.info(f"  Position Scale: {signal.position_scaling_factor:.1%}")
+    logger.info(f"{'─' * 70}")
+    logger.info(f"Allocation Tilts:")
+    logger.info(f"  Equity (SPY): {signal.equity_tilt:+.4f}")
+    logger.info(f"  Bond Duration (TLT): {signal.bond_duration_tilt:+.4f}")
+    logger.info(f"  Gold (GLD): {signal.gold_tilt:+.4f}")
     
     # Calculate allocation
     allocation = pipeline.get_current_allocation_weights(signal)
-    print(f"\n{'─' * 70}")
-    print(f"Adjusted Allocation (from base 46/38/16):")
+    logger.info(f"\n{'─' * 70}")
+    logger.info(f"Adjusted Allocation (from base 46/38/16):")
     for symbol, weight in allocation.items():
-        print(f"  {symbol}: {weight:.2%}")
+        logger.info(f"  {symbol}: {weight:.2%}")
     
     # Save
     filepath = pipeline.save_signal(signal, "demo_regime_signal.json")
-    print(f"\n{'─' * 70}")
-    print(f"✓ Saved to: {filepath}")
+    logger.info(f"\n{'─' * 70}")
+    logger.info(f"✓ Saved to: {filepath}")
     
     return signal
 

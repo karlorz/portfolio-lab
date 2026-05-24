@@ -18,6 +18,10 @@ from src.strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPo
 
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = ['VolParityAllocation', 'VolatilityParityAllocator']
 
 @dataclass

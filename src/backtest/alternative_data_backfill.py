@@ -17,6 +17,10 @@ from src.paths import SIGNALS_DIR
 
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = ['DailyAlternativeSignal', 'AlternativeDataBackfill']
 
 @dataclass
@@ -261,7 +265,7 @@ class AlternativeDataBackfill:
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=2)
         
-        print(f"Saved {len(self.signals)} days of alternative data signals to {filepath}")
+        logger.info(f"Saved {len(self.signals)} days of alternative data signals to {filepath}")
     
     def generate_metadata(self) -> Dict:
         """Generate summary statistics for validation."""

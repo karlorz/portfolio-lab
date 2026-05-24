@@ -40,6 +40,10 @@ import statistics
 
 from src.paths import DATA_DIR
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Data Classes
 # ---------------------------------------------------------------------------

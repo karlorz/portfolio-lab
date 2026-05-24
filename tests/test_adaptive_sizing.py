@@ -869,3 +869,425 @@ class TestExtendedCoverage:
         assert HARD_BOUNDS["TLT"] == (0.06, 0.26)
         assert HARD_BOUNDS["IEF"] == (0.00, 0.10)
         assert HARD_BOUNDS["SHY"] == (0.00, 0.10)
+
+
+class TestExports:
+    """Verify __all__ exports and import completeness."""
+
+    def test_all_exports_importable(self):
+        from src.strategy.adaptive_sizing import __all__
+        import src.strategy.adaptive_sizing as mod
+        for name in __all__:
+            assert hasattr(mod, name), f"{name} in __all__ but not in module"
+
+    def test_all_contains_key_names(self):
+        from src.strategy.adaptive_sizing import __all__
+        expected = {'HARD_BOUNDS', 'MAX_FACTOR_ADJUSTMENT', 'REGIME_ADJUSTMENTS',
+                    'CONFIDENCE_SCALING', 'SizingFactors', 'SizingDecision', 'AdaptiveSizer'}
+        assert expected.issubset(set(__all__))
+
+
+class TestSizingFactorsDataclass:
+    """Comprehensive SizingFactors dataclass tests."""
+
+    def test_all_fields_present(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(SizingFactors)}
+        expected = {"timestamp", "regime", "regime_confidence", "spy_vol_20d",
+                    "spy_mom_20d", "spy_drawdown_60d", "ensemble_signal",
+                    "ensemble_agreement", "circuit_breaker_severity"}
+        assert field_names == expected
+
+    def test_create_with_all_fields(self):
+        sf = SizingFactors(
+            timestamp="2026-05-24T10:00:00", regime="normal", regime_confidence=0.7,
+            spy_vol_20d=0.14, spy_mom_20d=0.02, spy_drawdown_60d=-0.03,
+            ensemble_signal=0.5, ensemble_agreement=0.8, circuit_breaker_severity="ok",
+        )
+        assert sf.regime == "normal"
+        assert sf.regime_confidence == 0.7
+
+    def test_to_dict_keys_match_fields(self):
+        from dataclasses import fields
+        sf = SizingFactors(
+            timestamp="2026-05-24T10:00:00", regime="normal", regime_confidence=0.7,
+            spy_vol_20d=0.14, spy_mom_20d=0.02, spy_drawdown_60d=-0.03,
+            ensemble_signal=0.5, ensemble_agreement=0.8, circuit_breaker_severity="ok",
+        )
+        d = sf.to_dict()
+        expected = {f.name for f in fields(SizingFactors)}
+        assert set(d.keys()) == expected
+
+
+class TestSizingDecisionDataclass:
+    """Comprehensive SizingDecision dataclass tests."""
+
+    def test_all_fields_present(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(SizingDecision)}
+        expected = {"timestamp", "base_allocation", "adjusted_allocation", "adjustments",
+                    "regime_adjustment", "volatility_adjustment", "signal_adjustment",
+                    "drawdown_adjustment", "factors"}
+        assert field_names == expected
+
+    def test_to_dict_contains_all_fields(self, normal_regime_state):
+        sizer = AdaptiveSizer(data_dir=normal_regime_state)
+        decision = sizer.compute_allocation()
+        d = decision.to_dict()
+        assert "factors" in d
+        assert isinstance(d["factors"], dict)
+
+
+class TestRegimeAdjustmentsExtended:
+    """Extended parametrized regime adjustment tests."""
+
+    @pytest.mark.parametrize("regime,spy_sign,gld_sign,tlt_sign", [
+        ("low_vol", 1, -1, -1),
+        ("normal", 0, 0, 0),
+        ("high_vol", -1, 1, 1),
+        ("crisis", -1, 1, 1),
+        ("recovery", 1, -1, -1),
+    ])
+    def test_regime_adjustment_directions(self, regime, spy_sign, gld_sign, tlt_sign, temp_data_dir):
+        from src.strategy.adaptive_sizing import REGIME_ADJUSTMENTS
+        adj = REGIME_ADJUSTMENTS[regime]
+        if spy_sign != 0:
+            assert (adj["SPY"] > 0) == (spy_sign > 0), f"{regime} SPY direction wrong"
+        else:
+            assert adj["SPY"] == 0.0, f"{regime} SPY should be zero"
+        if gld_sign != 0:
+            assert (adj["GLD"] > 0) == (gld_sign > 0), f"{regime} GLD direction wrong"
+        else:
+            assert adj["GLD"] == 0.0, f"{regime} GLD should be zero"
+        if tlt_sign != 0:
+            assert (adj["TLT"] > 0) == (tlt_sign > 0), f"{regime} TLT direction wrong"
+        else:
+            assert adj["TLT"] == 0.0, f"{regime} TLT should be zero"
+
+    def test_crisis_has_largest_spy_reduction(self):
+        from src.strategy.adaptive_sizing import REGIME_ADJUSTMENTS
+        crisis_spy = REGIME_ADJUSTMENTS["crisis"]["SPY"]
+        for regime, adj in REGIME_ADJUSTMENTS.items():
+            if regime != "crisis":
+                assert adj["SPY"] >= crisis_spy, f"{regime} SPY adj more negative than crisis"
+
+
+class TestComputeVolAdjustmentExtended:
+    """Extended vol adjustment edge cases."""
+
+    def test_vol_adjustment_negative_vol_returns_zero(self):
+        """Negative vol is unphysical; function should handle gracefully."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_vol_adjustment(-0.05)
+        # Negative vol <= 0.001 triggers early return
+        assert adj["SPY"] == 0.0
+
+    def test_vol_adjustment_exact_target(self):
+        """Vol exactly at target (14%) should produce zero adjustment."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_vol_adjustment(0.14)
+        # vol_ratio = 0.14/0.14 = 1.0 -> between 0.8 and 1.2 -> zero
+        assert adj["SPY"] == 0.0
+        assert adj["GLD"] == 0.0
+        assert adj["TLT"] == 0.0
+
+    @pytest.mark.parametrize("vol,expect_spy_positive", [
+        (0.08, True),   # Low vol -> increase SPY
+        (0.10, True),   # Low vol -> increase SPY
+        (0.14, None),   # At target -> zero
+        (0.20, False),  # High vol -> decrease SPY
+        (0.30, False),  # Very high vol -> decrease SPY
+    ])
+    def test_vol_adjustment_direction(self, vol, expect_spy_positive):
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_vol_adjustment(vol)
+        if expect_spy_positive is True:
+            assert adj["SPY"] > 0
+        elif expect_spy_positive is False:
+            assert adj["SPY"] < 0
+        else:
+            assert adj["SPY"] == 0.0
+
+
+class TestComputeSignalAdjustmentExtended:
+    """Extended signal adjustment tests."""
+
+    @pytest.mark.parametrize("signal,agreement,expect_nonzero", [
+        (0.5, 0.6, True),    # Above both thresholds
+        (0.1, 0.6, True),    # At signal boundary
+        (0.09, 0.6, False),  # Below signal threshold
+        (0.5, 0.5, False),   # At agreement boundary (<=0.5)
+        (-0.5, 0.6, True),   # Negative signal
+    ])
+    def test_signal_thresholds(self, signal, agreement, expect_nonzero):
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_signal_adjustment(signal, agreement)
+        if expect_nonzero:
+            assert adj["SPY"] != 0.0
+        else:
+            assert adj["SPY"] == 0.0
+
+
+class TestComputeDrawdownExtended:
+    """Extended drawdown adjustment tests."""
+
+    @pytest.mark.parametrize("dd,severity,expect_spy_negative", [
+        (-0.03, "ok", False),        # Shallow DD, no CB -> zero
+        (-0.15, "ok", True),         # Deep DD -> reduce SPY
+        (-0.05, "critical", True),   # Critical CB -> reduce SPY
+        (-0.05, "severe", True),     # Severe CB -> reduce SPY
+        (-0.05, "elevated", True),   # Elevated CB -> reduce SPY
+        (-0.05, "ok", False),        # Moderate DD, no CB -> zero
+    ])
+    def test_drawdown_directions(self, dd, severity, expect_spy_negative):
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        adj = sizer._compute_drawdown_adjustment(dd, severity)
+        if expect_spy_negative:
+            assert adj["SPY"] < 0
+        else:
+            assert adj["SPY"] == 0.0
+
+
+class TestApplyBoundsExtended:
+    """Extended _apply_bounds tests."""
+
+    def test_unknown_asset_default_bounds(self):
+        """Unknown asset should get default bounds (0.0, 1.0)."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        bounded = sizer._apply_bounds({"UNKNOWN_ASSET": 0.5})
+        assert bounded["UNKNOWN_ASSET"] == pytest.approx(1.0)  # Single asset normalizes to 1.0
+
+    def test_below_lower_bound_clamped(self):
+        """Weight below lower bound should be clamped up."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        bounded = sizer._apply_bounds({"SPY": 0.20, "GLD": 0.50, "TLT": 0.30})
+        # SPY 0.20 < 0.36, clamped to 0.36
+        assert bounded["SPY"] >= 0.36 / 1.16 - 0.01  # After normalization
+
+    def test_all_assets_at_bounds(self):
+        """All assets exactly at their bounds should remain."""
+        sizer = AdaptiveSizer(data_dir=Path("/tmp/nonexistent"))
+        bounded = sizer._apply_bounds({"SPY": 0.56, "GLD": 0.38, "TLT": 0.06})
+        total = sum(bounded.values())
+        assert abs(total - 1.0) < 0.01
+
+
+class TestStatePersistenceExtended:
+    """Extended state persistence tests."""
+
+    def test_corrupted_state_file_falls_back(self, tmp_path):
+        """Corrupted JSON state file should fall back gracefully."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "adaptive_sizing_state.json").write_text("NOT JSON!!!")
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        assert sizer.last_allocation == BASE_ALLOCATION
+
+    def test_state_file_missing_last_allocation(self, tmp_path):
+        """State file without last_allocation should use BASE_ALLOCATION."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        state = {"last_updated": "2026-05-24"}
+        (data_dir / "adaptive_sizing_state.json").write_text(json.dumps(state))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        assert sizer.last_allocation == BASE_ALLOCATION
+
+
+class TestCLIExtended:
+    """Extended CLI tests."""
+
+    def test_simulate_command_insufficient_data(self, temp_data_dir, monkeypatch, capsys):
+        """simulate command with no prices should report insufficient data."""
+        import sys as _sys
+        monkeypatch.setattr(_sys, "argv", ["adaptive_sizing.py", "simulate"])
+        from src.strategy import adaptive_sizing as mod
+        original_dir = mod.DATA_DIR
+        mod.DATA_DIR = temp_data_dir
+        mod.STATE_PATH = temp_data_dir / "adaptive_sizing_state.json"
+        try:
+            mod.main()
+            captured = capsys.readouterr()
+            assert "Insufficient data" in captured.out or "simulation" in captured.out.lower()
+        finally:
+            mod.DATA_DIR = original_dir
+
+    def test_unknown_command_prints_usage(self, temp_data_dir, monkeypatch, capsys):
+        """Unknown command should print usage."""
+        import sys as _sys
+        monkeypatch.setattr(_sys, "argv", ["adaptive_sizing.py", "foobar"])
+        from src.strategy import adaptive_sizing as mod
+        original_dir = mod.DATA_DIR
+        mod.DATA_DIR = temp_data_dir
+        mod.STATE_PATH = temp_data_dir / "adaptive_sizing_state.json"
+        try:
+            mod.main()
+            captured = capsys.readouterr()
+            assert "Usage" in captured.out
+        finally:
+            mod.DATA_DIR = original_dir
+
+    def test_no_args_defaults_to_adjust(self, temp_data_dir, monkeypatch, capsys):
+        """No args should default to adjust command."""
+        import sys as _sys
+        monkeypatch.setattr(_sys, "argv", ["adaptive_sizing.py"])
+        from src.strategy import adaptive_sizing as mod
+        original_dir = mod.DATA_DIR
+        mod.DATA_DIR = temp_data_dir
+        mod.STATE_PATH = temp_data_dir / "adaptive_sizing_state.json"
+        try:
+            mod.main()
+            captured = capsys.readouterr()
+            assert "ADAPTIVE POSITION SIZING" in captured.out
+        finally:
+            mod.DATA_DIR = original_dir
+
+
+class TestConstantsValidation:
+    """Validate all module constants."""
+
+    def test_max_factor_adjustment_positive(self):
+        assert MAX_FACTOR_ADJUSTMENT > 0
+        assert MAX_FACTOR_ADJUSTMENT <= 0.10
+
+    def test_hard_bounds_lo_less_than_hi(self):
+        for asset, (lo, hi) in HARD_BOUNDS.items():
+            assert lo < hi, f"{asset}: lo={lo} >= hi={hi}"
+
+    def test_hard_bounds_within_zero_one(self):
+        for asset, (lo, hi) in HARD_BOUNDS.items():
+            assert 0.0 <= lo <= 1.0, f"{asset}: lo={lo} out of range"
+            assert 0.0 <= hi <= 1.0, f"{asset}: hi={hi} out of range"
+
+    def test_regime_adjustments_all_numeric(self):
+        from src.strategy.adaptive_sizing import REGIME_ADJUSTMENTS
+        for regime, adj in REGIME_ADJUSTMENTS.items():
+            for asset, val in adj.items():
+                assert isinstance(val, (int, float)), f"{regime}.{asset} is not numeric"
+
+    def test_base_allocation_all_positive(self):
+        for asset, weight in BASE_ALLOCATION.items():
+            assert weight > 0, f"{asset} weight={weight} not positive"
+
+    def test_confidence_scaling_all_positive(self):
+        from src.strategy.adaptive_sizing import CONFIDENCE_SCALING
+        for conf, scale in CONFIDENCE_SCALING.items():
+            assert 0 < scale <= 1.0, f"confidence={conf} scale={scale} invalid"
+
+
+class TestLoadRegimeStateExtended:
+    """Extended _load_regime_state tests."""
+
+    def test_invalid_regime_falls_to_unknown(self, tmp_path):
+        """Regime not in REGIME_ADJUSTMENTS should fall to unknown."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        state = {"current_regime": "nuclear_war", "last_reading": {"confidence": 0.9}}
+        (data_dir / "regime_classifier_state.json").write_text(json.dumps(state))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        regime, conf = sizer._load_regime_state()
+        assert regime == "unknown"
+        assert conf == 0.3
+
+    def test_corrupted_regime_file_falls_to_unknown(self, tmp_path):
+        """Corrupted JSON regime file should fall to unknown or fallback."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "regime_classifier_state.json").write_text("BROKEN JSON")
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        regime, conf = sizer._load_regime_state()
+        # May fall to VIX-based fallback (normal) or unknown
+        assert regime in ("unknown", "normal")
+
+    def test_no_regime_file_falls_to_fallback(self, tmp_path):
+        """No regime file should return unknown or VIX-based fallback."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        regime, conf = sizer._load_regime_state()
+        # VIX-based fallback may return "normal"; only "unknown" if both paths fail
+        assert regime in ("unknown", "normal")
+
+
+class TestLoadCircuitBreaker:
+    """Circuit breaker loading tests."""
+
+    def test_missing_cb_file_returns_ok(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        assert sizer._load_circuit_breaker() == "ok"
+
+    def test_corrupted_cb_file_returns_ok(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / ".circuit_breaker_state.json").write_text("NOT JSON")
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        assert sizer._load_circuit_breaker() == "ok"
+
+    def test_valid_cb_file(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        state = {"severity": "elevated"}
+        (data_dir / ".circuit_breaker_state.json").write_text(json.dumps(state))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        assert sizer._load_circuit_breaker() == "elevated"
+
+
+class TestLoadEnsembleSignal:
+    """Ensemble signal loading tests."""
+
+    def test_missing_file_returns_defaults(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        signal, agreement = sizer._load_ensemble_signal()
+        assert signal == 0.0
+        assert agreement == 0.5
+
+    def test_corrupted_file_returns_defaults(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "ensemble_weights.json").write_text("BROKEN")
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        signal, agreement = sizer._load_ensemble_signal()
+        assert signal == 0.0
+        assert agreement == 0.5
+
+    def test_valid_file_with_composite_signal(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        state = {"composite_signal": 0.3, "agreement_ratio": 0.7}
+        (data_dir / "ensemble_weights.json").write_text(json.dumps(state))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        signal, agreement = sizer._load_ensemble_signal()
+        assert signal == 0.3
+        assert agreement == 0.7
+
+    def test_valid_file_with_weighted_consensus(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        state = {"weighted_consensus": -0.4, "agreement_ratio": 0.6}
+        (data_dir / "ensemble_weights.json").write_text(json.dumps(state))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        signal, agreement = sizer._load_ensemble_signal()
+        assert signal == -0.4
+        assert agreement == 0.6
+
+
+class TestGetSeries:
+    """_get_series edge cases."""
+
+    def test_no_prices_returns_none(self, tmp_path):
+        """When prices dict is explicitly empty and PRICES_JSON unavailable, returns None."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        sizer.prices = {}  # Empty dict, not None — triggers the symbol-not-found path
+        assert sizer._get_series("SPY") is None
+
+    def test_missing_symbol_returns_none(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        sizer.prices = {"QQQ": [{"d": "2024-01-01", "p": 400.0}]}
+        assert sizer._get_series("SPY") is None

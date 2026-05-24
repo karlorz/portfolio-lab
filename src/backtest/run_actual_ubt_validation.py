@@ -14,6 +14,10 @@ import numpy as np
 from src.paths import HISTORICAL_JSON, DATA_DIR
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = ['load_historical_data', 'extract_prices', 'calculate_returns', 'find_overlap', 'align_series', 'calculate_metrics', 'calculate_correlation']
 
 def load_historical_data():

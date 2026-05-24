@@ -32,6 +32,10 @@ from typing import Any, Optional
 
 from src.paths import LLM_COSTS_DIR
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Top-level imports for patching support (guarded for environments without SDKs)
 try:
     import openai
@@ -265,7 +269,7 @@ class LLMClient(ABC):
                     last_error = e
                     if attempt < self.max_retries:
                         wait = self._backoff(attempt)
-                        print(f"[retry {attempt+1}/{self.max_retries}] {type(e).__name__} — waiting {wait:.1f}s", file=sys.stderr)
+                        logger.info(f"[retry {attempt+1}/{self.max_retries}] {type(e).__name__} — waiting {wait:.1f}s", file=sys.stderr)
                         time.sleep(wait)
                         continue
                 # Server errors: retry
@@ -273,7 +277,7 @@ class LLMClient(ABC):
                 if isinstance(e, (openai.APIStatusError, anthropic.APIStatusError)) and status >= 500 and attempt < self.max_retries:
                     last_error = e
                     wait = self._backoff(attempt)
-                    print(f"[retry {attempt+1}/{self.max_retries}] {status} — waiting {wait:.1f}s", file=sys.stderr)
+                    logger.info(f"[retry {attempt+1}/{self.max_retries}] {status} — waiting {wait:.1f}s", file=sys.stderr)
                     time.sleep(wait)
                     continue
                 raise

@@ -47,6 +47,10 @@ from enum import Enum
 
 from src.paths import PROJECT_ROOT, DATA_DIR
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 # hmmlearn (~23MB) + sklearn (~78MB) accumulate in single-process test runs.
 _ML_ENABLED_RISK = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
@@ -57,7 +61,7 @@ if _ML_ENABLED_RISK:
         HMM_AVAILABLE = True
     except ImportError:
         HMM_AVAILABLE = False
-        print("Warning: hmmlearn not available. Install with: pip install hmmlearn")
+        logger.info("Warning: hmmlearn not available. Install with: pip install hmmlearn")
 else:
     HMM_AVAILABLE = False
 
@@ -291,7 +295,7 @@ class HMMRegimeDetector:
             price_data: Dict mapping ticker to price series
         """
         if not HMM_AVAILABLE:
-            print("Error: hmmlearn not available")
+            logger.info("Error: hmmlearn not available")
             return self
         
         all_features = []
@@ -308,7 +312,7 @@ class HMMRegimeDetector:
                 all_features.extend(features_list)
         
         if len(all_features) < 252:
-            print(f"Warning: Only {len(all_features)} samples for HMM training")
+            logger.info(f"Warning: Only {len(all_features)} samples for HMM training")
         
         X = np.array(all_features)
         
@@ -319,8 +323,8 @@ class HMMRegimeDetector:
         self.hmm.fit(X_scaled)
         self.is_fitted = True
         
-        print(f"HMM fitted: {self.n_states} states, {len(X)} samples")
-        print(f"Initial probabilities: {self.hmm.startprob_}")
+        logger.info(f"HMM fitted: {self.n_states} states, {len(X)} samples")
+        logger.info(f"Initial probabilities: {self.hmm.startprob_}")
         
         return self
     
@@ -378,7 +382,7 @@ class HMMRegimeDetector:
     def save(self, path: Path = MODEL_PATH) -> None:
         """Save fitted model to disk."""
         if not self.is_fitted:
-            print("Warning: Model not fitted, nothing to save")
+            logger.info("Warning: Model not fitted, nothing to save")
             return
         
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -389,12 +393,12 @@ class HMMRegimeDetector:
                 'n_states': self.n_states,
                 'is_fitted': self.is_fitted
             }, f)
-        print(f"Model saved to {path}")
+        logger.info(f"Model saved to {path}")
     
     def load(self, path: Path = MODEL_PATH) -> 'HMMRegimeDetector':
         """Load fitted model from disk."""
         if not path.exists():
-            print(f"Model not found at {path}")
+            logger.info(f"Model not found at {path}")
             return self
         
         with open(path, 'rb') as f:
@@ -405,7 +409,7 @@ class HMMRegimeDetector:
         self.n_states = data['n_states']
         self.is_fitted = data['is_fitted']
         
-        print(f"Model loaded from {path}")
+        logger.info(f"Model loaded from {path}")
         return self
 
 
@@ -458,7 +462,7 @@ class PortfolioRegimeManager:
                         self.price_cache[ticker] = df
                         return df
             except Exception as e:
-                print(f"Error loading prices for {ticker}: {e}")
+                logger.info(f"Error loading prices for {ticker}: {e}")
         
         return None
     
@@ -567,10 +571,10 @@ def train_hmm_model():
         df = manager.load_prices(ticker)
         if df is not None:
             price_data[ticker] = df['close']
-            print(f"Loaded {len(df)} days of {ticker} data")
+            logger.info(f"Loaded {len(df)} days of {ticker} data")
     
     if len(price_data) < 2:
-        print("Error: Insufficient training data")
+        logger.info("Error: Insufficient training data")
         return None
     
     # Fit HMM

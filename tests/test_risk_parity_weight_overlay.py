@@ -5,12 +5,14 @@ realized volatility calculation, risk parity overlay calculation, and CLI.
 """
 import sys
 import json
+import dataclasses
 import numpy as np
 import pandas as pd
 
 import pytest
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import Dict
 from unittest.mock import patch, MagicMock
 
 from src.strategy.risk_parity_weight_overlay import (
@@ -587,3 +589,680 @@ class TestRiskParityOverlayExtended:
             result = overlay.calculate_rp_overlay(base, df)
         except (ValueError, KeyError):
             pass  # Short data may not produce valid result
+
+
+# ==============================================================================
+# SECTION: Dataclass Field Validation
+# ==============================================================================
+
+class TestRPWeightOverlayDataclassFields:
+    """Validate RPWeightOverlay dataclass fields using dataclasses.fields()."""
+
+    def test_eight_fields(self):
+        fields = dataclasses.fields(RPWeightOverlay)
+        assert len(fields) == 8
+
+    def test_field_names(self):
+        fields = {f.name: f for f in dataclasses.fields(RPWeightOverlay)}
+        expected = {
+            'timestamp', 'asset_vols', 'raw_rp_weights', 'base_weights',
+            'rp_adjustments', 'target_weights', 'expected_vol', 'risk_parity_score',
+        }
+        assert set(fields.keys()) == expected
+
+    def test_timestamp_is_str(self):
+        fields = {f.name: f for f in dataclasses.fields(RPWeightOverlay)}
+        assert fields['timestamp'].type is str
+
+    def test_asset_vols_type(self):
+        fields = {f.name: f for f in dataclasses.fields(RPWeightOverlay)}
+        assert fields['asset_vols'].type == Dict[str, float]
+
+    def test_expected_vol_is_float(self):
+        fields = {f.name: f for f in dataclasses.fields(RPWeightOverlay)}
+        assert fields['expected_vol'].type is float
+
+    def test_risk_parity_score_is_float(self):
+        fields = {f.name: f for f in dataclasses.fields(RPWeightOverlay)}
+        assert fields['risk_parity_score'].type is float
+
+    def test_all_dict_fields_typed(self):
+        fields = {f.name: f for f in dataclasses.fields(RPWeightOverlay)}
+        for name in ['asset_vols', 'raw_rp_weights', 'base_weights', 'rp_adjustments', 'target_weights']:
+            assert fields[name].type == Dict[str, float], f'{name} type should be Dict[str, float]'
+
+    def test_no_mutable_defaults(self):
+        fields = {f.name: f for f in dataclasses.fields(RPWeightOverlay)}
+        for name in ['asset_vols', 'raw_rp_weights', 'base_weights', 'rp_adjustments', 'target_weights']:
+            assert fields[name].default is dataclasses.MISSING
+            assert fields[name].default_factory is dataclasses.MISSING
+
+
+# ==============================================================================
+# SECTION: Constants Type and Range Validation
+# ==============================================================================
+
+class TestConstantsTypeAndRange:
+    """Validate constants have correct types and reasonable ranges."""
+
+    def test_vol_lookback_type(self):
+        assert isinstance(VOL_LOOKBACK, int)
+
+    def test_vol_lookback_positive(self):
+        assert VOL_LOOKBACK > 0
+
+    def test_max_deviation_type(self):
+        assert isinstance(MAX_DEVIATION, float)
+
+    def test_max_deviation_between_zero_and_one(self):
+        assert 0 < MAX_DEVIATION < 1
+
+    def test_min_weight_type(self):
+        assert isinstance(MIN_WEIGHT, float)
+
+    def test_min_weight_between_zero_and_one(self):
+        assert 0 < MIN_WEIGHT < 1
+
+    def test_rebalance_freq_type(self):
+        assert isinstance(REBALANCE_FREQ, int)
+
+    def test_rebalance_freq_positive(self):
+        assert REBALANCE_FREQ > 0
+
+    def test_default_base_has_all_expected_keys(self):
+        expected = {'SPY', 'GLD', 'TLT', 'CASH'}
+        assert expected.issubset(set(DEFAULT_BASE.keys()))
+
+    def test_default_base_ex_cash_sum_to_one(self):
+        non_cash = {k: v for k, v in DEFAULT_BASE.items() if k != 'CASH'}
+        assert sum(non_cash.values()) == pytest.approx(1.0)
+
+
+# ==============================================================================
+# SECTION: Export Completeness (__all__)
+# ==============================================================================
+
+class TestExportCompleteness:
+    """Verify __all__ covers all public names in the module."""
+
+    def test_all_is_defined(self):
+        import src.strategy.risk_parity_weight_overlay as mod
+        assert hasattr(mod, '__all__')
+        assert len(mod.__all__) > 0
+
+    def test_all_names_exist_in_module(self):
+        import src.strategy.risk_parity_weight_overlay as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f'{name} in __all__ but missing from module'
+
+    def test_all_contains_all_expected_names(self):
+        import src.strategy.risk_parity_weight_overlay as mod
+        expected = {'VOL_LOOKBACK', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ',
+                    'DEFAULT_BASE', 'RPWeightOverlay', 'RiskParityWeightOverlay', 'RPBacktester'}
+        assert expected.issubset(set(mod.__all__))
+
+    def test_all_no_dunder_or_private_names(self):
+        import src.strategy.risk_parity_weight_overlay as mod
+        for name in mod.__all__:
+            assert not name.startswith('_'), f'__all__ contains private name: {name}'
+
+
+# ==============================================================================
+# SECTION: Load Prices Edge Cases
+# ==============================================================================
+
+class TestLoadPricesEdgeCases:
+    """Edge cases for _load_prices method."""
+
+    def test_file_not_found_raises(self):
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.prices_path = Path('/tmp/nonexistent_prices_xyz_000.json')
+        overlay._prices_df = None
+        with pytest.raises((FileNotFoundError, json.JSONDecodeError)):
+            overlay._load_prices()
+
+    def test_empty_json_object_raises(self, tmp_path):
+        prices_file = tmp_path / 'prices.json'
+        prices_file.write_text('{}')
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.prices_path = prices_file
+        overlay._prices_df = None
+        with pytest.raises(KeyError):
+            overlay._load_prices()
+
+    def test_missing_d_key_raises_key_error(self, tmp_path):
+        prices_data = {'SPY': [{'p': 450.0}]}
+        prices_file = tmp_path / 'prices.json'
+        with open(prices_file, 'w') as f:
+            json.dump(prices_data, f)
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.prices_path = prices_file
+        overlay._prices_df = None
+        with pytest.raises(KeyError):
+            overlay._load_prices()
+
+    def test_missing_p_key_raises_key_error(self, tmp_path):
+        prices_data = {'SPY': [{'d': '2026-01-02'}]}
+        prices_file = tmp_path / 'prices.json'
+        with open(prices_file, 'w') as f:
+            json.dump(prices_data, f)
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.prices_path = prices_file
+        overlay._prices_df = None
+        with pytest.raises(KeyError):
+            overlay._load_prices()
+
+    def test_single_symbol_two_days(self, tmp_path):
+        prices_data = {
+            'SPY': [{'d': '2026-01-02', 'p': 450.0}, {'d': '2026-01-03', 'p': 452.0}],
+        }
+        prices_file = tmp_path / 'prices.json'
+        with open(prices_file, 'w') as f:
+            json.dump(prices_data, f)
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.prices_path = prices_file
+        overlay._prices_df = None
+        df = overlay._load_prices()
+        assert list(df.columns) == ['SPY']
+        assert len(df) == 2
+
+    def test_malformed_json_raises(self, tmp_path):
+        prices_file = tmp_path / 'prices.json'
+        prices_file.write_text('{invalid json}')
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.prices_path = prices_file
+        overlay._prices_df = None
+        with pytest.raises(json.JSONDecodeError):
+            overlay._load_prices()
+
+
+# ==============================================================================
+# SECTION: Calculate Realized Vol — Edge Cases
+# ==============================================================================
+
+class TestCalculateRealizedVolEdgeCases:
+    """Edge cases for calculate_realized_vol."""
+
+    def _make_overlay(self):
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.vol_lookback = VOL_LOOKBACK
+        return overlay
+
+    def test_all_nan_prices_returns_none(self):
+        overlay = self._make_overlay()
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        df = pd.DataFrame({'SPY': [np.nan] * 300}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        assert vol is None
+
+    def test_all_zero_prices_returns_zero_or_none(self):
+        overlay = self._make_overlay()
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        df = pd.DataFrame({'SPY': [0.0] * 300}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        if vol is not None:
+            assert vol == 0.0
+
+    def test_constant_prices_zero_vol(self):
+        overlay = self._make_overlay()
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        df = pd.DataFrame({'SPY': [100.0] * 300}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        assert vol is not None
+        assert vol == 0.0
+
+    def test_inf_price_at_end(self):
+        overlay = self._make_overlay()
+        rng = np.random.RandomState(42)
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        prices = np.append(100 * np.cumprod(1 + rng.normal(0.0003, 0.012, 299)), np.inf)
+        df = pd.DataFrame({'SPY': prices}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        assert vol is not None
+
+    def test_barely_enough_data(self):
+        overlay = self._make_overlay()
+        n = VOL_LOOKBACK + 10
+        rng = np.random.RandomState(42)
+        prices = np.append(100.0, 100 * np.cumprod(1 + rng.normal(0.0003, 0.012, n - 1)))
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B')
+        df = pd.DataFrame({'SPY': prices}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        assert vol is not None
+        assert vol > 0
+
+    def test_one_less_than_lookback_threshold_returns_none(self):
+        overlay = self._make_overlay()
+        n = VOL_LOOKBACK + 9
+        rng = np.random.RandomState(42)
+        prices = np.append(100.0, 100 * np.cumprod(1 + rng.normal(0.0003, 0.012, n - 1)))
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='B')
+        df = pd.DataFrame({'SPY': prices}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        assert vol is None
+
+    def test_prices_with_nan_gap(self):
+        overlay = self._make_overlay()
+        rng = np.random.RandomState(42)
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        prices = np.append(100.0, 100 * np.cumprod(1 + rng.normal(0.0003, 0.012, 299)))
+        prices[100:105] = np.nan
+        df = pd.DataFrame({'SPY': prices}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        assert vol is not None
+
+    def test_negative_prices(self):
+        overlay = self._make_overlay()
+        rng = np.random.RandomState(42)
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        prices = np.append(-100.0, -100 * np.cumprod(1 + rng.normal(0.0003, 0.012, 299)))
+        df = pd.DataFrame({'SPY': prices}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        assert vol is not None
+        assert isinstance(vol, float)
+
+    def test_single_element_price_returns_none(self):
+        overlay = self._make_overlay()
+        dates = pd.date_range(end=datetime.now(), periods=1, freq='B')
+        df = pd.DataFrame({'SPY': [100.0]}, index=dates)
+        vol = overlay.calculate_realized_vol('SPY', df)
+        assert vol is None
+
+
+# ==============================================================================
+# SECTION: Calculate RP Overlay — Edge Cases
+# ==============================================================================
+
+class TestCalculateRPOverlayEdgeCases:
+    """Edge cases for calculate_rp_overlay."""
+
+    def _make_overlay(self):
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.vol_lookback = VOL_LOOKBACK
+        overlay.max_deviation = MAX_DEVIATION
+        return overlay
+
+    def test_empty_base_dict_returns_valid_overlay(self):
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        result = overlay.calculate_rp_overlay({}, df)
+        assert isinstance(result, RPWeightOverlay)
+        assert result.asset_vols == {}
+        assert result.target_weights == {'CASH': 0.0}
+        assert result.expected_vol == 0.0
+        assert result.risk_parity_score == 0.0
+
+    def test_all_cash_base_returns_valid_overlay(self):
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        result = overlay.calculate_rp_overlay({'CASH': 1.0}, df)
+        assert isinstance(result, RPWeightOverlay)
+        assert result.target_weights == {'CASH': 0.0}
+        assert result.expected_vol == 0.0
+
+    def test_base_with_missing_ticker_returns_none(self):
+        overlay = self._make_overlay()
+        df = _make_prices_df(['SPY'], days=300)
+        result = overlay.calculate_rp_overlay({'FAKE': 0.5, 'CASH': 0.5}, df)
+        assert result is None
+
+    def test_zero_vol_asset_filtered_returns_none(self):
+        overlay = self._make_overlay()
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(index=dates)
+        df['SPY'] = 100 * np.cumprod(1 + rng.normal(0.0003, 0.012, 300))
+        df['GLD'] = 190.0
+        rng2 = np.random.RandomState(99)
+        df['TLT'] = 95 * np.cumprod(1 + rng2.normal(0.0001, 0.008, 300))
+        result = overlay.calculate_rp_overlay(
+            {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}, df
+        )
+        assert result is None
+
+    def test_single_asset_with_cash(self):
+        overlay = self._make_overlay()
+        df = _make_prices_df(['SPY'], days=300)
+        result = overlay.calculate_rp_overlay({'SPY': 0.8, 'CASH': 0.2}, df)
+        if result is not None:
+            assert 'SPY' in result.target_weights
+            total = sum(v for k, v in result.target_weights.items() if k != 'CASH')
+            assert total == pytest.approx(1.0, abs=0.01)
+
+    def test_weights_normalize_after_min_clip(self):
+        overlay = self._make_overlay()
+        overlay.max_deviation = 0.50
+        df = _make_prices_df(days=300)
+        result = overlay.calculate_rp_overlay(
+            {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}, df
+        )
+        if result is not None:
+            total = sum(v for k, v in result.target_weights.items() if k != 'CASH')
+            assert total == pytest.approx(1.0, abs=0.01)
+
+    def test_max_deviation_zero_no_adjustment(self):
+        overlay = self._make_overlay()
+        overlay.max_deviation = 0.0
+        df = _make_prices_df(days=300)
+        result = overlay.calculate_rp_overlay(
+            {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}, df
+        )
+        if result is not None:
+            for asset in ['SPY', 'GLD', 'TLT']:
+                assert abs(result.rp_adjustments[asset]) < 0.01
+
+    def test_extreme_vol_difference_sorted(self):
+        overlay = self._make_overlay()
+        overlay.max_deviation = 0.50
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        rng_high = np.random.RandomState(42)
+        rng_low = np.random.RandomState(99)
+        df = pd.DataFrame(index=dates)
+        df['SPY'] = 100 * np.cumprod(1 + rng_high.normal(0.0005, 0.04, 300))
+        df['GLD'] = 190 * np.cumprod(1 + rng_low.normal(0.0002, 0.005, 300))
+        df['TLT'] = 95 * np.cumprod(1 + rng_low.normal(0.0003, 0.006, 300))
+        result = overlay.calculate_rp_overlay(
+            {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}, df
+        )
+        if result is not None:
+            vols = result.asset_vols
+            weights = result.raw_rp_weights
+            sorted_by_vol = sorted(vols.keys(), key=lambda k: vols[k])
+            sorted_by_weight = sorted(weights.keys(), key=lambda k: -weights[k])
+            assert sorted_by_vol[0] == sorted_by_weight[0]
+
+    def test_risk_parity_score_in_normal_range(self):
+        overlay = self._make_overlay()
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        rng = np.random.RandomState(42)
+        rets = rng.normal(0.0003, 0.012, (300, 3))
+        prices = 100 * np.cumprod(1 + rets, axis=0)
+        df = pd.DataFrame(prices, index=dates, columns=['SPY', 'GLD', 'TLT'])
+        result = overlay.calculate_rp_overlay(
+            {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}, df
+        )
+        if result is not None:
+            assert 0.0 <= result.risk_parity_score <= 1.0
+
+    def test_all_assets_perfectly_correlated(self):
+        overlay = self._make_overlay()
+        rng = np.random.RandomState(42)
+        dates = pd.date_range(end=datetime.now(), periods=300, freq='B')
+        base = np.cumprod(1 + rng.normal(0.0003, 0.012, 300))
+        df = pd.DataFrame({
+            'SPY': 100 * base,
+            'GLD': 190 * base,
+            'TLT': 95 * base,
+        }, index=dates)
+        result = overlay.calculate_rp_overlay(
+            {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}, df
+        )
+        if result is not None:
+            assert result.expected_vol > 0
+
+
+# ==============================================================================
+# SECTION: RPBacktester — Initialization
+# ==============================================================================
+
+class TestRPBacktesterInit:
+    """Test RPBacktester initialization."""
+
+    def test_init_with_defaults(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=300)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        assert bt.base_weights == DEFAULT_BASE
+        assert bt.rebalance_freq == REBALANCE_FREQ
+        assert bt.max_deviation == MAX_DEVIATION
+        assert bt.start_date is None
+        assert bt.end_date is None
+
+    def test_init_with_custom_params(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=300)):
+            bt = RPBacktester(
+                base_weights={'SPY': 0.6, 'GLD': 0.4, 'CASH': 0.0},
+                start_date='2020-01-01',
+                end_date='2025-12-31',
+                rebalance_freq=10,
+                max_deviation=0.20,
+            )
+        assert bt.start_date is not None
+        assert bt.end_date is not None
+        assert bt.rebalance_freq == 10
+        assert bt.max_deviation == 0.20
+
+    def test_init_creates_overlay_with_correct_max_dev(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=300)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE, max_deviation=0.25)
+        assert bt.overlay.max_deviation == 0.25
+
+
+# ==============================================================================
+# SECTION: RPBacktester — run_backtest
+# ==============================================================================
+
+class TestRPBacktesterRun:
+    """Test RPBacktester.run_backtest method."""
+
+    def test_insufficient_data_returns_error(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=10)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        result = bt.run_backtest()
+        assert isinstance(result, dict)
+        assert 'error' in result
+
+    def test_sufficient_data_returns_result(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=350)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        result = bt.run_backtest()
+        assert isinstance(result, dict)
+        assert 'error' not in result
+
+    def test_result_has_all_expected_keys(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=350)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        result = bt.run_backtest()
+        expected_keys = {
+            'strategy', 'start_date', 'end_date', 'trading_days',
+            'start_value', 'end_value', 'cagr', 'volatility',
+            'sharpe_ratio', 'max_drawdown', 'calmar_ratio',
+            'baseline_cagr', 'baseline_sharpe', 'baseline_volatility',
+            'excess_return', 'sharpe_improvement',
+            'crisis_2008_return', 'crisis_2020_return', 'crisis_2022_return',
+        }
+        assert expected_keys.issubset(set(result.keys()))
+
+    def test_sharpe_ratio_is_numeric(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=350)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        result = bt.run_backtest()
+        assert isinstance(result['sharpe_ratio'], (int, float))
+        assert not np.isnan(result['sharpe_ratio'])
+
+    def test_volatility_non_negative(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=350)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        result = bt.run_backtest()
+        assert result['volatility'] >= 0
+
+    def test_end_value_positive(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=350)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        result = bt.run_backtest()
+        if 'error' not in result:
+            assert result['end_value'] > 0
+
+    def test_backtest_crisis_returns_are_float_or_none(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=1000)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        result = bt.run_backtest()
+        for key in ['crisis_2008_return', 'crisis_2020_return', 'crisis_2022_return']:
+            assert key in result
+            assert result[key] is None or isinstance(result[key], (int, float))
+
+    def test_single_asset_backtest(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(['SPY'], days=350)):
+            bt = RPBacktester(base_weights={'SPY': 0.8, 'CASH': 0.2})
+        result = bt.run_backtest()
+        if 'error' not in result:
+            assert 'SPY' in result['strategy'] or result['end_value'] > 0
+
+    def test_baseline_comparison_present(self):
+        with patch.object(RiskParityWeightOverlay, '_load_prices',
+                          return_value=_make_prices_df(days=350)):
+            bt = RPBacktester(base_weights=DEFAULT_BASE)
+        result = bt.run_backtest()
+        assert 'baseline_cagr' in result
+        assert 'baseline_sharpe' in result
+        assert 'excess_return' in result
+        assert 'sharpe_improvement' in result
+
+
+# ==============================================================================
+# SECTION: CLI Extended Tests
+# ==============================================================================
+
+class TestCLIExtended:
+    """Extended tests for CLI entry points."""
+
+    def test_backtest_command_default(self, capsys):
+        mock_result = {'strategy': 'test_strategy', 'cagr': 0.08}
+        with patch('sys.argv', ['rp_overlay.py', 'backtest']):
+            with patch('src.strategy.risk_parity_weight_overlay.RPBacktester') as MockBT:
+                MockBT.return_value.run_backtest.return_value = mock_result
+                from src.strategy.risk_parity_weight_overlay import main
+                main()
+        captured = capsys.readouterr()
+        assert 'test_strategy' in captured.out
+
+    def test_backtest_with_custom_max_dev(self, capsys):
+        mock_result = {'strategy': 'custom_dev', 'cagr': 0.08}
+        with patch('sys.argv', ['rp_overlay.py', 'backtest', '--max-dev', '0.20']):
+            with patch('src.strategy.risk_parity_weight_overlay.RPBacktester') as MockBT:
+                MockBT.return_value.run_backtest.return_value = mock_result
+                from src.strategy.risk_parity_weight_overlay import main
+                main()
+        captured = capsys.readouterr()
+        assert 'custom_dev' in captured.out
+
+    def test_backtest_output_file(self, capsys, tmp_path):
+        output_file = tmp_path / 'result.json'
+        mock_result = {'strategy': 'file_output_test', 'cagr': 0.08}
+        with patch('sys.argv', ['rp_overlay.py', 'backtest', '--output', str(output_file)]):
+            with patch('src.strategy.risk_parity_weight_overlay.RPBacktester') as MockBT:
+                MockBT.return_value.run_backtest.return_value = mock_result
+                from src.strategy.risk_parity_weight_overlay import main
+                main()
+        assert output_file.exists()
+        with open(output_file) as f:
+            data = json.load(f)
+        assert data['strategy'] == 'file_output_test'
+
+    def test_live_command_prints_allocation(self, capsys):
+        mock_allocation = MagicMock()
+        mock_allocation.to_dict.return_value = {'target_weights': {'SPY': 0.5}}
+        with patch('sys.argv', ['rp_overlay.py', 'live']):
+            with patch('src.strategy.risk_parity_weight_overlay.RiskParityWeightOverlay') as MockRP:
+                MockRP.return_value.calculate_rp_overlay.return_value = mock_allocation
+                from src.strategy.risk_parity_weight_overlay import main
+                main()
+        captured = capsys.readouterr()
+        assert 'target_weights' in captured.out
+
+    def test_live_command_failure_prints_error(self, capsys):
+        with patch('sys.argv', ['rp_overlay.py', 'live']):
+            with patch('src.strategy.risk_parity_weight_overlay.RiskParityWeightOverlay') as MockRP:
+                MockRP.return_value.calculate_rp_overlay.return_value = None
+                from src.strategy.risk_parity_weight_overlay import main
+                main()
+        captured = capsys.readouterr()
+        assert 'error' in captured.out
+
+    def test_unknown_command_exits_with_usage(self, capsys):
+        with patch('sys.argv', ['rp_overlay.py', 'bogus_command_xyz']):
+            from src.strategy.risk_parity_weight_overlay import main
+            with pytest.raises(SystemExit):
+                main()
+        captured = capsys.readouterr()
+        assert 'usage' in captured.err.lower()
+        assert 'invalid choice' in captured.err.lower()
+
+    def test_status_displays_all_constants(self, capsys):
+        with patch('sys.argv', ['rp_overlay.py', 'status']):
+            from src.strategy.risk_parity_weight_overlay import main
+            main()
+        captured = capsys.readouterr()
+        assert 'Max deviation' in captured.out
+        assert 'Vol lookback' in captured.out
+        assert 'Rebalance frequency' in captured.out
+        assert 'Base allocation' in captured.out
+        assert 'SPY' in captured.out
+        assert 'GLD' in captured.out
+        assert 'TLT' in captured.out
+
+
+# ==============================================================================
+# SECTION: Main Guard
+# ==============================================================================
+
+class TestMainGuard:
+    """Test the __main__ guard pattern."""
+
+    def test_main_function_is_callable(self):
+        from src.strategy.risk_parity_weight_overlay import main
+        assert callable(main)
+
+    def test_module_imports_without_error(self):
+        import importlib
+        import src.strategy.risk_parity_weight_overlay as mod
+        importlib.reload(mod)
+
+
+
+# ==============================================================================
+# SECTION: RPWeightOverlay to_dict — deep copy behavior
+# ==============================================================================
+
+class TestRPWeightOverlayToDict:
+    """Test that to_dict produces independent copies."""
+
+    def test_to_dict_returns_new_dict(self):
+        overlay = RPWeightOverlay(
+            timestamp='2026-05-24',
+            asset_vols={'SPY': 0.15},
+            raw_rp_weights={'SPY': 0.5},
+            base_weights={'SPY': 0.46},
+            rp_adjustments={'SPY': 0.04},
+            target_weights={'SPY': 0.5, 'CASH': 0.0},
+            expected_vol=0.12,
+            risk_parity_score=0.90,
+        )
+        d = overlay.to_dict()
+        assert d is not overlay.__dict__
+        assert d['asset_vols'] is not overlay.asset_vols
+
+    def test_to_dict_mutation_does_not_affect_original(self):
+        overlay = RPWeightOverlay(
+            timestamp='2026-05-24',
+            asset_vols={'SPY': 0.15},
+            raw_rp_weights={'SPY': 0.5},
+            base_weights={'SPY': 0.46},
+            rp_adjustments={'SPY': 0.04},
+            target_weights={'SPY': 0.5},
+            expected_vol=0.12,
+            risk_parity_score=0.90,
+        )
+        d = overlay.to_dict()
+        d['expected_vol'] = 999.0
+        assert overlay.expected_vol == 0.12
