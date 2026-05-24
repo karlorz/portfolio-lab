@@ -31,6 +31,7 @@ import numpy as np
 
 
 from src.paths import DATA_DIR
+from src.utils import safe_get
 
 
 __all__ = ['SIGNAL_SOURCE_META', 'SourceAttribution', 'AttributionReport', 'PerformanceAttribution', 'print_report', 'patch_save_vote']
@@ -401,7 +402,7 @@ class PerformanceAttribution:
         matrix = np.zeros((len(sorted_dates), len(sources)))
         for i, d in enumerate(sorted_dates):
             for j, src in enumerate(sources):
-                matrix[i, j] = date_values.get(d, {}).get(src, 0)
+                matrix[i, j] = safe_get(date_values, d, src, default=0)
 
         # Compute pairwise correlation for each source
         avg_corrs = []

@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.paths import MARKET_DB
+from src.utils import safe_get
 
 
 __all__ = ['FactorScore', 'FactorMomentumEngine', 'FactorRotationBacktest']
@@ -923,13 +924,13 @@ def main():
         print(f"Signal Strength: {result.get('signal_strength', 0):.0%}")
         
         if use_tsfm:
-            print(f"VIX Context: {result.get('tsfm', {}).get('vix_context', 'N/A')}")
+            print(f"VIX Context: {safe_get(result, 'tsfm', 'vix_context', default='N/A')}")
             selected_key = "tsfm"
-            selected_factors = result.get('tsfm', {}).get('selected_factors_tsfm', [])
+            selected_factors = safe_get(result, 'tsfm', 'selected_factors_tsfm', default=[])
             print(f"\nSelected Factors (TSFM): {', '.join(selected_factors) if selected_factors else 'None'}")
             print(f"\nTSFM Recommendation: {result.get('recommendation_tsfm', 'N/A')}")
-            print(f"\nFormation Period: {result.get('tsfm', {}).get('formation_period', 'N/A')}")
-            print(f"Z-Score Cap: {result.get('tsfm', {}).get('z_score_cap', 'N/A')}")
+            print(f"\nFormation Period: {safe_get(result, 'tsfm', 'formation_period', default='N/A')}")
+            print(f"Z-Score Cap: {safe_get(result, 'tsfm', 'z_score_cap', default='N/A')}")
         elif use_ml:
             print(f"VIX Context: {result.get('vix_context', 'N/A')}")
             selected_key = "selected_factors_ml"
@@ -946,7 +947,7 @@ def main():
         
         # Show appropriate allocation based on mode
         if use_tsfm:
-            allocation = result.get('tsfm', {}).get('allocation_tsfm', {})
+            allocation = safe_get(result, 'tsfm', 'allocation_tsfm', default={})
         else:
             allocation = result['allocation']
         
@@ -971,7 +972,7 @@ def main():
             )
             
             for rank, (symbol, data) in enumerate(sorted_scores, 1):
-                factor_name = engine.FACTORS.get(symbol, {}).get('name', symbol)
+                factor_name = safe_get(engine.FACTORS, symbol, 'name', default=symbol)
                 base_score = result['current_scores'].get(symbol, {})
                 print(f"{rank:<6} {factor_name:<12} "
                       f"{base_score.get('return_12m', 0):>+7.1%} "

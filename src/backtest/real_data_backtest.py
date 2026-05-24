@@ -20,6 +20,7 @@ import numpy as np
 
 from src.backtest.metrics import BacktestResult
 from src.paths import BASE_ALLOCATION, DATA_DIR, sqlite_connect
+from src.utils import safe_get
 
 
 __all__ = ['RealDataBacktest', 'run_real_data_backtest']
@@ -148,10 +149,10 @@ class RealDataBacktest:
         spy_p = data["SPY"]["prices"]
         gld_p = data["GLD"]["prices"]
         tlt_p = data["TLT"]["prices"]
-        ief_p = data.get("IEF", {}).get("prices", tlt_p)
-        btc_p = data.get("BTC", {}).get("prices", spy_p)
-        eth_p = data.get("ETH", {}).get("prices", spy_p)
-        vix_d = data.get("VIX", {}).get("prices", [18.0] * len(spy_p))
+        ief_p = safe_get(data, "IEF", "prices", default=tlt_p)
+        btc_p = safe_get(data, "BTC", "prices", default=spy_p)
+        eth_p = safe_get(data, "ETH", "prices", default=spy_p)
+        vix_d = safe_get(data, "VIX", "prices", default=[18.0] * len(spy_p))
 
         spy_r = self._compute_returns(spy_p)
         gld_r = self._compute_returns(gld_p)

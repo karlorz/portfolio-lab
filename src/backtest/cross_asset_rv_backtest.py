@@ -22,6 +22,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
+from src.utils import safe_get
 from src.signals.cross_asset_relative_value import CrossAssetRVScanner, ZSCORE_ENTRY
 
 
@@ -88,8 +89,8 @@ class CrossAssetRVBacktester:
             d_now = self.dates[j]
             d_prev = self.dates[j - 1]
             for sym in symbols:
-                p_now = self.prices.get(d_now, {}).get(sym)
-                p_prev = self.prices.get(d_prev, {}).get(sym)
+                p_now = safe_get(self.prices, d_now, sym)
+                p_prev = safe_get(self.prices, d_prev, sym)
                 if p_now and p_prev and p_prev > 0:
                     returns_window[sym].append(p_now / p_prev - 1)
 

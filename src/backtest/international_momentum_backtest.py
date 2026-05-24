@@ -21,6 +21,7 @@ from src.backtest.metrics import (
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
+from src.utils import safe_get
 from src.signals.international_momentum import InternationalMomentumGenerator, SignalType
 
 
@@ -82,10 +83,10 @@ class InternationalMomentumBacktester:
 
         lookback_date = self.dates[idx - self.config.lookback_days]
 
-        spy_now = self.prices.get(date, {}).get('SPY')
-        spy_then = self.prices.get(lookback_date, {}).get('SPY')
-        efa_now = self.prices.get(date, {}).get('EFA')
-        efa_then = self.prices.get(lookback_date, {}).get('EFA')
+        spy_now = safe_get(self.prices, date, 'SPY')
+        spy_then = safe_get(self.prices, lookback_date, 'SPY')
+        efa_now = safe_get(self.prices, date, 'EFA')
+        efa_then = safe_get(self.prices, lookback_date, 'EFA')
 
         if not all([spy_now, spy_then, efa_now, efa_then]):
             return "neutral", 0.0

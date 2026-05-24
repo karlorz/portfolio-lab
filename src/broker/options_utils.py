@@ -25,6 +25,7 @@ import sqlite3
 from pathlib import Path
 
 from src.paths import OPTIONS_CACHE_DIR, MARKET_DB, sqlite_connect
+from src.utils import safe_get
 
 
 __all__ = ['OptionType', 'OptionStatus', 'OptionQuote', 'OptionsChain', 'OptionsChainFetcher', 'OptionsChainCache']
@@ -292,10 +293,10 @@ class OptionsChainFetcher:
                 ask=float(quote_data.get("ask", 0)),
                 last=float(quote_data.get("last", 0)),
                 mark=float(quote_data.get("mark", 0)),
-                delta=quote_data.get("greeks", {}).get("delta"),
-                gamma=quote_data.get("greeks", {}).get("gamma"),
-                theta=quote_data.get("greeks", {}).get("theta"),
-                vega=quote_data.get("greeks", {}).get("vega"),
+                delta=safe_get(quote_data, "greeks", "delta"),
+                gamma=safe_get(quote_data, "greeks", "gamma"),
+                theta=safe_get(quote_data, "greeks", "theta"),
+                vega=safe_get(quote_data, "greeks", "vega"),
                 implied_vol=quote_data.get("implied_volatility"),
                 volume=int(quote_data.get("volume", 0)),
                 open_interest=int(quote_data.get("open_interest", 0)),

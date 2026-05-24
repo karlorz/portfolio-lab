@@ -39,6 +39,7 @@ from enum import Enum
 import logging
 
 from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect
+from src.utils import safe_get
 
 
 __all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'BanditWeighter', 'EnsembleVoter']
@@ -238,7 +239,7 @@ class BanditWeighter:
 
     def _rolling_sharpe(self, signal: str, regime: str) -> float:
         """Compute rolling Sharpe ratio for a signal in a regime."""
-        hist = self._history.get(regime, {}).get(signal, [])
+        hist = safe_get(self._history, regime, signal, default=[])
         if len(hist) < 21:  # Need at least 1 month
             return 0.0
         arr = np.array(hist[-self.window:])

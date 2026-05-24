@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from src.paths import DATA_DIR
+from src.utils import safe_get
 
 
 __all__ = ['SEVERITY_THRESHOLDS', 'BriefSection', 'generate_brief_sections', 'render_brief_text', 'generate_narrative', 'generate_daily_brief']
@@ -93,7 +94,7 @@ def generate_brief_sections(dashboard: Dict[str, Any]) -> List[BriefSection]:
         name="risk_check",
         title="Risk Check",
         severity=risk_severity,
-        data_text=f"Current DD: {dd:.1f}%. VaR(95): {var_text}%. Vol(ann): {vol_text}%. Regime: {regime.get('classifier', {}).get('current_regime', 'unknown')}.",
+        data_text=f"Current DD: {dd:.1f}%. VaR(95): {var_text}%. Vol(ann): {vol_text}%. Regime: {safe_get(regime, 'classifier', 'current_regime', default='unknown')}.",
         recommendation=risk_rec,
     ))
 

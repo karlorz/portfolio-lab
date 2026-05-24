@@ -18,6 +18,7 @@ from pathlib import Path
 import logging
 
 from src.paths import MARKET_DB, sqlite_connect
+from src.utils import safe_get
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -148,7 +149,7 @@ class RedditSentimentFetcher:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
-                return data.get('data', {}).get('children', [])
+                return safe_get(data, 'data', 'children', default=[])
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 logger.warning("Rate limited on r/%s, using cache", subreddit)

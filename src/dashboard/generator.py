@@ -13,6 +13,7 @@ from typing import Dict, Optional
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect
+from src.utils import safe_get
 
 __all__ = [
     "DashboardGenerator",
@@ -344,30 +345,30 @@ class DashboardGenerator:
                         "timestamp": alt_data_raw.get("timestamp"),
                         "components": {
                             "earnings": {
-                                "score": alt_data_raw.get("raw_data", {}).get("earnings_sentiment"),
-                                "confidence": alt_data_raw.get("raw_data", {}).get("earnings_confidence"),
-                                "weight": alt_data_raw.get("raw_data", {}).get("weights", {}).get("earnings")
+                                "score": safe_get(alt_data_raw, "raw_data", "earnings_sentiment"),
+                                "confidence": safe_get(alt_data_raw, "raw_data", "earnings_confidence"),
+                                "weight": safe_get(alt_data_raw, "raw_data", "weights", "earnings")
                             },
                             "news": {
-                                "score": alt_data_raw.get("raw_data", {}).get("news_sentiment"),
-                                "confidence": alt_data_raw.get("raw_data", {}).get("news_confidence"),
-                                "weight": alt_data_raw.get("raw_data", {}).get("weights", {}).get("news")
+                                "score": safe_get(alt_data_raw, "raw_data", "news_sentiment"),
+                                "confidence": safe_get(alt_data_raw, "raw_data", "news_confidence"),
+                                "weight": safe_get(alt_data_raw, "raw_data", "weights", "news")
                             },
                             "jobs": {
-                                "score": alt_data_raw.get("raw_data", {}).get("jobs_signal"),
-                                "confidence": alt_data_raw.get("raw_data", {}).get("jobs_confidence"),
-                                "weight": alt_data_raw.get("raw_data", {}).get("weights", {}).get("jobs")
+                                "score": safe_get(alt_data_raw, "raw_data", "jobs_signal"),
+                                "confidence": safe_get(alt_data_raw, "raw_data", "jobs_confidence"),
+                                "weight": safe_get(alt_data_raw, "raw_data", "weights", "jobs")
                             },
                             "social": {
-                                "score": alt_data_raw.get("raw_data", {}).get("social_sentiment"),
-                                "confidence": alt_data_raw.get("raw_data", {}).get("social_confidence"),
-                                "weight": alt_data_raw.get("raw_data", {}).get("weights", {}).get("social")
+                                "score": safe_get(alt_data_raw, "raw_data", "social_sentiment"),
+                                "confidence": safe_get(alt_data_raw, "raw_data", "social_confidence"),
+                                "weight": safe_get(alt_data_raw, "raw_data", "weights", "social")
                             }
                         },
-                        "composite_score": alt_data_raw.get("raw_data", {}).get("composite_score"),
-                        "z_score": alt_data_raw.get("raw_data", {}).get("z_score"),
-                        "sources_count": alt_data_raw.get("raw_data", {}).get("sources_count"),
-                        "data_freshness_hours": alt_data_raw.get("raw_data", {}).get("data_freshness_hours")
+                        "composite_score": safe_get(alt_data_raw, "raw_data", "composite_score"),
+                        "z_score": safe_get(alt_data_raw, "raw_data", "z_score"),
+                        "sources_count": safe_get(alt_data_raw, "raw_data", "sources_count"),
+                        "data_freshness_hours": safe_get(alt_data_raw, "raw_data", "data_freshness_hours")
                     }
         except Exception as e:
             logger.debug("Alternative data signal not available: %s", e)
@@ -596,7 +597,7 @@ class DashboardGenerator:
                         garch_cvar["current_volatility"] = data["conditional_volatility_current"] / 100.0
                     if data.get("garch_persistence") is not None:
                         garch_cvar["volatility_clustering"] = "high" if data["garch_persistence"] > 0.95 else "elevated" if data["garch_persistence"] > 0.85 else "normal"
-                elif data.get("checks", {}).get("cvar_metrics", {}).get("garch_filtered"):
+                elif safe_get(data, "checks", "cvar_metrics", "garch_filtered"):
                     # Legacy nested format
                     cvar_check = data["checks"]["cvar_metrics"]
                     garch_cvar["cvar_95"] = cvar_check.get("cvar_95", -0.0179)
@@ -627,7 +628,7 @@ class DashboardGenerator:
             if health_file.exists():
                 with open(health_file) as f:
                     health = json.load(f)
-                    entropy_check = health.get("checks", {}).get("portfolio_entropy", {})
+                    entropy_check = safe_get(health, "checks", "portfolio_entropy", default={})
                     metrics = entropy_check.get("metrics", {})
                     if metrics:
                         entropy["shannon_entropy"] = metrics.get("shannon_entropy", 1.02)
@@ -923,7 +924,7 @@ class DashboardGenerator:
                     "level": "success",
                     "type": "graduation_candidate",
                     "title": "Paper Trading Graduation Ready",
-                    "message": f"Sharpe: {data.get('metrics', {}).get('sharpe')}, ready for live approval",
+                    "message": f"Sharpe: {safe_get(data, 'metrics', 'sharpe')}, ready for live approval",
                     "timestamp": data.get("timestamp"),
                     "requires_action": True
                 })

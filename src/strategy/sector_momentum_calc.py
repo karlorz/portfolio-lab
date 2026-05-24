@@ -11,6 +11,7 @@ from datetime import datetime
 import numpy as np
 
 from src.paths import HISTORICAL_JSON
+from src.utils import safe_get
 
 
 __all__ = ['SECTOR_ETF_DEFINITIONS', 'SECTOR_ETF_MAP', 'REGIME_SECTOR_PREFERENCES', 'SectorMomentumCalculator', 'generate_sector_signals']
@@ -93,7 +94,7 @@ class SectorMomentumCalculator:
             
         return {
             "symbol": symbol,
-            "name": SECTOR_ETF_MAP.get(symbol, {}).get("name", symbol),
+            "name": safe_get(SECTOR_ETF_MAP, symbol, "name", default=symbol),
             "longMomentum": long_momentum,
             "shortMomentum": short_momentum,
             "compositeMomentum": composite,

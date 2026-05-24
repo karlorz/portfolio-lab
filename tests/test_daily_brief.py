@@ -561,12 +561,12 @@ class TestBriefSectionsExtended:
         rc = next(s for s in sections if s.name == "risk_check")
         assert "unknown" in rc.data_text
 
-    def test_regime_classifier_none_raises_attribute_error(self, sample_dashboard):
-        """When classifier is None, source code raises AttributeError (not handled)."""
+    def test_regime_classifier_none_returns_unknown(self, sample_dashboard):
+        """When classifier is None, safe_get handles gracefully and returns 'unknown'."""
         sample_dashboard["regime"]["classifier"] = None
-        import pytest
-        with pytest.raises(AttributeError):
-            generate_brief_sections(sample_dashboard)
+        sections = generate_brief_sections(sample_dashboard)
+        rc = next(s for s in sections if s.name == "risk_check")
+        assert "unknown" in rc.data_text
 
     def test_regime_classifier_empty_dict(self, sample_dashboard):
         """When classifier is an empty dict, should handle gracefully."""

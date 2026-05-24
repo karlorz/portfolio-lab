@@ -28,6 +28,7 @@ import json
 import sys
 import logging
 from src.paths import BASE_ALLOCATION as DEFAULT_WEIGHTS
+from src.utils import safe_get
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Dict, Optional, Tuple
@@ -165,7 +166,7 @@ class PortfolioRiskDecomposition:
         )
         for fname, contrib in sorted_factors:
             bar = "█" * int(contrib / 2)
-            lines.append(f"  {FACTOR_DEFINITIONS.get(fname, {}).get('name', fname):20s} {contrib:5.1f}% {bar}")
+            lines.append(f"  {safe_get(FACTOR_DEFINITIONS, fname, 'name', default=fname):20s} {contrib:5.1f}% {bar}")
         lines.append("")
         lines.append("Asset-Level Factor Betas:")
         for sym, ad in self.asset_decompositions.items():
@@ -174,7 +175,7 @@ class PortfolioRiskDecomposition:
                 ad.factor_betas.items(), key=lambda x: abs(x[1].beta), reverse=True
             ):
                 sig = "*" if beta.significant else " "
-                lines.append(f"           {FACTOR_DEFINITIONS.get(fname, {}).get('name', fname):20s} β={beta.beta:+.3f}{sig}")
+                lines.append(f"           {safe_get(FACTOR_DEFINITIONS, fname, 'name', default=fname):20s} β={beta.beta:+.3f}{sig}")
         return "\n".join(lines)
 
 

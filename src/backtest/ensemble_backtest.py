@@ -26,6 +26,7 @@ from collections import defaultdict
 
 from src.backtest.metrics import BacktestResult
 from src.paths import MARKET_DB, sqlite_connect
+from src.utils import safe_get
 
 from src.signals.integrator import SignalIntegrator
 
@@ -417,7 +418,7 @@ class EnsembleBacktestEngine:
                 "calmar_ratio": calmar,
                 "var_95": var_95,
                 "cvar_95": cvar_95,
-                "avg_signal_confidence": np.mean([s["signals"].get("SPY", {}).get("confidence", 0)
+                "avg_signal_confidence": np.mean([safe_get(s["signals"], "SPY", "confidence", default=0)
                                                   for s in signal_history]) if signal_history else 0,
                 "regime_distribution": dict(regime_dist),
                 "crisis_alpha_2008": crisis_alpha.get("2008", 0),

@@ -29,6 +29,7 @@ from src.backtest.metrics import (
     BacktestResult,
     save_results_json,
 )
+from src.utils import safe_get
 
 logging.basicConfig(level=logging.INFO)
 
@@ -212,11 +213,11 @@ class CombinedOverlayBacktest:
         spy_prices = data["SPY"]["prices"]
         gld_prices = data["GLD"]["prices"]
         tlt_prices = data["TLT"]["prices"]
-        ief_prices = data.get("IEF", {}).get("prices", data["TLT"]["prices"])
-        shy_prices = data.get("SHY", {}).get("prices", data["TLT"]["prices"])
-        btc_prices = data.get("BTC", {}).get("prices", data["TLT"]["prices"])
-        eth_prices = data.get("ETH", {}).get("prices", data["TLT"]["prices"])
-        vix_data = data.get("VIX", {}).get("prices", [18.0] * len(spy_prices))
+        ief_prices = safe_get(data, "IEF", "prices", default=data["TLT"]["prices"])
+        shy_prices = safe_get(data, "SHY", "prices", default=data["TLT"]["prices"])
+        btc_prices = safe_get(data, "BTC", "prices", default=data["TLT"]["prices"])
+        eth_prices = safe_get(data, "ETH", "prices", default=data["TLT"]["prices"])
+        vix_data = safe_get(data, "VIX", "prices", default=[18.0] * len(spy_prices))
         dates = data["SPY"]["dates"]
 
         n = len(spy_prices)

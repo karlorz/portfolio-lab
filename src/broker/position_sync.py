@@ -13,6 +13,7 @@ from src.broker.alpaca import AlpacaClient
 from src.broker.alpaca import Position as AlpacaPosition
 
 from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
+from src.utils import safe_get
 
 
 __all__ = ['PositionDrift', 'PositionSync']
@@ -319,7 +320,7 @@ def main():
         elif cmd == "drift":
             result = sync.sync(dry_run=True)
             if result.get("status") == "success":
-                drift_items = result.get("drift", {}).get("items", [])
+                drift_items = safe_get(result, "drift", "items", default=[])
                 if drift_items:
                     print(f"Found {len(drift_items)} position drifts:")
                     for d in drift_items:

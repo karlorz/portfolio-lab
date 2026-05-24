@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from src.paths import DATA_DIR
+from src.utils import safe_get
 
 
 __all__ = ['generate_unified_dashboard', 'print_summary', 'generate_status_text']
@@ -66,8 +67,8 @@ def _get_health_section() -> Dict[str, Any]:
             "available": True,
             "timestamp": report.get("timestamp"),
             "status": report.get("status", "unknown"),
-            "checks_passed": report.get("summary", {}).get("passed", 0),
-            "checks_total": report.get("summary", {}).get("total_checks", 0),
+            "checks_passed": safe_get(report, "summary", "passed", default=0),
+            "checks_total": safe_get(report, "summary", "total_checks", default=0),
             "alerts": report.get("alerts", []),
             "components": {
                 name: {
@@ -622,8 +623,8 @@ def main():
         return
 
     if "--check" in sys.argv:
-        health_ok = dashboard.get("health", {}).get("status") == "healthy"
-        cron_ok = dashboard.get("cron", {}).get("errors", 99) == 0
+        health_ok = safe_get(dashboard, "health", "status") == "healthy"
+        cron_ok = safe_get(dashboard, "cron", "errors", default=99) == 0
         sys.exit(0 if (health_ok and cron_ok) else 1)
 
     # Default: print summary
