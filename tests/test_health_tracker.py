@@ -214,6 +214,7 @@ class TestHealthReport:
         assert "timestamp" in report
         assert "scores" in report
         assert "overall_health" in report
+        assert "ic_metrics" in report
 
 
 class TestLogPrediction:
@@ -560,3 +561,32 @@ class TestComputeICHalfLife:
         # May be None (not enough varied IC), float, or inf (stable IC)
         if hl is not None:
             assert hl > 0 or hl == float("inf")
+
+
+# ---------------------------------------------------------------------------
+# IC metrics in health report
+# ---------------------------------------------------------------------------
+
+class TestICMetricsInReport:
+
+    def test_report_includes_ic_metrics_key(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        report = tracker.get_health_report()
+        assert "ic_metrics" in report
+        assert isinstance(report["ic_metrics"], dict)
+
+    def test_ic_metrics_populated_with_data(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        for i in range(20):
+            ts = (today - timedelta(days=i * 4)).strftime("%Y-%m-%dT10:00:00")
+            tracker.log_prediction_simple(source="cta", signal_value=0.5, confidence=0.8, timestamp=ts)
+        for i in range(20):
+            day = (today - timedelta(days=i * 4)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": 0.01}, day)
+        report = tracker.get_health_report()
+        if "cta" in report.get("ic_metrics", {}):
+            assert "ic" in report["ic_metrics"]["cta"]
+            assert "ic_half_life_days" in report["ic_metrics"]["cta"]

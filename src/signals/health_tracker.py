@@ -661,14 +661,24 @@ class SignalHealthTracker:
         return round(half_life, 1)
 
     def get_health_report(self) -> Dict[str, Any]:
-        """Generate comprehensive health report."""
+        """Generate comprehensive health report including IC metrics."""
         scores = self.calculate_all_health_scores()
         alerts = self.detect_decay_alerts()
-        
+
         healthy_count = sum(1 for s in scores.values() if s.status == "healthy")
         degraded_count = sum(1 for s in scores.values() if s.status == "degraded")
         unhealthy_count = sum(1 for s in scores.values() if s.status == "unhealthy")
-        
+
+        # Compute IC for each tracked source
+        ic_data = {}
+        for source in scores:
+            ic = self.compute_ic(source)
+            half_life = self.compute_ic_half_life(source)
+            ic_data[source] = {
+                "ic": round(ic, 4) if ic is not None else None,
+                "ic_half_life_days": half_life,
+            }
+
         return {
             "timestamp": datetime.now().isoformat(),
             "summary": {
@@ -678,6 +688,7 @@ class SignalHealthTracker:
                 "total_tracked": len(scores)
             },
             "scores": {s: scores[s].to_dict() for s in scores},
+            "ic_metrics": ic_data,
             "alerts": [a.to_dict() for a in alerts],
             "overall_health": "healthy" if healthy_count >= len(scores) * 0.6 else "degraded"
         }
