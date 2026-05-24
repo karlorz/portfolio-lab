@@ -93,7 +93,7 @@ class SentimentAggregator:
             if self.analyzer.disabled:
                 self.analyzer = None
         except Exception as e:
-            logger.debug("SentimentAnalyzer unavailable, disabling: %s", e)
+            logger.warning("SentimentAnalyzer unavailable, disabling: %s", e)
             self.analyzer = None
 
     def calculate_ema(self, values: List[float], alpha: Optional[float] = None) -> float:
@@ -272,7 +272,7 @@ class SentimentAnalyzerPipeline:
             if self.analyzer.disabled:
                 self.analyzer = None
         except Exception as e:
-            logger.debug("SentimentAnalyzer unavailable, disabling: %s", e)
+            logger.warning("SentimentAnalyzer unavailable, disabling: %s", e)
             self.analyzer = None
 
     def analyze_text(self, text: str, source_type: str = "news") -> Optional[SentimentResult]:

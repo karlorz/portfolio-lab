@@ -287,7 +287,7 @@ class Portfolio:
             with open(report_path, 'w') as f:
                 json.dump(data, f, indent=2, default=str)
         except Exception as e:
-            logger.debug("Failed to write GARCH health report: %s", e)
+            logger.warning("Failed to write GARCH health report: %s", e)
 
     @staticmethod
     def _compute_portfolio_entropy() -> dict:

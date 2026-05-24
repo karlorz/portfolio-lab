@@ -181,7 +181,7 @@ class EnsembleBacktestEngine:
                     "sources": composite.sources
                 }
             except Exception as e:
-                logger.debug("Signal failed for %s, using neutral: %s", asset, e)
+                logger.warning("Signal failed for %s, using neutral: %s", asset, e)
                 signals[asset] = {
                     "score": 0.0,
                     "confidence": 0.0,

@@ -183,7 +183,7 @@ class AdaptiveSizer:
                 if regime in REGIME_ADJUSTMENTS:
                     return regime, 0.8
         except Exception as e:
-            logger.debug("VIX-based regime detection unavailable: %s", e)
+            logger.warning("VIX-based regime detection unavailable: %s", e)
 
         return "unknown", 0.3
 

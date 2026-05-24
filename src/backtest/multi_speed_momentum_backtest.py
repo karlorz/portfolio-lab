@@ -198,7 +198,7 @@ class MultiSpeedMomentumBacktester:
                 if signal is not None:
                     return float(np.clip(signal, -1.0, 1.0))
             except Exception as exc:
-                logger.debug("MultiSpeedMomentum signal failed for %s on %s: %s", ticker, end_date, exc)
+                logger.warning("MultiSpeedMomentum signal failed for %s on %s: %s", ticker, end_date, exc)
 
         # -- Fallback: simple 12-month momentum proxy --
         raw = self.prices_raw.get(ticker, [])
