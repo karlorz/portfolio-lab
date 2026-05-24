@@ -872,5 +872,103 @@ class TestGetBLViews:
         assert result['views'].prior == "market"
 
 
+class TestLowVolRegime:
+    """Tests for LOW_VOL regime — was missing from Regime enum, causing
+    cross_asset_regime_arb gate rule for LOW_VOL to be dead code."""
+
+    def test_low_vol_in_regime_enum(self):
+        """LOW_VOL should be a valid Regime enum member."""
+        assert hasattr(Regime, 'LOW_VOL')
+        assert Regime.LOW_VOL.value == "low_vol"
+
+    def test_low_vol_regime_weights_exist(self):
+        """LOW_VOL should have its own REGIME_WEIGHTS entry."""
+        assert Regime.LOW_VOL in REGIME_WEIGHTS
+        weights = REGIME_WEIGHTS[Regime.LOW_VOL]
+        # cross_asset_regime_arb is OFF in LOW_VOL, weight should be 0
+        assert weights[SignalSource.CROSS_ASSET_REGIME_ARB] == 0.0
+        # Remaining weights should sum to 1.0
+        total = sum(weights.values())
+        assert total == pytest.approx(1.0, abs=0.01)
+
+    def test_low_vol_detection(self):
+        """detect_regime should return LOW_VOL when vol < 12% and momentum > 1%."""
+        voter = EnsembleVoter()
+        # Create price data with very low vol and positive momentum
+        dates = pd.date_range('2026-01-01', periods=60, freq='B')
+        # Small consistent positive returns = low vol + positive momentum
+        returns = np.full(60, 0.002)  # ~0.2% daily = very low annualized vol
+        prices = 100 * (1 + returns).cumprod()
+        price_data = pd.DataFrame({'SPY': prices}, index=dates)
+
+        regime, confidence = voter.detect_regime(price_data)
+        assert regime == Regime.LOW_VOL
+        assert confidence >= 0.5
+
+    def test_low_vol_not_triggered_with_negative_momentum(self):
+        """LOW_VOL should not trigger if momentum is negative (even with low vol)."""
+        voter = EnsembleVoter()
+        dates = pd.date_range('2026-01-01', periods=60, freq='B')
+        # Small negative returns = low vol but negative momentum
+        returns = np.full(60, -0.001)
+        prices = 100 * (1 + returns).cumprod()
+        price_data = pd.DataFrame({'SPY': prices}, index=dates)
+
+        regime, _ = voter.detect_regime(price_data)
+        assert regime != Regime.LOW_VOL  # Should be NORMAL, not LOW_VOL
+
+    def test_low_vol_not_triggered_with_high_vol(self):
+        """LOW_VOL should not trigger if vol >= 12% even with positive momentum."""
+        voter = EnsembleVoter()
+        dates = pd.date_range('2026-01-01', periods=60, freq='B')
+        # Alternating returns to create moderate vol (~14% annualized) with positive drift
+        returns = np.array([0.01, -0.008] * 30)  # ~15% vol
+        prices = 100 * (1 + returns).cumprod()
+        price_data = pd.DataFrame({'SPY': prices}, index=dates)
+
+        regime, _ = voter.detect_regime(price_data)
+        # Should be NORMAL (not LOW_VOL) because vol > 12%
+        assert regime != Regime.LOW_VOL
+
+    def test_low_vol_regime_gate_activates(self):
+        """cross_asset_regime_arb gate rule should activate in LOW_VOL regime."""
+        from src.signals.regime_gate import RegimeGate
+        gate = RegimeGate()
+        # cross_asset_regime_arb should be OFF in LOW_VOL
+        assert not gate.is_active("cross_asset_regime_arb", "LOW_VOL")
+        # But ON in NORMAL
+        assert gate.is_active("cross_asset_regime_arb", "NORMAL")
+
+    def test_low_vol_behavioral_sentiment_on(self):
+        """behavioral_sentiment should be ON in LOW_VOL (only regime where it's allowed)."""
+        from src.signals.regime_gate import RegimeGate
+        gate = RegimeGate()
+        assert gate.is_active("behavioral_sentiment", "LOW_VOL")
+        # And OFF in all others
+        assert not gate.is_active("behavioral_sentiment", "NORMAL")
+        assert not gate.is_active("behavioral_sentiment", "HIGH_VOL")
+        assert not gate.is_active("behavioral_sentiment", "CRISIS")
+
+    def test_rebalance_config_includes_low_vol(self):
+        """get_rebalance_config should include low_vol mapping."""
+        voter = EnsembleVoter()
+        voter.current_regime = Regime.LOW_VOL
+        voter.current_regime_confidence = 0.7
+        config = voter.get_rebalance_config()
+        assert config['regime'] == 'low_vol'
+        assert config['regime_confidence'] == 0.7
+
+    def test_low_vol_weights_sum_to_one(self):
+        """LOW_VOL regime weights should sum to approximately 1.0."""
+        weights = REGIME_WEIGHTS[Regime.LOW_VOL]
+        total = sum(weights.values())
+        assert total == pytest.approx(1.0, abs=0.01)
+
+    def test_all_regimes_have_weights(self):
+        """All Regime enum members should have corresponding REGIME_WEIGHTS."""
+        for regime in Regime:
+            assert regime in REGIME_WEIGHTS, f"{regime} missing from REGIME_WEIGHTS"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

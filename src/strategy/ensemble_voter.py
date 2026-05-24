@@ -61,8 +61,9 @@ def _get_health_tracker():
 
 class Regime(Enum):
     """Market regime classifications."""
+    LOW_VOL = "low_vol"      # VIX < 15, calm bull market
     NORMAL = "normal"
-    HIGH_VOL = "high_vol"  
+    HIGH_VOL = "high_vol"
     CRISIS = "crisis"
     RECOVERY = "recovery"
 
@@ -128,6 +129,14 @@ class EnsembleVote:
 # MSM disabled (net-negative -0.012 Sharpe), weight redistributed to ALT_DATA and INTL_MOM.
 # Weights sum=1.0 per regime.
 REGIME_WEIGHTS = {
+    Regime.LOW_VOL: {
+        SignalSource.MULTI_SPEED_MOM: 0.0000,
+        SignalSource.CROSS_ASSET_RV: 0.1500,
+        SignalSource.ALTERNATIVE_DATA: 0.3500,
+        SignalSource.INTERNATIONAL_MOMENTUM: 0.2800,
+        SignalSource.CROSS_ASSET_REGIME_ARB: 0.0000,  # marginal in calm markets
+        SignalSource.UNIFIED_OVERLAY: 0.2200,
+    },
     Regime.NORMAL: {
         SignalSource.MULTI_SPEED_MOM: 0.0000,
         SignalSource.CROSS_ASSET_RV: 0.1300,
@@ -271,6 +280,8 @@ class EnsembleVoter:
     HIGH_VOL_VOL_THRESHOLD = 0.20      # 20d annualized vol above this → HIGH_VOL
     HIGH_VOL_DRAWDOWN_THRESHOLD = -0.05
     HIGH_VOL_MOM_THRESHOLD = 0.0       # Negative momentum with drawdown → HIGH_VOL
+    LOW_VOL_VOL_THRESHOLD = 0.12       # 20d annualized vol below this → LOW_VOL
+    LOW_VOL_MOM_THRESHOLD = 0.01       # Positive momentum required for LOW_VOL
     RECOVERY_DRAWDOWN_THRESHOLD = -0.03
     RECOVERY_MOM_THRESHOLD = 0.02
     
@@ -380,6 +391,9 @@ class EnsembleVoter:
         elif drawdown < self.RECOVERY_DRAWDOWN_THRESHOLD and mom_20d > self.RECOVERY_MOM_THRESHOLD:
             regime = Regime.RECOVERY
             confidence = min(mom_20d * 20, 0.7)
+        elif vol_20d < self.LOW_VOL_VOL_THRESHOLD and mom_20d > self.LOW_VOL_MOM_THRESHOLD:
+            regime = Regime.LOW_VOL
+            confidence = max(0.5, 1.0 - vol_20d * 4)
         else:
             regime = Regime.NORMAL
             confidence = max(0.5, 1.0 - vol_20d * 2)
@@ -621,6 +635,7 @@ class EnsembleVoter:
             'low_vol', 'recovery') for the rebalancing controller.
         """
         regime_map = {
+            Regime.LOW_VOL: 'low_vol',
             Regime.NORMAL: 'normal',
             Regime.HIGH_VOL: 'high_vol',
             Regime.CRISIS: 'crisis',

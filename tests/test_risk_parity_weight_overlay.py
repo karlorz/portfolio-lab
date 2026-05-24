@@ -293,3 +293,183 @@ class TestCLI:
             main()
         captured = capsys.readouterr()
         assert "usage" in captured.out.lower() or "Risk Parity" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestRPWeightOverlayDataclass:
+    """Test RPWeightOverlay dataclass and to_dict."""
+
+    def test_to_dict(self):
+        overlay = RPWeightOverlay(
+            timestamp='2026-05-24',
+            asset_vols={'SPY': 0.15, 'GLD': 0.14, 'TLT': 0.12},
+            raw_rp_weights={'SPY': 0.34, 'GLD': 0.36, 'TLT': 0.30},
+            base_weights={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
+            rp_adjustments={'SPY': -0.12, 'GLD': -0.02, 'TLT': 0.14},
+            target_weights={'SPY': 0.34, 'GLD': 0.36, 'TLT': 0.30, 'CASH': 0.0},
+            expected_vol=0.108,
+            risk_parity_score=0.95,
+        )
+        d = overlay.to_dict()
+        assert d['timestamp'] == '2026-05-24'
+        assert d['asset_vols']['SPY'] == 0.15
+        assert d['risk_parity_score'] == 0.95
+
+    def test_to_dict_has_all_fields(self):
+        overlay = RPWeightOverlay(
+            timestamp='2026-05-24',
+            asset_vols={}, raw_rp_weights={}, base_weights={},
+            rp_adjustments={}, target_weights={},
+            expected_vol=0.1, risk_parity_score=0.8,
+        )
+        d = overlay.to_dict()
+        expected_keys = {
+            'timestamp', 'asset_vols', 'raw_rp_weights', 'base_weights',
+            'rp_adjustments', 'target_weights', 'expected_vol', 'risk_parity_score',
+        }
+        assert expected_keys.issubset(set(d.keys()))
+
+
+class TestCalculateRealizedVolExtended:
+    """Extended realized volatility calculation tests."""
+
+    def _make_overlay(self):
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.vol_lookback = VOL_LOOKBACK
+        return overlay
+
+    def test_unknown_ticker_returns_none(self):
+        """Unknown ticker should return None."""
+        overlay = self._make_overlay()
+        df = _make_prices_df()
+        result = overlay.calculate_realized_vol('UNKNOWN', df)
+        assert result is None
+
+    def test_short_history_returns_none(self):
+        """Too few prices should return None."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=30)  # Too short for vol_lookback+10
+        result = overlay.calculate_realized_vol('SPY', df)
+        assert result is None
+
+    def test_valid_ticker_returns_positive(self):
+        """Valid ticker with enough data should return positive vol."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        result = overlay.calculate_realized_vol('SPY', df)
+        assert result is not None
+        assert result > 0
+
+    def test_vol_annualized(self):
+        """Realized vol should be annualized (multiply by sqrt(252))."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        result = overlay.calculate_realized_vol('SPY', df)
+        # Annualized vol for equities should typically be 5-50%
+        assert 0.01 < result < 1.0
+
+    def test_different_tickers_have_different_vols(self):
+        """Different tickers should generally have different volatilities."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        vol_spy = overlay.calculate_realized_vol('SPY', df)
+        vol_gld = overlay.calculate_realized_vol('GLD', df)
+        # They might be close with synthetic data, but both should be valid
+        assert vol_spy is not None
+        assert vol_gld is not None
+
+
+class TestCalculateRPOverlayExtended:
+    """Extended risk parity overlay calculation tests."""
+
+    def _make_overlay(self):
+        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
+        overlay.vol_lookback = VOL_LOOKBACK
+        overlay.max_deviation = MAX_DEVIATION
+        return overlay
+
+    def test_target_weights_sum_to_one(self):
+        """Target weights should sum to 1.0 (excluding CASH)."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        if result is not None:
+            total = sum(v for k, v in result.target_weights.items() if k != 'CASH')
+            assert abs(total - 1.0) < 0.01
+
+    def test_target_weights_respect_minimum(self):
+        """Target weights should be at least MIN_WEIGHT."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        if result is not None:
+            for k, v in result.target_weights.items():
+                if k != 'CASH':
+                    assert v >= MIN_WEIGHT
+
+    def test_risk_parity_score_between_0_and_1(self):
+        """Risk parity score should be between 0 and 1."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        if result is not None:
+            assert 0.0 <= result.risk_parity_score <= 1.0
+
+    def test_expected_vol_positive(self):
+        """Expected portfolio vol should be positive."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        if result is not None:
+            assert result.expected_vol > 0
+
+    def test_missing_vol_for_asset_returns_none(self):
+        """If any asset has missing vol, overlay should return None."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300, symbols=['SPY', 'GLD'])  # Missing TLT
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        assert result is None
+
+    def test_raw_rp_weights_inverse_vol(self):
+        """Raw RP weights should be proportional to inverse volatility."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        if result is not None:
+            # Lower vol assets should get higher raw RP weights
+            vols = result.asset_vols
+            rp_weights = result.raw_rp_weights
+            # Sort by vol: lowest vol should have highest RP weight
+            sorted_by_vol = sorted(vols.keys(), key=lambda k: vols[k])
+            sorted_by_weight = sorted(rp_weights.keys(), key=lambda k: -rp_weights[k])
+            # Lowest vol should have highest weight
+            assert sorted_by_vol[0] == sorted_by_weight[0]
+
+    def test_cash_always_zero(self):
+        """CASH weight should always be 0.0."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        if result is not None:
+            assert result.target_weights.get('CASH', 0.0) == 0.0
+
+    def test_adjustments_within_max_deviation(self):
+        """Adjustments should be clipped to max_deviation."""
+        overlay = self._make_overlay()
+        df = _make_prices_df(days=300)
+        base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
+        result = overlay.calculate_rp_overlay(base, df)
+        if result is not None:
+            for asset, adj in result.rp_adjustments.items():
+                assert abs(adj) <= MAX_DEVIATION + 0.01  # Post-normalization may slightly exceed

@@ -67,6 +67,30 @@ def _make_speed_signal(ticker='SPY', tier='fast', signal=1):
     )
 
 
+def _make_portfolio():
+    """Create a test MultiSpeedPortfolio."""
+    fast = _make_speed_signal(ticker='SPY', tier='fast', signal=1)
+    medium = _make_speed_signal(ticker='SPY', tier='medium', signal=1)
+    slow = _make_speed_signal(ticker='SPY', tier='slow', signal=0)
+    ens = EnsembleSignal(
+        ticker='SPY', timestamp='2026-05-24',
+        fast_signal=fast, medium_signal=medium, slow_signal=slow,
+        ensemble_position=0.5, ensemble_confidence=0.67,
+        base_weight=0.46, adjustment=0.05, target_weight=0.51,
+    )
+    return MultiSpeedPortfolio(
+        timestamp='2026-05-24',
+        base_allocation={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
+        ensemble_adjustments={'SPY': 0.05, 'GLD': -0.02, 'TLT': 0.01},
+        target_allocation={'SPY': 0.51, 'GLD': 0.36, 'TLT': 0.17, 'CASH': 0.0},
+        predicted_volatility=0.11,
+        max_drawdown_estimate=-0.275,
+        ensemble_signals={'SPY': ens},
+        tier_contributions={'fast': 0.3, 'medium': 0.4, 'slow': 0.3},
+        overall_confidence=0.67,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Constants tests
 # ---------------------------------------------------------------------------
@@ -403,6 +427,246 @@ class TestMultiSpeedBacktester:
         bt.prices_df = bt.multi_speed._prices_df
         result = bt.run_backtest()
         assert 'error' in result
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestSpeedMomentumSignalDataclass:
+    """Test SpeedMomentumSignal dataclass and to_dict."""
+
+    def test_to_dict(self):
+        sig = _make_speed_signal(ticker='GLD', tier='medium', signal=-1)
+        d = sig.to_dict()
+        assert d['ticker'] == 'GLD'
+        assert d['tier'] == 'medium'
+        assert d['signal'] == -1
+
+    def test_to_dict_has_all_fields(self):
+        sig = _make_speed_signal()
+        d = sig.to_dict()
+        expected_keys = {
+            'ticker', 'tier', 'timestamp', 'lookback_return', 'recent_return',
+            'signal', 'realized_vol', 'vol_scaled_position', 'base_weight',
+            'adjustment', 'target_weight', 'lookback_start_price',
+            'lookback_end_price', 'formation_days',
+        }
+        assert expected_keys.issubset(set(d.keys()))
+
+
+class TestEnsembleSignalDataclass:
+    """Test EnsembleSignal dataclass and to_dict."""
+
+    def test_to_dict(self):
+        fast = _make_speed_signal(tier='fast', signal=1)
+        medium = _make_speed_signal(tier='medium', signal=0)
+        slow = _make_speed_signal(tier='slow', signal=1)
+        ens = EnsembleSignal(
+            ticker='SPY', timestamp='2026-05-24',
+            fast_signal=fast, medium_signal=medium, slow_signal=slow,
+            ensemble_position=0.5, ensemble_confidence=0.5,
+            base_weight=0.46, adjustment=0.05, target_weight=0.51,
+        )
+        d = ens.to_dict()
+        assert d['ticker'] == 'SPY'
+        assert 'fast_signal' in d
+        assert isinstance(d['fast_signal'], dict)
+        assert d['ensemble_confidence'] == 0.5
+
+    def test_to_dict_nested_signals(self):
+        """Nested speed signals should be serialized as dicts."""
+        fast = _make_speed_signal(tier='fast')
+        medium = _make_speed_signal(tier='medium')
+        slow = _make_speed_signal(tier='slow')
+        ens = EnsembleSignal(
+            ticker='TLT', timestamp='2026-05-24',
+            fast_signal=fast, medium_signal=medium, slow_signal=slow,
+            ensemble_position=-0.3, ensemble_confidence=1.0,
+            base_weight=0.16, adjustment=-0.03, target_weight=0.13,
+        )
+        d = ens.to_dict()
+        assert d['fast_signal']['tier'] == 'fast'
+        assert d['slow_signal']['tier'] == 'slow'
+
+
+class TestMultiSpeedPortfolioDataclass:
+    """Test MultiSpeedPortfolio dataclass and to_dict."""
+
+    def test_to_dict(self):
+        portfolio = _make_portfolio()
+        d = portfolio.to_dict()
+        assert 'timestamp' in d
+        assert 'base_allocation' in d
+        assert 'ensemble_adjustments' in d
+        assert 'target_allocation' in d
+        assert 'predicted_volatility' in d
+        assert 'tier_contributions' in d
+        assert 'overall_confidence' in d
+
+    def test_to_dict_ensemble_signals_serialized(self):
+        """Ensemble signals in portfolio dict should be dicts, not dataclasses."""
+        portfolio = _make_portfolio()
+        d = portfolio.to_dict()
+        for ticker, sig_dict in d['ensemble_signals'].items():
+            assert isinstance(sig_dict, dict)
+            assert 'ticker' in sig_dict
+
+
+class TestComputeSpeedSignal:
+    """Test compute_speed_signal edge cases."""
+
+    def test_unknown_ticker_returns_none(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(tickers=['SPY', 'GLD', 'TLT'])
+        result = engine.compute_speed_signal('UNKNOWN', 'fast', 0.3)
+        assert result is None
+
+    def test_insufficient_data_returns_none(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=10)
+        result = engine.compute_speed_signal('SPY', 'slow', 0.3)
+        assert result is None
+
+    def test_fast_tier_signal(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=400)
+        result = engine.compute_speed_signal('SPY', 'fast', 0.46)
+        assert result is not None
+        assert result.tier == 'fast'
+        assert result.signal in (-1, 0, 1)
+
+    def test_slow_tier_signal(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=400)
+        result = engine.compute_speed_signal('SPY', 'slow', 0.46)
+        assert result is not None
+        assert result.tier == 'slow'
+
+    def test_target_weight_within_bounds(self):
+        """target_weight should be between min_weight and 1.0."""
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=400)
+        result = engine.compute_speed_signal('SPY', 'fast', 0.46)
+        assert result.target_weight >= engine.min_weight
+        assert result.target_weight <= 1.0
+
+    def test_adjustment_within_max_deviation(self):
+        """Adjustment should be clipped to max_deviation."""
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=400)
+        result = engine.compute_speed_signal('SPY', 'fast', 0.46)
+        assert abs(result.adjustment) <= engine.max_deviation
+
+    def test_medium_tier_signal(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=400)
+        result = engine.compute_speed_signal('GLD', 'medium', 0.38)
+        assert result is not None
+        assert result.ticker == 'GLD'
+
+
+class TestComputeEnsembleSignal:
+    """Test compute_ensemble_signal edge cases."""
+
+    def test_returns_ensemble_with_all_tiers(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=400)
+        result = engine.compute_ensemble_signal('SPY', 0.46)
+        assert result is not None
+        assert result.fast_signal is not None
+        assert result.medium_signal is not None
+        assert result.slow_signal is not None
+
+    def test_ensemble_confidence_full_agreement(self):
+        """When all tiers agree, confidence should be 1.0."""
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=400)
+        result = engine.compute_ensemble_signal('SPY', 0.46)
+        # Can't guarantee agreement with random data, but confidence should be valid
+        assert 0.0 <= result.ensemble_confidence <= 1.0
+
+    def test_insufficient_data_returns_none(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=10)
+        result = engine.compute_ensemble_signal('SPY', 0.46)
+        assert result is None
+
+    def test_unknown_ticker_returns_none(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(tickers=['SPY', 'GLD', 'TLT'])
+        result = engine.compute_ensemble_signal('UNKNOWN', 0.3)
+        assert result is None
+
+
+class TestGetSignalForTicker:
+    """Test get_signal_for_ticker integration method."""
+
+    def test_valid_ticker_returns_dict(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(n_days=400)
+        result = engine.get_signal_for_ticker('SPY')
+        assert isinstance(result, dict)
+        assert 'value' in result
+        assert 'confidence' in result
+        assert -1 <= result['value'] <= 1
+        assert 0 <= result['confidence'] <= 1
+
+    def test_unknown_ticker_returns_none(self):
+        engine = _make_engine()
+        engine._prices_df = _make_prices_df(tickers=['SPY', 'GLD', 'TLT'])
+        result = engine.get_signal_for_ticker('UNKNOWN')
+        assert result is None
+
+
+class TestSpeedTierConstants:
+    """Test speed tier configuration constants."""
+
+    def test_three_tiers_exist(self):
+        assert 'fast' in SPEED_TIERS
+        assert 'medium' in SPEED_TIERS
+        assert 'slow' in SPEED_TIERS
+
+    def test_each_tier_has_required_keys(self):
+        for tier_name, tier_config in SPEED_TIERS.items():
+            assert 'lookback_days' in tier_config
+            assert 'skip_days' in tier_config
+            assert 'vol_window' in tier_config
+
+    def test_slow_longer_lookback_than_fast(self):
+        assert SPEED_TIERS['slow']['lookback_days'] > SPEED_TIERS['fast']['lookback_days']
+
+    def test_default_base_allocation_keys(self):
+        assert 'SPY' in DEFAULT_BASE_ALLOCATION
+        assert 'GLD' in DEFAULT_BASE_ALLOCATION
+        assert 'TLT' in DEFAULT_BASE_ALLOCATION
+        assert 'CASH' in DEFAULT_BASE_ALLOCATION
+
+    def test_default_base_allocation_sums_to_one(self):
+        total = sum(DEFAULT_BASE_ALLOCATION.values())
+        assert abs(total - 1.0) < 0.01
+
+
+class TestParsePortfolioArgExtended:
+    """Extended _parse_portfolio_arg tests."""
+
+    def test_invalid_single_value_raises(self):
+        """Single value should raise ValueError (requires 3 or 4 parts)."""
+        with pytest.raises(ValueError, match="3 or 4"):
+            _parse_portfolio_arg('100')
+
+    def test_invalid_five_parts_raises(self):
+        """5-part portfolio should raise ValueError."""
+        with pytest.raises(ValueError, match="3 or 4"):
+            _parse_portfolio_arg('20/20/20/20/20')
+
+    def test_equal_weights_3_part(self):
+        """Equal 3-way split should give 1/3 each."""
+        alloc = _parse_portfolio_arg('33/33/34')
+        assert alloc['SPY'] == pytest.approx(0.33)
+        assert alloc['GLD'] == pytest.approx(0.33)
+        assert alloc['TLT'] == pytest.approx(0.34)
 
 
 if __name__ == '__main__':

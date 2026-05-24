@@ -332,3 +332,293 @@ def test_neutral_signals_accuracy(tracker):
 
 
 # Total: 15 tests
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestFeatureVectorDataclass:
+    """Test FeatureVector dataclass edge cases."""
+
+    def test_dimension_count_matches(self, engine, full_signals, regime_context, historical_accuracy):
+        """dimension_count should be TOTAL_DIMENSIONS."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        assert fv.dimension_count == StackingFeatureEngine.TOTAL_DIMENSIONS
+
+    def test_timestamp_populated(self, engine, full_signals, regime_context, historical_accuracy):
+        """FeatureVector should have a valid timestamp."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        assert isinstance(fv.timestamp, datetime)
+
+    def test_vix_normalized_calculation(self, engine, full_signals, historical_accuracy):
+        """VIX normalization should divide by vix_normalization_factor."""
+        regime = RegimeContext(vix_level=30.0, trend_strength=0.5, timestamp=datetime.now())
+        fv = engine.create_features(full_signals, regime, historical_accuracy)
+        assert fv.vix_normalized == pytest.approx(30.0 / 30.0)
+
+    def test_custom_vix_normalization_affects_output(self, full_signals, historical_accuracy):
+        """Custom VIX normalization should produce different normalized values."""
+        engine_default = StackingFeatureEngine(vix_normalization_factor=30.0)
+        engine_custom = StackingFeatureEngine(vix_normalization_factor=20.0)
+        regime = RegimeContext(vix_level=20.0, trend_strength=0.5, timestamp=datetime.now())
+
+        fv_default = engine_default.create_features(full_signals, regime, historical_accuracy)
+        fv_custom = engine_custom.create_features(full_signals, regime, historical_accuracy)
+
+        assert fv_default.vix_normalized == pytest.approx(20.0 / 30.0)
+        assert fv_custom.vix_normalized == pytest.approx(20.0 / 20.0)
+
+
+class TestPairwiseCombinations:
+    """Test pairwise combination logic."""
+
+    def test_correct_pair_count(self, engine):
+        """C(6,2) = 15 pairwise combinations."""
+        pairs = engine._get_pairwise_combinations(list(SignalSource))
+        assert len(pairs) == 15
+
+    def test_pairs_are_unique(self, engine):
+        """No duplicate pairs."""
+        pairs = engine._get_pairwise_combinations(list(SignalSource))
+        pair_set = set(pairs)
+        assert len(pair_set) == 15
+
+    def test_pair_ordering_consistent(self, engine):
+        """Pairs should be in consistent (sorted) order."""
+        pairs = engine._get_pairwise_combinations(list(SignalSource))
+        for s1, s2 in pairs:
+            assert s1 != s2
+
+    def test_cache_reuse(self, engine):
+        """Second call should return the same cached object."""
+        pairs1 = engine._get_pairwise_combinations(list(SignalSource))
+        pairs2 = engine._get_pairwise_combinations(list(SignalSource))
+        assert pairs1 is pairs2
+
+
+class TestNumpyConversion:
+    """Extended to_numpy conversion tests."""
+
+    def test_numpy_values_in_range(self, engine, full_signals, regime_context, historical_accuracy):
+        """All numpy values should be finite."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        arr = engine.to_numpy(fv)
+        assert np.all(np.isfinite(arr))
+
+    def test_numpy_multiplicative_section(self, engine, full_signals, regime_context, historical_accuracy):
+        """Multiplicative features should appear in the correct array positions."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        arr = engine.to_numpy(fv)
+        # Base: 0-5, Multiplicative: 6-20
+        for i in range(6, 21):
+            assert -1.0 <= arr[i] <= 1.0  # Signal values are -1 to +1
+
+    def test_numpy_accuracy_section(self, engine, full_signals, regime_context, historical_accuracy):
+        """Accuracy values should be in [0, 1] range."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        arr = engine.to_numpy(fv)
+        # Accuracy: indices 53-58
+        for i in range(53, 59):
+            assert 0.0 <= arr[i] <= 1.0
+
+
+class TestFeatureNames:
+    """Extended get_feature_names tests."""
+
+    def test_base_feature_names(self, engine):
+        """Base feature names should follow pattern base_{source.value}."""
+        names = engine.get_feature_names()
+        for source in SignalSource:
+            assert f"base_{source.value}" in names
+
+    def test_pairwise_feature_names(self, engine):
+        """Pairwise names should contain mult_, disagree_, avg_ prefixes."""
+        names = engine.get_feature_names()
+        mult_names = [n for n in names if n.startswith("mult_")]
+        disagree_names = [n for n in names if n.startswith("disagree_")]
+        avg_names = [n for n in names if n.startswith("avg_")]
+        assert len(mult_names) == 15
+        assert len(disagree_names) == 15
+        assert len(avg_names) == 15
+
+    def test_regime_feature_names(self, engine):
+        """Regime features should be named vix_normalized and trend_strength."""
+        names = engine.get_feature_names()
+        assert "vix_normalized" in names
+        assert "trend_strength" in names
+
+    def test_accuracy_feature_names(self, engine):
+        """Accuracy features should follow pattern acc90d_{source.value}."""
+        names = engine.get_feature_names()
+        for source in SignalSource:
+            assert f"acc90d_{source.value}" in names
+
+
+class TestFeatureExplanation:
+    """Extended explain_features tests."""
+
+    def test_explain_bearish_count(self, engine, regime_context, historical_accuracy):
+        """All-bearish signals should show 6 bearish, 0 bullish."""
+        now = datetime.now()
+        bearish_signals = {
+            source: Signal(source, -0.5, now, 0.7)
+            for source in SignalSource
+        }
+        fv = engine.create_features(bearish_signals, regime_context, historical_accuracy)
+        explanation = engine.explain_features(fv)
+        assert explanation["base_signals_summary"]["bearish_count"] == 6
+        assert explanation["base_signals_summary"]["bullish_count"] == 0
+
+    def test_explain_volatility_regime(self, engine, full_signals, historical_accuracy):
+        """Volatility regime should be derived from vix_normalized."""
+        # High VIX → "high" regime
+        regime_high = RegimeContext(vix_level=25.0, trend_strength=0.5, timestamp=datetime.now())
+        fv = engine.create_features(full_signals, regime_high, historical_accuracy)
+        explanation = engine.explain_features(fv)
+        vol_regime = explanation["regime_context"]["volatility_regime"]
+        # vix_normalized = 25/30 ≈ 0.83 > 0.67 → "high"
+        assert vol_regime == "high"
+
+    def test_explain_normal_volatility_regime(self, engine, full_signals, historical_accuracy):
+        """Low VIX → "normal" regime in explanation."""
+        regime_low = RegimeContext(vix_level=12.0, trend_strength=0.5, timestamp=datetime.now())
+        fv = engine.create_features(full_signals, regime_low, historical_accuracy)
+        explanation = engine.explain_features(fv)
+        vol_regime = explanation["regime_context"]["volatility_regime"]
+        # vix_normalized = 12/30 = 0.4 < 0.5 → "normal"
+        assert vol_regime == "normal"
+
+    def test_explain_elevated_volatility_regime(self, engine, full_signals, historical_accuracy):
+        """Mid VIX → "elevated" regime in explanation."""
+        regime_mid = RegimeContext(vix_level=17.0, trend_strength=0.5, timestamp=datetime.now())
+        fv = engine.create_features(full_signals, regime_mid, historical_accuracy)
+        explanation = engine.explain_features(fv)
+        vol_regime = explanation["regime_context"]["volatility_regime"]
+        # vix_normalized = 17/30 ≈ 0.567, 0.5 < x < 0.67 → "elevated"
+        assert vol_regime == "elevated"
+
+    def test_explain_historical_accuracy_best_worst(self, engine, full_signals, regime_context):
+        """Best and worst performer should be identifiable."""
+        now = datetime.now()
+        accuracy = {}
+        for i, source in enumerate(SignalSource):
+            accuracy[source] = HistoricalAccuracy(
+                source=source,
+                accuracy_90d=0.5 + i * 0.05,  # Varying accuracy
+                predictions_count=10,
+                timestamp=now,
+            )
+        fv = engine.create_features(full_signals, regime_context, accuracy)
+        explanation = engine.explain_features(fv)
+        # Last source has highest accuracy (0.5 + 5*0.05 = 0.75)
+        best = explanation["historical_accuracy"]["best_performer"]
+        worst = explanation["historical_accuracy"]["worst_performer"]
+        assert isinstance(best, str)
+        assert isinstance(worst, str)
+
+
+class TestToDictExtended:
+    """Extended to_dict serialization tests."""
+
+    def test_to_dict_keys_serialized_as_strings(self, engine, full_signals, regime_context, historical_accuracy):
+        """All dict keys should be strings (not Enum), for JSON compatibility."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        d = engine.to_dict(fv)
+
+        # base_values keys should be strings
+        for key in d["base_values"]:
+            assert isinstance(key, str)
+
+        # multiplicative keys should be strings
+        for key in d["multiplicative"]:
+            assert isinstance(key, str)
+
+    def test_to_dict_timestamp_is_isoformat(self, engine, full_signals, regime_context, historical_accuracy):
+        """Timestamp should be ISO format string."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        d = engine.to_dict(fv)
+        # Should be parseable as ISO format
+        assert isinstance(d["timestamp"], str)
+
+    def test_to_dict_disagreement_present(self, engine, full_signals, regime_context, historical_accuracy):
+        """Disagreement features should be in serialized dict."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        d = engine.to_dict(fv)
+        assert "disagreement" in d
+        assert len(d["disagreement"]) == 15
+
+    def test_to_dict_averages_present(self, engine, full_signals, regime_context, historical_accuracy):
+        """Average features should be in serialized dict."""
+        fv = engine.create_features(full_signals, regime_context, historical_accuracy)
+        d = engine.to_dict(fv)
+        assert "averages" in d
+        assert len(d["averages"]) == 15
+
+
+class TestStackingAccuracyTrackerExtended:
+    """Extended accuracy tracker tests."""
+
+    def test_all_negative_signals_correct(self, tracker):
+        """Negative signals with negative returns should be correct."""
+        now = datetime.now()
+        tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, -0.5, -0.02)
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        assert acc.accuracy_90d == 1.0  # All correct
+
+    def test_mixed_accuracy(self, tracker):
+        """Mixed correct/incorrect predictions should give intermediate accuracy."""
+        now = datetime.now()
+        for _ in range(5):
+            tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, 0.5, 0.02)
+        for _ in range(5):
+            tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, 0.5, -0.02)
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        assert acc.accuracy_90d == pytest.approx(0.5)
+
+    def test_all_sources_tracked_independently(self, tracker):
+        """Each source should be tracked independently."""
+        now = datetime.now()
+        tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, 0.5, 0.02)
+        tracker.record_prediction(SignalSource.CROSS_ASSET_RV, now, -0.5, 0.02)
+        acc_msm = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        acc_rv = tracker.get_historical_accuracy(SignalSource.CROSS_ASSET_RV, now)
+        assert acc_msm.accuracy_90d == 1.0
+        assert acc_rv.accuracy_90d == 0.0
+
+    def test_get_all_accuracies_returns_all_sources(self, tracker):
+        """get_all_accuracies should return entry for each source."""
+        now = datetime.now()
+        accs = tracker.get_all_accuracies(now)
+        assert len(accs) == 6
+        for source in SignalSource:
+            assert source in accs
+
+    def test_custom_window_days(self):
+        """Custom window_days should be stored."""
+        tracker = StackingAccuracyTracker(window_days=30)
+        assert tracker.window_days == 30
+
+    def test_neutral_signal_with_large_return_correct(self, tracker):
+        """Neutral signal with large positive return — first clause matches (both > 0)."""
+        now = datetime.now()
+        tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, 0.05, 0.05)
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        # 0.05 > 0 and 0.05 > 0 → True (first clause), so "correct"
+        assert acc.accuracy_90d == 1.0
+
+    def test_truly_neutral_signal_truly_neutral_return(self, tracker):
+        """Truly neutral signal with truly neutral return → correct via neutral clause."""
+        now = datetime.now()
+        tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, 0.05, 0.005)
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        # abs(0.05) < 0.1 and abs(0.005) < 0.01 → neutral match
+        assert acc.accuracy_90d == 1.0
+
+    def test_negative_signal_positive_return_incorrect(self, tracker):
+        """Negative signal with positive return should be incorrect."""
+        now = datetime.now()
+        tracker.record_prediction(SignalSource.MULTI_SPEED_MOM, now, -0.5, 0.02)
+        acc = tracker.get_historical_accuracy(SignalSource.MULTI_SPEED_MOM, now)
+        assert acc.accuracy_90d == 0.0

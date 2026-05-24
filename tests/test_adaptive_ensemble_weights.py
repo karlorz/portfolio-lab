@@ -25,7 +25,9 @@ from src.strategy.adaptive_ensemble_weights import (
     AdaptiveEnsembleWeights,
     DEFAULT_CONFIG,
     WeightAdjustment,
+    AdaptiveWeightsState,
 )
+from dataclasses import asdict
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
@@ -507,6 +509,232 @@ class TestStatePersistence:
             f.write("not valid json {{{")
         result = adaptive_weights._load_state()
         assert not result
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestRawMultiplier:
+    """Test _raw_multiplier edge cases."""
+
+    def test_negative_sharpe_gives_penalty(self, adaptive_weights):
+        """Negative Sharpe should return neg_sharpe_penalty."""
+        result = adaptive_weights._raw_multiplier(-0.5)
+        assert result == adaptive_weights.config["neg_sharpe_penalty"]
+
+    def test_zero_sharpe_gives_no_data(self, adaptive_weights):
+        """Zero Sharpe should return no_data_multiplier."""
+        result = adaptive_weights._raw_multiplier(0.0)
+        assert result == adaptive_weights.config["no_data_multiplier"]
+
+    def test_positive_sharpe_scales(self, adaptive_weights):
+        """Positive Sharpe should scale relative to baseline."""
+        # Sharpe = baseline_sharpe → multiplier = 1.0
+        result = adaptive_weights._raw_multiplier(adaptive_weights.config["baseline_sharpe"])
+        assert result == pytest.approx(1.0, abs=0.01)
+
+    def test_high_sharpe_capped(self, adaptive_weights):
+        """Very high Sharpe should be capped at max_multiplier."""
+        result = adaptive_weights._raw_multiplier(10.0)
+        assert result == adaptive_weights.config["max_multiplier"]
+
+    def test_very_small_positive_sharpe(self, adaptive_weights):
+        """Very small positive Sharpe should give low multiplier."""
+        result = adaptive_weights._raw_multiplier(0.001)
+        # 0.001 / 0.5 = 0.002, but clipped to min_multiplier
+        assert result == adaptive_weights.config["min_multiplier"]
+
+
+class TestComputeMultiplier:
+    """Test _compute_multiplier edge cases."""
+
+    def test_none_sharpe_returns_no_data(self, adaptive_weights):
+        """None Sharpe should return no_data_multiplier."""
+        attr = {"sharpe_contribution": None, "total_readings": 100}
+        result = adaptive_weights._compute_multiplier("test_source", attr)
+        assert result == adaptive_weights.config["no_data_multiplier"]
+
+    def test_nan_sharpe_returns_no_data(self, adaptive_weights):
+        """NaN Sharpe should return no_data_multiplier."""
+        attr = {"sharpe_contribution": float('nan'), "total_readings": 100}
+        result = adaptive_weights._compute_multiplier("test_source", attr)
+        assert result == adaptive_weights.config["no_data_multiplier"]
+
+    def test_zero_readings_returns_no_data(self, adaptive_weights):
+        """Zero total_readings should return no_data_multiplier."""
+        attr = {"sharpe_contribution": 0.5, "total_readings": 0}
+        result = adaptive_weights._compute_multiplier("test_source", attr)
+        assert result == adaptive_weights.config["no_data_multiplier"]
+
+    def test_scarce_data_scales_toward_one(self, adaptive_weights):
+        """Scarce data should scale multiplier toward 1.0."""
+        # With 5 readings (min_readings=20), data_ratio=0.25
+        attr = {"sharpe_contribution": 1.0, "total_readings": 5}
+        result = adaptive_weights._compute_multiplier("test_source", attr)
+        # raw_mult for sharpe=1.0 = 1.0/0.5 = 2.0, but clipped to max=2.0
+        # adjusted = 1.0 + (2.0 - 1.0) * 0.25 = 1.25
+        assert 1.0 <= result <= 2.0
+
+    def test_sufficient_data_uses_raw(self, adaptive_weights):
+        """Enough readings should use raw multiplier."""
+        attr = {"sharpe_contribution": 1.0, "total_readings": 100}
+        result = adaptive_weights._compute_multiplier("test_source", attr)
+        raw = adaptive_weights._raw_multiplier(1.0)
+        assert result == raw
+
+
+class TestResetToBaseline:
+    """Test reset_to_baseline behavior."""
+
+    def test_reset_returns_baseline(self, adaptive_weights, sample_attribution_good):
+        """After update and reset, weights should match baseline."""
+        adaptive_weights.update_weights(sample_attribution_good, "normal")
+        reset = adaptive_weights.reset_to_baseline()
+        for source in adaptive_weights.base_weights:
+            assert abs(reset[source] - adaptive_weights.base_weights[source]) < 0.001
+
+    def test_reset_multipliers_to_one(self, adaptive_weights, sample_attribution_good):
+        """After reset, all multipliers should be 1.0."""
+        adaptive_weights.update_weights(sample_attribution_good, "normal")
+        adaptive_weights.reset_to_baseline()
+        for mult in adaptive_weights.multipliers.values():
+            assert mult == 1.0
+
+    def test_reset_persists(self, adaptive_weights, sample_attribution_good):
+        """Reset should persist to state file."""
+        adaptive_weights.update_weights(sample_attribution_good, "normal")
+        adaptive_weights.reset_to_baseline()
+        # Load into new instance
+        new_weights = AdaptiveEnsembleWeights(
+            base_weights=adaptive_weights.base_weights,
+        )
+        new_weights.state_file = adaptive_weights.state_file
+        new_weights._load_state()
+        for source in adaptive_weights.base_weights:
+            assert abs(new_weights.adjusted_weights[source] - adaptive_weights.base_weights[source]) < 0.01
+
+
+class TestGetMultipliers:
+    """Test get_multipliers behavior."""
+
+    def test_before_update_returns_empty_or_loaded(self, adaptive_weights):
+        """Before update, multipliers should be empty or loaded from state."""
+        result = adaptive_weights.get_multipliers()
+        assert isinstance(result, dict)
+
+    def test_after_update_returns_multipliers(self, adaptive_weights, sample_attribution_good):
+        """After update, multipliers should have entries."""
+        adaptive_weights.update_weights(sample_attribution_good, "normal")
+        mults = adaptive_weights.get_multipliers()
+        assert len(mults) > 0
+
+
+class TestGetStateDict:
+    """Test get_state_dict for dashboard integration."""
+
+    def test_state_dict_has_expected_keys(self, adaptive_weights, sample_attribution_good):
+        """State dict should contain expected keys."""
+        adaptive_weights.update_weights(sample_attribution_good, "normal")
+        state = adaptive_weights.get_state_dict()
+        assert "timestamp" in state
+        assert "regime" in state
+        assert "adjusted_weights" in state
+        assert "multipliers" in state
+        assert "top_changes" in state
+        assert "history_count" in state
+
+    def test_state_dict_regime(self, adaptive_weights, sample_attribution_good):
+        """State dict should reflect the current regime."""
+        adaptive_weights.update_weights(sample_attribution_good, "crisis")
+        state = adaptive_weights.get_state_dict()
+        assert state["regime"] == "crisis"
+
+
+class TestUpdateWeightsExtended:
+    """Extended update_weights edge cases."""
+
+    def test_regime_stored(self, adaptive_weights, sample_attribution_good):
+        """update_weights should store the regime."""
+        adaptive_weights.update_weights(sample_attribution_good, "high_vol")
+        assert adaptive_weights.current_regime == "high_vol"
+
+    def test_weights_sum_to_one(self, adaptive_weights, sample_attribution_good):
+        """Adjusted weights should sum to approximately 1.0."""
+        result = adaptive_weights.update_weights(sample_attribution_good, "normal")
+        total = sum(result.values())
+        assert abs(total - 1.0) < 0.05
+
+    def test_history_populated(self, adaptive_weights, sample_attribution_good):
+        """History should have entries after update."""
+        adaptive_weights.update_weights(sample_attribution_good, "normal")
+        assert len(adaptive_weights.history) > 0
+
+    def test_custom_config(self):
+        """Custom config should override defaults."""
+        custom_config = {
+            "baseline_sharpe": 1.0,
+            "min_multiplier": 0.5,
+            "max_multiplier": 3.0,
+        }
+        aew = AdaptiveEnsembleWeights(config=custom_config)
+        assert aew.config["baseline_sharpe"] == 1.0
+        assert aew.config["min_multiplier"] == 0.5
+        assert aew.config["max_multiplier"] == 3.0
+        # Defaults should still be present
+        assert "neg_sharpe_penalty" in aew.config
+
+    def test_custom_base_weights(self):
+        """Custom base weights should be used instead of empty dict."""
+        custom_base = {"source_a": 0.6, "source_b": 0.4}
+        aew = AdaptiveEnsembleWeights(base_weights=custom_base)
+        assert aew.base_weights == custom_base
+
+
+class TestWeightAdjustmentDataclass:
+    """Test WeightAdjustment dataclass."""
+
+    def test_creation(self):
+        wa = WeightAdjustment(
+            timestamp="2026-05-24T00:00:00",
+            regime="normal",
+            source="test_source",
+            base_weight=0.3,
+            multiplier=1.5,
+            adjusted_weight=0.45,
+            sharpe_contribution=0.75,
+            total_readings=50,
+        )
+        assert wa.source == "test_source"
+        assert wa.multiplier == 1.5
+
+    def test_asdict(self):
+        wa = WeightAdjustment(
+            timestamp="2026-05-24", regime="crisis", source="s1",
+            base_weight=0.2, multiplier=0.8, adjusted_weight=0.16,
+            sharpe_contribution=-0.3, total_readings=10,
+        )
+        d = asdict(wa)
+        assert d["regime"] == "crisis"
+        assert d["source"] == "s1"
+
+
+class TestAdaptiveWeightsStateDataclass:
+    """Test AdaptiveWeightsState dataclass."""
+
+    def test_creation(self):
+        state = AdaptiveWeightsState(
+            timestamp="2026-05-24",
+            regime="normal",
+            adjusted_weights={"s1": 0.5},
+            multipliers={"s1": 1.0},
+            history=[],
+            baseline_weights={"s1": 0.5},
+            config=DEFAULT_CONFIG,
+        )
+        assert state.regime == "normal"
+        assert state.adjusted_weights["s1"] == 0.5
 
 
 if __name__ == "__main__":

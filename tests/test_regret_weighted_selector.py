@@ -472,3 +472,264 @@ class TestConvenienceFunction:
         )
         assert isinstance(result, dict)
         assert abs(sum(result.values()) - 1.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestRegimePenaltyMultiplier:
+    """Test _get_regime_penalty_multiplier static method."""
+
+    def test_normal_regime(self):
+        assert RegretWeightedSelector._get_regime_penalty_multiplier("normal") == 1.0
+
+    def test_high_vol_regime(self):
+        assert RegretWeightedSelector._get_regime_penalty_multiplier("high_vol") == 1.2
+
+    def test_crisis_regime(self):
+        assert RegretWeightedSelector._get_regime_penalty_multiplier("crisis") == 1.5
+
+    def test_recovery_regime(self):
+        assert RegretWeightedSelector._get_regime_penalty_multiplier("recovery") == 0.8
+
+    def test_unknown_regime_defaults_to_1(self):
+        assert RegretWeightedSelector._get_regime_penalty_multiplier("unknown") == 1.0
+
+
+class TestRegretWeightedState:
+    """Test RegretWeightedState serialization."""
+
+    def test_to_dict(self):
+        state = RegretWeightedState(
+            signal_history={"sig_a": [0.1, 0.2]},
+            decision_history={"ensemble": [0.15]},
+            rolling_window=60,
+            last_regime="high_vol",
+            last_ensemble_decision=0.3,
+        )
+        d = state.to_dict()
+        assert d["signal_history"]["sig_a"] == [0.1, 0.2]
+        assert d["last_regime"] == "high_vol"
+        assert d["rolling_window"] == 60
+
+    def test_from_dict(self):
+        data = {
+            "signal_history": {"sig_b": [0.5]},
+            "decision_history": {"ensemble": [0.4]},
+            "rolling_window": 30,
+            "last_regime": "crisis",
+            "last_ensemble_decision": -0.2,
+        }
+        state = RegretWeightedState.from_dict(data)
+        assert state.signal_history["sig_b"] == [0.5]
+        assert state.last_regime == "crisis"
+        assert state.rolling_window == 30
+
+    def test_from_dict_defaults(self):
+        """Missing keys should use defaults."""
+        data = {"signal_history": {}}
+        state = RegretWeightedState.from_dict(data)
+        assert state.decision_history == {}
+        assert state.rolling_window == DEFAULT_ROLLING_WINDOW
+        assert state.last_regime == "normal"
+        assert state.last_ensemble_decision == 0.0
+
+    def test_roundtrip(self):
+        """to_dict -> from_dict should preserve state."""
+        original = RegretWeightedState(
+            signal_history={"x": [1.0, 2.0]},
+            decision_history={"ensemble": [1.5]},
+            rolling_window=90,
+            last_regime="recovery",
+            last_ensemble_decision=0.8,
+        )
+        restored = RegretWeightedState.from_dict(original.to_dict())
+        assert restored.signal_history == original.signal_history
+        assert restored.last_regime == original.last_regime
+
+
+class TestSignalRegretMetrics:
+    """Test SignalRegretMetrics dataclass."""
+
+    def test_default_missing_data_false(self):
+        m = SignalRegretMetrics(
+            source="test", asset_covariances={}, regret_contribution=0.0,
+            regret_normalized=0.0, regret_penalty=0.0, regime_current="normal",
+            num_periods=5,
+        )
+        assert m.missing_data is False
+
+    def test_explicit_missing_data(self):
+        m = SignalRegretMetrics(
+            source="test", asset_covariances={}, regret_contribution=0.0,
+            regret_normalized=0.0, regret_penalty=0.0, regime_current="normal",
+            num_periods=1, missing_data=True,
+        )
+        assert m.missing_data is True
+
+
+class TestRegretComputation:
+    """Test _compute_regret edge cases."""
+
+    def test_insufficient_periods_returns_missing(self, selector):
+        """Fewer than MIN_COVARIANCE_PERIODS should return missing_data=True."""
+        # Add only 1 period
+        selector.state.signal_history["test_sig"] = [0.5]
+        selector.state.decision_history["ensemble"] = [0.3]
+        metrics = selector._compute_regret("test_sig", "normal")
+        assert metrics.missing_data is True
+        assert metrics.num_periods == 1
+
+    def test_sufficient_periods_returns_valid(self, selector):
+        """Enough periods should return valid metrics."""
+        selector.state.signal_history["test_sig"] = [0.5] * 10
+        selector.state.decision_history["ensemble"] = [0.3] * 10
+        metrics = selector._compute_regret("test_sig", "normal")
+        assert metrics.missing_data is False
+        assert metrics.num_periods == 10
+
+    def test_zero_variance_signal(self, selector):
+        """Constant signal values should produce zero regret_normalized."""
+        selector.state.signal_history["constant"] = [1.0] * 10
+        selector.state.decision_history["ensemble"] = [0.5] * 10
+        metrics = selector._compute_regret("constant", "normal")
+        # Constant signal → std ≈ 0 → regret_normalized = 0
+        assert metrics.regret_normalized == 0.0
+
+    def test_high_regret_above_threshold(self, selector):
+        """Signal perfectly correlated with ensemble should have high regret."""
+        # Create perfectly correlated signal and decision
+        values = [0.1, 0.2, 0.3, 0.4, 0.5, -0.1, -0.2, -0.3, -0.4, -0.5]
+        selector.state.signal_history["corr_sig"] = values
+        selector.state.decision_history["ensemble"] = values
+        metrics = selector._compute_regret("corr_sig", "normal")
+        # Perfect correlation → high normalized regret
+        assert metrics.regret_normalized > 0.5
+
+    def test_regret_penalty_capped_at_max(self, selector):
+        """Regret penalty should never exceed REGRET_MAX_PENALTY."""
+        # Even with very high regret, penalty should be capped
+        values = [0.1, 0.2, 0.3, 0.4, 0.5, -0.1, -0.2, -0.3, -0.4, -0.5]
+        selector.state.signal_history["high_regret"] = values
+        selector.state.decision_history["ensemble"] = values
+        metrics = selector._compute_regret("high_regret", "crisis")
+        assert metrics.regret_penalty <= REGRET_MAX_PENALTY
+
+
+class TestUpdateHistory:
+    """Test _update_history rolling window management."""
+
+    def test_history_appended(self, selector):
+        """Signal values should be appended to history."""
+        selector._update_history({"sig_a": 0.5}, 0.3)
+        assert "sig_a" in selector.state.signal_history
+        assert selector.state.signal_history["sig_a"] == [0.5]
+
+    def test_rolling_window_trimmed(self, selector):
+        """History should be trimmed to rolling_window size."""
+        for i in range(50):
+            selector._update_history({"sig_a": float(i)}, 0.3)
+        assert len(selector.state.signal_history["sig_a"]) == selector.rolling_window
+
+    def test_ensemble_decision_tracked(self, selector):
+        """Ensemble decision should be tracked in decision_history."""
+        selector._update_history({"sig_a": 0.5}, 0.3)
+        assert "ensemble" in selector.state.decision_history
+        assert selector.state.decision_history["ensemble"] == [0.3]
+
+    def test_decision_history_trimmed(self, selector):
+        """Decision history should be trimmed to rolling_window size."""
+        for i in range(50):
+            selector._update_history({"sig_a": float(i)}, float(i) * 0.1)
+        assert len(selector.state.decision_history["ensemble"]) == selector.rolling_window
+
+
+class TestGetAdjustedWeights:
+    """Test get_adjusted_weights convenience method."""
+
+    def test_returns_dict(self, selector, sample_signals):
+        """get_adjusted_weights should return a dict."""
+        weights = selector.get_adjusted_weights(
+            {"sig_a": 0.6, "sig_b": 0.4},
+            sample_signals,
+            0.3,
+            "normal",
+        )
+        assert isinstance(weights, dict)
+
+    def test_weights_sum_to_one(self, selector, sample_signals):
+        """Adjusted weights should sum to approximately 1.0."""
+        weights = selector.get_adjusted_weights(
+            {"sig_a": 0.6, "sig_b": 0.4},
+            sample_signals,
+            0.3,
+            "normal",
+        )
+        assert abs(sum(weights.values()) - 1.0) < 0.01
+
+
+class TestStatePersistence:
+    """Test state save/load roundtrip."""
+
+    def test_state_persists_across_instances(self, tmp_state_path):
+        """State should persist across selector instances."""
+        sel1 = RegretWeightedSelector(
+            state_path=tmp_state_path, rolling_window=30, regret_lambda=0.3,
+        )
+        sel1.adjust_weights({"sig_a": 0.5}, 0.3, {"sig_a": 1.0}, "normal")
+
+        sel2 = RegretWeightedSelector(
+            state_path=tmp_state_path, rolling_window=30, regret_lambda=0.3,
+        )
+        assert "sig_a" in sel2.state.signal_history
+
+    def test_state_file_created(self, selector, sample_signals):
+        """adjust_weights should create state file."""
+        selector.adjust_weights(sample_signals, 0.3, {"sig_a": 0.6, "sig_b": 0.4}, "normal")
+        assert selector._resolve_path().exists()
+
+
+class TestAdjustWeightsExtended:
+    """Extended adjust_weights edge cases."""
+
+    def test_adjust_with_new_signal(self, selector):
+        """Signal not in history should be treated with full weight initially."""
+        result = selector.adjust_weights(
+            {"new_sig": 0.5},
+            0.3,
+            {"new_sig": 1.0},
+            "normal",
+        )
+        # No prior history → missing_data → full weight
+        assert result.adjusted_weights["new_sig"] > 0
+
+    def test_adjust_preserves_zero_weight_signals(self, selector):
+        """Zero-weight signals should remain zero."""
+        result = selector.adjust_weights(
+            {"sig_a": 0.5, "sig_b": 0.3},
+            0.3,
+            {"sig_a": 1.0, "sig_b": 0.0},
+            "normal",
+        )
+        assert result.adjusted_weights["sig_b"] == 0.0
+
+    def test_avg_regret_computed(self, selector, sample_signals):
+        """avg_regret should be computed from metrics."""
+        result = selector.adjust_weights(
+            sample_signals, 0.3,
+            {"sig_a": 0.6, "sig_b": 0.4},
+            "normal",
+        )
+        assert isinstance(result.avg_regret, float)
+        assert result.avg_regret >= 0.0
+
+    def test_lambda_stored_in_result(self, selector, sample_signals):
+        """lambda_used should match the selector's regret_lambda."""
+        result = selector.adjust_weights(
+            sample_signals, 0.3,
+            {"sig_a": 0.6, "sig_b": 0.4},
+            "normal",
+        )
+        assert result.lambda_used == selector.regret_lambda
