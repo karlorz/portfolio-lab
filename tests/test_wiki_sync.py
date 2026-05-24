@@ -354,7 +354,7 @@ class TestSyncPerformanceSummary:
         result = wiki_sync.sync_performance_summary()
         assert result is not None
         assert isinstance(result, Path)
-        assert result.suffix == ".md"
+        assert result.suffix == ".json"
 
     def test_returns_none_when_no_log(self, wiki_sync):
         """Returns None when performance.jsonl does not exist."""
@@ -373,14 +373,17 @@ class TestSyncPerformanceSummary:
         assert result is None
 
     def test_content_includes_metrics(self, wiki_sync, perf_log):
-        """Generated markdown contains performance metrics table."""
+        """Generated JSON contains performance metrics."""
         path = wiki_sync.sync_performance_summary()
-        content = path.read_text()
-        assert "Total Return" in content
-        assert "Sharpe Ratio" in content
-        assert "Max Drawdown" in content
-        assert "Start Value" in content
-        assert "Current Value" in content
+        data = json.loads(path.read_text())
+        assert "date" in data
+        assert "performance" in data
+        assert "total_return" in data["performance"]
+        assert "sharpe" in data["performance"]
+        assert "max_drawdown" in data["performance"]
+        assert "start_value" in data["performance"]
+        assert "current_value" in data["performance"]
+        assert "days_tracked" in data["performance"]
 
     def test_handles_missing_daily_returns(self, wiki_sync):
         """Handles performance entries without daily_return gracefully."""
@@ -391,10 +394,11 @@ class TestSyncPerformanceSummary:
             for i in range(20):
                 f.write(json.dumps({"total_value": 100.0}) + "\n")
         result = wiki_sync.sync_performance_summary()
-        # Should still create a page (gracefully handles empty returns)
+        # Should still create a JSON file (gracefully handles empty returns)
         assert result is not None
-        content = result.read_text()
-        assert "0.0%" in content or "0." in content
+        data = json.loads(result.read_text())
+        assert "performance" in data
+        assert "daily_returns_distribution" in data
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +411,7 @@ class TestSyncOrderHistory:
         result = wiki_sync.sync_order_history()
         assert result is not None
         assert isinstance(result, Path)
-        assert result.suffix == ".md"
+        assert result.suffix == ".json"
 
     def test_returns_none_when_no_orders(self, wiki_sync):
         """Returns None when orders.jsonl does not exist."""
@@ -415,21 +419,26 @@ class TestSyncOrderHistory:
         assert result is None
 
     def test_content_includes_table(self, wiki_sync, orders_log):
-        """Generated markdown contains order table."""
+        """Generated JSON contains order data."""
         path = wiki_sync.sync_order_history()
-        content = path.read_text()
-        assert "| Date | Symbol | Side | Shares | Value | Reason |" in content
-        assert "SPY" in content
-        assert "GLD" in content
-        assert "TLT" in content
+        data = json.loads(path.read_text())
+        assert "total_orders" in data
+        assert "recent_shown" in data
+        assert "recent_orders" in data
+        assert len(data["recent_orders"]) == 3
+        symbols = {o["symbol"] for o in data["recent_orders"]}
+        assert "SPY" in symbols
+        assert "GLD" in symbols
+        assert "TLT" in symbols
 
     def test_statistics_section(self, wiki_sync, orders_log):
-        """Markdown includes order statistics (buys, sells, volume)."""
+        """JSON includes order statistics (buys, sells, volume)."""
         path = wiki_sync.sync_order_history()
-        content = path.read_text()
-        assert "buy orders" in content
-        assert "sell orders" in content
-        assert "Total volume" in content
+        data = json.loads(path.read_text())
+        assert "statistics" in data
+        assert data["statistics"]["total_buy_orders"] == 2
+        assert data["statistics"]["total_sell_orders"] == 1
+        assert data["statistics"]["total_volume"] == 72500.0
 
     def test_only_last_20_orders(self, wiki_sync):
         """Only 20 most recent orders are included in table."""
@@ -443,11 +452,8 @@ class TestSyncOrderHistory:
                                      "fill_shares": 10.0, "fill_value": 4500.0,
                                      "reason": "test"}) + "\n")
         result = wiki_sync.sync_order_history()
-        content = result.read_text()
-        # Count table rows (data lines)
-        data_rows = [l for l in content.split("\n") if l.startswith("| ") and "Date" not in l
-                     and "---" not in l and len(l.strip()) > 5]
-        assert len(data_rows) == 20
+        data = json.loads(result.read_text())
+        assert len(data["recent_orders"]) == 20
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +581,7 @@ class TestGraduationStatus:
         """Graduation candidate when sharpe >= 0.5, max_dd <= 0.15, days >= 63."""
         result = wiki_sync._graduation_status(0.10, 0.8, 0.05, 100)
         assert "GRADUATION CANDIDATE" in result
-        assert "Ready for live promotion" in result
+        assert "Sharpe 0.80" in result
 
     def test_fails_on_sharpe(self, wiki_sync):
         """Shows failure when sharpe is too low."""
@@ -616,11 +622,15 @@ class TestRun:
     def test_run_with_all_data(self, wiki_sync, db_with_regimes, perf_log, orders_log):
         """run() executes all sync methods without error."""
         wiki_sync.run()
-        # Check compound pages were created
+        # Check compound pages were created (regime analysis only — performance/orders are JSON in DATA_DIR)
         compound = wiki_sync._wiki / "compound"
         pages = list(compound.glob("*.md"))
-        assert len(pages) >= 3  # regime + performance + orders + knowledge
+        assert len(pages) >= 1  # regime analysis page
         assert (wiki_sync._wiki / "knowledge.md").exists()
+        # Check app data JSON files in DATA_DIR
+        import src.research.wiki_sync as ws
+        perf_orders_files = list(ws.DATA_DIR.glob("*.json"))
+        assert len(perf_orders_files) >= 2  # performance + order summaries
 
     def test_run_without_regime_data(self, wiki_sync, perf_log, orders_log):
         """run() proceeds without regime data."""
@@ -1020,10 +1030,10 @@ class TestSyncPerformanceSummaryEdgeCases:
                 f.write(json.dumps({"total_value": val, "daily_return": 0.001}) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
-        assert "Sharpe" in content
+        data = json.loads(result.read_text())
+        assert "sharpe" in data["performance"]
         # All returns are 0.001 -> identical -> variance=0 -> sharpe=0
-        assert "0.00" in content
+        assert data["performance"]["sharpe"] == 0.0
 
     def test_negative_total_values(self, wiki_sync):
         """All negative total values work without division-by-zero errors."""
@@ -1037,9 +1047,10 @@ class TestSyncPerformanceSummaryEdgeCases:
                 val += 10.0
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
+        data = json.loads(result.read_text())
         # Negative start value results in total_return of 0 (values[0] > 0 is False)
-        assert "Total Return" in content
+        assert "performance" in data
+        assert data["performance"]["total_return"] == 0
 
     def test_single_entry_with_value_no_return(self, wiki_sync):
         """Single entry lacks enough data for return/shapre, still creates page."""
@@ -1065,8 +1076,9 @@ class TestSyncPerformanceSummaryEdgeCases:
                 f.write(json.dumps({"total_value": round(val, 2), "daily_return": ret}) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
-        assert "Total Return" in content
+        data = json.loads(result.read_text())
+        assert "performance" in data
+        assert "total_return" in data["performance"]
 
     def test_malformed_json_lines(self, wiki_sync, caplog):
         """Malformed JSON lines are skipped with a debug log."""
@@ -1080,6 +1092,8 @@ class TestSyncPerformanceSummaryEdgeCases:
         path.write_text("\n".join(lines))
         result = wiki_sync.sync_performance_summary()
         assert result is not None
+        data = json.loads(result.read_text())
+        assert "raw_entries_count" in data
         debug_msgs = [m for m in caplog.messages if "Skipping malformed" in m]
         assert debug_msgs, "Expected a debug log for malformed JSON lines"
 
@@ -1109,7 +1123,7 @@ class TestSyncPerformanceSummaryEdgeCases:
         assert result is None
 
     def test_extreme_large_values(self, wiki_sync):
-        """Very large total values (billions) format correctly."""
+        """Very large total values (billions) are stored correctly."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "performance.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1120,11 +1134,11 @@ class TestSyncPerformanceSummaryEdgeCases:
                 f.write(json.dumps({"total_value": round(val, 2), "daily_return": 0.001}) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
-        assert "$" in content  # Dollar sign in formatted values
+        data = json.loads(result.read_text())
+        assert data["performance"]["current_value"] > 1e12
 
     def test_negative_returns(self, wiki_sync):
-        """All negative returns produce correct negative Sharpe."""
+        """All identical negative returns produce Sharpe of 0 (variance=0)."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "performance.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1135,9 +1149,9 @@ class TestSyncPerformanceSummaryEdgeCases:
                 f.write(json.dumps({"total_value": round(val, 2), "daily_return": -0.01}) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
-        # Negative Sharpe
-        assert "Sharpe" in content
+        data = json.loads(result.read_text())
+        # All returns are -0.01 -> identical -> variance=0 -> sharpe=0
+        assert data["performance"]["sharpe"] == 0.0
 
     def test_log_debug_on_json_decode_error(self, wiki_sync, caplog):
         """Malformed JSON lines produce debug-level log messages."""
@@ -1168,8 +1182,8 @@ class TestSyncPerformanceSummaryEdgeCases:
                 f.write(json.dumps({"total_value": round(val, 2), "daily_return": 0.001}) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
-        assert "100.0%" in content or "100%" in content
+        data = json.loads(result.read_text())
+        assert data["daily_returns_distribution"]["win_rate"] == 1.0
 
     def test_win_rate_with_all_negative_returns(self, wiki_sync):
         """Win rate is 0% when all daily returns are negative."""
@@ -1183,8 +1197,8 @@ class TestSyncPerformanceSummaryEdgeCases:
                 f.write(json.dumps({"total_value": round(val, 2), "daily_return": -0.01}) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
-        assert "0.0%" in content
+        data = json.loads(result.read_text())
+        assert data["daily_returns_distribution"]["win_rate"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -1195,7 +1209,7 @@ class TestSyncOrderHistoryEdgeCases:
     """sync_order_history() boundary conditions."""
 
     def test_orders_missing_timestamp(self, wiki_sync):
-        """Orders without timestamp display 'N/A'."""
+        """Orders without timestamp are stored in JSON without the key."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "orders.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1203,11 +1217,12 @@ class TestSyncOrderHistoryEdgeCases:
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
         assert result is not None
-        content = result.read_text()
-        assert "N/A" in content
+        data = json.loads(result.read_text())
+        order = data["recent_orders"][0]
+        assert "timestamp" not in order
 
     def test_orders_missing_symbol(self, wiki_sync):
-        """Orders without symbol show None."""
+        """Orders without symbol are stored without the key."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "orders.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1215,11 +1230,12 @@ class TestSyncOrderHistoryEdgeCases:
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
         assert result is not None
-        content = result.read_text()
-        assert "None" in content
+        data = json.loads(result.read_text())
+        order = data["recent_orders"][0]
+        assert "symbol" not in order
 
     def test_orders_missing_side(self, wiki_sync):
-        """Orders without side show None."""
+        """Orders without side are stored without the key."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "orders.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1227,9 +1243,9 @@ class TestSyncOrderHistoryEdgeCases:
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
         assert result is not None
-        content = result.read_text()
-        # .get("side") returns None when missing, which shows as "None"
-        assert "None" in content
+        data = json.loads(result.read_text())
+        order = data["recent_orders"][0]
+        assert "side" not in order
 
     def test_negative_fill_shares(self, wiki_sync):
         """Negative fill_shares is accepted (negative shares possible)."""
@@ -1241,8 +1257,8 @@ class TestSyncOrderHistoryEdgeCases:
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
         assert result is not None
-        content = result.read_text()
-        assert "-50" in content
+        data = json.loads(result.read_text())
+        assert data["recent_orders"][0]["fill_shares"] == -50.0
 
     def test_negative_fill_value(self, wiki_sync):
         """Negative fill_value is accepted."""
@@ -1254,11 +1270,11 @@ class TestSyncOrderHistoryEdgeCases:
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
         assert result is not None
-        content = result.read_text()
-        assert "-$" in content or "negative" in content.lower() or "45" in content
+        data = json.loads(result.read_text())
+        assert data["recent_orders"][0]["fill_value"] == -45000.0
 
     def test_zero_fill_shares_and_value(self, wiki_sync):
-        """Zero fill_shares and fill_value display correctly."""
+        """Zero fill_shares and fill_value are stored correctly."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "orders.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1267,9 +1283,9 @@ class TestSyncOrderHistoryEdgeCases:
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
         assert result is not None
-        content = result.read_text()
-        assert "0.00" in content
-        assert "$0.00" in content
+        data = json.loads(result.read_text())
+        assert data["recent_orders"][0]["fill_shares"] == 0
+        assert data["recent_orders"][0]["fill_value"] == 0
 
     def test_malformed_order_json(self, wiki_sync, caplog):
         """Malformed JSON lines in orders are skipped with debug log."""
@@ -1287,6 +1303,8 @@ class TestSyncOrderHistoryEdgeCases:
         path.write_text("\n".join(lines))
         result = wiki_sync.sync_order_history()
         assert result is not None
+        data = json.loads(result.read_text())
+        assert len(data["recent_orders"]) == 2  # Corrupted line skipped
         debug_msgs = [m for m in caplog.messages if "malformed" in m.lower()]
         assert debug_msgs, "Expected a debug log for malformed order JSON"
 
@@ -1300,7 +1318,7 @@ class TestSyncOrderHistoryEdgeCases:
         assert result is None
 
     def test_orders_with_unknown_reason_default(self, wiki_sync):
-        """Orders with missing reason default to 'rebalance'."""
+        """Orders with missing reason are stored without the key."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "orders.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1309,8 +1327,9 @@ class TestSyncOrderHistoryEdgeCases:
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
         assert result is not None
-        content = result.read_text()
-        assert "rebalance" in content
+        data = json.loads(result.read_text())
+        order = data["recent_orders"][0]
+        assert "reason" not in order
 
 
 # ---------------------------------------------------------------------------
@@ -1459,7 +1478,7 @@ class TestGraduationStatusEdgeCases:
         result = wiki_sync._graduation_status(-0.10, -0.5, 0.05, 100)
         assert "GRADUATION" not in result
         assert "Sharpe" in result
-        assert "✗" in result
+        assert "not yet meeting" in result.lower()
 
     def test_negative_max_dd(self, wiki_sync):
         """Negative max drawdown (impossible, but safe) treated as success."""
@@ -1520,7 +1539,7 @@ class TestGraduationStatusEdgeCases:
         """Both sharpe and max_dd at failure boundaries."""
         result = wiki_sync._graduation_status(0.10, 0.49, 0.16, 63)
         assert "GRADUATION" not in result
-        assert "✗" in result
+        assert "not yet meeting" in result.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -1546,7 +1565,7 @@ class TestRunCLI:
         assert "Wiki Sync Complete" in captured.out
 
     def test_run_no_data_capsys(self, wiki_sync, capsys):
-        """run() with no data prints 0 pages."""
+        """run() with no data prints 0 wiki and 0 app."""
         wiki_sync.conn.execute("""
             CREATE TABLE IF NOT EXISTS regime_log (
                 id INTEGER PRIMARY KEY, date TEXT, regime TEXT,
@@ -1557,7 +1576,7 @@ class TestRunCLI:
         wiki_sync.conn.commit()
         wiki_sync.run()
         captured = capsys.readouterr()
-        assert "0 pages" in captured.out
+        assert "0 wiki" in captured.out and "0 app" in captured.out
 
     def test_main_guard_calls_run(self, monkeypatch, tmp_path):
         """__main__ guard instantiates WikiSync and calls run()."""
@@ -1774,6 +1793,8 @@ class TestSyncPerformanceSummaryDataQuality:
                 f.write(json.dumps(entry) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
+        data = json.loads(result.read_text())
+        assert "performance" in data
 
     def test_all_returns_are_none(self, wiki_sync):
         """All entries have None returns -> returns list is empty."""
@@ -1785,9 +1806,9 @@ class TestSyncPerformanceSummaryDataQuality:
                 f.write(json.dumps({"total_value": 100000.0 * (1 + 0.01 * i)}) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
+        data = json.loads(result.read_text())
         # Should not crash; win rate section handles empty returns
-        assert "Positive days" in content or "Total Return" in content
+        assert "daily_returns_distribution" in data
 
     def test_entries_with_zero_total_value(self, wiki_sync):
         """Entries where total_value is 0 are filtered out (0 is falsy)."""
@@ -1803,7 +1824,7 @@ class TestSyncPerformanceSummaryDataQuality:
         assert result is None
 
     def test_graduation_status_included(self, wiki_sync):
-        """Performance page includes graduation status section."""
+        """Performance JSON includes graduation status."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "performance.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1815,9 +1836,10 @@ class TestSyncPerformanceSummaryDataQuality:
                 f.write(json.dumps({"total_value": round(val, 2), "daily_return": ret}) + "\n")
         result = wiki_sync.sync_performance_summary()
         assert result is not None
-        content = result.read_text()
-        assert "Graduation Status" in content
-        assert "Ready for live promotion" in content or "Not Ready" in content or "Tracking" in content
+        data = json.loads(result.read_text())
+        assert "graduation" in data
+        assert "status" in data["graduation"]
+        assert "days_tracked" in data["graduation"]
 
 
 # ---------------------------------------------------------------------------
@@ -1842,9 +1864,9 @@ class TestSyncOrderHistoryStatistics:
         ]
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
-        content = result.read_text()
-        assert "buy orders: 2" in content or "buy orders:2" in content
-        assert "sell orders: 1" in content or "sell orders:1" in content
+        data = json.loads(result.read_text())
+        assert data["statistics"]["total_buy_orders"] == 2
+        assert data["statistics"]["total_sell_orders"] == 1
 
     def test_total_volume_calculation(self, wiki_sync):
         """Total volume sums all fill_values."""
@@ -1859,8 +1881,8 @@ class TestSyncOrderHistoryStatistics:
         ]
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
-        content = result.read_text()
-        assert "$54,500" in content or "54500" in content
+        data = json.loads(result.read_text())
+        assert data["statistics"]["total_volume"] == 54500.0
 
     def test_all_sell_orders(self, wiki_sync):
         """All sell orders shows 0 buys."""
@@ -1873,12 +1895,12 @@ class TestSyncOrderHistoryStatistics:
         ]
         path.write_text("\n".join(json.dumps(o) for o in orders))
         result = wiki_sync.sync_order_history()
-        content = result.read_text()
-        assert "buy orders: 0" in content or "buy orders:0" in content
-        assert "sell orders: 1" in content or "sell orders:1" in content
+        data = json.loads(result.read_text())
+        assert data["statistics"]["total_buy_orders"] == 0
+        assert data["statistics"]["total_sell_orders"] == 1
 
     def test_orders_exceeding_20_truncated(self, wiki_sync):
-        """More than 20 orders shows only 20 in table."""
+        """More than 20 orders shows only 20 in recent_orders."""
         import src.research.wiki_sync as ws
         path = ws.DATA_DIR / "orders.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1890,11 +1912,8 @@ class TestSyncOrderHistoryStatistics:
                     "fill_shares": 10.0, "fill_value": 4500.0,
                 }) + "\n")
         result = wiki_sync.sync_order_history()
-        content = result.read_text()
-        # Table has up to 20 data rows
-        data_rows = [l for l in content.split("\n") if l.startswith("| ") and "Date" not in l
-                     and "---" not in l and len(l.strip()) > 5]
-        assert len(data_rows) == 20
+        data = json.loads(result.read_text())
+        assert len(data["recent_orders"]) == 20
 
 
 # ---------------------------------------------------------------------------

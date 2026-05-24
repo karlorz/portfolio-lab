@@ -146,11 +146,16 @@ Based on recent regime patterns:
         return page_path
     
     def sync_performance_summary(self) -> Optional[Path]:
-        """Sync paper trading performance to wiki."""
+        """Sync paper trading performance to app-level data directory.
+
+        Paper trading P&L is personal app state, not research knowledge.
+        Written to DATA_DIR (not wiki vault) to avoid polluting shared
+        knowledge base with user-specific runtime data.
+        """
         perf_log = DATA_DIR / "performance.jsonl"
         if not perf_log.exists():
             return None
-        
+
         # Load recent performance
         entries = []
         with open(perf_log) as f:
@@ -159,20 +164,20 @@ Based on recent regime patterns:
                     entries.append(json.loads(line))
                 except (json.JSONDecodeError, OSError) as e:
                     logger.debug("Skipping malformed line: %s", e)
-        
+
         if len(entries) < 10:
             return None
-        
+
         # Calculate metrics
         recent = entries[-63:]  # Last 63 entries
         values = [e.get("total_value", 0) for e in recent if e.get("total_value")]
         returns = [e.get("daily_return", 0) for e in recent if e.get("daily_return") is not None]
-        
+
         if not values or len(values) < 10:
             return None
-        
+
         total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else 0
-        
+
         # Sharpe ratio calculation with variance check to avoid division by zero
         if returns and len(returns) > 1:
             mean_return = sum(returns) / len(returns)
@@ -192,86 +197,46 @@ Based on recent regime patterns:
             dd = (peak - v) / peak
             if dd > max_dd:
                 max_dd = dd
-        
-        # Save raw
-        raw_data = {
-            "performance_summary": {
+
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        # Write to app-level DATA_DIR, not wiki vault
+        page_path = DATA_DIR / f"paper-trading-performance-{timestamp}.json"
+
+        summary = {
+            "date": timestamp,
+            "performance": {
                 "total_return": total_return,
                 "sharpe": sharpe,
                 "max_drawdown": max_dd,
                 "days_tracked": len(values),
                 "start_value": values[0],
-                "current_value": values[-1]
+                "current_value": values[-1],
             },
-            "raw_entries_count": len(entries)
+            "daily_returns_distribution": {
+                "positive_days": sum(1 for r in returns if r > 0),
+                "negative_days": sum(1 for r in returns if r < 0),
+                "win_rate": sum(1 for r in returns if r > 0) / len(returns) if returns else 0,
+            },
+            "graduation": self._graduation_status_dict(total_return, sharpe, max_dd, len(values)),
+            "raw_entries_count": len(entries),
         }
-        raw_path = self.save_raw_source(raw_data, "performance_summary")
-        
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        page_path = WIKI_DIR / "compound" / f"paper-trading-performance-{timestamp}.md"
-        
-        # Build citation separately to avoid f-string brace conflicts
-        raw_citation = f"raw/market/{raw_path.name}"
-        
-        content = f"""---
-type: query
-tags: [performance, paper-trading, portfolio-lab, metrics]
-provenance: project
-provenance_projects: [[portfolio-lab]]
-confidence: high
-created: {timestamp}
----
 
-# Paper Trading Performance: Live Summary
-
-**Period:** {len(values)} days tracked
-**Strategy:** SPY/GLD/TLT 46/38/16 with regime overrides
-**Mode:** Paper (simulated with slippage)
-
-## Performance Metrics
-
-| Metric | Value |
-|--------|-------|
-| Total Return | {total_return:.2%} |
-| Sharpe Ratio | {sharpe:.2f} |
-| Max Drawdown | {max_dd:.2%} |
-| Start Value | ${values[0]:,.2f} |
-| Current Value | ${values[-1]:,.2f} |
-
-## Graduation Status
-
-{self._graduation_status(total_return, sharpe, max_dd, len(values))}
-
-## Daily Returns Distribution
-
-- Positive days: {sum(1 for r in returns if r > 0)}
-- Negative days: {sum(1 for r in returns if r < 0)}
-- Win rate: {(sum(1 for r in returns if r > 0) / len(returns) if returns else 0):.1%}
-
-## Notes
-
-- Slippage model: 0.1% per trade
-- Rebalance threshold: 10% drift
-- Volatility target: 12% annual
-
-## Sources
-
-- {{[{raw_citation}]}}
-- [[compound/grid-search-results]] — original backtest validation
-- [[compound/decision-framework]] — allocation rationale
-"""
-        
         with open(page_path, 'w') as f:
-            f.write(content)
-        
+            json.dump(summary, f, indent=2, default=str)
+
         return page_path
     
     def sync_order_history(self) -> Optional[Path]:
-        """Sync recent orders to wiki."""
+        """Sync recent orders to app-level data directory.
+
+        Order fills are personal app state, not research knowledge.
+        Written to DATA_DIR (not wiki vault) to avoid polluting shared
+        knowledge base with user-specific runtime data.
+        """
         orders_log = DATA_DIR / "orders.jsonl"
         if not orders_log.exists():
             return None
-        
+
         orders = []
         with open(orders_log) as f:
             for line in f:
@@ -279,59 +244,32 @@ created: {timestamp}
                     orders.append(json.loads(line))
                 except (json.JSONDecodeError, OSError) as e:
                     logger.debug("Skipping malformed order line: %s", e)
-        
+
         if not orders:
             return None
-        
+
         # Recent orders only
         recent = orders[-20:]  # Last 20 orders
-        
-        # Save raw
-        raw_path = self.save_raw_source(recent, "order_history")
-        
+
         timestamp = datetime.now().strftime("%Y-%m-%d")
-        page_path = WIKI_DIR / "compound" / f"order-history-{timestamp}.md"
-        
-        # Build table
-        rows = "\n".join(
-            f"| {o.get('timestamp', 'N/A')[:10] if o.get('timestamp') else 'N/A'} | {o.get('symbol')} | {o.get('side')} | {o.get('fill_shares', 0):.2f} | ${o.get('fill_value', 0):,.2f} | {o.get('reason', 'rebalance')} |"
-            for o in recent
-        )
-        
-        content = f"""---
-type: query
-tags: [orders, execution, portfolio-lab]
-provenance: project
-provenance_projects: [[portfolio-lab]]
-confidence: high
-created: {timestamp}
----
+        # Write to app-level DATA_DIR, not wiki vault
+        page_path = DATA_DIR / f"order-history-{timestamp}.json"
 
-# Order History: Recent Executions
+        summary = {
+            "date": timestamp,
+            "total_orders": len(orders),
+            "recent_shown": len(recent),
+            "recent_orders": recent,
+            "statistics": {
+                "total_buy_orders": sum(1 for o in orders if o.get('side') == 'buy'),
+                "total_sell_orders": sum(1 for o in orders if o.get('side') == 'sell'),
+                "total_volume": sum(o.get('fill_value', 0) for o in orders),
+            },
+        }
 
-**Total Orders:** {len(orders)}
-**Recent Shown:** 20
-
-## Recent Orders
-
-| Date | Symbol | Side | Shares | Value | Reason |
-|------|--------|------|--------|-------|--------|
-{rows}
-
-## Order Statistics
-
-- Total buy orders: {sum(1 for o in orders if o.get('side') == 'buy')}
-- Total sell orders: {sum(1 for o in orders if o.get('side') == 'sell')}
-- Total volume: ${sum(o.get('fill_value', 0) for o in orders):,.2f}
-
-## Sources
-
-- ^[raw/market/{raw_path.name}]
-"""
-        
         with open(page_path, 'w') as f:
-            f.write(content)
-        
+            json.dump(summary, f, indent=2, default=str)
+
         return page_path
     
     def update_knowledge_md(self):
@@ -422,54 +360,75 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
         return implications.get(regime, implications['normal'])
     
     def _graduation_status(self, total_return: float, sharpe: float, max_dd: float, days: int) -> str:
-        """Generate graduation status text."""
+        """Generate graduation status text (markdown, for regime analysis page)."""
         MIN_DAYS = 63
         MIN_SHARPE = 0.5
         MAX_DD = 0.15
-        
+
         if days < MIN_DAYS:
-            return f"⏳ **Not Ready** — Need {MIN_DAYS - days} more days of history"
-        
+            return f"Not Ready — Need {MIN_DAYS - days} more days of history"
+
         checks = []
         if sharpe >= MIN_SHARPE:
-            checks.append(f"✓ Sharpe {sharpe:.2f} >= {MIN_SHARPE}")
+            checks.append(f"Sharpe {sharpe:.2f} >= {MIN_SHARPE}")
         else:
-            checks.append(f"✗ Sharpe {sharpe:.2f} < {MIN_SHARPE}")
-        
+            checks.append(f"Sharpe {sharpe:.2f} < {MIN_SHARPE}")
+
         if max_dd <= MAX_DD:
-            checks.append(f"✓ Max DD {max_dd:.1%} <= {MAX_DD:.0%}")
+            checks.append(f"Max DD {max_dd:.1%} <= {MAX_DD:.0%}")
         else:
-            checks.append(f"✗ Max DD {max_dd:.1%} > {MAX_DD:.0%}")
-        
+            checks.append(f"Max DD {max_dd:.1%} > {MAX_DD:.0%}")
+
         if sharpe >= MIN_SHARPE and max_dd <= MAX_DD:
-            return f"🎓 **GRADUATION CANDIDATE**\n\n" + "\n".join(f"- {c}" for c in checks) + "\n\nReady for live promotion approval."
+            return f"GRADUATION CANDIDATE: " + "; ".join(checks)
         else:
-            return f"📊 **Tracking** — Not yet meeting graduation criteria\n\n" + "\n".join(f"- {c}" for c in checks)
+            return f"Tracking — Not yet meeting graduation criteria: " + "; ".join(checks)
+
+    def _graduation_status_dict(self, total_return: float, sharpe: float, max_dd: float, days: int) -> dict:
+        """Generate graduation status as dict (for JSON output)."""
+        MIN_DAYS = 63
+        MIN_SHARPE = 0.5
+        MAX_DD = 0.15
+
+        ready = days >= MIN_DAYS and sharpe >= MIN_SHARPE and max_dd <= MAX_DD
+        return {
+            "status": "candidate" if ready else "tracking",
+            "days_tracked": days,
+            "min_days_required": MIN_DAYS,
+            "sharpe_met": sharpe >= MIN_SHARPE,
+            "max_dd_met": max_dd <= MAX_DD,
+            "sharpe": sharpe,
+            "max_drawdown": max_dd,
+        }
     
     def run(self):
         """Run full wiki sync."""
         print(f"[{datetime.now()}] Wiki Sync Starting")
-        
-        pages = []
-        
+
+        wiki_pages = []   # Pages written to wiki vault
+        app_data = []     # Data written to app-level DATA_DIR
+
         if result := self.sync_regime_analysis():
-            pages.append(f"Regime: {result.name}")
-        
+            wiki_pages.append(f"Regime: {result.name}")
+
         if result := self.sync_performance_summary():
-            pages.append(f"Performance: {result.name}")
-        
+            app_data.append(f"Performance: {result.name}")
+
         if result := self.sync_order_history():
-            pages.append(f"Orders: {result.name}")
-        
-        if pages:
+            app_data.append(f"Orders: {result.name}")
+
+        # Only update knowledge.md when wiki vault pages change
+        if wiki_pages:
             knowledge = self.update_knowledge_md()
             print(f"Updated {knowledge.name}")
-        
-        for p in pages:
-            print(f"  Synced: {p}")
-        
+
+        for p in wiki_pages:
+            print(f"  Synced (wiki): {p}")
+        for p in app_data:
+            print(f"  Synced (app): {p}")
+
         self.conn.close()
-        print(f"[{datetime.now()}] Wiki Sync Complete ({len(pages)} pages)")
+        print(f"[{datetime.now()}] Wiki Sync Complete ({len(wiki_pages)} wiki, {len(app_data)} app)")
 
 if __name__ == "__main__":
     sync = WikiSync()
