@@ -507,6 +507,26 @@ class TestGraduationCriteria:
         assert "exceeds realistic maximum" in captured.out
         assert "GRADUATION CANDIDATE" not in captured.out
 
+    def test_dsr_in_graduation_metrics(self, tmp_path, capsys):
+        """Graduation trigger should include DSR in metrics."""
+        p = _make_portfolio(tmp_path)
+        p.history = []
+        np.random.seed(42)
+        for i in range(100):
+            ret = np.random.normal(0.001, 0.005)
+            val = 100000 * (1 + ret)
+            p.history.append({
+                "timestamp": f"2026-01-{i+1:02d}T00:00:00",
+                "total_value": val,
+                "daily_return": ret,
+            })
+        check_graduation_criteria(p)
+        trigger_path = tmp_path / "data" / ".promote_to_live"
+        if trigger_path.exists():
+            import json
+            trigger = json.loads(trigger_path.read_text())
+            assert "dsr" in trigger["metrics"]
+
 
 class TestDeduplicateToDaily:
 

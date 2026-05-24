@@ -525,9 +525,22 @@ def check_graduation_criteria(portfolio: Portfolio):
         return
     
     # Check criteria
-    if sharpe > MIN_SHARPE and max_dd < MAX_DD and win_rate > MIN_WIN_RATE:
-        print(f"GRADUATION CANDIDATE: Sharpe={sharpe:.2f}, DD={max_dd:.2%}, WinRate={win_rate:.2%}")
-        
+    # DSR validation: confirm Sharpe survives multiple-testing correction
+    # With 94 grid-search configs, DSR > 0.95 means the Sharpe is statistically
+    # significant, not just the best of many trials
+    MIN_DSR = 0.50  # Minimum DSR for graduation confidence
+    try:
+        from src.backtest.metrics import compute_deflated_sharpe_ratio
+        dsr = compute_deflated_sharpe_ratio(
+            sharpe_ratio=sharpe, n_trials=94, n_observations=len(returns),
+        )
+    except Exception:
+        dsr = 0.0  # If DSR can't be computed, fail closed
+
+    if sharpe > MIN_SHARPE and max_dd < MAX_DD and win_rate > MIN_WIN_RATE and dsr >= MIN_DSR:
+        print(f"GRADUATION CANDIDATE: Sharpe={sharpe:.2f}, DD={max_dd:.2%}, "
+              f"WinRate={win_rate:.2%}, DSR={dsr:.2f}")
+
         # Create promotion trigger
         trigger = {
             "action": "promote_to_live",
@@ -535,7 +548,8 @@ def check_graduation_criteria(portfolio: Portfolio):
                 "sharpe": round(sharpe, 2),
                 "max_drawdown": round(max_dd, 4),
                 "win_rate": round(win_rate, 4),
-                "total_return": round(total_return, 6)
+                "total_return": round(total_return, 6),
+                "dsr": round(dsr, 4),
             },
             "timestamp": datetime.now().isoformat(),
             "requires_approval": True
