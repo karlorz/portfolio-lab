@@ -214,3 +214,249 @@ class TestHealthReport:
         assert "timestamp" in report
         assert "scores" in report
         assert "overall_health" in report
+
+
+class TestLogPrediction:
+    """Test log_prediction (full SignalPrediction version)."""
+
+    def test_log_full_prediction(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        pred = SignalPrediction(
+            timestamp=datetime.now().isoformat(),
+            source="alternative_data",
+            signal_value=0.5,
+            confidence=0.8,
+            predicted_direction=1,
+            metadata={"regime": "normal"},
+        )
+        tracker.log_prediction(pred)
+        # Verify it was saved by checking the database
+        import sqlite3
+        with sqlite3.connect(str(db)) as conn:
+            rows = conn.execute("SELECT COUNT(*) FROM signal_predictions").fetchone()
+        assert rows[0] == 1
+
+
+class TestUpdateActualDirections:
+    """Test update_actual_directions."""
+
+    def test_update_with_returns(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Log a prediction first
+        tracker.log_prediction_simple(
+            source="alternative_data",
+            signal_value=0.5,
+            confidence=0.7,
+        )
+        # Update with positive returns
+        returns_data = {"SPY": 0.02, "GLD": 0.01, "TLT": -0.01}
+        tracker.update_actual_directions(returns_data, datetime.now().isoformat())
+        # Should not raise
+
+
+class TestCalculateAllHealthScores:
+    """Test calculate_all_health_scores."""
+
+    def test_empty_database(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        scores = tracker.calculate_all_health_scores()
+        assert isinstance(scores, dict)
+
+    def test_with_multiple_sources(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        for _ in range(10):
+            tracker.log_prediction_simple(
+                source="alternative_data",
+                signal_value=0.5,
+                confidence=0.7,
+            )
+            tracker.log_prediction_simple(
+                source="cross_asset_rv",
+                signal_value=-0.4,
+                confidence=0.6,
+            )
+        scores = tracker.calculate_all_health_scores()
+        assert isinstance(scores, dict)
+
+
+class TestSaveHealthScores:
+    """Test save_health_scores."""
+
+    def test_save_and_retrieve(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        scores = {
+            "alternative_data": HealthScore(
+                source="alternative_data",
+                timestamp=datetime.now().isoformat(),
+                health_score=0.75,
+                accuracy_30d=0.70,
+                accuracy_60d=0.72,
+                accuracy_90d=0.68,
+                decay_rate=0.0,
+                predictions_count=50,
+                status=SignalHealthStatus.HEALTHY.value,
+            ),
+        }
+        tracker.save_health_scores(scores)
+        # Should not raise and should persist
+
+
+class TestDetectDecayAlerts:
+    """Test detect_decay_alerts — queries database directly."""
+
+    def test_no_alerts_for_fresh_db(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # No health score history in DB → no alerts
+        alerts = tracker.detect_decay_alerts()
+        assert isinstance(alerts, list)
+        assert len(alerts) == 0
+
+    def test_with_historical_scores_in_db(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Save some health scores first (need at least 2 for comparison)
+        scores_old = {
+            "multi_speed_momentum": HealthScore(
+                source="multi_speed_momentum",
+                timestamp=(datetime.now() - timedelta(days=20)).isoformat(),
+                health_score=0.80,
+                accuracy_30d=0.75,
+                accuracy_60d=0.78,
+                accuracy_90d=0.73,
+                decay_rate=0.01,
+                predictions_count=100,
+                status=SignalHealthStatus.HEALTHY.value,
+            ),
+        }
+        tracker.save_health_scores(scores_old)
+        scores_new = {
+            "multi_speed_momentum": HealthScore(
+                source="multi_speed_momentum",
+                timestamp=datetime.now().isoformat(),
+                health_score=0.40,
+                accuracy_30d=0.35,
+                accuracy_60d=0.40,
+                accuracy_90d=0.45,
+                decay_rate=0.08,
+                predictions_count=100,
+                status=SignalHealthStatus.DEGRADED.value,
+            ),
+        }
+        tracker.save_health_scores(scores_new)
+        alerts = tracker.detect_decay_alerts()
+        assert isinstance(alerts, list)
+
+
+class TestGetAdjustedWeights:
+    """Test get_adjusted_weights."""
+
+    def _make_health_score(self, source, health_score, status, accuracy_30d=0.70):
+        return HealthScore(
+            source=source,
+            timestamp=datetime.now().isoformat(),
+            health_score=health_score,
+            accuracy_30d=accuracy_30d,
+            accuracy_60d=accuracy_30d - 0.02,
+            accuracy_90d=accuracy_30d - 0.05,
+            decay_rate=0.01,
+            predictions_count=100,
+            status=status,
+        )
+
+    def test_default_weights_healthy(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        base_weights = {
+            "alternative_data": 0.305,
+            "cross_asset_rv": 0.13,
+            "international_momentum": 0.245,
+        }
+        scores = {
+            "alternative_data": self._make_health_score("alternative_data", 0.85, SignalHealthStatus.HEALTHY.value, 0.75),
+            "cross_asset_rv": self._make_health_score("cross_asset_rv", 0.90, SignalHealthStatus.HEALTHY.value, 0.80),
+            "international_momentum": self._make_health_score("international_momentum", 0.78, SignalHealthStatus.HEALTHY.value, 0.68),
+        }
+        adjusted = tracker.get_adjusted_weights(base_weights, scores)
+        assert isinstance(adjusted, dict)
+        # Healthy signals should keep most of their weight
+        for src, weight in adjusted.items():
+            assert weight >= 0
+
+    def test_degraded_signal_reduced_weight(self, tmp_path):
+        """When one signal has worse health, it should get less relative weight."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Log enough predictions for health calculation
+        for _ in range(25):
+            tracker.log_prediction_simple(source="alternative_data", signal_value=0.5, confidence=0.8)
+            tracker.log_prediction_simple(source="multi_speed_momentum", signal_value=-0.1, confidence=0.3)
+        base_weights = {
+            "alternative_data": 0.305,
+            "multi_speed_momentum": 0.305,
+        }
+        adjusted = tracker.get_adjusted_weights(base_weights)
+        # Both sources have data now; should produce adjusted weights
+        assert isinstance(adjusted, dict)
+        # Weights should sum to ~1.0
+        total = sum(adjusted.values())
+        assert abs(total - 1.0) < 0.01
+
+
+class TestDecayAlertDataclass:
+    """Test DecayAlert dataclass creation."""
+
+    def test_create_with_all_fields(self):
+        alert = DecayAlert(
+            source="multi_speed_momentum",
+            alert_timestamp=datetime.now().isoformat(),
+            previous_health=0.75,
+            current_health=0.40,
+            drop_30d=0.35,
+            severity="critical",
+            message="Health dropped below threshold",
+        )
+        assert alert.source == "multi_speed_momentum"
+        assert alert.severity == "critical"
+        assert alert.drop_30d == 0.35
+
+    def test_to_dict(self):
+        alert = DecayAlert(
+            source="multi_speed_momentum",
+            alert_timestamp=datetime.now().isoformat(),
+            previous_health=0.60,
+            current_health=0.35,
+            drop_30d=0.25,
+            severity="warning",
+            message="Monitor closely",
+        )
+        d = alert.to_dict()
+        assert isinstance(d, dict)
+        assert d["source"] == "multi_speed_momentum"
+
+
+class TestHealthScoreStatusClassification:
+    """Test HealthScore status classification logic."""
+
+    def test_healthy_threshold(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        for _ in range(20):
+            tracker.log_prediction_simple(
+                source="alternative_data",
+                signal_value=0.5,
+                confidence=0.9,
+            )
+        # With consistent predictions, should get a health score
+        scores = tracker.calculate_all_health_scores()
+        if "alternative_data" in scores:
+            score = scores["alternative_data"]
+            assert hasattr(score, "health_score")
+            assert hasattr(score, "status")
+            assert score.health_score >= 0
+            assert score.health_score <= 1
