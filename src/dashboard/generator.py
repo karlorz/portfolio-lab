@@ -278,7 +278,7 @@ class DashboardGenerator:
         # Add sector rotation momentum signals (v2.40 Phase 5)
         sector_momentum_signal = None
         try:
-            sector_momentum_signal = self._generate_sector_momentum_signals()
+            sector_momentum_signal = self._generate_sector_momentum_signals(vix_level=vix_level)
         except Exception as e:
             # Sector momentum not available yet
             logger.warning("Sector momentum not available: %s", e)
@@ -1073,27 +1073,19 @@ class DashboardGenerator:
         
         return out_path
     
-    def _generate_sector_momentum_signals(self) -> Optional[Dict]:
+    def _generate_sector_momentum_signals(self, vix_level: Optional[float] = None) -> Optional[Dict]:
         """Generate sector rotation momentum signals from historical data."""
         try:
             from src.strategy.sector_momentum_calc import generate_sector_signals
-            
+
             historical_path = PUBLIC_DIR.parent / "data" / "historical.json"
-            
-            # Get current VIX level for threshold checking
-            vix = 0
-            try:
-                cursor = self.conn.cursor()
-                cursor.execute("SELECT close FROM prices WHERE symbol = '^VIX' ORDER BY date DESC LIMIT 1")
-                row = cursor.fetchone()
-                if row:
-                    vix = row[0]
-            except Exception as e:
-                logger.warning("Failed to fetch VIX level for sector momentum: %s", e)
+
+            # Use provided VIX level (avoid re-querying DB)
+            vix = vix_level if vix_level is not None else 0
 
             signals = generate_sector_signals(historical_path, vix=vix)
             return signals
-            
+
         except Exception as e:
             logger.warning("Failed to generate sector momentum signals: %s", e)
             return None
