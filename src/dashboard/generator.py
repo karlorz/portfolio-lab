@@ -804,7 +804,7 @@ class DashboardGenerator:
             result["duration_allocation"] = regime_allocations.get(regime, regime_allocations["normal"])
             
         except Exception as e:
-            print(f"Warning: Failed to load yield curve data: {e}")
+            logger.warning("Failed to load yield curve data: %s", e)
         
         return result
     
@@ -1096,7 +1096,7 @@ class DashboardGenerator:
             return signals
             
         except Exception as e:
-            print(f"Warning: Failed to generate sector momentum signals: {e}")
+            logger.warning("Failed to generate sector momentum signals: %s", e)
             return None
     
     def generate_analytics_json(self) -> Path:
@@ -1192,7 +1192,7 @@ class DashboardGenerator:
             return out_path
 
         except Exception as e:
-            print(f"Warning: Failed to generate graduation data: {e}")
+            logger.warning("Failed to generate graduation data: %s", e)
             return None
 
     def run(self):
