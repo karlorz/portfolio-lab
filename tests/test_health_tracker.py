@@ -460,3 +460,103 @@ class TestHealthScoreStatusClassification:
             assert hasattr(score, "status")
             assert score.health_score >= 0
             assert score.health_score <= 1
+
+
+# ---------------------------------------------------------------------------
+# Spearman rank correlation (static helper)
+# ---------------------------------------------------------------------------
+
+class TestSpearmanRankCorrelation:
+
+    def test_perfect_positive(self):
+        rho = SignalHealthTracker._spearman_rank_correlation([1, 2, 3, 4], [1, 2, 3, 4])
+        assert rho == pytest.approx(1.0, abs=0.01)
+
+    def test_perfect_negative(self):
+        rho = SignalHealthTracker._spearman_rank_correlation([1, 2, 3, 4], [4, 3, 2, 1])
+        assert rho == pytest.approx(-1.0, abs=0.01)
+
+    def test_no_correlation(self):
+        # Uncorrelated sequences
+        rho = SignalHealthTracker._spearman_rank_correlation([1, 2, 3, 4, 5], [5, 1, 4, 2, 3])
+        assert -1.0 <= rho <= 1.0
+
+    def test_too_few_points_returns_none(self):
+        assert SignalHealthTracker._spearman_rank_correlation([1], [1]) is None
+        assert SignalHealthTracker._spearman_rank_correlation([1, 2], [1, 2]) is None
+
+    def test_constant_series_returns_zero(self):
+        rho = SignalHealthTracker._spearman_rank_correlation([1, 1, 1, 1], [1, 2, 3, 4])
+        assert rho == 0.0
+
+    def test_tied_ranks(self):
+        rho = SignalHealthTracker._spearman_rank_correlation([1, 1, 3, 4], [1, 2, 3, 4])
+        assert -1.0 <= rho <= 1.0
+
+    def test_mismatched_lengths_returns_none(self):
+        assert SignalHealthTracker._spearman_rank_correlation([1, 2, 3], [1, 2]) is None
+
+
+# ---------------------------------------------------------------------------
+# compute_ic
+# ---------------------------------------------------------------------------
+
+class TestComputeIC:
+
+    def test_insufficient_data_returns_none(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Only 2 predictions — need at least 3
+        tracker.log_prediction_simple(source="cta", signal_value=0.5, confidence=0.8)
+        tracker.log_prediction_simple(source="cta", signal_value=0.3, confidence=0.7)
+        assert tracker.compute_ic("cta") is None
+
+    def test_with_data_returns_float(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        for i in range(20):
+            ts = (today - timedelta(days=i * 4)).strftime("%Y-%m-%dT10:00:00")
+            tracker.log_prediction_simple(source="cta", signal_value=0.5, confidence=0.8, timestamp=ts)
+        for i in range(20):
+            day = (today - timedelta(days=i * 4)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": 0.01}, day)
+        ic = tracker.compute_ic("cta")
+        assert ic is not None
+        assert -1.0 <= ic <= 1.0
+
+    def test_unknown_source_returns_none(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        assert tracker.compute_ic("nonexistent") is None
+
+
+# ---------------------------------------------------------------------------
+# compute_ic_half_life
+# ---------------------------------------------------------------------------
+
+class TestComputeICHalfLife:
+
+    def test_insufficient_data_returns_none(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Only 5 predictions — not enough for rolling windows
+        for i in range(5):
+            tracker.log_prediction_simple(source="cta", signal_value=0.5, confidence=0.8)
+        assert tracker.compute_ic_half_life("cta") is None
+
+    def test_returns_float_or_inf_when_stable(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        # Insert 60 predictions over 360 days for enough IC windows
+        for i in range(60):
+            ts = (today - timedelta(days=i * 6)).strftime("%Y-%m-%dT10:00:00")
+            tracker.log_prediction_simple(source="cta", signal_value=0.5, confidence=0.8, timestamp=ts)
+        for i in range(60):
+            day = (today - timedelta(days=i * 6)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": 0.01}, day)
+        hl = tracker.compute_ic_half_life("cta")
+        # May be None (not enough varied IC), float, or inf (stable IC)
+        if hl is not None:
+            assert hl > 0 or hl == float("inf")

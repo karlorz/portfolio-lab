@@ -503,7 +503,163 @@ class SignalHealthTracker:
             adjusted = {k: v / total for k, v in adjusted.items()}
         
         return adjusted
-    
+
+    # ------------------------------------------------------------------
+    # Information Coefficient (IC) methods
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _spearman_rank_correlation(x: List[float], y: List[float]) -> Optional[float]:
+        """
+        Compute Spearman rank correlation without scipy dependency.
+
+        Spearman ρ = Pearson correlation of ranks.
+        Returns None if fewer than 3 paired observations.
+        """
+        n = len(x)
+        if n < 3 or len(y) != n:
+            return None
+
+        def _rank(vals: List[float]) -> List[float]:
+            indexed = sorted(enumerate(vals), key=lambda t: t[1])
+            ranks = [0.0] * n
+            i = 0
+            while i < n:
+                j = i
+                while j < n - 1 and indexed[j + 1][1] == indexed[j][1]:
+                    j += 1
+                avg_rank = (i + 1 + j + 1) / 2  # Average of 1-based positions
+                for k in range(i, j + 1):
+                    ranks[indexed[k][0]] = avg_rank
+                i = j + 1
+            return ranks
+
+        rx = _rank(x)
+        ry = _rank(y)
+
+        mean_rx = sum(rx) / n
+        mean_ry = sum(ry) / n
+
+        cov = sum((rx[i] - mean_rx) * (ry[i] - mean_ry) for i in range(n))
+        std_rx = (sum((r - mean_rx) ** 2 for r in rx)) ** 0.5
+        std_ry = (sum((r - mean_ry) ** 2 for r in ry)) ** 0.5
+
+        if std_rx == 0 or std_ry == 0:
+            return 0.0
+
+        return cov / (std_rx * std_ry)
+
+    def compute_ic(
+        self, source: str, lookback_days: int = 90, end_date: Optional[str] = None
+    ) -> Optional[float]:
+        """
+        Compute Information Coefficient (Spearman rank correlation) between
+        signal values and actual forward returns for a given source.
+
+        IC measures predictive power: |IC| > 0.05 is meaningful for most
+        cross-sectional strategies; |IC| > 0.10 is strong.
+
+        Returns None if insufficient data.
+        """
+        end_date = end_date or datetime.now().strftime("%Y-%m-%d")
+        start_date = (
+            datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=lookback_days)
+        ).strftime("%Y-%m-%d")
+
+        with sqlite_connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT signal_value, actual_direction
+                FROM signal_predictions
+                WHERE source = ?
+                  AND date(timestamp) BETWEEN date(?) AND date(?)
+                  AND actual_direction IS NOT NULL
+                  AND signal_value IS NOT NULL
+                ORDER BY timestamp
+                """,
+                (source, start_date, end_date),
+            )
+            rows = cursor.fetchall()
+
+        if len(rows) < 3:
+            logger.info("Insufficient data for IC: source=%s, rows=%d", source, len(rows))
+            return None
+
+        signals = [r[0] for r in rows]
+        actuals = [r[1] for r in rows]
+        return self._spearman_rank_correlation(signals, actuals)
+
+    def compute_ic_half_life(
+        self, source: str, end_date: Optional[str] = None, min_periods: int = 6
+    ) -> Optional[float]:
+        """
+        Estimate IC half-life: the number of days over which IC decays to
+        half its initial value.
+
+        Method: compute rolling 30-day IC windows, fit exponential decay
+        IC(t) = IC_0 * exp(-t * ln(2) / half_life), and return half_life
+        in days.  Returns None if insufficient data.
+        """
+        end_date = end_date or datetime.now().strftime("%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+
+        # Compute IC over overlapping 30-day windows, stepped by 10 days
+        window_days = 30
+        step_days = 10
+        ics: List[tuple] = []  # (center_offset_days, ic_value)
+
+        offset = 0
+        while True:
+            window_end = end_dt - timedelta(days=offset)
+            window_start = window_end - timedelta(days=window_days)
+            if window_start < end_dt - timedelta(days=365):
+                break
+
+            ic = self.compute_ic(
+                source,
+                lookback_days=window_days,
+                end_date=window_end.strftime("%Y-%m-%d"),
+            )
+            if ic is not None:
+                ics.append((offset, ic))
+            offset += step_days
+
+        if len(ics) < min_periods:
+            logger.info(
+                "Insufficient IC windows for half-life: source=%s, windows=%d",
+                source,
+                len(ics),
+            )
+            return None
+
+        # Fit: IC(t) = IC_0 * exp(-k * t), half_life = ln(2) / k
+        # Use log-linear regression: ln|IC(t)| = ln|IC_0| - k * t
+        import math
+
+        filtered = [(t, abs(ic)) for t, ic in ics if abs(ic) > 1e-9]
+        if len(filtered) < min_periods:
+            return None
+
+        n = len(filtered)
+        sum_t = sum(t for t, _ in filtered)
+        sum_y = sum(math.log(v) for _, v in filtered)
+        sum_tt = sum(t * t for t, _ in filtered)
+        sum_ty = sum(t * math.log(v) for t, v in filtered)
+
+        denom = n * sum_tt - sum_t * sum_t
+        if abs(denom) < 1e-12:
+            return None
+
+        # slope = -k (decay rate per day)
+        k = -(n * sum_ty - sum_t * sum_y) / denom
+        if k <= 0:
+            # No decay detected — IC is stable or increasing
+            return float("inf")
+
+        half_life = math.log(2) / k
+        return round(half_life, 1)
+
     def get_health_report(self) -> Dict[str, Any]:
         """Generate comprehensive health report."""
         scores = self.calculate_all_health_scores()
