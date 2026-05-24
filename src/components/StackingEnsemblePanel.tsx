@@ -12,7 +12,7 @@ interface StackingEnsembleData {
   model_version: string;
   voting_accuracy: number;          // Baseline 65%
   stacking_accuracy: number;        // Target 76%
-  feature_count: number;            // 102-dim feature vector
+  feature_count: number;            // 59-dim feature vector
   latency_ms: number;               // Inference latency
   top_features?: Array<{ name: string; importance: number }>;
   backtest_finding?: string;
