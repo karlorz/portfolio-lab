@@ -5,12 +5,15 @@ Triggered by regime changes or manual request. Uses Claude Code for complex anal
 """
 
 import json
+import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
 from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, WORK_DIR as _WORK_DIR, sqlite_connect
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = _DATA_DIR
 WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
@@ -203,34 +206,34 @@ created: {timestamp}
     
     def run(self):
         """Main research agent loop."""
-        print(f"[{datetime.now()}] Research Agent Starting")
-        
+        logger.info("Research Agent Starting")
+
         triggers = self.check_triggers()
-        
+
         if not triggers:
-            print("No triggers found, checking for scheduled analysis...")
+            logger.info("No triggers found, checking for scheduled analysis...")
             # Run daily summary analysis
             return self.run_daily_summary()
         
         for trigger in triggers:
-            print(f"Processing trigger: {trigger.get('type')}")
-            
+            logger.info("Processing trigger: %s", trigger.get('type'))
+
             analysis = self.analyze_regime(trigger)
-            print(f"Analysis complete: {analysis.get('recommended_action')}")
-            
+            logger.info("Analysis complete: %s", analysis.get('recommended_action'))
+
             if self.should_delegate_claude(analysis):
                 work_file = self.delegate_to_claude(analysis, trigger)
-                print(f"Delegated to Claude Code: {work_file}")
-                
+                logger.info("Delegated to Claude Code: %s", work_file)
+
                 # In a real system, this would spawn Claude Code
                 # For now, we create a human-readable task file
                 self.create_claude_prompt(work_file, analysis)
-            
+
             wiki_page = self.crystallize_to_wiki(analysis)
-            print(f"Crystallized to wiki: {wiki_page}")
-        
+            logger.info("Crystallized to wiki: %s", wiki_page)
+
         self.conn.close()
-        print(f"[{datetime.now()}] Research Agent Complete")
+        logger.info("Research Agent Complete")
     
     def create_claude_prompt(self, work_file: Path, analysis: Dict):
         """Create a human/Claude readable prompt from work item."""

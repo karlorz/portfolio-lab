@@ -282,6 +282,29 @@ class SmartRebalancingController:
         cost_decimal = base_spread * vpin_mult * time_mult
         return round(cost_decimal * 10000, 2)  # Convert to bps
 
+    def estimate_total_cost_bps(
+        self, drift_details: Dict[str, float], vpin: float, in_optimal_window: bool
+    ) -> float:
+        """
+        Estimate total rebalancing cost using per-ETF transaction costs.
+
+        For each symbol with non-zero drift, computes the per-symbol cost
+        and sums them. Falls back to flat estimate_cost_bps if no drift
+        details available.
+        """
+        if not drift_details:
+            return self.estimate_cost_bps(vpin, in_optimal_window)
+
+        total = 0.0
+        for symbol, drift in drift_details.items():
+            if drift > 0:
+                symbol_cost = self.estimate_per_symbol_cost_bps(
+                    symbol, vpin, in_optimal_window
+                )
+                # Scale cost by drift magnitude (larger drift = larger trade)
+                total += symbol_cost * drift
+        return round(total, 2)
+
     def _in_optimal_window(self, now: Optional[datetime] = None) -> bool:
         """Check if current time is in optimal execution window (11am-2pm ET)."""
         if now is None:
@@ -346,7 +369,7 @@ class SmartRebalancingController:
         # Step 3: Safety override — force if drift > 25%
         force_threshold = self.config['fallback']['force_if_drift_exceeds']
         if max_drift > force_threshold:
-            cost = self.estimate_cost_bps(vpin, self._in_optimal_window(now))
+            cost = self.estimate_total_cost_bps(drift_details, vpin, self._in_optimal_window(now))
             return RebalanceDecisionResult(
                 decision=RebalanceDecision.OVERRIDE_EMERGENCY,
                 urgency=UrgencyLevel.EMERGENCY,
@@ -365,7 +388,7 @@ class SmartRebalancingController:
             if self.consecutive_deferrals > max_deferrals:
                 # Max deferral count exceeded — force execution
                 self.consecutive_deferrals = 0
-                cost = self.estimate_cost_bps(vpin, self._in_optimal_window(now))
+                cost = self.estimate_total_cost_bps(drift_details, vpin, self._in_optimal_window(now))
                 return RebalanceDecisionResult(
                     decision=RebalanceDecision.EXECUTE,
                     urgency=urgency,
@@ -416,7 +439,7 @@ class SmartRebalancingController:
                 )
 
         # All checks passed — execute
-        cost = self.estimate_cost_bps(vpin, in_window)
+        cost = self.estimate_total_cost_bps(drift_details, vpin, in_window)
         return RebalanceDecisionResult(
             decision=RebalanceDecision.EXECUTE,
             urgency=urgency,

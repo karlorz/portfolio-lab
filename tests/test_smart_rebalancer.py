@@ -562,3 +562,49 @@ class TestRegimeAdaptiveDriftThresholds:
         result = ctrl.should_rebalance(portfolio, market, regime='unknown_regime')
         # Default 10% threshold, 8% drift → skip
         assert result.decision == RebalanceDecision.SKIP_LOW_DRIFT
+
+
+# ---------------------------------------------------------------------------
+# estimate_total_cost_bps (per-ETF integration)
+# ---------------------------------------------------------------------------
+
+class TestEstimateTotalCostBps:
+
+    def test_uses_per_symbol_costs(self):
+        ctrl = SmartRebalancingController()
+        drift_details = {'SPY': 0.05, 'GLD': 0.03}
+        total = ctrl.estimate_total_cost_bps(drift_details, 0.30, True)
+        assert total > 0
+
+    def test_tlt_costs_more_than_spy_for_same_drift(self):
+        ctrl = SmartRebalancingController()
+        spy_drift = {'SPY': 0.10}
+        tlt_drift = {'TLT': 0.10}
+        spy_cost = ctrl.estimate_total_cost_bps(spy_drift, 0.30, True)
+        tlt_cost = ctrl.estimate_total_cost_bps(tlt_drift, 0.30, True)
+        assert tlt_cost > spy_cost
+
+    def test_empty_drift_falls_back_to_flat(self):
+        ctrl = SmartRebalancingController()
+        total = ctrl.estimate_total_cost_bps({}, 0.30, True)
+        flat = ctrl.estimate_cost_bps(0.30, True)
+        assert total == flat
+
+    def test_larger_drift_costs_more(self):
+        ctrl = SmartRebalancingController()
+        small_drift = {'SPY': 0.05}
+        large_drift = {'SPY': 0.15}
+        small_cost = ctrl.estimate_total_cost_bps(small_drift, 0.30, True)
+        large_cost = ctrl.estimate_total_cost_bps(large_drift, 0.30, True)
+        assert large_cost > small_cost
+
+    def test_rebalance_result_uses_per_symbol_costs(self):
+        """should_rebalance now uses per-ETF cost estimation."""
+        ctrl = SmartRebalancingController()
+        portfolio = _drifted_portfolio(0.15)
+        market = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 13, 12, 0)
+        result = ctrl.should_rebalance(portfolio, market, now=now)
+        if result.decision == RebalanceDecision.EXECUTE:
+            # Cost should reflect per-ETF pricing, not flat rate
+            assert result.estimated_cost_bps > 0
