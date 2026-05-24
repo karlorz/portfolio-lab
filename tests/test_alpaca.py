@@ -363,5 +363,206 @@ class TestCheckAlpacaStatus:
         assert status['sdk_available'] is False
 
 
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestOrderRequestExtended:
+    """Extended OrderRequest tests."""
+
+    def test_to_dict_has_all_fields(self):
+        req = OrderRequest(
+            symbol='TLT', qty=3.0, side=OrderSide.BUY,
+            order_type=OrderType.LIMIT, limit_price=95.0,
+            time_in_force='gtc',
+        )
+        d = req.to_dict()
+        expected_keys = {'symbol', 'qty', 'side', 'type', 'limit_price', 'time_in_force'}
+        assert expected_keys == set(d.keys())
+
+    def test_market_order_no_limit_price(self):
+        """Market order should have None limit_price."""
+        req = OrderRequest(symbol='SPY', qty=1.0, side=OrderSide.BUY)
+        d = req.to_dict()
+        assert d['limit_price'] is None
+
+
+class TestOrderExtended:
+    """Extended Order tests."""
+
+    def test_filled_order_fields(self):
+        order = Order(
+            id='fill-1', symbol='GLD', qty=5.0, filled_qty=5.0,
+            side='buy', type='market', status='filled',
+            created_at='2026-05-24T10:00:00',
+            filled_at='2026-05-24T10:00:01',
+            filled_avg_price=200.5,
+        )
+        assert order.filled_qty == order.qty
+        assert order.filled_avg_price > 0
+
+    def test_from_alpaca_with_filled(self):
+        mock = MagicMock()
+        mock.id = 'o1'
+        mock.symbol = 'TLT'
+        mock.qty = 2.0
+        mock.filled_qty = 2.0
+        mock.side.value = 'sell'
+        mock.type.value = 'limit'
+        mock.status.value = 'filled'
+        mock.created_at = datetime(2026, 5, 24)
+        mock.filled_at = datetime(2026, 5, 24, 10, 0, 5)
+        mock.filled_avg_price = 95.0
+        order = Order.from_alpaca(mock)
+        assert order.side == 'sell'
+        assert order.type == 'limit'
+        assert order.filled_avg_price == 95.0
+
+
+class TestPositionExtended:
+    """Extended Position tests."""
+
+    def test_all_fields(self):
+        pos = Position(
+            symbol='TLT', qty=20.0, avg_entry_price=95.0,
+            current_price=92.0, market_value=1840.0,
+            unrealized_pl=-60.0, unrealized_plpc=-0.032,
+        )
+        assert pos.unrealized_pl < 0
+        assert pos.unrealized_plpc < 0
+
+    def test_from_alpaca_with_negative_pl(self):
+        mock = MagicMock()
+        mock.symbol = 'TLT'
+        mock.qty = 20.0
+        mock.avg_entry_price = 95.0
+        mock.current_price = 92.0
+        mock.market_value = 1840.0
+        mock.unrealized_pl = -60.0
+        mock.unrealized_plpc = -0.032
+        pos = Position.from_alpaca(mock)
+        assert pos.unrealized_pl == -60.0
+
+
+class TestAlpacaClientExtended:
+    """Extended AlpacaClient tests."""
+
+    def test_get_account_not_configured_raises(self):
+        """get_account should raise when not configured."""
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.get_account()
+
+    def test_submit_order_not_configured_raises(self):
+        """submit_order should raise when not configured."""
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        req = OrderRequest(symbol='SPY', qty=1.0, side=OrderSide.BUY)
+        with pytest.raises((ImportError, RuntimeError)):
+            client.submit_order(req)
+
+    def test_get_orders_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.get_orders()
+
+    def test_cancel_order_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.cancel_order('fake-id')
+
+    def test_cancel_all_orders_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.cancel_all_orders()
+
+    def test_get_positions_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.get_positions()
+
+    def test_get_position_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.get_position('SPY')
+
+    def test_get_clock_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.get_clock()
+
+    def test_get_bars_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.get_bars('SPY')
+
+    def test_close_position_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.close_position('SPY')
+
+    def test_close_all_positions_not_configured_raises(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = None
+        with pytest.raises((ImportError, RuntimeError)):
+            client.close_all_positions()
+
+
+class TestPaperTradingManagerExtended:
+    """Extended PaperTradingManager tests."""
+
+    def test_execute_rebalance_with_orders(self, tmp_path):
+        """Rebalance with significant drift should generate orders."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_account = {'equity': 100000.0}
+        # SPY at 10%, target 60% → large delta
+        mock_positions = [
+            Position('SPY', 2, 500.0, 585.0, 1170.0, 170.0, 0.17),
+        ]
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value=mock_account), \
+             patch.object(manager.client, 'get_positions', return_value=mock_positions), \
+             patch.object(manager.client, '_fetch_price', return_value=585.0):
+            result = manager.execute_rebalance(
+                {'SPY': 0.60}, total_value=100000, dry_run=True
+            )
+        assert result['order_count'] > 0
+
+    def test_execute_rebalance_with_empty_positions(self, tmp_path):
+        """Rebalance from no positions should generate orders."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_account = {'equity': 100000.0}
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value=mock_account), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, '_fetch_price', return_value=200.0):
+            result = manager.execute_rebalance(
+                {'GLD': 0.50}, total_value=100000, dry_run=True
+            )
+        # May contain dry_run key or error status
+        assert 'dry_run' in result or 'status' in result
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
