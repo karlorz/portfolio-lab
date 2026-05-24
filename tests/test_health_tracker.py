@@ -660,3 +660,92 @@ class TestHealthScoreICFields:
         assert "ic" in d
         assert "ic_half_life_days" in d
         assert d["ic"] == 0.05
+
+
+class TestDetectICAlerts:
+    """Tests for detect_ic_alerts() — IC-based degradation detection."""
+
+    @pytest.fixture
+    def tracker_with_predictions(self, tmp_path):
+        """Create a tracker with some predictions logged."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        # Log enough predictions to compute IC
+        for i in range(60):
+            ts = (datetime.now() - timedelta(days=60 - i)).isoformat()
+            tracker.log_prediction_simple(
+                source="CROSS_ASSET_RV",
+                signal_value=0.5,
+                confidence=0.6,
+                timestamp=ts,
+            )
+        return tracker
+
+    def test_returns_list(self, tracker_with_predictions):
+        alerts = tracker_with_predictions.detect_ic_alerts()
+        assert isinstance(alerts, list)
+
+    def test_empty_with_no_data(self, tmp_path):
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        alerts = tracker.detect_ic_alerts()
+        assert alerts == []
+
+    def test_alert_structure(self, tracker_with_predictions):
+        """If any alerts are produced, they should be DecayAlert instances."""
+        from unittest.mock import patch
+
+        # Mock compute_ic to produce a negative streak
+        with patch.object(tracker_with_predictions, 'compute_ic', return_value=-0.05):
+            alerts = tracker_with_predictions.detect_ic_alerts()
+
+        for alert in alerts:
+            assert isinstance(alert, DecayAlert)
+            assert alert.source is not None
+            assert alert.message is not None
+
+    def test_negative_ic_streak_alert(self, tmp_path):
+        """3+ consecutive negative IC windows should trigger streak alert."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+
+        # Mock compute_ic to return negative values (streak)
+        def mock_ic(source, lookback_days=90, end_date=None):
+            return -0.05  # Always negative
+
+        from unittest.mock import patch
+        with patch.object(tracker, 'compute_ic', side_effect=mock_ic):
+            alerts = tracker.detect_ic_alerts()
+
+        streak_alerts = [a for a in alerts if "streak" in a.message.lower()]
+        assert len(streak_alerts) > 0
+
+    def test_ic_drawdown_alert(self, tmp_path):
+        """IC dropping >50% from peak should trigger drawdown alert."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+
+        from unittest.mock import patch
+        # First call returns low IC (current), subsequent calls return higher (past peaks)
+        ic_sequence = iter([0.02, 0.10, 0.12, 0.08, 0.06, 0.05, 0.04])
+
+        def mock_ic(source, lookback_days=90, end_date=None):
+            try:
+                return next(ic_sequence)
+            except StopIteration:
+                return 0.05
+
+        with patch.object(tracker, 'compute_ic', side_effect=mock_ic):
+            alerts = tracker.detect_ic_alerts()
+
+        drawdown_alerts = [a for a in alerts if "drawdown" in a.message.lower()]
+        assert len(drawdown_alerts) > 0
+
+    def test_saves_to_state(self, tracker_with_predictions):
+        """IC alerts should be saved to tracker state."""
+        from unittest.mock import patch
+        with patch.object(tracker_with_predictions, 'compute_ic', return_value=-0.05):
+            alerts = tracker_with_predictions.detect_ic_alerts()
+
+        if alerts:
+            assert "ic_alerts" in tracker_with_predictions.state

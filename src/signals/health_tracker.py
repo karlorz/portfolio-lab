@@ -469,7 +469,126 @@ class SignalHealthTracker:
                     self.state["decay_alerts"] = self.state["decay_alerts"][-100:]
         
         self._save_state()
-        
+
+        return alerts
+
+    def detect_ic_alerts(
+        self,
+        lookback_days: int = 90,
+        streak_threshold: int = 3,
+        ic_ratio_floor: float = 0.3,
+        ic_drawdown_threshold: float = 0.5,
+    ) -> List[DecayAlert]:
+        """Detect IC-based signal degradation alerts.
+
+        Three alert types:
+        1. Negative IC streak: signal has N consecutive negative IC windows
+        2. Low IC ratio: |IC|/|IC_peak| below floor (signal losing predictive power)
+        3. IC drawdown: IC dropped >threshold% from its peak
+
+        Args:
+            lookback_days: How far back to look for IC history.
+            streak_threshold: Consecutive negative IC windows for streak alert.
+            ic_ratio_floor: Minimum IC/|IC_peak| ratio (below = alert).
+            ic_drawdown_threshold: Fraction of peak IC loss to trigger alert.
+
+        Returns:
+            List of DecayAlert instances for IC degradation.
+        """
+        alerts = []
+
+        for source in SignalSource:
+            # Compute current IC and recent IC history
+            try:
+                current_ic = self.compute_ic(source, lookback_days=lookback_days)
+            except Exception:
+                continue
+
+            if current_ic is None:
+                continue
+
+            # Get IC history from rolling windows
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+            # Compute IC at multiple lookback points to build history
+            ic_history = []
+            window_days = 30
+            n_windows = min(lookback_days // window_days, 6)
+
+            for i in range(n_windows):
+                try:
+                    window_end = (datetime.now() - timedelta(days=i * window_days)).strftime("%Y-%m-%d")
+                    ic_val = self.compute_ic(source, lookback_days=window_days, end_date=window_end)
+                    if ic_val is not None:
+                        ic_history.append(ic_val)
+                except Exception:
+                    continue
+
+            if not ic_history:
+                continue
+
+            # Alert 1: Negative IC streak
+            consecutive_neg = 0
+            for ic_val in ic_history:
+                if ic_val < 0:
+                    consecutive_neg += 1
+                else:
+                    break  # Streak must be from most recent window
+
+            if consecutive_neg >= streak_threshold:
+                alerts.append(DecayAlert(
+                    source=source.value,
+                    alert_timestamp=datetime.now().isoformat(),
+                    previous_health=0,  # Not health-based
+                    current_health=0,
+                    drop_30d=0,
+                    severity="warning",
+                    message=f"{source.value}: Negative IC streak ({consecutive_neg} consecutive "
+                            f"windows, current IC={current_ic:.4f})",
+                ))
+
+            # Alert 2: Low IC ratio
+            peak_ic = max(abs(ic) for ic in ic_history) if ic_history else 0
+            if peak_ic > 0:
+                ic_ratio = abs(current_ic) / peak_ic
+                if ic_ratio < ic_ratio_floor and peak_ic > 0.02:
+                    alerts.append(DecayAlert(
+                        source=source.value,
+                        alert_timestamp=datetime.now().isoformat(),
+                        previous_health=peak_ic,
+                        current_health=abs(current_ic),
+                        drop_30d=round(1 - ic_ratio, 4),
+                        severity="warning",
+                        message=f"{source.value}: IC ratio {ic_ratio:.2f} below floor "
+                                f"({ic_ratio_floor}), current IC={current_ic:.4f} vs peak={peak_ic:.4f}",
+                    ))
+
+            # Alert 3: IC drawdown from peak
+            if peak_ic > 0.02:
+                ic_drawdown = (peak_ic - current_ic) / peak_ic if peak_ic > 0 else 0
+                if ic_drawdown > ic_drawdown_threshold:
+                    severity = "critical" if ic_drawdown > 0.75 else "warning"
+                    alerts.append(DecayAlert(
+                        source=source.value,
+                        alert_timestamp=datetime.now().isoformat(),
+                        previous_health=peak_ic,
+                        current_health=current_ic,
+                        drop_30d=round(ic_drawdown, 4),
+                        severity=severity,
+                        message=f"{source.value}: IC drawdown {ic_drawdown:.1%} from peak "
+                                f"({peak_ic:.4f} -> {current_ic:.4f})",
+                    ))
+
+        # Save IC alerts to state
+        if alerts:
+            if "ic_alerts" not in self.state:
+                self.state["ic_alerts"] = []
+            for alert in alerts:
+                self.state["ic_alerts"].append(alert.to_dict())
+            self.state["ic_alerts"] = self.state["ic_alerts"][-100:]
+            self._save_state()
+
         return alerts
     
     def get_adjusted_weights(
