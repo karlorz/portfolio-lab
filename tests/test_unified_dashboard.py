@@ -29,6 +29,7 @@ from src.monitor.unified_dashboard import (
     _get_attribution_section,
     _get_cron_section,
     _get_risk_history_section,
+    _get_adaptive_weights_section,
     generate_unified_dashboard,
     generate_status_text,
     print_summary,
@@ -409,7 +410,126 @@ class TestAttributionSection:
 # ─────────────────────────────────────────────
 
 
-class TestGenerateUnifiedDashboard:
+class TestAdaptiveWeightsSection:
+    """Tests for _get_adaptive_weights_section."""
+
+    def test_not_available_when_no_file(self, tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            assert section["available"] is False
+
+    def test_not_available_when_no_adjusted_weights(self, tmp_path):
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps({"baseline_weights": {"A": 0.5}}))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            assert section["available"] is False
+
+    def test_available_with_valid_data(self, tmp_path):
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps({
+            "timestamp": "2026-05-24T10:00:00",
+            "regime": "normal",
+            "adjusted_weights": {"ALT_DATA": 0.35, "CROSS_RV": 0.10},
+            "baseline_weights": {"ALT_DATA": 0.30, "CROSS_RV": 0.15},
+            "multipliers": {"ALT_DATA": 1.17, "CROSS_RV": 0.67},
+            "history": [{"ts": "t1"}, {"ts": "t2"}],
+        }))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            assert section["available"] is True
+            assert section["num_sources"] == 2
+            assert section["regime"] == "normal"
+            assert section["history_count"] == 2
+
+    def test_top_boosted_and_reduced(self, tmp_path):
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps({
+            "adjusted_weights": {"A": 0.50, "B": 0.05, "C": 0.30},
+            "baseline_weights": {"A": 0.30, "B": 0.25, "C": 0.30},
+            "multipliers": {"A": 1.67, "B": 0.20, "C": 1.0},
+        }))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            boosted = section["top_boosted"]
+            reduced = section["top_reduced"]
+            assert any(c["source"] == "A" for c in boosted)
+            assert any(c["source"] == "B" for c in reduced)
+
+    def test_changes_sorted_by_abs_change(self, tmp_path):
+        f = tmp_path / "adaptive_weights_state.json"
+        f.write_text(json.dumps({
+            "adjusted_weights": {"A": 0.50, "B": 0.10, "C": 0.40},
+            "baseline_weights": {"A": 0.30, "B": 0.20, "C": 0.50},
+            "multipliers": {},
+        }))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_adaptive_weights_section()
+            changes = section["top_changes"]
+            # A: +0.20, B: -0.10, C: -0.10 → A first
+            assert changes[0]["source"] == "A"
+
+
+class TestFormatHelpers:
+    """Tests for _fmt, _fmt_pct, _status_badge."""
+
+    def test_fmt_none(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(None) == "N/A"
+
+    def test_fmt_float(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(3.14159) == "3.14"
+
+    def test_fmt_float_with_suffix(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(3.14159, "%") == "3.14%"
+
+    def test_fmt_int(self):
+        from src.monitor.unified_dashboard import _fmt
+        assert _fmt(42) == "42"
+
+    def test_fmt_pct_none(self):
+        from src.monitor.unified_dashboard import _fmt_pct
+        assert _fmt_pct(None) == "N/A"
+
+    def test_fmt_pct_float(self):
+        from src.monitor.unified_dashboard import _fmt_pct
+        assert _fmt_pct(12.345) == "12.35%"
+
+    def test_status_badge_ok(self):
+        from src.monitor.unified_dashboard import _status_badge
+        assert _status_badge(True) == "✅"
+
+    def test_status_badge_fail(self):
+        from src.monitor.unified_dashboard import _status_badge
+        assert _status_badge(False) == "❌"
+
+
+class TestRiskHistoryEdgeCases:
+    """Additional edge cases for risk history section."""
+
+    def test_single_data_point_not_available(self, tmp_path):
+        f = tmp_path / "risk_metrics_history.json"
+        f.write_text(json.dumps([{"timestamp": "2026-01-01"}]))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_risk_history_section()
+            assert section["available"] is False
+            assert section["data_points"] == 1
+
+    def test_empty_list_not_available(self, tmp_path):
+        f = tmp_path / "risk_metrics_history.json"
+        f.write_text(json.dumps([]))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_risk_history_section()
+            assert section["available"] is False
+
+    def test_corrupt_json_not_available(self, tmp_path):
+        f = tmp_path / "risk_metrics_history.json"
+        f.write_text("not valid json{{{")
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_risk_history_section()
+            assert section["available"] is False
     def test_returns_all_sections(self, tmp_path):
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             dashboard = generate_unified_dashboard()

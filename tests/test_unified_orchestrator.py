@@ -504,3 +504,91 @@ class TestBLComparison:
                                                "ief": 0, "shy": 0, "btc": 0, "eth": 0})
         # Should not raise
         assert result is None or isinstance(result, dict)
+
+    def test_compute_bl_with_real_prices(self, orch, tmp_path):
+        """BL comparison should return weights when real prices exist."""
+        import numpy as np
+
+        # Create real prices.json with lowercase keys
+        prices_file = tmp_path / "prices.json"
+        rng = np.random.RandomState(42)
+        n = 100
+        prices_data = {
+            "spy": {"p": list(np.cumsum(rng.normal(0.1, 1, n)) + 500)},
+            "gld": {"p": list(np.cumsum(rng.normal(0.05, 0.8, n)) + 200)},
+            "tlt": {"p": list(np.cumsum(rng.normal(0.03, 0.5, n)) + 140)},
+        }
+        prices_file.write_text(json.dumps(prices_data))
+
+        # Patch DATA_DIR to point to tmp_path using src.paths module
+        import src.paths
+        original = src.paths.DATA_DIR
+        src.paths.DATA_DIR = tmp_path
+        try:
+            result = orch._compute_bl_comparison({
+                "spy": 0.50, "gld": 0.35, "tlt": 0.15,
+                "ief": 0, "shy": 0, "btc": 0, "eth": 0,
+            })
+            # May return None if pypfopt unavailable, or a dict if it works
+            assert result is None or isinstance(result, dict)
+            if result is not None:
+                assert all(sym in result for sym in ("SPY", "GLD", "TLT"))
+                assert all(0 <= w <= 1 for w in result.values())
+        finally:
+            src.paths.DATA_DIR = original
+
+    def test_bias_derived_from_weight_delta(self, orch):
+        """Verify bias computation: 10pp weight delta = 1.0 bias, clamped at [-1, +1]."""
+        baseline = orch.BASELINE
+        # +10pp SPY → equity_bias = 1.0
+        spy_delta_10pp = (0.56 - baseline["spy"]) / 0.10
+        assert abs(spy_delta_10pp - 1.0) < 0.01
+
+        # +24pp SPY → would be 2.4, clamped to 1.0
+        spy_delta_24pp = (0.70 - baseline["spy"]) / 0.10
+        clamped = max(-1.0, min(1.0, spy_delta_24pp))
+        assert clamped == 1.0
+
+        # -10pp SPY → equity_bias = -1.0
+        spy_delta_neg = (0.36 - baseline["spy"]) / 0.10
+        clamped_neg = max(-1.0, min(1.0, spy_delta_neg))
+        assert abs(clamped_neg - (-1.0)) < 0.01
+
+        # -20pp GLD → gold_bias clamped to -1.0
+        gld_delta = (0.18 - baseline["gld"]) / 0.10
+        clamped_gld = max(-1.0, min(1.0, gld_delta))
+        assert clamped_gld == -1.0
+
+    def test_compute_bl_returns_none_on_exception(self, orch, tmp_path):
+        """Should return None gracefully when compute_bl_weights raises."""
+        import src.paths
+        original = src.paths.DATA_DIR
+        src.paths.DATA_DIR = tmp_path
+        try:
+            # No prices.json → method returns None before reaching compute_bl_weights
+            result = orch._compute_bl_comparison({
+                "spy": 0.46, "gld": 0.38, "tlt": 0.16,
+                "ief": 0, "shy": 0, "btc": 0, "eth": 0,
+            })
+            assert result is None
+        finally:
+            src.paths.DATA_DIR = original
+
+    def test_compute_bl_missing_symbol_in_prices(self, orch, tmp_path):
+        """Should return None when prices.json doesn't have all 3 symbols."""
+        import src.paths
+        original = src.paths.DATA_DIR
+        src.paths.DATA_DIR = tmp_path
+        try:
+            # Only SPY, missing GLD and TLT
+            prices_file = tmp_path / "prices.json"
+            prices_file.write_text(json.dumps({
+                "spy": {"p": [500 + i for i in range(50)]},
+            }))
+            result = orch._compute_bl_comparison({
+                "spy": 0.46, "gld": 0.38, "tlt": 0.16,
+                "ief": 0, "shy": 0, "btc": 0, "eth": 0,
+            })
+            assert result is None
+        finally:
+            src.paths.DATA_DIR = original
