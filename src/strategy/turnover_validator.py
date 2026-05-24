@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_ROLLING_WINDOW = 20          # periods for stability computation
 MAX_TURNOVER_PENALTY = 0.5           # max weight reduction (50%)
 MIN_SIGNAL_HISTORY = 5               # minimum history needed for computation
-DEFAULT_SIGNAL_COST = 0.001          # assumed transaction cost per signal unit (10bps)
+DEFAULT_SIGNAL_COST = 0.0005         # assumed transaction cost per signal unit (5bps, median ETF cost)
 DEFAULT_RISK_FREE_RATE = 0.05        # annual risk-free rate for marginal score
 
 from src.paths import DATA_DIR

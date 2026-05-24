@@ -261,6 +261,12 @@ class TestUpdateRegime:
         gate = SmartRebalanceGate()
         assert gate._regime is None
 
+    def test_regime_in_status(self):
+        gate = SmartRebalanceGate()
+        gate.update_regime('high_vol')
+        status = gate.get_status()
+        assert status['regime'] == 'high_vol'
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

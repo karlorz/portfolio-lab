@@ -177,7 +177,9 @@ class SmartRebalanceGate:
 
     def get_status(self) -> Dict[str, Any]:
         """Get current gate status for dashboard."""
-        return self.controller.get_status()
+        status = self.controller.get_status()
+        status['regime'] = self._regime
+        return status
 
     def to_json(self) -> str:
         """Serialize current status to JSON for dashboard/API."""
