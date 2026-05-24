@@ -88,7 +88,41 @@ class Portfolio:
             for p in self.positions.values()
         )
         return self.cash + position_value
-    
+
+    def _get_daily_returns(self) -> np.ndarray:
+        """Extract properly-deduped daily returns from snapshot history.
+
+        The history may contain multiple intraday snapshots per trading day.
+        This method deduplicates by date (YYYY-MM-DD), taking the LAST snapshot
+        per day, then computes daily returns from the resulting time series.
+        Falls back to using the stored daily_return field if only 1 day exists.
+        """
+        if len(self.history) < 2:
+            return np.array([])
+
+        # Group snapshots by trading date (last entry per day wins)
+        from collections import OrderedDict
+        daily = OrderedDict()
+        for h in self.history:
+            date_key = h.get("timestamp", "")[:10]  # YYYY-MM-DD
+            daily[date_key] = h
+
+        if len(daily) < 2:
+            # Fallback: use stored daily_return values directly
+            returns = np.array([h.get("daily_return", 0.0) for h in self.history[-252:]])
+            # Filter out zero returns (intraday duplicate noise)
+            returns = returns[np.abs(returns) > 1e-12]
+            return returns if len(returns) >= 2 else np.array([])
+
+        # Compute daily returns from sorted total_value series
+        sorted_dates = list(daily.keys())
+        values = np.array([daily[d]["total_value"] for d in sorted_dates])
+        prev_values = values[:-1]
+        curr_values = values[1:]
+        daily_returns = np.where(prev_values > 0, (curr_values - prev_values) / prev_values, 0.0)
+
+        return daily_returns
+
     def current_weights(self, prices: Dict[str, float]) -> Dict[str, float]:
         total = self.total_value(prices)
         if total == 0:
@@ -201,12 +235,11 @@ class Portfolio:
                 return f"max_drawdown_{(peak - total) / peak:.2%}"
 
         # GARCH-CVaR tail risk check
-        if len(self.history) > 63:  # Need at least 3 months
+        daily_returns = self._get_daily_returns()
+        if len(daily_returns) >= 21:  # ~1 month of daily data minimum
             try:
                 from src.monitor.garch_cvar import calculate_garch_cvar
-                recent_returns = np.array([
-                    h.get("daily_return", 0.0) for h in self.history[-252:]
-                ])
+                recent_returns = daily_returns[-min(252, len(daily_returns)):]
                 current_dd = 0.0
                 if len(self.history) > 20:
                     peak = max(h["total_value"] for h in self.history[-252:])
