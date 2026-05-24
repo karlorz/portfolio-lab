@@ -20,6 +20,7 @@ WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
 WORK_DIR = _WORK_DIR
 DB_PATH = DATA_DIR / "market.db"
 
+logger = logging.getLogger(__name__)
 class ResearchAgent:
     def __init__(self):
         self.conn = sqlite_connect(DB_PATH)
@@ -294,7 +295,7 @@ Work item: {work_file}
         with open(prompt_file, 'w') as f:
             f.write(prompt)
         
-        print(f"Created Claude prompt: {prompt_file}")
+        logger.info("Created Claude prompt: %s", prompt_file)
     
     def run_daily_summary(self) -> Dict:
         """Run daily summary analysis."""
@@ -321,7 +322,7 @@ Work item: {work_file}
             "trough": row[3]
         }
         
-        print(f"Daily summary: {summary}")
+        logger.info("Daily summary: %s", summary)
         
         self.conn.close()
         return summary
