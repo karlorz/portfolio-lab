@@ -344,40 +344,39 @@ class VolatilityParityAllocator:
 def main():
     """CLI entry point"""
     allocator = VolatilityParityAllocator()
-    
+
     if len(sys.argv) > 1 and sys.argv[1] == '--backtest':
         start = sys.argv[2] if len(sys.argv) > 2 else '2020-01-01'
         end = sys.argv[3] if len(sys.argv) > 3 else '2024-12-31'
-        
-        print(f"Running volatility parity backtest: {start} to {end}")
+
+        logger.info("Running volatility parity backtest: %s to %s", start, end)
         results = allocator.run_backtest(start, end)
-        
-        print("\n=== Volatility Parity Backtest ===")
-        print(json.dumps(results, indent=2))
-    
+
+        logger.info("\n=== Volatility Parity Backtest ===")
+        logger.info(json.dumps(results, indent=2))
+
     elif len(sys.argv) > 1 and sys.argv[1] == '--current':
         current = allocator.get_current_allocation()
-        print(json.dumps(current, indent=2))
-    
+        logger.info(json.dumps(current, indent=2))
+
     else:
-        print("Volatility Parity Allocator (v2.21)")
-        print("Usage: python3 vol_parity_allocator.py [--backtest START END] [--current]")
-        print()
-        
+        logger.info("Volatility Parity Allocator (v2.21)")
+        logger.info("Usage: python3 vol_parity_allocator.py [--backtest START END] [--current]")
+
         # Show sample allocations
         test_dates = ['2023-01-15', '2023-06-15', '2023-10-15', '2024-03-15']
-        print("Sample Allocations:")
+        logger.info("Sample Allocations:")
         for date in test_dates:
             alloc = allocator.generate_allocation(date)
-            print(f"\n{date}:")
-            print(f"  SPY: {alloc.spy_pct:.1f}% | GLD: {alloc.gld_pct:.1f}% | TLT: {alloc.tlt_pct:.1f}%")
-            print(f"  VIX Short: {alloc.vix_short_pct:.1f}% | VIX Tail: {alloc.vix_tail_pct:.1f}%")
-            print(f"  Cash: {alloc.cash_pct:.1f}%")
-            print(f"  Expected Vol: {alloc.expected_portfolio_vol:.1f}% (Target: {alloc.target_volatility:.1f}%)")
+            logger.info("\n%s:", date)
+            logger.info("  SPY: %.1f%% | GLD: %.1f%% | TLT: %.1f%%", alloc.spy_pct, alloc.gld_pct, alloc.tlt_pct)
+            logger.info("  VIX Short: %.1f%% | VIX Tail: %.1f%%", alloc.vix_short_pct, alloc.vix_tail_pct)
+            logger.info("  Cash: %.1f%%", alloc.cash_pct)
+            logger.info("  Expected Vol: %.1f%% (Target: %.1f%%)", alloc.expected_portfolio_vol, alloc.target_volatility)
             if alloc.vix_short_pct > 0:
-                print(f"  ✓ Convexity harvest active")
+                logger.info("  Convexity harvest active")
             if alloc.rebalance_triggered:
-                print(f"  ↻ Rebalance triggered: {alloc.rebalance_reason}")
+                logger.info("  Rebalance triggered: %s", alloc.rebalance_reason)
 
 
 if __name__ == '__main__':

@@ -1061,23 +1061,25 @@ class TestCLI:
         assert isinstance(arr, np.ndarray)
         assert arr.shape == (59,)
 
-    def test_main_names_flag(self, capsys):
-        """main(['--names']) prints 59 feature names."""
+    def test_main_names_flag(self, caplog):
+        """main(['--names']) logs 59 feature names."""
+        import logging
+        caplog.set_level(logging.INFO)
         from src.signals.stacking_feature_engine import main
         main(["--names"])
-        captured = capsys.readouterr()
-        lines = captured.out.strip().split("\n")
+        lines = caplog.text.strip().split("\n")
         assert len(lines) == 59
-        assert "base_multi_speed_momentum" in captured.out
-        assert "acc90d_unified_overlay" in captured.out
+        assert "base_multi_speed_momentum" in caplog.text
+        assert "acc90d_unified_overlay" in caplog.text
 
-    def test_main_test_flag(self, capsys):
+    def test_main_test_flag(self, caplog):
         """main(['--test']) runs demo without error."""
+        import logging
+        caplog.set_level(logging.INFO)
         from src.signals.stacking_feature_engine import main
         main(["--test"])
-        captured = capsys.readouterr()
-        assert "Feature vector created" in captured.out
-        assert "Shape: (59,)" in captured.out
+        assert "Feature vector created" in caplog.text
+        assert "Shape: (59," in caplog.text
 
     def test_main_no_args_prints_help(self, capsys):
         """main([]) prints help to stdout."""

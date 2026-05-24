@@ -1152,71 +1152,76 @@ class TestGetCurrentAllocation:
 # ==============================================================================
 
 class TestCLI:
-    """Test CLI entry points using capsys for print output."""
+    """Test CLI entry points using caplog for logger output."""
 
     def test_main_callable(self):
         from src.strategy.vol_parity_allocator import main
         assert callable(main)
 
-    def test_main_default_output(self, capsys):
-        """Default invocation should print usage and sample allocations."""
+    def test_main_default_output(self, caplog):
+        """Default invocation should log usage and sample allocations."""
+        import logging
+        caplog.set_level(logging.INFO)
         from src.strategy.vol_parity_allocator import main
         with patch.object(VolatilityParityAllocator, 'generate_allocation',
                           return_value=_make_allocation()):
             main()
-        captured = capsys.readouterr()
-        assert "Volatility Parity Allocator" in captured.out
-        assert "Usage:" in captured.out
-        assert "Sample Allocations:" in captured.out
-        assert "SPY:" in captured.out
+        assert "Volatility Parity Allocator" in caplog.text
+        assert "Usage:" in caplog.text
+        assert "Sample Allocations:" in caplog.text
+        assert "SPY:" in caplog.text
 
-    def test_main_backtest_flag(self, capsys):
-        """--backtest flag should run backtest and print JSON."""
+    def test_main_backtest_flag(self, caplog):
+        """--backtest flag should run backtest and log JSON."""
+        import logging
+        caplog.set_level(logging.INFO)
         from src.strategy.vol_parity_allocator import main
         mock_alloc = _make_allocation()
         with patch.object(VolatilityParityAllocator, 'generate_allocation',
                           return_value=mock_alloc):
             with patch.object(sys, 'argv', ['prog', '--backtest', '2026-01-01', '2026-01-03']):
                 main()
-        captured = capsys.readouterr()
-        assert "Running volatility parity backtest" in captured.out
-        assert "Volatility Parity Backtest" in captured.out
-        assert "period" in captured.out
+        assert "Running volatility parity backtest" in caplog.text
+        assert "Volatility Parity Backtest" in caplog.text
+        assert "period" in caplog.text
 
-    def test_main_backtest_default_dates(self, capsys):
+    def test_main_backtest_default_dates(self, caplog):
         """--backtest without explicit dates uses defaults."""
+        import logging
+        caplog.set_level(logging.INFO)
         from src.strategy.vol_parity_allocator import main
         mock_alloc = _make_allocation()
         with patch.object(VolatilityParityAllocator, 'generate_allocation',
                           return_value=mock_alloc):
             with patch.object(sys, 'argv', ['prog', '--backtest']):
                 main()
-        captured = capsys.readouterr()
-        assert "2020-01-01" in captured.out
-        assert "2024-12-31" in captured.out
+        assert "2020-01-01" in caplog.text
+        assert "2024-12-31" in caplog.text
 
-    def test_main_current_flag(self, capsys):
-        """--current flag should print current allocation."""
+    def test_main_current_flag(self, caplog):
+        """--current flag should log current allocation."""
+        import logging
+        caplog.set_level(logging.INFO)
         from src.strategy.vol_parity_allocator import main
         with patch.object(VolatilityParityAllocator, 'get_current_allocation',
                           return_value={'allocation': {}, 'summary': {}}):
             with patch.object(sys, 'argv', ['prog', '--current']):
                 main()
-        captured = capsys.readouterr()
-        assert "allocation" in captured.out
-        assert "summary" in captured.out
+        assert "allocation" in caplog.text
+        assert "summary" in caplog.text
 
-    def test_main_backtest_partial_args(self, capsys):
+    def test_main_backtest_partial_args(self, caplog):
         """--backtest with only start date uses default end."""
+        import logging
+        caplog.set_level(logging.INFO)
         from src.strategy.vol_parity_allocator import main
         mock_alloc = _make_allocation()
         with patch.object(VolatilityParityAllocator, 'generate_allocation',
                           return_value=mock_alloc):
             with patch.object(sys, 'argv', ['prog', '--backtest', '2023-01-01']):
                 main()
-        captured = capsys.readouterr()
-        assert "2023-01-01" in captured.out
-        assert "2024-12-31" in captured.out
+        assert "2023-01-01" in caplog.text
+        assert "2024-12-31" in caplog.text
 
 
 class TestMainGuard:

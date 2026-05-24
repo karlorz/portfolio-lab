@@ -1074,22 +1074,22 @@ class AlternativeDataClient:
 
 def main():
     if len(sys.argv) < 2:
-        print("""Usage:
+        logger.info("""Usage:
   python -m src.data.alternative_data fetch --ticker AAPL --source satellite
   python -m src.data.alternative_data composite --ticker AAPL
   python -m src.data.alternative_data batch --tickers AAPL,AMZN,TGT
   python -m src.data.alternative_data earnings --ticker AAPL --quarter Q4-2025
         """)
         sys.exit(1)
-    
+
     command = sys.argv[1]
     client = AlternativeDataClient()
-    
+
     if command == "fetch":
         ticker = None
         source = "all"
         days = 30
-        
+
         i = 2
         while i < len(sys.argv):
             if sys.argv[i] == "--ticker" and i + 1 < len(sys.argv):
@@ -1103,35 +1103,35 @@ def main():
                 i += 2
             else:
                 i += 1
-        
+
         if not ticker:
-            print("Error: --ticker required")
+            logger.error("--ticker required")
             sys.exit(1)
-        
+
         if source == "satellite" or source == "all":
             signal = client.get_satellite_signal(ticker, days)
             if signal:
-                print(f"📡 Satellite Signal for {ticker}:")
-                print(json.dumps(signal.to_dict(), indent=2))
-        
+                logger.info("Satellite Signal for %s:", ticker)
+                logger.info(json.dumps(signal.to_dict(), indent=2))
+
         if source == "credit_card" or source == "all":
             signal = client.get_credit_card_signal(ticker, days)
             if signal:
-                print(f"💳 Credit Card Signal for {ticker}:")
-                print(json.dumps(signal.to_dict(), indent=2))
-        
+                logger.info("Credit Card Signal for %s:", ticker)
+                logger.info(json.dumps(signal.to_dict(), indent=2))
+
         if source == "supply_chain" or source == "all":
             signal = client.get_supply_chain_signal(ticker, days)
             if signal:
-                print(f"🚢 Supply Chain Signal for {ticker}:")
-                print(json.dumps(signal.to_dict(), indent=2))
-        
+                logger.info("Supply Chain Signal for %s:", ticker)
+                logger.info(json.dumps(signal.to_dict(), indent=2))
+
         return
-    
+
     if command == "composite":
         ticker = None
         days = 30
-        
+
         i = 2
         while i < len(sys.argv):
             if sys.argv[i] == "--ticker" and i + 1 < len(sys.argv):
@@ -1142,20 +1142,20 @@ def main():
                 i += 2
             else:
                 i += 1
-        
+
         if not ticker:
-            print("Error: --ticker required")
+            logger.error("--ticker required")
             sys.exit(1)
-        
+
         composite = client.get_composite_signal(ticker, days)
-        print(f"🔀 Composite Alternative Data Signal for {ticker}:")
-        print(json.dumps(composite.to_dict(), indent=2))
+        logger.info("Composite Alternative Data Signal for %s:", ticker)
+        logger.info(json.dumps(composite.to_dict(), indent=2))
         return
-    
+
     if command == "batch":
         tickers = []
         days = 30
-        
+
         i = 2
         while i < len(sys.argv):
             if sys.argv[i] == "--tickers" and i + 1 < len(sys.argv):
@@ -1166,25 +1166,25 @@ def main():
                 i += 2
             else:
                 i += 1
-        
+
         if not tickers:
-            print("Error: --tickers required (comma-separated)")
+            logger.error("--tickers required (comma-separated)")
             sys.exit(1)
-        
+
         signals = client.get_batch_signals(tickers, days)
-        print(f"📊 Batch Alternative Data Signals:")
+        logger.info("Batch Alternative Data Signals:")
         for ticker, signal in signals.items():
-            print(f"\n{ticker}:")
-            print(f"  Composite Score: {signal.composite_score:+.3f}")
-            print(f"  Confidence: {signal.composite_confidence:.1%}")
-            print(f"  Primary Driver: {signal.primary_driver}")
-            print(f"  Agreement: {signal.signal_agreement}")
+            logger.info("\n%s:", ticker)
+            logger.info("  Composite Score: %+.3f", signal.composite_score)
+            logger.info("  Confidence: %.1f%%", signal.composite_confidence * 100)
+            logger.info("  Primary Driver: %s", signal.primary_driver)
+            logger.info("  Agreement: %s", signal.signal_agreement)
         return
-    
+
     if command == "earnings":
         ticker = None
         quarter = None
-        
+
         i = 2
         while i < len(sys.argv):
             if sys.argv[i] == "--ticker" and i + 1 < len(sys.argv):
@@ -1195,20 +1195,20 @@ def main():
                 i += 2
             else:
                 i += 1
-        
+
         if not ticker or not quarter:
-            print("Error: --ticker and --quarter required")
+            logger.error("--ticker and --quarter required")
             sys.exit(1)
-        
+
         prediction = client.get_earnings_prediction(ticker, quarter)
         if prediction:
-            print(f"📈 Earnings Prediction for {ticker} {quarter}:")
-            print(json.dumps(prediction.to_dict(), indent=2))
+            logger.info("Earnings Prediction for %s %s:", ticker, quarter)
+            logger.info(json.dumps(prediction.to_dict(), indent=2))
         else:
-            print(f"Insufficient data for {ticker} earnings prediction")
+            logger.info("Insufficient data for %s earnings prediction", ticker)
         return
-    
-    print(f"Unknown command: {command}")
+
+    logger.error("Unknown command: %s", command)
     sys.exit(1)
 
 if __name__ == "__main__":

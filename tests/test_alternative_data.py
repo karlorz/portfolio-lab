@@ -1117,12 +1117,14 @@ class TestSignalCalcEdgeCases:
 class TestCLIMain:
     """Test the CLI main() argument parsing and dispatching."""
 
-    def test_no_args_prints_usage(self, capsys):
+    def test_no_args_prints_usage(self, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         from src.data.alternative_data import main as cli_main
         with patch.object(sys, "argv", ["alternative_data.py"]):
             with pytest.raises(SystemExit):
                 cli_main()
-        assert "Usage:" in capsys.readouterr().out
+        assert "Usage:" in caplog.text
 
     def test_unknown_command_exits(self):
         from src.data.alternative_data import main as cli_main
@@ -2146,7 +2148,9 @@ class TestAdapterFetchDataEdgeCases:
 class TestCLIAdditionalCommands:
     """Additional CLI command path coverage."""
 
-    def test_fetch_with_source_all(self, tmp_path, capsys):
+    def test_fetch_with_source_all(self, tmp_path, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         from src.data.alternative_data import main as cli_main
         db = tmp_path / "alt.db"
         with patch("src.data.alternative_data.ALT_DATA_DB", db):
@@ -2155,12 +2159,13 @@ class TestCLIAdditionalCommands:
                 "--source", "all", "--days", "10",
             ]):
                 cli_main()
-        output = capsys.readouterr().out
-        assert "Satellite Signal" in output
-        assert "Credit Card Signal" in output
-        assert "Supply Chain Signal" in output
+        assert "Satellite Signal" in caplog.text
+        assert "Credit Card Signal" in caplog.text
+        assert "Supply Chain Signal" in caplog.text
 
-    def test_earnings_insufficient_data(self, tmp_path, capsys):
+    def test_earnings_insufficient_data(self, tmp_path, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         from src.data.alternative_data import main as cli_main
         db = tmp_path / "alt.db"
         with patch("src.data.alternative_data.ALT_DATA_DB", db):
@@ -2169,9 +2174,11 @@ class TestCLIAdditionalCommands:
                 "--quarter", "Q1-2026",
             ]):
                 cli_main()
-        assert "Insufficient data" in capsys.readouterr().out
+        assert "Insufficient data" in caplog.text
 
-    def test_fetch_satellite_source_specific(self, tmp_path, capsys):
+    def test_fetch_satellite_source_specific(self, tmp_path, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         from src.data.alternative_data import main as cli_main
         db = tmp_path / "alt.db"
         with patch("src.data.alternative_data.ALT_DATA_DB", db):
@@ -2180,10 +2187,9 @@ class TestCLIAdditionalCommands:
                 "--source", "satellite", "--days", "5",
             ]):
                 cli_main()
-        output = capsys.readouterr().out
-        assert "Satellite Signal" in output
-        assert "Credit Card Signal" not in output
-        assert "Supply Chain Signal" not in output
+        assert "Satellite Signal" in caplog.text
+        assert "Credit Card Signal" not in caplog.text
+        assert "Supply Chain Signal" not in caplog.text
 
 
 # ---------------------------------------------------------------------------
