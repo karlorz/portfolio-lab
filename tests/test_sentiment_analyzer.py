@@ -611,3 +611,650 @@ class TestDemo:
         # TypeError is now caught by the broadened except tuple — returns empty list gracefully
         history = pipe.load_sentiment_history(days=365)
         assert history == []
+
+
+class TestSentimentAnalyzerInit:
+    """SentimentAnalyzerPipeline __init__ edge cases."""
+
+    def test_init_creates_data_dir_attribute(self):
+        """Constructor sets data_dir attribute correctly."""
+        pipe = SentimentAnalyzerPipeline()
+        assert hasattr(pipe, "data_dir")
+        assert pipe.data_dir is not None
+        assert pipe.data_dir.name == "sentiment"
+
+    def test_init_with_missing_data_dir(self, tmp_path):
+        """Data dir that does not exist yet should be created."""
+        missing = tmp_path / "nonexistent" / "deep" / "sentiment"
+        assert not missing.exists()
+        pipe = SentimentAnalyzerPipeline(data_dir=missing)
+        assert pipe.data_dir == missing
+        assert missing.exists()
+
+    def init_analyzer_side_effect(*args, **kwargs):
+        raise Exception("API key not configured")
+
+    def test_init_handles_analyzer_exception(self):
+        """When SentimentAnalyzer() raises, analyzer is set to None."""
+        with patch("src.strategy.sentiment_analyzer.SentimentAnalyzer",
+                   side_effect=Exception("API key not found")):
+            pipe = SentimentAnalyzerPipeline()
+            assert pipe.analyzer is None
+
+    def test_init_handles_disabled_analyzer(self):
+        """When SentimentAnalyzer has disabled=True, analyzer is set to None."""
+        with patch("src.strategy.sentiment_analyzer.SentimentAnalyzer") as mock_cls:
+            instance = mock_cls.return_value
+            instance.disabled = True
+            pipe = SentimentAnalyzerPipeline()
+            assert pipe.analyzer is None
+
+    def test_init_data_dir_is_absolute_path(self):
+        """data_dir is an absolute Path object."""
+        pipe = SentimentAnalyzerPipeline()
+        assert isinstance(pipe.data_dir, Path)
+        assert pipe.data_dir.is_absolute()
+
+    def test_init_aggregator_has_correct_lookback(self):
+        """Aggregator created by pipeline has default lookback."""
+        pipe = SentimentAnalyzerPipeline()
+        assert pipe.aggregator.lookback_days == 30
+        assert pipe.aggregator.history.maxlen == 30
+
+
+class TestLoadSentimentHistoryExtended:
+    """Extended tests for load_sentiment_history error handling and edge cases."""
+
+    def test_valid_file_loaded(self, tmp_path):
+        """Valid sentiment JSON file is loaded correctly."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        sentiment = AggregatedSentiment(
+            timestamp=datetime.now().isoformat(),
+            news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=-0.1, composite_score=0.25,
+            confidence=0.8, smoothed_score=0.22,
+            sentiment_momentum=0.05, regime_signal="risk_on",
+            sources_used=3, data_quality="high",
+        )
+        pipe.save_sentiment(sentiment, "sentiment_valid.json")
+        history = pipe.load_sentiment_history(days=365)
+        assert len(history) == 1
+        loaded = history[0]
+        assert loaded.composite_score == 0.25
+        assert loaded.regime_signal == "risk_on"
+        assert loaded.sources_used == 3
+        assert loaded.data_quality == "high"
+
+    def test_invalid_json_skipped(self, tmp_path):
+        """Malformed JSON file is skipped without crashing."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        bad_file = tmp_path / "sentiment_bad.json"
+        bad_file.write_text("{invalid json content")
+        history = pipe.load_sentiment_history(days=365)
+        assert isinstance(history, list)
+        assert len(history) == 0
+
+    def test_multiple_files_sorted_by_timestamp(self, tmp_path):
+        """Multiple valid files are returned sorted by timestamp ascending."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        later = AggregatedSentiment(
+            timestamp="2026-05-20T12:00:00",
+            news_sentiment=0.6, earnings_sentiment=0.4,
+            macro_sentiment=0.2, composite_score=0.4,
+            confidence=0.9, smoothed_score=0.35,
+            sentiment_momentum=0.1, regime_signal="risk_on",
+            sources_used=3, data_quality="high",
+        )
+        earlier = AggregatedSentiment(
+            timestamp="2026-05-10T12:00:00",
+            news_sentiment=0.3, earnings_sentiment=0.2,
+            macro_sentiment=0.1, composite_score=0.2,
+            confidence=0.7, smoothed_score=0.18,
+            sentiment_momentum=0.05, regime_signal="neutral",
+            sources_used=2, data_quality="medium",
+        )
+        pipe.save_sentiment(later, "sentiment_later.json")
+        pipe.save_sentiment(earlier, "sentiment_earlier.json")
+        history = pipe.load_sentiment_history(days=365)
+        assert len(history) == 2
+        assert history[0].timestamp == "2026-05-10T12:00:00"
+        assert history[1].timestamp == "2026-05-20T12:00:00"
+
+    def test_days_filter_excludes_old_files(self, tmp_path):
+        """Files with timestamps outside the days cutoff are filtered out."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        old = AggregatedSentiment(
+            timestamp=(datetime.now() - timedelta(days=60)).isoformat(),
+            news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=-0.1, composite_score=0.25,
+            confidence=0.8, smoothed_score=0.22,
+            sentiment_momentum=0.05, regime_signal="risk_on",
+            sources_used=3, data_quality="high",
+        )
+        pipe.save_sentiment(old, "sentiment_old.json")
+        history = pipe.load_sentiment_history(days=30)
+        assert len(history) == 0
+
+    def test_ioerror_is_caught(self, tmp_path):
+        """IOError during file read is caught gracefully."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        valid = AggregatedSentiment(
+            timestamp=datetime.now().isoformat(),
+            news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=-0.1, composite_score=0.25,
+            confidence=0.8, smoothed_score=0.22,
+            sentiment_momentum=0.05, regime_signal="risk_on",
+            sources_used=3, data_quality="high",
+        )
+        pipe.save_sentiment(valid, "sentiment_ok.json")
+        with patch("builtins.open", side_effect=IOError("Permission denied")):
+            history = pipe.load_sentiment_history(days=365)
+            assert isinstance(history, list)
+
+    def test_oserror_is_caught(self, tmp_path):
+        """OSError during file read is caught gracefully."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        valid = AggregatedSentiment(
+            timestamp=datetime.now().isoformat(),
+            news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=-0.1, composite_score=0.25,
+            confidence=0.8, smoothed_score=0.22,
+            sentiment_momentum=0.05, regime_signal="risk_on",
+            sources_used=3, data_quality="high",
+        )
+        pipe.save_sentiment(valid, "sentiment_ok.json")
+        with patch("builtins.open", side_effect=OSError("Disk error")):
+            history = pipe.load_sentiment_history(days=365)
+            assert isinstance(history, list)
+
+    def test_json_decode_error_is_caught(self, tmp_path):
+        """JSONDecodeError from malformed JSON is caught gracefully."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        bad_file = tmp_path / "sentiment_decode.json"
+        bad_file.write_text('{"unclosed": true')
+        history = pipe.load_sentiment_history(days=365)
+        assert isinstance(history, list)
+        assert len(history) == 0
+
+    def test_type_error_caught_with_wrong_field_types(self, tmp_path):
+        """TypeError from wrong field types in JSON is caught gracefully."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        bad_file = tmp_path / "sentiment_bad_types.json"
+        bad_file.write_text(json.dumps({
+            "timestamp": datetime.now().isoformat(),
+            "news_sentiment": "not_a_number",
+        }))
+        history = pipe.load_sentiment_history(days=365)
+        assert isinstance(history, list)
+        assert len(history) == 0
+
+    def test_keyerror_caught_with_missing_timestamp(self, tmp_path):
+        """KeyError when JSON lacks 'timestamp' is caught gracefully."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        bad_file = tmp_path / "sentiment_no_ts.json"
+        bad_file.write_text(json.dumps({"composite_score": 0.5}))
+        history = pipe.load_sentiment_history(days=365)
+        assert isinstance(history, list)
+        assert len(history) == 0
+
+    def test_non_matching_glob_ignored(self, tmp_path):
+        """Files not matching sentiment_*.json glob are ignored."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        ignored = tmp_path / "not_sentiment.json"
+        ignored.write_text(json.dumps({"timestamp": datetime.now().isoformat()}))
+        history = pipe.load_sentiment_history(days=365)
+        assert len(history) == 0
+
+    def test_mixed_valid_and_invalid_files(self, tmp_path):
+        """Valid files load while invalid files are skipped."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        valid = AggregatedSentiment(
+            timestamp=datetime.now().isoformat(),
+            news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=-0.1, composite_score=0.25,
+            confidence=0.8, smoothed_score=0.22,
+            sentiment_momentum=0.05, regime_signal="risk_on",
+            sources_used=3, data_quality="high",
+        )
+        pipe.save_sentiment(valid, "sentiment_valid.json")
+        bad_file = tmp_path / "sentiment_bad.json"
+        bad_file.write_text("{bad")
+        history = pipe.load_sentiment_history(days=365)
+        assert len(history) == 1
+        assert history[0].composite_score == 0.25
+
+    def test_subdir_sentiment_files_not_loaded(self, tmp_path):
+        """Files in subdirectories of data_dir are not loaded (glob is shallow)."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        sub_file = sub / "sentiment_sub.json"
+        sub_file.write_text(json.dumps({
+            "timestamp": datetime.now().isoformat(),
+            "news_sentiment": 0.5, "earnings_sentiment": 0.3,
+            "macro_sentiment": 0.1, "composite_score": 0.3,
+            "confidence": 0.8, "smoothed_score": 0.25,
+            "sentiment_momentum": 0.02, "regime_signal": "neutral",
+            "sources_used": 2, "data_quality": "medium",
+        }))
+        history = pipe.load_sentiment_history(days=365)
+        assert len(history) == 0
+
+
+class TestAggregatedSentimentRoundTrip:
+    """AggregatedSentiment dict round-trip and field-level tests."""
+
+    def test_from_dict_round_trip(self):
+        """Create AggregatedSentiment, to_dict, then recreate from dict."""
+        original = AggregatedSentiment(
+            timestamp="2026-05-15T00:00:00",
+            news_sentiment=0.5, earnings_sentiment=0.3,
+            macro_sentiment=-0.1, composite_score=0.25,
+            confidence=0.8, smoothed_score=0.22,
+            sentiment_momentum=0.05, regime_signal="risk_on",
+            sources_used=3, data_quality="high",
+        )
+        d = original.to_dict()
+        recreated = AggregatedSentiment(**d)
+        assert recreated.timestamp == original.timestamp
+        assert recreated.composite_score == original.composite_score
+        assert recreated.regime_signal == original.regime_signal
+        assert recreated.sources_used == original.sources_used
+        assert recreated.data_quality == original.data_quality
+        assert recreated.confidence == original.confidence
+
+    def test_from_dict_round_trip_all_fields(self):
+        """All 11 fields survive to_dict -> AggregatedSentiment round trip."""
+        original = AggregatedSentiment(
+            timestamp="2026-06-01T00:00:00",
+            news_sentiment=0.8, earnings_sentiment=-0.2,
+            macro_sentiment=0.1, composite_score=0.3,
+            confidence=0.65, smoothed_score=0.28,
+            sentiment_momentum=-0.03, regime_signal="risk_off",
+            sources_used=2, data_quality="medium",
+        )
+        d = original.to_dict()
+        assert len(d) == 11
+        recreated = AggregatedSentiment(**d)
+        for field in ["timestamp", "news_sentiment", "earnings_sentiment",
+                       "macro_sentiment", "composite_score", "confidence",
+                       "smoothed_score", "sentiment_momentum", "regime_signal",
+                       "sources_used", "data_quality"]:
+            assert getattr(recreated, field) == getattr(original, field), \
+                f"Field '{field}' mismatch in round trip"
+
+    def test_to_dict_returns_copy_not_reference(self):
+        """to_dict returns a new dict each time."""
+        s = AggregatedSentiment(
+            timestamp="t", news_sentiment=0, earnings_sentiment=0,
+            macro_sentiment=0, composite_score=0, confidence=0,
+            smoothed_score=0, sentiment_momentum=0, regime_signal="neutral",
+            sources_used=0, data_quality="low",
+        )
+        d1 = s.to_dict()
+        d2 = s.to_dict()
+        assert d1 is not d2
+        assert d1 == d2
+
+    def test_to_dict_with_extreme_values(self):
+        """to_dict handles extreme values for all numeric fields."""
+        s = AggregatedSentiment(
+            timestamp="2026-01-01T00:00:00",
+            news_sentiment=-1.0, earnings_sentiment=1.0,
+            macro_sentiment=0.0, composite_score=-0.9999,
+            confidence=1.0, smoothed_score=0.9999,
+            sentiment_momentum=-0.9999, regime_signal="extreme_risk_off",
+            sources_used=0, data_quality="low",
+        )
+        d = s.to_dict()
+        assert d["news_sentiment"] == -1.0
+        assert d["earnings_sentiment"] == 1.0
+        assert d["composite_score"] == -0.9999
+        assert d["confidence"] == 1.0
+
+
+class TestGetCurrentSentiment:
+    """Tests for get_current_sentiment method (main pipeline method)."""
+
+    def test_empty_text_lists_returns_zero_sources(self):
+        """All text lists empty returns result with 0 sources used."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.get_current_sentiment(news_texts=[], earnings_texts=[], macro_texts=[])
+        assert result is not None
+        assert result.sources_used == 0
+        assert result.composite_score == 0.0
+
+    def test_news_only_texts(self):
+        """Only news texts provided yields correct news_sentiment."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.get_current_sentiment(news_texts=["Bullish market outlook"])
+        assert result is not None
+        assert result.news_sentiment > 0
+        assert result.sources_used >= 1
+
+    def test_calls_aggregate_sources_on_aggregator(self):
+        """get_current_sentiment delegates to aggregator.aggregate_sources."""
+        pipe = SentimentAnalyzerPipeline()
+        with patch.object(pipe.aggregator, "aggregate_sources",
+                          wraps=pipe.aggregator.aggregate_sources) as mock:
+            pipe.get_current_sentiment(news_texts=["test"])
+            mock.assert_called_once()
+
+    def test_analyzer_none_uses_mock_results(self):
+        """When analyzer is None, mock results are used instead of real analysis."""
+        pipe = SentimentAnalyzerPipeline()
+        pipe.analyzer = None
+        result = pipe.get_current_sentiment(
+            news_texts=["Great news today"],
+            earnings_texts=["Strong quarter results"],
+            macro_texts=["Fed holds rates steady"],
+        )
+        assert result is not None
+        assert result.sources_used == 3
+
+    def test_earnings_only_texts(self):
+        """Only earnings texts provided."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.get_current_sentiment(earnings_texts=["Bullish earnings beat"])
+        assert result is not None
+        assert result.earnings_sentiment > 0
+
+    def test_macro_only_texts(self):
+        """Only macro texts provided."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.get_current_sentiment(macro_texts=["Fed signals rate cut"])
+        assert result is not None
+        assert result.macro_sentiment >= 0
+
+    def test_max_news_limit_applied(self):
+        """Only first 5 news texts are analyzed (limit)."""
+        pipe = SentimentAnalyzerPipeline()
+        news = ["bullish headline"] * 10
+        result = pipe.get_current_sentiment(news_texts=news)
+        assert result is not None
+        assert result.news_sentiment > 0
+
+    def test_max_earnings_limit_applied(self):
+        """Only first 3 earnings texts are analyzed (limit)."""
+        pipe = SentimentAnalyzerPipeline()
+        earnings = ["bullish transcript"] * 5
+        result = pipe.get_current_sentiment(earnings_texts=earnings)
+        assert result is not None
+        assert result.earnings_sentiment > 0
+
+    def test_max_macro_limit_applied(self):
+        """Only first 3 macro texts are analyzed (limit)."""
+        pipe = SentimentAnalyzerPipeline()
+        macro = ["speech"] * 5
+        result = pipe.get_current_sentiment(macro_texts=macro)
+        assert result is not None
+        assert result.macro_sentiment >= 0
+
+
+class TestAnalyzeText:
+    """Tests for analyze_text method."""
+
+    def test_returns_none_when_analyzer_is_none(self):
+        """analyze_text returns None when analyzer is None."""
+        pipe = SentimentAnalyzerPipeline()
+        pipe.analyzer = None
+        result = pipe.analyze_text("Some text about markets")
+        assert result is None
+
+    def test_detects_bearish_keyword(self):
+        """Bearish keyword in text produces bearish sentiment."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.analyze_text("Bearish outlook for global markets")
+        if result is not None:
+            assert result.sentiment == "bearish"
+
+    def test_detects_bullish_keyword(self):
+        """Bullish keyword in text produces bullish sentiment."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.analyze_text("Bullish market trend continues")
+        if result is not None:
+            assert result.sentiment == "bullish"
+
+    def test_detects_neutral_when_no_keywords(self):
+        """Text without sentiment keywords produces neutral."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.analyze_text("The market opened at 5000")
+        if result is not None:
+            assert result.sentiment == "neutral"
+
+
+class TestSaveSentiment:
+    """Tests for save_sentiment method."""
+
+    def test_save_creates_file_on_disk(self, tmp_path):
+        """Saving sentiment creates a file at the expected path."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        sentiment = pipe.get_current_sentiment(news_texts=["test"])
+        filepath = pipe.save_sentiment(sentiment, "test_save.json")
+        assert filepath.exists()
+        assert filepath.name == "test_save.json"
+
+    def test_saved_json_contains_all_fields(self, tmp_path):
+        """Saved JSON contains all 11 AggregatedSentiment fields."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        sentiment = pipe.get_current_sentiment(news_texts=["test"])
+        filepath = pipe.save_sentiment(sentiment, "test_fields.json")
+        data = json.loads(filepath.read_text())
+        expected_keys = {"timestamp", "news_sentiment", "earnings_sentiment",
+                         "macro_sentiment", "composite_score", "confidence",
+                         "smoothed_score", "sentiment_momentum", "regime_signal",
+                         "sources_used", "data_quality"}
+        assert expected_keys.issubset(data.keys())
+
+    def test_save_autogenerated_name_pattern(self, tmp_path):
+        """Autogenerated filename starts with sentiment_ and ends with .json."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        sentiment = pipe.get_current_sentiment()
+        filepath = pipe.save_sentiment(sentiment)
+        assert filepath.name.startswith("sentiment_")
+        assert filepath.name.endswith(".json")
+
+    def test_save_overwrites_existing_file(self, tmp_path):
+        """Saving with the same filename overwrites the existing file."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        s1 = pipe.get_current_sentiment(news_texts=["first"])
+        pipe.save_sentiment(s1, "overwrite.json")
+        s2 = pipe.get_current_sentiment(news_texts=["second"])
+        pipe.save_sentiment(s2, "overwrite.json")
+        data = json.loads((tmp_path / "overwrite.json").read_text())
+        assert data["composite_score"] == s2.composite_score
+
+    def test_save_returns_path_object(self, tmp_path):
+        """save_sentiment returns a Path object pointing to the saved file."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        sentiment = pipe.get_current_sentiment()
+        filepath = pipe.save_sentiment(sentiment, "return_type.json")
+        assert isinstance(filepath, Path)
+        assert filepath.suffix == ".json"
+
+
+class TestSentimentAggregatorEdgeCases:
+    """Additional SentimentAggregator edge cases not covered by existing tests."""
+
+    def test_two_sources_high_conf_high_quality(self):
+        """Two sources with high confidence yields data_quality='high'."""
+        agg = SentimentAggregator()
+        result = agg.aggregate_sources(
+            news_results=[_MockSentimentResult("bullish", 0.8)],
+            earnings_results=[_MockSentimentResult("bullish", 0.8)],
+        )
+        assert result.data_quality == "high"
+        assert result.confidence > 0.7
+
+    def test_two_sources_low_conf_medium_quality(self):
+        """Two sources with low confidence yields data_quality='medium'."""
+        agg = SentimentAggregator()
+        result = agg.aggregate_sources(
+            news_results=[_MockSentimentResult("bullish", 0.4)],
+            earnings_results=[_MockSentimentResult("bearish", 0.3)],
+        )
+        assert result.data_quality == "medium"
+
+    def test_calculate_momentum_positive_values(self):
+        """Positive momentum is computed correctly."""
+        agg = SentimentAggregator()
+        scores = [0.1] * 5 + [0.5] * 5
+        mom = agg.calculate_momentum(scores, window=5)
+        assert mom > 0
+
+    def test_calculate_momentum_exact_window_multiple(self):
+        """Exact 2*window size uses first window as prior."""
+        agg = SentimentAggregator()
+        scores = [0.2, 0.2, 0.2, 0.2, 0.2, 0.6, 0.6, 0.6, 0.6, 0.6]
+        mom = agg.calculate_momentum(scores, window=5)
+        assert mom == pytest.approx(0.4)
+
+    def test_calculate_momentum_large_dataset(self):
+        """Momentum with a large dataset works without error."""
+        agg = SentimentAggregator()
+        scores = [0.1 + (i % 3) * 0.1 for i in range(100)]
+        mom = agg.calculate_momentum(scores, window=10)
+        assert isinstance(mom, float)
+
+    def test_ema_with_mixed_positive_negative(self):
+        """EMA with both positive and negative values remains bounded."""
+        agg = SentimentAggregator()
+        values = [0.5, -0.3, 0.8, -0.6, 0.2]
+        ema = agg.calculate_ema(values)
+        assert -1.0 <= ema <= 1.0
+
+    def test_ema_convergence_towards_recent_values(self):
+        """EMA gives more weight to recent values after sufficient samples."""
+        agg = SentimentAggregator()
+        # With alpha ~0.094, need many positive values to overwhelm initial negatives
+        values = [-0.5] * 10 + [0.9] * 20
+        ema = agg.calculate_ema(values)
+        assert ema > 0  # Recent positive values pull EMA up
+
+    def test_aggregate_sources_boundary_confidence_values(self):
+        """Source aggregation handles boundary confidence values (0 and 1)."""
+        agg = SentimentAggregator()
+        result = agg.aggregate_sources(
+            news_results=[_MockSentimentResult("bullish", 0.0)],
+            earnings_results=[_MockSentimentResult("bearish", 1.0)],
+        )
+        assert 0.0 <= result.confidence <= 1.0
+        assert result.sources_used == 2
+
+    def test_regime_extreme_risk_off_with_positive_momentum(self):
+        """extreme_risk_off is determined by score, not momentum."""
+        agg = SentimentAggregator()
+        assert agg.classify_regime_signal(-0.7, 0.5) == "extreme_risk_off"
+
+    def test_regime_classify_requires_momentum_gt_02(self):
+        """Momentum must be > 0.2 (strict) to trigger risk_on."""
+        agg = SentimentAggregator()
+        assert agg.classify_regime_signal(0.1, 0.2) == "neutral"
+        assert agg.classify_regime_signal(0.1, 0.2001) == "risk_on"
+
+    def test_regime_classify_requires_momentum_lt_neg02(self):
+        """Momentum must be < -0.2 (strict) to trigger risk_off."""
+        agg = SentimentAggregator()
+        assert agg.classify_regime_signal(-0.1, -0.2) == "neutral"
+        assert agg.classify_regime_signal(-0.1, -0.2001) == "risk_off"
+
+
+class TestDemoFunctionExtended:
+    """Extended tests for demo() function."""
+
+    def test_demo_saves_sentiment_file(self, tmp_path, monkeypatch):
+        """demo() saves a sentiment file in the data directory."""
+        monkeypatch.chdir(tmp_path)
+        result = demo()
+        assert result is not None
+        assert isinstance(result, AggregatedSentiment)
+
+    def test_demo_outputs_key_sections(self, capsys):
+        """demo() prints all expected output sections."""
+        demo()
+        captured = capsys.readouterr()
+        assert "Sentiment Analyzer Demo" in captured.out
+        assert "Aggregated Sentiment Results" in captured.out
+        assert "Composite Score" in captured.out
+        assert "Regime Signal" in captured.out
+        assert "Data Quality" in captured.out
+        assert "Sources Used" in captured.out
+
+    def test_demo_returns_correct_type(self):
+        """demo() returns an AggregatedSentiment with valid regime."""
+        result = demo()
+        assert isinstance(result, AggregatedSentiment)
+        assert result.regime_signal in ("risk_on", "risk_off", "neutral", "extreme_risk_off")
+
+    def test_demo_outputs_numeric_values(self, capsys):
+        """demo() prints numeric sentiment values."""
+        demo()
+        captured = capsys.readouterr()
+        assert "News Sentiment" in captured.out
+        assert "Earnings Sentiment" in captured.out
+        assert "Macro Sentiment" in captured.out
+        assert "Momentum" in captured.out
+
+
+class TestSentimentAggregatorInitExtended:
+    """Additional SentimentAggregator initialization edge cases."""
+
+    def test_init_lookback_large_value(self):
+        """Large lookback_days value is accepted."""
+        agg = SentimentAggregator(lookback_days=365)
+        assert agg.lookback_days == 365
+        assert agg.history.maxlen == 365
+
+    def test_init_lookback_minimum(self):
+        """Lookback of 1 is accepted."""
+        agg = SentimentAggregator(lookback_days=1)
+        assert agg.lookback_days == 1
+        assert agg.history.maxlen == 1
+
+    def test_history_starts_empty(self):
+        """history deque starts empty after init."""
+        agg = SentimentAggregator()
+        assert len(agg.history) == 0
+
+    def test_history_maxlen_enforced(self):
+        """history deque respects its maxlen (LIFO eviction)."""
+        agg = SentimentAggregator(lookback_days=3)
+        for _ in range(5):
+            agg.aggregate_sources(
+                news_results=[_MockSentimentResult("bullish", 0.8)]
+            )
+        assert len(agg.history) == 3
+
+
+class TestSentimentAnalyzerPipelineEdgeCases:
+    """Edge cases for SentimentAnalyzerPipeline that cross multiple methods."""
+
+    def test_save_then_load_round_trip(self, tmp_path):
+        """save_sentiment followed by load_sentiment_history preserves data."""
+        pipe = SentimentAnalyzerPipeline(data_dir=tmp_path)
+        sentiment = pipe.get_current_sentiment(
+            news_texts=["test"],
+            earnings_texts=["test"],
+            macro_texts=["test"],
+        )
+        pipe.save_sentiment(sentiment, "sentiment_roundtrip.json")
+        history = pipe.load_sentiment_history(days=365)
+        assert len(history) == 1
+        loaded = history[0]
+        assert loaded.composite_score == sentiment.composite_score
+        assert loaded.regime_signal == sentiment.regime_signal
+        assert loaded.sources_used == sentiment.sources_used
+
+    def test_get_current_sentiment_with_none_texts(self):
+        """Passing None (default) for all text parameters yields 0 sources."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.get_current_sentiment()
+        assert result.sources_used == 0
+        assert result.composite_score == 0.0
+
+    def test_get_current_sentiment_with_empty_string_text(self):
+        """Empty string text produces neutral sentiment."""
+        pipe = SentimentAnalyzerPipeline()
+        result = pipe.get_current_sentiment(news_texts=[""])
+        assert result is not None
+        assert isinstance(result.composite_score, float)

@@ -790,3 +790,735 @@ class TestClassificationBoundaries:
         """Extremely high VIX (100+) should still classify as CRISIS."""
         assert generator.classify_regime(100.0) == CollarRegime.CRISIS
         assert generator.classify_regime(999.99) == CollarRegime.CRISIS
+
+
+class TestFetchSpotPrice:
+    """Test _fetch_spot_price() method with DB/file fallback behavior."""
+
+    @pytest.fixture
+    def generator(self):
+        return CollarSignalGenerator()
+
+    def test_returns_fallback_when_db_not_exists(self, generator):
+        """Should return 550.0 when MARKET_DB does not exist."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            result = generator._fetch_spot_price()
+            assert result == 550.0
+
+    def test_returns_price_from_db(self, generator):
+        """Should return SPY price from DB when MARKET_DB exists with data."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = [545.25]
+                mock_conn = MagicMock()
+                mock_conn.__enter__.return_value.cursor.return_value = mock_cursor
+                mock_connect.return_value = mock_conn
+
+                result = generator._fetch_spot_price()
+
+                assert result == 545.25
+                assert isinstance(result, float)
+
+    def test_returns_fallback_when_no_rows(self, generator):
+        """Should return 550.0 when DB query returns no rows (no SPY data)."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = None
+                mock_conn = MagicMock()
+                mock_conn.__enter__.return_value.cursor.return_value = mock_cursor
+                mock_connect.return_value = mock_conn
+
+                result = generator._fetch_spot_price()
+
+                assert result == 550.0
+
+    def test_returns_fallback_on_db_exception(self, generator):
+        """Should return 550.0 when DB raises an exception (e.g. connection error)."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_connect.side_effect = Exception("DB connection failed")
+                result = generator._fetch_spot_price()
+                assert result == 550.0
+
+
+class TestFetchVixLevel:
+    """Test _fetch_vix_level() method with multiple fallback paths."""
+
+    @pytest.fixture
+    def generator(self):
+        return CollarSignalGenerator()
+
+    def test_returns_fallback_when_no_sources(self, generator):
+        """Should return 16.0 when neither DB nor term structure file exists."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                mock_vix_path = MagicMock()
+                mock_vix_path.exists.return_value = False
+                mock_data_dir.__truediv__.return_value = mock_vix_path
+
+                result = generator._fetch_vix_level()
+
+                assert result == 16.0
+
+    def test_returns_vix_from_db(self, generator):
+        """Should return VIX price from DB when MARKET_DB exists with data."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = [14.5]
+                mock_conn = MagicMock()
+                mock_conn.__enter__.return_value.cursor.return_value = mock_cursor
+                mock_connect.return_value = mock_conn
+
+                result = generator._fetch_vix_level()
+
+                assert result == 14.5
+                assert isinstance(result, float)
+
+    def test_returns_fallback_when_db_has_no_vix(self, generator):
+        """Should fall through when DB returns no VIX data and no file exists."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = None
+                mock_conn = MagicMock()
+                mock_conn.__enter__.return_value.cursor.return_value = mock_cursor
+                mock_connect.return_value = mock_conn
+
+                with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                    mock_vix_path = MagicMock()
+                    mock_vix_path.exists.return_value = False
+                    mock_data_dir.__truediv__.return_value = mock_vix_path
+
+                    result = generator._fetch_vix_level()
+
+                    assert result == 16.0
+
+    def test_returns_vix_from_term_structure_file(self, generator):
+        """Should read VIX from vix_term_structure.json file when DB unavailable."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                mock_vix_path = MagicMock()
+                mock_vix_path.exists.return_value = True
+                mock_data_dir.__truediv__.return_value = mock_vix_path
+
+                with patch("builtins.open", MagicMock()):
+                    with patch("json.load") as mock_json_load:
+                        mock_json_load.return_value = {
+                            "2025-01-15": {"vix_spot": 15.2},
+                        }
+                        result = generator._fetch_vix_level()
+                        assert result == 15.2
+
+    def test_returns_fallback_on_db_exception(self, generator):
+        """Should fall through when DB raises and no file exists."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_connect.side_effect = Exception("DB locked")
+                with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                    mock_vix_path = MagicMock()
+                    mock_vix_path.exists.return_value = False
+                    mock_data_dir.__truediv__.return_value = mock_vix_path
+
+                    result = generator._fetch_vix_level()
+
+                    assert result == 16.0
+
+    def test_returns_fallback_on_json_exception(self, generator):
+        """Should return 16.0 when term structure file has parse error."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                mock_vix_path = MagicMock()
+                mock_vix_path.exists.return_value = True
+                mock_data_dir.__truediv__.return_value = mock_vix_path
+
+                with patch("builtins.open", MagicMock()):
+                    with patch("json.load") as mock_json_load:
+                        mock_json_load.side_effect = json.JSONDecodeError("Boom", "", 0)
+                        result = generator._fetch_vix_level()
+                        assert result == 16.0
+
+
+class TestCLIEntryPoint:
+    """Test the main() CLI entry point."""
+
+    @pytest.fixture
+    def mock_signal(self):
+        """Fixture that returns a MagicMock with all attributes main() accesses."""
+        sig = MagicMock()
+        sig.timestamp = "2025-01-15T10:30:00"
+        sig.signal_state = "active"
+        sig.regime = "normal"
+        sig.underlying_price = 550.0
+        sig.vix_level = 16.0
+        sig.call_strike = 575.0
+        sig.put_strike = 530.0
+        sig.max_upside_pct = 4.5
+        sig.max_downside_pct = 3.6
+        sig.expected_monthly_yield = 0.52
+        sig.is_valid = True
+        sig.confidence = 85.0
+        sig.collar_notional_pct = 0.46
+        sig.spy_shift = 0.05
+        sig.reason = "Cashless collar active"
+        sig.strikes.net_premium = -1.25
+        sig.strikes.is_cashless = True
+        return sig
+
+    @pytest.fixture
+    def mock_signal_crisis(self):
+        """Mock signal with crisis regime values."""
+        sig = MagicMock()
+        sig.timestamp = "2025-03-10T14:00:00"
+        sig.signal_state = "unhedged"
+        sig.regime = "crisis"
+        sig.underlying_price = 500.0
+        sig.vix_level = 45.0
+        sig.call_strike = 550.0
+        sig.put_strike = 450.0
+        sig.max_upside_pct = 10.0
+        sig.max_downside_pct = 10.0
+        sig.expected_monthly_yield = 0.0
+        sig.is_valid = False
+        sig.confidence = 0.0
+        sig.collar_notional_pct = 0.0
+        sig.spy_shift = 0.0
+        sig.reason = "Collar disabled: VIX crisis level, cost prohibitive"
+        sig.strikes.net_premium = 0.0
+        sig.strikes.is_cashless = False
+        return sig
+
+    def test_main_runs_without_error(self, mock_signal):
+        """main() should execute without raising exceptions."""
+        from src.signals.collar_signal import main
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal
+            with patch("sys.argv", ["collar_signal.py"]):
+                main()  # should not raise
+
+    def test_main_with_save_flag(self, mock_signal):
+        """main() should call save_signal when '--save' is in sys.argv."""
+        from src.signals.collar_signal import main
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal
+            with patch("sys.argv", ["collar_signal.py", "--save"]):
+                main()
+            instance.save_signal.assert_called_once_with(mock_signal)
+
+    def test_main_without_save_flag(self, mock_signal):
+        """main() should NOT call save_signal when '--save' is absent."""
+        from src.signals.collar_signal import main
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal
+            with patch("sys.argv", ["collar_signal.py"]):
+                main()
+            instance.save_signal.assert_not_called()
+
+    def test_main_with_crisis_signal(self, mock_signal_crisis):
+        """main() should handle crisis regime signal without error."""
+        from src.signals.collar_signal import main
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal_crisis
+            with patch("sys.argv", ["collar_signal.py"]):
+                main()  # should not raise
+
+    def test_main_calls_generate_signal_with_no_args(self, mock_signal):
+        """main() should call generate_signal() with no arguments."""
+        from src.signals.collar_signal import main
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal
+            with patch("sys.argv", ["collar_signal.py"]):
+                main()
+            instance.generate_signal.assert_called_once_with()
+
+    def test_main_save_with_crisis_also_saves(self, mock_signal_crisis):
+        """main() with --save should save even when signal is crisis (invalid)."""
+        from src.signals.collar_signal import main
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal_crisis
+            with patch("sys.argv", ["collar_signal.py", "--save"]):
+                main()
+            instance.save_signal.assert_called_once_with(mock_signal_crisis)
+
+
+class TestGenerateConvenienceFunction:
+    """Test the generate_collar_signal() convenience function."""
+
+    def test_creates_generator_and_calls_generate(self):
+        """Should instantiate CollarSignalGenerator and call generate_signal."""
+        mock_signal = MagicMock(spec=CollarSignal)
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal
+
+            result = generate_collar_signal(spot=550.0, vix=16.0)
+
+            assert result is mock_signal
+            instance.generate_signal.assert_called_once_with(spot=550.0, vix=16.0)
+
+    def test_passes_spot_and_vix_only(self):
+        """Should forward only spot and vix kwargs to generate_signal."""
+        mock_signal = MagicMock(spec=CollarSignal)
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal
+
+            result = generate_collar_signal(spot=500.0, vix=22.5)
+
+            assert result is mock_signal
+            instance.generate_signal.assert_called_once_with(spot=500.0, vix=22.5)
+
+    def test_passes_none_by_default(self):
+        """Should pass None for spot/vix when not provided."""
+        mock_signal = MagicMock(spec=CollarSignal)
+        with patch("src.signals.collar_signal.CollarSignalGenerator") as MockGen:
+            instance = MockGen.return_value
+            instance.generate_signal.return_value = mock_signal
+
+            result = generate_collar_signal()
+
+            assert result is mock_signal
+            instance.generate_signal.assert_called_once_with(spot=None, vix=None)
+
+    def test_returns_collarsignal_type(self):
+        """Convenience function should return a CollarSignal instance with real data."""
+        result = generate_collar_signal(spot=550.0, vix=16.0)
+        assert isinstance(result, CollarSignal)
+        assert result.underlying_price == 550.0
+        assert result.vix_level == 16.0
+        assert result.is_valid
+
+
+class TestEnsureDirs:
+    """Test _ensure_dirs() directory creation."""
+
+    @pytest.fixture
+    def generator(self):
+        return CollarSignalGenerator()
+
+    def test_creates_data_dir(self, generator):
+        """_ensure_dirs should call mkdir on DATA_DIR (via class attribute)."""
+        with patch.object(CollarSignalGenerator, "DATA_DIR") as mock_data_dir:
+            with patch("src.signals.collar_signal.SIGNALS_DIR") as mock_signals_dir:
+                generator._ensure_dirs()
+                mock_data_dir.mkdir.assert_called_once_with(parents=True, exist_ok=True)
+                mock_signals_dir.mkdir.assert_called_once_with(parents=True, exist_ok=True)
+
+    def test_creates_signals_dir(self, generator):
+        """_ensure_dirs should call mkdir on SIGNALS_DIR."""
+        with patch("src.signals.collar_signal.SIGNALS_DIR") as mock_signals_dir:
+            generator._ensure_dirs()
+            mock_signals_dir.mkdir.assert_called_once_with(parents=True, exist_ok=True)
+
+    def test_idempotent_on_existing_dirs(self, generator):
+        """_ensure_dirs should not raise when dirs already exist (exist_ok=True)."""
+        with patch.object(CollarSignalGenerator, "DATA_DIR") as mock_data_dir:
+            with patch("src.signals.collar_signal.SIGNALS_DIR") as mock_signals_dir:
+                # First call
+                generator._ensure_dirs()
+                # Second call — should not raise
+                generator._ensure_dirs()
+                assert mock_data_dir.mkdir.call_count == 2
+                assert mock_signals_dir.mkdir.call_count == 2
+
+    def test_called_during_init(self):
+        """_ensure_dirs should be called during CollarSignalGenerator.__init__."""
+        with patch.object(CollarSignalGenerator, "_ensure_dirs") as mock_ensure:
+            gen = CollarSignalGenerator()
+            mock_ensure.assert_called_once()
+
+    def test_mkdir_parents_true(self, generator):
+        """mkdir should be called with parents=True for both directories."""
+        with patch.object(CollarSignalGenerator, "DATA_DIR") as mock_data_dir:
+            with patch("src.signals.collar_signal.SIGNALS_DIR") as mock_signals_dir:
+                generator._ensure_dirs()
+                mock_data_dir.mkdir.assert_called_once_with(parents=True, exist_ok=True)
+                mock_signals_dir.mkdir.assert_called_once_with(parents=True, exist_ok=True)
+
+
+class TestFetchSpotPriceEdgeCases:
+    """Additional edge cases for _fetch_spot_price()."""
+
+    @pytest.fixture
+    def generator(self):
+        return CollarSignalGenerator()
+
+    def test_db_query_uses_correct_sql(self, generator):
+        """Should execute the correct SQL query against MARKET_DB."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = [550.0]
+                mock_conn = MagicMock()
+                mock_conn.__enter__.return_value.cursor.return_value = mock_cursor
+                mock_connect.return_value = mock_conn
+
+                generator._fetch_spot_price()
+
+                mock_cursor.execute.assert_called_once_with(
+                    "SELECT close FROM prices WHERE symbol='SPY' ORDER BY date DESC LIMIT 1"
+                )
+
+    def test_float_conversion_of_db_result(self, generator):
+        """Returned value should be a Python float even if DB returns string."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = ["545.50"]
+                mock_conn = MagicMock()
+                mock_conn.__enter__.return_value.cursor.return_value = mock_cursor
+                mock_connect.return_value = mock_conn
+
+                result = generator._fetch_spot_price()
+
+                assert result == 545.50
+                assert isinstance(result, float)
+
+    def test_db_connect_called_with_str_path(self, generator):
+        """sqlite_connect should be called with str(MARKET_DB)."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            mock_db.__str__.return_value = "/fake/path/market.db"
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = [550.0]
+                mock_conn = MagicMock()
+                mock_conn.__enter__.return_value.cursor.return_value = mock_cursor
+                mock_connect.return_value = mock_conn
+
+                generator._fetch_spot_price()
+
+                mock_connect.assert_called_once_with("/fake/path/market.db")
+
+    def test_fallback_type_is_float(self, generator):
+        """Fallback value 550.0 should be a float."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            result = generator._fetch_spot_price()
+            assert isinstance(result, float)
+            assert result == 550.0
+
+
+class TestFetchVixLevelEdgeCases:
+    """Additional edge cases for _fetch_vix_level()."""
+
+    @pytest.fixture
+    def generator(self):
+        return CollarSignalGenerator()
+
+    def test_db_query_uses_correct_sql(self, generator):
+        """Should execute the correct SQL query for VIX."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = True
+            with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = [16.0]
+                mock_conn = MagicMock()
+                mock_conn.__enter__.return_value.cursor.return_value = mock_cursor
+                mock_connect.return_value = mock_conn
+
+                generator._fetch_vix_level()
+
+                mock_cursor.execute.assert_called_once_with(
+                    "SELECT close FROM prices WHERE symbol='VIX' ORDER BY date DESC LIMIT 1"
+                )
+
+    def test_term_structure_file_reads_latest_date(self, generator):
+        """Should take the max date key from the JSON file."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                mock_vix_path = MagicMock()
+                mock_vix_path.exists.return_value = True
+                mock_data_dir.__truediv__.return_value = mock_vix_path
+                with patch("builtins.open", MagicMock()):
+                    with patch("json.load") as mock_json_load:
+                        mock_json_load.return_value = {
+                            "2025-01-01": {"vix_spot": 14.0},
+                            "2025-01-15": {"vix_spot": 16.5},
+                            "2025-01-10": {"vix_spot": 15.0},
+                        }
+                        result = generator._fetch_vix_level()
+                        # Should pick "2025-01-15" (max key)
+                        assert result == 16.5
+
+    def test_term_structure_empty_dict_returns_fallback(self, generator):
+        """Empty JSON dict should return 16.0."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                mock_vix_path = MagicMock()
+                mock_vix_path.exists.return_value = True
+                mock_data_dir.__truediv__.return_value = mock_vix_path
+                with patch("builtins.open", MagicMock()):
+                    with patch("json.load") as mock_json_load:
+                        mock_json_load.return_value = {}
+                        result = generator._fetch_vix_level()
+                        assert result == 16.0
+
+    def test_term_structure_missing_vix_spot_returns_fallback(self, generator):
+        """JSON entry without vix_spot key should return 16.0."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                mock_vix_path = MagicMock()
+                mock_vix_path.exists.return_value = True
+                mock_data_dir.__truediv__.return_value = mock_vix_path
+                with patch("builtins.open", MagicMock()):
+                    with patch("json.load") as mock_json_load:
+                        mock_json_load.return_value = {
+                            "2025-01-15": {"other_field": 42},
+                        }
+                        result = generator._fetch_vix_level()
+                        # .get("vix_spot", 16.0) returns 16.0
+                        assert result == 16.0
+
+    def test_fallback_returns_float(self, generator):
+        """Ultimate fallback of 16.0 should be a float."""
+        with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
+            mock_db.exists.return_value = False
+            with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
+                mock_vix_path = MagicMock()
+                mock_vix_path.exists.return_value = False
+                mock_data_dir.__truediv__.return_value = mock_vix_path
+                result = generator._fetch_vix_level()
+                assert isinstance(result, float)
+                assert result == 16.0
+
+
+class TestPricerGreeks:
+    """Detailed Greek calculations for Black-Scholes pricer."""
+
+    @pytest.fixture
+    def pricer(self):
+        return BlackScholesPricer()
+
+    def test_gamma_positive_for_atm(self, pricer):
+        """Gamma should be positive for ATM options."""
+        result = pricer.price_option(100, 100, 30/365, 0.05, 0.20, is_call=True)
+        assert result["gamma"] > 0
+
+    def test_vega_positive(self, pricer):
+        """Vega should be positive."""
+        result = pricer.price_option(100, 100, 30/365, 0.05, 0.20, is_call=True)
+        assert result["vega"] >= 0
+
+    def test_theta_negative_for_atm_call(self, pricer):
+        """Theta should be negative for ATM calls (time decay costs)."""
+        result = pricer.price_option(100, 100, 30/365, 0.05, 0.20, is_call=True)
+        assert result["theta"] <= 0
+
+    def test_put_atm_theta_sign(self, pricer):
+        """ATM put theta can be positive or negative depending on rates."""
+        result = pricer.price_option(100, 100, 30/365, 0.05, 0.20, is_call=False)
+        # theta is a float
+        assert isinstance(result["theta"], float)
+
+    def test_otm_greeks_proportional(self, pricer):
+        """OTM options should have lower gamma and vega than ATM."""
+        atm = pricer.price_option(100, 100, 30/365, 0.05, 0.20, is_call=True)
+        otm = pricer.price_option(100, 110, 30/365, 0.05, 0.20, is_call=True)
+        assert otm["gamma"] < atm["gamma"]
+        assert otm["vega"] < atm["vega"]
+
+    def test_itm_greeks_proportional(self, pricer):
+        """ITM options should have lower gamma and vega than ATM."""
+        atm = pricer.price_option(100, 100, 30/365, 0.05, 0.20, is_call=True)
+        itm = pricer.price_option(100, 90, 30/365, 0.05, 0.20, is_call=True)
+        assert itm["gamma"] < atm["gamma"]
+
+    def test_gamma_rounding_precision(self, pricer):
+        """Gamma should be rounded to 6 decimal places."""
+        result = pricer.price_option(100, 100, 30/365, 0.05, 0.20, is_call=True)
+        gamma_str = str(result["gamma"])
+        if "." in gamma_str:
+            decimals = len(gamma_str.split(".")[1])
+            assert decimals <= 6
+
+
+class TestPricerFindStrikeByDelta:
+    """Test find_strike_by_delta binary search edge cases."""
+
+    @pytest.fixture
+    def pricer(self):
+        return BlackScholesPricer()
+
+    def test_single_iteration_convergence(self, pricer):
+        """Binary search should converge within 50 iterations."""
+        strike = pricer.find_strike_by_delta(
+            spot=550, target_delta=0.30, time_to_expiry=30/365,
+            rate=0.045, vol=0.16, is_call=True,
+        )
+        result = pricer.price_option(550, strike, 30/365, 0.045, 0.16, is_call=True)
+        assert abs(result["delta"] - 0.30) < 0.05
+
+    def test_find_strike_put_otm(self, pricer):
+        """Put strike should be below spot for target delta -0.20."""
+        strike = pricer.find_strike_by_delta(
+            spot=550, target_delta=-0.20, time_to_expiry=30/365,
+            rate=0.045, vol=0.16, is_call=False,
+        )
+        assert strike < 550
+
+    def test_find_strike_call_otm(self, pricer):
+        """Call strike should be above spot for target delta 0.30."""
+        strike = pricer.find_strike_by_delta(
+            spot=550, target_delta=0.30, time_to_expiry=30/365,
+            rate=0.045, vol=0.16, is_call=True,
+        )
+        assert strike > 550
+
+    def test_zero_vol_find_strike(self, pricer):
+        """Zero vol should not crash the binary search."""
+        strike = pricer.find_strike_by_delta(
+            spot=550, target_delta=0.30, time_to_expiry=30/365,
+            rate=0.045, vol=0, is_call=True,
+        )
+        assert isinstance(strike, float)
+
+
+class TestGenerateSignalWithFallbacks:
+    """Test generate_signal when it uses _fetch_spot_price / _fetch_vix_level internally."""
+
+    def test_uses_fetch_methods_when_spot_none(self):
+        """Should call _fetch_spot_price when spot is None."""
+        gen = CollarSignalGenerator()
+        with patch.object(gen, "_fetch_spot_price", return_value=550.0) as mock_fetch:
+            with patch.object(gen, "_fetch_vix_level", return_value=16.0):
+                signal = gen.generate_signal(spot=None, vix=16.0)
+                mock_fetch.assert_called_once()
+                assert signal.underlying_price == 550.0
+
+    def test_uses_fetch_methods_when_vix_none(self):
+        """Should call _fetch_vix_level when vix is None."""
+        gen = CollarSignalGenerator()
+        with patch.object(gen, "_fetch_vix_level", return_value=16.0) as mock_fetch:
+            with patch.object(gen, "_fetch_spot_price", return_value=550.0):
+                signal = gen.generate_signal(spot=550.0, vix=None)
+                mock_fetch.assert_called_once()
+                assert signal.vix_level == 16.0
+
+    def test_does_not_fetch_when_both_provided(self):
+        """Should not call fetch methods when both spot and vix are provided."""
+        gen = CollarSignalGenerator()
+        with patch.object(gen, "_fetch_spot_price") as mock_spot:
+            with patch.object(gen, "_fetch_vix_level") as mock_vix:
+                gen.generate_signal(spot=550.0, vix=16.0)
+                mock_spot.assert_not_called()
+                mock_vix.assert_not_called()
+
+    def test_fetches_both_when_neither_provided(self):
+        """Should call both fetch methods when neither spot nor vix is provided."""
+        gen = CollarSignalGenerator()
+        with patch.object(gen, "_fetch_spot_price", return_value=550.0) as mock_spot:
+            with patch.object(gen, "_fetch_vix_level", return_value=16.0) as mock_vix:
+                gen.generate_signal()
+                mock_spot.assert_called_once()
+                mock_vix.assert_called_once()
+
+
+class TestSaveSignalEdgeCases:
+    """Edge cases for save_signal()."""
+
+    def test_save_with_none_signal_raises_error(self, tmp_path):
+        """Saving a None signal should raise AttributeError."""
+        gen = CollarSignalGenerator()
+        with pytest.raises((AttributeError, TypeError)):
+            gen.save_signal(None)
+
+    def test_save_output_path_uses_signals_dir(self):
+        """OUTPUT_PATH should be inside SIGNALS_DIR."""
+        original = CollarSignalGenerator.OUTPUT_PATH
+        try:
+            expected_dir = CollarSignalGenerator.OUTPUT_PATH.parent
+            assert expected_dir.name == "signals"
+        finally:
+            pass
+
+    def test_save_signal_json_indent(self, tmp_path):
+        """Saved JSON should use 2-space indent formatting."""
+        gen = CollarSignalGenerator()
+        gen._fetch_spot_price = lambda: 550.0
+        gen._fetch_vix_level = lambda: 16.0
+        signal = gen.generate_signal(spot=550.0, vix=16.0)
+        output_path = tmp_path / "collar_signal.json"
+        original = gen.OUTPUT_PATH
+        gen.OUTPUT_PATH = output_path
+        try:
+            gen.save_signal(signal)
+            with open(output_path) as f:
+                content = f.read()
+            # Should have two-space indentation
+            lines = content.split("\n")
+            if len(lines) > 2:
+                # Check that indentation uses spaces (not tabs)
+                for line in lines[1:]:
+                    stripped = line.lstrip()
+                    if stripped.startswith('"'):
+                        indent = line[:len(line) - len(stripped)]
+                        assert indent.startswith("  ") or not indent
+                        break
+        finally:
+            gen.OUTPUT_PATH = original
+
+
+class TestCollarSignalGeneratorConstruction:
+    """Test CollarSignalGenerator construction and initialization."""
+
+    def test_pricer_instantiated_during_init(self):
+        """BlackScholesPricer should be created during __init__."""
+        gen = CollarSignalGenerator()
+        assert hasattr(gen, "pricer")
+        assert isinstance(gen.pricer, BlackScholesPricer)
+
+    def test_default_parameters_present(self):
+        """Default class-level parameters should be present."""
+        assert hasattr(CollarSignalGenerator, "CALL_DELTA_TARGET")
+        assert hasattr(CollarSignalGenerator, "PUT_DELTA_TARGET")
+        assert hasattr(CollarSignalGenerator, "WIDE_FACTOR")
+        assert hasattr(CollarSignalGenerator, "VIX_ELEVATED")
+        assert hasattr(CollarSignalGenerator, "VIX_STRESS")
+        assert hasattr(CollarSignalGenerator, "VIX_CRISIS")
+        assert hasattr(CollarSignalGenerator, "DEFAULT_DAYS_TO_EXPIRY")
+        assert hasattr(CollarSignalGenerator, "RISK_FREE_RATE")
+        assert hasattr(CollarSignalGenerator, "CASHLESS_TOLERANCE")
+        assert hasattr(CollarSignalGenerator, "OUTPUT_PATH")
+
+    def test_output_path_is_path_object(self):
+        """OUTPUT_PATH should be a Path instance."""
+        assert isinstance(CollarSignalGenerator.OUTPUT_PATH, Path)
+
+    def test_save_signal_creates_parent_dir(self, tmp_path):
+        """save_signal should create parent directory if it doesn't exist."""
+        gen = CollarSignalGenerator()
+        gen._fetch_spot_price = lambda: 550.0
+        gen._fetch_vix_level = lambda: 16.0
+        signal = gen.generate_signal(spot=550.0, vix=16.0)
+        nested_path = tmp_path / "nested" / "subdir" / "signal.json"
+        original = gen.OUTPUT_PATH
+        gen.OUTPUT_PATH = nested_path
+        try:
+            gen.save_signal(signal)
+            assert nested_path.exists()
+        finally:
+            gen.OUTPUT_PATH = original
