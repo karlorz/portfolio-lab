@@ -279,6 +279,81 @@ def print_metrics_report(metrics: BacktestMetrics, title: str = "Backtest Result
         print(f"Transaction Costs: {metrics.total_transaction_costs:.2f}")
 
 
+def compute_deflated_sharpe_ratio(
+    sharpe_ratio: float,
+    n_trials: int,
+    n_observations: int,
+    skew: float = 0.0,
+    kurtosis: float = 3.0,
+    trading_days_per_year: int = TRADING_DAYS_PER_YEAR,
+) -> float:
+    """
+    Compute the Deflated Sharpe Ratio (DSR).
+
+    DSR corrects for multiple testing when a Sharpe ratio is selected
+    from N independent trials. It estimates the probability that the
+    best Sharpe among N strategies is statistically significant.
+
+    Reference: Bailey & Lopez de Prado, "The Deflated Sharpe Ratio",
+    Journal of Portfolio Management, 2014.
+
+    Args:
+        sharpe_ratio: The observed Sharpe ratio (annualized).
+        n_trials: Number of independent strategy trials.
+        n_observations: Number of return observations (trading days).
+        skew: Skewness of returns (default 0.0 for symmetric).
+        kurtosis: Excess kurtosis of returns (default 3.0 for normal).
+        trading_days_per_year: Annualization factor (default 252).
+
+    Returns:
+        DSR value between 0 and 1. Values > 0.95 indicate statistical
+        significance at the 5% level. Values > 0.50 suggest the Sharpe
+        is likely positive after multiple-testing correction.
+    """
+    import math
+
+    if n_trials < 1 or n_observations < 1 or sharpe_ratio == 0:
+        return 0.0
+
+    # Annualized Sharpe variance (under null hypothesis SR=0)
+    # V(SR) ≈ (1 - skew * SR + (kurtosis - 1) / 4 * SR^2) / (T - 1)
+    # Simplified for SR≈0 under null: V(SR) ≈ 1 / (T - 1) * annualization
+    # But using the full formula for accuracy
+    t_years = n_observations / trading_days_per_year
+    var_sr = (1 - skew * sharpe_ratio + (kurtosis - 1) / 4 * sharpe_ratio ** 2) / max(n_observations - 1, 1)
+
+    # Expected maximum Sharpe under null (from N independent trials)
+    # E[max(SR)] ≈ (1 - gamma) * Z^{-1}(1 - 1/N) + gamma * Z^{-1}(1 - 1/(N*e))
+    # where gamma ≈ 0.5772 (Euler-Mascheroni constant)
+    # Simplified: E[max(SR)] ≈ sqrt(V(SR)) * (1 - gamma) * Z^{-1}(1 - 1/N)
+    # For N > 5, use the approximation: E[max] ≈ sqrt(V(SR)) * sqrt(2 * ln(N))
+
+    if n_trials == 1:
+        expected_max_sr = 0.0
+    else:
+        expected_max_sr = math.sqrt(var_sr) * math.sqrt(2 * math.log(n_trials))
+
+    # Standard deviation of the maximum Sharpe under null
+    # sigma_max ≈ sqrt(V(SR)) * sqrt(pi/6 / ln(N)) for large N
+    if n_trials > 2:
+        sigma_max = math.sqrt(var_sr) * math.sqrt(math.pi / (6 * math.log(n_trials)))
+    else:
+        sigma_max = math.sqrt(var_sr)
+
+    # DSR = Phi((SR - E[max]) / sigma_max)
+    # where Phi is the standard normal CDF
+    if sigma_max <= 0:
+        return 1.0 if sharpe_ratio > expected_max_sr else 0.0
+
+    z = (sharpe_ratio - expected_max_sr) / sigma_max
+
+    # Approximate standard normal CDF using the logistic function
+    # Phi(z) ≈ 1 / (1 + exp(-1.7 * z)) — close approximation
+    dsr = 1.0 / (1.0 + math.exp(-1.7 * z))
+
+    return round(dsr, 4)
+
+
 def save_results_json(data: dict, output_path: str = None, default_dir: Path = None):
     """Save results dict to JSON file.
 

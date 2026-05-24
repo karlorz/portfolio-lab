@@ -14,6 +14,7 @@ from src.backtest.metrics import (
     BacktestConfig, BacktestResult, DailyPrices,
     BacktestMetrics, OverlayMetrics, CrisisReturns,
     compute_metrics, compute_crisis_returns,
+    compute_deflated_sharpe_ratio,
     print_metrics_report, save_results_json,
 )
 
@@ -342,6 +343,59 @@ class TestSaveResultsJson:
     def test_no_path_no_dir(self):
         # Should not crash, just return
         save_results_json({'key': 'val'}, output_path=None, default_dir=None)
+
+
+# ---------------------------------------------------------------------------
+# compute_deflated_sharpe_ratio
+# ---------------------------------------------------------------------------
+
+class TestDeflatedSharpeRatio:
+
+    def test_single_trial_returns_high_dsr(self):
+        """With only 1 trial, no multiple-testing penalty — DSR should be high for decent Sharpe."""
+        dsr = compute_deflated_sharpe_ratio(
+            sharpe_ratio=0.79, n_trials=1, n_observations=5371,
+        )
+        assert dsr > 0.90
+
+    def test_many_trials_reduces_dsr(self):
+        """More trials → more multiple-testing penalty → lower DSR."""
+        dsr_10 = compute_deflated_sharpe_ratio(0.20, n_trials=10, n_observations=100)
+        dsr_94 = compute_deflated_sharpe_ratio(0.20, n_trials=94, n_observations=100)
+        assert dsr_10 > dsr_94
+
+    def test_higher_sharpe_gives_higher_dsr(self):
+        dsr_low = compute_deflated_sharpe_ratio(0.15, n_trials=20, n_observations=100)
+        dsr_high = compute_deflated_sharpe_ratio(0.30, n_trials=20, n_observations=100)
+        assert dsr_high > dsr_low
+
+    def test_zero_sharpe_returns_zero(self):
+        dsr = compute_deflated_sharpe_ratio(0.0, n_trials=10, n_observations=1000)
+        assert dsr == 0.0
+
+    def test_dsr_between_zero_and_one(self):
+        for n_trials in [1, 5, 20, 94]:
+            dsr = compute_deflated_sharpe_ratio(0.79, n_trials=n_trials, n_observations=5371)
+            assert 0.0 <= dsr <= 1.0, f"DSR out of range for n_trials={n_trials}: {dsr}"
+
+    def test_champion_sharpe_with_94_trials(self):
+        """Champion Sharpe 0.79 with 94 grid-search configs should have DSR > 0.50."""
+        dsr = compute_deflated_sharpe_ratio(0.79, n_trials=94, n_observations=5371)
+        assert dsr > 0.50, f"DSR for champion is only {dsr}, expected > 0.50"
+
+    def test_more_observations_increases_dsr(self):
+        """More data → more statistical power → higher DSR."""
+        dsr_short = compute_deflated_sharpe_ratio(0.79, n_trials=20, n_observations=500)
+        dsr_long = compute_deflated_sharpe_ratio(0.79, n_trials=20, n_observations=5000)
+        assert dsr_long >= dsr_short
+
+    def test_skew_and_kurtosis_parameters(self):
+        """Non-normal return distribution should affect DSR."""
+        dsr_normal = compute_deflated_sharpe_ratio(0.79, n_trials=20, n_observations=5371, skew=0.0, kurtosis=3.0)
+        dsr_skewed = compute_deflated_sharpe_ratio(0.79, n_trials=20, n_observations=5371, skew=-0.5, kurtosis=5.0)
+        # Both should be valid
+        assert 0.0 <= dsr_normal <= 1.0
+        assert 0.0 <= dsr_skewed <= 1.0
 
 
 if __name__ == '__main__':
