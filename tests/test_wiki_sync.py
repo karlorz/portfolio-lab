@@ -315,7 +315,7 @@ class TestSyncRegimeAnalysis:
         content = path.read_text()
         assert "| Date | Regime | VIX | Trend Strength |" in content
         assert "crisis" in content
-        assert "normal" in content
+        assert "low_vol" in content
 
     def test_raw_source_created(self, db_with_regimes):
         """Raw source file is saved alongside the compound page."""
