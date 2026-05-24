@@ -167,3 +167,157 @@ class TestEdgeCases:
         result = bridge._find_from_chain(chain, 550.0, 16.0, 30)
         assert result is None  # Should return None, triggering fallback
 
+    def test_find_from_chain_with_calls_and_puts(self, bridge):
+        """Should find optimal collar from a populated chain."""
+        exp = date(2026, 6, 16)
+        quotes = [
+            OptionQuote(
+                symbol="SPY260616C00560000", underlying="SPY", option_type=OptionType.CALL,
+                strike=560.0, expiration=exp, bid=4.0, ask=4.2, last=4.1, mark=4.1,
+                delta=0.30, volume=500, open_interest=5000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616C00565000", underlying="SPY", option_type=OptionType.CALL,
+                strike=565.0, expiration=exp, bid=2.5, ask=2.7, last=2.6, mark=2.6,
+                delta=0.20, volume=300, open_interest=3000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616P00540000", underlying="SPY", option_type=OptionType.PUT,
+                strike=540.0, expiration=exp, bid=3.8, ask=4.0, last=3.9, mark=3.9,
+                delta=-0.20, volume=400, open_interest=4000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616P00535000", underlying="SPY", option_type=OptionType.PUT,
+                strike=535.0, expiration=exp, bid=5.0, ask=5.3, last=5.15, mark=5.15,
+                delta=-0.30, volume=200, open_interest=2000, implied_vol=0.18,
+            ),
+        ]
+        chain = OptionsChain(underlying="SPY", quotes=quotes)
+        result = bridge._find_from_chain(chain, 550.0, 16.0, 30)
+        assert result is not None
+        assert result.call_strike == 560.0  # Delta 0.30 is closest to target
+        assert result.put_strike == 540.0   # Delta -0.20 is closest to target
+
+    def test_find_from_chain_picks_best_delta(self, bridge):
+        """Should select options closest to target deltas."""
+        exp = date(2026, 6, 16)
+        quotes = [
+            OptionQuote(
+                symbol="SPY260616C00555000", underlying="SPY", option_type=OptionType.CALL,
+                strike=555.0, expiration=exp, bid=5.5, ask=5.7, last=5.6, mark=5.6,
+                delta=0.35, volume=600, open_interest=6000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616C00560000", underlying="SPY", option_type=OptionType.CALL,
+                strike=560.0, expiration=exp, bid=4.0, ask=4.2, last=4.1, mark=4.1,
+                delta=0.28, volume=500, open_interest=5000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616P00545000", underlying="SPY", option_type=OptionType.PUT,
+                strike=545.0, expiration=exp, bid=2.8, ask=3.0, last=2.9, mark=2.9,
+                delta=-0.15, volume=400, open_interest=4000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616P00540000", underlying="SPY", option_type=OptionType.PUT,
+                strike=540.0, expiration=exp, bid=3.8, ask=4.0, last=3.9, mark=3.9,
+                delta=-0.22, volume=300, open_interest=3000, implied_vol=0.18,
+            ),
+        ]
+        chain = OptionsChain(underlying="SPY", quotes=quotes)
+        result = bridge._find_from_chain(chain, 550.0, 16.0, 30)
+        assert result is not None
+        assert result.call_strike == 560.0  # Delta 0.28 closer to 0.30
+        assert result.put_strike == 540.0   # Delta -0.22 closer to -0.20
+
+    def test_find_from_chain_none_delta_skipped(self, bridge):
+        """Options with None delta should be deprioritized."""
+        exp = date(2026, 6, 16)
+        quotes = [
+            OptionQuote(
+                symbol="SPY260616C00550000", underlying="SPY", option_type=OptionType.CALL,
+                strike=550.0, expiration=exp, bid=8.0, ask=8.5, last=8.25, mark=8.25,
+                delta=None, volume=100, open_interest=1000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616C00560000", underlying="SPY", option_type=OptionType.CALL,
+                strike=560.0, expiration=exp, bid=4.0, ask=4.2, last=4.1, mark=4.1,
+                delta=0.30, volume=500, open_interest=5000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616P00540000", underlying="SPY", option_type=OptionType.PUT,
+                strike=540.0, expiration=exp, bid=3.8, ask=4.0, last=3.9, mark=3.9,
+                delta=-0.20, volume=400, open_interest=4000, implied_vol=0.18,
+            ),
+        ]
+        chain = OptionsChain(underlying="SPY", quotes=quotes)
+        result = bridge._find_from_chain(chain, 550.0, 16.0, 30)
+        assert result is not None
+        assert result.call_strike == 560.0  # Valid delta wins over None
+
+    def test_get_spot_from_populated_chain(self, bridge):
+        """Should infer spot from ATM strike in chain."""
+        exp = date(2026, 6, 16)
+        quotes = [
+            OptionQuote(
+                symbol=f"SPY260616C{strike:08d}", underlying="SPY",
+                option_type=OptionType.CALL, strike=float(strike), expiration=exp,
+                bid=5.0, ask=5.2, last=5.1, mark=5.1, delta=0.40,
+                volume=100, open_interest=1000, implied_vol=0.18,
+            )
+            for strike in [540, 545, 550, 555, 560]
+        ]
+        chain = OptionsChain(underlying="SPY", quotes=quotes)
+        spot = bridge._get_spot(chain)
+        assert spot == 550.0  # Middle strike
+
+    def test_compare_with_signal_has_diff_pcts(self, bridge):
+        """compare_with_signal should include diff percentages."""
+        import asyncio
+        strikes = asyncio.run(bridge._fallback_estimate(550.0, 16.0, 30))
+        comparison = bridge.compare_with_signal(strikes)
+        assert "call_diff_pct" in comparison
+        assert "put_diff_pct" in comparison
+        assert isinstance(comparison["call_diff_pct"], (int, float))
+        assert isinstance(comparison["put_diff_pct"], (int, float))
+
+    def test_net_premium_calculation(self, bridge):
+        """Net premium should be call mark minus put mark."""
+        exp = date(2026, 6, 16)
+        quotes = [
+            OptionQuote(
+                symbol="SPY260616C00560000", underlying="SPY", option_type=OptionType.CALL,
+                strike=560.0, expiration=exp, bid=4.0, ask=4.2, last=4.1, mark=4.1,
+                delta=0.30, volume=500, open_interest=5000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616P00540000", underlying="SPY", option_type=OptionType.PUT,
+                strike=540.0, expiration=exp, bid=3.8, ask=4.0, last=3.9, mark=3.9,
+                delta=-0.20, volume=400, open_interest=4000, implied_vol=0.18,
+            ),
+        ]
+        chain = OptionsChain(underlying="SPY", quotes=quotes)
+        result = bridge._find_from_chain(chain, 550.0, 16.0, 30)
+        assert result is not None
+        expected_net = 4.1 - 3.9
+        assert abs(result.net_premium - expected_net) < 0.01
+
+    def test_cashless_collar_detection(self, bridge):
+        """Collar should be cashless when net premium is near zero."""
+        exp = date(2026, 6, 16)
+        quotes = [
+            OptionQuote(
+                symbol="SPY260616C00560000", underlying="SPY", option_type=OptionType.CALL,
+                strike=560.0, expiration=exp, bid=3.9, ask=4.1, last=4.0, mark=4.0,
+                delta=0.30, volume=500, open_interest=5000, implied_vol=0.18,
+            ),
+            OptionQuote(
+                symbol="SPY260616P00540000", underlying="SPY", option_type=OptionType.PUT,
+                strike=540.0, expiration=exp, bid=3.9, ask=4.1, last=4.0, mark=4.0,
+                delta=-0.20, volume=400, open_interest=4000, implied_vol=0.18,
+            ),
+        ]
+        chain = OptionsChain(underlying="SPY", quotes=quotes)
+        result = bridge._find_from_chain(chain, 550.0, 16.0, 30)
+        assert result is not None
+        assert result.is_cashless  # Net premium ~0
+
