@@ -2284,7 +2284,7 @@ class TestLoadHistoricalBars:
         mock_db.exists.return_value = False
         with patch('src.paths.MARKET_DB', mock_db):
             with patch('requests.get') as mock_get:
-                mock_get.side_effect = Exception("HTTP fail")
+                mock_get.side_effect = ConnectionError("HTTP fail")
                 df = load_historical_bars("SPY", days=1)
         assert isinstance(df, pd.DataFrame)
         assert df.empty
@@ -2298,7 +2298,7 @@ class TestLoadHistoricalBars:
         mock_db.exists.return_value = False
         with patch('src.paths.MARKET_DB', mock_db):
             with patch('requests.get') as mock_get:
-                mock_get.side_effect = Exception("HTTP fail")
+                mock_get.side_effect = ConnectionError("HTTP fail")
                 df = load_historical_bars("SPY", days=1)
         assert isinstance(df, pd.DataFrame)
         assert df.empty
@@ -2312,7 +2312,7 @@ class TestLoadHistoricalBars:
         mock_db.exists.return_value = False
         with patch('src.paths.MARKET_DB', mock_db):
             with patch('requests.get') as mock_get:
-                mock_get.side_effect = Exception("Network error")
+                mock_get.side_effect = ConnectionError("Network error")
                 df = load_historical_bars("SPY", days=1)
         assert isinstance(df, pd.DataFrame)
         assert df.empty

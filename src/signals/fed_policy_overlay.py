@@ -109,7 +109,7 @@ def fetch_fred_series(series_id: str, start_date: str = "2000-01-01") -> Optiona
         
         return df
         
-    except Exception as e:
+    except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
         logger.error("Error fetching %s: %s", series_id, e)
         return None
 

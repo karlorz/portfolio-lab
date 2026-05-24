@@ -5,6 +5,7 @@ regime-gated suppression, and contrarian allocation signals.
 """
 
 from src.paths import sqlite_connect
+import sqlite3
 import logging
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
@@ -129,7 +130,7 @@ class BehavioralSentimentSignal:
                     )
                 """)
                 conn.commit()
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to init zscore table: %s", e)
 
     def _get_zscore(self, composite_score: float) -> float:
@@ -156,7 +157,7 @@ class BehavioralSentimentSignal:
                     return 0.0
 
                 return (composite_score - mean) / std
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, ZeroDivisionError) as e:
             logger.warning("Z-score computation failed: %s", e)
             return composite_score / 1.5
 
@@ -171,7 +172,7 @@ class BehavioralSentimentSignal:
                     (datetime.now().isoformat(), composite_score, signal_type),
                 )
                 conn.commit()
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to record zscore: %s", e)
 
     def _regime_check(self, vix: float) -> Tuple[bool, str]:
@@ -399,7 +400,7 @@ class BehavioralSentimentSignal:
                         "equity_shift_pct": 0.0 if regime_suppressed else equity_shift,
                         "regime_suppressed": regime_suppressed,
                     })
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
             logger.warning("Historical backfill failed: %s", e)
 
         return results

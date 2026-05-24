@@ -211,11 +211,11 @@ class TSMOMOverlay:
                         df.set_index('date', inplace=True)
                         self.price_cache[ticker] = df
                         return df
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
                 logger.warning("Error loading prices for %s: %s", ticker, e)
 
         return None
-    
+
     def calculate_formation_return(
         self,
         prices: pd.Series,

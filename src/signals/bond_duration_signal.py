@@ -22,12 +22,13 @@ Usage:
 
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Dict, Tuple
 
-from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR
+from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR, sqlite_connect
 
 
 __all__ = ['YieldCurveRegime', 'RateDirection', 'DurationPosition', 'BondDurationSignal', 'BondDurationCalculator', 'BondDurationSignalGenerator', 'generate_bond_duration_signal']
@@ -266,7 +267,6 @@ class BondDurationSignalGenerator:
         db_path = MARKET_DB
         if db_path.exists():
             try:
-                import sqlite3
                 with sqlite_connect(str(db_path)) as conn:
                     cursor = conn.cursor()
 
@@ -285,7 +285,7 @@ class BondDurationSignalGenerator:
                 y10 = yields.get("^TNX", 45) / 10 if yields.get("^TNX", 0) > 1 else yields.get("^TNX", 4.5)
 
                 return {"yield_10y": y10, "yield_2y": yields.get("2Y", y10 - 0.5)}
-            except Exception as e:
+            except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to fetch yields from DB: %s", e)
 
         # Default: current market ~4.5% 10Y, ~4.0% 2Y

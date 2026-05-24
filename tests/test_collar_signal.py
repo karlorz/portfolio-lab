@@ -3,6 +3,7 @@ Tests for Cashless Collar Signal Generator (v4.60)
 """
 
 import json
+import sqlite3
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -842,7 +843,7 @@ class TestFetchSpotPrice:
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = True
             with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
-                mock_connect.side_effect = Exception("DB connection failed")
+                mock_connect.side_effect = sqlite3.Error("DB connection failed")
                 result = generator._fetch_spot_price()
                 assert result == 550.0
 
@@ -925,7 +926,7 @@ class TestFetchVixLevel:
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = True
             with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
-                mock_connect.side_effect = Exception("DB locked")
+                mock_connect.side_effect = sqlite3.Error("DB locked")
                 with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
                     mock_vix_path = MagicMock()
                     mock_vix_path.exists.return_value = False

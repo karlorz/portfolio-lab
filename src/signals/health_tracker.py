@@ -929,7 +929,7 @@ def backfill_predictions(
             conn.commit()
             logger.info("Backfilled %d historical predictions", count)
         
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.error("Backfill error: %s", e)
     
     return count

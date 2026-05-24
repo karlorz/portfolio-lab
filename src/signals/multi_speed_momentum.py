@@ -473,7 +473,7 @@ class MultiSpeedMomentum:
                     "confidence": signal.ensemble_confidence,
                 }
             return {"value": 0.0, "confidence": 0.0}
-        except Exception as e:
+        except (OSError, KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
             logger.warning("get_signal_for_ticker(%s) failed: %s", ticker, e)
             return None
 

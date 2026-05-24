@@ -14,6 +14,7 @@ Usage:
 import json
 import logging
 import math
+import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
@@ -424,7 +425,6 @@ class CollarSignalGenerator:
         db_path = MARKET_DB
         if db_path.exists():
             try:
-                import sqlite3
                 with sqlite_connect(str(db_path)) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
@@ -434,7 +434,7 @@ class CollarSignalGenerator:
                     row = cursor.fetchone()
                 if row:
                     return float(row[0])
-            except Exception as e:
+            except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to fetch %s price from DB: %s", symbol, e)
         return fallback
 
@@ -457,7 +457,7 @@ class CollarSignalGenerator:
                 if data:
                     latest = max(data.keys())
                     return data[latest].get("vix_spot", 16.0)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to parse VIX term structure file: %s", e)
         return 16.0
 

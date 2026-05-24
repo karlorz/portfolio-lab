@@ -4,6 +4,7 @@ Generates momentum-based signals for EFA/EEM overlay strategy
 """
 
 import json
+import sqlite3
 from src.paths import sqlite_connect
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -186,7 +187,7 @@ class InternationalMomentumGenerator:
                 row = cursor.fetchone()
                 if row:
                     return float(row[0])
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.warning("Could not fetch VIX: %s", e)
         return 20.0  # Default to normal level
     
@@ -204,7 +205,7 @@ class InternationalMomentumGenerator:
                 row = cursor.fetchone()
                 if row:
                     return float(row[0])
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.warning("Could not fetch correlation: %s", e)
         return 0.85  # Default normal correlation
     
@@ -356,7 +357,7 @@ class InternationalMomentumGenerator:
                     1 if signal.data_fresh else 0
                 ))
                 conn.commit()
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.error("Failed to save signal: %s", e)
     
     def get_signal_history(self, days: int = 90) -> List[Dict]:
@@ -470,7 +471,7 @@ def main():
             print(f"Error: Data file not found: {args.data_file}", file=sys.stderr)
             print("Run data fetcher first: bun run fetch-data", file=sys.stderr)
             sys.exit(1)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
             print(f"Error generating signal: {e}", file=sys.stderr)
             sys.exit(1)
     

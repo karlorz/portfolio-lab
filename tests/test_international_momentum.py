@@ -4,6 +4,7 @@ Tests for International Momentum Signal Generator
 
 import unittest
 import tempfile
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -1417,14 +1418,14 @@ class TestInternationalMomentumGeneratorExceptionHandling(unittest.TestCase):
     def test_get_vix_level_exception_returns_default(self):
         """Exception in _get_vix_level should return default 20.0."""
         with patch('src.signals.international_momentum.sqlite_connect',
-                   side_effect=Exception('DB error')):
+                   side_effect=sqlite3.Error('DB error')):
             vix = self.generator._get_vix_level()
         self.assertEqual(vix, 20.0)
 
     def test_get_correlation_exception_returns_default(self):
         """Exception in _get_correlation should return default 0.85."""
         with patch('src.signals.international_momentum.sqlite_connect',
-                   side_effect=Exception('DB error')):
+                   side_effect=sqlite3.Error('DB error')):
             corr = self.generator._get_correlation()
         self.assertEqual(corr, 0.85)
 
@@ -1441,7 +1442,7 @@ class TestInternationalMomentumGeneratorExceptionHandling(unittest.TestCase):
             data_fresh=True, vix_filter_active=False, correlation_override=False,
         )
         with patch('src.signals.international_momentum.sqlite_connect',
-                   side_effect=Exception('DB error')):
+                   side_effect=sqlite3.Error('DB error')):
             # Should not raise
             self.generator._save_signal(signal)
 

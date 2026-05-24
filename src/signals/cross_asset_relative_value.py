@@ -189,7 +189,7 @@ class CrossAssetRVScanner:
 
             return True
 
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
             logger.error("Error loading price data: %s", e)
             return False
 
@@ -459,7 +459,7 @@ class CrossAssetRVScanner:
             try:
                 with open(self.state_path) as f:
                     return json.load(f)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load relative value state: %s", e)
         return {}
 
@@ -467,7 +467,7 @@ class CrossAssetRVScanner:
         try:
             with open(self.state_path, "w") as f:
                 json.dump(state, f, indent=2)
-        except Exception as e:
+        except (OSError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to save state: %s", e)
 
 

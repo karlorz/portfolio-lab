@@ -333,7 +333,7 @@ class VIXTermStructureSignalGenerator:
         try:
             with open(self.VIX_DATA_PATH, 'r') as f:
                 return json.load(f)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Error loading VIX data: %s", e)
             return {}
     
@@ -461,9 +461,9 @@ class VIXTermStructureSignalGenerator:
             with open(self.OUTPUT_PATH, 'w') as f:
                 json.dump(signal.to_dict(), f, indent=2)
             logger.info("Saved VIX signal to %s", self.OUTPUT_PATH)
-        except Exception as e:
+        except (OSError, KeyError, ValueError, TypeError) as e:
             logger.error("Error saving signal: %s", e)
-    
+
     def get_signal_history(self, days: int = 30) -> List[VIXTermStructureSignal]:
         """Generate signals for historical dates."""
         historical_data = self.load_vix_data()

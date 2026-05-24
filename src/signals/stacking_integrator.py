@@ -131,7 +131,7 @@ class StackingIntegrator:
             )
             return True
             
-        except Exception as e:
+        except (OSError, pickle.UnpicklingError, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
             logger.error("Failed to load model from %s: %s", model_path, e)
             self.model = None
             self.metadata = None
@@ -250,7 +250,7 @@ class StackingIntegrator:
             
             return prediction
             
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
             logger.error("Model prediction failed: %s, using fallback", e)
             return self._weighted_voting_fallback(
                 base_signals, features, start_time
@@ -479,7 +479,7 @@ class StackingIntegrator:
             logger.info("Exported %d predictions to %s", len(records), filepath)
             return True
 
-        except Exception as e:
+        except (OSError, KeyError, ValueError, TypeError) as e:
             logger.error("Failed to export predictions: %s", e)
             return False
 

@@ -501,7 +501,7 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
                         df = df.dropna(subset=['close', 'volume'])
                         df['volume'] = df['volume'].fillna(0)
                         return df[['open', 'high', 'low', 'close', 'volume']]
-            except Exception as e:
+            except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
                 logger.warning("Failed to fetch OHLCV for %s from DB: %s", symbol, e)
 
     # Fallback: fetch from Yahoo Finance v8 API
@@ -538,7 +538,7 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
         df['volume'] = df['volume'].fillna(0)
 
         return df.tail(days)
-    except Exception as e:
+    except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
         logger.warning("Failed to fetch OHLCV for %s from Yahoo Finance: %s", symbol, e)
         return pd.DataFrame()
 

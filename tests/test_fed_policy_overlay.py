@@ -635,7 +635,7 @@ class TestFetchFredSeries:
         with patch('src.signals.fed_policy_overlay.requests.get') as mock_get:
             mock_response = MagicMock()
             mock_response.text = csv_data
-            mock_response.raise_for_status.side_effect = Exception("HTTP 404 Not Found")
+            mock_response.raise_for_status.side_effect = RuntimeError("HTTP 404 Not Found")
             mock_get.return_value = mock_response
 
             result = fetch_fred_series('FEDFUNDS')
@@ -644,7 +644,7 @@ class TestFetchFredSeries:
     def test_request_exception_returns_none(self):
         """Network error (connection timeout) should return None."""
         with patch('src.signals.fed_policy_overlay.requests.get') as mock_get:
-            mock_get.side_effect = Exception("ConnectionError: No connection")
+            mock_get.side_effect = ConnectionError("No connection")
 
             result = fetch_fred_series('FEDFUNDS')
             assert result is None

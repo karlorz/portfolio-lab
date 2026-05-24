@@ -17,13 +17,14 @@ Usage:
 import json
 import logging
 import math
+import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
 from typing import List, Tuple
 import numpy as np
 
-from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB
+from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_connect
 
 
 __all__ = ['CryptoVolRegime', 'CryptoSignalState', 'CryptoAssetSignal', 'CryptoCompositeSignal', 'CryptoMomentumCalculator', 'CryptoMomentumSignalGenerator', 'generate_crypto_signal']
@@ -260,7 +261,6 @@ class CryptoMomentumSignalGenerator:
         db_path = MARKET_DB
         if db_path.exists():
             try:
-                import sqlite3
                 with sqlite_connect(str(db_path)) as conn:
                     cursor = conn.cursor()
                     # Try crypto symbols
@@ -277,7 +277,7 @@ class CryptoMomentumSignalGenerator:
                                 for i in range(1, len(prices))
                             ]
                             return prices, returns
-            except Exception as e:
+            except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
                 logger.warning("Failed to fetch price history for %s from DB: %s", symbol, e)
 
         # Fallback: generate realistic simulated data
