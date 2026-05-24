@@ -119,3 +119,113 @@ class TestBackwardEliminate:
                    for i in range(8)}
         result = backward_eliminate(returns, target_n=5)
         assert len(result) == 5
+
+
+class TestCorrelationClusterExtended:
+    """Extended edge cases for correlation clustering."""
+
+    def test_negative_correlation_separate_clusters(self):
+        """Negatively correlated signals should NOT be clustered together."""
+        returns = {
+            "pos": np.array([0.01, 0.02, -0.01, 0.005, 0.01]),
+            "neg": np.array([-0.01, -0.02, 0.01, -0.005, -0.01]),  # perfect neg corr
+        }
+        sharpe = {"pos": 0.5, "neg": 0.3}
+        result = correlation_cluster(returns, sharpe, threshold=0.6)
+        # Negatively correlated → separate clusters (diversifying, not redundant)
+        assert len(result) == 2
+
+    def test_constant_returns_nan_corr_handled(self):
+        """Constant returns produce NaN correlation, should be handled as 0."""
+        returns = {
+            "const": np.array([0.0, 0.0, 0.0, 0.0, 0.0]),  # zero variance
+            "var": np.array([0.01, -0.01, 0.02, -0.005, 0.01]),
+        }
+        sharpe = {"const": 0.0, "var": 0.5}
+        # Should not crash — NaN corr treated as 0
+        result = correlation_cluster(returns, sharpe, threshold=0.6)
+        assert len(result) == 2  # Not correlated (NaN → 0), separate clusters
+
+    def test_cluster_order_by_sharpe(self):
+        """Within each cluster, highest Sharpe signal should be first."""
+        returns = {
+            "low": np.array([0.01, 0.02, 0.01]),
+            "mid": np.array([0.01, 0.02, 0.01]),
+            "high": np.array([0.01, 0.02, 0.01]),
+        }
+        sharpe = {"low": 0.1, "mid": 0.5, "high": 0.9}
+        result = correlation_cluster(returns, sharpe, threshold=0.6)
+        # All three in one cluster (identical), highest Sharpe first
+        assert len(result) == 1
+        assert result[0][0] == "high"
+
+    def test_threshold_near_one_keeps_most(self):
+        """High threshold means only very highly correlated signals cluster."""
+        rng = np.random.RandomState(42)
+        returns = {f"s{i}": rng.randn(100) for i in range(5)}
+        sharpe = {f"s{i}": 0.3 for i in range(5)}
+        result_low = correlation_cluster(returns, sharpe, threshold=0.1)
+        result_high = correlation_cluster(returns, sharpe, threshold=0.9)
+        # Higher threshold → more clusters (less aggressive grouping)
+        assert len(result_high) >= len(result_low)
+
+    def test_three_way_cluster(self):
+        """Three mutually correlated signals should end up in one cluster."""
+        base = np.array([0.01, 0.02, -0.01, 0.005, 0.01])
+        returns = {
+            "a": base,
+            "b": base + np.array([0.001, -0.001, 0.001, -0.001, 0.001]),  # near-identical
+            "c": base + np.array([0.002, -0.002, 0.002, -0.002, 0.002]),  # near-identical
+        }
+        sharpe = {"a": 0.5, "b": 0.4, "c": 0.3}
+        result = correlation_cluster(returns, sharpe, threshold=0.6)
+        assert len(result) == 1
+        assert result[0][0] == "a"  # Highest Sharpe first
+
+
+class TestBackwardEliminateExtended:
+    """Extended edge cases for backward elimination."""
+
+    def test_target_n_one(self):
+        """Should keep only the best single signal."""
+        rng = np.random.RandomState(42)
+        returns = {
+            "strong": rng.randn(252) * 0.01 + 0.002,
+            "medium": rng.randn(252) * 0.01 + 0.001,
+            "weak": rng.randn(252) * 0.01 - 0.001,
+        }
+        result = backward_eliminate(returns, target_n=1)
+        assert len(result) == 1
+        assert "strong" in result
+
+    def test_constant_returns_handled(self):
+        """Constant (zero-variance) returns should not crash ensemble_sharpe."""
+        returns = {
+            "const": np.zeros(252),
+            "var": np.random.RandomState(42).randn(252) * 0.01,
+        }
+        result = backward_eliminate(returns, target_n=1)
+        assert len(result) == 1  # Should not crash
+
+    def test_preserves_signal_names(self):
+        """Result should contain actual signal names from input."""
+        rng = np.random.RandomState(42)
+        returns = {"alpha": rng.randn(252), "beta": rng.randn(252)}
+        result = backward_eliminate(returns, target_n=2)
+        assert set(result) == {"alpha", "beta"}
+
+    def test_target_n_zero_minimal_result(self):
+        """target_n=0 — backward elimination can't go below 1 signal
+        (removing the last signal gives empty list with -inf Sharpe)."""
+        rng = np.random.RandomState(42)
+        returns = {"a": rng.randn(252), "b": rng.randn(252)}
+        result = backward_eliminate(returns, target_n=0)
+        assert len(result) >= 1  # Can't eliminate to 0
+
+    def test_deterministic_results(self):
+        """Same input should always produce same output."""
+        rng = np.random.RandomState(42)
+        returns = {f"s{i}": rng.randn(252) for i in range(6)}
+        result1 = backward_eliminate(returns, target_n=3)
+        result2 = backward_eliminate(returns, target_n=3)
+        assert result1 == result2
