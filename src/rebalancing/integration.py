@@ -43,6 +43,10 @@ try:
 except ImportError:
     _VPIN_AVAILABLE = False
 
+__all__ = [
+    'RebalanceGateResult', 'SmartRebalanceGate', 'create_gate_from_config',
+]
+
 
 @dataclass
 class RebalanceGateResult:

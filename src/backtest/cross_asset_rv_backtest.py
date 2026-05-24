@@ -24,6 +24,9 @@ from src.backtest.metrics import (
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 from src.signals.cross_asset_relative_value import CrossAssetRVScanner, ZSCORE_ENTRY
 
+
+__all__ = ['BacktestConfig', 'CrossAssetRVBacktester']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

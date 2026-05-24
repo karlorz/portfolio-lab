@@ -17,6 +17,9 @@ from src.paths import BASE_ALLOCATION
 from src.strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition
 
 
+
+__all__ = ['VolParityAllocation', 'VolatilityParityAllocator']
+
 @dataclass
 class VolParityAllocation:
     """Volatility parity portfolio allocation"""

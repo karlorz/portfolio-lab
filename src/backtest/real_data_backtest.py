@@ -21,6 +21,9 @@ import numpy as np
 from src.backtest.metrics import BacktestResult
 from src.paths import BASE_ALLOCATION, DATA_DIR, sqlite_connect
 
+
+__all__ = ['RealDataBacktest', 'run_real_data_backtest']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

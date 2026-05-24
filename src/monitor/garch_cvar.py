@@ -41,6 +41,11 @@ from src.monitor.cvar_metrics import (
     get_tail_severity, calculate_volatility
 )
 
+__all__ = [
+    'GARCHParams', 'GARCHCVaRMetrics', 'GARCHFilteredCVaR',
+    'calculate_garch_cvar', 'compare_cvar_methods',
+]
+
 
 @dataclass
 class GARCHParams:

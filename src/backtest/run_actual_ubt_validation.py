@@ -13,6 +13,9 @@ import numpy as np
 
 from src.paths import HISTORICAL_JSON, DATA_DIR
 
+
+__all__ = ['load_historical_data', 'extract_prices', 'calculate_returns', 'find_overlap', 'align_series', 'calculate_metrics', 'calculate_correlation']
+
 def load_historical_data():
     """Load historical data from JSON"""
     data_path = str(HISTORICAL_JSON)

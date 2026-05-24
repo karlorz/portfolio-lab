@@ -16,6 +16,9 @@ on rapid regime transitions (AlphaCrafter, Yuan et al. 2026).
 from typing import Dict, List, Optional, Set
 
 
+
+__all__ = ['RegimeGate']
+
 class RegimeGate:
     """Hard gate that enables/disables signals per market regime.
 

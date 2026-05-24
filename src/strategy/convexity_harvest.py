@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 from src.data.vix_futures import VIXDataManager, fetch_vix_futures_data
 
 
+
+__all__ = ['ConvexityPosition', 'ConvexityHarvestStrategy']
+
 @dataclass
 class ConvexityPosition:
     """Convexity harvest position state"""

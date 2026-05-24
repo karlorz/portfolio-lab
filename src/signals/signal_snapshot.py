@@ -15,6 +15,9 @@ from datetime import datetime
 from typing import Dict, Any
 
 
+
+__all__ = ['SignalSnapshot']
+
 @dataclass
 class SignalSnapshot:
     """Canonical output type for portfolio signal modules.

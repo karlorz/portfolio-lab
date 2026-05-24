@@ -34,6 +34,9 @@ from src.backtest.metrics import (
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer
 
+
+__all__ = ['TRADING_DAYS_PER_YEAR', 'MONTHLY_TRADING_DAYS', 'CRISIS_YEARS', 'BASE_SYMBOLS', 'VIX_SYMBOL', 'BacktestConfig', 'WalkForwardVIXYBacktester']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

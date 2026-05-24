@@ -21,6 +21,9 @@ from dataclasses import dataclass, asdict
 
 from src.paths import DATA_DIR, BASE_ALLOCATION, MARKET_DB
 
+
+__all__ = ['CVaRMetrics', 'calculate_var', 'calculate_cvar', 'get_tail_severity', 'fetch_portfolio_returns', 'calculate_volatility', 'compute_cvar_metrics', 'load_history', 'save_history', 'export_metrics', 'display_metrics']
+
 DB_PATH = MARKET_DB
 
 RISK_METRICS_PATH = DATA_DIR / "risk_metrics.json"

@@ -18,6 +18,9 @@ from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
 from src.paths import PRICES_JSON, SIGNALS_DIR, BASE_ALLOCATION as WEIGHTS
 
 
+
+__all__ = ['DailyReturn', 'WindowResult', 'StressResult', 'FullBacktestResult', 'REGIME_SHIFTS', 'STRESS_PERIODS', 'load_price_data', 'load_alt_signals', 'build_daily_returns', 'compute_metrics', 'walk_forward_test', 'stress_test', 'run_full_backtest', 'print_results', 'save_results']
+
 @dataclass
 class DailyReturn:
     date: str

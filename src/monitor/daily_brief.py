@@ -20,6 +20,9 @@ from typing import Any, Dict, List, Optional
 
 from src.paths import DATA_DIR
 
+
+__all__ = ['SEVERITY_THRESHOLDS', 'BriefSection', 'generate_brief_sections', 'render_brief_text', 'generate_narrative', 'generate_daily_brief']
+
 logger = logging.getLogger(__name__)
 
 # Guarded anthropic import (follows src/llm/sentiment_client.py pattern)

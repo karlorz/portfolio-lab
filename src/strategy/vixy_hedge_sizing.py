@@ -25,6 +25,9 @@ import numpy as np
 from src.paths import DATA_DIR
 
 
+
+__all__ = ['DEFAULT_CONFIG', 'HedgeRegime', 'HedgeAction', 'VIXYHedgeConfig', 'VIXYHedgeSignal', 'VIXYHedgeState', 'VIXYHedgeSizer']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

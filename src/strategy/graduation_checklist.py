@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 from src.paths import DATA_DIR
 
 
+
+__all__ = ['CheckResult', 'GraduationChecklist', 'run_check_and_exit', 'run_report_and_exit', 'run_progress_and_exit']
+
 class CheckResult(NamedTuple):
     """Result of a single graduation criterion check."""
     name: str

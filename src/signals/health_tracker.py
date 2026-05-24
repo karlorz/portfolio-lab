@@ -22,6 +22,9 @@ import logging
 
 from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 
+
+__all__ = ['SignalSource', 'SignalHealthStatus', 'SignalPrediction', 'HealthScore', 'DecayAlert', 'SignalHealthTracker', 'backfill_predictions']
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

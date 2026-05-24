@@ -14,6 +14,9 @@ from typing import Any
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 
+
+__all__ = ['generate']
+
 logger = logging.getLogger(__name__)
 
 ORDERS_DIR = DATA_DIR / "historical_orders"

@@ -35,6 +35,9 @@ import numpy as np
 from src.backtest.metrics import BacktestResult
 from src.paths import DATA_DIR, sqlite_connect
 
+
+__all__ = ['BASELINE_SPY', 'BASELINE_GLD', 'BASELINE_TLT', 'MAX_SHIFT', 'TSMOM_EXPECTED_SHARPE', 'BehavioralSentimentBacktest']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

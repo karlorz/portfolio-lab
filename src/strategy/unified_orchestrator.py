@@ -40,6 +40,9 @@ from src.signals.bond_duration_signal import generate_bond_duration_signal
 from src.signals.collar_signal import generate_collar_signal
 from src.signals.crypto_momentum import generate_crypto_signal
 
+
+__all__ = ['OverlayStatus', 'OverlayContribution', 'UnifiedRecommendation', 'UnifiedOrchestrator', 'get_unified_recommendation']
+
 try:
     from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer
     _HAS_VIXY = True

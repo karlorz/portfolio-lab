@@ -27,6 +27,9 @@ from typing import Any, Dict, List, Optional
 
 from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
 
+
+__all__ = ['SYMBOLS_REQUIRED', 'ComponentSignal', 'AlternativeDataComposite', 'EnsembleSignal', 'AlternativeDataSignalGenerator']
+
 logger = logging.getLogger(__name__)
 
 PRICES_PATH = PRICES_JSON

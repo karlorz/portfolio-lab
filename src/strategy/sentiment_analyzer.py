@@ -26,6 +26,9 @@ from src.paths import DATA_DIR
 from src.llm.sentiment_client import SentimentAnalyzer, SentimentResult
 
 
+
+__all__ = ['AggregatedSentiment', 'SentimentAggregator', 'SentimentAnalyzerPipeline']
+
 @dataclass
 class AggregatedSentiment:
     """Aggregated sentiment across multiple sources with smoothing."""

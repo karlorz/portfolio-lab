@@ -29,6 +29,9 @@ from src.paths import MARKET_DB, sqlite_connect
 
 from src.signals.integrator import SignalIntegrator
 
+
+__all__ = ['EnsembleBacktestEngine']
+
 logger = logging.getLogger(__name__)
 
 

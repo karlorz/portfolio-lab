@@ -32,6 +32,9 @@ from dataclasses import dataclass, asdict
 
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
 
+
+__all__ = ['VOL_LOOKBACK', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'DEFAULT_BASE', 'RPWeightOverlay', 'RiskParityWeightOverlay', 'RPBacktester']
+
 logger = logging.getLogger(__name__)
 
 DB_PATH = DATA_DIR / "signals.db"

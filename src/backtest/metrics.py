@@ -14,6 +14,9 @@ from typing import Any, Dict, List, Optional
 from src.paths import BASE_ALLOCATION
 from src.costs.etf_cost_table import ETF_COST_BPS as _ETF_COST_BPS
 
+
+__all__ = ['BacktestConfig', 'DailyPrices', 'BacktestResult', 'BacktestMetrics', 'OverlayMetrics', 'CrisisReturns', 'compute_metrics', 'compute_crisis_returns', 'print_metrics_report', 'compute_deflated_sharpe_ratio', 'save_results_json']
+
 # ── Module-level constants ──────────────────────────────────────────
 TRADING_DAYS_PER_YEAR: int = 252
 DEFAULT_CRISIS_YEARS: List[str] = ['2008', '2020', '2022']

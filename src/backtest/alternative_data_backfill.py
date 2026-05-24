@@ -16,6 +16,9 @@ import os
 from src.paths import SIGNALS_DIR
 
 
+
+__all__ = ['DailyAlternativeSignal', 'AlternativeDataBackfill']
+
 @dataclass
 class DailyAlternativeSignal:
     """Daily composite signal from alternative data sources."""

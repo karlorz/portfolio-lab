@@ -36,6 +36,9 @@ from src.backtest.metrics import (
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
+
+__all__ = ['MAX_SIGNAL_STRENGTH', 'BacktestConfig', 'DailyReturn', 'RebalanceSignal', 'CrossAssetRegimeArbBacktester']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

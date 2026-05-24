@@ -23,6 +23,9 @@ from src.backtest.metrics import (
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 from src.signals.international_momentum import InternationalMomentumGenerator, SignalType
 
+
+__all__ = ['BacktestConfig', 'InternationalMomentumBacktester']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

@@ -28,6 +28,11 @@ from src.strategy.sentiment_analyzer import (
     SentimentAnalyzerPipeline
 )
 
+__all__ = [
+    'RegimeSentiment', 'CombinedRegimeSignal', 'RegimeSentimentIntegrator',
+    'RegimeSentimentPipeline',
+]
+
 
 class RegimeSentiment(Enum):
     """Sentiment-based regime classification"""

@@ -31,6 +31,11 @@ from src.backtest.metrics import (
 )
 
 logging.basicConfig(level=logging.INFO)
+
+__all__ = [
+    'CombinedOverlayBacktest', 'run_combined_backtest',
+]
+
 logger = logging.getLogger(__name__)
 
 

@@ -29,6 +29,9 @@ from src.backtest.metrics import (
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
 
+
+__all__ = ['BacktestConfig', 'DailyReturn', 'AlternativeDataBacktester']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

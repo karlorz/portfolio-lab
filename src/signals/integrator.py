@@ -54,6 +54,9 @@ from src.paths import DATA_DIR
 # Existing module imports
 from src.data.alternative_data import AlternativeDataClient
 
+
+__all__ = ['BASE_WEIGHTS', 'REGIME_WEIGHTS', 'MIN_SIGNAL_SOURCES', 'SIGNAL_MIN', 'SIGNAL_MAX', 'MAX_DELTA_PCT', 'SignalSourceResult', 'CompositeSignal', 'AllocationDelta', 'PortfolioRecommendation', 'init_database', 'SignalSource', 'TechnicalSignal', 'MacroSignal', 'AlternativeDataSignalAdapter', 'LLMSentimentSignalAdapter', 'SignalIntegrator']
+
 # New strategy adapters - lazy import to avoid circular dependency
 # These are imported in SignalIntegrator.__init__()
 

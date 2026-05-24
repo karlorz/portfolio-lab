@@ -40,6 +40,9 @@ import logging
 
 from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect
 
+
+__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'BanditWeighter', 'EnsembleVoter']
+
 logger = logging.getLogger(__name__)
 
 # Module-level health tracker singleton (lazy initialized)

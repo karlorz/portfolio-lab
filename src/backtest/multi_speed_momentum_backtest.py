@@ -26,6 +26,9 @@ from src.backtest.metrics import (
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
+
+__all__ = ['MultiSpeedMomentum', 'BacktestConfig', 'DailyReturn', 'MultiSpeedMomentumBacktester']
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
