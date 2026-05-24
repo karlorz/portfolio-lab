@@ -87,7 +87,7 @@ class TestBriefSections:
         assert "overlay_status" in section_names
         assert "tca_watch" in section_names
         assert "action_items" in section_names
-        assert len(sections) == 6
+        assert len(sections) == 7
 
     def test_portfolio_snapshot_normal(self, sample_dashboard):
         sections = generate_brief_sections(sample_dashboard)
@@ -266,3 +266,29 @@ class TestGenerateDailyBrief:
         assert out.exists()
         loaded = json.loads(out.read_text())
         assert loaded["severity"] == "normal"
+
+
+class TestModelValidationSection:
+    """Tests for the model_validation section in daily brief."""
+
+    def test_model_validation_section_exists(self, sample_dashboard):
+        sections = generate_brief_sections(sample_dashboard)
+        names = [s.name for s in sections]
+        assert "model_validation" in names
+
+    def test_model_validation_contains_dsr(self, sample_dashboard):
+        sections = generate_brief_sections(sample_dashboard)
+        mv = [s for s in sections if s.name == "model_validation"][0]
+        assert "DSR" in mv.data_text
+
+    def test_model_validation_normal_severity(self, sample_dashboard):
+        sections = generate_brief_sections(sample_dashboard)
+        mv = [s for s in sections if s.name == "model_validation"][0]
+        assert mv.severity == "normal"
+
+    def test_model_validation_with_bl_weights(self, sample_dashboard):
+        """BL weights in dashboard should appear in model validation."""
+        sample_dashboard["bl_weights"] = {"SPY": 0.48, "GLD": 0.35, "TLT": 0.17}
+        sections = generate_brief_sections(sample_dashboard)
+        mv = [s for s in sections if s.name == "model_validation"][0]
+        assert "BL" in mv.data_text

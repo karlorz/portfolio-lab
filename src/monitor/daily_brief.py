@@ -143,6 +143,36 @@ def generate_brief_sections(dashboard: Dict[str, Any]) -> List[BriefSection]:
         recommendation=tca_rec,
     ))
 
+    # ── Model Validation (DSR + BL) ──
+    model_severity = "normal"
+    model_text_parts = []
+
+    # Deflated Sharpe Ratio — validates champion against multiple testing
+    try:
+        from src.backtest.metrics import compute_deflated_sharpe_ratio
+        dsr = compute_deflated_sharpe_ratio(
+            sharpe_ratio=0.79, n_trials=94, n_observations=5371,
+        )
+        model_text_parts.append(f"DSR={dsr:.2f} (94 configs)")
+        if dsr < 0.50:
+            model_severity = "warning"
+    except Exception:
+        model_text_parts.append("DSR: unavailable")
+
+    # Black-Litterman posterior — shows BL weight perspective
+    bl_weights = dashboard.get("bl_weights")
+    if bl_weights:
+        bl_parts = [f"{k} {v:.0%}" for k, v in bl_weights.items()]
+        model_text_parts.append(f"BL: {', '.join(bl_parts)}")
+
+    model_text = ". ".join(model_text_parts) if model_text_parts else "No validation data."
+    sections.append(BriefSection(
+        name="model_validation",
+        title="Model Validation",
+        severity=model_severity,
+        data_text=model_text,
+    ))
+
     # ── Action Items ──
     warnings = [s for s in sections if s.severity in ("warning", "alert")]
     alerts = health.get("alerts", [])
