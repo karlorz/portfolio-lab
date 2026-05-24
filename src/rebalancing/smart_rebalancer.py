@@ -108,6 +108,23 @@ class SmartRebalancingController:
     and intraday seasonality optimization.
     """
 
+    # Per-ETF one-way transaction costs in basis points.
+    # Source: typical retail spread + commission for marketable orders.
+    ETF_TRANSACTION_COSTS_BPS: Dict[str, float] = {
+        'SPY': 2.0,   # Most liquid US equity ETF
+        'GLD': 5.0,   # Gold — wider spread
+        'TLT': 8.0,   # Long-duration Treasury — thinnest book
+        'IEF': 6.0,   # Intermediate Treasury
+        'QQQ': 2.0,   # Near-SPY liquidity
+        'EFA': 5.0,   # International equity
+        'VXUS': 5.0,  # Ex-US equity
+        'MTUM': 4.0,  # Factor ETF
+        'VLUE': 5.0,  # Value factor
+        'USMV': 4.0,  # Min-vol factor
+        'DBC': 10.0,  # Commodities — widest spreads
+    }
+    DEFAULT_COST_BPS = 5.0  # Fallback for unknown symbols
+
     DEFAULT_CONFIG = {
         'drift_threshold': 0.10,
         'urgency_levels': {
@@ -223,6 +240,41 @@ class SmartRebalancingController:
 
         cost = base_spread * vpin_mult * time_mult + fixed
         return round(cost * 10000, 2)  # Convert to bps
+
+    def estimate_per_symbol_cost_bps(
+        self, symbol: str, vpin: float, in_optimal_window: bool
+    ) -> float:
+        """
+        Estimate execution cost for a specific ETF symbol.
+
+        Uses per-ETF base cost from ETF_TRANSACTION_COSTS_BPS, then applies
+        VPIN and timing multipliers (same formula as estimate_cost_bps but
+        with symbol-specific base instead of flat 3 bps).
+        """
+        base_bps = self.ETF_TRANSACTION_COSTS_BPS.get(
+            symbol, self.DEFAULT_COST_BPS
+        )
+        base_spread = base_bps / 10000  # Convert bps → decimal
+
+        # VPIN multiplier (same logic as estimate_cost_bps)
+        vpin_mult = max(1.0, 1.0 + (vpin - 0.30) * 2.0)
+        vpin_mult = min(vpin_mult, 2.0)
+
+        # Time multiplier (same logic as estimate_cost_bps)
+        if in_optimal_window:
+            time_mult = 1.0
+        else:
+            now = datetime.now()
+            hour = now.hour
+            if hour < 10:
+                time_mult = 1.25
+            elif hour >= 15.5:
+                time_mult = 1.15
+            else:
+                time_mult = 1.05
+
+        cost_decimal = base_spread * vpin_mult * time_mult
+        return round(cost_decimal * 10000, 2)  # Convert to bps
 
     def _in_optimal_window(self, now: Optional[datetime] = None) -> bool:
         """Check if current time is in optimal execution window (11am-2pm ET)."""

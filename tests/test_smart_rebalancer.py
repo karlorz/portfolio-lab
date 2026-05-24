@@ -421,3 +421,82 @@ class TestSamplePortfolio:
         assert isinstance(p, PortfolioSnapshot)
         assert p.total_value == 100000
         assert abs(sum(p.targets.values()) - 1.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Per-ETF transaction cost constants
+# ---------------------------------------------------------------------------
+
+class TestPerETFTransactionCosts:
+
+    def test_spy_is_cheapest_equity(self):
+        assert SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS['SPY'] == 2.0
+
+    def test_tlt_more_expensive_than_spy(self):
+        tlt = SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS['TLT']
+        spy = SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS['SPY']
+        assert tlt > spy
+
+    def test_gld_between_spy_and_tlt(self):
+        spy = SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS['SPY']
+        gld = SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS['GLD']
+        tlt = SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS['TLT']
+        assert spy < gld < tlt
+
+    def test_known_symbols_count(self):
+        costs = SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS
+        assert len(costs) >= 10
+
+    def test_default_cost_constant(self):
+        assert SmartRebalancingController.DEFAULT_COST_BPS == 5.0
+
+    def test_all_costs_positive(self):
+        for sym, cost in SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS.items():
+            assert cost > 0, f"{sym} has non-positive cost {cost}"
+
+    def test_all_costs_reasonable_range(self):
+        for sym, cost in SmartRebalancingController.ETF_TRANSACTION_COSTS_BPS.items():
+            assert 1.0 <= cost <= 15.0, f"{sym} cost {cost} out of range"
+
+
+# ---------------------------------------------------------------------------
+# estimate_per_symbol_cost_bps
+# ---------------------------------------------------------------------------
+
+class TestEstimatePerSymbolCost:
+
+    def test_spy_cheaper_than_tlt(self):
+        ctrl = SmartRebalancingController()
+        spy_cost = ctrl.estimate_per_symbol_cost_bps('SPY', 0.30, True)
+        tlt_cost = ctrl.estimate_per_symbol_cost_bps('TLT', 0.30, True)
+        assert spy_cost < tlt_cost
+
+    def test_unknown_symbol_uses_default(self):
+        ctrl = SmartRebalancingController()
+        cost = ctrl.estimate_per_symbol_cost_bps('UNKNOWN', 0.30, True)
+        # Should use DEFAULT_COST_BPS (5.0) as base, result > 0
+        assert cost > 0
+
+    def test_high_vpin_increases_cost(self):
+        ctrl = SmartRebalancingController()
+        low_vpin = ctrl.estimate_per_symbol_cost_bps('SPY', 0.20, True)
+        high_vpin = ctrl.estimate_per_symbol_cost_bps('SPY', 0.60, True)
+        assert high_vpin >= low_vpin
+
+    def test_optimal_window_reduces_cost(self):
+        ctrl = SmartRebalancingController()
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            # Outside optimal window (8am)
+            mock_dt.now.return_value = datetime(2026, 5, 13, 8, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            outside = ctrl.estimate_per_symbol_cost_bps('SPY', 0.30, False)
+        inside = ctrl.estimate_per_symbol_cost_bps('SPY', 0.30, True)
+        assert inside <= outside
+
+    def test_returns_bps_value(self):
+        ctrl = SmartRebalancingController()
+        cost = ctrl.estimate_per_symbol_cost_bps('GLD', 0.30, True)
+        assert isinstance(cost, float)
+        assert cost > 0
+        # Should be in reasonable range (1-30 bps)
+        assert 1.0 <= cost <= 30.0
