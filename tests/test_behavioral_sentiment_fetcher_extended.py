@@ -254,7 +254,7 @@ class TestFetchVixDataEdgeCases:
         # Actually the exception is caught inside _fetch_vix_data
         mock_vix = MagicMock()
         mock_vix.history.return_value = pd.DataFrame({"Close": [28.0]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=[mock_vix, Exception("boom")]):
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=[mock_vix, RuntimeError("boom")]):
             vix, vix9d = fetcher._fetch_vix_data()
             assert vix == 28.0
             assert vix9d == 28.0 * 0.9
@@ -263,7 +263,7 @@ class TestFetchVixDataEdgeCases:
         """Both VIX and VIX9D fail -> both fallback defaults."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("network err")):
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("network err")):
             vix, vix9d = fetcher._fetch_vix_data()
             assert vix == 16.0
             assert vix9d == 14.4
@@ -315,7 +315,7 @@ class TestFetchVixDataEdgeCases:
         """Return type is always (float, float)."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("err")):
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("err")):
             vix, vix9d = fetcher._fetch_vix_data()
             assert isinstance(vix, float)
             assert isinstance(vix9d, float)
@@ -355,7 +355,7 @@ class TestFetchSkewIndexEdgeCases:
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         with patch.object(fetcher, "_fetch_vix_data", return_value=(50.0, 45.0)):
-            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("err")):
+            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("err")):
                 skew = fetcher._fetch_skew_index()
                 assert skew == 170.0  # 100 + (50-15)*2 = 170
 
@@ -364,7 +364,7 @@ class TestFetchSkewIndexEdgeCases:
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         with patch.object(fetcher, "_fetch_vix_data", return_value=(10.0, 9.0)):
-            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("err")):
+            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("err")):
                 skew = fetcher._fetch_skew_index()
                 assert skew == 100.0  # max(0, (10-15)*2) = 0
 
@@ -374,7 +374,7 @@ class TestFetchSkewIndexEdgeCases:
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         fetcher._vix_cache = (16.0, 14.4)
         fetcher._vix_cache_time = datetime.now()
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("err")):
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("err")):
             skew = fetcher._fetch_skew_index()
             assert skew == 102.0  # Uses cached VIX
 

@@ -626,7 +626,7 @@ class MacroSignal(SignalSource):
 
             if row:
                 return float(row[0])
-        except Exception as e:
+        except (sqlite3.Error, KeyError, ValueError, TypeError, OSError) as e:
             warnings.warn(f"Failed to fetch Fed hawk/dove score: {e}")
         
         # Default: neutral/slightly dovish given current environment
@@ -657,7 +657,7 @@ class MacroSignal(SignalSource):
                     # Steepening (TLT rising faster than SHY) = bullish
                     spread_change = tlt_change - shy_change
                     return max(-1.0, min(1.0, spread_change * 5))
-        except Exception as e:
+        except (sqlite3.Error, KeyError, ValueError, TypeError, ZeroDivisionError) as e:
             warnings.warn(f"Failed to compute yield curve spread: {e}")
         
         return 0.0
@@ -673,7 +673,7 @@ class MacroSignal(SignalSource):
                 # HYG underperforming LQD = spreads widening = bearish
                 spread_change = hyg_change - lqd_change
                 return max(-1.0, min(1.0, -spread_change * 10))
-        except Exception as e:
+        except (sqlite3.Error, KeyError, ValueError, TypeError, ZeroDivisionError) as e:
             warnings.warn(f"Failed to compute credit spread: {e}")
         
         return 0.0
@@ -697,7 +697,7 @@ class MacroSignal(SignalSource):
                 current = rows[0][0]
                 prev = rows[-1][0]
                 return (current - prev) / prev
-        except Exception as e:
+        except (sqlite3.Error, KeyError, ValueError, TypeError, ZeroDivisionError) as e:
             warnings.warn(f"Failed to compute 30d change: {e}")
         
         return None
@@ -770,7 +770,7 @@ class AlternativeDataSignalAdapter(SignalSource):
             self._store_signal(ticker, result)
             return result
             
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
             logger.warning("Alternative data signal generation failed for %s: %s", ticker, e)
             return None
 
@@ -837,7 +837,7 @@ class LLMSentimentSignalAdapter(SignalSource):
                 }
             )
             
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
             logger.warning("LLM narrative signal generation failed for %s: %s", ticker, e)
             return None
 
@@ -903,7 +903,7 @@ class SignalIntegrator:
                 signal = source.generate_signal(ticker)
                 if signal:
                     component_signals.append(signal)
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
                 warnings.warn(f"Signal source {source.source_name} failed for {ticker}: {e}")
         
         # Check minimum signal count
@@ -1023,7 +1023,7 @@ class SignalIntegrator:
                     return "bull"
                 else:
                     return "neutral"
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, RuntimeError, sqlite3.Error) as e:
             warnings.warn(f"Failed to detect regime: {e}")
         
         return "neutral"

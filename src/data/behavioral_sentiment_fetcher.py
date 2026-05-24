@@ -7,6 +7,7 @@ v2.70 Phase 4: Integrated Reddit Sentiment for real social data
 """
 
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import math
@@ -179,7 +180,7 @@ class BehavioralSentimentFetcher:
                         data = json.loads(row[0])
                         return self._dict_to_snapshot(data)
             return None
-        except Exception as e:
+        except (sqlite3.Error, json.JSONDecodeError, KeyError, ValueError, OSError) as e:
             logger.warning("Cache retrieval failed: %s", e)
             return None
     
@@ -203,7 +204,7 @@ class BehavioralSentimentFetcher:
                     WHERE created_at < date('now', '-7 days')
                 """)
                 conn.commit()
-        except Exception as e:
+        except (sqlite3.Error, OSError) as e:
             logger.warning("Cache save failed: %s", e)
     
     def _dict_to_snapshot(self, data: Dict) -> BehavioralSentimentSnapshot:
@@ -240,7 +241,7 @@ class BehavioralSentimentFetcher:
                 raw = float(hist["Close"].iloc[-1])
                 if not math.isnan(raw):
                     vix = raw
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("yfinance fetch failed for ^VIX: %s", e)
 
         # ^VIX9D (short-term VIX)
@@ -253,7 +254,7 @@ class BehavioralSentimentFetcher:
                     vix9d = raw9d
             else:
                 vix9d = vix * 0.9  # Estimate as 90% of VIX
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("yfinance fetch failed for ^VIX9D: %s", e)
             vix9d = vix * 0.9
 
@@ -280,7 +281,7 @@ class BehavioralSentimentFetcher:
                     self._skew_cache = raw
                     self._skew_cache_time = now
                     return raw
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("yfinance fetch failed for ^SKEW: %s", e)
 
         # Estimate SKEW from VIX if unavailable
@@ -309,7 +310,7 @@ class BehavioralSentimentFetcher:
                     self._cpce_cache = result
                     self._cpce_cache_time = now
                     return result
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("yfinance fetch failed for ^CPCE: %s", e)
 
         self._cpce_cache = 0.65  # Historical average
@@ -337,7 +338,7 @@ class BehavioralSentimentFetcher:
                 retail_top_100_correlation=-0.15,  # Typical inverse correlation
                 small_lot_premium_ratio=0.85  # Estimated retail share
             )
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.warning("Failed to estimate retail flow: %s", e)
             return RetailFlow(
                 timestamp=datetime.now().isoformat(),
@@ -388,7 +389,7 @@ class BehavioralSentimentFetcher:
                     reddit_engagement_score=reddit_snapshot.engagement_score,
                     reddit_data_source="reddit_api"
                 )
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
                 logger.warning("Reddit fetch failed, falling back to proxy: %s", e)
         
         # Fallback: VIX-based proxy estimation
@@ -587,7 +588,7 @@ class BehavioralSentimentFetcher:
                 )
                 rows = cursor.fetchall()
                 return [json.loads(row[0]) for row in rows]
-        except Exception as e:
+        except (sqlite3.Error, json.JSONDecodeError, KeyError, ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to retrieve history: %s", e)
             return []
 

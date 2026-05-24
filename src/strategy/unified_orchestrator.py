@@ -285,7 +285,7 @@ class UnifiedOrchestrator:
                     reason=f"Collar: {collar.regime} (VIX={vix_level:.1f}), "
                            f"{'cashless' if collar.strikes.is_cashless else 'debit'}",
                 )]
-        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
             logger.warning("Collar overlay unavailable: %s", e)
         return []
 
@@ -316,7 +316,7 @@ class UnifiedOrchestrator:
                     reason=f"VIXY: {vixy_signal.regime} ({vixy_signal.allocation_pct:.1f}%), "
                            f"efficiency {vixy_signal.hedge_efficiency:.2f}x",
                 )]
-        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
             logger.warning("VIXY overlay unavailable: %s", e)
         return []
 
@@ -344,7 +344,7 @@ class UnifiedOrchestrator:
                     reason=f"Crypto: {crypto.signal_state}, {crypto.composite_weight:.1%} weight"
                            + (f", 6m mom={btc_mom:+.1%}" if btc_mom is not None else ""),
                 )]
-        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
             logger.warning("Crypto overlay unavailable: %s", e)
         return []
 
@@ -370,7 +370,7 @@ class UnifiedOrchestrator:
                     confidence=bond.confidence,
                     reason=f"Bond: {bond.position} ({bond.curve_regime}/{bond.rate_direction})",
                 )]
-        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
             logger.warning("Bond duration overlay unavailable: %s", e)
         return []
 
@@ -390,7 +390,7 @@ class UnifiedOrchestrator:
                 confidence=85.0,
                 reason=f"Calendar: {mod:.2f}x urgency modifier",
             )]
-        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
             logger.warning("Calendar overlay unavailable: %s", e)
         return []
 

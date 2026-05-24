@@ -336,7 +336,7 @@ class TestFetchVixData:
     def test_returns_default_on_failure(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("network error")):
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("network error")):
             vix, vix9d = fetcher._fetch_vix_data()
             assert vix == 16.0
             assert vix9d == 14.4
@@ -372,7 +372,7 @@ class TestFetchSkewIndex:
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         with patch.object(fetcher, "_fetch_vix_data", return_value=(16.0, 14.4)):
-            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("error")):
+            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("error")):
                 skew = fetcher._fetch_skew_index()
                 # Fallback: 100 + max(0, (16-15)*2) = 102
                 assert skew == 102.0
@@ -391,7 +391,7 @@ class TestFetchPutCallRatio:
     def test_returns_default_on_failure(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=Exception("error")):
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("error")):
             ratio = fetcher._fetch_put_call_ratio()
             assert ratio == 0.65
 
@@ -422,7 +422,7 @@ class TestEstimateRetailFlow:
     def test_exception_returns_defaults(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        with patch.object(fetcher, "_fetch_put_call_ratio", side_effect=Exception("error")):
+        with patch.object(fetcher, "_fetch_put_call_ratio", side_effect=ValueError("error")):
             flow = fetcher._estimate_retail_flow()
             assert isinstance(flow, RetailFlow)
             assert flow.retail_buy_sell_imbalance == 0.0

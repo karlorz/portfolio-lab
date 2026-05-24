@@ -156,7 +156,7 @@ class RedditSentimentFetcher:
                 return []
             logger.error("HTTP error fetching r/%s: %s", subreddit, e)
             return []
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.error("Error fetching r/%s: %s", subreddit, e)
             return []
     
@@ -380,7 +380,7 @@ class RedditSentimentFetcher:
                             virality_flag=data['virality_flag'],
                             data_fresh=True
                         )
-        except Exception as e:
+        except (sqlite3.Error, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Error reading cache: %s", e)
         
         return None
@@ -404,7 +404,7 @@ class RedditSentimentFetcher:
                     )
                 """)
                 conn.commit()
-        except Exception as e:
+        except (sqlite3.Error, OSError) as e:
             logger.error("Error caching sentiment: %s", e)
     
     def _store_mentions(self, posts: List[Dict]):
@@ -432,7 +432,7 @@ class RedditSentimentFetcher:
                         ))
                 
                 conn.commit()
-        except Exception as e:
+        except (sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.error("Error storing mentions: %s", e)
     
     def get_history(self, days: int = 7) -> List[Dict]:
@@ -453,7 +453,7 @@ class RedditSentimentFetcher:
                     history.append(data)
                 
                 return history
-        except Exception as e:
+        except (sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.error("Error fetching history: %s", e)
             return []
     
@@ -472,7 +472,7 @@ class RedditSentimentFetcher:
                 
                 columns = [desc[0] for desc in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
-        except Exception as e:
+        except (sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.error("Error fetching ticker history: %s", e)
             return []
 
