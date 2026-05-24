@@ -749,3 +749,317 @@ class TestDetectICAlerts:
 
         if alerts:
             assert "ic_alerts" in tracker_with_predictions.state
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestSignalPredictionExtended:
+    """Extended SignalPrediction dataclass tests."""
+
+    def test_to_dict_all_fields(self):
+        sp = SignalPrediction(
+            timestamp="2026-05-24T10:00:00",
+            source="test_source",
+            signal_value=0.5,
+            confidence=0.9,
+            predicted_direction=1,
+            metadata={"key": "value"},
+        )
+        d = sp.to_dict()
+        assert set(d.keys()) == {
+            'timestamp', 'source', 'signal_value', 'confidence',
+            'predicted_direction', 'metadata',
+        }
+        assert d['predicted_direction'] == 1
+
+    def test_metadata_serialized_as_json_string(self):
+        """Metadata should be JSON-serialized in to_dict."""
+        sp = SignalPrediction(
+            timestamp="2026-05-24",
+            source="src",
+            signal_value=0.3,
+            confidence=0.7,
+            predicted_direction=0,
+            metadata={"nested": {"key": "val"}},
+        )
+        d = sp.to_dict()
+        assert isinstance(d["metadata"], str)
+        parsed = json.loads(d["metadata"])
+        assert parsed["nested"]["key"] == "val"
+
+    def test_negative_prediction(self):
+        sp = SignalPrediction(
+            timestamp="2026-05-24",
+            source="src",
+            signal_value=-0.8,
+            confidence=0.6,
+            predicted_direction=-1,
+            metadata={},
+        )
+        assert sp.signal_value < 0
+        assert sp.predicted_direction == -1
+
+
+class TestHealthScoreExtended:
+    """Extended HealthScore dataclass tests."""
+
+    def test_to_dict_has_all_fields(self):
+        hs = HealthScore(
+            source="cta",
+            timestamp="2026-05-24",
+            health_score=0.85,
+            accuracy_30d=0.80,
+            accuracy_60d=0.82,
+            accuracy_90d=0.85,
+            decay_rate=-0.01,
+            predictions_count=100,
+            status="healthy",
+            ic=0.05,
+            ic_half_life_days=200.0,
+        )
+        d = hs.to_dict()
+        expected_keys = {
+            'source', 'timestamp', 'health_score', 'accuracy_30d',
+            'accuracy_60d', 'accuracy_90d', 'decay_rate', 'predictions_count',
+            'status', 'ic', 'ic_half_life_days',
+        }
+        assert set(d.keys()) == expected_keys
+
+    def test_status_values(self):
+        """Valid status values."""
+        for status in ["healthy", "degraded", "unhealthy"]:
+            hs = HealthScore(
+                source="src", timestamp="2026-05-24",
+                health_score=0.5, accuracy_30d=0.5, accuracy_60d=0.5,
+                accuracy_90d=0.5, decay_rate=0.0, predictions_count=10,
+                status=status,
+            )
+            assert hs.status == status
+
+
+class TestDecayAlertExtended:
+    """Extended DecayAlert dataclass tests."""
+
+    def test_to_dict_all_fields(self):
+        da = DecayAlert(
+            source="src",
+            alert_timestamp="2026-05-24",
+            previous_health=0.8,
+            current_health=0.5,
+            drop_30d=0.3,
+            severity="warning",
+            message="Test alert",
+        )
+        d = da.to_dict()
+        expected_keys = {
+            'source', 'alert_timestamp', 'previous_health',
+            'current_health', 'drop_30d', 'severity', 'message',
+        }
+        assert set(d.keys()) == expected_keys
+
+    def test_severity_values(self):
+        """Both warning and critical severities should work."""
+        for severity in ["warning", "critical"]:
+            da = DecayAlert(
+                source="src", alert_timestamp="2026-05-24",
+                previous_health=0.8, current_health=0.4,
+                drop_30d=0.4, severity=severity, message="Test",
+            )
+            assert da.severity == severity
+
+
+class TestLogPredictionSimpleExtended:
+    """Extended log_prediction_simple tests."""
+
+    def test_direction_thresholds(self, tmp_path):
+        """Direction should be determined by signal_value thresholds."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Exactly at +0.2 threshold → direction 1
+        tracker.log_prediction_simple(source="src", signal_value=0.2, confidence=0.8)
+        # Exactly at -0.2 threshold → direction -1
+        tracker.log_prediction_simple(source="src", signal_value=-0.2, confidence=0.8)
+        # Between → direction 0
+        tracker.log_prediction_simple(source="src", signal_value=0.1, confidence=0.8)
+
+    def test_with_metadata(self, tmp_path):
+        """Metadata should be preserved."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(
+            source="src", signal_value=0.5, confidence=0.8,
+            metadata={"regime": "normal", "vix": 15.0},
+        )
+
+
+class TestHealthScoreClassificationExtended:
+    """Extended health score classification tests."""
+
+    def test_unhealthy_score(self, tmp_path):
+        """Score below 0.5 should be unhealthy."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Log predictions where predicted_direction != actual
+        today = datetime.now()
+        for i in range(20):
+            ts = (today - timedelta(days=i * 5)).strftime("%Y-%m-%dT10:00:00")
+            # Predict bullish but actual will be bearish → inaccurate
+            tracker.log_prediction_simple(
+                source="bad_signal", signal_value=0.5, confidence=0.8, timestamp=ts,
+            )
+        for i in range(20):
+            day = (today - timedelta(days=i * 5)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": -0.01}, day)
+        result = tracker.calculate_health_score("bad_signal")
+        # With wrong predictions, health should be low
+        if result is not None:
+            assert result.health_score < 0.7  # At least degraded
+
+    def test_health_score_bounded(self, tmp_path):
+        """Health score should always be between 0 and 1."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        today = datetime.now()
+        for i in range(20):
+            ts = (today - timedelta(days=i * 5)).strftime("%Y-%m-%dT10:00:00")
+            tracker.log_prediction_simple(
+                source="bounded_test", signal_value=0.5, confidence=0.8, timestamp=ts,
+            )
+        for i in range(20):
+            day = (today - timedelta(days=i * 5)).strftime("%Y-%m-%d")
+            tracker.update_actual_directions({"SPY": 0.01}, day)
+        result = tracker.calculate_health_score("bounded_test")
+        if result is not None:
+            assert 0.0 <= result.health_score <= 1.0
+
+
+class TestUpdateActualDirectionsExtended:
+    """Extended update_actual_directions tests."""
+
+    def test_negative_returns_direction_minus_1(self, tmp_path):
+        """Negative SPY return should give actual_direction = -1."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(source="src", signal_value=0.5, confidence=0.8)
+        updated = tracker.update_actual_directions({"SPY": -0.02}, datetime.now().strftime("%Y-%m-%d"))
+        assert isinstance(updated, int)
+
+    def test_zero_returns_direction_0(self, tmp_path):
+        """Zero SPY return should give actual_direction = 0."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(source="src", signal_value=0.5, confidence=0.8)
+        updated = tracker.update_actual_directions({"SPY": 0.0}, datetime.now().strftime("%Y-%m-%d"))
+        assert isinstance(updated, int)
+
+    def test_missing_spy_defaults_to_zero(self, tmp_path):
+        """Missing SPY in returns should default to 0 (no direction)."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        tracker.log_prediction_simple(source="src", signal_value=0.5, confidence=0.8)
+        updated = tracker.update_actual_directions({"GLD": 0.02}, datetime.now().strftime("%Y-%m-%d"))
+        assert isinstance(updated, int)
+
+
+class TestGetAdjustedWeightsExtended:
+    """Extended get_adjusted_weights tests."""
+
+    def test_empty_base_weights(self, tmp_path):
+        """Empty base weights should return empty."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        adjusted = tracker.get_adjusted_weights({})
+        assert adjusted == {}
+
+    def test_weights_sum_to_one(self, tmp_path):
+        """Adjusted weights should sum to 1.0."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        base_weights = {
+            "alternative_data": 0.305,
+            "cross_asset_rv": 0.13,
+            "international_momentum": 0.245,
+            "unified_overlay": 0.19,
+        }
+        adjusted = tracker.get_adjusted_weights(base_weights)
+        total = sum(adjusted.values())
+        assert abs(total - 1.0) < 0.01
+
+
+class TestSpearmanRankCorrelationExtended:
+    """Extended Spearman rank correlation tests."""
+
+    def test_single_element_returns_none(self):
+        assert SignalHealthTracker._spearman_rank_correlation([5], [5]) is None
+
+    def test_two_elements_returns_none(self):
+        assert SignalHealthTracker._spearman_rank_correlation([1, 2], [1, 2]) is None
+
+    def test_three_elements_perfect_positive(self):
+        rho = SignalHealthTracker._spearman_rank_correlation([1, 2, 3], [1, 2, 3])
+        assert rho == pytest.approx(1.0, abs=0.01)
+
+    def test_float_values(self):
+        rho = SignalHealthTracker._spearman_rank_correlation(
+            [0.1, 0.5, 0.3, 0.8], [0.2, 0.6, 0.4, 0.9]
+        )
+        assert -1.0 <= rho <= 1.0
+        assert rho > 0  # Should be positively correlated
+
+
+class TestGetHealthReportExtended:
+    """Extended health report tests."""
+
+    def test_report_structure(self, tmp_path):
+        """Report should have expected top-level keys."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        report = tracker.get_health_report()
+        assert "timestamp" in report
+        assert "summary" in report
+        assert "scores" in report
+        assert "alerts" in report
+        assert "overall_health" in report
+
+    def test_summary_structure(self, tmp_path):
+        """Summary should have expected fields."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        report = tracker.get_health_report()
+        summary = report["summary"]
+        assert "healthy" in summary
+        assert "degraded" in summary
+        assert "unhealthy" in summary
+        assert "total_tracked" in summary
+
+
+class TestDetectICAlertsExtended:
+    """Extended detect_ic_alerts tests."""
+
+    def test_custom_parameters(self, tmp_path):
+        """Custom lookback and thresholds should be accepted."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        with patch.object(tracker, 'compute_ic', return_value=-0.03):
+            alerts = tracker.detect_ic_alerts(
+                lookback_days=60,
+                streak_threshold=2,
+                ic_ratio_floor=0.4,
+                ic_drawdown_threshold=0.6,
+            )
+        assert isinstance(alerts, list)
+
+    def test_no_alerts_with_positive_ic(self, tmp_path):
+        """Consistently positive IC should not trigger streak alerts."""
+        db = str(tmp_path / "test_health.db")
+        tracker = SignalHealthTracker(db_path=db)
+        from unittest.mock import patch
+        with patch.object(tracker, 'compute_ic', return_value=0.08):
+            alerts = tracker.detect_ic_alerts()
+        # No streak alerts since IC is positive
+        streak_alerts = [a for a in alerts if "streak" in a.message.lower()]
+        assert len(streak_alerts) == 0

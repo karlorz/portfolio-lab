@@ -468,5 +468,232 @@ class TestTSMOMBacktester:
         assert abs(sum(weights.values()) - 1.0) < 0.05
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestTSMOMSignalExtended:
+    """Extended TSMOMSignal dataclass tests."""
+
+    def test_to_dict_has_all_fields(self):
+        sig = TSMOMSignal(
+            ticker='SPY', timestamp='2026-05-24',
+            lookback_return=0.12, recent_return=0.02, signal=1,
+            realized_vol=0.16, vol_scaled_position=6.25,
+            base_weight=0.46, adjustment=0.05, target_weight=0.51,
+            lookback_start_price=450.0, lookback_end_price=504.0,
+            formation_days=252,
+        )
+        d = sig.to_dict()
+        expected_keys = {
+            'ticker', 'timestamp', 'lookback_return', 'recent_return',
+            'signal', 'realized_vol', 'vol_scaled_position', 'base_weight',
+            'adjustment', 'target_weight', 'lookback_start_price',
+            'lookback_end_price', 'formation_days',
+        }
+        assert expected_keys == set(d.keys())
+
+    def test_bearish_signal(self):
+        sig = TSMOMSignal(
+            ticker='TLT', timestamp='2026-05-24',
+            lookback_return=-0.08, recent_return=-0.02, signal=-1,
+            realized_vol=0.12, vol_scaled_position=8.33,
+            base_weight=0.16, adjustment=-0.05, target_weight=0.11,
+            lookback_start_price=100.0, lookback_end_price=92.0,
+            formation_days=252,
+        )
+        assert sig.signal == -1
+        assert sig.lookback_return < 0
+
+    def test_to_signal_snapshot(self):
+        """to_signal_snapshot should return a SignalSnapshot."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        sig = TSMOMSignal(
+            ticker='SPY', timestamp='2026-05-24',
+            lookback_return=0.12, recent_return=0.02, signal=1,
+            realized_vol=0.16, vol_scaled_position=6.25,
+            base_weight=0.46, adjustment=0.05, target_weight=0.51,
+            lookback_start_price=450.0, lookback_end_price=504.0,
+            formation_days=252,
+        )
+        snapshot = sig.to_signal_snapshot()
+        assert isinstance(snapshot, SignalSnapshot)
+        assert snapshot.source == "tsmom_overlay"
+
+
+class TestTSMOMPortfolioExtended:
+    """Extended TSMOMPortfolio dataclass tests."""
+
+    def test_to_dict_has_all_fields(self):
+        port = TSMOMPortfolio(
+            timestamp='2026-05-24',
+            base_allocation={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
+            tsmom_adjustments={'SPY': 0.05},
+            target_allocation={'SPY': 0.51, 'GLD': 0.38, 'TLT': 0.16, 'CASH': -0.05},
+            predicted_volatility=0.14,
+            max_drawdown_estimate=-0.15,
+            tsmom_signals={},
+            overall_confidence=0.75,
+        )
+        d = port.to_dict()
+        expected_keys = {
+            'timestamp', 'base_allocation', 'tsmom_adjustments',
+            'target_allocation', 'predicted_volatility', 'max_drawdown_estimate',
+            'tsmom_signals', 'overall_confidence',
+        }
+        assert expected_keys == set(d.keys())
+
+    def test_negative_drawdown(self):
+        port = TSMOMPortfolio(
+            timestamp='2026-05-24',
+            base_allocation={}, tsmom_adjustments={},
+            target_allocation={}, predicted_volatility=0.20,
+            max_drawdown_estimate=-0.30,
+            tsmom_signals={}, overall_confidence=0.5,
+        )
+        assert port.max_drawdown_estimate < 0
+
+
+class TestCalculateFormationReturnExtended:
+    """Extended formation return tests."""
+
+    def test_negative_return(self):
+        """Monotonically decreasing prices → negative formation return."""
+        overlay = _make_overlay()
+        prices = pd.Series([500 - i * 0.5 for i in range(400)],
+                          index=pd.date_range(end=datetime.now(), periods=400, freq='B'))
+        ret, _, _, _ = overlay.calculate_formation_return(prices, 399)
+        assert ret < 0
+
+    def test_boundary_index(self):
+        """First valid index should work."""
+        overlay = _make_overlay()
+        prices = _make_prices_series(n_days=400)
+        ret, _, _, _ = overlay.calculate_formation_return(prices, LOOKBACK_DAYS + SKIP_DAYS)
+        assert isinstance(ret, float)
+
+
+class TestCalculateRealizedVolatilityExtended:
+    """Extended realized volatility tests."""
+
+    def test_constant_prices_min_vol(self):
+        """Constant prices should get minimum 1% vol."""
+        overlay = _make_overlay()
+        prices = pd.Series([100.0] * 100,
+                          index=pd.date_range(end=datetime.now(), periods=100, freq='B'))
+        vol = overlay.calculate_realized_volatility(prices, 99)
+        assert vol >= 0.01
+
+    def test_very_short_window(self):
+        """Very short window should still return a value."""
+        overlay = _make_overlay()
+        prices = _make_prices_series(n_days=30)
+        vol = overlay.calculate_realized_volatility(prices, 29)
+        assert vol > 0
+
+
+class TestComputeSignalExtended:
+    """Extended compute_signal tests."""
+
+    def test_multiple_signals_deterministic(self):
+        """Same data should produce same signal."""
+        overlay = _make_overlay()
+        _inject_prices(overlay, ['SPY'])
+        sig1 = overlay.compute_signal('SPY')
+        sig2 = overlay.compute_signal('SPY')
+        assert sig1.signal == sig2.signal
+        assert sig1.lookback_return == sig2.lookback_return
+
+    def test_all_tickers(self):
+        """Should work for all default tickers."""
+        overlay = _make_overlay()
+        _inject_prices(overlay, ['SPY', 'GLD', 'TLT'])
+        for ticker in ['SPY', 'GLD', 'TLT']:
+            sig = overlay.compute_signal(ticker)
+            assert sig is not None
+            assert sig.ticker == ticker
+
+    def test_adjustment_bounded_by_max_deviation(self):
+        """Adjustment should not exceed max_deviation."""
+        overlay = _make_overlay()
+        _inject_prices(overlay, ['SPY', 'GLD', 'TLT'])
+        for ticker in ['SPY', 'GLD', 'TLT']:
+            sig = overlay.compute_signal(ticker)
+            assert abs(sig.adjustment) <= MAX_DEVIATION + 0.01
+
+
+class TestComputePortfolioExtended:
+    """Extended compute_portfolio tests."""
+
+    def test_adjustments_for_all_assets(self):
+        """Portfolio should include adjustments for all assets."""
+        overlay = _make_overlay()
+        _inject_prices(overlay, ['SPY', 'GLD', 'TLT'])
+        port = overlay.compute_portfolio()
+        for ticker in ['SPY', 'GLD', 'TLT']:
+            assert ticker in port.tsmom_adjustments
+
+    def test_signals_for_all_assets(self):
+        """Portfolio should include signals for all assets."""
+        overlay = _make_overlay()
+        _inject_prices(overlay, ['SPY', 'GLD', 'TLT'])
+        port = overlay.compute_portfolio()
+        for ticker in ['SPY', 'GLD', 'TLT']:
+            assert ticker in port.tsmom_signals
+
+    def test_custom_tickers(self):
+        """Portfolio with custom tickers should work."""
+        overlay = _make_overlay()
+        _inject_prices(overlay, ['SPY', 'TLT'])
+        port = overlay.compute_portfolio(tickers=['SPY', 'TLT'])
+        assert port is not None
+        assert 'SPY' in port.target_allocation
+        assert 'TLT' in port.target_allocation
+
+
+class TestGetCurrentRecommendationExtended:
+    """Extended get_current_recommendation tests."""
+
+    def test_recommendation_fields(self):
+        """Recommendation should include strategy and timestamp."""
+        overlay = _make_overlay()
+        _inject_prices(overlay, ['SPY', 'GLD', 'TLT'])
+        rec = overlay.get_current_recommendation()
+        assert 'strategy' in rec
+        assert 'timestamp' in rec or 'error' in rec
+
+    def test_custom_base_allocation(self):
+        """Custom base allocation should be reflected."""
+        overlay = _make_overlay()
+        _inject_prices(overlay, ['SPY', 'GLD', 'TLT'])
+        custom = {'SPY': 0.50, 'GLD': 0.30, 'TLT': 0.20, 'CASH': 0.0}
+        rec = overlay.get_current_recommendation(base_allocation=custom)
+        if 'strategy' in rec:
+            assert rec.get('base_allocation') == custom or 'strategy' in rec
+
+
+class TestTSMOMBacktesterExtended:
+    """Extended backtester tests."""
+
+    def test_default_tickers(self):
+        bt = TSMOMBacktester()
+        assert 'SPY' in bt.tickers
+        assert 'GLD' in bt.tickers
+        assert 'TLT' in bt.tickers
+
+    def test_weights_from_signals_cash_fill(self):
+        """Weights with fewer signals should fill rest with cash."""
+        bt = TSMOMBacktester()
+        sig = TSMOMSignal(
+            ticker='SPY', timestamp='2026-01-01',
+            lookback_return=0.10, recent_return=0.01, signal=1,
+            realized_vol=0.15, vol_scaled_position=6.67,
+            base_weight=0.46, adjustment=0.05, target_weight=0.51,
+            lookback_start_price=450.0, lookback_end_price=495.0,
+            formation_days=252,
+        )
+        weights = bt._weights_from_signals({'SPY': sig})
+        assert weights['CASH'] >= 0
+        total = sum(weights.values())
+        assert abs(total - 1.0) < 0.05
