@@ -32,7 +32,7 @@ import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_connect
 from src.signals.calendar_seasonality import get_calendar_modifier
@@ -128,6 +128,9 @@ class UnifiedRecommendation:
     confidence: float
     recommendation: str
     is_actionable: bool
+
+    # Black-Litterman comparison (optional — populated when pypfopt available)
+    bl_comparison: Optional[Dict[str, float]] = None  # BL posterior weights
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -506,6 +509,9 @@ class UnifiedOrchestrator:
         # Include VIX info in recommendation
         vix_level = self._fetch_vix_level()
 
+        # Black-Litterman comparison (optional — informational only)
+        bl_comparison = self._compute_bl_comparison(weights)
+
         return UnifiedRecommendation(
             timestamp=datetime.now().isoformat(),
             baseline_spy=self.BASELINE["spy"],
@@ -538,7 +544,79 @@ class UnifiedOrchestrator:
                 f"{len(conflicts)} conflict(s)"
             ),
             is_actionable=len(conflicts) == 0,
+            bl_comparison=bl_comparison,
         )
+
+    def _compute_bl_comparison(
+        self, overlay_weights: Dict[str, float]
+    ) -> Optional[Dict[str, float]]:
+        """Compute BL posterior weights as a comparison view.
+
+        Takes the overlay-adjusted weights and derives ensemble biases
+        from the delta vs baseline, then runs BL optimization to show
+        how a covariance-aware Bayesian update would adjust weights.
+
+        This is informational only — it does not change the primary
+        recommendation. It provides a second opinion for portfolio
+        managers who want to see both the overlay-based and BL-based
+        weight perspectives.
+
+        Returns:
+            Dict of {symbol: weight} from BL, or None if pypfopt unavailable.
+        """
+        try:
+            from src.strategy.black_litterman_mapper import compute_bl_weights
+            from src.paths import DATA_DIR
+        except ImportError:
+            return None
+
+        # Derive biases from overlay delta vs baseline
+        # Map overlay weights back to ensemble bias scale
+        spy_delta = overlay_weights.get("spy", 0.46) - self.BASELINE["spy"]
+        gld_delta = overlay_weights.get("gld", 0.38) - self.BASELINE["gld"]
+        tlt_delta = overlay_weights.get("tlt", 0.16) - self.BASELINE["tlt"]
+
+        # Scale deltas to [-1, +1] bias range (10pp = 1.0 bias)
+        equity_bias = max(-1.0, min(1.0, spy_delta / 0.10))
+        gold_bias = max(-1.0, min(1.0, gld_delta / 0.10))
+        duration_bias = max(-1.0, min(1.0, tlt_delta / 0.10))
+
+        try:
+            # Load prices for covariance estimation
+            prices_path = DATA_DIR / "prices.json"
+            if not prices_path.exists():
+                return None
+
+            import pandas as pd
+            with open(prices_path) as f:
+                raw = json.load(f)
+            prices = {}
+            for sym in ("SPY", "GLD", "TLT"):
+                if sym.lower() in raw:
+                    prices[sym] = raw[sym.lower()]["p"]
+                elif sym in raw:
+                    prices[sym] = raw[sym]["p"]
+
+            if len(prices) < 3:
+                return None
+
+            # Build DataFrame
+            min_len = min(len(v) for v in prices.values())
+            df = pd.DataFrame({
+                sym: prices[sym][-min_len:] for sym in ("SPY", "GLD", "TLT")
+            })
+
+            result = compute_bl_weights(
+                prices_df=df,
+                equity_bias=equity_bias,
+                duration_bias=duration_bias,
+                gold_bias=gold_bias,
+                tau=0.15,
+            )
+            return {k: round(v, 4) for k, v in result.bl_weights.items()}
+        except Exception as e:
+            logger.debug("BL comparison unavailable: %s", e)
+            return None
 
     def save_recommendation(self, rec: UnifiedRecommendation):
         out = self.STATE_FILE.parent / "signals" / "unified_recommendation.json"
