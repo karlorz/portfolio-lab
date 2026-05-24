@@ -351,3 +351,251 @@ class TestEmptyDataFrameGuard:
             # Should not crash on iloc[-1] with empty df
             latest = df.iloc[-1]['date'].strftime('%Y-%m-%d') if not df.empty else "N/A"
             assert latest == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestFedPolicyRegimeExtended:
+    """Extended FedPolicyRegime dataclass tests."""
+
+    def test_to_dict_has_all_fields(self):
+        r = _make_regime(unemployment=3.8, confidence=0.85, regime_factors={'real_rate_level': 1.5})
+        d = r.to_dict()
+        expected_keys = {
+            'timestamp', 'regime', 'fed_funds_rate', 'inflation_yoy',
+            'real_rate_10y', 'real_rate_short', 'breakeven_10y',
+            'yield_curve_10y2y', 'unemployment', 'confidence', 'regime_factors',
+        }
+        assert expected_keys == set(d.keys())
+
+    def test_divergence_risk_boundary(self):
+        """Exactly 1.0 difference should NOT trigger divergence risk."""
+        r = _make_regime(real_rate_short=1.0, real_rate_10y=2.0)
+        assert r.is_divergence_risk() is False  # abs(1.0 - 2.0) == 1.0, not > 1.0
+
+    def test_divergence_risk_just_over(self):
+        """Slightly over 1.0 difference should trigger divergence risk."""
+        r = _make_regime(real_rate_short=0.5, real_rate_10y=2.0)
+        assert r.is_divergence_risk() is True  # abs(0.5 - 2.0) = 1.5 > 1.0
+
+    def test_allocation_shift_easing_keys(self):
+        """EASING shift should have SPY, GLD, TLT, CASH keys."""
+        r = _make_regime(regime='EASING')
+        shift = r.get_allocation_shift()
+        assert set(shift.keys()) == {'SPY', 'GLD', 'TLT', 'CASH'}
+        assert shift['SPY'] > 0
+        assert shift['GLD'] > 0
+
+    def test_allocation_shift_tightening_keys(self):
+        """TIGHTENING shift should have correct signs."""
+        r = _make_regime(regime='TIGHTENING')
+        shift = r.get_allocation_shift()
+        assert shift['SPY'] < 0
+        assert shift['GLD'] > 0
+        assert shift['TLT'] == 0.0
+
+    def test_allocation_shift_uncertain_keys(self):
+        """UNCERTAIN shift should reduce SPY and TLT, increase GLD."""
+        r = _make_regime(regime='UNCERTAIN')
+        shift = r.get_allocation_shift()
+        assert shift['SPY'] < 0
+        assert shift['GLD'] > 0
+        assert shift['TLT'] < 0
+
+
+class TestClassifyFedRegimeExtended:
+    """Extended classify_fed_regime tests."""
+
+    def test_easing_with_rate_cuts(self):
+        """Large rate cuts should classify as EASING."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=2.0, inflation_yoy=3.0, real_rate_10y=-1.0,
+            real_rate_short=-1.0, rate_change_6m=-1.0,
+        )
+        assert regime == 'EASING'
+
+    def test_tightening_with_hikes_and_inflation(self):
+        """Rate hikes + high inflation should classify as TIGHTENING."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=5.5, inflation_yoy=4.0, real_rate_10y=2.5,
+            real_rate_short=2.5, rate_change_6m=1.5,
+        )
+        assert regime == 'TIGHTENING'
+
+    def test_uncertain_extreme_inflation(self):
+        """Extreme inflation gap (> 2%) should add UNCERTAIN signal."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=3.0, inflation_yoy=5.0, real_rate_10y=-2.0,
+            rate_change_6m=-0.5,
+        )
+        # Either EASING or UNCERTAIN depending on scoring
+        assert regime in ['EASING', 'UNCERTAIN']
+
+    def test_confidence_increases_with_margin(self):
+        """Larger score margin should increase confidence."""
+        # Strong EASING signal
+        _, conf_strong, _ = classify_fed_regime(
+            fed_funds=1.0, inflation_yoy=4.0, real_rate_10y=-3.0,
+            real_rate_short=-3.0, rate_change_6m=-1.0,
+        )
+        # Weak / ambiguous signal
+        _, conf_weak, _ = classify_fed_regime(
+            fed_funds=3.0, inflation_yoy=2.0, real_rate_10y=1.0,
+            real_rate_short=1.0, rate_change_6m=0.0,
+        )
+        assert conf_strong >= conf_weak
+
+    def test_no_yield_curve_default(self):
+        """Missing yield_curve_slope should default to 0.0 in factors."""
+        _, _, factors = classify_fed_regime(
+            fed_funds=3.0, inflation_yoy=2.0, real_rate_10y=1.0,
+        )
+        assert factors['yield_curve'] == 0.0
+
+    def test_inflation_gap_calculation(self):
+        """inflation_gap should be inflation - 2.0."""
+        _, _, factors = classify_fed_regime(
+            fed_funds=3.0, inflation_yoy=3.5, real_rate_10y=1.0,
+        )
+        assert factors['inflation_gap'] == 1.5
+
+    def test_real_short_fallback(self):
+        """When real_rate_short is None, should use fed_funds - inflation."""
+        _, _, factors = classify_fed_regime(
+            fed_funds=4.0, inflation_yoy=2.5, real_rate_10y=1.5,
+        )
+        assert factors['real_rate_level'] == 1.5  # 4.0 - 2.5
+
+
+class TestCalculateInflationYoyExtended:
+    """Extended calculate_inflation_yoy tests."""
+
+    def test_zero_drift_zero_inflation(self):
+        """Zero drift should produce near-zero inflation."""
+        df = _make_cpi_df(n=24, drift=0.0)
+        result = calculate_inflation_yoy(df)
+        if len(result) > 0:
+            assert all(abs(result['inflation_yoy']) < 0.1)
+
+    def test_high_drift_high_inflation(self):
+        """High drift should produce high inflation."""
+        df = _make_cpi_df(n=24, drift=0.01)
+        result = calculate_inflation_yoy(df)
+        if len(result) > 0:
+            assert all(result['inflation_yoy'] > 5.0)
+
+    def test_insufficient_data(self):
+        """Less than 12 months should produce empty result after dropna."""
+        df = _make_cpi_df(n=11)
+        result = calculate_inflation_yoy(df)
+        assert len(result) == 0
+
+
+class TestCalculateRealRateExtended:
+    """Extended calculate_real_rate tests."""
+
+    def test_real_rate_positive(self):
+        """Nominal > inflation should give positive real rate."""
+        nominal = _make_nominal_df(n=24, base=5.0)
+        cpi = calculate_inflation_yoy(_make_cpi_df(n=24, drift=0.002))
+        result = calculate_real_rate(nominal, cpi)
+        if len(result) > 0 and 'real_rate' in result.columns:
+            assert any(result['real_rate'] > 0)
+
+    def test_real_rate_formula(self):
+        """Real rate should equal nominal - inflation."""
+        nominal = _make_nominal_df(n=24, base=5.0)
+        cpi = calculate_inflation_yoy(_make_cpi_df(n=24, drift=0.002))
+        result = calculate_real_rate(nominal, cpi)
+        if len(result) > 0 and 'real_rate' in result.columns:
+            for _, row in result.iterrows():
+                expected = row['nominal'] - row['inflation']
+                assert row['real_rate'] == pytest.approx(expected, abs=0.01)
+
+
+class TestFedPolicyOverlayExtended:
+    """Extended FedPolicyOverlay tests."""
+
+    def test_detect_regime_no_fed_funds(self):
+        """Missing FEDFUNDS data should return None."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred.json')
+        overlay.current_regime = None
+        overlay.data = {
+            'CPIAUCSL': pd.DataFrame({'date': pd.date_range(end=datetime.now(), periods=30, freq='MS'), 'value': np.linspace(300, 310, 30)}),
+        }
+        result = overlay.detect_regime()
+        assert result is None
+
+    def test_detect_regime_with_timestamp(self):
+        """Custom timestamp should be preserved."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred.json')
+        overlay.current_regime = None
+        dates = pd.date_range(end=datetime.now(), periods=30, freq='MS')
+        overlay.data = {
+            'FEDFUNDS': pd.DataFrame({'date': dates, 'value': [5.0] * 30}),
+            'CPIAUCSL': pd.DataFrame({'date': dates, 'value': np.linspace(300, 310, 30)}),
+            'DFII10': pd.DataFrame({'date': dates, 'value': [1.5] * 30}),
+            'DGS10': pd.DataFrame({'date': dates, 'value': [4.5] * 30}),
+            'DGS2': pd.DataFrame({'date': dates, 'value': [4.0] * 30}),
+            'T10YIE': pd.DataFrame({'date': dates, 'value': [2.3] * 30}),
+        }
+        result = overlay.detect_regime(timestamp='2026-05-24T12:00:00')
+        assert result is not None
+        assert result.timestamp == '2026-05-24T12:00:00'
+
+    def test_get_allocation_recommendation_no_regime(self):
+        """Recommendation without regime should return error or detect regime."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/nonexistent.json')
+        overlay.current_regime = None
+        overlay.data = {}
+        # With empty data, detect_regime returns None
+        result = overlay.get_allocation_recommendation()
+        assert 'error' in result or 'regime' in result
+
+    def test_recommendation_normalization(self):
+        """Recommended allocation should sum to 1.0."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred.json')
+        overlay.current_regime = _make_regime(regime='EASING')
+        result = overlay.get_allocation_recommendation()
+        total = sum(result['recommended_allocation'].values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_recommendation_clamping(self):
+        """Allocation weights should be clamped between 0.05 and 0.90."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred.json')
+        overlay.current_regime = _make_regime(regime='TIGHTENING')
+        result = overlay.get_allocation_recommendation()
+        for asset, weight in result['recommended_allocation'].items():
+            assert 0.05 <= weight <= 0.90, f"{asset}={weight} out of bounds"
+
+    def test_recommendation_has_strategy_field(self):
+        """Recommendation should include strategy identifier."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred.json')
+        overlay.current_regime = _make_regime(regime='NEUTRAL')
+        result = overlay.get_allocation_recommendation()
+        assert 'strategy' in result
+        assert 'Fed Policy' in result['strategy']
+
+
+class TestFredSeriesExtended:
+    """Extended FRED_SERIES constant tests."""
+
+    def test_core_priority_series(self):
+        """Priority series should be in FRED_SERIES."""
+        priority = ['FEDFUNDS', 'CPIAUCSL', 'T10YIE', 'DFII10', 'DGS10', 'DGS2']
+        for series in priority:
+            assert series in FRED_SERIES
+
+    def test_all_values_are_strings(self):
+        """All FRED_SERIES values should be descriptive strings."""
+        for key, desc in FRED_SERIES.items():
+            assert isinstance(desc, str) and len(desc) > 10

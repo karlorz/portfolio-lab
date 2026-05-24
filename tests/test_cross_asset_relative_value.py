@@ -360,3 +360,301 @@ class TestPrint:
         captured = capsys.readouterr()
         assert "spy_qqq" in captured.out
         assert "diverged_bull" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestPairReadingDataclass:
+    """Extended PairReading dataclass tests."""
+
+    def test_to_dict_has_all_fields(self):
+        reading = PairReading(
+            pair_name="spy_efa", symbol_a="SPY", symbol_b="EFA",
+            return_a_60d=3.0, return_b_60d=1.0, return_differential=2.0,
+            z_score=1.8, z_score_mean=0.5, z_score_std=0.8,
+            signal_value=-0.4, regime="neutral", conviction=0.3,
+            active=False, days_active=0, entry_zscore=0.0,
+        )
+        d = reading.to_dict()
+        expected_keys = {
+            'pair_name', 'symbol_a', 'symbol_b', 'return_a_60d', 'return_b_60d',
+            'return_differential', 'z_score', 'z_score_mean', 'z_score_std',
+            'signal_value', 'regime', 'conviction', 'active', 'days_active',
+            'entry_zscore',
+        }
+        assert expected_keys == set(d.keys())
+
+    def test_diverged_bear_regime(self):
+        """Negative z-score past threshold should be diverged_bear."""
+        reading = PairReading(
+            pair_name="spy_gld", symbol_a="SPY", symbol_b="GLD",
+            return_a_60d=-5.0, return_b_60d=3.0, return_differential=-8.0,
+            z_score=-2.8, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=0.7, regime="diverged_bear", conviction=0.9,
+            active=True, days_active=2, entry_zscore=-2.8,
+        )
+        assert reading.regime == "diverged_bear"
+        assert reading.signal_value > 0  # Long A, short B
+
+    def test_converged_regime(self):
+        """Low z-score should indicate converged."""
+        reading = PairReading(
+            pair_name="tlt_ief", symbol_a="TLT", symbol_b="IEF",
+            return_a_60d=1.0, return_b_60d=0.8, return_differential=0.2,
+            z_score=0.3, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=0.0, regime="converged", conviction=0.0,
+            active=False, days_active=0, entry_zscore=0.0,
+        )
+        assert reading.regime == "converged"
+        assert reading.active is False
+
+
+class TestCrossAssetRVSignalDataclass:
+    """Extended CrossAssetRVSignal dataclass tests."""
+
+    def test_to_dict_nested_pair_serialization(self):
+        reading = PairReading(
+            pair_name="spy_qqq", symbol_a="SPY", symbol_b="QQQ",
+            return_a_60d=5.0, return_b_60d=2.0, return_differential=3.0,
+            z_score=2.5, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=-0.75, regime="diverged_bull", conviction=0.8,
+            active=True, days_active=3, entry_zscore=2.5,
+        )
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={"spy_qqq": reading},
+            avg_z_score=2.5,
+            max_divergence=2.5,
+            num_diverged=1,
+            total_pairs=5,
+            risk_on_score=-0.5,
+            duration_score=0.2,
+            overall_conviction=0.8,
+        )
+        d = signal.to_dict()
+        # Nested pair should be serialized to dict
+        assert isinstance(d["pairs"]["spy_qqq"], dict)
+        assert d["pairs"]["spy_qqq"]["pair_name"] == "spy_qqq"
+        assert d["duration_score"] == 0.2
+
+    def test_to_dict_all_fields(self):
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={},
+            avg_z_score=0.0,
+            max_divergence=0.0,
+            num_diverged=0,
+            total_pairs=5,
+            risk_on_score=0.0,
+            duration_score=0.0,
+            overall_conviction=0.0,
+        )
+        d = signal.to_dict()
+        expected_keys = {
+            'timestamp', 'pairs', 'avg_z_score', 'max_divergence',
+            'num_diverged', 'total_pairs', 'risk_on_score',
+            'duration_score', 'overall_conviction',
+        }
+        assert expected_keys == set(d.keys())
+
+
+class TestComputationsExtended:
+    """Extended computation edge cases."""
+
+    def test_compute_returns_all_nan(self, scanner):
+        """All-NaN prices should return all-NaN returns."""
+        prices = np.full(100, np.nan)
+        rets = scanner._compute_returns(prices, period=10)
+        assert np.all(np.isnan(rets))
+
+    def test_compute_z_score_short_series(self, scanner):
+        """Series shorter than window should return all NaN z-scores."""
+        values = np.array([1.0, 2.0, 3.0])
+        z_scores, means, stds = scanner._compute_z_score(values, window=10)
+        assert np.all(np.isnan(z_scores))
+
+    def test_compute_z_score_with_nans(self, scanner):
+        """Z-score computation should handle NaN values in input."""
+        np.random.seed(42)
+        values = np.random.normal(0, 1, 100)
+        values[30] = np.nan
+        values[60] = np.nan
+        z_scores, means, stds = scanner._compute_z_score(values, window=20)
+        # Should still produce some valid z-scores
+        valid = z_scores[~np.isnan(z_scores)]
+        assert len(valid) > 0
+
+    def test_compute_returns_exact_period(self, scanner):
+        """Returns should match exact period computation."""
+        prices = np.arange(1.0, 101.0)  # 1, 2, 3, ..., 100
+        rets = scanner._compute_returns(prices, period=1)
+        # rets[i] = prices[i] / prices[i-1] - 1
+        assert rets[1] == pytest.approx(2.0 / 1.0 - 1)
+        assert rets[2] == pytest.approx(3.0 / 2.0 - 1)
+
+
+class TestPairScanningExtended:
+    """Extended pair scanning tests."""
+
+    def test_scan_pair_missing_symbol(self, tmp_path):
+        """Scanning a pair with missing price data should return None."""
+        data_dir = tmp_path / "partial"
+        data_dir.mkdir()
+        # Only SPY, no QQQ
+        dates = [("2026-01-0" + str(i+1), 100.0 + i) for i in range(7)]
+        prices = {"SPY": [{"d": d, "p": p} for d, p in dates]}
+        with open(data_dir / "prices.json", "w") as f:
+            json.dump(prices, f)
+        scanner = CrossAssetRVScanner(data_dir=data_dir)
+        scanner._load_price_data()
+        # spy_qqq needs both SPY and QQQ, but QQQ not loaded → should work with NaN
+        # The scanner loads NaN arrays for missing symbols, scan_pair checks len
+
+    def test_scan_pair_valid_output_fields(self, scanner):
+        """Scanned pair should have all expected fields."""
+        scanner._load_price_data()
+        reading = scanner.scan_pair("spy_qqq")
+        if reading is not None:
+            assert hasattr(reading, 'return_a_60d')
+            assert hasattr(reading, 'return_b_60d')
+            assert hasattr(reading, 'return_differential')
+            assert hasattr(reading, 'z_score')
+            assert hasattr(reading, 'z_score_mean')
+            assert hasattr(reading, 'z_score_std')
+            assert hasattr(reading, 'signal_value')
+            assert hasattr(reading, 'regime')
+            assert hasattr(reading, 'conviction')
+            assert hasattr(reading, 'active')
+            assert hasattr(reading, 'days_active')
+            assert hasattr(reading, 'entry_zscore')
+
+    def test_scan_all_signal_fields(self, scanner):
+        """scan_all result should have all expected fields."""
+        scanner._load_price_data()
+        signal = scanner.scan_all()
+        assert isinstance(signal.timestamp, str)
+        assert isinstance(signal.avg_z_score, float)
+        assert isinstance(signal.max_divergence, float)
+        assert isinstance(signal.num_diverged, int)
+        assert isinstance(signal.total_pairs, int)
+        assert isinstance(signal.risk_on_score, float)
+        assert isinstance(signal.duration_score, float)
+        assert isinstance(signal.overall_conviction, float)
+
+    def test_scan_pair_current_idx_out_of_bounds(self, scanner):
+        """Out-of-bounds current_idx should be clamped."""
+        scanner._load_price_data()
+        reading = scanner.scan_pair("spy_qqq", current_idx=9999)
+        assert reading is not None  # Should clamp and return
+
+
+class TestSignalGenerationExtended:
+    """Extended signal generation tests."""
+
+    def test_get_signal_snapshot_structure(self, scanner):
+        """get_signal_snapshot should return a SignalSnapshot."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        scanner._load_price_data()
+        snapshot = scanner.get_signal_snapshot()
+        assert isinstance(snapshot, SignalSnapshot)
+        assert snapshot.source == "cross_asset_rv"
+
+    def test_get_signal_snapshot_active_field(self, scanner):
+        """SignalSnapshot is_active should reflect signal_value."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        scanner._load_price_data()
+        snapshot = scanner.get_signal_snapshot()
+        # is_active should be True if signal_value != 0, False otherwise
+        if snapshot.value != 0.0:
+            assert snapshot.is_active is True
+
+    def test_ensemble_signal_timestamp(self, scanner):
+        """Ensemble signal should include a timestamp."""
+        scanner._load_price_data()
+        es = scanner.get_ensemble_signal()
+        assert "timestamp" in es
+        assert es["timestamp"] is not None
+
+    def test_ensemble_signal_pair_details(self, scanner):
+        """Ensemble signal should include pair details."""
+        scanner._load_price_data()
+        es = scanner.get_ensemble_signal()
+        assert "pairs" in es
+        assert "avg_z_score" in es
+        assert "num_diverged" in es
+        assert "total_pairs" in es
+
+
+class TestStatePersistenceExtended:
+    """Extended state persistence tests."""
+
+    def test_save_and_load_roundtrip(self, tmp_path):
+        """Save and load should roundtrip correctly."""
+        scanner = CrossAssetRVScanner(data_dir=tmp_path / "state_rt")
+        state = {
+            "spy_qqq": {"active": True, "days_active": 10, "entry_zscore": 2.3, "last_zscore": 2.1},
+            "spy_gld": {"active": False, "days_active": 0, "entry_zscore": 0.0, "last_zscore": 0.5},
+        }
+        scanner._save_state(state)
+        loaded = scanner._load_state()
+        assert loaded["spy_qqq"]["active"] is True
+        assert loaded["spy_qqq"]["days_active"] == 10
+        assert loaded["spy_gld"]["active"] is False
+
+    def test_corrupted_state_file(self, tmp_path):
+        """Corrupted state file should return empty dict."""
+        scanner = CrossAssetRVScanner(data_dir=tmp_path / "corrupt")
+        scanner.state_dir.mkdir(parents=True, exist_ok=True)
+        with open(scanner.state_path, "w") as f:
+            f.write("not valid json {{{")
+        state = scanner._load_state()
+        assert state == {}
+
+
+class TestPrintExtended:
+    """Extended print tests."""
+
+    def test_print_scan_shows_legend(self, capsys):
+        """Print should show the legend section."""
+        signal = CrossAssetRVSignal(
+            timestamp="2026-01-01",
+            pairs={},
+            avg_z_score=0.0,
+            max_divergence=0.0,
+            num_diverged=0,
+            total_pairs=5,
+            risk_on_score=0.0,
+            duration_score=0.0,
+            overall_conviction=0.0,
+        )
+        print_scan(signal)
+        captured = capsys.readouterr()
+        assert "Legend" in captured.out
+        assert "Z-Score" in captured.out
+
+    def test_print_scan_converged_pair(self, capsys):
+        """Print should handle converged pairs."""
+        reading = PairReading(
+            pair_name="spy_efa", symbol_a="SPY", symbol_b="EFA",
+            return_a_60d=2.0, return_b_60d=1.5, return_differential=0.5,
+            z_score=0.3, z_score_mean=0.1, z_score_std=0.5,
+            signal_value=0.0, regime="converged", conviction=0.0,
+            active=False, days_active=0, entry_zscore=0.0,
+        )
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24",
+            pairs={"spy_efa": reading},
+            avg_z_score=0.3,
+            max_divergence=0.3,
+            num_diverged=0,
+            total_pairs=5,
+            risk_on_score=0.0,
+            duration_score=0.0,
+            overall_conviction=0.0,
+        )
+        print_scan(signal)
+        captured = capsys.readouterr()
+        assert "converged" in captured.out

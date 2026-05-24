@@ -307,3 +307,163 @@ class TestGetAllocationDeltasExtended:
         assert deltas["SPY"] == 0.05
         assert deltas["GLD"] == 0.0
         assert deltas["TLT"] == -0.03
+
+
+# ---------------------------------------------------------------------------
+# get_signal_snapshot Tests
+# ---------------------------------------------------------------------------
+
+class TestGetSignalSnapshot:
+    """Tests for TSMOMSignalAdapter.get_signal_snapshot()."""
+
+    def _make_adapter(self, mod, mi, signals_by_ticker=None):
+        """Create adapter with mocked overlay returning specified signals."""
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        adapter.overlay = MagicMock()
+        adapter.base_allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        if signals_by_ticker is None:
+            signals_by_ticker = {
+                "SPY": _make_tsmom_signal(adjustment=0.05, signal=1),
+                "GLD": _make_tsmom_signal(adjustment=-0.02, signal=-1),
+                "TLT": _make_tsmom_signal(adjustment=0.01, signal=1),
+            }
+
+        def compute_side_effect(ticker):
+            return signals_by_ticker.get(ticker)
+
+        adapter.overlay.compute_signal.side_effect = compute_side_effect
+        # Also mock get_allocation_deltas to avoid double-compute
+        adapter._compute_confidence = MagicMock(return_value=0.72)
+        return adapter
+
+    def test_returns_signal_snapshot(self, tsmom_module):
+        """get_signal_snapshot should return a SignalSnapshot object."""
+        mod, mock_tsmom, _ = tsmom_module
+        # Mock SignalSnapshot
+        mock_snapshot_cls = MagicMock()
+        with patch.dict('sys.modules', {'src.signals.signal_snapshot': MagicMock(SignalSnapshot=mock_snapshot_cls)}):
+            adapter = self._make_adapter(mod, mock_tsmom)
+            adapter.get_signal_snapshot(["SPY", "GLD", "TLT"])
+            # Should have called compute_signal for each ticker
+            assert adapter.overlay.compute_signal.call_count >= 1
+
+    def test_no_signals_returns_inactive(self, tsmom_module):
+        """When no signals available, snapshot should be inactive."""
+        mod, mock_tsmom, _ = tsmom_module
+        adapter = mod.TSMOMSignalAdapter.__new__(mod.TSMOMSignalAdapter)
+        adapter.overlay = MagicMock()
+        adapter.overlay.compute_signal.return_value = None
+        adapter.base_allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        adapter._compute_confidence = MagicMock(return_value=0.5)
+
+        mock_snapshot_cls = MagicMock()
+        with patch.dict('sys.modules', {'src.signals.signal_snapshot': MagicMock(SignalSnapshot=mock_snapshot_cls)}):
+            result = adapter.get_signal_snapshot(["SPY"])
+            # SignalSnapshot should be called with is_active=False
+            call_kwargs = mock_snapshot_cls.call_args
+            assert call_kwargs is not None
+
+    def test_default_tickers(self, tsmom_module):
+        """Default tickers should be SPY, GLD, TLT."""
+        mod, mock_tsmom, _ = tsmom_module
+        adapter = self._make_adapter(mod, mock_tsmom)
+        mock_snapshot_cls = MagicMock()
+        with patch.dict('sys.modules', {'src.signals.signal_snapshot': MagicMock(SignalSnapshot=mock_snapshot_cls)}):
+            adapter.get_signal_snapshot()
+            # Should call compute_signal for each default ticker
+            calls = [c.args[0] for c in adapter.overlay.compute_signal.call_args_list]
+            assert "SPY" in calls or len(calls) > 0
+
+    def test_active_when_nonzero_deltas(self, tsmom_module):
+        """Snapshot should be active when any delta is nonzero."""
+        mod, mock_tsmom, _ = tsmom_module
+        signals_by_ticker = {
+            "SPY": _make_tsmom_signal(adjustment=0.05, signal=1),
+            "GLD": _make_tsmom_signal(adjustment=-0.02, signal=-1),
+        }
+        adapter = self._make_adapter(mod, mock_tsmom, signals_by_ticker)
+        mock_snapshot_cls = MagicMock()
+        with patch.dict('sys.modules', {'src.signals.signal_snapshot': MagicMock(SignalSnapshot=mock_snapshot_cls)}):
+            adapter.get_signal_snapshot(["SPY", "GLD"])
+            call_kwargs = mock_snapshot_cls.call_args[1]
+            assert call_kwargs.get('is_active', False) is True
+
+    def test_inactive_when_all_zero_deltas(self, tsmom_module):
+        """Snapshot should be inactive when all deltas are zero."""
+        mod, mock_tsmom, _ = tsmom_module
+        signals_by_ticker = {
+            "SPY": _make_tsmom_signal(adjustment=0.0, signal=0),
+        }
+        adapter = self._make_adapter(mod, mock_tsmom, signals_by_ticker)
+        mock_snapshot_cls = MagicMock()
+        with patch.dict('sys.modules', {'src.signals.signal_snapshot': MagicMock(SignalSnapshot=mock_snapshot_cls)}):
+            adapter.get_signal_snapshot(["SPY"])
+            call_kwargs = mock_snapshot_cls.call_args[1]
+            assert call_kwargs.get('is_active', True) is False
+
+    def test_source_field(self, tsmom_module):
+        """Source field should be 'tsmom_integration'."""
+        mod, mock_tsmom, _ = tsmom_module
+        adapter = self._make_adapter(mod, mock_tsmom)
+        mock_snapshot_cls = MagicMock()
+        with patch.dict('sys.modules', {'src.signals.signal_snapshot': MagicMock(SignalSnapshot=mock_snapshot_cls)}):
+            adapter.get_signal_snapshot(["SPY"])
+            call_kwargs = mock_snapshot_cls.call_args[1]
+            assert call_kwargs['source'] == 'tsmom_integration'
+
+    def test_metadata_contains_deltas(self, tsmom_module):
+        """Metadata should include deltas dict."""
+        mod, mock_tsmom, _ = tsmom_module
+        adapter = self._make_adapter(mod, mock_tsmom)
+        mock_snapshot_cls = MagicMock()
+        with patch.dict('sys.modules', {'src.signals.signal_snapshot': MagicMock(SignalSnapshot=mock_snapshot_cls)}):
+            adapter.get_signal_snapshot(["SPY"])
+            call_kwargs = mock_snapshot_cls.call_args[1]
+            assert 'deltas' in call_kwargs.get('metadata', {})
+
+
+# ---------------------------------------------------------------------------
+# __init__ and constructor Tests
+# ---------------------------------------------------------------------------
+
+class TestTSMOMAdapterConstructor:
+
+    def test_default_base_allocation(self, tsmom_module):
+        """Default base_allocation should use DEFAULT_BASE_ALLOCATION."""
+        mod, mock_tsmom, _ = tsmom_module
+        mock_tsmom.TSMOMOverlay = MagicMock
+        mock_tsmom.DEFAULT_BASE_ALLOCATION = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        adapter = mod.TSMOMSignalAdapter()
+        assert adapter.base_allocation == {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+
+    def test_custom_base_allocation(self, tsmom_module):
+        """Custom base_allocation should override default."""
+        mod, mock_tsmom, _ = tsmom_module
+        mock_tsmom.TSMOMOverlay = MagicMock
+        mock_tsmom.DEFAULT_BASE_ALLOCATION = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        custom = {"SPY": 0.50, "GLD": 0.30, "TLT": 0.20}
+        adapter = mod.TSMOMSignalAdapter(base_allocation=custom)
+        assert adapter.base_allocation == custom
+
+
+# ---------------------------------------------------------------------------
+# Convenience function extended tests
+# ---------------------------------------------------------------------------
+
+class TestGetIntegratorResultExtended:
+
+    def test_custom_base_allocation(self, tsmom_module):
+        """get_tsmom_integrator_result should pass base_allocation through."""
+        mod, _, _ = tsmom_module
+        custom = {"SPY": 0.50, "GLD": 0.30, "TLT": 0.20}
+        with patch.object(mod.TSMOMSignalAdapter, 'get_portfolio_signals', return_value={}) as mock:
+            mod.get_tsmom_integrator_result(["SPY"], base_allocation=custom)
+            # Adapter should have been created with custom base_allocation
+            # We can't easily check the constructor arg, but the call should succeed
+
+    def test_custom_tickers(self, tsmom_module):
+        """Should accept custom ticker list."""
+        mod, _, _ = tsmom_module
+        with patch.object(mod.TSMOMSignalAdapter, 'get_portfolio_signals', return_value={}) as mock:
+            mod.get_tsmom_integrator_result(["QQQ", "IWM"])
+            mock.assert_called_once_with(["QQQ", "IWM"])

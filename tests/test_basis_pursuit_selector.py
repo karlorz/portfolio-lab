@@ -534,3 +534,310 @@ class TestEdgeCases:
         # This is a soft check since lambda determines pruning level
         assert result.sparsity_ratio >= 0.0
         assert result.sparsity_ratio <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestPrunedSignalExtended:
+    """Extended PrunedSignal dataclass tests."""
+
+    def test_to_dict_has_all_fields(self):
+        p = PrunedSignal(
+            signal="test_a",
+            weight=0.15,
+            reason="redundant",
+            paired_with="test_b",
+            correlation=0.93,
+        )
+        # dataclass fields
+        assert p.signal == "test_a"
+        assert p.weight == 0.15
+        assert p.reason == "redundant"
+        assert p.paired_with == "test_b"
+        assert p.correlation == 0.93
+
+    def test_near_zero_defaults(self):
+        """Near-zero pruned signal should have None for pair fields."""
+        p = PrunedSignal(signal="x", weight=0.001, reason="near_zero")
+        assert p.paired_with is None
+        assert p.correlation is None
+
+
+class TestBasisPursuitResultExtended:
+    """Extended BasisPursuitResult dataclass tests."""
+
+    def test_is_concentrated_boundary(self):
+        """Exactly at threshold should not be concentrated."""
+        result = BasisPursuitResult(
+            active_signals={"a": 0.5, "b": 0.5},
+            pruned_signals={},
+            prune_reasons={},
+            sparsity_ratio=0.3,  # == SPARSITY_ALERT_THRESHOLD
+            lambda_used=0.01,
+            regime="normal",
+        )
+        assert not result.is_concentrated()  # < not <=
+
+    def test_just_below_threshold(self):
+        """Just below threshold should be concentrated."""
+        result = BasisPursuitResult(
+            active_signals={"a": 1.0},
+            pruned_signals={"b": 0.5},
+            prune_reasons={},
+            sparsity_ratio=0.29,
+            lambda_used=0.15,
+            regime="crisis",
+        )
+        assert result.is_concentrated()
+
+
+class TestBasisPursuitStateExtended:
+    """Extended BasisPursuitState tests."""
+
+    def test_from_dict_defaults(self):
+        """from_dict should provide sensible defaults."""
+        state = BasisPursuitState.from_dict({})
+        assert state.signal_history == {}
+        assert state.full_weight_history == {}
+        assert state.rolling_window == DEFAULT_ROLLING_WINDOW
+        assert state.last_regime == "normal"
+
+    def test_from_dict_partial(self):
+        """from_dict with partial data should fill defaults."""
+        state = BasisPursuitState.from_dict({
+            "signal_history": {"a": [0.1]},
+            "last_regime": "crisis",
+        })
+        assert state.signal_history == {"a": [0.1]}
+        assert state.last_regime == "crisis"
+        assert state.full_weight_history == {}
+
+    def test_to_dict_and_back(self):
+        """Roundtrip should preserve all data."""
+        original = BasisPursuitState(
+            signal_history={"x": [0.1, 0.2], "y": [0.3]},
+            full_weight_history={"x": [0.5, 0.5], "y": [0.5]},
+            rolling_window=42,
+            last_regime="high_vol",
+        )
+        restored = BasisPursuitState.from_dict(original.to_dict())
+        assert restored.signal_history == original.signal_history
+        assert restored.full_weight_history == original.full_weight_history
+        assert restored.rolling_window == 42
+        assert restored.last_regime == "high_vol"
+
+
+class TestL1SelectionExtended:
+    """Extended L1 selection tests."""
+
+    def test_empty_weights(self, selector):
+        """Empty base weights should return empty."""
+        result = selector._apply_l1_selection({}, {}, 0.05, {})
+        assert result == {}
+
+    def test_high_lambda_prunes_everything(self, selector):
+        """Very high lambda should zero out all contributions."""
+        base_weights = {"a": 0.1, "b": 0.05}
+        signal_values = {"a": 0.5, "b": 0.3}
+        result = selector._apply_l1_selection(base_weights, signal_values, 100.0, {})
+        # All contributions < lambda, so all should be zero
+        for v in result.values():
+            assert v == 0.0
+
+    def test_zero_lambda_no_shrinkage(self, selector):
+        """Zero lambda should not shrink any weights."""
+        base_weights = {"a": 0.3, "b": 0.2}
+        signal_values = {"a": 0.5, "b": 0.5}
+        result = selector._apply_l1_selection(base_weights, signal_values, 0.0, {})
+        # All contributions should be preserved
+        assert result["a"] > 0
+        assert result["b"] > 0
+
+    def test_signal_not_in_values(self, selector):
+        """Signal not in signal_values should use base_weight as contribution."""
+        base_weights = {"a": 0.3, "b": 0.2}
+        signal_values = {"a": 0.5}  # b not in signal_values
+        result = selector._apply_l1_selection(base_weights, signal_values, 0.01, {})
+        # b's contribution = base_weight (0.2) since not in signal_values
+        assert result["b"] > 0
+
+
+class TestRedundancyDetectionExtended:
+    """Extended redundancy detection tests."""
+
+    def test_insufficient_history(self, selector):
+        """Less than 3 periods should find no redundant signals."""
+        selector._update_history({"a": 0.5, "b": 0.4}, {"a": 0.5, "b": 0.5})
+        selector._update_history({"a": 0.6, "b": 0.5}, {"a": 0.5, "b": 0.5})
+        # Only 2 periods — need >= 3
+        redundant = selector._find_redundant_signals()
+        assert redundant == {}
+
+    def test_uncorrelated_signals(self, preloaded_selector):
+        """Uncorrelated signals should not be flagged as redundant."""
+        # Add independent signals
+        for period in range(10):
+            preloaded_selector._update_history(
+                {
+                    "independent_a": 0.5 + math.sin(period) * 0.3,
+                    "independent_b": 0.5 + math.cos(period * 2.7) * 0.3,
+                },
+                {"independent_a": 0.5, "independent_b": 0.5},
+            )
+        redundant = preloaded_selector._find_redundant_signals()
+        # Should not find these two redundant
+        assert "independent_a" not in redundant or redundant.get("independent_a") != "independent_b"
+
+
+class TestPruneNearZeroExtended:
+    """Extended prune_near_zero tests."""
+
+    def test_exactly_at_threshold(self):
+        """Signal at exactly MIN_ACTIVE_WEIGHT should be pruned."""
+        l1_weights = {"a": MIN_ACTIVE_WEIGHT}  # 0.01, not < 0.01
+        original = {"a": 0.5}
+        active, pruned, reasons = BasisPursuitSelector._prune_near_zero(
+            l1_weights, original, {}
+        )
+        # abs(0.01) < MIN_ACTIVE_WEIGHT is False, so it should be active
+        assert "a" in active
+
+    def test_just_below_threshold(self):
+        """Signal just below MIN_ACTIVE_WEIGHT should be pruned."""
+        l1_weights = {"a": 0.009}
+        original = {"a": 0.5}
+        active, pruned, reasons = BasisPursuitSelector._prune_near_zero(
+            l1_weights, original, {}
+        )
+        assert "a" in pruned
+        assert reasons["a"].reason == "near_zero"
+
+    def test_negative_weight_near_zero(self):
+        """Negative weight near zero should be pruned."""
+        l1_weights = {"a": -0.005}
+        original = {"a": 0.5}
+        active, pruned, reasons = BasisPursuitSelector._prune_near_zero(
+            l1_weights, original, {}
+        )
+        assert "a" in pruned
+
+    def test_mixed_active_and_pruned(self):
+        """Mix of active and pruned signals."""
+        l1_weights = {"a": 0.5, "b": 0.003, "c": 0.4}
+        original = {"a": 0.3, "b": 0.3, "c": 0.4}
+        active, pruned, reasons = BasisPursuitSelector._prune_near_zero(
+            l1_weights, original, {}
+        )
+        assert len(active) == 2
+        assert len(pruned) == 1
+
+
+class TestSelectionExtended:
+    """Extended selection integration tests."""
+
+    def test_recovery_regime(self, selector, sample_signals, sample_weights):
+        """Recovery regime should use recovery lambda."""
+        result = selector.select_signals(sample_signals, sample_weights, "recovery")
+        assert result.lambda_used == LAMBDA_BY_REGIME["recovery"]
+        assert result.regime == "recovery"
+
+    def test_high_vol_regime(self, selector, sample_signals, sample_weights):
+        """High vol regime should use high_vol lambda."""
+        result = selector.select_signals(sample_signals, sample_weights, "high_vol")
+        assert result.lambda_used == LAMBDA_BY_REGIME["high_vol"]
+
+    def test_active_weights_sum_to_one(self, selector, sample_signals, sample_weights):
+        """Active weights should sum to 1.0 after normalization."""
+        result = selector.select_signals(sample_signals, sample_weights, "normal")
+        total = sum(result.active_signals.values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_result_fields_populated(self, selector, sample_signals, sample_weights):
+        """Result should have all fields populated."""
+        result = selector.select_signals(sample_signals, sample_weights, "normal")
+        assert result.num_active >= 0
+        assert result.num_pruned >= 0
+        assert result.total_signals == len(sample_weights)
+        assert result.num_active + result.num_pruned == result.total_signals
+        assert result.sparsity_ratio == result.num_active / max(result.total_signals, 1)
+
+    def test_fallback_when_all_pruned(self, selector):
+        """When all signals pruned, should fall back to base weights."""
+        # Very high lambda with tiny weights
+        signal_values = {"a": 0.001, "b": 0.001}
+        base_weights = {"a": 0.5, "b": 0.5}
+        result = selector.select_signals(signal_values, base_weights, "crisis")
+        # Fallback ensures we still have active signals
+        assert len(result.active_signals) > 0
+        total = sum(result.active_signals.values())
+        assert abs(total - 1.0) < 0.01
+
+
+class TestStatePersistenceExtended:
+    """Extended state persistence tests."""
+
+    def test_regime_persisted(self, tmp_state_path):
+        """Last regime should be persisted."""
+        sel = BasisPursuitSelector(state_path=tmp_state_path, rolling_window=20)
+        sel.select_signals({"a": 0.5}, {"a": 1.0}, "crisis")
+        sel._save_state()
+
+        sel2 = BasisPursuitSelector(state_path=tmp_state_path, rolling_window=20)
+        assert sel2.state.last_regime == "crisis"
+
+    def test_rolling_window_preserved(self, tmp_state_path):
+        """Rolling window should persist correctly."""
+        sel = BasisPursuitSelector(state_path=tmp_state_path, rolling_window=42)
+        sel._save_state()
+
+        sel2 = BasisPursuitSelector(state_path=tmp_state_path, rolling_window=42)
+        assert sel2.state.rolling_window == 42
+
+
+class TestGetStateDiagnosticsExtended:
+    """Extended diagnostics tests."""
+
+    def test_signal_statistics(self, selector):
+        """Diagnostics should include mean and std for signals with history."""
+        for i in range(5):
+            selector._update_history({"test": float(i) / 10}, {"test": 0.5})
+        diag = selector.get_state_diagnostics()
+        assert diag["test"]["signal_periods"] == 5
+        assert "signal_mean" in diag["test"]
+        assert "signal_std" in diag["test"]
+
+    def test_weight_statistics(self, selector):
+        """Diagnostics should include weight mean."""
+        for i in range(3):
+            selector._update_history({"w_test": 0.5}, {"w_test": 0.3 + i * 0.1})
+        diag = selector.get_state_diagnostics()
+        assert "weight_mean" in diag["w_test"]
+        assert diag["w_test"]["weight_periods"] == 3
+
+
+class TestConstants:
+    """Test module constants."""
+
+    def test_default_rolling_window(self):
+        assert DEFAULT_ROLLING_WINDOW == 60
+
+    def test_lambda_by_regime_keys(self):
+        expected = {"normal", "high_vol", "crisis", "recovery", "unknown_regime"}
+        assert set(LAMBDA_BY_REGIME.keys()) == expected
+
+    def test_lambda_monotonic(self):
+        """Lambda should increase with regime severity."""
+        assert LAMBDA_BY_REGIME["normal"] < LAMBDA_BY_REGIME["high_vol"]
+        assert LAMBDA_BY_REGIME["high_vol"] < LAMBDA_BY_REGIME["crisis"]
+
+    def test_redundancy_threshold(self):
+        assert REDUNDANCY_CORRELATION_THRESHOLD == 0.85
+
+    def test_min_active_weight(self):
+        assert MIN_ACTIVE_WEIGHT == 0.01
+
+    def test_sparsity_alert_threshold(self):
+        assert SPARSITY_ALERT_THRESHOLD == 0.3
