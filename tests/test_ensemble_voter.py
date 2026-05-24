@@ -718,6 +718,56 @@ class TestPersistVote:
             row = conn.execute("SELECT COUNT(*) FROM ensemble_votes").fetchone()
             assert row[0] >= 1
 
+    def test_ic_alert_check_with_alerts(self, tmp_path):
+        """_persist_vote should check for IC decay alerts via _get_health_tracker."""
+        voter = _make_voter(tmp_path)
+        vote = EnsembleVote(
+            timestamp='2026-01-02', regime=Regime.NORMAL, regime_confidence=0.7,
+            num_sources=1, weighted_consensus=0.3, agreement_ratio=0.8,
+            equity_bias=0.3, duration_bias=-0.1, gold_bias=0.05,
+            action='increase_equity', confidence=0.6, reasoning='test', source_votes=[],
+        )
+        mock_tracker = MagicMock()
+        mock_alert = MagicMock()
+        mock_alert.source = "MULTI_SPEED_MOM"
+        mock_tracker.detect_ic_alerts.return_value = [mock_alert]
+
+        with patch('src.strategy.ensemble_voter._get_health_tracker', return_value=mock_tracker):
+            with patch('src.strategy.ensemble_voter.logger') as mock_logger:
+                voter._persist_vote(vote, weighted_consensus=0.3)
+                mock_tracker.detect_ic_alerts.assert_called_once()
+                mock_logger.warning.assert_any_call(
+                    "IC decay alerts detected: %s", ["MULTI_SPEED_MOM"]
+                )
+
+    def test_ic_alert_check_no_alerts(self, tmp_path):
+        """_persist_vote with no IC alerts should not log warning."""
+        voter = _make_voter(tmp_path)
+        vote = EnsembleVote(
+            timestamp='2026-01-03', regime=Regime.NORMAL, regime_confidence=0.7,
+            num_sources=1, weighted_consensus=0.3, agreement_ratio=0.8,
+            equity_bias=0.3, duration_bias=-0.1, gold_bias=0.05,
+            action='increase_equity', confidence=0.6, reasoning='test', source_votes=[],
+        )
+        mock_tracker = MagicMock()
+        mock_tracker.detect_ic_alerts.return_value = []
+
+        with patch('src.strategy.ensemble_voter._get_health_tracker', return_value=mock_tracker):
+            voter._persist_vote(vote, weighted_consensus=0.3)
+            mock_tracker.detect_ic_alerts.assert_called_once()
+
+    def test_ic_alert_check_tracker_unavailable(self, tmp_path):
+        """_persist_vote should handle None tracker gracefully."""
+        voter = _make_voter(tmp_path)
+        vote = EnsembleVote(
+            timestamp='2026-01-04', regime=Regime.NORMAL, regime_confidence=0.7,
+            num_sources=1, weighted_consensus=0.3, agreement_ratio=0.8,
+            equity_bias=0.3, duration_bias=-0.1, gold_bias=0.05,
+            action='increase_equity', confidence=0.6, reasoning='test', source_votes=[],
+        )
+        with patch('src.strategy.ensemble_voter._get_health_tracker', return_value=None):
+            voter._persist_vote(vote, weighted_consensus=0.3)  # Should not raise
+
 
 # ---------------------------------------------------------------------------
 # get_rebalance_config

@@ -1097,10 +1097,12 @@ class EnsembleVoter:
 
         # Check for IC-based signal decay alerts
         try:
-            alerts = self.tracker.detect_ic_alerts()
-            if alerts:
-                alert_names = [a.source for a in alerts]
-                logger.warning("IC decay alerts detected: %s", alert_names)
+            _tracker = _get_health_tracker()
+            if _tracker is not None:
+                alerts = _tracker.detect_ic_alerts()
+                if alerts:
+                    alert_names = [a.source for a in alerts]
+                    logger.warning("IC decay alerts detected: %s", alert_names)
         except Exception as ic_e:
             logger.debug("IC alert check failed: %s", ic_e)
 
