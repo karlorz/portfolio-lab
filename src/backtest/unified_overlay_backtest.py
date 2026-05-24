@@ -32,6 +32,7 @@ from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
     BacktestResult,
     compute_metrics,
+    save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
@@ -450,12 +451,9 @@ class UnifiedOverlayBacktester:
         """Save results to JSON file."""
         from dataclasses import asdict
 
-        out_path = Path(path) if path else BACKTEST_RESULTS_DIR / "unified_overlay_results.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-
+        out_path = path or str(BACKTEST_RESULTS_DIR / "unified_overlay_results.json")
         data = asdict(result)
-        with open(out_path, "w") as f:
-            json.dump(data, f, indent=2, default=str)
+        save_results_json(data, output_path=out_path)
         logger.info("Results saved to %s", out_path)
 
 
