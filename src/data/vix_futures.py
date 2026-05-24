@@ -257,13 +257,13 @@ def fetch_vix_futures_data(
     if use_cache and manager.data:
         cache_start, cache_end = manager.get_data_range()
         if cache_start <= start_date and cache_end >= (end_date or datetime.now().strftime('%Y-%m-%d')):
-            print(f"Using cached VIX data ({cache_start} to {cache_end})")
+            logger.info("Using cached VIX data (%s to %s)", cache_start, cache_end)
             return [
                 manager.data[d] for d in sorted(manager.data.keys())
                 if start_date <= d <= (end_date or cache_end)
             ]
-    
-    print(f"Generating VIX term structure proxy data ({start_date} to {end_date or 'now'})...")
+
+    logger.info("Generating VIX term structure proxy data (%s to %s)", start_date, end_date or 'now')
     return manager.generate_historical_proxy(start_date, end_date)
 
 
@@ -274,14 +274,14 @@ if __name__ == '__main__':
     # Generate data if not cached
     if not manager.data:
         data = manager.generate_historical_proxy('2020-01-01', '2024-12-31')
-        print(f"Generated {len(data)} VIX term structure records")
-    
+        logger.info("Generated %d VIX term structure records", len(data))
+
     # Test contango signals
     test_dates = ['2020-03-15', '2021-06-01', '2022-01-01', '2023-10-15']
     for date in test_dates:
         signal = manager.get_contango_signal(date)
         if signal:
-            print(f"\n{date}: {signal['signal']}")
-            print(f"  VIX: {signal['vix_level']:.2f}")
-            print(f"  Contango (spot-1m): {signal['contango_spot_1m']:.2f}%")
-            print(f"  Annualized roll yield: {signal['annualized_roll_yield']:.1f}%")
+            logger.info("%s: %s", date, signal['signal'])
+            logger.info("  VIX: %.2f", signal['vix_level'])
+            logger.info("  Contango (spot-1m): %.2f%%", signal['contango_spot_1m'])
+            logger.info("  Annualized roll yield: %.1f%%", signal['annualized_roll_yield'])
