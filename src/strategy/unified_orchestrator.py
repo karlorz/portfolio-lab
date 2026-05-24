@@ -227,7 +227,7 @@ class UnifiedOrchestrator:
             if row and len(row) > 0 and row[0] > 0:
                 return float(row[0])
         except Exception as e:
-            logger.debug("Could not fetch VIX from DB: %s", e)
+            logger.warning("Could not fetch VIX from DB: %s", e)
         return 16.0  # fallback
 
     def collect_overlay_contributions(self) -> List[OverlayContribution]:
@@ -615,7 +615,7 @@ class UnifiedOrchestrator:
             )
             return {k: round(v, 4) for k, v in result.bl_weights.items()}
         except Exception as e:
-            logger.debug("BL comparison unavailable: %s", e)
+            logger.warning("BL comparison unavailable: %s", e)
             return None
 
     def save_recommendation(self, rec: UnifiedRecommendation):
