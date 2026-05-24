@@ -102,28 +102,18 @@ class CostBudgetTracker:
         return self.ytd_total_pct >= self.warning_threshold_pct
 
 
+from src.costs.etf_cost_table import ETF_COST_BPS, DEFAULT_COST_BPS as _DEFAULT_COST_BPS
+
+
 class SmartRebalancingController:
     """
     Unified rebalancing controller combining drift triggers, VPIN timing,
     and intraday seasonality optimization.
     """
 
-    # Per-ETF one-way transaction costs in basis points.
-    # Source: typical retail spread + commission for marketable orders.
-    ETF_TRANSACTION_COSTS_BPS: Dict[str, float] = {
-        'SPY': 2.0,   # Most liquid US equity ETF
-        'GLD': 5.0,   # Gold — wider spread
-        'TLT': 8.0,   # Long-duration Treasury — thinnest book
-        'IEF': 6.0,   # Intermediate Treasury
-        'QQQ': 2.0,   # Near-SPY liquidity
-        'EFA': 5.0,   # International equity
-        'VXUS': 5.0,  # Ex-US equity
-        'MTUM': 4.0,  # Factor ETF
-        'VLUE': 5.0,  # Value factor
-        'USMV': 4.0,  # Min-vol factor
-        'DBC': 10.0,  # Commodities — widest spreads
-    }
-    DEFAULT_COST_BPS = 5.0  # Fallback for unknown symbols
+    # Per-ETF one-way transaction costs — delegates to centralized cost table.
+    ETF_TRANSACTION_COSTS_BPS: Dict[str, float] = dict(ETF_COST_BPS)
+    DEFAULT_COST_BPS: float = _DEFAULT_COST_BPS
 
     DEFAULT_CONFIG = {
         'drift_threshold': 0.10,

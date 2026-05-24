@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.paths import BASE_ALLOCATION
+from src.costs.etf_cost_table import ETF_COST_BPS as _ETF_COST_BPS
 
 # ── Module-level constants ──────────────────────────────────────────
 TRADING_DAYS_PER_YEAR: int = 252
@@ -44,10 +45,7 @@ class BacktestConfig:
     transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS
 
     # Per-ETF transaction costs (bps). Falls back to transaction_cost_bps for unknown symbols.
-    transaction_costs_by_symbol: Dict[str, float] = field(default_factory=lambda: {
-        'SPY': 2.0, 'QQQ': 2.0, 'GLD': 5.0, 'TLT': 8.0, 'IEF': 6.0,
-        'EFA': 5.0, 'VXUS': 5.0, 'MTUM': 4.0, 'VLUE': 5.0, 'USMV': 4.0, 'DBC': 10.0,
-    })
+    transaction_costs_by_symbol: Dict[str, float] = field(default_factory=lambda: dict(_ETF_COST_BPS))
 
     # Backtest-specific extras (shift limits, thresholds, lookbacks, etc.)
     extras: Dict[str, Any] = field(default_factory=dict)
