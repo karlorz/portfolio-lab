@@ -1081,3 +1081,167 @@ class TestGenerateReportExtended:
         report = attributor.generate_report(days=30)
         assert isinstance(report, AttributionReport)
         assert len(report.sources) == 0
+
+
+class TestSourceAttributionExtended:
+    """Extended tests for SourceAttribution dataclass."""
+
+    def test_all_fields(self):
+        sa = SourceAttribution(
+            source="MULTI_SPEED_MOM", display_name="Multi-Speed Momentum",
+            category="momentum", total_readings=500, active_days=200,
+            hit_rate=0.65, win_rate=0.55, avg_return_bps=1.2,
+            total_return_bps=120.0, sharpe_contribution=0.15,
+            max_consecutive_losses=5, avg_correlation=0.3,
+            avg_weight=0.20, current_weight_regime="normal",
+        )
+        assert sa.source == "MULTI_SPEED_MOM"
+        assert sa.hit_rate == 0.65
+        assert sa.total_return_bps == 120.0
+
+    def test_to_dict_completeness(self):
+        sa = SourceAttribution(
+            source="CROSS_ASSET_RV", display_name="Cross-Asset RV",
+            category="relative_value", total_readings=300, active_days=150,
+            hit_rate=0.55, win_rate=0.50, avg_return_bps=0.5,
+            total_return_bps=50.0, sharpe_contribution=0.08,
+            max_consecutive_losses=3, avg_correlation=0.2,
+            avg_weight=0.13,
+        )
+        d = sa.to_dict()
+        expected_keys = {
+            "source", "display_name", "category", "total_readings", "active_days",
+            "hit_rate", "win_rate", "avg_return_bps", "total_return_bps",
+            "sharpe_contribution", "max_consecutive_losses", "avg_correlation",
+            "avg_weight", "current_weight_regime",
+        }
+        assert set(d.keys()) == expected_keys
+
+    def test_efficiency_ratio_positive(self):
+        sa = SourceAttribution(
+            source="TEST", display_name="Test", category="test",
+            total_readings=100, active_days=50, hit_rate=0.6,
+            win_rate=0.5, avg_return_bps=2.0, total_return_bps=100.0,
+            sharpe_contribution=0.1, max_consecutive_losses=2,
+            avg_correlation=0.0, avg_weight=0.2,
+        )
+        assert sa.efficiency_ratio > 0
+
+    def test_efficiency_ratio_zero_return(self):
+        sa = SourceAttribution(
+            source="TEST", display_name="Test", category="test",
+            total_readings=100, active_days=50, hit_rate=0.5,
+            win_rate=0.5, avg_return_bps=0.0, total_return_bps=0.0,
+            sharpe_contribution=0.0, max_consecutive_losses=0,
+            avg_correlation=0.0, avg_weight=0.2,
+        )
+        assert sa.efficiency_ratio == 0.0
+
+    def test_default_weight_regime(self):
+        sa = SourceAttribution(
+            source="TEST", display_name="Test", category="test",
+            total_readings=0, active_days=0, hit_rate=0.0,
+            win_rate=0.0, avg_return_bps=0.0, total_return_bps=0.0,
+            sharpe_contribution=0.0, max_consecutive_losses=0,
+            avg_correlation=0.0, avg_weight=0.0,
+        )
+        assert sa.current_weight_regime == "normal"
+
+
+class TestAttributionReportExtended:
+    """Extended tests for AttributionReport dataclass."""
+
+    def test_to_dict_serializes_sources(self):
+        sa = SourceAttribution(
+            source="TEST", display_name="Test", category="test",
+            total_readings=100, active_days=50, hit_rate=0.6,
+            win_rate=0.5, avg_return_bps=1.0, total_return_bps=50.0,
+            sharpe_contribution=0.1, max_consecutive_losses=2,
+            avg_correlation=0.0, avg_weight=0.2,
+        )
+        report = AttributionReport(
+            timestamp="2026-05-24", start_date="2026-03-01", end_date="2026-05-24",
+            analysis_days=90, sources={"TEST": sa},
+            best_source="TEST", worst_source=None,
+            avg_hit_rate=0.6, avg_correlation=0.0,
+            avg_active_sources_per_day=5.0, total_sources_tracked=1,
+            degradation_signals=[], top_performers=["TEST"],
+        )
+        d = report.to_dict()
+        assert "sources" in d
+        assert "TEST" in d["sources"]
+
+    def test_to_json(self):
+        report = AttributionReport(
+            timestamp="2026-05-24", start_date="2026-03-01", end_date="2026-05-24",
+            analysis_days=90, sources={},
+            best_source=None, worst_source=None,
+            avg_hit_rate=0.0, avg_correlation=0.0,
+            avg_active_sources_per_day=0.0, total_sources_tracked=0,
+            degradation_signals=[], top_performers=[],
+        )
+        j = report.to_json()
+        assert isinstance(j, str)
+        parsed = json.loads(j)
+        assert parsed["analysis_days"] == 90
+
+    def test_empty_report(self):
+        report = AttributionReport(
+            timestamp="2026-05-24", start_date="2026-05-24", end_date="2026-05-24",
+            analysis_days=0, sources={},
+            best_source=None, worst_source=None,
+            avg_hit_rate=0.0, avg_correlation=0.0,
+            avg_active_sources_per_day=0.0, total_sources_tracked=0,
+            degradation_signals=[], top_performers=[],
+        )
+        assert report.sources == {}
+        assert report.best_source is None
+        assert report.total_sources_tracked == 0
+
+
+class TestPerformanceAttributionExtended:
+    """Extended PerformanceAttribution tests."""
+
+    def test_default_data_dir(self):
+        from src.paths import DATA_DIR as _DATA_DIR
+        pa = PerformanceAttribution()
+        assert pa.data_dir == _DATA_DIR
+
+    def test_custom_data_dir(self, tmp_path):
+        pa = PerformanceAttribution(data_dir=tmp_path)
+        assert pa.data_dir == tmp_path
+
+    def test_compute_hit_rate_neutral_signal(self):
+        """Neutral signal should not count as hit."""
+        pa = PerformanceAttribution()
+        result = pa._compute_hit_rate(0.0, 0.01)
+        assert isinstance(result, bool)
+
+    def test_compute_hit_rate_correct_direction(self):
+        """Positive signal + positive return = hit."""
+        pa = PerformanceAttribution()
+        result = pa._compute_hit_rate(0.5, 0.01)
+        assert result is True
+
+    def test_compute_hit_rate_wrong_direction(self):
+        """Positive signal + negative return = miss."""
+        pa = PerformanceAttribution()
+        result = pa._compute_hit_rate(0.5, -0.01)
+        assert result is False
+
+
+class TestPrintReport:
+    """Test print_report function."""
+
+    def test_print_empty_report(self, capsys):
+        report = AttributionReport(
+            timestamp="2026-05-24", start_date="2026-03-01", end_date="2026-05-24",
+            analysis_days=90, sources={},
+            best_source=None, worst_source=None,
+            avg_hit_rate=0.0, avg_correlation=0.0,
+            avg_active_sources_per_day=0.0, total_sources_tracked=0,
+            degradation_signals=[], top_performers=[],
+        )
+        print_report(report)
+        captured = capsys.readouterr()
+        assert "ATTRIBUTION" in captured.out

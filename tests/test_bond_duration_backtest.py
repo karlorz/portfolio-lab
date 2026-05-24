@@ -877,11 +877,9 @@ class TestRegimeClassificationBoundaries:
         assert str(calc.classify_curve(0.299)) == "YieldCurveRegime.FLAT"
 
     def test_classify_curve_exact_inverted_threshold(self):
-        """Spread exactly 0.0 is classified by the implementation."""
+        """Spread exactly 0.0 returns INVERTED (strict > 0.0 means 0.0 is not FLAT)."""
         calc = BondDurationCalculator()
-        result = str(calc.classify_curve(0.0))
-        # Accept whichever regime the implementation uses at 0.0 boundary
-        assert result in ("YieldCurveRegime.FLAT", "YieldCurveRegime.INVERTED")
+        assert str(calc.classify_curve(0.0)) == "YieldCurveRegime.INVERTED"
 
     def test_classify_curve_inverted(self):
         """Spread below 0 should return INVERTED."""

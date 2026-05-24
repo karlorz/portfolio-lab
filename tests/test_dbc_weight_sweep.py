@@ -31,6 +31,69 @@ class TestDBCSweepRow:
         assert d["funded_from"] == "gld"
         assert d["sharpe_delta"] == 0.03
 
+    def test_to_dict_field_completeness(self):
+        """to_dict() returns exactly all 11 fields, no extras."""
+        row = DBCSweepRow(
+            dbc_weight=0.05, funded_from="tlt",
+            cagr=9.8, vol=11.5, sharpe=0.71, max_dd=-28.0,
+            sharpe_delta=-0.08, crisis_2008=-14.0,
+            crisis_2020=-8.5, crisis_2022=-15.0,
+            avg_dbc_return=4.2,
+        )
+        d = row.to_dict()
+        assert set(d.keys()) == {
+            "dbc_weight", "funded_from", "cagr", "vol", "sharpe",
+            "max_dd", "sharpe_delta", "crisis_2008", "crisis_2020",
+            "crisis_2022", "avg_dbc_return",
+        }
+
+    def test_to_dict_field_types(self):
+        """Each field in to_dict() has the correct type."""
+        row = DBCSweepRow(
+            dbc_weight=0.02, funded_from="spy",
+            cagr=10.2, vol=10.8, sharpe=0.79, max_dd=-26.0,
+            sharpe_delta=-0.01, crisis_2008=-12.5,
+            crisis_2020=-7.2, crisis_2022=-13.8,
+            avg_dbc_return=3.8,
+        )
+        d = row.to_dict()
+        assert isinstance(d["dbc_weight"], float)
+        assert isinstance(d["funded_from"], str)
+        assert isinstance(d["cagr"], float)
+        assert isinstance(d["vol"], float)
+        assert isinstance(d["sharpe"], float)
+        assert isinstance(d["max_dd"], float)
+        assert isinstance(d["sharpe_delta"], float)
+        assert isinstance(d["crisis_2008"], float)
+        assert isinstance(d["crisis_2020"], float)
+        assert isinstance(d["crisis_2022"], float)
+        assert isinstance(d["avg_dbc_return"], float)
+
+    def test_round_trip_construct_from_dict_values(self):
+        """Reconstructing from to_dict() values yields same to_dict()."""
+        row = DBCSweepRow(
+            dbc_weight=0.01, funded_from="gld",
+            cagr=11.0, vol=11.2, sharpe=0.81, max_dd=-26.5,
+            sharpe_delta=0.02, crisis_2008=-11.8,
+            crisis_2020=-6.5, crisis_2022=-12.5,
+            avg_dbc_return=5.0,
+        )
+        d1 = row.to_dict()
+        row2 = DBCSweepRow(**d1)
+        d2 = row2.to_dict()
+        assert d1 == d2
+
+    def test_funded_from_only_valid_sources(self):
+        """funded_from must be one of the three valid sources."""
+        row = DBCSweepRow(
+            dbc_weight=0.04, funded_from="gld",
+            cagr=10.0, vol=11.0, sharpe=0.75, max_dd=-27.0,
+            sharpe_delta=-0.04, crisis_2008=-13.0,
+            crisis_2020=-7.5, crisis_2022=-14.0,
+            avg_dbc_return=4.0,
+        )
+        assert row.funded_from in ("gld", "spy", "tlt")
+
 
 class TestDBCWeightSweep:
     """Test sweep core functionality."""
@@ -116,6 +179,21 @@ class TestDBCWeightSweep:
     def test_convenience_function(self):
         result = run_dbc_sweep()
         assert isinstance(result, DBCSweepResult)
+
+    def test_baseline_sums_to_one(self):
+        """BASELINE allocation weights must sum to 1.0."""
+        total = sum(DBCWeightSweep.BASELINE.values())
+        assert abs(total - 1.0) < 1e-10
+
+    def test_baseline_has_correct_keys(self):
+        """BASELINE must contain exactly SPY, GLD, TLT."""
+        assert set(DBCWeightSweep.BASELINE.keys()) == {"spy", "gld", "tlt"}
+
+    def test_baseline_values_match_import(self):
+        """BASELINE values should be 0.46, 0.38, 0.16."""
+        assert DBCWeightSweep.BASELINE["spy"] == 0.46
+        assert DBCWeightSweep.BASELINE["gld"] == 0.38
+        assert DBCWeightSweep.BASELINE["tlt"] == 0.16
 
 
 class TestEdgeCases:

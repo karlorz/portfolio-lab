@@ -15,11 +15,15 @@ from src.strategy.evaluator import (
     PAPER_CONFIG,
     BASE_ALLOCATION,
     REGIME_OVERRIDES,
+    ORDERS_LOG,
+    PERFORMANCE_LOG,
     Position,
     Portfolio,
     calculate_performance,
     check_graduation_criteria,
     _deduplicate_to_daily,
+    get_current_regime,
+    get_latest_vix,
 )
 
 
