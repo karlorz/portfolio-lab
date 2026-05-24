@@ -590,3 +590,42 @@ class TestICMetricsInReport:
         if "cta" in report.get("ic_metrics", {}):
             assert "ic" in report["ic_metrics"]["cta"]
             assert "ic_half_life_days" in report["ic_metrics"]["cta"]
+
+
+# ---------------------------------------------------------------------------
+# IC fields in HealthScore dataclass
+# ---------------------------------------------------------------------------
+
+class TestHealthScoreICFields:
+
+    def test_health_score_has_ic_fields(self):
+        hs = HealthScore(
+            source="cta", timestamp="2026-05-24",
+            health_score=0.85, accuracy_30d=0.80, accuracy_60d=0.82,
+            accuracy_90d=0.85, decay_rate=-0.01, predictions_count=100,
+            status="healthy", ic=0.08, ic_half_life_days=300.0,
+        )
+        assert hs.ic == 0.08
+        assert hs.ic_half_life_days == 300.0
+
+    def test_ic_defaults_to_none(self):
+        hs = HealthScore(
+            source="cta", timestamp="2026-05-24",
+            health_score=0.85, accuracy_30d=0.80, accuracy_60d=0.82,
+            accuracy_90d=0.85, decay_rate=-0.01, predictions_count=100,
+            status="healthy",
+        )
+        assert hs.ic is None
+        assert hs.ic_half_life_days is None
+
+    def test_to_dict_includes_ic_fields(self):
+        hs = HealthScore(
+            source="cta", timestamp="2026-05-24",
+            health_score=0.85, accuracy_30d=0.80, accuracy_60d=0.82,
+            accuracy_90d=0.85, decay_rate=-0.01, predictions_count=100,
+            status="healthy", ic=0.05, ic_half_life_days=150.0,
+        )
+        d = hs.to_dict()
+        assert "ic" in d
+        assert "ic_half_life_days" in d
+        assert d["ic"] == 0.05

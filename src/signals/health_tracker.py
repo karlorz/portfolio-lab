@@ -77,7 +77,9 @@ class HealthScore:
     decay_rate: float  # Daily decay rate (negative = improving)
     predictions_count: int
     status: str  # healthy/degraded/unhealthy
-    
+    ic: Optional[float] = None  # Information Coefficient (Spearman ρ)
+    ic_half_life_days: Optional[float] = None  # IC half-life in days (inf = stable)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -355,7 +357,9 @@ class SignalHealthTracker:
             accuracy_90d=round(accuracies['90d'], 4),
             decay_rate=round(decay_rate, 6),
             predictions_count=counts['90d'],
-            status=status
+            status=status,
+            ic=self.compute_ic(source, end_date=end_date),
+            ic_half_life_days=self.compute_ic_half_life(source, end_date=end_date),
         )
     
     def calculate_all_health_scores(
