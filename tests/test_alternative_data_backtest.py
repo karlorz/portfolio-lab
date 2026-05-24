@@ -1261,3 +1261,1204 @@ class TestCLI:
         with patch("sys.argv", ["alternative_data_backtest.py", "run", "--save"]):
             result = main()
         assert result == 1  # No data available
+
+
+# ── Dataclass Field Introspection ────────────────────────────────────────────
+
+
+class TestDataclassFieldIntrospection:
+    """Validate dataclass field definitions programmatically via dataclasses.fields()."""
+
+    def test_backtest_config_field_names(self):
+        """BacktestConfig fields() includes all inherited and local fields."""
+        from dataclasses import fields
+
+        names = {f.name for f in fields(BacktestConfig)}
+        # Inherited from _BaseConfig
+        assert "start_date" in names
+        assert "end_date" in names
+        assert "initial_capital" in names
+        assert "base_weights" in names
+        assert "rebalance_frequency" in names
+        assert "rebalance_frequency_days" in names
+        assert "transaction_cost_bps" in names
+        assert "transaction_costs_by_symbol" in names
+        # Local fields
+        assert "max_signal_shift" in names
+        assert "min_holding_period" in names
+        assert "vix_bull_threshold" in names
+        assert "vix_bear_threshold" in names
+        assert "vix_crisis_threshold" in names
+
+    def test_backtest_config_field_defaults(self):
+        """BacktestConfig local field defaults match source code."""
+        from dataclasses import fields
+
+        fmap = {f.name: f for f in fields(BacktestConfig)}
+        assert fmap["max_signal_shift"].default == 0.05
+        assert fmap["min_holding_period"].default == 20
+        assert fmap["vix_bull_threshold"].default == 15.0
+        assert fmap["vix_bear_threshold"].default == 20.0
+        assert fmap["vix_crisis_threshold"].default == 30.0
+
+    def test_daily_return_field_names(self):
+        """DailyReturn fields() matches source annotations."""
+        from dataclasses import fields
+
+        names = {f.name for f in fields(DailyReturn)}
+        assert names == {"date", "spy_return", "gld_return", "tlt_return", "vix_spot"}
+
+    def test_daily_return_vix_spot_default_is_none(self):
+        """DailyReturn.vix_spot default is None."""
+        from dataclasses import fields
+
+        fmap = {f.name: f for f in fields(DailyReturn)}
+        assert fmap["vix_spot"].default is None
+
+    def test_backtest_result_field_names(self):
+        """BacktestResult fields() matches source annotations."""
+        from dataclasses import fields
+        from src.backtest.metrics import BacktestResult
+
+        names = {f.name for f in fields(BacktestResult)}
+        assert "total_return" in names
+        assert "cagr" in names
+        assert "volatility" in names
+        assert "sharpe_ratio" in names
+        assert "max_drawdown" in names
+        assert "total_rebalances" in names
+        assert "total_transaction_costs" in names
+        assert "avg_turnover" in names
+        assert "baseline_sharpe" in names
+        assert "sharpe_improvement" in names
+        assert "extras" in names
+        assert "crisis_returns" in names
+
+    def test_backtest_result_defaults(self):
+        """BacktestResult default values via dataclasses.fields()."""
+        from dataclasses import fields
+        from src.backtest.metrics import BacktestResult
+
+        fmap = {f.name: f for f in fields(BacktestResult)}
+        assert fmap["total_rebalances"].default == 0
+        assert fmap["total_transaction_costs"].default == 0.0
+        assert fmap["avg_turnover"].default == 0.0
+        assert fmap["baseline_sharpe"].default is None
+        assert fmap["sharpe_improvement"].default is None
+        assert fmap["crisis_returns"].default is None
+
+    def test_backtest_config_is_dataclass(self):
+        """BacktestConfig is a proper dataclass."""
+        from dataclasses import is_dataclass
+
+        assert is_dataclass(BacktestConfig)
+
+    def test_daily_return_is_dataclass(self):
+        """DailyReturn is a proper dataclass."""
+        from dataclasses import is_dataclass
+
+        assert is_dataclass(DailyReturn)
+
+
+# ── NaN / Inf Handling ───────────────────────────────────────────────────────
+
+
+class TestNaNInfHandling:
+    """Edge cases with NaN and Inf values in computations."""
+
+    def test_calculate_metrics_with_nan_returns(self):
+        """NaN in returns does not crash _calculate_metrics."""
+        metrics = AlternativeDataBacktester._calculate_metrics(
+            [0.001, float("nan"), 0.002]
+        )
+        assert isinstance(metrics["cagr"], float)
+        assert isinstance(metrics["sharpe"], (int, float))
+
+    def test_calculate_metrics_with_inf_returns(self):
+        """Inf in returns does not crash _calculate_metrics."""
+        metrics = AlternativeDataBacktester._calculate_metrics(
+            [0.001, float("inf"), 0.002]
+        )
+        assert isinstance(metrics["cagr"], float)
+
+    def test_annualize_returns_with_nan(self):
+        """NaN in returns list is handled without crashing."""
+        result = AlternativeDataBacktester._annualize_returns([0.001, float("nan")])
+        assert isinstance(result, float)
+
+    def test_annualize_returns_with_inf(self):
+        """Inf in returns list is handled without crashing."""
+        result = AlternativeDataBacktester._annualize_returns([0.001, float("inf")])
+        assert isinstance(result, float)
+
+    def test_infer_regime_nan_spy_return(self):
+        """NaN spy_60d_return does not crash infer_regime_from_spy_return."""
+        bt = AlternativeDataBacktester()
+        # np.clip(nan * 2.0, -1, 1) -> nan, comparisons with nan are False -> neutral
+        regime = bt.infer_regime_from_spy_return(float("nan"))
+        assert regime == "neutral"
+
+    def test_infer_regime_inf_spy_return(self):
+        """Inf spy_60d_return clips correctly."""
+        bt = AlternativeDataBacktester()
+        regime = bt.infer_regime_from_spy_return(float("inf"))
+        # composite_score = clip(inf * 2.0, -1, 1) = 1.0 > 0.15 -> risk_on -> bull
+        assert regime == "bull"
+
+
+# ── Data Loading Edge Cases ──────────────────────────────────────────────────
+
+
+class TestLoadDataEdgeCases:
+    """Edge cases for load_data and _process_price_data."""
+
+    def test_load_data_malformed_json(self, caplog, monkeypatch):
+        """Malformed JSON returns False."""
+        import logging, tempfile
+
+        caplog.set_level(logging.ERROR)
+        bt = AlternativeDataBacktester()
+        # Create a temp file with invalid JSON
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("not valid json")
+            tmp_path = Path(f.name)
+        try:
+            monkeypatch.setattr("src.backtest.alternative_data_backtest.PRICES_JSON", tmp_path)
+            result = bt.load_data()
+            assert result is False
+        finally:
+            tmp_path.unlink()
+
+    def test_load_data_empty_json_object(self, monkeypatch):
+        """Empty JSON object {} with no SPY key returns False."""
+        import tempfile, json
+
+        bt = AlternativeDataBacktester()
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({}, f)
+            tmp_path = Path(f.name)
+        try:
+            monkeypatch.setattr("src.backtest.alternative_data_backtest.PRICES_JSON", tmp_path)
+            result = bt.load_data()
+            assert result is True  # loads, processes (empty spy -> logs error -> data=[])
+            assert bt.data == []
+        finally:
+            tmp_path.unlink()
+
+    def test_load_data_io_exception(self, monkeypatch):
+        """IOError during file read returns False."""
+        bt = AlternativeDataBacktester()
+        original_open = __builtins__["open"] if isinstance(__builtins__, dict) else __builtins__.open
+
+        def _failing_open(*args, **kwargs):
+            raise OSError("Simulated IO error")
+
+        monkeypatch.setattr("builtins.open", _failing_open)
+        result = bt.load_data()
+        assert result is False
+
+    def test_process_price_data_zero_prices(self):
+        """Zero prices produce extreme returns for non-falsy values."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 0.01}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-03", "p": 51.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-03", "p": 81.0}],
+        }
+        bt._process_price_data(prices)
+        # spy_return = (0.01 - 100) / 100 = -0.9999
+        assert len(bt.data) == 1
+        assert bt.data[0].spy_return == pytest.approx(-0.9999)
+
+    def test_process_price_data_non_consecutive_dates(self):
+        """Non-consecutive dates are processed normally (gap between prev & curr)."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-10", "p": 110.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-10", "p": 48.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-10", "p": 82.0}],
+        }
+        bt._process_price_data(prices)
+        assert len(bt.data) == 1
+        assert bt.data[0].spy_return == pytest.approx(0.10)
+
+    def test_process_price_data_single_datum_per_symbol(self):
+        """Single price point per symbol produces no daily returns."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}],
+        }
+        bt._process_price_data(prices)
+        assert bt.data == []
+
+    def test_process_price_data_gap_in_one_symbol(self):
+        """Missing a date in one symbol causes that day to be skipped."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [
+                {"d": "2020-01-02", "p": 100.0},
+                {"d": "2020-01-03", "p": 101.0},
+                {"d": "2020-01-06", "p": 102.0},
+            ],
+            "GLD": [
+                {"d": "2020-01-02", "p": 50.0},
+                # 2020-01-03 missing for GLD
+                {"d": "2020-01-06", "p": 51.0},
+            ],
+            "TLT": [
+                {"d": "2020-01-02", "p": 80.0},
+                {"d": "2020-01-03", "p": 81.0},
+                {"d": "2020-01-06", "p": 82.0},
+            ],
+        }
+        bt._process_price_data(prices)
+        # SPY has 3 entries, so 2 return days. GLD has 2 entries -> day 2020-01-03 has no GLD data
+        # Day 2020-01-03: spy_prev=100.0, spy_curr=101.0 OK; gld_prev from 2020-01-02=50.0, gld_curr=None -> SKIP
+        # Day 2020-01-06: spy_prev=101.0, spy_curr=102.0 OK; gld_prev from 2020-01-06... actually let me trace through.
+        # dates = ["2020-01-02", "2020-01-03", "2020-01-06"]
+        # spy_prices = {"2020-01-02": 100.0, "2020-01-03": 101.0, "2020-01-06": 102.0}
+        # gld_prices = {"2020-01-02": 50.0, "2020-01-06": 51.0} -- no "2020-01-03"
+        # tlt_prices = {"2020-01-02": 80.0, "2020-01-03": 81.0, "2020-01-06": 82.0}
+        # i=1 (date="2020-01-03"): spy_prev=100, spy_curr=101, gld_curr=51 (from 2020-01-06)... wait, gld_prices.get("2020-01-03") = None
+        # So gld_curr would be None -> SKIP
+        # i=2 (date="2020-01-06"): spy_prev=101, spy_curr=102, gld_prev=None (gld_prices.get("2020-01-03")=None) -> SKIP
+        # So we get 0 data points!
+        assert bt.data == []
+
+    def test_process_price_data_reversed_dates(self):
+        """Dates in reverse order still process (only adjacent pairs matter)."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [{"d": "2020-01-03", "p": 101.0}, {"d": "2020-01-02", "p": 100.0}],
+            "GLD": [{"d": "2020-01-03", "p": 49.0}, {"d": "2020-01-02", "p": 50.0}],
+            "TLT": [{"d": "2020-01-03", "p": 81.0}, {"d": "2020-01-02", "p": 80.0}],
+        }
+        bt._process_price_data(prices)
+        # dates = ["2020-01-03", "2020-01-02"]
+        # i=1 (date="2020-01-02"): spy_prev=101, spy_curr=100 -> spy_return = (100-101)/101 = -0.0099
+        assert len(bt.data) == 1
+        assert bt.data[0].spy_return == pytest.approx(-0.00990099, abs=1e-6)
+
+    def test_process_price_data_negative_price(self):
+        """Negative price produces negative return without crashing."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": -10.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-03", "p": 51.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-03", "p": 81.0}],
+        }
+        # all() returns True for non-zero values. spy_return = (-10 - 100) / 100 = -1.1
+        bt._process_price_data(prices)
+        assert len(bt.data) == 1
+        assert bt.data[0].spy_return == -1.1
+
+    def test_process_price_data_missing_price_key(self, caplog):
+        """Missing 'p' key in price dict raises KeyError caught by load_data."""
+        import logging, tempfile, json
+
+        caplog.set_level(logging.ERROR)
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [{"d": "2020-01-02", "x": 100.0}, {"d": "2020-01-03", "x": 101.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-03", "p": 51.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-03", "p": 81.0}],
+        }
+        # This will crash in _process_price_data when doing p["p"]
+        with pytest.raises(KeyError):
+            bt._process_price_data(prices)
+
+    def test_process_price_data_extra_symbols(self):
+        """Extra symbols in data dict are ignored."""
+        bt = AlternativeDataBacktester()
+        prices = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 101.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-03", "p": 49.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-03", "p": 81.0}],
+            "QQQ": [{"d": "2020-01-02", "p": 200.0}, {"d": "2020-01-03", "p": 205.0}],
+            "BTC": [{"d": "2020-01-02", "p": 9000.0}, {"d": "2020-01-03", "p": 9200.0}],
+        }
+        bt._process_price_data(prices)
+        assert len(bt.data) == 1
+        assert bt.data[0].date == "2020-01-03"
+
+    def test_load_data_valid_no_spy_returns_true_empty_data(self, monkeypatch):
+        """load_data returns True, but data stays empty when SPY missing."""
+        import tempfile, json
+
+        bt = AlternativeDataBacktester()
+        prices = {
+            "GLD": [{"d": "2020-01-02", "p": 100.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(prices, f)
+            tmp_path = Path(f.name)
+        try:
+            monkeypatch.setattr("src.backtest.alternative_data_backtest.PRICES_JSON", tmp_path)
+            result = bt.load_data()
+            assert result is True
+            assert bt.data == []
+        finally:
+            tmp_path.unlink()
+
+
+# ── CLI / __main__ Guard ─────────────────────────────────────────────────────
+
+
+class TestCLIGuard:
+    """Test CLI entry point and __main__ guard."""
+
+    def test_main_invalid_command(self):
+        """Invalid command argument raises SystemExit."""
+        from src.backtest.alternative_data_backtest import main
+
+        with patch("sys.argv", ["alternative_data_backtest.py", "invalid"]):
+            with pytest.raises(SystemExit):
+                main()
+
+    def test_main_run_with_mock_success(self):
+        """Full success path: load_data -> run_backtest -> print_report."""
+        from src.backtest.alternative_data_backtest import main
+
+        mock_result = BacktestResult(
+            total_return=10.0,
+            cagr=5.0,
+            volatility=12.0,
+            sharpe_ratio=0.6,
+            max_drawdown=-15.0,
+            total_rebalances=50,
+            total_transaction_costs=20.0,
+            baseline_sharpe=0.55,
+            sharpe_improvement=0.05,
+            crisis_returns={"2008": -12.0},
+            extras={
+                "overlay_active_months": 30,
+                "overlay_active_pct": 60.0,
+                "avg_rebalance_size": 0.02,
+                "regime_distribution": {"bull": 500, "bear": 200, "neutral": 300, "crisis": 50},
+                "regime_returns": {"bull": 10.0, "bear": -5.0, "neutral": 1.0, "crisis": -8.0},
+                "equity_curve": [{"date": "2020-01-02", "baseline": 100000, "overlay": 105000}],
+            },
+        )
+
+        with (
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.load_data",
+                  return_value=True),
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.run_backtest",
+                  return_value=mock_result),
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.print_report"),
+            patch("sys.argv", ["alternative_data_backtest.py", "run"]),
+        ):
+            result = main()
+        assert result == 0
+
+    def test_main_run_backtest_failure(self):
+        """run_backtest returning None leads to error exit."""
+        from src.backtest.alternative_data_backtest import main
+
+        with (
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.load_data",
+                  return_value=True),
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.run_backtest",
+                  return_value=None),
+            patch("sys.argv", ["alternative_data_backtest.py", "run"]),
+        ):
+            result = main()
+        assert result == 1
+
+    def test_main_with_save_flag_success(self):
+        """--save flag triggers save_results in success path."""
+        from src.backtest.alternative_data_backtest import main
+
+        mock_result = BacktestResult(
+            total_return=5.0,
+            cagr=2.0,
+            volatility=10.0,
+            sharpe_ratio=0.3,
+            max_drawdown=-20.0,
+            total_rebalances=10,
+            total_transaction_costs=5.0,
+            baseline_sharpe=0.25,
+            sharpe_improvement=0.05,
+            extras={
+                "overlay_active_months": 5,
+                "overlay_active_pct": 10.0,
+                "avg_rebalance_size": 0.01,
+                "regime_distribution": {"bull": 100},
+                "regime_returns": {"bull": 2.0},
+                "equity_curve": [],
+            },
+        )
+
+        with (
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.load_data",
+                  return_value=True),
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.run_backtest",
+                  return_value=mock_result),
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.print_report"),
+            patch("src.backtest.alternative_data_backtest.AlternativeDataBacktester.save_results"),
+            patch("sys.argv", ["alternative_data_backtest.py", "run", "--save"]),
+        ):
+            result = main()
+        assert result == 0
+
+    def test_main_module_name_guard(self):
+        """The __name__ == '__main__' guard exists and calls exit(main())."""
+        import ast
+
+        with open("src/backtest/alternative_data_backtest.py") as f:
+            tree = ast.parse(f.read())
+
+        found = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.If)
+                and isinstance(node.test, ast.Compare)
+                and isinstance(node.test.left, ast.Name)
+                and node.test.left.id == "__name__"
+            ):
+                found = True
+                break
+
+        assert found, "__name__ == '__main__' guard not found in source"
+
+
+# ── Export Completeness ──────────────────────────────────────────────────────
+
+
+class TestExportCompleteness:
+    """Verify __all__ covers all public API names."""
+
+    def test_all_defined(self):
+        """__all__ is defined in the module."""
+        import src.backtest.alternative_data_backtest as mod
+
+        assert hasattr(mod, "__all__")
+        assert isinstance(mod.__all__, list)
+        assert len(mod.__all__) > 0
+
+    def test_all_entries_exist_in_module(self):
+        """Every entry in __all__ is actually defined in the module."""
+        import src.backtest.alternative_data_backtest as mod
+
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"{name} listed in __all__ but not found in module"
+
+    def test_all_covers_public_names(self):
+        """All class/function names from module-level scope are in __all__."""
+        import src.backtest.alternative_data_backtest as mod
+
+        # Names exported by the module (not imports)
+        module_members = {
+            "BacktestConfig",
+            "DailyReturn",
+            "AlternativeDataBacktester",
+        }
+        all_set = set(mod.__all__)
+        for name in module_members:
+            assert name in all_set, f"Public name '{name}' missing from __all__"
+
+
+# ── Helper Method Boundaries ─────────────────────────────────────────────────
+
+
+class TestHelperBoundaries:
+    """Boundary conditions for static helper methods."""
+
+    def test_is_rebalance_feb_29_leap_year(self):
+        """February 29 (day 29) with no prior rebalance is NOT a rebalance day."""
+        assert not AlternativeDataBacktester._is_rebalance_day("2020-02-29", None)
+
+    def test_is_rebalance_dec_31_to_jan_1(self):
+        """December 31 to January 1 crosses year boundary -> rebalance."""
+        assert AlternativeDataBacktester._is_rebalance_day(
+            "2021-01-01", "2020-12-31"
+        )
+
+    def test_returns_from_equity_negative_equity(self):
+        """Negative equity values produce valid returns."""
+        returns = AlternativeDataBacktester._returns_from_equity([100.0, 80.0, 60.0])
+        assert len(returns) == 2
+        assert returns[0] == -0.20
+        assert returns[1] == -0.25
+
+    def test_returns_from_equity_all_zeros(self):
+        """All-zero equity raises ZeroDivisionError (Python does not support 0.0/0.0)."""
+        with pytest.raises(ZeroDivisionError):
+            AlternativeDataBacktester._returns_from_equity([0.0, 0.0, 0.0])
+
+    def test_calculate_metrics_single_return(self):
+        """Single return value produces a valid metrics dict."""
+        metrics = AlternativeDataBacktester._calculate_metrics([0.01])
+        assert isinstance(metrics["cagr"], float)
+        assert isinstance(metrics["volatility"], float)
+
+    def test_calculate_metrics_all_zero_returns(self):
+        """All-zero returns produce zero CAGR and zero volatility."""
+        metrics = AlternativeDataBacktester._calculate_metrics([0.0] * 252)
+        assert metrics["cagr"] == 0.0
+        assert metrics["volatility"] == 0.0
+        assert metrics["sharpe"] == 0
+
+    def test_annualize_regime_returns_empty_dict(self):
+        """Empty regime returns dict returns empty result."""
+        result = AlternativeDataBacktester._annualize_regime_returns({})
+        assert result == {}
+
+    def test_annualize_regime_returns_single_element(self):
+        """Single-element regime list computes correctly."""
+        result = AlternativeDataBacktester._annualize_regime_returns(
+            {"bull": [0.001]}
+        )
+        # mean=0.001 * 252 * 100 = 25.2
+        assert result["bull"] == pytest.approx(25.2, abs=0.1)
+
+
+# ── Allocation Shift Boundaries ──────────────────────────────────────────────
+
+
+class TestAllocationShiftBoundaries:
+    """Boundary conditions for get_allocation_shifts."""
+
+    def test_signal_at_positive_one(self):
+        """Signal=1.0 is positive, maps to bull shift."""
+        bt = AlternativeDataBacktester()
+        spy_s, gld_s, tlt_s = bt.get_allocation_shifts(1.0)
+        assert spy_s == 0.03
+        assert gld_s == -0.02
+        assert tlt_s == -0.01
+
+    def test_signal_at_negative_one(self):
+        """Signal=-1.0 is <= -0.5, maps to crisis shift."""
+        bt = AlternativeDataBacktester()
+        spy_s, gld_s, tlt_s = bt.get_allocation_shifts(-1.0)
+        assert spy_s == -0.05
+        assert gld_s == 0.03
+        assert tlt_s == 0.02
+
+    def test_signal_neg_0_5001_crisis(self):
+        """Signal=-0.5001 is <= -0.5, maps to crisis."""
+        bt = AlternativeDataBacktester()
+        spy_s, gld_s, tlt_s = bt.get_allocation_shifts(-0.5001)
+        assert spy_s == -0.05
+
+    def test_signal_neg_0_4999_bear(self):
+        """Signal=-0.4999 is > -0.5, maps to bear."""
+        bt = AlternativeDataBacktester()
+        spy_s, gld_s, tlt_s = bt.get_allocation_shifts(-0.4999)
+        assert spy_s == -0.03
+
+    def test_signal_very_small_positive_bull(self):
+        """Signal=1e-10 is positive, maps to bull shift."""
+        bt = AlternativeDataBacktester()
+        spy_s, gld_s, tlt_s = bt.get_allocation_shifts(1e-10)
+        assert spy_s == 0.03
+
+    def test_signal_very_small_negative_bear(self):
+        """Signal=-1e-10 is negative and > -0.5, maps to bear."""
+        bt = AlternativeDataBacktester()
+        spy_s, gld_s, tlt_s = bt.get_allocation_shifts(-1e-10)
+        assert spy_s == -0.03
+
+
+# ── Backtest Run Edge Cases ──────────────────────────────────────────────────
+
+
+class TestBacktestRunEdgeCases:
+    """Edge cases in run_backtest execution."""
+
+    def _make_controlled_data(
+        self,
+        n_days=252,
+        spy_ret=0.0,
+        gld_ret=0.0005,
+        tlt_ret=0.0003,
+        start_date="2020-01-01",
+    ):
+        """Generate deterministic DailyReturn list."""
+        from datetime import timedelta
+
+        data = []
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        for i in range(n_days):
+            d = start + timedelta(days=i)
+            data.append(
+                DailyReturn(
+                    date=d.strftime("%Y-%m-%d"),
+                    spy_return=spy_ret,
+                    gld_return=gld_ret,
+                    tlt_return=tlt_ret,
+                )
+            )
+        return data
+
+    def test_run_with_nan_in_returns(self):
+        """NaN in returns does not crash run_backtest."""
+        data = self._make_controlled_data(n_days=200, spy_ret=0.001)
+        data[50].spy_return = float("nan")
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+
+    def test_run_with_extreme_positive_returns(self):
+        """Extreme positive daily returns (10%) do not crash."""
+        data = self._make_controlled_data(n_days=200, spy_ret=0.10, gld_ret=0.05, tlt_ret=0.03)
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.cagr > 0
+
+    def test_run_with_extreme_negative_returns(self):
+        """Extreme negative daily returns (-10%) do not crash."""
+        data = self._make_controlled_data(n_days=200, spy_ret=-0.10, gld_ret=-0.05, tlt_ret=-0.03)
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.cagr < 0
+
+    def test_run_date_boundary_exact(self):
+        """Data starting exactly on start_date works correctly."""
+        data = self._make_controlled_data(n_days=100, start_date="2020-06-01")
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-06-01", end_date="2020-08-31")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+
+    def test_run_high_transaction_costs(self):
+        """Very high transaction costs still produce a valid result."""
+        data = self._make_controlled_data(n_days=200, spy_ret=0.001)
+        bt = AlternativeDataBacktester(
+            BacktestConfig(
+                start_date="2020-01-01",
+                end_date="2020-12-31",
+                transaction_cost_bps=500.0,
+            )
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.total_transaction_costs >= 0
+
+    def test_run_zero_transaction_costs(self):
+        """Zero transaction costs produce zero total costs."""
+        data = self._make_controlled_data(n_days=200, spy_ret=0.001)
+        bt = AlternativeDataBacktester(
+            BacktestConfig(
+                start_date="2020-01-01",
+                end_date="2020-12-31",
+                transaction_cost_bps=0.0,
+            )
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        assert result.total_transaction_costs == 0.0
+
+    def test_run_single_month_data(self):
+        """Only one month of data produces a result with minimal rebalances."""
+        data = self._make_controlled_data(n_days=25, start_date="2020-06-01")
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-06-01", end_date="2020-06-30")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+
+    def test_run_alternating_regimes(self):
+        """Returns that alternate between positive/negative produce mixed regime distribution."""
+        data = self._make_controlled_data(n_days=300, spy_ret=0.0)
+        # Inject alternating strong signals
+        for i in range(0, 300, 60):
+            for j in range(60):
+                idx = i + j
+                if idx < 300:
+                    data[idx].spy_return = 0.01 if (i // 60) % 2 == 0 else -0.01
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-12-31")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+        assert result is not None
+        # Should have both bull and bear regimes
+        dist = result.extras["regime_distribution"]
+        assert dist.get("bull", 0) > 0
+        assert dist.get("bear", 0) > 0
+
+
+# ── save_results Edge Cases ──────────────────────────────────────────────────
+
+
+class TestSaveResultsEdgeCases:
+    """Edge cases for save_results method."""
+
+    def test_save_results_default_path(self, monkeypatch):
+        """save_results with default path writes a JSON file."""
+        import tempfile, json
+
+        data = TestRunBacktest._make_synthetic_data(TestRunBacktest(), n_days=100)
+        bt = AlternativeDataBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-06-01")
+        )
+        bt.data = data
+        result = bt.run_backtest()
+
+        # Use a temp directory for the default path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.setattr(
+                "src.backtest.alternative_data_backtest.BACKTEST_RESULTS_DIR",
+                Path(tmpdir),
+            )
+            bt.save_results(result)
+            expected_path = Path(tmpdir) / "alternative_data_backtest.json"
+            assert expected_path.exists()
+            with open(expected_path) as f:
+                saved = json.load(f)
+            assert "total_return" in saved
+            assert "extras" in saved
+
+    def test_save_results_none_in_extras(self):
+        """save_results handles None values in extras gracefully."""
+        import tempfile, json
+
+        # _annualize_regime_returns never returns None, but extras can contain None
+        result = BacktestResult(
+            total_return=0.0,
+            cagr=0.0,
+            volatility=0.0,
+            sharpe_ratio=0.0,
+            max_drawdown=0.0,
+            total_rebalances=0,
+            total_transaction_costs=0.0,
+            baseline_sharpe=None,
+            sharpe_improvement=None,
+            crisis_returns=None,
+            extras={
+                "overlay_active_months": 0,
+                "overlay_active_pct": 0.0,
+                "avg_rebalance_size": 0.0,
+                "regime_distribution": {},
+                "regime_returns": {},
+                "equity_curve": [],
+            },
+        )
+        bt = AlternativeDataBacktester()
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            tmp_path = f.name
+        try:
+            bt.save_results(result, output_path=tmp_path)
+            with open(tmp_path) as f:
+                saved = json.load(f)
+            assert saved["baseline_sharpe"] is None
+            assert saved["crisis_returns"] is None
+        finally:
+            Path(tmp_path).unlink()
+
+    def test_save_results_creates_parent_dir(self, monkeypatch):
+        """save_results creates parent directory if it does not exist."""
+        import tempfile, json
+
+        result = BacktestResult(
+            total_return=1.0,
+            cagr=0.5,
+            volatility=10.0,
+            sharpe_ratio=0.1,
+            max_drawdown=-5.0,
+            total_rebalances=0,
+            total_transaction_costs=0.0,
+            extras={
+                "overlay_active_months": 0,
+                "overlay_active_pct": 0.0,
+                "avg_rebalance_size": 0.0,
+                "regime_distribution": {},
+                "regime_returns": {},
+                "equity_curve": [],
+            },
+        )
+        bt = AlternativeDataBacktester()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested = Path(tmpdir) / "nested" / "dir"
+            output_path = str(nested / "result.json")
+            bt.save_results(result, output_path=output_path)
+            assert Path(output_path).exists()
+            with open(output_path) as f:
+                saved = json.load(f)
+            assert saved["total_return"] == 1.0
+
+
+# ── print_report Edge Cases ──────────────────────────────────────────────────
+
+
+class TestPrintReportEdgeCases:
+    """Edge cases for print_report method."""
+
+    def test_print_report_success_failure_mix(self, capsys):
+        """print_report with mixed PASS/FAIL success criteria."""
+        result = BacktestResult(
+            total_return=-30.0,
+            cagr=-10.0,
+            volatility=25.0,
+            sharpe_ratio=-0.5,
+            max_drawdown=-50.0,
+            total_rebalances=500,  # FAIL (>= 400)
+            total_transaction_costs=200.0,
+            baseline_sharpe=-0.8,
+            sharpe_improvement=0.3,  # >= 0 -> PASS
+            crisis_returns={"2008": -30.0, "2020": -15.0, "2022": -25.0},
+            extras={
+                "overlay_active_months": 50,
+                "overlay_active_pct": 25.0,
+                "avg_rebalance_size": 0.05,
+                "regime_distribution": {
+                    "bull": 100,
+                    "bear": 200,
+                    "neutral": 150,
+                    "crisis": 50,
+                },
+                "regime_returns": {
+                    "bull": -5.0,
+                    "bear": -10.0,
+                    "neutral": 0.0,
+                    "crisis": -20.0,
+                },
+                "equity_curve": [
+                    {"date": "2020-01-02", "baseline": 100000, "overlay": 70000}
+                ],
+            },
+        )
+        bt = AlternativeDataBacktester()
+        bt.print_report(result)
+        captured = capsys.readouterr()
+        assert "FAIL" in captured.out
+        assert "PASS" in captured.out
+        assert "SUCCESS CRITERIA" in captured.out
+
+    def test_print_report_all_regime_zero(self, capsys):
+        """print_report with all-zero regime distribution avoids division by zero."""
+        result = BacktestResult(
+            total_return=5.0,
+            cagr=2.0,
+            volatility=10.0,
+            sharpe_ratio=0.2,
+            max_drawdown=-10.0,
+            total_rebalances=10,
+            total_transaction_costs=5.0,
+            baseline_sharpe=0.15,
+            sharpe_improvement=0.05,
+            crisis_returns=None,
+            extras={
+                "overlay_active_months": 5,
+                "overlay_active_pct": 10.0,
+                "avg_rebalance_size": 0.01,
+                "regime_distribution": {},
+                "regime_returns": {},
+                "equity_curve": [{"date": "2020-01-02", "baseline": 100000, "overlay": 105000}],
+            },
+        )
+        bt = AlternativeDataBacktester()
+        bt.print_report(result)  # Should not crash
+        captured = capsys.readouterr()
+        assert "REGIME DISTRIBUTION" in captured.out
+
+    def test_print_report_crisis_none_handled(self, capsys):
+        """print_report with crisis_returns=None does not crash."""
+        result = BacktestResult(
+            total_return=5.0,
+            cagr=2.0,
+            volatility=10.0,
+            sharpe_ratio=0.2,
+            max_drawdown=-10.0,
+            total_rebalances=10,
+            total_transaction_costs=5.0,
+            baseline_sharpe=0.15,
+            sharpe_improvement=0.05,
+            crisis_returns=None,
+            extras={
+                "overlay_active_months": 5,
+                "overlay_active_pct": 10.0,
+                "avg_rebalance_size": 0.01,
+                "regime_distribution": {"bull": 100, "bear": 50, "neutral": 50, "crisis": 10},
+                "regime_returns": {"bull": 5.0, "bear": -3.0, "neutral": 0.5, "crisis": -8.0},
+                "equity_curve": [{"date": "2020-01-02", "baseline": 100000, "overlay": 105000}],
+            },
+        )
+        bt = AlternativeDataBacktester()
+        bt.print_report(result)
+        captured = capsys.readouterr()
+        assert "CRISIS PERFORMANCE" in captured.out
+
+    def test_print_report_negative_total_return(self, capsys):
+        """print_report with negative total return shows correct values."""
+        result = BacktestResult(
+            total_return=-15.0,
+            cagr=-5.0,
+            volatility=18.0,
+            sharpe_ratio=-0.3,
+            max_drawdown=-35.0,
+            total_rebalances=200,
+            total_transaction_costs=100.0,
+            baseline_sharpe=0.1,
+            sharpe_improvement=-0.4,
+            crisis_returns={"2008": -25.0, "2022": -15.0},
+            extras={
+                "overlay_active_months": 80,
+                "overlay_active_pct": 40.0,
+                "avg_rebalance_size": 0.03,
+                "regime_distribution": {"bull": 300, "bear": 400, "neutral": 200, "crisis": 100},
+                "regime_returns": {"bull": -2.0, "bear": -8.0, "neutral": 0.0, "crisis": -15.0},
+                "equity_curve": [{"date": "2020-01-02", "baseline": 100000, "overlay": 85000}],
+            },
+        )
+        bt = AlternativeDataBacktester()
+        bt.print_report(result)
+        captured = capsys.readouterr()
+        assert "NEGATIVE" in captured.out
+        assert "-15.00%" in captured.out
+
+
+# ── Signal Generator Mock Integration ────────────────────────────────────────
+
+
+class TestSignalGeneratorMock:
+    """Test backtester integration with AlternativeDataSignalGenerator."""
+
+    def test_infer_regime_uses_signal_generator(self):
+        """infer_regime_from_spy_return delegates to _determine_regime."""
+        bt = AlternativeDataBacktester()
+        with patch.object(
+            bt._signal_generator, "_determine_regime", return_value="risk_on"
+        ) as mock_method:
+            regime = bt.infer_regime_from_spy_return(0.10)
+            mock_method.assert_called_once()
+            assert regime == "bull"
+
+    def test_signal_generator_unexpected_regime_label(self):
+        """Unknown regime label from _determine_regime defaults to 'neutral'."""
+        bt = AlternativeDataBacktester()
+        with patch.object(
+            bt._signal_generator, "_determine_regime", return_value="unknown_label"
+        ):
+            regime = bt.infer_regime_from_spy_return(0.10)
+            assert regime == "neutral"
+
+    def test_signal_generator_mocked_for_all_returns(self):
+        """Mock _determine_regime to control all regime outputs."""
+        bt = AlternativeDataBacktester()
+        spy_returns = [0.10, -0.10, 0.0]
+        expected = [
+            ("risk_on", "bull"),
+            ("risk_off", "bear"),
+            ("neutral", "neutral"),
+        ]
+        for ret, (prod_regime, expected_regime) in zip(spy_returns, expected):
+            with patch.object(
+                bt._signal_generator, "_determine_regime", return_value=prod_regime
+            ):
+                regime = bt.infer_regime_from_spy_return(ret)
+                assert regime == expected_regime, f"spy_ret={ret}: expected {expected_regime}, got {regime}"
+
+
+# ── BacktestConfig Custom Values ─────────────────────────────────────────────
+
+
+class TestBacktestConfigCustom:
+    """Custom configurations for BacktestConfig."""
+
+    def test_config_custom_vix_thresholds(self):
+        """Custom VIX thresholds are stored correctly."""
+        config = BacktestConfig(
+            vix_bull_threshold=10.0,
+            vix_bear_threshold=18.0,
+            vix_crisis_threshold=25.0,
+        )
+        assert config.vix_bull_threshold == 10.0
+        assert config.vix_bear_threshold == 18.0
+        assert config.vix_crisis_threshold == 25.0
+        # Ordering invariant
+        assert config.vix_bull_threshold < config.vix_bear_threshold < config.vix_crisis_threshold
+
+    def test_config_zero_transaction_cost(self):
+        """Zero transaction cost is valid."""
+        config = BacktestConfig(transaction_cost_bps=0.0)
+        assert config.transaction_cost_bps == 0.0
+
+    def test_config_custom_min_holding_period(self):
+        """Custom min_holding_period is stored correctly."""
+        config = BacktestConfig(min_holding_period=60)
+        assert config.min_holding_period == 60
+
+    def test_config_custom_max_signal_shift(self):
+        """Custom max_signal_shift is stored correctly."""
+        config = BacktestConfig(max_signal_shift=0.10)
+        assert config.max_signal_shift == 0.10
+
+    def test_config_extras_empty_by_default(self):
+        """BacktestConfig.extras should be empty by default."""
+        config = BacktestConfig()
+        assert config.extras == {}
+
+
+# ── Module Constants ─────────────────────────────────────────────────────────
+
+
+class TestModuleConstants:
+    """Test module-level constant validation."""
+
+    def test_module_all_exact_match(self):
+        """__all__ contains exactly: BacktestConfig, DailyReturn, AlternativeDataBacktester."""
+        import src.backtest.alternative_data_backtest as mod
+
+        assert set(mod.__all__) == {"BacktestConfig", "DailyReturn", "AlternativeDataBacktester"}
+
+    def test_regime_signal_map_values_in_range(self):
+        """All REGIME_SIGNAL_MAP values are in [-1, 1] range."""
+        for regime, signal in AlternativeDataBacktester.REGIME_SIGNAL_MAP.items():
+            assert -1.0 <= signal <= 1.0, f"{regime}: {signal} out of range"
+
+    def test_regime_signal_map_bull_positive(self):
+        """Bull regime has a positive signal."""
+        assert AlternativeDataBacktester.REGIME_SIGNAL_MAP["bull"] > 0
+
+    def test_regime_signal_map_bear_negative(self):
+        """Bear regime has a negative signal."""
+        assert AlternativeDataBacktester.REGIME_SIGNAL_MAP["bear"] < 0
+
+    def test_regime_signal_map_crisis_most_negative(self):
+        """Crisis regime has the most negative signal."""
+        signals = AlternativeDataBacktester.REGIME_SIGNAL_MAP
+        assert signals["crisis"] < signals["bear"]
+        assert signals["crisis"] < signals["neutral"]
+
+
+# ── BacktestResult Edge Cases ────────────────────────────────────────────────
+
+
+class TestBacktestResultEdgeCases:
+    """Edge cases for BacktestResult construction."""
+
+    def test_result_with_empty_extras(self):
+        """BacktestResult allows empty extras dict."""
+        result = BacktestResult(
+            total_return=0.0,
+            cagr=0.0,
+            volatility=0.0,
+            sharpe_ratio=0.0,
+            max_drawdown=0.0,
+            total_rebalances=0,
+            total_transaction_costs=0.0,
+            extras={},
+        )
+        assert result.extras == {}
+
+    def test_result_with_large_values(self):
+        """BacktestResult handles very large float values."""
+        result = BacktestResult(
+            total_return=1e6,
+            cagr=1e3,
+            volatility=1e3,
+            sharpe_ratio=100.0,
+            max_drawdown=-1e6,
+            total_rebalances=999999,
+            total_transaction_costs=1e12,
+            extras={
+                "overlay_active_months": 999,
+                "overlay_active_pct": 999.0,
+                "avg_rebalance_size": 1e6,
+                "regime_distribution": {"bull": 1_000_000},
+                "regime_returns": {"bull": 1e6},
+                "equity_curve": [{"date": "2020-01-01", "baseline": 1e12, "overlay": 1e12}],
+            },
+        )
+        assert result.total_return == 1e6
+        assert result.total_rebalances == 999999
+
+    def test_result_minimal_construction(self):
+        """BacktestResult can be constructed with only required fields."""
+        result = BacktestResult(
+            total_return=0.0,
+            cagr=0.0,
+            volatility=0.0,
+            sharpe_ratio=0.0,
+            max_drawdown=0.0,
+        )
+        # Default values should be set
+        assert result.total_rebalances == 0
+        assert result.extras == {}
+        assert result.crisis_returns is None
+
+
+# ── Data Loading with Exception Paths ────────────────────────────────────────
+
+
+class TestDataLoadingExceptions:
+    """Exception paths in data loading."""
+
+    def test_load_data_catches_key_error(self, caplog, monkeypatch):
+        """KeyError in _process_price_data is caught and logged."""
+        import logging
+        import tempfile, json
+
+        caplog: pytest.LogCaptureFixture
+        caplog.set_level(logging.ERROR)
+
+        bt = AlternativeDataBacktester()
+        # Write JSON with wrong structure (no 'p' key)
+        bad_data = {
+            "SPY": [{"d": "2020-01-02", "x": 100.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(bad_data, f)
+            tmp_path = Path(f.name)
+        try:
+            monkeypatch.setattr("src.backtest.alternative_data_backtest.PRICES_JSON", tmp_path)
+            result = bt.load_data()
+            assert result is False
+            assert "Failed to load data" in caplog.text
+        finally:
+            tmp_path.unlink()
+
+    def test_load_data_catches_attribute_error(self, caplog, monkeypatch):
+        """AttributeError in data processing is caught."""
+        import logging
+
+        caplog: pytest.LogCaptureFixture
+        caplog.set_level(logging.ERROR)
+
+        bt = AlternativeDataBacktester()
+
+        # Mock prices_path.exists to raise something strange
+        class MockPath:
+            def exists(self):
+                return True
+
+            def __str__(self):
+                return "/nonexistent"
+
+        monkeypatch.setattr(
+            "src.backtest.alternative_data_backtest.PRICES_JSON",
+            MockPath(),
+        )
+
+        # open will fail -> caught by except Exception
+        result = bt.load_data()
+        assert result is False
+
+    def test_process_price_data_without_call_leaves_data_empty(self):
+        """Backtester initializes with empty data."""
+        bt = AlternativeDataBacktester()
+        assert bt.data == []
+

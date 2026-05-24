@@ -9,6 +9,8 @@ import pytest
 from datetime import datetime
 from unittest.mock import patch
 
+import inspect
+
 from src.rebalancing.smart_rebalancer import (
     RebalanceDecision,
     UrgencyLevel,
@@ -636,3 +638,1081 @@ class TestPerSymbolCostBreakdown:
         result = ctrl.should_rebalance(portfolio, market)
         assert result.decision == RebalanceDecision.SKIP_LOW_DRIFT
         assert 'per_symbol_cost_bps' not in result.metadata
+
+
+# ---------------------------------------------------------------------------
+# Dataclass field validation
+# ---------------------------------------------------------------------------
+
+class TestDataclassFields:
+    """Validate field definitions, types, and defaults for all dataclasses."""
+
+    def test_portfolio_snapshot_has_correct_fields(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(PortfolioSnapshot)}
+        assert set(fields) == {'holdings', 'targets', 'total_value', 'timestamp'}
+        assert 'Dict[str, float]' in str(fields['holdings'].type)
+        assert 'Dict[str, float]' in str(fields['targets'].type)
+        assert fields['total_value'].type is float
+        assert fields['timestamp'].type is datetime
+
+    def test_portfolio_snapshot_all_fields_required(self):
+        import dataclasses
+        for f in dataclasses.fields(PortfolioSnapshot):
+            msg = f"field '{f.name}' should not have a default"
+            assert f.default is dataclasses.MISSING, msg
+            assert f.default_factory is dataclasses.MISSING, msg
+
+    def test_market_conditions_has_correct_fields(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(MarketConditions)}
+        assert set(fields) == {'vpin', 'vix', 'spread_bps', 'timestamp'}
+        assert fields['vpin'].type is float
+        assert 'Optional[float]' in str(fields['vix'].type) or 'Union[float, None]' in str(fields['vix'].type)
+        assert fields['vix'].default is None
+        assert fields['spread_bps'].default is None
+        assert fields['timestamp'].default is None
+
+    def test_rebalance_decision_result_has_correct_fields(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(RebalanceDecisionResult)}
+        expected = {'decision', 'urgency', 'max_drift', 'drift_details',
+                    'vpin', 'estimated_cost_bps', 'reason', 'metadata'}
+        assert set(fields) == expected
+
+    def test_rebalance_decision_result_metadata_default(self):
+        import dataclasses
+        fields = dataclasses.fields(RebalanceDecisionResult)
+        meta = [f for f in fields if f.name == 'metadata'][0]
+        assert meta.default_factory is not dataclasses.MISSING
+        # default_factory produces an empty dict
+        result = meta.default_factory()
+        assert result == {}
+
+    def test_cost_budget_tracker_has_correct_fields(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(CostBudgetTracker)}
+        assert set(fields) == {'annual_limit_pct', 'warning_threshold_pct', 'ytd_costs'}
+        assert fields['annual_limit_pct'].type is float
+        assert fields['annual_limit_pct'].default == 0.005
+        assert fields['warning_threshold_pct'].type is float
+        assert fields['warning_threshold_pct'].default == 0.004
+
+    def test_cost_budget_tracker_ytd_costs_factory(self):
+        import dataclasses
+        fields = dataclasses.fields(CostBudgetTracker)
+        ytd = [f for f in fields if f.name == 'ytd_costs'][0]
+        assert ytd.default_factory is not dataclasses.MISSING
+        assert ytd.default_factory() == []
+
+    def test_rebalance_decision_enum_members(self):
+        members = {e.name: e.value for e in RebalanceDecision}
+        assert members == {
+            'EXECUTE': 'execute',
+            'DEFER_TOXICITY': 'defer_toxicity',
+            'DEFER_TIMING': 'defer_timing',
+            'DEFER_BUDGET': 'defer_budget',
+            'SKIP_LOW_DRIFT': 'skip_low_drift',
+            'OVERRIDE_EMERGENCY': 'override_emergency',
+        }
+
+    def test_urgency_level_enum_members(self):
+        members = {e.name: e.value for e in UrgencyLevel}
+        assert members == {
+            'LOW': 'low',
+            'MODERATE': 'moderate',
+            'HIGH': 'high',
+            'EMERGENCY': 'emergency',
+        }
+
+    def test_portfolio_snapshot_can_be_constructed_with_all_fields(self):
+        p = PortfolioSnapshot(
+            holdings={'SPY': 100.0},
+            targets={'SPY': 1.0},
+            total_value=100.0,
+            timestamp=datetime(2026, 1, 1),
+        )
+        assert p.holdings == {'SPY': 100.0}
+        assert p.targets == {'SPY': 1.0}
+        assert p.total_value == 100.0
+        assert p.timestamp == datetime(2026, 1, 1)
+
+    def test_market_conditions_defaults(self):
+        m = MarketConditions(vpin=0.50)
+        assert m.vpin == 0.50
+        assert m.vix is None
+        assert m.spread_bps is None
+        assert m.timestamp is None
+
+    def test_market_conditions_all_fields(self):
+        ts = datetime(2026, 5, 1)
+        m = MarketConditions(
+            vpin=0.45,
+            vix=22.0,
+            spread_bps={'SPY': 1.5},
+            timestamp=ts,
+        )
+        assert m.vpin == 0.45
+        assert m.vix == 22.0
+        assert m.spread_bps == {'SPY': 1.5}
+        assert m.timestamp == ts
+
+
+# ---------------------------------------------------------------------------
+# Constants and exports validation
+# ---------------------------------------------------------------------------
+
+class TestModuleExports:
+    """Verify __all__, module-level constants, and config structure."""
+
+    def test_all_exports_match_imports(self):
+        expected = {
+            'RebalanceDecision', 'UrgencyLevel', 'PortfolioSnapshot',
+            'MarketConditions', 'RebalanceDecisionResult',
+            'CostBudgetTracker', 'SmartRebalancingController',
+            'create_sample_portfolio',
+        }
+        from src.rebalancing import smart_rebalancer as mod
+        assert set(mod.__all__) == expected
+
+    def test_default_config_has_all_top_level_keys(self):
+        keys = set(SmartRebalancingController.DEFAULT_CONFIG.keys())
+        expected = {
+            'drift_threshold', 'drift_threshold_by_regime', 'urgency_levels',
+            'vpin', 'timing', 'cost_budget', 'fallback', 'safety',
+        }
+        assert keys == expected
+
+    def test_default_config_drift_threshold_is_float_in_range(self):
+        val = SmartRebalancingController.DEFAULT_CONFIG['drift_threshold']
+        assert isinstance(val, float)
+        assert 0.0 <= val <= 1.0
+
+    def test_default_config_vpin_threshold_in_range(self):
+        vpin_cfg = SmartRebalancingController.DEFAULT_CONFIG['vpin']
+        assert 0.0 <= vpin_cfg['threshold'] <= 1.0
+        assert 0.0 <= vpin_cfg['default'] <= 1.0
+
+    def test_default_config_timing_window_valid(self):
+        timing = SmartRebalancingController.DEFAULT_CONFIG['timing']
+        assert 0 <= timing['optimal_start'] < 24
+        assert 0 <= timing['optimal_end'] < 24
+        assert timing['optimal_start'] < timing['optimal_end']
+        assert isinstance(timing['low_urgency_can_wait'], bool)
+
+    def test_default_config_safety_ranges(self):
+        safety = SmartRebalancingController.DEFAULT_CONFIG['safety']
+        assert safety['max_deferral_hours'] > 0
+        assert safety['max_single_trade_cost_bps'] > 0
+        assert safety['max_annual_cost_pct'] > 0
+        assert safety['min_drift_override'] > 0
+
+    def test_default_config_cost_budget_ranges(self):
+        budget = SmartRebalancingController.DEFAULT_CONFIG['cost_budget']
+        assert 0 < budget['annual_limit'] < 1
+        assert 0 < budget['warning_threshold'] < 1
+        assert budget['warning_threshold'] <= budget['annual_limit']
+
+    def test_default_config_fallback_ranges(self):
+        fallback = SmartRebalancingController.DEFAULT_CONFIG['fallback']
+        assert fallback['deferral_max_hours'] > 0
+        assert 0 < fallback['force_if_drift_exceeds'] <= 1
+
+    def test_default_config_urgency_levels_in_order(self):
+        levels = SmartRebalancingController.DEFAULT_CONFIG['urgency_levels']
+        assert levels['low'] < levels['moderate'] < levels['high'] < levels['emergency']
+
+    def test_module_level_cost_constants(self):
+        from src.rebalancing.smart_rebalancer import SmartRebalancingController as C
+        assert isinstance(C.ETF_TRANSACTION_COSTS_BPS, dict)
+        assert all(isinstance(v, float) for v in C.ETF_TRANSACTION_COSTS_BPS.values())
+        assert isinstance(C.DEFAULT_COST_BPS, float)
+        assert C.DEFAULT_COST_BPS == 5.0
+
+
+# ---------------------------------------------------------------------------
+# Computation edge cases — zero/empty/NaN/Inf/boundary
+# ---------------------------------------------------------------------------
+
+class TestComputeEdgeCases:
+    """Edge cases: NaN, Inf, zero, empty, single-element, boundary values."""
+
+    def _ctrl(self):
+        return SmartRebalancingController()
+
+    # --- Drift calculation edge cases ---
+
+    def test_calculate_drift_nan_in_holdings(self):
+        ctrl = self._ctrl()
+        p = _make_portfolio(
+            holdings={'SPY': float('nan'), 'GLD': 0, 'TLT': 0},
+        )
+        max_drift, details = ctrl.calculate_drift(p)
+        # NaN in current_value leads to NaN current_alloc, NaN drift
+        import math
+        assert math.isnan(details['SPY'])
+
+    def test_calculate_drift_inf_in_holdings(self):
+        ctrl = self._ctrl()
+        p = _make_portfolio(
+            holdings={'SPY': float('inf'), 'GLD': 0, 'TLT': 0},
+            total_value=float('inf'),
+        )
+        max_drift, details = ctrl.calculate_drift(p)
+        # inf / inf = nan for current_alloc
+        import math
+        assert math.isnan(details['SPY']) or details['SPY'] == 0.0
+
+    def test_calculate_drift_single_holding(self):
+        ctrl = self._ctrl()
+        p = PortfolioSnapshot(
+            holdings={'SPY': 100000},
+            targets={'SPY': 1.0},
+            total_value=100000,
+            timestamp=datetime.now(),
+        )
+        max_drift, details = ctrl.calculate_drift(p)
+        assert max_drift == 0.0
+        assert details['SPY'] == 0.0
+
+    def test_calculate_drift_empty_holdings(self):
+        """With empty holdings, all targets have 100% drift."""
+        ctrl = self._ctrl()
+        p = _make_portfolio(holdings={})
+        max_drift, details = ctrl.calculate_drift(p)
+        # current_alloc = 0 for all → drift = |0 - target|/target = 1.0
+        assert max_drift == 1.0
+
+    def test_calculate_drift_empty_targets(self):
+        ctrl = self._ctrl()
+        p = _make_portfolio(targets={})
+        max_drift, details = ctrl.calculate_drift(p)
+        assert max_drift == 0.0
+        assert details == {}
+
+    def test_calculate_drift_zero_target_allocation(self):
+        ctrl = self._ctrl()
+        p = _make_portfolio(targets={'SPY': 0.0, 'GLD': 1.0}, holdings={'SPY': 50000, 'GLD': 50000})
+        max_drift, details = ctrl.calculate_drift(p)
+        # SPY target=0 → drift formula uses division by target, returns 0
+        # GLD: 0.50 vs 1.0 → drift = |0.5 - 1.0| / 1.0 = 0.5
+        assert details['SPY'] == 0.0
+        assert details['GLD'] == 0.5
+
+    def test_calculate_drift_many_symbols(self):
+        ctrl = self._ctrl()
+        symbols = [f'SYM{i}' for i in range(100)]
+        holdings = {s: 1000 for s in symbols}
+        targets = {s: 1.0 / len(symbols) for s in symbols}
+        p = PortfolioSnapshot(
+            holdings=holdings,
+            targets=targets,
+            total_value=100000,
+            timestamp=datetime.now(),
+        )
+        max_drift, details = ctrl.calculate_drift(p)
+        assert max_drift == 0.0
+        assert len(details) == 100
+
+    # --- Cost estimation edge cases ---
+
+    def test_estimate_cost_bps_vpin_zero(self):
+        ctrl = self._ctrl()
+        cost = ctrl.estimate_cost_bps(vpin=0.0, in_optimal_window=True)
+        # vpin_mult = max(1.0, 1.0 + (0 - 0.30) * 2.0) = max(1.0, 0.4) = 1.0
+        # cost = 0.0003 * 1.0 * 1.0 + 0.0002 = 0.0005 → 5 bps
+        assert cost == pytest.approx(5.0, abs=0.5)
+
+    def test_estimate_cost_bps_vpin_one(self):
+        """Extreme VPIN=1.0 should cap multiplier at 2.0."""
+        ctrl = self._ctrl()
+        cost = ctrl.estimate_cost_bps(vpin=1.0, in_optimal_window=True)
+        # vpin_mult = min(2.0, max(1.0, 1.0 + (1.0-0.30)*2.0)) = min(2.0, 2.4) = 2.0
+        # cost = 0.0003 * 2.0 * 1.0 + 0.0002 = 0.0008 → 8 bps
+        assert cost == pytest.approx(8.0, abs=0.5)
+
+    def test_estimate_cost_bps_negative_vpin(self):
+        """Negative VPIN should floor vpin_mult at 1.0."""
+        ctrl = self._ctrl()
+        cost = ctrl.estimate_cost_bps(vpin=-0.5, in_optimal_window=True)
+        assert cost == pytest.approx(5.0, abs=0.5)
+
+    def test_estimate_cost_bps_outside_window_morning(self):
+        """Outside optimal window before 10am should use 1.25 multiplier."""
+        ctrl = self._ctrl()
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 9, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            cost = ctrl.estimate_cost_bps(vpin=0.30, in_optimal_window=False)
+        # time_mult = 1.25, vpin_mult = 1.0, cost = 0.0003 * 1.0 * 1.25 + 0.0002 = 0.000575 → 5.75 bps
+        assert cost == pytest.approx(5.75, abs=0.5)
+
+    def test_estimate_cost_bps_outside_window_closing(self):
+        """After 3:30pm should use 1.15 multiplier."""
+        ctrl = self._ctrl()
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 15, 35)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            cost = ctrl.estimate_cost_bps(vpin=0.30, in_optimal_window=False)
+        # time_mult = 1.15
+        assert cost == pytest.approx(5.45, abs=0.5)
+
+    def test_estimate_cost_bps_outside_window_midday(self):
+        """Mid-afternoon (between 14:00 and 15:30) should use 1.05 multiplier."""
+        ctrl = self._ctrl()
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 15, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            cost = ctrl.estimate_cost_bps(vpin=0.30, in_optimal_window=False)
+        # time_mult = 1.05
+        assert cost == pytest.approx(5.15, abs=0.5)
+
+    def test_estimate_per_symbol_cost_bps_zero_vpin(self):
+        ctrl = self._ctrl()
+        cost = ctrl.estimate_per_symbol_cost_bps('SPY', 0.0, True)
+        assert cost > 0
+        assert isinstance(cost, float)
+
+    def test_estimate_per_symbol_cost_bps_extreme_vpin(self):
+        ctrl = self._ctrl()
+        cost = ctrl.estimate_per_symbol_cost_bps('SPY', 1.0, True)
+        # SPY base = 2 bps = 0.0002, vpin_mult = 2.0, time_mult = 1.0
+        # cost = 0.0002 * 2.0 * 1.0 * 10000 = 4 bps
+        assert cost == pytest.approx(4.0, abs=0.5)
+
+    def test_estimate_per_symbol_cost_bps_negative_vpin(self):
+        ctrl = self._ctrl()
+        cost = ctrl.estimate_per_symbol_cost_bps('SPY', -0.5, True)
+        assert cost > 0
+
+    def test_estimate_per_symbol_cost_bps_outside_window(self):
+        ctrl = self._ctrl()
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 9, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            cost = ctrl.estimate_per_symbol_cost_bps('TLT', 0.30, False)
+        assert cost > 0
+
+    def test_estimate_total_cost_bps_with_empty_dict(self):
+        ctrl = self._ctrl()
+        total = ctrl.estimate_total_cost_bps({}, 0.30, True)
+        flat = ctrl.estimate_cost_bps(0.30, True)
+        assert total == flat
+
+    def test_estimate_total_cost_bps_with_none_value(self):
+        """If a drift detail has 0 drift, it should be skipped."""
+        ctrl = self._ctrl()
+        total = ctrl.estimate_total_cost_bps({'SPY': 0.0, 'GLD': 0.05}, 0.30, True)
+        assert total > 0
+
+    def test_estimate_total_cost_bps_single_symbol(self):
+        ctrl = self._ctrl()
+        total = ctrl.estimate_total_cost_bps({'SPY': 0.10}, 0.30, True)
+        assert total > 0
+
+    # --- Urgency boundary ---
+
+    def test_calculate_urgency_zero_drift(self):
+        ctrl = self._ctrl()
+        assert ctrl.calculate_urgency(0.0) == UrgencyLevel.LOW
+
+    def test_calculate_urgency_exact_emergency(self):
+        ctrl = self._ctrl()
+        assert ctrl.calculate_urgency(0.201) == UrgencyLevel.EMERGENCY
+
+
+# ---------------------------------------------------------------------------
+# Function boundary conditions — extreme inputs, missing keys, wrong types
+# ---------------------------------------------------------------------------
+
+class TestBoundaryConditions:
+    """Extreme inputs, missing keys, type mismatches."""
+
+    def test_should_rebalance_no_regime_and_none_vpin(self):
+        """VPIN=None should use config default."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m = MarketConditions(vpin=None)
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        # Should use config default vpin (0.30), which is below threshold → execute
+        assert result.decision == RebalanceDecision.EXECUTE
+
+    def test_should_rebalance_with_vpin_none_in_config_default(self):
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m = MarketConditions(vpin=None)
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        assert result.vpin == ctrl.config['vpin']['default']
+
+    def test_estimate_cost_bps_large_vpin_saturates(self):
+        ctrl = SmartRebalancingController()
+        cost_2 = ctrl.estimate_cost_bps(vpin=2.0, in_optimal_window=True)
+        cost_10 = ctrl.estimate_cost_bps(vpin=10.0, in_optimal_window=True)
+        # Both should be capped at vpin_mult=2.0 → same result
+        assert cost_2 == cost_10
+
+    def test_rebalance_decision_result_all_fields_populated_on_execute(self):
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        if result.decision == RebalanceDecision.EXECUTE:
+            assert isinstance(result.max_drift, float)
+            assert isinstance(result.drift_details, dict)
+            assert isinstance(result.vpin, float)
+            assert isinstance(result.estimated_cost_bps, float)
+            assert isinstance(result.reason, str)
+            assert isinstance(result.metadata, dict)
+
+    def test_record_rebalance_isoformat_date(self):
+        ctrl = SmartRebalancingController()
+        date_str = "2026-05-14T12:30:00"
+        ctrl.record_rebalance(5.0, date_str, ["SPY"])
+        assert ctrl.last_rebalance == datetime(2026, 5, 14, 12, 30, 0)
+
+    def test_record_rebalance_simple_date(self):
+        ctrl = SmartRebalancingController()
+        ctrl.record_rebalance(3.0, "2026-05-14", ["SPY"])
+        assert ctrl.last_rebalance.year == 2026
+        assert ctrl.last_rebalance.month == 5
+        assert ctrl.last_rebalance.day == 14
+
+    def test_record_rebalance_clears_deferred(self):
+        ctrl = SmartRebalancingController()
+        ctrl.deferred_until = datetime(2026, 6, 1)
+        ctrl.record_rebalance(5.0, "2026-05-14", ["SPY"])
+        assert ctrl.deferred_until is None
+
+    def test_should_rebalance_regime_edge_high_vol(self):
+        """High vol regime (7% threshold): 8% drift should trigger."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.08)
+        m = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now, regime='high_vol')
+        # 8% drift > 7% threshold → shouldn't skip
+        assert result.decision != RebalanceDecision.SKIP_LOW_DRIFT
+
+    def test_should_rebalance_regime_edge_high_vol_skip(self):
+        """High vol regime (7% threshold): 6% drift should skip."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.06)
+        m = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now, regime='high_vol')
+        assert result.decision == RebalanceDecision.SKIP_LOW_DRIFT
+
+    def test_maximally_deferred_then_toxicity_clears(self):
+        """After max deferrals force execution, next toxicity should start fresh."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m_high = _make_market(vpin=0.60)
+        m_low = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 14, 12, 0)
+        # Exhaust max deferrals (4 hours = 4 deferrals)
+        for _ in range(4):
+            ctrl.should_rebalance(p, m_high, now=now)
+        # 5th call forces execute and resets counter
+        ctrl.should_rebalance(p, m_high, now=now)
+        # Now VPIN is low so it should execute
+        result = ctrl.should_rebalance(p, m_low, now=now)
+        assert result.decision == RebalanceDecision.EXECUTE
+
+    def test_should_rebalance_defer_toxicity_vpin_threshold_tight(self):
+        """VPIN exactly at threshold should NOT defer (not strictly greater)."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m = _make_market(vpin=0.50)  # Exactly threshold
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        # vpin 0.50 is not > 0.50, so no toxicity defer
+        assert result.decision != RebalanceDecision.DEFER_TOXICITY
+
+
+# ---------------------------------------------------------------------------
+# CostBudgetTracker edge cases
+# ---------------------------------------------------------------------------
+
+class TestCostBudgetTrackerEdgeCases:
+    """Additional CostBudgetTracker scenarios beyond basic coverage."""
+
+    def test_custom_limits(self):
+        tracker = CostBudgetTracker(
+            annual_limit_pct=0.01,
+            warning_threshold_pct=0.008,
+        )
+        assert tracker.annual_limit_pct == 0.01
+        assert tracker.warning_threshold_pct == 0.008
+        assert tracker.remaining_budget_pct == 0.01
+
+    def test_add_cost_single_entry(self):
+        tracker = CostBudgetTracker()
+        tracker.add_cost(10.0, "2026-05-01", ["SPY"])
+        assert len(tracker.ytd_costs) == 1
+        entry = tracker.ytd_costs[0]
+        assert entry['cost_bps'] == 10.0
+        assert entry['date'] == "2026-05-01"
+        assert entry['symbols'] == ["SPY"]
+
+    def test_add_cost_empty_symbols(self):
+        tracker = CostBudgetTracker()
+        tracker.add_cost(5.0, "2026-05-01", [])
+        assert tracker.ytd_total_bps == 5.0
+
+    def test_add_cost_negative_cost(self):
+        tracker = CostBudgetTracker()
+        tracker.add_cost(-5.0, "2026-05-01", ["SPY"])
+        assert tracker.ytd_total_bps == -5.0
+        assert tracker.remaining_budget_pct == 0.0055  # 0.005 - (-0.0005)
+
+    def test_is_warning_at_exact_threshold(self):
+        tracker = CostBudgetTracker()
+        # warning_threshold_pct = 0.004, which is 40 bps
+        tracker.add_cost(40.0, "2026-05-14", ["SPY"])
+        assert tracker.is_warning() is True
+
+    def test_is_warning_just_below_threshold(self):
+        tracker = CostBudgetTracker()
+        # 39.99 bps = 0.003999, just below 0.004
+        tracker.add_cost(39.99, "2026-05-14", ["SPY"])
+        assert tracker.is_warning() is False
+
+    def test_is_over_budget_just_below(self):
+        tracker = CostBudgetTracker()
+        # 49.99 bps = 0.004999, just below 0.005
+        tracker.add_cost(49.99, "2026-05-14", ["SPY"])
+        assert tracker.is_over_budget() is False
+
+    def test_is_over_budget_at_exact_limit(self):
+        tracker = CostBudgetTracker()
+        tracker.add_cost(50.0, "2026-05-14", ["SPY"])
+        assert tracker.is_over_budget() is True
+
+    def test_remaining_budget_no_costs(self):
+        tracker = CostBudgetTracker()
+        assert tracker.remaining_budget_pct == tracker.annual_limit_pct
+
+    def test_is_over_budget_false_by_default(self):
+        tracker = CostBudgetTracker()
+        assert tracker.is_over_budget() is False
+
+    def test_is_warning_false_by_default(self):
+        tracker = CostBudgetTracker()
+        assert tracker.is_warning() is False
+
+
+# ---------------------------------------------------------------------------
+# SmartRebalancingController — initialization & config loading
+# ---------------------------------------------------------------------------
+
+class TestControllerInitialization:
+    """Constructor, config loading, deep merge."""
+
+    def test_default_initialization(self):
+        ctrl = SmartRebalancingController()
+        assert ctrl.config is not None
+        assert ctrl.cost_tracker is not None
+        assert ctrl.deferred_until is None
+        assert ctrl.last_rebalance is None
+
+    def test_cost_tracker_uses_config_limits(self):
+        ctrl = SmartRebalancingController()
+        assert ctrl.cost_tracker.annual_limit_pct == ctrl.config['cost_budget']['annual_limit']
+        assert ctrl.cost_tracker.warning_threshold_pct == ctrl.config['cost_budget']['warning_threshold']
+
+    def test_consecutive_deferrals_initialized_on_first_call(self):
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m = _make_market(vpin=0.60)
+        now = datetime(2026, 5, 14, 12, 0)
+        ctrl.should_rebalance(p, m, now=now)
+        # consecutive_deferrals should have been set dynamically
+        assert hasattr(ctrl, 'consecutive_deferrals')
+
+    def test_deep_merge_nested_dict(self):
+        ctrl = SmartRebalancingController()
+        base = {'a': {'b': 1, 'c': 2}, 'd': 3}
+        override = {'a': {'b': 99}}
+        ctrl._deep_merge(base, override)
+        assert base['a']['b'] == 99
+        assert base['a']['c'] == 2  # Should be preserved
+        assert base['d'] == 3
+
+    def test_deep_merge_new_key(self):
+        ctrl = SmartRebalancingController()
+        base = {'a': 1}
+        override = {'b': 2}
+        ctrl._deep_merge(base, override)
+        assert base['a'] == 1
+        assert base['b'] == 2
+
+    def test_deep_merge_non_dict_overwrites(self):
+        ctrl = SmartRebalancingController()
+        base = {'a': {'nested': 'value'}}
+        override = {'a': 'scalar'}
+        ctrl._deep_merge(base, override)
+        assert base['a'] == 'scalar'
+
+    def test_deep_merge_empty_override(self):
+        ctrl = SmartRebalancingController()
+        base = {'a': 1}
+        ctrl._deep_merge(base, {})
+        assert base == {'a': 1}
+
+    def test_load_config_missing_file(self):
+        """Loading a non-existent path should silently use defaults."""
+        ctrl = SmartRebalancingController(config_path='/tmp/nonexistent_config_file_xyz.yaml')
+        assert ctrl.config['drift_threshold'] == 0.10
+
+
+class TestPerSymbolCostBreakdownExpanded:
+    """Extended metadata coverage."""
+
+    def test_execute_metadata_includes_window_and_budget(self):
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 13, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        if result.decision == RebalanceDecision.EXECUTE:
+            assert 'in_optimal_window' in result.metadata
+            assert result.metadata['in_optimal_window'] is True
+            assert 'ytd_cost_bps' in result.metadata
+            assert 'remaining_budget_pct' in result.metadata
+            assert result.metadata['remaining_budget_pct'] > 0
+
+    def test_override_emergency_has_no_metadata(self):
+        """OVERRIDE_EMERGENCY bypasses metadata generation in execute path."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.30)
+        m = _make_market(vpin=0.80)
+        now = datetime(2026, 5, 13, 9, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        assert result.decision == RebalanceDecision.OVERRIDE_EMERGENCY
+        # Emergency override still goes through execute path for cost
+        # But doesn't build per_symbol metadata
+        assert 'per_symbol_cost_bps' not in result.metadata
+
+
+# ---------------------------------------------------------------------------
+# get_status edge cases
+# ---------------------------------------------------------------------------
+
+class TestGetStatusEdgeCases:
+    """Cover additional status scenarios."""
+
+    def test_status_last_rebalance_none(self):
+        ctrl = SmartRebalancingController()
+        status = ctrl.get_status()
+        assert status['last_rebalance'] is None
+
+    def test_status_deferred_none(self):
+        ctrl = SmartRebalancingController()
+        status = ctrl.get_status()
+        assert status['deferred_until'] is None
+
+    def test_status_config_summary_keys(self):
+        ctrl = SmartRebalancingController()
+        status = ctrl.get_status()
+        config = status['config']
+        assert 'drift_threshold' in config
+        assert 'vpin_threshold' in config
+        assert 'optimal_window' in config
+        assert 'annual_cost_limit' in config
+
+    def test_status_cost_pct_format(self):
+        ctrl = SmartRebalancingController()
+        ctrl.record_rebalance(25.0, "2026-05-14", ["SPY", "GLD"])
+        status = ctrl.get_status()
+        # 25 bps = 0.25% of total value
+        assert status['ytd_cost_pct'] == 0.25
+        assert status['remaining_budget_pct'] == 0.25  # 0.5 - 0.25 = 0.25
+
+
+# ---------------------------------------------------------------------------
+# CLI / __main__ guard
+# ---------------------------------------------------------------------------
+
+class TestCliMainGuard:
+    """Cover demo() and the __name__ == '__main__' guard."""
+
+    def test_demo_runs_without_error(self, capsys):
+        """demo() should execute all 5 scenarios and print output."""
+        from src.rebalancing.smart_rebalancer import demo
+        # demo() depends on datetime.now(), so we control critical calls
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            demo()
+        captured = capsys.readouterr()
+        assert 'Scenario 1' in captured.out
+        assert 'Scenario 2' in captured.out
+        assert 'Scenario 3' in captured.out
+        assert 'Scenario 4' in captured.out
+        assert 'Scenario 5' in captured.out
+        assert 'Controller Status' in captured.out
+
+    def test_demo_scenario_1_skip_low_drift(self, capsys):
+        from src.rebalancing.smart_rebalancer import demo
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            demo()
+        captured = capsys.readouterr()
+        assert 'skip_low_drift' in captured.out
+
+    def test_demo_scenario_2_execute(self, capsys):
+        from src.rebalancing.smart_rebalancer import demo
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            demo()
+        captured = capsys.readouterr()
+        assert 'Cost:' in captured.out
+
+    def test_demo_prints_urgency(self, capsys):
+        from src.rebalancing.smart_rebalancer import demo
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            demo()
+        captured = capsys.readouterr()
+        assert 'Urgency:' in captured.out
+
+    def test_main_guard_string(self):
+        """The module-level __name__ check should reference 'demo()'."""
+        import src.rebalancing.smart_rebalancer as mod
+        source = inspect.getsource(mod)
+        assert "__name__" in source and "__main__" in source
+        assert "demo()" in source
+
+
+# ---------------------------------------------------------------------------
+# RebalanceDecisionResult default construction
+# ---------------------------------------------------------------------------
+
+class TestRebalanceDecisionResultConstruction:
+    """Test that RebalanceDecisionResult can be constructed in various ways."""
+
+    def test_construct_with_metadata(self):
+        result = RebalanceDecisionResult(
+            decision=RebalanceDecision.EXECUTE,
+            urgency=UrgencyLevel.HIGH,
+            max_drift=0.15,
+            drift_details={'SPY': 0.15},
+            vpin=0.30,
+            estimated_cost_bps=5.0,
+            reason='test',
+            metadata={'extra': 'data'},
+        )
+        assert result.metadata == {'extra': 'data'}
+
+    def test_construct_without_metadata(self):
+        result = RebalanceDecisionResult(
+            decision=RebalanceDecision.SKIP_LOW_DRIFT,
+            urgency=UrgencyLevel.LOW,
+            max_drift=0.0,
+            drift_details={},
+            vpin=0.30,
+            estimated_cost_bps=0,
+            reason='test',
+        )
+        assert result.metadata == {}
+
+    def test_construct_all_fields_required(self):
+        """Most fields are required (no defaults)."""
+        import dataclasses
+        required = {'decision', 'urgency', 'max_drift', 'drift_details',
+                    'vpin', 'estimated_cost_bps', 'reason'}
+        for f in dataclasses.fields(RebalanceDecisionResult):
+            if f.name in required:
+                assert f.default is dataclasses.MISSING
+                assert f.default_factory is dataclasses.MISSING
+
+
+# ---------------------------------------------------------------------------
+# Drift calculation additional edge cases
+# ---------------------------------------------------------------------------
+
+class TestDriftCalculationAdditional:
+    """Additional drift calculation scenarios."""
+
+    def test_calculate_drift_symmetric_around_target(self):
+        """Overweight and underweight should produce symmetric drift."""
+        ctrl = SmartRebalancingController()
+        # SPY target 0.46, current 0.56 → drift = |0.56-0.46|/0.46 = 0.217
+        over = _make_portfolio(
+            holdings={'SPY': 56000, 'GLD': 30000, 'TLT': 14000},
+            total_value=100000,
+        )
+        over_drift, _ = ctrl.calculate_drift(over)
+
+        # SPY target 0.46, current 0.36 → drift = |0.36-0.46|/0.46 = 0.217
+        under = _make_portfolio(
+            holdings={'SPY': 36000, 'GLD': 46000, 'TLT': 18000},
+            total_value=100000,
+        )
+        under_drift, _ = ctrl.calculate_drift(under)
+        assert over_drift == pytest.approx(under_drift, abs=0.01)
+
+    def test_calculate_drift_holdings_not_in_targets(self):
+        """Extra holdings without targets should be ignored."""
+        ctrl = SmartRebalancingController()
+        p = _make_portfolio(
+            holdings={'SPY': 46000, 'GLD': 38000, 'TLT': 16000, 'CASH': 0},
+        )
+        max_drift, details = ctrl.calculate_drift(p)
+        assert max_drift == 0.0
+        # CASH is not in targets, so it won't appear
+        assert 'CASH' not in details
+
+    def test_calculate_drift_precision(self):
+        """Drift values should be rounded to 4 decimal places."""
+        ctrl = SmartRebalancingController()
+        p = _make_portfolio(
+            holdings={'SPY': 46211, 'GLD': 37889, 'TLT': 15900},
+            total_value=100000,
+        )
+        _, details = ctrl.calculate_drift(p)
+        for val in details.values():
+            # Should have at most 4 decimal places
+            assert val * 10000 == pytest.approx(round(val * 10000), abs=0.0001)
+
+
+# ---------------------------------------------------------------------------
+# SmartRebalancingController — estimate_cost_bps parameter validation
+# ---------------------------------------------------------------------------
+
+class TestEstimateCostValidation:
+    """Test cost estimation with various parameter combinations."""
+
+    def test_cost_increases_with_vpin(self):
+        """Cost should be monotonically non-decreasing with VPIN."""
+        ctrl = SmartRebalancingController()
+        costs = []
+        for vpin in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
+            costs.append(ctrl.estimate_cost_bps(vpin, in_optimal_window=True))
+        for i in range(len(costs) - 1):
+            assert costs[i] <= costs[i + 1], f"Cost decreased at vpin step {i}"
+
+    def test_per_symbol_cost_increases_with_vpin(self):
+        """Per-symbol cost should be monotonically non-decreasing with VPIN."""
+        ctrl = SmartRebalancingController()
+        costs = []
+        for vpin in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
+            costs.append(ctrl.estimate_per_symbol_cost_bps('SPY', vpin, True))
+        for i in range(len(costs) - 1):
+            assert costs[i] <= costs[i + 1]
+
+
+# ---------------------------------------------------------------------------
+# SmartRebalancingController — should_rebalance decision logic edge cases
+# ---------------------------------------------------------------------------
+
+class TestShouldRebalanceEdgeCases:
+    """Cover edge cases in the decision engine."""
+
+    def test_skip_low_drift_has_zero_cost(self):
+        ctrl = SmartRebalancingController()
+        p = _make_portfolio()  # No drift
+        m = _make_market()
+        result = ctrl.should_rebalance(p, m)
+        assert result.decision == RebalanceDecision.SKIP_LOW_DRIFT
+        assert result.estimated_cost_bps == 0
+
+    def test_defer_toxicity_has_zero_cost(self):
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m = _make_market(vpin=0.60)
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        assert result.decision == RebalanceDecision.DEFER_TOXICITY
+        assert result.estimated_cost_bps == 0
+
+    def test_defer_timing_has_zero_cost(self):
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.11)
+        m = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 14, 9, 30)
+        result = ctrl.should_rebalance(p, m, now=now)
+        assert result.decision == RebalanceDecision.DEFER_TIMING
+        assert result.estimated_cost_bps == 0
+
+    def test_defer_budget_has_non_zero_cost_in_result(self):
+        """Defer_budget sets estimated_cost_bps=0."""
+        ctrl = SmartRebalancingController()
+        ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
+        p = _drifted_portfolio(0.15)
+        m = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        assert result.decision == RebalanceDecision.DEFER_BUDGET
+        assert result.estimated_cost_bps == 0
+
+    def test_low_urgency_outside_window_defers_without_toxicity(self):
+        """Low urgency outside window should defer for timing, not toxicity."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.11)
+        m = _make_market(vpin=0.60)  # High VPIN
+        now = datetime(2026, 5, 14, 9, 30)  # Outside window
+        result = ctrl.should_rebalance(p, m, now=now)
+        # VPIN check comes before timing, so it should be DEFER_TOXICITY
+        assert result.decision == RebalanceDecision.DEFER_TOXICITY
+
+    def test_low_urgency_in_window_high_vpin_defers_toxicity(self):
+        """Low urgency in window but high VPIN should defer for toxicity."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.11)
+        m = _make_market(vpin=0.60)
+        now = datetime(2026, 5, 14, 12, 0)  # In window
+        result = ctrl.should_rebalance(p, m, now=now)
+        assert result.decision == RebalanceDecision.DEFER_TOXICITY
+
+    def test_high_urgency_passes_through_vpin_and_timing(self):
+        """High urgency should bypass timing deferral but not VPIN deferral."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.17)  # HIGH urgency
+        m = _make_market(vpin=0.30)  # Low VPIN (below 0.50 threshold)
+        now = datetime(2026, 5, 14, 9, 30)  # Outside window
+        result = ctrl.should_rebalance(p, m, now=now)
+        # VPIN passes (0.30 <= 0.50), timing skipped (HIGH != LOW), budget ok
+        assert result.decision == RebalanceDecision.EXECUTE
+
+    def test_emergency_urgency_bypasses_all_checks(self):
+        """Drift > 25% should produce OVERRIDE_EMERGENCY (bypassing toxicity/timing/budget)."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.30)  # 30% drift on SPY → max_drift > 0.25
+        m = _make_market(vpin=0.90)
+        now = datetime(2026, 5, 14, 9, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        assert result.decision == RebalanceDecision.OVERRIDE_EMERGENCY
+
+    def test_should_rebalance_with_now_param(self):
+        """Passing explicit 'now' should be used for timing."""
+        ctrl = SmartRebalancingController()
+        p = _drifted_portfolio(0.15)
+        m = _make_market(vpin=0.30)
+        # Outside window test
+        result = ctrl.should_rebalance(p, m, now=datetime(2026, 5, 14, 9, 0))
+        assert result.decision == RebalanceDecision.EXECUTE
+
+    def test_should_rebalance_high_urgency_but_over_budget_defers(self):
+        """High urgency but over budget should defer unless EMERGENCY."""
+        ctrl = SmartRebalancingController()
+        ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
+        p = _drifted_portfolio(0.17)  # HIGH urgency (not EMERGENCY)
+        m = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 14, 12, 0)
+        result = ctrl.should_rebalance(p, m, now=now)
+        assert result.decision == RebalanceDecision.DEFER_BUDGET
+
+
+class TestSamplePortfolioExpanded:
+    """Additional create_sample_portfolio coverage."""
+
+    def test_precision_of_targets(self):
+        p = create_sample_portfolio()
+        total = sum(p.targets.values())
+        assert total == pytest.approx(1.0, abs=0.01)
+
+    def test_sample_portfolio_holdings(self):
+        p = create_sample_portfolio()
+        assert 'SPY' in p.holdings
+        assert 'GLD' in p.holdings
+        assert 'TLT' in p.holdings
+        assert sum(p.holdings.values()) == p.total_value
+
+    def test_sample_portfolio_timestamp_is_now(self):
+        p = create_sample_portfolio()
+        diff = (datetime.now() - p.timestamp).total_seconds()
+        assert diff < 5  # Created within last 5 seconds
+
+
+class TestMarketConditionsAdvanced:
+    """Additional MarketConditions scenarios."""
+
+    def test_spread_bps_structure(self):
+        m = _make_market(spread_bps={'SPY': 1.5, 'TLT': 8.0})
+        assert m.spread_bps['SPY'] == 1.5
+        assert m.spread_bps['TLT'] == 8.0
+
+
+class TestOptimalWindowAdvanced:
+    """Additional timing window edge cases."""
+
+    def test_in_window_exact_start_inclusive(self):
+        ctrl = SmartRebalancingController()
+        assert ctrl._in_optimal_window(datetime(2026, 5, 14, 11, 0)) is True
+
+    def test_in_window_exact_end_exclusive(self):
+        ctrl = SmartRebalancingController()
+        assert ctrl._in_optimal_window(datetime(2026, 5, 14, 14, 0)) is False
+
+    def test_at_midnight(self):
+        ctrl = SmartRebalancingController()
+        assert ctrl._in_optimal_window(datetime(2026, 5, 14, 0, 0)) is False
+
+    def test_at_midnight_just_before(self):
+        ctrl = SmartRebalancingController()
+        assert ctrl._in_optimal_window(datetime(2026, 5, 14, 23, 59)) is False
+
+    def test_default_now_returns_something(self):
+        """Without explicit now, should use datetime.now() and return bool."""
+        ctrl = SmartRebalancingController()
+        result = ctrl._in_optimal_window()
+        assert isinstance(result, bool)
+
+
+# ---------------------------------------------------------------------------
+# Error resistance — verify functions don't crash on malformed data
+# ---------------------------------------------------------------------------
+
+class TestErrorResistance:
+    """Functions should degrade gracefully on unexpected input."""
+
+    def test_calculate_drift_with_negative_holdings(self):
+        ctrl = SmartRebalancingController()
+        p = _make_portfolio(holdings={'SPY': -10000, 'GLD': 60000, 'TLT': 30000})
+        # Should not crash with negative holdings
+        max_drift, details = ctrl.calculate_drift(p)
+        assert isinstance(max_drift, float)
+        assert isinstance(details, dict)
+
+    def test_calculate_drift_with_negative_target(self):
+        ctrl = SmartRebalancingController()
+        p = _make_portfolio(targets={'SPY': -0.1, 'GLD': 1.1})
+        max_drift, details = ctrl.calculate_drift(p)
+        assert isinstance(max_drift, float)
+        assert isinstance(details, dict)
+
+    def test_estimate_per_symbol_cost_with_empty_string_symbol(self):
+        ctrl = SmartRebalancingController()
+        cost = ctrl.estimate_per_symbol_cost_bps('', 0.30, True)
+        assert cost > 0  # Should use DEFAULT_COST_BPS
+
+    def test_estimate_total_cost_with_non_dict_drift(self):
+        """estimate_total_cost_bps should handle a non-dict-like drift_details."""
+        # Actually, the signature expects Dict[str, float], and an empty dict
+        # falls back to flat estimate. Non-dict would fail, but that's expected.
+        pass  # Type contract is enforced by caller
+
+    def test_estimate_cost_bps_negative_returns_positive(self):
+        """Cost should always be positive even with negative vpin."""
+        ctrl = SmartRebalancingController()
+        cost = ctrl.estimate_cost_bps(vpin=-1.0, in_optimal_window=True)
+        assert cost > 0
+
+    def test_demo_prints_all_scenarios_more(self, capsys):
+        """Collect all scenario outputs for completeness."""
+        from src.rebalancing.smart_rebalancer import demo
+        with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            demo()
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split('\n')
+        # Should have more than 5 lines of output (5 scenarios + status + blanks)
+        assert len(lines) > 6

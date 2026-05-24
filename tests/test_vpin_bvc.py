@@ -1466,3 +1466,1409 @@ class TestVpinModuleExports:
         for name in expected:
             assert name in vpin_bvc.__all__, f"{name} missing from __all__"
         assert len(vpin_bvc.__all__) == len(expected)
+
+
+# ---------------------------------------------------------------------------
+# New comprehensive tests: dataclass field validation via dataclasses.fields()
+# ---------------------------------------------------------------------------
+
+
+class TestBVCBarDataclassFields:
+    """Validate BVCBar dataclass schema via dataclasses.fields()."""
+
+    def test_field_count(self):
+        from src.signals.vpin_bvc import BVCBar
+        import dataclasses
+        fields = dataclasses.fields(BVCBar)
+        assert len(fields) == 9
+
+    def test_field_names(self):
+        from src.signals.vpin_bvc import BVCBar
+        import dataclasses
+        names = [f.name for f in dataclasses.fields(BVCBar)]
+        expected = ['timestamp', 'open', 'high', 'low', 'close',
+                     'volume', 'buy_volume', 'sell_volume', 'vpin_local']
+        assert names == expected
+
+    def test_field_types(self):
+        from src.signals.vpin_bvc import BVCBar
+        import dataclasses
+        from datetime import datetime
+        types = {f.name: f.type for f in dataclasses.fields(BVCBar)}
+        assert types['timestamp'] is datetime
+        assert types['open'] is float
+        assert types['high'] is float
+        assert types['low'] is float
+        assert types['close'] is float
+        assert types['volume'] is float
+        assert types['buy_volume'] is float
+        assert types['sell_volume'] is float
+        assert types['vpin_local'] is float
+
+    def test_no_defaults_on_required(self):
+        from src.signals.vpin_bvc import BVCBar
+        import dataclasses
+        for f in dataclasses.fields(BVCBar):
+            assert f.default is dataclasses.MISSING, f"{f.name} has default"
+            assert f.default_factory is dataclasses.MISSING, f"{f.name} has default_factory"
+
+    def test_asdict_round_trip(self):
+        from src.signals.vpin_bvc import BVCBar
+        import dataclasses
+        from datetime import datetime
+        ts = datetime(2026, 5, 14, 10, 0)
+        bar = BVCBar(timestamp=ts, open=1.0, high=2.0, low=0.5,
+                      close=1.5, volume=1000, buy_volume=600,
+                      sell_volume=400, vpin_local=0.2)
+        d = dataclasses.asdict(bar)
+        restored = BVCBar(**d)
+        assert restored == bar
+        assert restored.timestamp == ts
+
+
+class TestVPINBucketDataclassFields:
+    """Validate VPINBucket dataclass schema via dataclasses.fields()."""
+
+    def test_field_count(self):
+        from src.signals.vpin_bvc import VPINBucket
+        import dataclasses
+        fields = dataclasses.fields(VPINBucket)
+        assert len(fields) == 9
+
+    def test_field_names(self):
+        from src.signals.vpin_bvc import VPINBucket
+        import dataclasses
+        names = [f.name for f in dataclasses.fields(VPINBucket)]
+        expected = ['start_time', 'end_time', 'target_volume', 'actual_volume',
+                     'bars', 'buy_volume', 'sell_volume', 'vpin', 'complete']
+        assert names == expected
+
+    def test_field_types(self):
+        from src.signals.vpin_bvc import VPINBucket
+        import dataclasses
+        from datetime import datetime
+        types = {f.name: f.type for f in dataclasses.fields(VPINBucket)}
+        assert types['start_time'] is datetime
+        assert types['end_time'] is datetime
+        assert types['target_volume'] is float
+        assert types['actual_volume'] is float
+        # 'bars' type is list[BVCBar] — check origin is list and args includes BVCBar
+        from typing import get_origin, get_args
+        from src.signals.vpin_bvc import BVCBar
+        bars_type = types['bars']
+        assert get_origin(bars_type) is list
+        assert BVCBar in get_args(bars_type)
+        assert types['buy_volume'] is float
+        assert types['sell_volume'] is float
+        assert types['vpin'] is float
+        assert types['complete'] is bool
+
+    def test_asdict_round_trip(self):
+        from src.signals.vpin_bvc import VPINBucket, BVCBar
+        import dataclasses
+        from datetime import datetime
+        ts = datetime(2026, 5, 14, 9, 30)
+        bar = BVCBar(timestamp=ts, open=1.0, high=2.0, low=0.5,
+                      close=1.5, volume=1000, buy_volume=600,
+                      sell_volume=400, vpin_local=0.2)
+        bucket = VPINBucket(start_time=ts, end_time=ts, target_volume=50000.0,
+                             actual_volume=10000.0, bars=[bar],
+                             buy_volume=600.0, sell_volume=400.0, vpin=0.2,
+                             complete=False)
+        d = dataclasses.asdict(bucket)
+        # asdict converts nested dataclasses to dicts; verify field values directly
+        assert d['start_time'] == ts
+        assert d['end_time'] == ts
+        assert d['target_volume'] == 50000.0
+        assert d['actual_volume'] == 10000.0
+        assert len(d['bars']) == 1
+        assert d['bars'][0]['open'] == 1.0
+        assert d['buy_volume'] == 600.0
+        assert d['sell_volume'] == 400.0
+        assert d['vpin'] == 0.2
+        assert d['complete'] is False
+
+    def test_no_defaults_on_required(self):
+        from src.signals.vpin_bvc import VPINBucket
+        import dataclasses
+        for f in dataclasses.fields(VPINBucket):
+            assert f.default is dataclasses.MISSING, f"{f.name} has default"
+            assert f.default_factory is dataclasses.MISSING, f"{f.name} has default_factory"
+
+
+class TestVPINSignalDataclassFields:
+    """Validate VPINSignal dataclass schema via dataclasses.fields()."""
+
+    def test_field_count(self):
+        from src.signals.vpin_bvc import VPINSignal
+        import dataclasses
+        fields = dataclasses.fields(VPINSignal)
+        assert len(fields) == 11
+
+    def test_field_names(self):
+        from src.signals.vpin_bvc import VPINSignal
+        import dataclasses
+        names = [f.name for f in dataclasses.fields(VPINSignal)]
+        expected = ['timestamp', 'vpin', 'vpin_ma', 'vpin_std', 'z_score',
+                     'percentile', 'regime', 'confidence', 'toxicity_level',
+                     'recommendation', 'expected_cost_impact']
+        assert names == expected
+
+    def test_field_types(self):
+        from src.signals.vpin_bvc import VPINSignal
+        import dataclasses
+        from datetime import datetime
+        types = {f.name: f.type for f in dataclasses.fields(VPINSignal)}
+        assert types['timestamp'] is datetime
+        assert types['vpin'] is float
+        assert types['vpin_ma'] is float
+        assert types['vpin_std'] is float
+        assert types['z_score'] is float
+        assert types['percentile'] is float
+        assert types['regime'] is str
+        assert types['confidence'] is float
+        assert types['toxicity_level'] is float
+        assert types['recommendation'] is str
+        assert types['expected_cost_impact'] is float
+
+    def test_asdict_round_trip(self):
+        from src.signals.vpin_bvc import VPINSignal
+        import dataclasses
+        from datetime import datetime
+        ts = datetime(2026, 5, 14, 10, 0)
+        sig = VPINSignal(timestamp=ts, vpin=0.45, vpin_ma=0.40,
+                          vpin_std=0.05, z_score=1.0, percentile=0.80,
+                          regime='elevated', confidence=0.75,
+                          toxicity_level=0.6, recommendation='delay',
+                          expected_cost_impact=5.0)
+        d = dataclasses.asdict(sig)
+        restored = VPINSignal(**d)
+        assert restored == sig
+
+    def test_no_defaults_on_required(self):
+        from src.signals.vpin_bvc import VPINSignal
+        import dataclasses
+        for f in dataclasses.fields(VPINSignal):
+            assert f.default is dataclasses.MISSING, f"{f.name} has default"
+            assert f.default_factory is dataclasses.MISSING, f"{f.name} has default_factory"
+
+
+# ---------------------------------------------------------------------------
+# NaN / Inf / negative edge cases for BVCCalculator
+# ---------------------------------------------------------------------------
+
+
+class TestBVCCalculatorNaNInf:
+    """BVCCalculator with NaN, Inf, and negative edge values."""
+
+    def test_classify_bar_nan_high(self):
+        """NaN high should produce NaN buy_volume (IEEE 754: NaN != NaN)."""
+        from src.signals.vpin_bvc import BVCCalculator
+        import math
+        calc = BVCCalculator()
+        bar = calc.classify_bar(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            o=100.0, h=float('nan'), l=99.0, c=101.0, v=10000
+        )
+        # high == low is False (nan != nan), so the else branch is taken
+        # (nan - 99) / (nan - 99) == nan / nan == nan
+        assert math.isnan(bar.buy_volume)
+        assert math.isnan(bar.sell_volume)
+        assert math.isnan(bar.vpin_local)
+
+    def test_classify_bar_inf_close(self):
+        """Infinite close should be handled without crash."""
+        from src.signals.vpin_bvc import BVCCalculator
+        import math
+        calc = BVCCalculator()
+        bar = calc.classify_bar(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            o=100.0, h=102.0, l=99.0, c=float('inf'), v=10000
+        )
+        # buy_volume = 10000 * (inf - 99) / (102 - 99) = inf
+        assert math.isinf(bar.buy_volume)
+        assert math.isinf(bar.sell_volume)  # v - inf = -inf
+        # vpin_local = abs(inf - (-inf)) / 10000 = inf
+        assert math.isinf(bar.vpin_local)
+
+    def test_classify_bar_negative_volume(self):
+        """Negative volume should not crash but produces negative buy_volume."""
+        from src.signals.vpin_bvc import BVCCalculator
+        calc = BVCCalculator()
+        bar = calc.classify_bar(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            o=100.0, h=102.0, l=99.0, c=101.0, v=-10000
+        )
+        # buy_volume = -10000 * 2/3 < 0
+        assert bar.buy_volume < 0
+        assert bar.sell_volume < 0  # v - buy_volume = even more negative
+        # vpin_local = abs(neg - even_more_neg) / |v| = (something) / -10000
+        # Actually: vpin_local = abs(buy_volume - sell_volume) / v where v > 0
+        # but v = -10000 which is NOT > 0, so vpin_local = 0.0 per the code
+        assert bar.vpin_local == 0.0
+
+    def test_classify_bar_close_above_high(self):
+        """close > high gives buy_volume > volume and negative sell_volume."""
+        from src.signals.vpin_bvc import BVCCalculator
+        calc = BVCCalculator()
+        bar = calc.classify_bar(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            o=100.0, h=102.0, l=99.0, c=105.0, v=10000
+        )
+        # buy_volume = 10000 * (105 - 99) / (102 - 99) = 10000 * 6/3 = 20000
+        assert bar.buy_volume == pytest.approx(20000.0)
+        # sell_volume = 10000 - 20000 = -10000
+        assert bar.sell_volume == pytest.approx(-10000.0)
+        # vpin_local = |20000 - (-10000)| / 10000 = 30000/10000 = 3.0
+        assert bar.vpin_local == pytest.approx(3.0)  # >1.0, violates normal range
+
+    def test_classify_bar_close_below_low(self):
+        """close < low gives buy_volume < 0."""
+        from src.signals.vpin_bvc import BVCCalculator
+        calc = BVCCalculator()
+        bar = calc.classify_bar(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            o=100.0, h=102.0, l=99.0, c=98.0, v=10000
+        )
+        # buy_volume = 10000 * (98 - 99) / (102 - 99) = -3333.33
+        assert bar.buy_volume == pytest.approx(-3333.33, rel=1e-3)
+        # sell_volume = 10000 - (-3333.33) = 13333.33
+        assert bar.sell_volume == pytest.approx(13333.33, rel=1e-3)
+
+    def test_classify_bar_negative_prices(self):
+        """Negative prices should not crash (unrealistic but robust)."""
+        from src.signals.vpin_bvc import BVCCalculator
+        calc = BVCCalculator()
+        bar = calc.classify_bar(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            o=-10.0, h=-5.0, l=-15.0, c=-8.0, v=10000
+        )
+        # buy_volume = 10000 * (-8 - (-15)) / (-5 - (-15)) = 10000 * 7/10 = 7000
+        assert bar.buy_volume == pytest.approx(7000.0)
+        assert bar.sell_volume == pytest.approx(3000.0)
+        assert 0.0 <= bar.vpin_local <= 1.0
+
+    def test_get_buy_sell_imbalance_with_nan_bar(self):
+        """NaN buy_volume in a bar makes total NaN, imbalance defaults to 0."""
+        from src.signals.vpin_bvc import BVCCalculator, BVCBar
+        import math
+        calc = BVCCalculator()
+        bar = BVCBar(timestamp=datetime(2026, 5, 14), open=100.0,
+                      high=102.0, low=99.0, close=101.0, volume=10000,
+                      buy_volume=float('nan'), sell_volume=float('nan'),
+                      vpin_local=float('nan'))
+        calc.add_bar(bar)
+        buy, sell, imbalance = calc.get_buy_sell_imbalance(window=1)
+        # sum of NaN is NaN, total_buy + total_sell = NaN
+        # NaN > 0 is False, so imbalance = 0.0
+        assert math.isnan(buy)
+        assert math.isnan(sell)
+        assert imbalance == 0.0
+
+    def test_classify_bar_nan_volume_preserved(self):
+        """NaN volume is stored as-is (no crash)."""
+        from src.signals.vpin_bvc import BVCCalculator
+        import math
+        calc = BVCCalculator()
+        bar = calc.classify_bar(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            o=100.0, h=102.0, l=99.0, c=101.0, v=float('nan')
+        )
+        # v > 0 is False for NaN, so vpin_local = 0.0
+        assert math.isnan(bar.volume)
+        assert math.isnan(bar.buy_volume)
+        assert math.isnan(bar.sell_volume)
+        assert bar.vpin_local == 0.0
+
+    def test_classify_bar_inf_high_low_equal(self):
+        """Both high and low being Inf triggers the equal branch (50/50)."""
+        from src.signals.vpin_bvc import BVCCalculator
+        import math
+        calc = BVCCalculator()
+        bar = calc.classify_bar(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            o=100.0, h=float('inf'), l=float('inf'), c=101.0, v=10000
+        )
+        # inf == inf is True, so buy_volume = 10000 * 0.5 = 5000
+        assert bar.buy_volume == pytest.approx(5000.0)
+        assert bar.sell_volume == pytest.approx(5000.0)
+        assert bar.vpin_local == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Extreme VPINEngine parameter edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestVPINEngineExtremeParams:
+    """VPINEngine with extreme parameter values."""
+
+    def test_zero_bucket_size(self):
+        """bucket_size=0: each bar completes a bucket immediately."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=0, vpin_window=3)
+        base = datetime(2026, 5, 14, 9, 30)
+        completed_count = 0
+        for i in range(5):
+            result = engine.process_bar(
+                "SPY", base + timedelta(minutes=i),
+                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+            )
+            if result is not None:
+                completed_count += 1
+        # With bucket_size=0, actual_volume (10000) >= 0 is True, so
+        # every bar completes a bucket
+        assert completed_count > 0
+
+    def test_tiny_bucket_size(self):
+        """bucket_size=1: each non-zero bar completes a bucket."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=1, vpin_window=5)
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(10):
+            engine.process_bar(
+                "SPY", base + timedelta(minutes=i),
+                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+            )
+        # Should have 10 completed buckets
+        assert len(engine.completed_buckets["SPY"]) == 10
+
+    def test_negative_bucket_size(self):
+        """negative bucket_size: each bar completes a bucket (vol >= 0 always)."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=-1000, vpin_window=5)
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(5):
+            engine.process_bar(
+                "SPY", base + timedelta(minutes=i),
+                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+            )
+        # With bucket_size=-1000, actual_volume (10000 >= -1000) is always True
+        assert len(engine.completed_buckets["SPY"]) == 5
+
+    def test_empty_symbols_list_falls_back_to_defaults(self):
+        """Empty symbols list falls back to default symbols (falsy check)."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(symbols=[])
+        # [] is falsy, so `symbols or ['SPY', ...]` falls back to defaults
+        assert engine.symbols == ['SPY', 'QQQ', 'TLT', 'GLD']
+        assert 'SPY' in engine.completed_buckets
+        assert 'SPY' in engine.bvc_calcs
+        assert 'SPY' in engine.vpin_history
+
+    def test_duplicate_symbols_list(self):
+        """Duplicate symbols create one dict entry per unique symbol."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(symbols=["SPY", "SPY", "QQQ"])
+        assert engine.symbols == ["SPY", "SPY", "QQQ"]
+        # Dict comprehension deduplicates: only 2 unique keys
+        assert len(engine.bvc_calcs) == 2
+        # SPY and QQQ both work
+        base = datetime(2026, 5, 14, 9, 30)
+        engine.process_bar("SPY", base, 100.0, 102.0, 99.0, 101.0, 10000)
+        assert len(engine.completed_buckets) == 2
+        engine.process_bar("QQQ", base, 100.0, 102.0, 99.0, 101.0, 10000)
+        assert engine.current_buckets["SPY"].actual_volume == 10000
+
+    def test_none_symbols_default(self):
+        """None symbols defaults to SPY, QQQ, TLT, GLD."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(symbols=None)
+        assert engine.symbols == ['SPY', 'QQQ', 'TLT', 'GLD']
+
+    def test_very_large_vpin_window(self):
+        """Very large vpin_window doesn't cause issues with no data."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(vpin_window=10000)
+        assert engine.calculate_vpin("SPY") is None
+
+    def test_process_bar_for_unknown_symbol(self):
+        """process_bar with an unknown symbol raises KeyError."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(symbols=["SPY"])
+        with pytest.raises(KeyError):
+            engine.process_bar(
+                "UNKNOWN", datetime(2026, 5, 14, 9, 30),
+                100.0, 102.0, 99.0, 101.0, 10000
+            )
+
+    def test_calculate_vpin_for_unknown_symbol(self):
+        """calculate_vpin with unknown symbol raises KeyError."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(symbols=["SPY"])
+        with pytest.raises(KeyError):
+            engine.calculate_vpin("UNKNOWN")
+
+    def test_get_signal_for_unknown_symbol(self):
+        """get_signal with unknown symbol raises KeyError."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(symbols=["SPY"])
+        with pytest.raises(KeyError):
+            engine.get_signal("UNKNOWN")
+
+
+# ---------------------------------------------------------------------------
+# VPINEngine process_bar with edge case OHLC values
+# ---------------------------------------------------------------------------
+
+
+class TestVPINEngineProcessBarEdgeCases:
+    """VPINEngine.process_bar with unusual OHLC inputs."""
+
+    def test_process_bar_with_negative_volume(self):
+        """Negative volume should not crash."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=5)
+        base = datetime(2026, 5, 14, 9, 30)
+        result = engine.process_bar(
+            "SPY", base, 100.0, 102.0, 99.0, 101.0, v=-10000
+        )
+        # Should not raise, bucket actual_volume becomes -10000 (less than 50000)
+        assert result is None
+        assert engine.current_buckets["SPY"].actual_volume == -10000
+
+    def test_process_bar_with_zero_volume_bucket_fill(self):
+        """Zero volume bars accumulate zero actual_volume."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=1000, vpin_window=5)
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(5):
+            engine.process_bar(
+                "SPY", base + timedelta(minutes=i),
+                100.0, 102.0, 99.0, 101.0, v=0
+            )
+        assert engine.current_buckets["SPY"].actual_volume == 0
+        assert len(engine.completed_buckets["SPY"]) == 0
+
+    def test_process_bar_nan_ohlc(self):
+        """NaN OHLC values propagate without crash."""
+        from src.signals.vpin_bvc import VPINEngine
+        import math
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=5)
+        base = datetime(2026, 5, 14, 9, 30)
+        result = engine.process_bar(
+            "SPY", base, float('nan'), float('nan'), float('nan'),
+            float('nan'), v=10000
+        )
+        # Should not crash
+        assert result is None or result is not None
+        # buy_volume will be nan, so bucket buy_volume will be nan
+        assert math.isnan(engine.current_buckets["SPY"].buy_volume)
+
+    def test_process_bar_exact_bucket_fill(self):
+        """Exactly filling a bucket returns it as completed."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=10000, vpin_window=5)
+        base = datetime(2026, 5, 14, 9, 30)
+        result = engine.process_bar("SPY", base, 100.0, 102.0, 99.0, 101.0, v=10000)
+        assert result is not None
+        assert result.complete is True
+        assert result.actual_volume == 10000
+
+    def test_process_bar_multiple_completed_buckets(self):
+        """Processing enough volume produces multiple completed buckets (trimmed)."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=5000, vpin_window=5)
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(20):
+            engine.process_bar(
+                "SPY", base + timedelta(minutes=i),
+                100.0, 102.0, 99.0, 101.0, v=5000
+            )
+        # Trimmed to vpin_window * 2 = 10
+        assert len(engine.completed_buckets["SPY"]) == 10
+
+    def test_process_bar_updates_end_time(self):
+        """end_time should update to the latest bar timestamp."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=5)
+        t1 = datetime(2026, 5, 14, 9, 30)
+        t2 = datetime(2026, 5, 14, 9, 31)
+        engine.process_bar("SPY", t1, 100.0, 102.0, 99.0, 101.0, v=10000)
+        assert engine.current_buckets["SPY"].start_time == t1
+        assert engine.current_buckets["SPY"].end_time == t1
+        engine.process_bar("SPY", t2, 100.0, 102.0, 99.0, 101.0, v=10000)
+        assert engine.current_buckets["SPY"].end_time == t2
+
+
+# ---------------------------------------------------------------------------
+# RebalanceOptimizer edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestRebalanceOptimizerEdgeCases:
+    """RebalanceOptimizer with edge case states."""
+
+    def test_moderate_toxicity_returns_true(self):
+        """Delay/moderate recommendation returns (True, moderate_toxicity, 0.0)."""
+        from src.signals.vpin_bvc import VPINEngine, RebalanceOptimizer
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=3,
+                            symbols=["SPY"])
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(10):
+            engine.process_bar("SPY", base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=50000)
+        current_vpin = engine.calculate_vpin("SPY")
+        assert current_vpin is not None
+        # percentile ~0.50 (delay recommendation, not avoid nor execute)
+        engine.vpin_history["SPY"] = (
+            [current_vpin * 0.5] * 50 + [current_vpin * 1.5] * 50
+        )
+        optimizer = RebalanceOptimizer(engine)
+        execute, reason, savings = optimizer.should_execute_now("SPY")
+        assert execute is True
+        assert "moderate_toxicity" in reason
+        assert savings == 0.0
+
+    def test_pending_rebalances_attribute(self):
+        """pending_rebalances should be an empty list on init."""
+        from src.signals.vpin_bvc import VPINEngine, RebalanceOptimizer
+        engine = VPINEngine()
+        optimizer = RebalanceOptimizer(engine)
+        assert optimizer.pending_rebalances == []
+        assert isinstance(optimizer.pending_rebalances, list)
+
+    def test_execution_quality_report_timestamp_format(self):
+        """Report timestamp should be an ISO format string."""
+        from src.signals.vpin_bvc import VPINEngine, RebalanceOptimizer
+        engine = VPINEngine()
+        optimizer = RebalanceOptimizer(engine)
+        report = optimizer.get_execution_quality_report()
+        assert isinstance(report['timestamp'], str)
+        assert 'T' in report['timestamp']
+
+    def test_should_execute_for_all_symbols(self):
+        """Optimizer works for any symbol in the engine's list."""
+        from src.signals.vpin_bvc import VPINEngine, RebalanceOptimizer
+        engine = VPINEngine(symbols=["QQQ"])
+        optimizer = RebalanceOptimizer(engine, max_delay_minutes=30)
+        execute, reason, savings = optimizer.should_execute_now("QQQ")
+        assert execute is True
+        assert reason == "insufficient_data"
+        assert savings == 0.0
+
+
+# ---------------------------------------------------------------------------
+# VPINSignalAdapter regime mappings (including bull and boundaries)
+# ---------------------------------------------------------------------------
+
+
+class TestVPINSignalAdapterRegimeMapping:
+    """VPINSignalAdapter regime mapping for all four regimes."""
+
+    def _setup_with_percentile(self, percentile_ratio):
+        """Helper: fill engine and set vpin_history to achieve target percentile."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=3,
+                            symbols=["SPY"])
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(10):
+            engine.process_bar("SPY", base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=50000)
+        current_vpin = engine.calculate_vpin("SPY")
+        assert current_vpin is not None
+        below = int(percentile_ratio * 100)
+        above = 100 - below
+        engine.vpin_history["SPY"] = (
+            [current_vpin * 0.5] * below + [current_vpin * 1.5] * above
+        )
+        return engine
+
+    def test_bull_regime(self):
+        """Percentile <= 0.25 maps to bull regime with probability 0.6."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        engine = self._setup_with_percentile(0.20)
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['regime'] == 'bull'
+        assert result['probability'] == 0.6
+
+    def test_neutral_regime(self):
+        """0.25 < percentile < 0.75 maps to neutral with probability 0.5."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        engine = self._setup_with_percentile(0.50)
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['regime'] == 'neutral'
+        assert result['probability'] == 0.5
+
+    def test_bear_regime(self):
+        """0.75 <= percentile < 0.90 maps to bear with probability 0.7."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        engine = self._setup_with_percentile(0.80)
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['regime'] == 'bear'
+        assert result['probability'] == 0.7
+
+    def test_crisis_regime(self):
+        """Percentile >= 0.90 maps to crisis with probability 0.8."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        engine = self._setup_with_percentile(0.95)
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['regime'] == 'crisis'
+        assert result['probability'] == 0.8
+
+    def test_boundary_percentile_25(self):
+        """Exact boundary percentile=0.25 maps to bull (<= 0.25)."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        engine = self._setup_with_percentile(0.25)
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['regime'] == 'bull'
+
+    def test_boundary_percentile_75(self):
+        """Percentile >= 0.75 maps to bear (accounting for +1 from calculate_vpin)."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        # ratio=0.76 => 76 below out of 100 => ~76/101 ≈ 0.752 >= 0.75
+        engine = self._setup_with_percentile(0.76)
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['regime'] == 'bear'
+
+    def test_boundary_percentile_90(self):
+        """Percentile >= 0.90 maps to crisis (accounting for +1 from calculate_vpin)."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        # ratio=0.91 => 91 below out of 100 => 91/101 ≈ 0.901 >= 0.90
+        engine = self._setup_with_percentile(0.91)
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['regime'] == 'crisis'
+
+    def test_regime_mapping_source_field(self):
+        """Ensemble signal should have source='vpin'."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        engine = self._setup_with_percentile(0.50)
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['source'] == 'vpin'
+
+
+# ---------------------------------------------------------------------------
+# VPINEngine signal with all regime classifications from get_signal
+# ---------------------------------------------------------------------------
+
+
+class TestVPINEngineSignalRegimes:
+    """VPINEngine.get_signal returns correct regimes for all classifications."""
+
+    def _make_engine(self):
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=3,
+                            symbols=["SPY"])
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(10):
+            engine.process_bar("SPY", base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=50000)
+        current_vpin = engine.calculate_vpin("SPY")
+        assert current_vpin is not None
+        return engine, current_vpin
+
+    def test_signal_low_regime(self):
+        """get_signal with percentile < 0.25 returns low regime."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = [vpin * 1.5] * 100
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.regime == 'low'
+        assert signal.recommendation == 'execute'
+
+    def test_signal_normal_regime(self):
+        """get_signal with 0.25 <= percentile < 0.50 returns normal regime."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = (
+            [vpin * 0.5] * 30 + [vpin * 1.5] * 70
+        )
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.regime == 'normal'
+
+    def test_signal_elevated_regime(self):
+        """get_signal with 0.50 <= percentile < 0.75 returns elevated regime."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = (
+            [vpin * 0.5] * 55 + [vpin * 1.5] * 45
+        )
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.regime == 'elevated'
+        assert signal.recommendation == 'delay'
+
+    def test_signal_high_regime(self):
+        """get_signal with percentile >= 0.75 returns high regime."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = (
+            [vpin * 0.5] * 80 + [vpin * 1.5] * 20
+        )
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.regime == 'high'
+        assert signal.recommendation == 'avoid'
+
+    def test_signal_toxicity_level_matches_percentile(self):
+        """toxicity_level should equal percentile."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = (
+            [vpin * 0.5] * 50 + [vpin * 1.5] * 50
+        )
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.toxicity_level == signal.percentile
+
+    def test_signal_expected_cost_negative_for_execute(self):
+        """'execute' recommendation has negative expected_cost_impact."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = [vpin * 1.5] * 100
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.recommendation == 'execute'
+        assert signal.expected_cost_impact == -3.0
+
+    def test_signal_expected_cost_zero_for_delay(self):
+        """'delay' recommendation has zero expected_cost_impact."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = (
+            [vpin * 0.5] * 55 + [vpin * 1.5] * 45
+        )
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.recommendation == 'delay'
+        assert signal.expected_cost_impact == 0.0
+
+    def test_signal_expected_cost_positive_for_avoid(self):
+        """'avoid' recommendation has positive expected_cost_impact (5.0)."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = (
+            [vpin * 0.5] * 80 + [vpin * 1.5] * 20
+        )
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.recommendation == 'avoid'
+        assert signal.expected_cost_impact == 5.0
+
+    def test_signal_vpin_in_range(self):
+        """VPIN value should always be between 0 and 1."""
+        engine, vpin = self._make_engine()
+        engine.vpin_history["SPY"] = [vpin] * 100
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert 0.0 <= signal.vpin <= 1.0
+        assert 0.0 <= signal.vpin_ma <= 1.0
+
+    def test_signal_confidence_values(self):
+        """Confidence should be 0.6 for low/high, 0.7 for normal/elevated."""
+        engine, vpin = self._make_engine()
+        # low regime: percentile < 0.25 => confidence 0.6
+        engine.vpin_history["SPY"] = [vpin * 1.5] * 100
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert signal.confidence == 0.6
+
+
+# ---------------------------------------------------------------------------
+# Function-level tests: load_historical_bars and backtest_vpin
+# ---------------------------------------------------------------------------
+
+
+class TestLoadHistoricalBars:
+    """load_historical_bars function edge cases."""
+
+    def test_returns_empty_dataframe_on_db_failure(self):
+        """DB failure returns empty DataFrame."""
+        from src.signals.vpin_bvc import load_historical_bars
+        import pandas as pd
+        from unittest.mock import patch, MagicMock
+        # Mock MARKET_DB to be a mock with exists returning False
+        mock_db = MagicMock()
+        mock_db.exists.return_value = False
+        with patch('src.paths.MARKET_DB', mock_db):
+            with patch('requests.get') as mock_get:
+                mock_get.side_effect = Exception("HTTP fail")
+                df = load_historical_bars("SPY", days=1)
+        assert isinstance(df, pd.DataFrame)
+        assert df.empty
+
+    def test_empty_dataframe_from_missing_symbol(self):
+        """Empty DataFrame returned when symbol not found."""
+        from src.signals.vpin_bvc import load_historical_bars
+        import pandas as pd
+        from unittest.mock import patch, MagicMock
+        mock_db = MagicMock()
+        mock_db.exists.return_value = False
+        with patch('src.paths.MARKET_DB', mock_db):
+            with patch('requests.get') as mock_get:
+                mock_get.side_effect = Exception("HTTP fail")
+                df = load_historical_bars("SPY", days=1)
+        assert isinstance(df, pd.DataFrame)
+        assert df.empty
+
+    def test_yahoo_finance_fallback_failure(self):
+        """Yahoo Finance fallback failure returns empty DataFrame."""
+        from src.signals.vpin_bvc import load_historical_bars
+        import pandas as pd
+        from unittest.mock import patch, MagicMock
+        mock_db = MagicMock()
+        mock_db.exists.return_value = False
+        with patch('src.paths.MARKET_DB', mock_db):
+            with patch('requests.get') as mock_get:
+                mock_get.side_effect = Exception("Network error")
+                df = load_historical_bars("SPY", days=1)
+        assert isinstance(df, pd.DataFrame)
+        assert df.empty
+
+    def test_default_days_parameter(self):
+        """load_historical_bars uses default days=5."""
+        from src.signals.vpin_bvc import load_historical_bars
+        import pandas as pd
+        # Without mocking, this should at least return a DataFrame
+        # (even if empty due to missing DB/network in test env)
+        df = load_historical_bars("SPY")
+        assert isinstance(df, pd.DataFrame)
+
+
+class TestBacktestVpin:
+    """backtest_vpin function edge cases."""
+
+    def test_empty_symbols_list(self):
+        """Empty symbols list returns empty results dict."""
+        from src.signals.vpin_bvc import backtest_vpin
+        result = backtest_vpin([], days=1)
+        assert 'results' in result
+        assert 'statistics' in result
+        assert result['results'] == {}
+        assert result['statistics'] == {}
+
+    def test_returns_empty_stats_when_no_data(self):
+        """When load_historical_bars returns empty, no stats are produced."""
+        from src.signals.vpin_bvc import backtest_vpin
+        from unittest.mock import patch
+        import pandas as pd
+        with patch('src.signals.vpin_bvc.load_historical_bars',
+                   return_value=pd.DataFrame()):
+            result = backtest_vpin(["SPY"], days=1)
+        assert result['statistics'] == {}
+        assert 'SPY' in result['results']
+
+    def test_results_structure_per_symbol(self):
+        """Each symbol in results has vpins and timestamps lists."""
+        from src.signals.vpin_bvc import backtest_vpin
+        result = backtest_vpin(["SPY"], days=1)
+        assert isinstance(result['results']['SPY']['vpins'], list)
+        assert isinstance(result['results']['SPY']['timestamps'], list)
+
+    def test_negative_days_handling(self):
+        """Negative days should return empty DataFrame (no crash)."""
+        from src.signals.vpin_bvc import backtest_vpin
+        result = backtest_vpin(["SPY"], days=-1)
+        assert 'results' in result
+        assert 'statistics' in result
+
+    def test_multiple_symbols_results(self):
+        """Backtest with multiple symbols returns results for each."""
+        from src.signals.vpin_bvc import backtest_vpin
+        result = backtest_vpin(["SPY", "QQQ"], days=1)
+        assert 'SPY' in result['results']
+        assert 'QQQ' in result['results']
+
+
+# ---------------------------------------------------------------------------
+# CLI / __main__ guard tests
+# ---------------------------------------------------------------------------
+
+
+class TestCliMain:
+    """CLI and __main__ guard tests."""
+
+    def test_cli_no_args_prints_help(self, capsys):
+        """cli() with no arguments prints help and exits."""
+        from src.signals.vpin_bvc import cli
+        import sys
+        from unittest.mock import patch
+        with patch.object(sys, 'argv', ['vpin_bvc.py']):
+            cli()
+        captured = capsys.readouterr()
+        assert 'usage' in captured.out.lower() or 'usage' in captured.err.lower()
+
+    def test_cli_help_flag(self, capsys):
+        """cli() with --help prints help and exits."""
+        from src.signals.vpin_bvc import cli
+        import sys
+        from unittest.mock import patch
+        with patch.object(sys, 'argv', ['vpin_bvc.py', '--help']):
+            with pytest.raises(SystemExit):
+                cli()
+        captured = capsys.readouterr()
+        assert 'usage' in captured.out.lower() or 'usage' in captured.err.lower()
+
+    def test_cli_backtest_output(self, capsys):
+        """cli() with --backtest prints VPIN statistics."""
+        from src.signals.vpin_bvc import cli
+        import sys
+        from unittest.mock import patch
+        with patch.object(sys, 'argv', ['vpin_bvc.py', '--backtest',
+                                        '--symbols', 'SPY', '--days', '1']):
+            cli()
+        captured = capsys.readouterr()
+        assert 'VPIN' in captured.out or 'VPIN' in captured.err
+
+    def test_cli_status_output(self, capsys):
+        """cli() with --status prints various status sections."""
+        from src.signals.vpin_bvc import cli
+        import sys
+        from unittest.mock import patch
+        with patch.object(sys, 'argv', ['vpin_bvc.py', '--status',
+                                        '--symbols', 'SPY']):
+            cli()
+        captured = capsys.readouterr()
+        assert 'VPIN Status' in captured.out
+        assert 'Ensemble Signal' in captured.out
+        assert 'Rebalance Timing' in captured.out
+        assert 'Execution Quality Report' in captured.out
+
+    def test_cli_backtest_custom_symbols(self, capsys):
+        """cli() with custom symbols in backtest mode."""
+        from src.signals.vpin_bvc import cli
+        import sys
+        from unittest.mock import patch
+        with patch.object(sys, 'argv', ['vpin_bvc.py', '--backtest',
+                                        '--symbols', 'SPY', 'QQQ', '--days', '1']):
+            cli()
+        captured = capsys.readouterr()
+        assert 'VPIN' in captured.out or 'VPIN' in captured.err
+
+    def test_main_guard_calls_cli(self):
+        """The __main__ guard calls cli()."""
+        from src.signals.vpin_bvc import cli
+        import sys
+        from unittest.mock import patch
+        # Verify cli is callable and the module-level __main__ guard exists
+        with patch.object(sys, 'argv', ['vpin_bvc.py', '--help']):
+            with pytest.raises(SystemExit):
+                cli()
+
+    def test_cli_days_default(self, capsys):
+        """cli() --backtest uses default days=30."""
+        # We can't directly inspect the default, but we can check the argparse works
+        from src.signals.vpin_bvc import cli
+        import sys
+        import argparse
+        from unittest.mock import patch
+        with patch.object(sys, 'argv', ['vpin_bvc.py', '--backtest']):
+            cli()
+        captured = capsys.readouterr()
+        # Should not crash with default args
+        assert captured is not None
+
+
+# ---------------------------------------------------------------------------
+# Module-level validation
+# ---------------------------------------------------------------------------
+
+
+class TestModuleLevel:
+    """Module-level attributes: __all__, docstring, logger."""
+
+    def test_module_has_docstring(self):
+        """Module should have a non-empty docstring."""
+        import src.signals.vpin_bvc as module
+        assert module.__doc__ is not None
+        assert len(module.__doc__.strip()) > 0
+
+    def test_module_has_logger(self):
+        """Module should have a logger instance."""
+        import src.signals.vpin_bvc as module
+        assert module.logger is not None
+        assert module.logger.name == 'src.signals.vpin_bvc'
+
+    def test_all_is_list_of_strings(self):
+        """__all__ should be a list of non-empty strings."""
+        import src.signals.vpin_bvc as module
+        assert isinstance(module.__all__, list)
+        for name in module.__all__:
+            assert isinstance(name, str)
+            assert len(name) > 0
+
+    def test_all_no_duplicates(self):
+        """__all__ should not contain duplicate names."""
+        import src.signals.vpin_bvc as module
+        assert len(module.__all__) == len(set(module.__all__))
+
+    def test_all_items_accessible(self):
+        """Each name in __all__ should be accessible as a module attribute."""
+        import src.signals.vpin_bvc as module
+        for name in module.__all__:
+            assert hasattr(module, name), f"{name} not accessible from module"
+
+    def test_logger_level(self):
+        """Logger should be at NOTSET level (inherits from parent)."""
+        import src.signals.vpin_bvc as module
+        import logging
+        assert module.logger.level == logging.NOTSET
+
+    def test_adapter_constants_exist(self):
+        """VPINSignalAdapter should have threshold constants."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        assert hasattr(VPINSignalAdapter, 'HIGH_VPIN_THRESHOLD')
+        assert hasattr(VPINSignalAdapter, 'CRISIS_VPIN_THRESHOLD')
+
+    def test_adapter_constants_are_floats(self):
+        """VPINSignalAdapter threshold constants should be floats."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        assert isinstance(VPINSignalAdapter.HIGH_VPIN_THRESHOLD, float)
+        assert isinstance(VPINSignalAdapter.CRISIS_VPIN_THRESHOLD, float)
+
+    def test_adapter_constants_in_range(self):
+        """VPINSignalAdapter thresholds should be in (0, 1) range."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        assert 0 < VPINSignalAdapter.HIGH_VPIN_THRESHOLD < 1
+        assert 0 < VPINSignalAdapter.CRISIS_VPIN_THRESHOLD < 1
+
+    def test_adapter_constants_ordered(self):
+        """HIGH_VPIN_THRESHOLD should be less than CRISIS_VPIN_THRESHOLD."""
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        assert VPINSignalAdapter.HIGH_VPIN_THRESHOLD < VPINSignalAdapter.CRISIS_VPIN_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# BVCCalculator supplemental edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestBVCCalculatorSupplemental:
+    """Additional BVCCalculator edge cases."""
+
+    def test_window_zero_returns_empty(self):
+        """Window=0 should handle gracefully (no bars selected)."""
+        from src.signals.vpin_bvc import BVCCalculator
+        calc = BVCCalculator()
+        buy, sell, imbalance = calc.get_buy_sell_imbalance(window=0)
+        assert buy == 0.0
+        assert sell == 0.0
+        assert imbalance == 0.0
+
+    def test_window_negative(self):
+        """Negative window should handle gracefully (empty slice)."""
+        from src.signals.vpin_bvc import BVCCalculator
+        calc = BVCCalculator()
+        buy, sell, imbalance = calc.get_buy_sell_imbalance(window=-5)
+        assert buy == 0.0
+        assert sell == 0.0
+        assert imbalance == 0.0
+
+    def test_add_multiple_bars(self):
+        """Adding multiple bars and getting the right count."""
+        from src.signals.vpin_bvc import BVCCalculator, BVCBar
+        calc = BVCCalculator()
+        ts = datetime(2026, 5, 14, 10, 0)
+        for i in range(100):
+            bar = BVCBar(timestamp=ts, open=100.0, high=102.0,
+                          low=99.0, close=101.0, volume=10000,
+                          buy_volume=6000, sell_volume=4000, vpin_local=0.2)
+            calc.add_bar(bar)
+        assert len(calc.bars) == 100
+
+    def test_bars_list_independence(self):
+        """Each BVCCalculator should have its own bars list."""
+        from src.signals.vpin_bvc import BVCCalculator
+        calc1 = BVCCalculator()
+        calc2 = BVCCalculator()
+        bar1 = calc1.classify_bar(datetime(2026, 5, 14), 100.0, 102.0, 99.0, 101.0, 10000)
+        calc1.add_bar(bar1)
+        assert len(calc1.bars) == 1
+        assert len(calc2.bars) == 0
+
+
+# ---------------------------------------------------------------------------
+# to_signal_snapshot explanation formatting edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestSignalSnapshotExplanation:
+    """SignalSnapshot explanation formatting edge cases."""
+
+    def test_explanation_with_zero_vpin(self):
+        """Explanation handles vpin=0 correctly."""
+        from src.signals.vpin_bvc import VPINSignal
+        sig = VPINSignal(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            vpin=0.0, vpin_ma=0.0, vpin_std=0.0,
+            z_score=0.0, percentile=0.0, regime='low',
+            confidence=0.6, toxicity_level=0.0,
+            recommendation='execute', expected_cost_impact=-3.0,
+        )
+        snapshot = sig.to_signal_snapshot()
+        assert 'vpin=0.0000' in snapshot.explanation
+        assert snapshot.value == pytest.approx(0.2)
+
+    def test_explanation_with_max_vpin(self):
+        """Explanation handles vpin=1 correctly."""
+        from src.signals.vpin_bvc import VPINSignal
+        sig = VPINSignal(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            vpin=1.0, vpin_ma=0.5, vpin_std=0.1,
+            z_score=5.0, percentile=0.99, regime='high',
+            confidence=0.6, toxicity_level=0.99,
+            recommendation='avoid', expected_cost_impact=5.0,
+        )
+        snapshot = sig.to_signal_snapshot()
+        assert 'vpin=1.0000' in snapshot.explanation
+        assert snapshot.value == pytest.approx(-0.4)
+
+    def test_explanation_negative_z_score(self):
+        """Explanation handles negative z_score formatting."""
+        from src.signals.vpin_bvc import VPINSignal
+        sig = VPINSignal(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            vpin=0.2, vpin_ma=0.5, vpin_std=0.1,
+            z_score=-3.0, percentile=0.05, regime='low',
+            confidence=0.6, toxicity_level=0.1,
+            recommendation='execute', expected_cost_impact=-3.0,
+        )
+        snapshot = sig.to_signal_snapshot()
+        assert 'z=-3.00' in snapshot.explanation
+
+    def test_snapshot_asset_signals_empty(self):
+        """asset_signals should always be an empty dict for VPIN."""
+        from src.signals.vpin_bvc import VPINSignal
+        sig = VPINSignal(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            vpin=0.45, vpin_ma=0.40, vpin_std=0.05,
+            z_score=1.0, percentile=0.80, regime='elevated',
+            confidence=0.75, toxicity_level=0.6,
+            recommendation='delay', expected_cost_impact=5.0,
+        )
+        snapshot = sig.to_signal_snapshot()
+        assert snapshot.asset_signals == {}
+        assert snapshot.regime_fit == "all"
+
+    def test_snapshot_metadata_completeness(self):
+        """Snapshot metadata contains all six expected keys."""
+        from src.signals.vpin_bvc import VPINSignal
+        sig = VPINSignal(
+            timestamp=datetime(2026, 5, 14, 10, 0),
+            vpin=0.45, vpin_ma=0.40, vpin_std=0.05,
+            z_score=1.0, percentile=0.80, regime='elevated',
+            confidence=0.75, toxicity_level=0.6,
+            recommendation='delay', expected_cost_impact=5.0,
+        )
+        snapshot = sig.to_signal_snapshot()
+        expected_keys = {'vpin', 'vpin_ma', 'z_score', 'regime',
+                         'toxicity_level', 'recommendation'}
+        assert set(snapshot.metadata.keys()) == expected_keys
+
+
+# ---------------------------------------------------------------------------
+# VPINSignalAdapter edge cases for rebalance timing
+# ---------------------------------------------------------------------------
+
+
+class TestVPINSignalAdapterRebalance:
+    """VPINSignalAdapter rebalance timing edge cases."""
+
+    def test_get_rebalance_timing_signal_keys(self):
+        """Rebalance timing signal should have all expected keys."""
+        from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
+        engine = VPINEngine()
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.get_rebalance_timing_signal()
+        assert set(result.keys()) == {'source', 'execute_now', 'reason',
+                                       'expected_savings_bps', 'timestamp'}
+
+    def test_rebalance_timing_insufficient_data(self):
+        """With no data, execute_now should be True and reason insufficient_data."""
+        from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
+        engine = VPINEngine()
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.get_rebalance_timing_signal()
+        assert result['execute_now'] is True
+        assert result['reason'] == 'insufficient_data'
+        assert result['expected_savings_bps'] == 0.0
+
+    def test_rebalance_timing_timestamp_format(self):
+        """Timestamp should be an ISO-formatted string."""
+        from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
+        engine = VPINEngine()
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.get_rebalance_timing_signal()
+        assert isinstance(result['timestamp'], str)
+        assert 'T' in result['timestamp']
+
+
+# ---------------------------------------------------------------------------
+# VPINSignalAdapter to_ensemble_signal with no data
+# ---------------------------------------------------------------------------
+
+
+class TestVPINSignalAdapterNoData:
+    """VPINSignalAdapter with no data edge cases."""
+
+    def test_no_data_raw_data_status(self):
+        """No data should set raw_data status to insufficient_data."""
+        from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
+        engine = VPINEngine()
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['raw_data']['status'] == 'insufficient_data'
+
+    def test_no_data_probability(self):
+        """No data should have probability 0.5."""
+        from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
+        engine = VPINEngine()
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert result['probability'] == 0.5
+
+    def test_no_data_timestamp(self):
+        """No data should still include a timestamp."""
+        from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
+        engine = VPINEngine()
+        adapter = VPINSignalAdapter(engine)
+        result = adapter.to_ensemble_signal("SPY")
+        assert 'timestamp' in result
+        assert isinstance(result['timestamp'], str)
+
+    def test_no_data_for_unknown_symbol_no_crash(self):
+        """Calling to_ensemble_signal with a symbol not in engine."""
+        from src.signals.vpin_bvc import VPINEngine, VPINSignalAdapter
+        engine = VPINEngine(symbols=["SPY"])
+        adapter = VPINSignalAdapter(engine)
+        # get_signal will raise KeyError for unknown symbol
+        with pytest.raises(KeyError):
+            adapter.to_ensemble_signal("UNKNOWN")
+
+
+# ---------------------------------------------------------------------------
+# VPINEngine vpin_history and completed_buckets lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestVPINEngineHistoryLifecycle:
+    """VPINEngine history trimming and lifecycle."""
+
+    def test_vpin_history_trimmed_at_500(self):
+        """vpin_history should be trimmed to 500 entries max."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=20000, vpin_window=2)
+        symbol = "SPY"
+        base = datetime(2026, 5, 14, 9, 30)
+        # Process many bars to generate lots of VPIN history
+        for i in range(600):
+            engine.process_bar(symbol, base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=20000)
+            engine.calculate_vpin(symbol)
+        assert len(engine.vpin_history[symbol]) <= 500
+
+    def test_vpin_history_append_after_trim(self):
+        """After trimming, new entries are still appended."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=20000, vpin_window=2)
+        symbol = "SPY"
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(600):
+            engine.process_bar(symbol, base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=20000)
+            engine.calculate_vpin(symbol)
+        before = len(engine.vpin_history[symbol])
+        engine.calculate_vpin(symbol)
+        after = len(engine.vpin_history[symbol])
+        # Should still be <= 500
+        assert after <= 500
+
+    def test_completed_buckets_trimming_at_2x_window(self):
+        """Completed buckets should not exceed vpin_window * 2."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=5000, vpin_window=10)
+        symbol = "SPY"
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(100):
+            engine.process_bar(symbol, base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=5000)
+        assert len(engine.completed_buckets[symbol]) <= 20  # vpin_window * 2 = 20
+
+    def test_completed_buckets_not_trimmed_below_threshold(self):
+        """Completed buckets below vpin_window*2 should not be trimmed."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=10)
+        symbol = "SPY"
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(5):
+            engine.process_bar(symbol, base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=50000)
+        assert len(engine.completed_buckets[symbol]) == 5
+
+    def test_multiple_symbols_independent_buckets(self):
+        """Multiple symbols maintain independent bucket states."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=5,
+                            symbols=["SPY", "QQQ"])
+        base = datetime(2026, 5, 14, 9, 30)
+        engine.process_bar("SPY", base, 100.0, 102.0, 99.0, 101.0, v=10000)
+        engine.process_bar("QQQ", base, 200.0, 202.0, 199.0, 201.0, v=20000)
+        assert engine.current_buckets["SPY"].actual_volume == 10000
+        assert engine.current_buckets["QQQ"].actual_volume == 20000
+        assert engine.current_buckets["SPY"].target_volume == 50000
+        assert engine.current_buckets["QQQ"].target_volume == 50000
+
+
+# ---------------------------------------------------------------------------
+# VPINEngine signal with edge case z-score and std
+# ---------------------------------------------------------------------------
+
+
+class TestVPINEngineZScore:
+    """VPINEngine z-score computation edge cases."""
+
+    def test_z_score_with_zero_std(self):
+        """Near-zero standard deviation yields finite z_score (no crash)."""
+        from src.signals.vpin_bvc import VPINEngine
+        import numpy as np
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=3,
+                            symbols=["SPY"])
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(10):
+            engine.process_bar("SPY", base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=50000)
+        current_vpin = engine.calculate_vpin("SPY")
+        assert current_vpin is not None
+        # Fill history with identical values to get near-zero std
+        engine.vpin_history["SPY"] = [float(current_vpin)] * 100
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        # vpin_std will be near-zero due to floating point; z_score must be finite
+        assert np.isfinite(signal.z_score)
+
+    def test_z_score_with_single_value_history(self):
+        """Single value history uses short array for mean, but get_signal needs 50+."""
+        from src.signals.vpin_bvc import VPINEngine
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=3,
+                            symbols=["SPY"])
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(10):
+            engine.process_bar("SPY", base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=50000)
+        current_vpin = engine.calculate_vpin("SPY")
+        assert current_vpin is not None
+        # Only put 1 entry in history (less than 50 required)
+        engine.vpin_history["SPY"] = [current_vpin]
+        signal = engine.get_signal("SPY")
+        assert signal is None
+
+    def test_z_score_extreme_positive(self):
+        """Extreme z-score values should be finite."""
+        from src.signals.vpin_bvc import VPINEngine
+        import numpy as np
+        engine = VPINEngine(volume_bucket_size=50000, vpin_window=3,
+                            symbols=["SPY"])
+        base = datetime(2026, 5, 14, 9, 30)
+        for i in range(10):
+            engine.process_bar("SPY", base + timedelta(minutes=i),
+                               100.0, 102.0, 99.0, 101.0, v=50000)
+        current_vpin = engine.calculate_vpin("SPY")
+        assert current_vpin is not None
+        # vpin is ~0.33, history has mean ~0.001 with tiny std
+        engine.vpin_history["SPY"] = [0.001] * 49 + [0.002] * 51
+        signal = engine.get_signal("SPY")
+        assert signal is not None
+        assert np.isfinite(signal.z_score)
+

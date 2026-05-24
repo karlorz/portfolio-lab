@@ -4,6 +4,7 @@ Tests for combined strategy backtest — data classes, signal combination,
 Fed regime classification, baseline backtest, and crisis return calculation.
 """
 import sys
+import logging
 import numpy as np
 import pandas as pd
 
@@ -1740,15 +1741,15 @@ class TestGetFedRegimeAdvanced:
 class TestLoadPrices:
     """load_prices method edge cases and error handling."""
 
-    def test_returns_false_when_file_not_found(self, capsys):
+    def test_returns_false_when_file_not_found(self, caplog):
         """File not found returns False and prints error."""
+        caplog.set_level(logging.INFO, logger='src.backtest.combined_strategy')
         bt = _make_backtester()
         with patch('src.backtest.combined_strategy.PRICES_PATH') as mock_path:
             mock_path.exists.return_value = False
             result = bt.load_prices()
             assert result is False
-        captured = capsys.readouterr()
-        assert 'Error' in captured.out
+        assert 'Error' in caplog.text
 
     def test_returns_false_when_empty_json(self, capsys):
         """Empty JSON dict returns False."""
@@ -1774,9 +1775,10 @@ class TestLoadPrices:
                     result = bt.load_prices()
                     assert result is False
 
-    def test_prints_error_on_bad_json(self, capsys):
+    def test_prints_error_on_bad_json(self, caplog):
         """Invalid JSON prints error and returns False."""
         import json as _json
+        caplog.set_level(logging.INFO, logger='src.backtest.combined_strategy')
         bt = _make_backtester()
         with patch('builtins.open', MagicMock()):
             with patch('json.load', side_effect=_json.JSONDecodeError('bad', '', 0)):
@@ -1784,11 +1786,11 @@ class TestLoadPrices:
                     mock_path.exists.return_value = True
                     result = bt.load_prices()
                     assert result is False
-        captured = capsys.readouterr()
-        assert 'Error' in captured.out
+        assert 'Error' in caplog.text
 
-    def test_loads_some_tickers_when_partial_data(self, capsys):
+    def test_loads_some_tickers_when_partial_data(self, caplog):
         """When only some tickers have data, loads available ones."""
+        caplog.set_level(logging.INFO, logger='src.backtest.combined_strategy')
         bt = _make_backtester()
         bt.tickers = ['SPY', 'MISSING']
         mock_data = {
@@ -1802,22 +1804,22 @@ class TestLoadPrices:
                     result = bt.load_prices()
                     # Should return True since SPY was loaded
                     assert result is True
-        captured = capsys.readouterr()
-        assert 'Loaded' in captured.out
+        assert 'Loaded' in caplog.text
 
-    def test_handles_exception_gracefully(self, capsys):
+    def test_handles_exception_gracefully(self, caplog):
         """Exception during loading prints error and returns False."""
+        caplog.set_level(logging.INFO, logger='src.backtest.combined_strategy')
         bt = _make_backtester()
         with patch('builtins.open', side_effect=PermissionError('denied')):
             with patch('src.backtest.combined_strategy.PRICES_PATH') as mock_path:
                 mock_path.exists.return_value = True
                 result = bt.load_prices()
                 assert result is False
-        captured = capsys.readouterr()
-        assert 'Error' in captured.out
+        assert 'Error' in caplog.text
 
-    def test_successful_load_prints_range(self, capsys):
+    def test_successful_load_prints_range(self, caplog):
         """Successful load prints day count and date range."""
+        caplog.set_level(logging.INFO, logger='src.backtest.combined_strategy')
         bt = _make_backtester()
         bt.tickers = ['SPY']
         mock_data = {
@@ -1830,9 +1832,8 @@ class TestLoadPrices:
                     mock_path.exists.return_value = True
                     result = bt.load_prices()
                     assert result is True
-        captured = capsys.readouterr()
-        assert '2026-01-01' in captured.out
-        assert '2026-01-02' in captured.out
+        assert '2026-01-01' in caplog.text
+        assert '2026-01-02' in caplog.text
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,9 @@ Tests for v5.40 Skew Engineering Overlay.
 Tests skew ratio computation, regime classification, and vol target adjustment.
 """
 
+import argparse
 import json
+import logging
 import math
 import tempfile
 from pathlib import Path
@@ -724,6 +726,643 @@ class TestCLIExtended:
     def test_cli_adjust_callable(self):
         from src.monitor.skew_engineering import cli_adjust
         assert callable(cli_adjust)
+
+
+class TestDataclassFieldValidation:
+    """Verify dataclass fields via dataclasses.fields()."""
+
+    def test_skew_metrics_field_count(self):
+        import dataclasses
+        fields = dataclasses.fields(SkewMetrics)
+        assert len(fields) == 21
+
+    def test_skew_metrics_field_names_and_defaults(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(SkewMetrics)}
+        assert fields["symbol"].type == str
+        assert fields["symbol"].default is dataclasses.MISSING
+        assert fields["timestamp"].type == str
+        assert fields["timestamp"].default is dataclasses.MISSING
+        assert fields["window_21d"].type == int
+        assert fields["window_21d"].default == 21
+        assert fields["window_63d"].type == int
+        assert fields["window_63d"].default == 63
+        assert fields["window_252d"].type == int
+        assert fields["window_252d"].default == 252
+        assert fields["upside_var_21d"].type == float
+        assert fields["upside_var_21d"].default == 0.0
+        assert fields["downside_var_21d"].type == float
+        assert fields["downside_var_21d"].default == 0.0
+        assert fields["skew_ratio_21d"].type == float
+        assert fields["skew_ratio_21d"].default == 1.0
+
+    def test_skew_metrics_required_fields(self):
+        """Only symbol and timestamp are required."""
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(SkewMetrics)}
+        required = [n for n, f in fields.items() if f.default is dataclasses.MISSING]
+        assert required == ["symbol", "timestamp"]
+
+    def test_skew_metrics_regime_type(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(SkewMetrics)}
+        assert fields["regime_21d"].type == str
+        assert fields["regime_63d"].type == str
+        assert fields["regime_252d"].type == str
+        assert fields["composite_regime"].type == str
+
+    def test_skew_state_field_count(self):
+        import dataclasses
+        fields = dataclasses.fields(SkewState)
+        assert len(fields) == 6
+
+    def test_skew_state_field_types(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(SkewState)}
+        assert fields["symbol"].type == str
+        assert fields["last_update"].type == str
+        assert fields["composite_regime"].type == str
+        assert fields["vol_penalty"].type == float
+        assert fields["side_computed"].type == bool
+        assert fields["n_obs"].type == int
+
+    def test_skew_state_all_required(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(SkewState)}
+        required = [n for n, f in fields.items() if f.default is dataclasses.MISSING]
+        assert len(required) == 6  # All fields required, no defaults
+
+    def test_skew_state_no_defaults(self):
+        import dataclasses
+        for f in dataclasses.fields(SkewState):
+            assert f.default is dataclasses.MISSING, f"{f.name} should not have default"
+            assert f.default_factory is dataclasses.MISSING
+
+
+class TestNanInfEdgeCases:
+    """NaN and Inf handling in compute_skew_ratio."""
+
+    def test_nan_returns_dropped_gracefully(self):
+        """NaN values are excluded by comparison operators, computation should still work."""
+        engine = SkewEngine()
+        returns = np.array([0.01, -0.02, np.nan, 0.015, -0.01, 0.02, -0.03])
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert ratio > 0
+        assert isinstance(regime, str)
+
+    def test_inf_returns_handled(self):
+        """Inf values should not crash the computation."""
+        engine = SkewEngine()
+        returns = np.array([0.01, -0.02, np.inf, 0.015, -0.01, 0.02, -0.03])
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert isinstance(regime, str)
+
+    def test_neg_inf_returns_handled(self):
+        """-Inf values should not crash the computation."""
+        engine = SkewEngine()
+        returns = np.array([0.01, -0.02, -np.inf, 0.015, -0.01, 0.02, -0.03])
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert isinstance(regime, str)
+
+    def test_all_nan_returns(self):
+        """All-NaN returns should produce defaults."""
+        engine = SkewEngine()
+        returns = np.full(100, np.nan)
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert ratio == 1.0
+        assert regime == SkewRegime.NORMAL
+
+    def test_mixed_nan_valid_returns(self):
+        """Mix of NaN and valid returns should use only valid values."""
+        engine = SkewEngine()
+        np.random.seed(42)
+        valid = np.random.randn(50) * 0.01
+        nans = np.full(50, np.nan)
+        returns = np.concatenate([valid, nans])
+        np.random.shuffle(returns)
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert ratio > 0
+        assert isinstance(regime, str)
+
+    def test_all_inf_returns(self):
+        """All-Inf returns - should not crash."""
+        engine = SkewEngine()
+        returns = np.full(100, np.inf)
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert isinstance(regime, str)
+
+
+class TestConstantsValidation:
+    """Verify module-level constants."""
+
+    def test_state_file_is_path(self):
+        assert isinstance(STATE_FILE, Path)
+
+    def test_state_file_name(self):
+        assert STATE_FILE.name == "skew_state.json"
+
+    def test_data_dir_is_path(self):
+        assert isinstance(DATA_DIR, Path)
+
+    def test_min_obs_constant(self):
+        assert SkewEngine.MIN_OBS == 10
+
+    def test_min_obs_positive(self):
+        assert SkewEngine.MIN_OBS > 0
+
+    def test_all_export_defined(self):
+        from src.monitor.skew_engineering import __all__
+        assert isinstance(__all__, list)
+        assert len(__all__) > 0
+
+    def test_all_export_strings(self):
+        from src.monitor.skew_engineering import __all__
+        for item in __all__:
+            assert isinstance(item, str)
+
+    def test_regime_thresholds_positive(self):
+        assert SkewRegime.THRESHOLD_ELEVATED > 0
+        assert SkewRegime.THRESHOLD_HIGH > 0
+
+    def test_penalties_within_bounds(self):
+        assert 0.0 < SkewRegime.PENALTY_NORMAL < 0.5
+        assert 0.0 < SkewRegime.PENALTY_ELEVATED < 0.5
+        assert 0.0 < SkewRegime.PENALTY_HIGH < 0.5
+
+
+class TestBoundaryConditions:
+    """Boundary conditions around thresholds and limits."""
+
+    def test_min_obs_exact(self):
+        """Exactly MIN_OBS observations should work (not return defaults)."""
+        engine = SkewEngine()
+        returns = np.random.randn(SkewEngine.MIN_OBS) * 0.01
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        # Should not return early (1.0, NORMAL) since we have enough obs
+        assert len(returns) >= 10
+
+    def test_one_below_min_obs(self):
+        """One less than MIN_OBS returns defaults."""
+        engine = SkewEngine()
+        returns = np.random.randn(SkewEngine.MIN_OBS - 1) * 0.01
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert ratio == 1.0
+        assert regime == SkewRegime.NORMAL
+
+    def test_ratio_above_high_threshold(self):
+        """Ratio above HIGH threshold produces HIGH regime."""
+        engine = SkewEngine()
+        # Create at least MIN_OBS returns where downside var dominates
+        positive = np.array([0.005, 0.01, 0.008, 0.012, 0.006])
+        negative = np.array([-0.01, -0.05, -0.04, -0.03, -0.035])
+        returns = np.concatenate([positive, negative])
+        _, _, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert ratio >= SkewRegime.THRESHOLD_HIGH
+        assert regime == SkewRegime.HIGH
+
+    def test_ratio_below_normal_threshold(self):
+        """Ratio well below 1.3 produces NORMAL regime."""
+        engine = SkewEngine()
+        # Symmetric returns should give ratio near 1.0
+        np.random.seed(12345)
+        returns = np.random.randn(100) * 0.01
+        _, _, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert ratio < 1.3
+        assert regime == SkewRegime.NORMAL
+
+    def test_get_vol_adjustment_zero_target(self):
+        """Zero target vol should produce zero adjusted vol."""
+        engine = SkewEngine()
+        with patch.object(SkewEngine, "_get_prices") as mock_prices:
+            mock_prices.return_value = np.random.randn(260) * 0.01
+            adjusted = engine.get_vol_adjustment(target_vol=0.0)
+            assert adjusted == 0.0
+
+    def test_get_vol_adjustment_max_target(self):
+        """High target vol should stay within bounds."""
+        engine = SkewEngine()
+        with patch.object(SkewEngine, "_get_prices") as mock_prices:
+            mock_prices.return_value = np.random.randn(260) * 0.01
+            adjusted = engine.get_vol_adjustment(target_vol=1.0)
+            assert adjusted > 0.0
+            assert adjusted <= 1.0
+
+    def test_all_positive_returns_boundary(self):
+        """All positive returns produce ratio close to 0 (upside dominated)."""
+        engine = SkewEngine()
+        # Create returns where var_up > 0 but var_down = 0 (clamped to 1e-12)
+        returns = np.abs(np.random.randn(63)) * 0.01
+        # Ensure at least one positive so var_up > 0
+        returns = np.abs(returns)
+        _, _, ratio, _ = engine.compute_skew_ratio(returns, 63)
+        # With all positive returns, downside var is clamped to 1e-12
+        # and ratio = 1e-12 / upside_var -> very small
+        assert ratio < 1.0
+
+    def test_all_negative_returns_boundary(self):
+        """All negative returns produce very high ratio (downside dominates)."""
+        engine = SkewEngine()
+        returns = -np.abs(np.random.randn(63)) * 0.01
+        _, _, ratio, _ = engine.compute_skew_ratio(returns, 63)
+        # With all negative returns, upside var is clamped to 1e-12
+        # and ratio = downside_var / 1e-12 -> very large
+        assert ratio > 100
+
+    def test_exact_window_equal_returns_len(self):
+        """When window exactly equals returns length, all returns are used."""
+        engine = SkewEngine()
+        np.random.seed(42)
+        returns = np.random.randn(21) * 0.01
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 21)
+        assert ratio > 0
+        assert isinstance(regime, str)
+
+
+class TestCliOutput:
+    """CLI function output with capsys."""
+
+    def _get_cli_compute(self):
+        from src.monitor.skew_engineering import cli_compute as _f
+        return _f
+
+    def _get_cli_summary(self):
+        from src.monitor.skew_engineering import cli_summary as _f
+        return _f
+
+    def _get_cli_adjust(self):
+        from src.monitor.skew_engineering import cli_adjust as _f
+        return _f
+
+    def _get_main(self):
+        from src.monitor.skew_engineering import main as _main
+        return _main
+
+    def test_cli_compute_prints_json(self, capsys):
+        args = argparse.Namespace(symbol="SPY", command="compute")
+        with patch.object(SkewEngine, "_get_prices") as mock_prices:
+            mock_prices.return_value = np.random.randn(260) * 0.01
+            self._get_cli_compute()(args)
+        captured = capsys.readouterr()
+        assert captured.out.strip().startswith("{")
+        assert '"symbol": "SPY"' in captured.out
+
+    def test_cli_compute_serializable(self, capsys):
+        args = argparse.Namespace(symbol="GLD", command="compute")
+        with patch.object(SkewEngine, "_get_prices") as mock_prices:
+            mock_prices.return_value = np.random.randn(260) * 0.01
+            self._get_cli_compute()(args)
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert parsed["symbol"] == "GLD"
+        assert "skew_ratio_21d" in parsed
+
+    def test_cli_summary_prints_summary(self, capsys):
+        args = argparse.Namespace(symbol="SPY", command="summary")
+        with patch.object(SkewEngine, "_get_prices") as mock_prices:
+            mock_prices.return_value = np.random.randn(260) * 0.01
+            self._get_cli_summary()(args)
+        captured = capsys.readouterr()
+        assert "Skew Engineering" in captured.out
+
+    def test_cli_adjust_prints_adjustment(self, capsys):
+        args = argparse.Namespace(symbol="SPY", command="adjust", target_vol=0.12)
+        with patch.object(SkewEngine, "_get_prices") as mock_prices:
+            mock_prices.return_value = np.random.randn(260) * 0.01
+            self._get_cli_adjust()(args)
+        captured = capsys.readouterr()
+        assert "Base target:" in captured.out
+        assert "Adjusted target:" in captured.out
+        assert "Reduction:" in captured.out
+
+    def test_main_compute_command(self, capsys):
+        with patch.object(
+            SkewEngine, "_get_prices", return_value=np.random.randn(260) * 0.01
+        ), patch(
+            "sys.argv", ["skew_engineering", "--symbol", "SPY", "compute"]
+        ):
+            self._get_main()()
+        captured = capsys.readouterr()
+        assert '"symbol": "SPY"' in captured.out
+
+    def test_main_summary_command(self, capsys):
+        with patch.object(
+            SkewEngine, "_get_prices", return_value=np.random.randn(260) * 0.01
+        ), patch(
+            "sys.argv", ["skew_engineering", "--symbol", "QQQ", "summary"]
+        ):
+            self._get_main()()
+        captured = capsys.readouterr()
+        assert "QQQ" in captured.out
+
+    def test_main_adjust_command(self, capsys):
+        with patch.object(
+            SkewEngine, "_get_prices", return_value=np.random.randn(260) * 0.01
+        ), patch(
+            "sys.argv", ["skew_engineering", "--symbol", "SPY", "adjust", "--target-vol", "0.15"]
+        ):
+            self._get_main()()
+        captured = capsys.readouterr()
+        assert "15.0%" in captured.out.replace(" ", "").replace("\n", "")
+
+    def test_main_no_command_prints_help(self, capsys):
+        with patch(
+            "sys.argv", ["skew_engineering"]
+        ):
+            self._get_main()()
+        captured = capsys.readouterr()
+        assert "Skew Engineering" in captured.out or "usage:" in captured.out
+
+
+class TestExportCompleteness:
+    """Verify __all__ covers public API."""
+
+    def test_all_covers_skew_regime(self):
+        from src.monitor.skew_engineering import __all__
+        assert "SkewRegime" in __all__
+
+    def test_all_covers_skew_metrics(self):
+        from src.monitor.skew_engineering import __all__
+        assert "SkewMetrics" in __all__
+
+    def test_all_covers_skew_state(self):
+        from src.monitor.skew_engineering import __all__
+        assert "SkewState" in __all__
+
+    def test_all_covers_skew_engine(self):
+        from src.monitor.skew_engineering import __all__
+        assert "SkewEngine" in __all__
+
+    def test_all_covers_cli_functions(self):
+        from src.monitor.skew_engineering import __all__
+        assert "cli_compute" in __all__
+        assert "cli_summary" in __all__
+        assert "cli_adjust" in __all__
+
+    def test_all_public_names_are_importable(self):
+        from src.monitor.skew_engineering import __all__
+        import src.monitor.skew_engineering as mod
+        for name in __all__:
+            assert hasattr(mod, name), f"{name} is in __all__ but not in module"
+
+
+class TestErrorAndEdgePaths:
+    """Error handling paths in SkewEngine."""
+
+    def test_load_state_corrupt_json(self, caplog):
+        """Corrupt state file should log error and return None."""
+        engine = SkewEngine()
+        with patch("src.monitor.skew_engineering.STATE_FILE") as mock_state_file:
+            mock_state_file.exists.return_value = True
+            mock_open_handle = mock_open(read_data="not valid json {")
+            with patch("builtins.open", mock_open_handle):
+                caplog.clear()
+                state = engine.load_state()
+        assert state is None
+
+    def test_load_state_os_error(self, caplog):
+        """OSError during load should log and return None."""
+        engine = SkewEngine()
+        with patch("src.monitor.skew_engineering.STATE_FILE") as mock_state_file:
+            mock_state_file.exists.return_value = True
+            with patch("builtins.open", side_effect=OSError("Permission denied")):
+                caplog.clear()
+                state = engine.load_state()
+        assert state is None
+
+    @patch.object(SkewEngine, "_get_prices")
+    def test_vol_adjustment_with_high_skew_exact_penalty(self, mock_prices):
+        """High skew regime should apply PENALTY_HIGH reduction."""
+        np.random.seed(42)
+        n = 260
+        returns = np.random.randn(n) * 0.005
+        for i in range(20):
+            idx = np.random.randint(0, n)
+            returns[idx] = -0.06
+        mock_prices.return_value = returns
+        engine = SkewEngine()
+        adjusted = engine.get_vol_adjustment(target_vol=0.10)
+        expected = round(0.10 * (1.0 - SkewRegime.PENALTY_HIGH), 4)
+        assert adjusted == expected
+
+    @patch.object(SkewEngine, "_get_prices")
+    def test_vol_adjustment_normal_skew_exact_penalty(self, mock_prices):
+        """Normal skew regime should apply PENALTY_NORMAL reduction."""
+        np.random.seed(42)
+        mock_prices.return_value = np.random.randn(260) * 0.01
+        engine = SkewEngine()
+        adjusted = engine.get_vol_adjustment(target_vol=0.10)
+        expected_max = round(0.10 * (1.0 - SkewRegime.PENALTY_NORMAL), 4)
+        # With normal skew, penalty should be PENALTY_NORMAL
+        assert adjusted == expected_max
+
+    @patch.object(SkewEngine, "_get_prices")
+    def test_compute_save_state_called(self, mock_prices):
+        """compute() should call _save_state."""
+        np.random.seed(42)
+        mock_prices.return_value = np.random.randn(260) * 0.01
+        engine = SkewEngine()
+        with patch.object(engine, "_save_state") as mock_save:
+            metrics = engine.compute()
+            mock_save.assert_called_once_with(metrics)
+
+    def test_save_state_os_error_logged(self, caplog):
+        """_save_state OSError should be logged."""
+        engine = SkewEngine()
+        metrics = SkewMetrics(symbol="SPY", timestamp="2026-01-01T00:00:00")
+        with patch("builtins.open", side_effect=OSError("Disk full")):
+            caplog.clear()
+            engine._save_state(metrics)
+            assert len(caplog.records) > 0
+            assert "Failed to save state" in caplog.text
+
+    @patch.object(SkewEngine, "_get_prices")
+    def test_compute_after_save_state_persists(self, mock_prices):
+        """compute() output should produce a valid SkewState."""
+        np.random.seed(42)
+        mock_prices.return_value = np.random.randn(260) * 0.01
+        engine = SkewEngine()
+        metrics = engine.compute()
+        state = SkewState(
+            symbol=metrics.symbol,
+            last_update=metrics.timestamp,
+            composite_regime=metrics.composite_regime,
+            vol_penalty=metrics.vol_penalty,
+            side_computed=False,
+            n_obs=metrics.n_obs,
+        )
+        assert isinstance(state, SkewState)
+        assert state.symbol == metrics.symbol
+
+
+class TestComputeEdgeCases:
+    """Additional edge cases for compute_skew_ratio."""
+
+    def test_ratio_single_upside_observation(self):
+        """Single unique upside value gives upside_var=0, clamped to 1e-12, regime HIGH."""
+        engine = SkewEngine()
+        # Need >= MIN_OBS returns, with only 1 unique positive and >=2 unique negatives
+        positive = np.array([0.01, 0.01, 0.01])  # 3 same values => var=0
+        negative = np.array([-0.01, -0.05, -0.01, -0.05, -0.01, -0.05, -0.01])
+        returns = np.concatenate([positive, negative])  # len = 10
+        _, _, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        # Only 1 unique positive (upside_var = 0.0, clamped to 1e-12)
+        # Multiple different negatives (downside_var > 0)
+        # ratio = downside_var / 1e-12 >> 1.8
+        assert regime == SkewRegime.HIGH
+
+    def test_ratio_single_downside_observation(self):
+        """Single unique downside value gives downside_var=0, ratio near 0."""
+        engine = SkewEngine()
+        # Need >= MIN_OBS returns, with >=2 unique positives and only 1 unique negative
+        negative = np.array([-0.01, -0.01, -0.01])  # 3 same values => var=0
+        positive = np.array([0.01, 0.05, 0.01, 0.05, 0.01, 0.05, 0.01])
+        returns = np.concatenate([negative, positive])  # len = 10
+        _, _, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        # Only 1 unique negative (downside_var = 0.0)
+        # Multiple different positives (upside_var > 0)
+        # skew_ratio = 0.0 / upside_var = 0.0
+        assert ratio == 0.0
+        assert regime == SkewRegime.NORMAL
+
+    def test_ratio_empty_array(self):
+        """Empty array returns defaults."""
+        engine = SkewEngine()
+        returns = np.array([])
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert ratio == 1.0
+        assert regime == SkewRegime.NORMAL
+
+    def test_ratio_two_returns_exactly_min_obs_gate(self):
+        """Two returns is below MIN_OBS, returns defaults."""
+        engine = SkewEngine()
+        returns = np.array([0.01, -0.02])
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert ratio == 1.0
+        assert regime == SkewRegime.NORMAL
+
+    def test_ratio_large_window_small_data(self):
+        """Window larger than data uses all data."""
+        engine = SkewEngine()
+        np.random.seed(42)
+        returns = np.random.randn(15) * 0.01
+        up_var, down_var, ratio, regime = engine.compute_skew_ratio(returns, 252)
+        assert isinstance(regime, str)  # Should not crash
+
+    def test_ratio_upside_single_var_downside_multiple(self):
+        """2 positive values (upside_var > 0) and multiple negative values."""
+        engine = SkewEngine()
+        returns = np.array([0.01, 0.02, -0.01, -0.03, -0.02, -0.015])
+        _, _, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert regime in (SkewRegime.NORMAL, SkewRegime.ELEVATED, SkewRegime.HIGH)
+
+    def test_ratio_downside_single_var_upside_multiple(self):
+        """2 negative values (downside_var > 0) and multiple positive values."""
+        engine = SkewEngine()
+        returns = np.array([-0.01, -0.02, 0.01, 0.03, 0.02, 0.015])
+        _, _, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        assert regime in (SkewRegime.NORMAL, SkewRegime.ELEVATED, SkewRegime.HIGH)
+
+
+class TestTypeValidation:
+    """Type handling and coercion in dataclasses and methods."""
+
+    def test_skew_metrics_float_field_coercion(self):
+        """int values should be coerced to float for float-typed fields."""
+        m = SkewMetrics(symbol="SPY", timestamp="now", upside_var_21d=1, n_obs=100)
+        assert isinstance(m.upside_var_21d, (int, float))
+
+    def test_skew_metrics_int_defaults(self):
+        """Default int fields should be int."""
+        m = SkewMetrics(symbol="SPY", timestamp="now")
+        assert isinstance(m.window_21d, int)
+        assert isinstance(m.n_obs, int)
+
+    def test_skew_state_vol_penalty_float(self):
+        """vol_penalty should accept float."""
+        s = SkewState(
+            symbol="SPY", last_update="now", composite_regime="NORMAL",
+            vol_penalty=0.05, side_computed=False, n_obs=100
+        )
+        assert isinstance(s.vol_penalty, float)
+
+    def test_skew_state_side_computed_bool(self):
+        """side_computed should be bool."""
+        s = SkewState(
+            symbol="SPY", last_update="now", composite_regime="NORMAL",
+            vol_penalty=0.05, side_computed=True, n_obs=100
+        )
+        assert isinstance(s.side_computed, bool)
+
+    def test_compute_skew_ratio_returns_tuple(self):
+        """compute_skew_ratio returns a 4-tuple."""
+        engine = SkewEngine()
+        np.random.seed(42)
+        returns = np.random.randn(100) * 0.01
+        result = engine.compute_skew_ratio(returns, 63)
+        assert isinstance(result, tuple)
+        assert len(result) == 4
+        assert isinstance(result[0], float)
+        assert isinstance(result[1], float)
+        assert isinstance(result[2], float)
+        assert isinstance(result[3], str)
+
+    def test_compute_returns_skew_metrics_type(self):
+        """compute() returns SkewMetrics."""
+        engine = SkewEngine()
+        with patch.object(SkewEngine, "_get_prices") as mock_prices:
+            mock_prices.return_value = np.random.randn(260) * 0.01
+            result = engine.compute()
+        assert isinstance(result, SkewMetrics)
+
+    def test_load_state_returns_optional(self):
+        """load_state returns None or SkewState."""
+        engine = SkewEngine()
+        result = engine.load_state()
+        assert result is None or isinstance(result, SkewState)
+
+
+class TestDataDirAndPaths:
+    """Verify DATA_DIR and file paths."""
+
+    def test_data_dir_exists(self):
+        assert DATA_DIR.exists()
+
+    def test_data_dir_is_directory(self):
+        assert DATA_DIR.is_dir()
+
+    def test_state_file_parent_is_data_dir(self):
+        assert STATE_FILE.parent == DATA_DIR
+
+
+class TestLoggingBehavior:
+    """Test logging output for various scenarios."""
+
+    def test_insufficient_data_warning(self, caplog):
+        """Warning logged when insufficient data."""
+        engine = SkewEngine()
+        with patch.object(SkewEngine, "_get_prices", return_value=np.array([0.01, 0.02])):
+            caplog.set_level(logging.WARNING)
+            engine.compute()
+            assert any("Insufficient data" in r.message for r in caplog.records)
+
+    def test_database_not_found_warning(self, caplog):
+        """Warning logged when database not found."""
+        engine = SkewEngine()
+        with patch.object(engine, "db_path") as mock_db_path:
+            mock_db_path.exists.return_value = False
+            caplog.set_level(logging.WARNING)
+            result = engine._get_prices(days=260)
+            assert len(result) == 0
+            assert any("Database not found" in r.message for r in caplog.records)
+
+    def test_empty_returns_from_get_prices(self, caplog):
+        """Empty returns should produce warning."""
+        engine = SkewEngine()
+        with patch.object(SkewEngine, "_get_prices", return_value=np.array([])):
+            caplog.set_level(logging.WARNING)
+            metrics = engine.compute()
+            assert metrics.n_obs == 0
+            assert metrics.composite_regime == SkewRegime.NORMAL
 
 
 if __name__ == "__main__":

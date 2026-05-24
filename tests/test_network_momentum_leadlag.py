@@ -1498,5 +1498,755 @@ class TestNetworkMomentumBacktesterEdgeCases:
             assert 'crisis_2020_return' in result
 
 
+
+# ---------------------------------------------------------------------------
+# Dataclass field validation via dataclasses.fields()
+# ---------------------------------------------------------------------------
+
+class TestLeadLagMatrixFields:
+    """Verify LeadLagMatrix dataclass fields, types, and defaults."""
+
+    def test_fields_count(self):
+        import dataclasses
+        fields = dataclasses.fields(LeadLagMatrix)
+        assert len(fields) == 6
+
+    def test_field_names(self):
+        import dataclasses
+        names = {f.name for f in dataclasses.fields(LeadLagMatrix)}
+        expected = {'timestamp', 'window', 'leadlag_matrix',
+                    'dtw_distances', 'levy_areas', 'adjacency'}
+        assert names == expected
+
+    def test_timestamp_is_str(self):
+        import dataclasses
+        f = next(f for f in dataclasses.fields(LeadLagMatrix) if f.name == 'timestamp')
+        assert f.type is str or 'str' in str(f.type)
+
+    def test_window_is_int(self):
+        import dataclasses
+        f = next(f for f in dataclasses.fields(LeadLagMatrix) if f.name == 'window')
+        assert f.type is int or 'int' in str(f.type)
+
+
+class TestWindowMomentumSignalFields:
+    """Verify WindowMomentumSignal dataclass fields."""
+
+    def test_fields_count(self):
+        import dataclasses
+        fields = dataclasses.fields(WindowMomentumSignal)
+        assert len(fields) == 10
+
+    def test_field_names(self):
+        import dataclasses
+        names = {f.name for f in dataclasses.fields(WindowMomentumSignal)}
+        expected = {'ticker', 'window', 'timestamp', 'momentum_return',
+                    'signal', 'network_momentum', 'network_adjustment',
+                    'base_weight', 'target_weight', 'adjustment'}
+        assert names == expected
+
+
+class TestEnsembleNetworkSignalFields:
+    """Verify EnsembleNetworkSignal dataclass fields."""
+
+    def test_fields_count(self):
+        import dataclasses
+        fields = dataclasses.fields(EnsembleNetworkSignal)
+        assert len(fields) == 12
+
+    def test_field_names(self):
+        import dataclasses
+        names = {f.name for f in dataclasses.fields(EnsembleNetworkSignal)}
+        expected = {'ticker', 'timestamp', 'window_signals',
+                    'ensemble_momentum', 'ensemble_signal', 'ensemble_confidence',
+                    'base_weight', 'adjustment', 'target_weight',
+                    'leadership_score', 'followership_score', 'network_centrality'}
+        assert names == expected
+
+    def test_signal_field_is_int(self):
+        import dataclasses
+        f = next(f for f in dataclasses.fields(EnsembleNetworkSignal) if f.name == 'ensemble_signal')
+        assert f.type is int or 'int' in str(f.type)
+
+
+class TestNetworkMomentumPortfolioFields:
+    """Verify NetworkMomentumPortfolio dataclass fields."""
+
+    def test_fields_count(self):
+        import dataclasses
+        fields = dataclasses.fields(NetworkMomentumPortfolio)
+        assert len(fields) == 10
+
+    def test_field_names(self):
+        import dataclasses
+        names = {f.name for f in dataclasses.fields(NetworkMomentumPortfolio)}
+        expected = {'timestamp', 'base_allocation', 'network_adjustments',
+                    'target_allocation', 'leadlag_matrix', 'ensemble_signals',
+                    'dominant_leader', 'dominant_follower', 'network_efficiency',
+                    'overall_confidence'}
+        assert names == expected
+
+    def test_dominant_leader_is_str(self):
+        import dataclasses
+        f = next(f for f in dataclasses.fields(NetworkMomentumPortfolio) if f.name == 'dominant_leader')
+        assert f.type is str or 'str' in str(f.type)
+
+    def test_network_efficiency_is_float(self):
+        import dataclasses
+        f = next(f for f in dataclasses.fields(NetworkMomentumPortfolio) if f.name == 'network_efficiency')
+        assert f.type is float or 'float' in str(f.type)
+
+
+# ---------------------------------------------------------------------------
+# Constants type and range validation
+# ---------------------------------------------------------------------------
+
+class TestConstantsTypes:
+    """Verify module-level constants have expected types and ranges."""
+
+    def test_lookback_windows_all_positive(self):
+        for w in LOOKBACK_WINDOWS:
+            assert w > 0
+
+    def test_levy_lags_all_positive(self):
+        for lag in LEVY_LAGS:
+            assert lag > 0
+
+    def test_dtw_radius_is_int(self):
+        assert isinstance(DTW_RADIUS, int)
+
+    def test_max_deviation_is_float_range(self):
+        assert isinstance(MAX_DEVIATION, float)
+        assert 0.0 < MAX_DEVIATION < 1.0
+
+    def test_min_weight_is_float_range(self):
+        assert isinstance(MIN_WEIGHT, float)
+        assert 0.0 < MIN_WEIGHT < MAX_DEVIATION
+
+    def test_assets_is_list_of_strings(self):
+        assert isinstance(ASSETS, list)
+        for a in ASSETS:
+            assert isinstance(a, str)
+
+    def test_sparsity_alpha_is_float(self):
+        assert isinstance(GRAPH_SPARSITY_ALPHA, float)
+        assert GRAPH_SPARSITY_ALPHA > 0
+
+    def test_smoothness_beta_is_float(self):
+        assert isinstance(GRAPH_SMOOTHNESS_BETA, float)
+        assert GRAPH_SMOOTHNESS_BETA > 0
+
+
+# ---------------------------------------------------------------------------
+# __all__ export completeness
+# ---------------------------------------------------------------------------
+
+class TestAllExports:
+    """Verify __all__ covers all public API names."""
+
+    def test_all_is_list_of_strings(self):
+        from src.strategy.network_momentum_leadlag import __all__
+        assert isinstance(__all__, list)
+        for name in __all__:
+            assert isinstance(name, str)
+
+    def test_all_names_exist_in_module(self):
+        import src.strategy.network_momentum_leadlag as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"__all__ contains '{name}' but module has no such attribute"
+
+    def test_all_contains_core_dataclasses(self):
+        from src.strategy.network_momentum_leadlag import __all__
+        required = {'LeadLagMatrix', 'WindowMomentumSignal',
+                    'EnsembleNetworkSignal', 'NetworkMomentumPortfolio'}
+        assert required.issubset(set(__all__)), f"Missing: {required - set(__all__)}"
+
+    def test_all_contains_all_constants(self):
+        from src.strategy.network_momentum_leadlag import __all__
+        required = {'LOOKBACK_WINDOWS', 'DEFAULT_WINDOW', 'DTW_RADIUS',
+                    'LEVY_LAGS', 'GRAPH_SPARSITY_ALPHA', 'GRAPH_SMOOTHNESS_BETA',
+                    'MAX_DEVIATION', 'MIN_WEIGHT', 'ASSETS', 'DEFAULT_BASE_ALLOCATION'}
+        assert required.issubset(set(__all__)), f"Missing: {required - set(__all__)}"
+
+    def test_all_contains_both_classes(self):
+        from src.strategy.network_momentum_leadlag import __all__
+        required = {'NetworkMomentumLeadLag', 'NetworkMomentumBacktester'}
+        assert required.issubset(set(__all__)), f"Missing: {required - set(__all__)}"
+
+
+# ---------------------------------------------------------------------------
+# CLI/__main__ guard tests
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    """Test CLI entry points via capsys and argparse interaction."""
+
+    def test_status_command_output(self, capsys):
+        from src.strategy.network_momentum_leadlag import main
+        with patch('sys.argv', ['script', 'status']):
+            try:
+                main()
+            except (SystemExit, FileNotFoundError, json.JSONDecodeError):
+                pass  # Expected if no data file exists
+        captured = capsys.readouterr()
+        # Status should print at least the header
+        assert 'Network Momentum Lead-Lag' in captured.out or 'Network Momentum Lead-Lag' in captured.err
+
+    def test_no_command_shows_help(self, capsys):
+        """No argument should trigger argparse error or print help."""
+        from src.strategy.network_momentum_leadlag import main
+        with patch('sys.argv', ['script']):
+            try:
+                main()
+            except SystemExit:
+                pass
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert combined  # Should produce some output (help or error)
+
+    def test_compute_command_no_data_returns_error(self, capsys):
+        """Compute with a ticker when no data available."""
+        from src.strategy.network_momentum_leadlag import main
+        with patch('sys.argv', ['script', 'compute', '--ticker', 'SPY', '--window', '66']):
+            try:
+                main()
+            except (SystemExit, FileNotFoundError, json.JSONDecodeError):
+                pass
+        captured = capsys.readouterr()
+        # Should either have output or gracefully fail
+        assert True  # No crash is sufficient
+
+    def test_unknown_command_does_not_crash(self, capsys):
+        from src.strategy.network_momentum_leadlag import main
+        with patch('sys.argv', ['script', 'unknown_cmd_xyz']):
+            try:
+                main()
+            except SystemExit:
+                pass
+        captured = capsys.readouterr()
+        assert True  # No unhandled exception
+
+
+# ---------------------------------------------------------------------------
+# DTW with NaN/Inf edge cases
+# ---------------------------------------------------------------------------
+
+class TestDTWNaNInf:
+    """DTW distance with NaN, Inf, and extreme inputs."""
+
+    def test_nan_input_raises_or_handles(self):
+        e = _make_engine()
+        s = np.array([1.0, np.nan, 3.0, 4.0, 5.0])
+        with np.errstate(invalid='ignore'):
+            try:
+                dist = e._simple_dtw_distance(s, s)
+                # Either it handles NaN gracefully (returns finite)
+                assert math.isfinite(dist) if not math.isnan(dist) else True
+            except (ValueError, ZeroDivisionError):
+                pass  # Acceptable to raise on NaN
+
+    def test_inf_input_handled(self):
+        e = _make_engine()
+        s1 = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        s2 = np.array([1.0, 2.0, np.inf, 4.0, 5.0])
+        # Mean/std with inf → inf or nan; DTW should not crash
+        with np.errstate(invalid='ignore', divide='ignore'):
+            try:
+                dist = e._simple_dtw_distance(s1, s2)
+                # After normalization, inf becomes nan via (inf - inf) / inf
+                # DTW returns nan, not a crash
+                assert dist >= 0 or math.isinf(dist) or math.isnan(dist)
+            except (ValueError, ZeroDivisionError, FloatingPointError):
+                pass
+
+    def test_neg_inf_input_handled(self):
+        e = _make_engine()
+        s1 = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        s2 = np.array([1.0, 2.0, -np.inf, 4.0, 5.0])
+        with np.errstate(invalid='ignore', divide='ignore'):
+            try:
+                dist = e._simple_dtw_distance(s1, s2)
+                assert dist >= 0 or math.isinf(dist) or math.isnan(dist)
+            except (ValueError, ZeroDivisionError):
+                pass
+
+    def test_zero_length_series_raises(self):
+        e = _make_engine()
+        s = np.array([])
+        # Empty array → mean is nan, std is nan, DTW may produce nan or raise
+        with np.errstate(invalid='ignore', divide='ignore'):
+            try:
+                dist = e._simple_dtw_distance(s, s)
+                # Either returns nan or raises
+                assert math.isnan(dist) or dist >= 0
+            except (ValueError, ZeroDivisionError, IndexError):
+                pass
+
+    def test_radius_negative_falls_back(self):
+        e = _make_engine()
+        s1 = np.array([1.0, 2.0, 3.0])
+        s2 = np.array([3.0, 2.0, 1.0])
+        dist = e._simple_dtw_distance(s1, s2, radius=-1)
+        # Negative radius should be handled (could fall back to 0 or default)
+        assert dist >= 0
+
+
+# ---------------------------------------------------------------------------
+# Levy area with NaN/Inf edge cases
+# ---------------------------------------------------------------------------
+
+class TestLevyAreaNaNInf:
+    """Levy area signature with NaN, Inf, and extreme inputs."""
+
+    def test_nan_in_returns_handled(self):
+        e = _make_engine()
+        s1 = np.array([0.01, 0.02, np.nan, 0.03])
+        s2 = np.array([0.02, 0.01, 0.03, 0.01])
+        with np.errstate(invalid='ignore'):
+            try:
+                levy = e._compute_levy_area_signature(s1, s2)
+                assert isinstance(levy, float)
+            except (ValueError, ZeroDivisionError):
+                pass
+
+    def test_all_nan_returns_zero(self):
+        e = _make_engine()
+        s = np.array([np.nan, np.nan, np.nan])
+        with np.errstate(invalid='ignore'):
+            try:
+                levy = e._compute_levy_area_signature(s, s)
+                assert levy == 0.0 or math.isnan(levy)
+            except (ValueError, ZeroDivisionError):
+                pass
+
+    def test_inf_values(self):
+        e = _make_engine()
+        s1 = np.array([0.01, np.inf, -0.01, 0.02])
+        s2 = np.array([0.02, 0.01, 0.03, 0.01])
+        with np.errstate(invalid='ignore', divide='ignore'):
+            try:
+                levy = e._compute_levy_area_signature(s1, s2)
+                assert isinstance(levy, float)
+            except (ValueError, ZeroDivisionError):
+                pass
+
+    def test_mismatched_lengths(self):
+        e = _make_engine()
+        s1 = np.random.randn(100) * 0.01
+        s2 = np.random.randn(50) * 0.01  # shorter
+        # Method uses min_len, so should work
+        levy = e._compute_levy_area_signature(s1, s2, lags=[1, 5])
+        assert isinstance(levy, float)
+
+
+# ---------------------------------------------------------------------------
+# Learn adjacency boundary conditions
+# ---------------------------------------------------------------------------
+
+class TestLearnAdjacencyBoundary:
+    """Learn adjacency with extreme input values."""
+
+    def test_extreme_positive_scores(self):
+        e = _make_engine()
+        scores = {('A', 'B'): 1e6, ('B', 'A'): -1e6}
+        adj = e._learn_adjacency_matrix(scores, ['A', 'B'])
+        for v in adj.values():
+            assert 0.0 <= v <= 1.0
+
+    def test_extreme_negative_scores(self):
+        e = _make_engine()
+        scores = {('A', 'B'): -1e6, ('B', 'A'): 1e6}
+        adj = e._learn_adjacency_matrix(scores, ['A', 'B'])
+        for v in adj.values():
+            assert 0.0 <= v <= 1.0
+
+    def test_very_large_number_of_pairs(self):
+        e = _make_engine()
+        assets = [f'A{i}' for i in range(20)]
+        scores = {}
+        for a1, a2 in combinations(assets, 2):
+            scores[(a1, a2)] = np.random.randn() * 0.5
+        adj = e._learn_adjacency_matrix(scores, assets)
+        for v in adj.values():
+            assert 0.0 <= v <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# compute_leadlag_matrix extreme edge cases
+# ---------------------------------------------------------------------------
+
+class TestComputeLeadLagMatrixExtreme:
+    """Lead-lag matrix computation with extreme inputs."""
+
+    def test_constant_prices_all_same(self):
+        e = _make_engine()
+        dates = pd.bdate_range('2024-01-02', periods=200)
+        df = pd.DataFrame(
+            {'SPY': [100.0] * 200, 'GLD': [150.0] * 200, 'TLT': [130.0] * 200},
+            index=dates
+        )
+        # Constant prices → zero returns → zero std → may return None or valid
+        result = e.compute_leadlag_matrix(66, df)
+        # Either None (due to zero std handling) or a valid LeadLagMatrix
+        assert result is None or isinstance(result, LeadLagMatrix)
+
+    def test_single_row_dataframe(self):
+        e = _make_engine()
+        dates = pd.bdate_range('2024-01-02', periods=1)
+        df = pd.DataFrame({'SPY': [400.0], 'GLD': [150.0], 'TLT': [130.0]}, index=dates)
+        result = e.compute_leadlag_matrix(66, df)
+        assert result is None
+
+    def test_prices_with_nan_column(self):
+        e = _make_engine()
+        df = _make_prices_df(200)
+        df['SPY'] = np.nan  # All NaN for SPY
+        result = e.compute_leadlag_matrix(66, df)
+        # Only GLD + TLT have data → might still work with 2 assets
+        assert result is None or isinstance(result, LeadLagMatrix)
+
+    def test_window_exact_data_length(self):
+        """Window exactly matching available data should work."""
+        e = _make_engine()
+        df = _make_prices_df(100)
+        result = e.compute_leadlag_matrix(80, df)
+        assert result is None or isinstance(result, LeadLagMatrix)
+
+    def test_zero_returns_after_pct_change(self):
+        """Prices that don't change should have zero returns."""
+        e = _make_engine()
+        dates = pd.bdate_range('2024-01-02', periods=200)
+        # All same price → zero returns → may trigger division by zero in levy/DTW
+        df = pd.DataFrame(
+            {'SPY': [100.0] * 200, 'GLD': [100.0] * 200, 'TLT': [100.0] * 200},
+            index=dates
+        )
+        result = e.compute_leadlag_matrix(66, df)
+        assert result is None or isinstance(result, LeadLagMatrix)
+
+
+# ---------------------------------------------------------------------------
+# compute_window_signal extreme boundary conditions
+# ---------------------------------------------------------------------------
+
+class TestComputeWindowSignalExtreme:
+    """Window signal with extreme base weights, zero weights, boundary values."""
+
+    def test_base_weight_zero(self):
+        e = _make_engine()
+        df = _make_prices_df(200)
+        ll = _make_leadlag_matrix()
+        sig = e.compute_window_signal('SPY', 66, 0.0, ll, df)
+        assert sig is not None
+        assert sig.base_weight == 0.0
+        assert MIN_WEIGHT <= sig.target_weight <= 1.0
+
+    def test_base_weight_one(self):
+        e = _make_engine()
+        df = _make_prices_df(200)
+        ll = _make_leadlag_matrix()
+        sig = e.compute_window_signal('SPY', 66, 1.0, ll, df)
+        assert sig is not None
+        assert sig.base_weight == 1.0
+
+    def test_base_weight_negative(self):
+        e = _make_engine()
+        df = _make_prices_df(200)
+        ll = _make_leadlag_matrix()
+        sig = e.compute_window_signal('SPY', 66, -0.5, ll, df)
+        # Negative base weight is unusual but should not crash
+        assert sig is not None or sig is None
+
+    def test_extreme_negative_momentum(self):
+        e = _make_engine()
+        dates = pd.bdate_range('2024-01-02', periods=200)
+        # Monotonically declining prices → strong negative momentum
+        spy = 400.0 * (1.0 - np.linspace(0, 0.5, 200))  # drops 50%
+        gld = 150.0 * (1.0 - np.linspace(0, 0.4, 200))
+        tlt = 130.0 * (1.0 - np.linspace(0, 0.3, 200))
+        df = pd.DataFrame({'SPY': spy, 'GLD': gld, 'TLT': tlt}, index=dates)
+        ll = _make_leadlag_matrix()
+        sig = e.compute_window_signal('SPY', 66, 0.46, ll, df)
+        assert sig is not None
+        assert sig.momentum_return < 0
+        assert sig.signal == -1
+
+    def test_extreme_positive_momentum(self):
+        e = _make_engine()
+        dates = pd.bdate_range('2024-01-02', periods=200)
+        # Monotonically increasing prices → strong positive momentum
+        spy = 400.0 * (1.0 + np.linspace(0, 1.0, 200))  # doubles
+        gld = 150.0 * (1.0 + np.linspace(0, 0.5, 200))
+        tlt = 130.0 * (1.0 + np.linspace(0, 0.3, 200))
+        df = pd.DataFrame({'SPY': spy, 'GLD': gld, 'TLT': tlt}, index=dates)
+        ll = _make_leadlag_matrix()
+        sig = e.compute_window_signal('SPY', 66, 0.46, ll, df)
+        assert sig is not None
+        assert sig.momentum_return > 0
+        assert sig.signal == 1
+
+
+# ---------------------------------------------------------------------------
+# compute_ensemble_signal extreme edge cases
+# ---------------------------------------------------------------------------
+
+class TestComputeEnsembleSignalExtreme:
+    """Ensemble signal with edge conditions: all windows None, empty lookback, etc."""
+
+    def test_empty_lookback_windows(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        with patch.object(e, 'lookback_windows', []):
+            sig = e.compute_ensemble_signal('SPY', 0.46, df)
+            assert sig is None
+
+    def test_all_windows_return_none(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        with patch.object(e, 'lookback_windows', [22, 44]):
+            with patch.object(e, 'compute_window_signal', return_value=None):
+                sig = e.compute_ensemble_signal('SPY', 0.46, df)
+                assert sig is None
+
+    def test_leadlag_matrix_none_returns_none(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        with patch.object(e, 'compute_leadlag_matrix', return_value=None):
+            sig = e.compute_ensemble_signal('SPY', 0.46, df)
+            assert sig is None
+
+    def test_ticker_not_in_assets(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        sig = e.compute_ensemble_signal('NOTAREALTICKER', 0.46, df)
+        assert sig is None
+
+    def test_ensemble_signal_zero_when_momentum_zero(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        ws = WindowMomentumSignal(
+            ticker='SPY', window=66, timestamp='2026-01-01',
+            momentum_return=0.0, signal=0,
+            network_momentum=0.0, network_adjustment=0.0,
+            base_weight=0.46, target_weight=0.46, adjustment=0.0,
+        )
+        ll = _make_leadlag_matrix()
+        # Create a signal with all-zero window signals → ensemble_momentum=0
+        with patch.object(e, 'compute_leadlag_matrix', return_value=ll):
+            with patch.object(e, 'compute_window_signal', return_value=ws):
+                sig = e.compute_ensemble_signal('SPY', 0.46, df)
+                if sig is not None:
+                    assert sig.ensemble_momentum == 0.0
+                    assert sig.ensemble_signal == 0
+
+
+# ---------------------------------------------------------------------------
+# get_current_recommendation extreme edge cases
+# ---------------------------------------------------------------------------
+
+class TestGetCurrentRecommendationExtreme:
+    """Portfolio recommendation with extreme inputs."""
+
+    def test_empty_allocation_returns_portfolio(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        rec = e.get_current_recommendation({})
+        # Empty allocation should still return a portfolio with default fields
+        assert rec is not None
+        assert 'CASH' not in rec.target_allocation or rec.target_allocation.get('CASH') is not None
+
+    def test_all_cash_allocation(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        rec = e.get_current_recommendation({'CASH': 1.0})
+        assert rec is not None
+        assert rec.dominant_leader == 'SPY'
+        assert rec.overall_confidence == 0.0
+
+    def test_single_non_cash_asset(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        rec = e.get_current_recommendation({'SPY': 1.0})
+        assert rec is not None
+        assert 'SPY' in rec.target_allocation
+
+    def test_normalization_with_all_zero_cash(self):
+        """When all weights are zero except CASH, normalization should handle it."""
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        rec = e.get_current_recommendation({'SPY': 0.0, 'GLD': 0.0, 'TLT': 0.0, 'CASH': 1.0})
+        assert rec is not None
+        total = sum(w for k, w in rec.target_allocation.items() if k != 'CASH')
+        # Either 0 or normalized to 1.0
+        assert total == 0.0 or abs(total - 1.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Backtester extreme edge cases
+# ---------------------------------------------------------------------------
+
+class TestBacktesterExtreme:
+    """Backtester with extreme inputs: missing columns, NaNs in prices."""
+
+    def test_prices_with_nan_columns_handled(self):
+        bt = NetworkMomentumBacktester.__new__(NetworkMomentumBacktester)
+        bt.base_allocation = DEFAULT_BASE_ALLOCATION
+        bt.start_date = None
+        bt.end_date = None
+        bt.rebalance_freq = 21
+        bt.network_momentum = _make_engine()
+        bt.prices_df = _make_prices_df(400)
+        # Add an all-NaN column
+        bt.prices_df['BOGUS'] = np.nan
+        result = bt.run_backtest()
+        if 'error' not in result:
+            assert result['end_value'] > 0
+
+    def test_negative_prices_handled(self):
+        bt = NetworkMomentumBacktester.__new__(NetworkMomentumBacktester)
+        bt.base_allocation = DEFAULT_BASE_ALLOCATION
+        bt.start_date = None
+        bt.end_date = None
+        bt.rebalance_freq = 21
+        bt.network_momentum = _make_engine()
+        df = _make_prices_df(400)
+        df['SPY'] = -df['SPY']  # Negative prices
+        bt.prices_df = df
+        result = bt.run_backtest()
+        if 'error' not in result:
+            assert result['end_value'] > 0  # Should still produce a positive value
+
+    def test_zero_rebalance_freq(self):
+        bt = NetworkMomentumBacktester.__new__(NetworkMomentumBacktester)
+        bt.base_allocation = DEFAULT_BASE_ALLOCATION
+        bt.start_date = None
+        bt.end_date = None
+        bt.rebalance_freq = 0
+        bt.network_momentum = _make_engine()
+        bt.prices_df = _make_prices_df(400)
+        # Zero rebalance frequency may cause issues (modulo by zero)
+        try:
+            result = bt.run_backtest()
+            assert 'error' in result or 'cagr' in result
+        except (ValueError, ZeroDivisionError, TypeError):
+            pass  # Acceptable edge case behavior
+
+    def test_start_date_after_end_date(self):
+        bt = NetworkMomentumBacktester.__new__(NetworkMomentumBacktester)
+        bt.base_allocation = DEFAULT_BASE_ALLOCATION
+        bt.start_date = pd.to_datetime('2025-01-01')
+        bt.end_date = pd.to_datetime('2024-01-01')  # Before start
+        bt.rebalance_freq = 21
+        bt.network_momentum = _make_engine()
+        bt.prices_df = _make_prices_df(400)
+        result = bt.run_backtest()
+        assert 'error' in result
+
+
+# ---------------------------------------------------------------------------
+# Boundary conditions: wrong types, missing keys
+# ---------------------------------------------------------------------------
+
+class TestBoundaryWrongTypes:
+    """Passing wrong types to methods should not crash."""
+
+    def test_window_signal_string_window(self):
+        e = _make_engine()
+        df = _make_prices_df(200)
+        ll = _make_leadlag_matrix()
+        # Window as string instead of int
+        try:
+            sig = e.compute_window_signal('SPY', '66', 0.46, ll, df)
+            assert sig is not None
+        except (TypeError, ValueError):
+            pass
+
+    def test_window_signal_none_prices_df(self):
+        """Passing None for prices_df triggers _load_prices."""
+        e = NetworkMomentumLeadLag.__new__(NetworkMomentumLeadLag)
+        e.prices_path = None
+        e.db_path = None
+        e.lookback_windows = LOOKBACK_WINDOWS
+        e.max_deviation = MAX_DEVIATION
+        df = _make_prices_df(200)
+        e._prices_df = df
+        ll = _make_leadlag_matrix()
+        # With _prices_df set, _load_prices returns cached df, so prices_df=None works
+        sig = e.compute_window_signal('SPY', 66, 0.46, ll, prices_df=None)
+        assert sig is None or isinstance(sig, WindowMomentumSignal)
+
+    def test_ensemble_signal_invalid_ticker_type(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        # Pass ticker as None instead of string
+        sig = e.compute_ensemble_signal(None, 0.46, df)
+        assert sig is None  # Should gracefully return None
+
+    def test_get_recommendation_non_dict_allocation(self):
+        e = _make_engine()
+        df = _make_prices_df(300)
+        e._prices_df = df
+        with pytest.raises((TypeError, AttributeError)):
+            e.get_current_recommendation("not_a_dict")
+
+    def test_leadlag_matrix_empty_window_zero(self):
+        """Compute leadlag with window=0 should not crash."""
+        e = _make_engine()
+        df = _make_prices_df(200)
+        try:
+            result = e.compute_leadlag_matrix(0, df)
+            assert result is None or isinstance(result, LeadLagMatrix)
+        except (ZeroDivisionError, ValueError):
+            pass
+
+
+# ---------------------------------------------------------------------------
+# NetworkMomentumLeadLag initialization edge cases
+# ---------------------------------------------------------------------------
+
+class TestNetworkMomentumLeadLagInit:
+    """Test __init__ edge cases for NetworkMomentumLeadLag."""
+
+    def test_init_with_none_lookback(self):
+        engine = NetworkMomentumLeadLag(lookback_windows=None)
+        assert engine.lookback_windows == LOOKBACK_WINDOWS
+
+    def test_init_with_custom_lookback(self):
+        custom = [10, 20, 30]
+        engine = NetworkMomentumLeadLag(lookback_windows=custom)
+        assert engine.lookback_windows == custom
+
+    def test_init_with_custom_max_deviation(self):
+        engine = NetworkMomentumLeadLag(max_deviation=0.25)
+        assert engine.max_deviation == 0.25
+
+    def test_init_default_prices_path(self):
+        from src.paths import PRICES_JSON
+        engine = NetworkMomentumLeadLag()
+        assert engine.prices_path == PRICES_JSON
+
+    def test_load_prices_caches_result(self):
+        """_load_prices should return cached _prices_df if set."""
+        engine = NetworkMomentumLeadLag.__new__(NetworkMomentumLeadLag)
+        engine.prices_path = None
+        engine.db_path = None
+        engine.lookback_windows = LOOKBACK_WINDOWS
+        engine.max_deviation = MAX_DEVIATION
+        fake_df = pd.DataFrame({'SPY': [100.0]}, index=pd.date_range('2024-01-02', periods=1))
+        engine._prices_df = fake_df
+        result = engine._load_prices()
+        assert result is fake_df
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

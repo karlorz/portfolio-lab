@@ -948,23 +948,24 @@ class TestRunFullBacktest:
 
 
 class TestPrintResults:
-    def test_print_results_empty_walkforward(self, capsys):
+    def test_print_results_empty_walkforward(self, caplog):
         """print_results should not crash with empty walk_forward_windows."""
+        caplog.set_level(logging.INFO, logger='src.backtest.alt_data_walkforward_stress')
         result = _make_empty_result()
         print_results(result)
-        captured = capsys.readouterr()
-        assert 'WALK-FORWARD' in captured.out
-        assert 'STRESS TEST' in captured.out
+        assert 'WALK-FORWARD' in caplog.text
+        assert 'STRESS TEST' in caplog.text
 
-    def test_print_results_empty_stress_tests(self, capsys):
+    def test_print_results_empty_stress_tests(self, caplog):
         """print_results should not crash with empty stress_tests."""
+        caplog.set_level(logging.INFO, logger='src.backtest.alt_data_walkforward_stress')
         result = _make_empty_result()
         print_results(result)
-        captured = capsys.readouterr()
-        assert 'STRESS TEST RESULTS' in captured.out
+        assert 'STRESS TEST RESULTS' in caplog.text
 
-    def test_print_results_with_data(self, capsys):
+    def test_print_results_with_data(self, caplog):
         """print_results should format walk-forward and stress data."""
+        caplog.set_level(logging.INFO, logger='src.backtest.alt_data_walkforward_stress')
         w = WindowResult(
             label='Train 2020-2022 / Test 2023', start_date='2023', end_date='2023',
             trading_days=252, baseline_cagr=8.0, baseline_vol=12.0, baseline_sharpe=0.67,
@@ -982,11 +983,10 @@ class TestPrintResults:
             overall_sharpe_delta=0.05, target_met=True,
         )
         print_results(result)
-        captured = capsys.readouterr()
-        assert '0.670' in captured.out  # baseline_sharpe
-        assert '0.780' in captured.out  # overlay_sharpe
-        assert 'covid_crash' in captured.out
-        assert 'MET' in captured.out
+        assert '0.670' in caplog.text  # baseline_sharpe
+        assert '0.780' in caplog.text  # overlay_sharpe
+        assert 'covid_crash' in caplog.text
+        assert 'MET' in caplog.text
 
 
 class TestSaveResults:

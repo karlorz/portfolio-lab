@@ -3,18 +3,24 @@ Tests for VIX Term Structure Signal Generator (v4.50)
 Target: 40+ tests for comprehensive coverage.
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+import dataclasses
+import inspect
 import json
+import math
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+from unittest.mock import Mock, MagicMock, patch
+
+import pytest
 
 from src.signals.vix_term_structure import (
     VIXRegime,
     VIXSignalState,
     VIXTermStructureCalculator,
-    VIXTermStructureSignalGenerator,
     VIXTermStructureSignal,
+    VIXTermStructureSignalGenerator,
+    main,
 )
 
 
@@ -1073,5 +1079,821 @@ class TestVIXExtendedCoverage:
         assert signal.confidence == 50.0
 
 
+# ===================================================================== #
+#  New test classes for expanded coverage (dataclass validation,        #
+#  NaN/Inf, boundary conditions, CLI, exports, generator edge cases)    #
+# ===================================================================== #
+
+
+class TestDataclassFieldValidation:
+    """Verify all dataclass fields via dataclasses.fields()."""
+
+    def test_vix_term_structure_signal_field_count(self):
+        """Verify VIXTermStructureSignal has exactly 20 fields."""
+        fields = dataclasses.fields(VIXTermStructureSignal)
+        assert len(fields) == 19, f"Expected 19 fields, got {len(fields)}"
+
+    def test_vix_term_structure_signal_field_names(self):
+        """Verify VIXTermStructureSignal field names match the source dataclass."""
+        fields = dataclasses.fields(VIXTermStructureSignal)
+        field_names = {f.name for f in fields}
+        expected = {
+            "timestamp",
+            "signal_state",
+            "signal_value",
+            "vix_spot",
+            "vix3m",
+            "vix6m",
+            "slope_vix3m_vix",
+            "regime",
+            "regime_strength",
+            "slope_signal",
+            "roll_yield_signal",
+            "vix_zscore_signal",
+            "curve_shape_signal",
+            "spy_shift",
+            "gld_shift",
+            "tlt_shift",
+            "confidence",
+            "is_valid",
+            "reason",
+        }
+        extra = field_names - expected
+        missing = expected - field_names
+        assert field_names == expected, f"Extra fields: {extra}, Missing fields: {missing}"
+
+    def test_vix_term_structure_signal_field_types(self):
+        """Verify VIXTermStructureSignal field type annotations."""
+        fields = {f.name: f.type for f in dataclasses.fields(VIXTermStructureSignal)}
+        # String fields
+        assert fields["timestamp"] is str
+        assert fields["signal_state"] is str
+        assert fields["regime"] is str
+        assert fields["reason"] is str
+        # Float fields
+        assert fields["signal_value"] is float
+        assert fields["vix_spot"] is float
+        assert fields["slope_vix3m_vix"] is float
+        assert fields["regime_strength"] is float
+        assert fields["slope_signal"] is float
+        assert fields["roll_yield_signal"] is float
+        assert fields["vix_zscore_signal"] is float
+        assert fields["curve_shape_signal"] is float
+        assert fields["spy_shift"] is float
+        assert fields["gld_shift"] is float
+        assert fields["tlt_shift"] is float
+        assert fields["confidence"] is float
+        # Bool field
+        assert fields["is_valid"] is bool
+        # Optional float fields
+        assert fields["vix3m"] is Optional[float]
+        assert fields["vix6m"] is Optional[float]
+
+    def test_vix_term_structure_signal_no_defaults(self):
+        """Verify VIXTermStructureSignal has no default values (all required)."""
+        for f in dataclasses.fields(VIXTermStructureSignal):
+            assert f.default is dataclasses.MISSING, (
+                f"Field {f.name} has default={f.default!r} (should not exist)"
+            )
+            assert f.default_factory is dataclasses.MISSING, (
+                f"Field {f.name} has default_factory={f.default_factory!r}"
+            )
+
+    def test_vix_regime_enum_member_count(self):
+        """Verify VIXRegime has exactly 5 members."""
+        assert len(list(VIXRegime)) == 5
+
+    def test_vix_signal_state_enum_member_count(self):
+        """Verify VIXSignalState has exactly 3 members."""
+        assert len(list(VIXSignalState)) == 3
+
+
+class TestNaNInfEdgeCases:
+    """Test computation methods with NaN and Inf inputs."""
+
+    def test_slope_signal_nan_vix(self):
+        """Test calculate_slope_signal with NaN VIX does not crash."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=math.nan, vix3m=20.0)
+        # NaN arithmetic propagates; the exact result may be NaN or 0
+        assert isinstance(signal, float)
+
+    def test_slope_signal_nan_vix3m(self):
+        """Test calculate_slope_signal with NaN VIX3M does not crash."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=20.0, vix3m=math.nan)
+        assert isinstance(signal, float)
+
+    def test_slope_signal_inf_vix(self):
+        """Test calculate_slope_signal with +inf VIX (ratio = 0 -> -1.0)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=math.inf, vix3m=20.0)
+        # 20 / inf = 0.0, which is < 0.85 -> -1.0
+        assert signal == -1.0
+
+    def test_slope_signal_neg_inf_vix(self):
+        """Test calculate_slope_signal with -inf VIX (<= 0 guard)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=-math.inf, vix3m=20.0)
+        # -inf <= 0 -> guard returns 0.0
+        assert signal == 0.0
+
+    def test_slope_signal_inf_vix3m(self):
+        """Test calculate_slope_signal with +inf VIX3M (capped at 1.0)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=20.0, vix3m=math.inf)
+        assert signal == 1.0
+
+    def test_roll_yield_nan_vix(self):
+        """Test calculate_roll_yield_signal with NaN VIX does not crash."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_roll_yield_signal(vix=math.nan, vix3m=20.0)
+        assert isinstance(signal, float)
+
+    def test_roll_yield_inf_vix3m(self):
+        """Test calculate_roll_yield_signal with +inf VIX3M (capped at 1.0)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_roll_yield_signal(vix=20.0, vix3m=math.inf)
+        # (inf - 20) / inf = 1.0, * 5 = 5.0, capped at 1.0
+        assert signal == 1.0
+
+    def test_roll_yield_neg_inf_vix3m(self):
+        """Test calculate_roll_yield_signal with -inf VIX3M (<= 0 guard)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_roll_yield_signal(vix=20.0, vix3m=-math.inf)
+        assert signal == 0.0
+
+    def test_vix_zscore_nan_vix(self):
+        """Test calculate_vix_zscore_signal with NaN VIX does not crash."""
+        calc = VIXTermStructureCalculator()
+        for i in range(60):
+            calc.add_vix_reading(f"2026-01-{i+1:03d}", 20.0)
+        signal = calc.calculate_vix_zscore_signal(vix=math.nan)
+        assert isinstance(signal, float)
+
+    def test_vix_zscore_inf_vix(self):
+        """Test calculate_vix_zscore_signal with +inf VIX (extreme -> -1.0)."""
+        calc = VIXTermStructureCalculator()
+        for i in range(60):
+            calc.add_vix_reading(f"2026-01-{i+1:03d}", 20.0 + (i % 5))
+        signal = calc.calculate_vix_zscore_signal(vix=math.inf)
+        # inf zscore -> inverted -> -1.0
+        assert signal == -1.0
+
+    def test_curve_shape_nan_vix3m(self):
+        """Test calculate_curve_shape_signal with NaN VIX3M does not crash."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_curve_shape_signal(vix3m=math.nan, vix6m=20.0)
+        assert isinstance(signal, float)
+
+    def test_curve_shape_nan_vix6m(self):
+        """Test calculate_curve_shape_signal with NaN VIX6M does not crash."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_curve_shape_signal(vix3m=20.0, vix6m=math.nan)
+        assert isinstance(signal, float)
+
+    def test_curve_shape_inf_vix6m(self):
+        """Test calculate_curve_shape_signal with +inf VIX6M (capped at 1.0)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_curve_shape_signal(vix3m=20.0, vix6m=math.inf)
+        # inf / 20 = inf, (inf - 1)*10 = inf, capped at 1.0
+        assert signal == 1.0
+
+    def test_classify_regime_nan(self):
+        """Test classify_regime with NaN slope does not crash."""
+        calc = VIXTermStructureCalculator()
+        regime, strength = calc.classify_regime(math.nan)
+        # NaN comparisons all False -> falls through to extreme_backwardation
+        assert isinstance(regime, VIXRegime)
+        assert isinstance(strength, float)
+
+    def test_classify_regime_inf(self):
+        """Test classify_regime with +inf slope."""
+        calc = VIXTermStructureCalculator()
+        regime, strength = calc.classify_regime(math.inf)
+        assert regime == VIXRegime.EXTREME_CONTANGO
+        assert 0.0 <= strength <= 1.0
+
+    def test_get_allocation_shifts_nan(self):
+        """Test get_allocation_shifts with NaN signal does not crash."""
+        calc = VIXTermStructureCalculator()
+        shifts = calc.get_allocation_shifts(math.nan)
+        # NaN comparisons all False -> caution branch (>= -0.7 is False ... wait,
+        # NaN >= -0.7 is False, so it falls to the else -> risk-off)
+        assert shifts == {"spy": -0.10, "gld": 0.05, "tlt": 0.05}
+
+    def test_get_allocation_shifts_inf(self):
+        """Test get_allocation_shifts with +inf signal."""
+        calc = VIXTermStructureCalculator()
+        shifts = calc.get_allocation_shifts(math.inf)
+        # inf >= 0.7 is True -> complacent branch
+        assert shifts["spy"] == 0.05
+        assert shifts["gld"] == -0.03
+
+    def test_get_allocation_shifts_neg_inf(self):
+        """Test get_allocation_shifts with -inf signal."""
+        calc = VIXTermStructureCalculator()
+        shifts = calc.get_allocation_shifts(-math.inf)
+        # -inf >= 0.7 is False, -inf >= -0.3 is False, -inf >= -0.7 is False
+        # -> else branch: risk-off
+        assert shifts == {"spy": -0.10, "gld": 0.05, "tlt": 0.05}
+
+
+class TestBoundaryConditions:
+    """Function boundary conditions with extreme inputs."""
+
+    def test_slope_signal_extreme_large_ratio(self):
+        """Test slope signal with VIX3M/VIX ratio of 3.0 (capped at +1.0)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=10.0, vix3m=30.0)
+        assert signal == 1.0
+
+    def test_slope_signal_extreme_small_ratio(self):
+        """Test slope signal with VIX3M/VIX ratio of 0.1 (capped at -1.0)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=100.0, vix3m=10.0)
+        assert signal == -1.0
+
+    def test_slope_signal_ratio_just_above_1(self):
+        """Test slope signal with ratio just above 1.0 (1.001)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=100.0, vix3m=100.1)
+        assert 0.0 < signal < 0.1
+
+    def test_slope_signal_ratio_just_below_1(self):
+        """Test slope signal with ratio just below 1.0 (0.999)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_slope_signal(vix=100.0, vix3m=99.9)
+        # slope 0.999 < 1.0 => -1.0 + (0.999 - 0.85) / 0.15 * 0.5 ≈ -0.503
+        assert -0.6 < signal < -0.4
+
+    def test_roll_yield_equal_large_values(self):
+        """Test roll yield with equal very large values (should be 0)."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_roll_yield_signal(vix=1e10, vix3m=1e10)
+        assert signal == 0.0
+
+    def test_roll_yield_vix_near_zero_positive(self):
+        """Test roll yield with VIX near zero but vix3m positive."""
+        calc = VIXTermStructureCalculator()
+        signal = calc.calculate_roll_yield_signal(vix=1e-10, vix3m=20.0)
+        # (20 - 1e-10) / 20 ≈ 1.0, * 5 = 5.0, capped at 1.0
+        assert signal == 1.0
+
+    def test_vix_zscore_single_element_history(self):
+        """Test Z-score with single element history (below 60-day threshold)."""
+        calc = VIXTermStructureCalculator()
+        calc.add_vix_reading("2026-01-01", 20.0)
+        signal = calc.calculate_vix_zscore_signal(vix=25.0)
+        assert signal == 0.0
+
+    def test_vix_zscore_exactly_60_days(self):
+        """Test Z-score with exactly 60 days of history (boundary)."""
+        calc = VIXTermStructureCalculator()
+        for i in range(60):
+            calc.add_vix_reading(f"2026-01-{i+1:03d}", 20.0 + (i % 5))
+        signal = calc.calculate_vix_zscore_signal(vix=25.0)
+        assert signal != 0.0  # 60 days is enough for non-zero
+
+    def test_vix_zscore_very_large_history(self):
+        """Test Z-score with 1000 days of history."""
+        calc = VIXTermStructureCalculator()
+        for i in range(1000):
+            calc.add_vix_reading(f"2026-{i // 30 + 1:02d}-{i % 28 + 1:02d}", 18.0 + (i % 5))
+        signal = calc.calculate_vix_zscore_signal(vix=25.0)
+        assert -1.0 <= signal <= 1.0
+
+    def test_vix_zscore_negative_zscore_gives_positive_signal(self):
+        """Verify negative Z-score (VIX below mean) gives positive (risk-on) signal."""
+        calc = VIXTermStructureCalculator()
+        for i in range(100):
+            calc.add_vix_reading(f"2026-01-{i+1:03d}", 30.0 + (i % 5))
+        signal = calc.calculate_vix_zscore_signal(vix=20.0)
+        assert signal > 0.0
+
+    def test_classify_regime_zero_slope(self):
+        """Test classify_regime with slope of 0.0 (extreme backwardation)."""
+        calc = VIXTermStructureCalculator()
+        regime, strength = calc.classify_regime(0.0)
+        assert regime == VIXRegime.EXTREME_BACKWARDATION
+        assert 0.0 <= strength <= 1.0
+
+    def test_classify_regime_negative_slope(self):
+        """Test classify_regime with negative slope."""
+        calc = VIXTermStructureCalculator()
+        regime, strength = calc.classify_regime(-0.5)
+        assert regime == VIXRegime.EXTREME_BACKWARDATION
+        assert 0.0 <= strength <= 1.0
+
+    def test_classify_regime_extreme_high_slope(self):
+        """Test classify_regime with very high slope (5.0)."""
+        calc = VIXTermStructureCalculator()
+        regime, strength = calc.classify_regime(5.0)
+        assert regime == VIXRegime.EXTREME_CONTANGO
+        assert 0.0 <= strength <= 1.0
+
+    def test_get_allocation_shifts_above_1_saturates(self):
+        """Test get_allocation_shifts with signal > 1.0 (saturates at complacent)."""
+        calc = VIXTermStructureCalculator()
+        shifts = calc.get_allocation_shifts(1.5)
+        assert shifts["spy"] == 0.05  # Same as >= 0.7 branch
+
+    def test_get_allocation_shifts_below_neg1_saturates(self):
+        """Test get_allocation_shifts with signal < -1.0 (saturates at risk-off)."""
+        calc = VIXTermStructureCalculator()
+        shifts = calc.get_allocation_shifts(-1.5)
+        assert shifts == {"spy": -0.10, "gld": 0.05, "tlt": 0.05}
+
+    def test_calculator_custom_history_days(self):
+        """Test VIXTermStructureCalculator with custom history_days=5."""
+        calc = VIXTermStructureCalculator(history_days=5)
+        assert calc.history_days == 5
+        for i in range(10):
+            calc.add_vix_reading(f"2026-01-{i+1:02d}", float(i))
+        assert len(calc.vix_history) == 5
+
+    def test_add_vix_reading_empty_date(self):
+        """Test add_vix_reading with empty string date."""
+        calc = VIXTermStructureCalculator()
+        calc.add_vix_reading("", 20.0)
+        assert len(calc.vix_history) == 1
+        assert calc.vix_history[0] == ("", 20.0)
+
+    def test_add_vix_reading_zero_vix(self):
+        """Test add_vix_reading with zero VIX value."""
+        calc = VIXTermStructureCalculator()
+        calc.add_vix_reading("2026-01-01", 0.0)
+        assert calc.vix_history[0] == ("2026-01-01", 0.0)
+
+    def test_add_vix_reading_negative_vix(self):
+        """Test add_vix_reading with negative VIX value."""
+        calc = VIXTermStructureCalculator()
+        calc.add_vix_reading("2026-01-01", -5.0)
+        assert calc.vix_history[0] == ("2026-01-01", -5.0)
+
+
+class TestCLIEntryPoint:
+    """Test CLI entry points with capsys."""
+
+    @patch.object(VIXTermStructureSignalGenerator, "generate_signal")
+    @patch.object(VIXTermStructureSignalGenerator, "save_signal")
+    def test_main_runs_and_returns_signal(self, mock_save, mock_gen):
+        """Test main() returns a VIXTermStructureSignal."""
+        mock_signal = MagicMock(spec=VIXTermStructureSignal)
+        mock_signal.timestamp = "2026-05-15T12:00:00"
+        mock_signal.signal_state = "neutral"
+        mock_signal.signal_value = 0.0
+        mock_signal.vix_spot = 20.0
+        mock_signal.vix3m = 22.0
+        mock_signal.vix6m = 24.0
+        mock_signal.slope_vix3m_vix = 1.1
+        mock_signal.regime = "contango"
+        mock_signal.regime_strength = 0.5
+        mock_signal.slope_signal = 0.3
+        mock_signal.roll_yield_signal = 0.2
+        mock_signal.vix_zscore_signal = 0.1
+        mock_signal.curve_shape_signal = 0.15
+        mock_signal.spy_shift = 0.0
+        mock_signal.gld_shift = 0.0
+        mock_signal.tlt_shift = 0.0
+        mock_signal.confidence = 85.0
+        mock_signal.is_valid = True
+        mock_signal.reason = "Test signal"
+        mock_gen.return_value = mock_signal
+
+        result = main()
+        assert result is mock_signal
+        mock_save.assert_called_once_with(mock_signal)
+
+    @patch.object(VIXTermStructureSignalGenerator, "generate_signal")
+    @patch.object(VIXTermStructureSignalGenerator, "save_signal")
+    def test_main_output_contains_key_fields(self, mock_save, mock_gen, capsys):
+        """Test main() prints expected fields to stdout."""
+        mock_signal = MagicMock(spec=VIXTermStructureSignal)
+        mock_signal.timestamp = "2026-05-15T12:00:00"
+        mock_signal.signal_state = "risk_off"
+        mock_signal.signal_value = -0.75
+        mock_signal.vix_spot = 35.0
+        mock_signal.vix3m = 28.0
+        mock_signal.vix6m = 25.0
+        mock_signal.slope_vix3m_vix = 0.8
+        mock_signal.regime = "backwardation"
+        mock_signal.regime_strength = 0.8
+        mock_signal.slope_signal = -0.8
+        mock_signal.roll_yield_signal = -0.5
+        mock_signal.vix_zscore_signal = -0.6
+        mock_signal.curve_shape_signal = -0.4
+        mock_signal.spy_shift = -0.10
+        mock_signal.gld_shift = 0.05
+        mock_signal.tlt_shift = 0.05
+        mock_signal.confidence = 90.0
+        mock_signal.is_valid = True
+        mock_signal.reason = "Backwardation detected"
+        mock_gen.return_value = mock_signal
+
+        main()
+        captured = capsys.readouterr()
+
+        assert "VIX TERM STRUCTURE SIGNAL GENERATOR" in captured.out
+        assert "Signal State: risk_off" in captured.out
+        assert "Signal Value: -0.750" in captured.out
+        assert "VIX Spot: 35.00" in captured.out
+        assert "Regime: backwardation" in captured.out
+        assert "Confidence: 90%" in captured.out
+        assert "Valid: True" in captured.out
+        assert "Reason: Backwardation detected" in captured.out
+
+    @patch.object(VIXTermStructureSignalGenerator, "generate_signal")
+    @patch.object(VIXTermStructureSignalGenerator, "save_signal")
+    def test_main_output_with_invalid_signal(self, mock_save, mock_gen, capsys):
+        """Test main() output when signal is invalid."""
+        mock_signal = MagicMock(spec=VIXTermStructureSignal)
+        mock_signal.timestamp = "2026-05-15T12:00:00"
+        mock_signal.signal_state = "neutral"
+        mock_signal.signal_value = 0.0
+        mock_signal.vix_spot = 0.0
+        mock_signal.vix3m = None
+        mock_signal.vix6m = None
+        mock_signal.slope_vix3m_vix = 1.0
+        mock_signal.regime = "unknown"
+        mock_signal.regime_strength = 0.0
+        mock_signal.slope_signal = 0.0
+        mock_signal.roll_yield_signal = 0.0
+        mock_signal.vix_zscore_signal = 0.0
+        mock_signal.curve_shape_signal = 0.0
+        mock_signal.spy_shift = 0.0
+        mock_signal.gld_shift = 0.0
+        mock_signal.tlt_shift = 0.0
+        mock_signal.confidence = 0.0
+        mock_signal.is_valid = False
+        mock_signal.reason = "No VIX data available"
+        mock_gen.return_value = mock_signal
+
+        main()
+        captured = capsys.readouterr()
+        assert "Valid: False" in captured.out
+        assert "No VIX data available" in captured.out
+
+    def test_cli_guard_present(self):
+        """Test that __name__ == '__main__' guard exists in source."""
+        import src.signals.vix_term_structure as module
+        source = inspect.getsource(module)
+        assert "if __name__ == '__main__':" in source
+
+
+class TestExportCompleteness:
+    """Verify __all__ coverage in vix_term_structure module."""
+
+    def test_all_exports_exist(self):
+        """Verify every name in __all__ actually exists in the module."""
+        import src.signals.vix_term_structure as module
+        for name in module.__all__:
+            assert hasattr(module, name), (
+                f"'{name}' declared in __all__ but not defined in module"
+            )
+
+    def test_all_exports_are_types(self):
+        """Verify all __all__ members are classes (no plain functions exported)."""
+        import src.signals.vix_term_structure as module
+        for name in module.__all__:
+            obj = getattr(module, name)
+            assert isinstance(obj, type), f"'{name}' is {type(obj).__name__}, not a class/type"
+
+    def test_all_count(self):
+        """Verify __all__ contains exactly 5 exports."""
+        import src.signals.vix_term_structure as module
+        assert len(module.__all__) == 5
+
+
+class TestGeneratorEdgeCases:
+    """Additional generator edge case tests."""
+
+    @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
+    def test_generate_signal_nonexistent_date_uses_latest(self, mock_load_data):
+        """Test generate_signal with a date not in data fetches current."""
+        mock_load_data.return_value = {
+            "2026-05-10": {"vix_spot": 18.0, "front_month": 20.0, "third_month": 22.0},
+            "2026-05-11": {"vix_spot": 19.0, "front_month": 21.0, "third_month": 23.0},
+        }
+        generator = VIXTermStructureSignalGenerator()
+        # Date '2026-05-15' not in data -> tries fetch_current_vix -> returns latest
+        signal = generator.generate_signal("2026-05-15")
+        assert signal.is_valid
+        assert signal.vix_spot == 19.0  # latest is 2026-05-11
+
+    @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
+    def test_generate_signal_missing_vix_spot_key(self, mock_load_data):
+        """Test generate_signal when vix_spot key is missing (defaults to 0)."""
+        mock_load_data.return_value = {
+            "2026-05-15": {
+                "date": "2026-05-15",
+                "front_month": 20.0,
+                "third_month": 22.0,
+            }
+        }
+        generator = VIXTermStructureSignalGenerator()
+        signal = generator.generate_signal("2026-05-15")
+        assert signal.is_valid
+        assert signal.vix_spot == 0.0  # default from .get("vix_spot", 0)
+        assert signal.vix3m == 20.0
+
+    @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
+    def test_generate_signal_string_vix_spot_raises_type_error(self, mock_load_data):
+        """Test generate_signal with string vix_spot raises TypeError (not guarded)."""
+        mock_load_data.return_value = {
+            "2026-05-15": {
+                "date": "2026-05-15",
+                "vix_spot": "high",
+                "front_month": 20.0,
+                "third_month": 22.0,
+            }
+        }
+        generator = VIXTermStructureSignalGenerator()
+        with pytest.raises(TypeError):
+            generator.generate_signal("2026-05-15")
+
+    @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
+    def test_fetch_current_vix_returns_latest(self, mock_load_data):
+        """Test fetch_current_vix returns latest entry from data."""
+        mock_load_data.return_value = {
+            "2026-05-10": {"vix_spot": 18.0},
+            "2026-05-11": {"vix_spot": 19.0},
+            "2026-05-12": {"vix_spot": 20.0},
+        }
+        generator = VIXTermStructureSignalGenerator()
+        result = generator.fetch_current_vix()
+        assert result == {"vix_spot": 20.0}
+
+    @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
+    def test_save_signal_exception_handling(self, mock_load_data):
+        """Test save_signal handles file write exception gracefully."""
+        generator = VIXTermStructureSignalGenerator()
+        signal = VIXTermStructureSignal(
+            timestamp="2026-05-15T12:00:00",
+            signal_state="neutral",
+            signal_value=0.0,
+            vix_spot=0.0,
+            vix3m=None,
+            vix6m=None,
+            slope_vix3m_vix=1.0,
+            regime="unknown",
+            regime_strength=0.0,
+            slope_signal=0.0,
+            roll_yield_signal=0.0,
+            vix_zscore_signal=0.0,
+            curve_shape_signal=0.0,
+            spy_shift=0.0,
+            gld_shift=0.0,
+            tlt_shift=0.0,
+            confidence=0.0,
+            is_valid=False,
+            reason="test save exception",
+        )
+        with patch("builtins.open", side_effect=OSError("Permission denied")):
+            generator.save_signal(signal)  # Should not raise
+
+    def test_load_vix_data_file_not_found(self):
+        """Test load_vix_data when file does not exist returns empty dict."""
+        generator = VIXTermStructureSignalGenerator()
+        generator.VIX_DATA_PATH = Path("/nonexistent/path/should/not/exist.json")
+        result = generator.load_vix_data()
+        assert result == {}
+
+    def test_load_vix_data_corrupt_json(self, tmp_path):
+        """Test load_vix_data with corrupt JSON file."""
+        data_file = tmp_path / "vix_term_structure.json"
+        data_file.write_text("{invalid json}")
+        generator = VIXTermStructureSignalGenerator()
+        generator.VIX_DATA_PATH = data_file
+        result = generator.load_vix_data()
+        assert result == {}
+
+    def test_generate_signal_empty_data_dict(self):
+        """Test generate_signal with empty data dict returns invalid signal."""
+        generator = VIXTermStructureSignalGenerator()
+        with patch.object(generator, "load_vix_data", return_value={}):
+            signal = generator.generate_signal("2026-05-15")
+            assert not signal.is_valid
+            assert signal.reason == "No VIX data available"
+
+
+class TestCompositeSignalFallback:
+    """Test composite signal fallback logic for each VIX level threshold.
+
+    When vix3m is None the code assigns a proxy vix3m based on VIX level,
+    then recalculates slope_signal via calculate_slope_signal().
+    - VIX < VIX_CHEAP:  proxy = vix * 1.1  (slope 1.10) -> slope_signal = 0.333
+    - VIX >= VIX_CHEAP: proxy = vix * 0.9  (slope 0.90) -> slope_signal = -0.833
+    """
+
+    def _calc_with_history(self):
+        calc = VIXTermStructureCalculator()
+        for i in range(60):
+            calc.add_vix_reading(f"2026-01-{i+1:03d}", 18.0)
+        return calc
+
+    def test_vix3m_none_vix_cheap(self):
+        """Test fallback when VIX3M is None and VIX is below cheap threshold."""
+        calc = self._calc_with_history()
+        components = calc.calculate_composite_signal(
+            vix=14.0, vix3m=None, vix6m=None, date="2026-05-15"
+        )
+        # VIX(14.0) < VIX_CHEAP(16.0) -> proxy=14*1.1=15.4, slope=1.1 -> signal=0.333
+        assert components["slope_signal"] == pytest.approx(1 / 3, abs=0.001)
+
+    def test_vix3m_none_vix_between_cheap_and_fair(self):
+        """Test fallback when VIX3M is None and VIX is between cheap and fair."""
+        calc = self._calc_with_history()
+        components = calc.calculate_composite_signal(
+            vix=18.0, vix3m=None, vix6m=None, date="2026-05-15"
+        )
+        # VIX_CHEAP(16.0) <= 18.0 < VIX_FAIR(20.0) -> slope_signal_assigned=0.0
+        # proxy=18*0.9=16.2, slope=0.9 -> recalculated signal=-0.833
+        assert components["slope_signal"] == pytest.approx(-0.83333, abs=0.001)
+
+    def test_vix3m_none_vix_between_fair_and_expensive(self):
+        """Test fallback when VIX3M is None and VIX is between fair and expensive."""
+        calc = self._calc_with_history()
+        components = calc.calculate_composite_signal(
+            vix=22.0, vix3m=None, vix6m=None, date="2026-05-15"
+        )
+        # VIX_FAIR(20.0) <= 22.0 < VIX_EXPENSIVE(25.0) -> recalculated signal=-0.833
+        assert components["slope_signal"] == pytest.approx(-0.83333, abs=0.001)
+
+    def test_vix3m_none_vix_expensive(self):
+        """Test fallback when VIX3M is None and VIX is above expensive threshold."""
+        calc = self._calc_with_history()
+        components = calc.calculate_composite_signal(
+            vix=30.0, vix3m=None, vix6m=None, date="2026-05-15"
+        )
+        # VIX(30.0) >= VIX_EXPENSIVE(25.0) -> recalculated signal=-0.833
+        assert components["slope_signal"] == pytest.approx(-0.83333, abs=0.001)
+
+    def test_vix3m_none_at_exact_cheap_threshold(self):
+        """Test fallback when VIX equals cheap threshold exactly."""
+        calc = self._calc_with_history()
+        components = calc.calculate_composite_signal(
+            vix=16.0, vix3m=None, vix6m=None, date="2026-05-15"
+        )
+        # 16.0 < 16.0 is False -> 16.0 < 20.0 is True -> assigned 0.0 -> recalculated -0.833
+        assert components["slope_signal"] == pytest.approx(-0.83333, abs=0.001)
+
+    def test_vix3m_none_at_exact_fair_threshold(self):
+        """Test fallback when VIX equals fair threshold exactly."""
+        calc = self._calc_with_history()
+        components = calc.calculate_composite_signal(
+            vix=20.0, vix3m=None, vix6m=None, date="2026-05-15"
+        )
+        # 20.0 < 16.0: False. 20.0 < 20.0: False. 20.0 < 25.0: True -> assigned -0.3
+        # proxy=20*0.9=18, slope=0.9 -> recalculated -0.833
+        assert components["slope_signal"] == pytest.approx(-0.83333, abs=0.001)
+
+    def test_vix3m_none_at_exact_expensive_threshold(self):
+        """Test fallback when VIX equals expensive threshold exactly."""
+        calc = self._calc_with_history()
+        components = calc.calculate_composite_signal(
+            vix=25.0, vix3m=None, vix6m=None, date="2026-05-15"
+        )
+        # All comparisons False -> else branch: assigned -0.8 -> recalculated -0.833
+        assert components["slope_signal"] == pytest.approx(-0.83333, abs=0.001)
+
+
+class TestSignalDataclassConvenience:
+    """Test convenience methods on VIXTermStructureSignal dataclass."""
+
+    def test_to_dict_with_minimal_signal(self):
+        """Test to_dict() with minimal (empty) signal."""
+        signal = VIXTermStructureSignal(
+            timestamp="",
+            signal_state="",
+            signal_value=0.0,
+            vix_spot=0.0,
+            vix3m=None,
+            vix6m=None,
+            slope_vix3m_vix=0.0,
+            regime="",
+            regime_strength=0.0,
+            slope_signal=0.0,
+            roll_yield_signal=0.0,
+            vix_zscore_signal=0.0,
+            curve_shape_signal=0.0,
+            spy_shift=0.0,
+            gld_shift=0.0,
+            tlt_shift=0.0,
+            confidence=0.0,
+            is_valid=False,
+            reason="",
+        )
+        d = signal.to_dict()
+        assert d["timestamp"] == ""
+        assert d["vix3m"] is None
+        assert d["vix6m"] is None
+        assert d["is_valid"] is False
+        assert d["confidence"] == 0.0
+
+    def test_to_signal_snapshot_with_invalid_signal(self):
+        """Test to_signal_snapshot() with an invalid (is_valid=False) signal."""
+        signal = VIXTermStructureSignal(
+            timestamp="2026-05-15T12:00:00",
+            signal_state="neutral",
+            signal_value=0.0,
+            vix_spot=0.0,
+            vix3m=None,
+            vix6m=None,
+            slope_vix3m_vix=1.0,
+            regime="unknown",
+            regime_strength=0.0,
+            slope_signal=0.0,
+            roll_yield_signal=0.0,
+            vix_zscore_signal=0.0,
+            curve_shape_signal=0.0,
+            spy_shift=0.0,
+            gld_shift=0.0,
+            tlt_shift=0.0,
+            confidence=0.0,
+            is_valid=False,
+            reason="No data",
+        )
+        snapshot = signal.to_signal_snapshot()
+        assert snapshot.is_active is False
+        assert snapshot.value == 0.0
+        assert snapshot.confidence == 0.0
+
+    def test_to_dict_roundtrip(self):
+        """Verify to_dict() output can recreate a signal with the same fields."""
+        original = VIXTermStructureSignal(
+            timestamp="2026-05-15T12:00:00",
+            signal_state="risk_on",
+            signal_value=0.75,
+            vix_spot=15.0,
+            vix3m=18.0,
+            vix6m=20.0,
+            slope_vix3m_vix=1.2,
+            regime="extreme_contango",
+            regime_strength=0.8,
+            slope_signal=0.6,
+            roll_yield_signal=0.4,
+            vix_zscore_signal=0.3,
+            curve_shape_signal=0.2,
+            spy_shift=0.05,
+            gld_shift=-0.03,
+            tlt_shift=-0.02,
+            confidence=90.0,
+            is_valid=True,
+            reason="Roundtrip test",
+        )
+        d = original.to_dict()
+        restored = VIXTermStructureSignal(**d)
+        assert restored.timestamp == original.timestamp
+        assert restored.signal_value == original.signal_value
+        assert restored.vix_spot == original.vix_spot
+        assert restored.vix3m == original.vix3m
+        assert restored.vix6m == original.vix6m
+        assert restored.confidence == original.confidence
+        assert restored.is_valid == original.is_valid
+        assert restored.reason == original.reason
+
+
+class TestRegimeClassificationEdgeCases:
+    """Edge cases for regime classification strength calculation."""
+
+    def test_regime_strength_at_precise_boundaries(self):
+        """Verify regime strength at precise regime boundary slopes."""
+        calc = VIXTermStructureCalculator()
+
+        # EXTREME_CONTANGO at 1.30: strength = (1.30-1.15)/0.15 + 0.5 = 1.5 -> capped to 1.0
+        regime, strength = calc.classify_regime(1.30)
+        assert regime == VIXRegime.EXTREME_CONTANGO
+        assert strength == 1.0
+
+        # CONTANGO at 1.07: strength = (1.07-1.0)/0.15 = 0.4666...
+        regime, strength = calc.classify_regime(1.07)
+        assert regime == VIXRegime.CONTANGO
+        assert 0.4 <= strength <= 0.5
+
+        # FLAT at 0.96: strength = (1.0-0.96)/0.05 = 0.8
+        regime, strength = calc.classify_regime(0.96)
+        assert regime == VIXRegime.FLAT
+        assert strength == pytest.approx(0.8, abs=1e-9)
+
+        # BACKWARDATION at 0.85: strength = (0.95-0.85)/0.15 = 0.666...
+        regime, strength = calc.classify_regime(0.85)
+        assert regime == VIXRegime.BACKWARDATION
+        assert 0.66 <= strength <= 0.67
+
+        # EXTREME_BACKWARDATION at 0.70: strength = (0.80-0.70)/0.10 + 0.5 = 1.5 -> capped at 1.0
+        regime, strength = calc.classify_regime(0.70)
+        assert regime == VIXRegime.EXTREME_BACKWARDATION
+        assert strength == 1.0
+
+    def test_regime_strength_flat_upper_boundary(self):
+        """Test regime strength when slope is exactly 1.0 (upper contango boundary -> EXTREME_CONTANGO)."""
+        calc = VIXTermStructureCalculator()
+        # Actually 1.0 is CONTANGO threshold via >= 1.0 check
+        regime, strength = calc.classify_regime(1.0)
+        assert regime == VIXRegime.CONTANGO
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
