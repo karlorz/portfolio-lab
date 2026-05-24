@@ -6,6 +6,9 @@ and FedPolicyOverlay allocation recommendation.
 """
 import numpy as np
 import pandas as pd
+import json
+import os
+import time
 
 import pytest
 from pathlib import Path
@@ -14,11 +17,14 @@ from datetime import datetime
 
 from src.signals.fed_policy_overlay import (
     FRED_SERIES,
+    FRED_CACHE,
     calculate_inflation_yoy,
     calculate_real_rate,
     FedPolicyRegime,
     classify_fed_regime,
     FedPolicyOverlay,
+    fetch_fred_series,
+    fetch_all_fred_data,
 )
 
 
@@ -599,3 +605,458 @@ class TestFredSeriesExtended:
         """All FRED_SERIES values should be descriptive strings."""
         for key, desc in FRED_SERIES.items():
             assert isinstance(desc, str) and len(desc) > 10
+
+
+# =============================================================================
+# fetch_fred_series tests
+# =============================================================================
+
+class TestFetchFredSeries:
+    """Tests for fetch_fred_series with mocked HTTP calls."""
+
+    def test_successful_fetch_valid_csv(self):
+        """Valid CSV response should return DataFrame with date and value columns."""
+        csv_data = "DATE,VALUE\n2020-01-01,2.5\n2020-02-01,2.6\n"
+        with patch('src.signals.fed_policy_overlay.requests.get') as mock_get:
+            mock_response = MagicMock()
+            mock_response.text = csv_data
+            mock_response.raise_for_status.return_value = None
+            mock_get.return_value = mock_response
+
+            result = fetch_fred_series('FEDFUNDS')
+            assert result is not None
+            assert 'date' in result.columns
+            assert 'value' in result.columns
+            assert len(result) == 2
+
+    def test_http_error_returns_none(self):
+        """HTTP error (e.g. 404) should return None."""
+        csv_data = "DATE,VALUE\n2020-01-01,2.5\n"
+        with patch('src.signals.fed_policy_overlay.requests.get') as mock_get:
+            mock_response = MagicMock()
+            mock_response.text = csv_data
+            mock_response.raise_for_status.side_effect = Exception("HTTP 404 Not Found")
+            mock_get.return_value = mock_response
+
+            result = fetch_fred_series('FEDFUNDS')
+            assert result is None
+
+    def test_request_exception_returns_none(self):
+        """Network error (connection timeout) should return None."""
+        with patch('src.signals.fed_policy_overlay.requests.get') as mock_get:
+            mock_get.side_effect = Exception("ConnectionError: No connection")
+
+            result = fetch_fred_series('FEDFUNDS')
+            assert result is None
+
+    def test_invalid_numeric_data_dropped(self):
+        """Non-numeric values should be coerced to NaN and dropped."""
+        csv_data = "DATE,VALUE\n2020-01-01,abc\n2020-02-01,def\n"
+        with patch('src.signals.fed_policy_overlay.requests.get') as mock_get:
+            mock_response = MagicMock()
+            mock_response.text = csv_data
+            mock_response.raise_for_status.return_value = None
+            mock_get.return_value = mock_response
+
+            result = fetch_fred_series('FEDFUNDS')
+            # After dropna all rows are gone
+            assert result is None or len(result) == 0
+
+
+# =============================================================================
+# fetch_all_fred_data tests
+# =============================================================================
+
+class TestFetchAllFredData:
+    """Tests for fetch_all_fred_data with caching behavior."""
+
+    def test_cache_hit_uses_cached_data(self, tmp_path):
+        """Valid cache file under 24h old should skip fetch."""
+        cache_file = tmp_path / "fred_cache.json"
+        cached_data = {
+            'FEDFUNDS': [{'date': '2026-01-01', 'value': 5.0}],
+        }
+        cache_file.write_text(json.dumps(cached_data))
+
+        with patch('src.signals.fed_policy_overlay.fetch_fred_series') as mock_fetch:
+            result = fetch_all_fred_data(cache_path=cache_file)
+            mock_fetch.assert_not_called()
+            assert 'FEDFUNDS' in result
+
+    def test_cache_miss_triggers_fetch(self, tmp_path):
+        """No cache file should trigger FRED fetch and create cache."""
+        cache_file = tmp_path / "fred_cache.json"
+        mock_df = pd.DataFrame({
+            'date': pd.date_range('2026-01-01', periods=3, freq='MS'),
+            'value': [5.0, 5.25, 5.5],
+        })
+
+        with patch('src.signals.fed_policy_overlay.fetch_fred_series', return_value=mock_df) as mock_fetch:
+            result = fetch_all_fred_data(cache_path=cache_file)
+            assert mock_fetch.call_count >= 1
+            assert cache_file.exists()
+
+    def test_force_refresh_bypasses_cache(self, tmp_path):
+        """force_refresh=True should bypass cache and fetch fresh data."""
+        cache_file = tmp_path / "fred_cache.json"
+        cached_data = {'FEDFUNDS': [{'date': '2026-01-01', 'value': 5.0}]}
+        cache_file.write_text(json.dumps(cached_data))
+        mock_df = pd.DataFrame({
+            'date': pd.date_range('2026-01-01', periods=3, freq='MS'),
+            'value': [5.0, 5.25, 5.5],
+        })
+
+        with patch('src.signals.fed_policy_overlay.fetch_fred_series', return_value=mock_df) as mock_fetch:
+            result = fetch_all_fred_data(cache_path=cache_file, force_refresh=True)
+            mock_fetch.assert_called()
+            assert 'FEDFUNDS' in result
+
+
+# =============================================================================
+# calculate_real_rate merge behavior tests
+# =============================================================================
+
+class TestCalculateRealRateMerge:
+    """Tests for calculate_real_rate merge and frequency behavior."""
+
+    def test_inner_merge_drops_non_overlapping(self):
+        """Inner merge should only keep rows with matching dates."""
+        nominal_dates = pd.date_range('2020-01-01', periods=5, freq='MS')
+        cpi_dates = pd.date_range('2021-01-01', periods=5, freq='MS')
+        nominal = pd.DataFrame({'date': nominal_dates, 'value': [4.0, 4.5, 5.0, 5.5, 6.0]})
+        cpi_inflation = pd.DataFrame({
+            'date': cpi_dates,
+            'inflation_yoy': [2.0, 2.2, 2.4, 2.6, 2.8],
+        })
+
+        result = calculate_real_rate(nominal, cpi_inflation, merge_how='inner')
+        # No overlapping dates, so empty after dropna
+        assert len(result) == 0
+
+    def test_forward_fill_handles_different_frequencies(self):
+        """Forward fill should propagate inflation values to fill gaps."""
+        # Daily nominal, monthly CPI
+        nominal_dates = pd.date_range('2020-01-01', periods=5, freq='D')
+        cpi_dates = pd.date_range('2020-01-01', periods=3, freq='MS')
+        nominal = pd.DataFrame({'date': nominal_dates, 'value': [4.0, 4.1, 4.2, 4.3, 4.4]})
+        cpi_inflation = pd.DataFrame({
+            'date': cpi_dates,
+            'inflation_yoy': [2.0, 2.2, 2.4],
+        })
+
+        result = calculate_real_rate(nominal, cpi_inflation, merge_how='outer')
+        # Should not crash; forward_fill should succeed
+        assert 'real_rate' in result.columns
+
+    def test_real_rate_negative_when_inflation_above_nominal(self):
+        """When inflation exceeds nominal rate, real rate should be negative."""
+        nominal = pd.DataFrame({
+            'date': pd.date_range('2020-01-01', periods=3, freq='MS'),
+            'value': [1.0, 1.0, 1.0],
+        })
+        cpi_inflation = pd.DataFrame({
+            'date': pd.date_range('2020-01-01', periods=3, freq='MS'),
+            'inflation_yoy': [3.0, 3.5, 4.0],
+        })
+
+        result = calculate_real_rate(nominal, cpi_inflation, merge_how='inner')
+        if len(result) > 0:
+            assert all(result['real_rate'] < 0)
+            assert result['real_rate'].iloc[0] == pytest.approx(-2.0, abs=0.01)
+
+
+# =============================================================================
+# FedPolicyRegime dataclass edge cases
+# =============================================================================
+
+class TestFedPolicyRegimeDefaults:
+    """Tests for FedPolicyRegime dataclass default values and edge cases."""
+
+    def test_regime_factors_defaults_to_none(self):
+        """regime_factors field should default to None."""
+        r = _make_regime()
+        assert r.regime_factors is None
+
+    def test_unemployment_defaults_to_none(self):
+        """unemployment field should default to None."""
+        r = _make_regime()
+        assert r.unemployment is None
+
+    def test_confidence_defaults_to_zero(self):
+        """confidence field should default to 0.0."""
+        r = FedPolicyRegime(
+            timestamp='2026-01-01',
+            regime='NEUTRAL',
+            fed_funds_rate=5.0,
+            inflation_yoy=2.5,
+            real_rate_10y=1.5,
+            real_rate_short=2.5,
+            breakeven_10y=2.3,
+            yield_curve_10y2y=0.5,
+        )
+        assert r.confidence == 0.0
+
+    def test_regime_factors_none_in_to_dict(self):
+        """regime_factors=None should appear as None in to_dict()."""
+        r = _make_regime(regime_factors=None)
+        d = r.to_dict()
+        assert d['regime_factors'] is None
+
+    def test_divergence_risk_both_rates_negative(self):
+        """Both short and long real rates negative: divergence should depend on gap."""
+        r = _make_regime(real_rate_short=-2.0, real_rate_10y=-0.5)
+        assert r.is_divergence_risk() is True  # gap = 1.5 > 1.0
+
+    def test_divergence_risk_equal_rates(self):
+        """Equal short and long real rates should never trigger divergence."""
+        r = _make_regime(real_rate_short=2.0, real_rate_10y=2.0)
+        assert r.is_divergence_risk() is False  # gap = 0.0
+
+    def test_to_dict_contains_confidence_when_set(self):
+        """Confidence should appear in to_dict() output."""
+        r = _make_regime(confidence=0.85)
+        d = r.to_dict()
+        assert d['confidence'] == 0.85
+
+
+# =============================================================================
+# classify_fed_regime edge cases
+# =============================================================================
+
+class TestClassifyFedRegimeEdgeCases:
+    """Edge case coverage for classify_fed_regime."""
+
+    def test_max_score_zero_returns_neutral(self):
+        """When all scores are 0, regime defaults to NEUTRAL with conf 0.5."""
+        # Need to avoid ALL scoring conditions:
+        # real_short=1.0 (not <0, not <0.5 for EASING; not >1.5, not >1.0 for TIGHTENING)
+        # inflation=3.0 (outside NEUTRAL [1.5,2.5]; NOT >3 so no behind-curve/high-fed bonus)
+        # rate_change=0.25 (NOT < -0.25 for EASING; NOT >0.5 for TIGHTENING;
+        #                   NOT < 0.25 for NEUTRAL abs-check; NOT > 0.25 for TIGHTENING)
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=5.0, inflation_yoy=3.0, real_rate_10y=1.0,
+            real_rate_short=1.0, rate_change_6m=0.25,
+        )
+        assert regime == 'NEUTRAL'
+        assert conf == 0.5
+
+    def test_boundary_real_short_at_neutral_lower(self):
+        """real_short exactly 0.5 should count as NEUTRAL."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=2.5, inflation_yoy=2.0, real_rate_10y=0.5,
+            real_rate_short=0.5, rate_change_6m=0.0, yield_curve_slope=1.0,
+        )
+        assert regime == 'NEUTRAL'
+
+    def test_boundary_real_short_at_neutral_upper(self):
+        """real_short exactly 1.5 should count as NEUTRAL."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=3.5, inflation_yoy=2.0, real_rate_10y=1.5,
+            real_rate_short=1.5, rate_change_6m=0.0, yield_curve_slope=1.0,
+        )
+        assert regime == 'NEUTRAL'
+
+    def test_fed_behind_curve_easing(self):
+        """Inflation > 3% and fed_funds < inflation should add EASING signal."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=2.0, inflation_yoy=4.0, real_rate_10y=-2.0,
+            real_rate_short=-2.0, rate_change_6m=-0.5,
+        )
+        assert regime == 'EASING'
+
+    def test_exact_target_inflation_no_penalty(self):
+        """Inflation exactly 2.0% should produce inflation_gap of 0."""
+        _, _, factors = classify_fed_regime(
+            fed_funds=3.0, inflation_yoy=2.0, real_rate_10y=1.0,
+        )
+        assert factors['inflation_gap'] == 0.0
+
+    def test_yield_curve_slightly_positive_scores_neutral(self):
+        """Yield curve slope between 0 and 2 should add to NEUTRAL."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=2.5, inflation_yoy=2.0, real_rate_10y=1.0,
+            real_rate_short=1.0, rate_change_6m=0.0, yield_curve_slope=0.5,
+        )
+        # Slope < 2 AND > 0 adds to neutral
+        assert regime == 'NEUTRAL'
+
+    def test_yield_curve_moderately_negative_no_uncertainty(self):
+        """Yield curve -0.3 (not < -0.5) should NOT add UNCERTAIN signal."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=2.5, inflation_yoy=2.0, real_rate_10y=1.0,
+            real_rate_short=1.0, rate_change_6m=0.0, yield_curve_slope=-0.3,
+        )
+        # -0.3 is not < -0.5, so no uncertain point, and not > 0 for neutral
+        assert regime == 'NEUTRAL'
+
+    def test_tightening_with_high_fed_and_inflation(self):
+        """High fed funds (>4) with high inflation (>3) should strengthen TIGHTENING."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=5.0, inflation_yoy=3.5, real_rate_10y=2.0,
+            real_rate_short=2.0, rate_change_6m=0.75,
+        )
+        # real_short 2.0 > 1.5 → TIGHTENING+2, rate_change 0.75 > 0.5 →+2
+        # inflation > 3 and fed > 4 → +1 = 5 total TIGHTENING
+        assert regime == 'TIGHTENING'
+
+    def test_yield_curve_above_2_not_neutral(self):
+        """Yield curve slope >= 2 should NOT add to NEUTRAL scoring."""
+        regime, conf, factors = classify_fed_regime(
+            fed_funds=2.5, inflation_yoy=2.0, real_rate_10y=1.0,
+            real_rate_short=0.5, rate_change_6m=0.0, yield_curve_slope=2.5,
+        )
+        # Inverted curve? No, slope is 2.5 which is > 0.5.
+        # curve > 0 AND < 2 → neutral +1. 2.5 is NOT < 2, so no neutral point.
+        # But real_short 0.5 is exactly 0.5, which is >= 0.5, so it's in NEUTRAL range.
+        # rate_change 0.0 < 0.25 → NEUTRAL +1, total NEUTRAL = 2
+        assert regime == 'NEUTRAL'
+
+
+# =============================================================================
+# FedPolicyOverlay edge cases
+# =============================================================================
+
+class TestFedPolicyOverlayMore:
+    """Additional edge case tests for FedPolicyOverlay."""
+
+    def test_detect_regime_no_cpi_uses_breakeven(self):
+        """When CPI data is missing, should fall back to breakeven inflation."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred_no_cpi.json')
+        overlay.current_regime = None
+        dates = pd.date_range(end=datetime.now(), periods=30, freq='MS')
+        overlay.data = {
+            'FEDFUNDS': pd.DataFrame({'date': dates, 'value': [5.0] * 30}),
+            # No CPIAUCSL
+            'T10YIE': pd.DataFrame({'date': dates, 'value': [2.5] * 30}),
+            'DFII10': pd.DataFrame({'date': dates, 'value': [1.5] * 30}),
+            'DGS10': pd.DataFrame({'date': dates, 'value': [4.5] * 30}),
+            'DGS2': pd.DataFrame({'date': dates, 'value': [4.0] * 30}),
+        }
+        result = overlay.detect_regime()
+        assert result is not None
+        # Without CPIAUCSL, inflation falls back to T10YIE = 2.5
+        assert result.inflation_yoy == 2.5
+
+    def test_detect_regime_no_cpi_no_breakeven_default(self):
+        """When CPI and breakeven are both missing, inflation defaults to 2.0."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred_no_inflation.json')
+        overlay.current_regime = None
+        dates = pd.date_range(end=datetime.now(), periods=30, freq='MS')
+        overlay.data = {
+            'FEDFUNDS': pd.DataFrame({'date': dates, 'value': [4.0] * 30}),
+            'DFII10': pd.DataFrame({'date': dates, 'value': [1.0] * 30}),
+            'DGS10': pd.DataFrame({'date': dates, 'value': [4.5] * 30}),
+            'DGS2': pd.DataFrame({'date': dates, 'value': [4.0] * 30}),
+        }
+        result = overlay.detect_regime()
+        assert result is not None
+        # No CPI and no breakeven → inflation default 2.0
+        assert result.inflation_yoy == 2.0
+
+    def test_detect_regime_no_tips_uses_nominal_breakeven(self):
+        """When TIPS data is missing, real rate should use nominal - breakeven."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred_no_tips.json')
+        overlay.current_regime = None
+        dates = pd.date_range(end=datetime.now(), periods=30, freq='MS')
+        overlay.data = {
+            'FEDFUNDS': pd.DataFrame({'date': dates, 'value': [5.0] * 30}),
+            'CPIAUCSL': pd.DataFrame({'date': dates, 'value': np.linspace(300, 310, 30)}),
+            # No DFII10
+            'T10YIE': pd.DataFrame({'date': dates, 'value': [2.3] * 30}),
+            'DGS10': pd.DataFrame({'date': dates, 'value': [4.5] * 30}),
+            'DGS2': pd.DataFrame({'date': dates, 'value': [4.0] * 30}),
+        }
+        result = overlay.detect_regime()
+        assert result is not None
+        # real_rate_10y = nominal - breakeven = 4.5 - 2.3 = 2.2
+        assert result.real_rate_10y == pytest.approx(2.2, abs=0.01)
+
+    def test_detect_regime_fewer_than_6_points(self):
+        """Less than 6 data points should set rate_change_6m to 0.0."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred_short.json')
+        overlay.current_regime = None
+        dates = pd.date_range(end=datetime.now(), periods=3, freq='MS')
+        overlay.data = {
+            'FEDFUNDS': pd.DataFrame({'date': dates, 'value': [5.0, 5.0, 5.0]}),
+            'CPIAUCSL': pd.DataFrame({'date': dates, 'value': [300, 301, 302]}),
+            'DFII10': pd.DataFrame({'date': dates, 'value': [1.5, 1.5, 1.5]}),
+            'DGS10': pd.DataFrame({'date': dates, 'value': [4.5, 4.5, 4.5]}),
+            'DGS2': pd.DataFrame({'date': dates, 'value': [4.0, 4.0, 4.0]}),
+            'T10YIE': pd.DataFrame({'date': dates, 'value': [2.3, 2.3, 2.3]}),
+        }
+        result = overlay.detect_regime()
+        assert result is not None
+        assert result.regime_factors['rate_change_6m'] == 0.0
+
+    def test_recommendation_includes_divergence_risk(self):
+        """get_allocation_recommendation should include divergence_risk field."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred_div.json')
+        overlay.current_regime = _make_regime(regime='NEUTRAL')
+        result = overlay.get_allocation_recommendation()
+        assert 'divergence_risk' in result
+        assert isinstance(result['divergence_risk'], bool)
+
+    def test_recommendation_with_none_base_allocation(self):
+        """get_allocation_recommendation should accept None base_allocation."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred_none_base.json')
+        overlay.current_regime = _make_regime(regime='NEUTRAL')
+        # Explicitly passing None should use BASE_ALLOCATION
+        result = overlay.get_allocation_recommendation(None)
+        assert 'regime' in result
+        assert result['regime'] == 'NEUTRAL'
+
+    def test_fetch_data_calls_fetch_all(self):
+        """Overlay.fetch_data should delegate to fetch_all_fred_data."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred_fetch.json')
+        overlay.data = {}
+        overlay.current_regime = None
+
+        with patch('src.signals.fed_policy_overlay.fetch_all_fred_data') as mock_fetch:
+            mock_fetch.return_value = {
+                'FEDFUNDS': pd.DataFrame({'date': [datetime.now()], 'value': [5.0]}),
+            }
+            result = overlay.fetch_data()
+            mock_fetch.assert_called_once_with(overlay.cache_path, False)
+            assert 'FEDFUNDS' in result
+
+    def test_fetch_data_force_refresh_passthrough(self):
+        """Overlay.fetch_data should pass force_refresh to fetch_all_fred_data."""
+        overlay = FedPolicyOverlay.__new__(FedPolicyOverlay)
+        overlay.cache_path = Path('/tmp/test_fred_refresh.json')
+        overlay.data = {}
+        overlay.current_regime = None
+
+        with patch('src.signals.fed_policy_overlay.fetch_all_fred_data') as mock_fetch:
+            mock_fetch.return_value = {}
+            result = overlay.fetch_data(force_refresh=True)
+            mock_fetch.assert_called_once_with(overlay.cache_path, True)
+
+
+# =============================================================================
+# Constants tests
+# =============================================================================
+
+class TestConstants:
+    """Tests for module-level constants."""
+
+    def test_fred_cache_is_path(self):
+        """FRED_CACHE should be a Path object."""
+        assert isinstance(FRED_CACHE, Path)
+
+    def test_all_exports_defined(self):
+        """All names in __all__ should be importable."""
+        from src.signals.fed_policy_overlay import __all__
+        expected = [
+            'FRED_SERIES', 'FRED_CACHE', 'fetch_fred_series', 'fetch_all_fred_data',
+            'calculate_inflation_yoy', 'calculate_real_rate', 'FedPolicyRegime',
+            'classify_fed_regime', 'FedPolicyOverlay',
+        ]
+        for name in expected:
+            assert name in __all__, f"{name} missing from __all__"

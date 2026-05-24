@@ -547,3 +547,122 @@ class TestStatusReport:
             assert "current_allocation_pct" in status
             assert "vix_level" in status
             assert "regime" in status
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.strategy.vixy_hedge_sizing as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.strategy.vixy_hedge_sizing as mod
+        assert len(mod.__all__) == 7
+
+
+# ---------------------------------------------------------------------------
+# HedgeRegime extended
+# ---------------------------------------------------------------------------
+
+class TestHedgeRegimeExtended:
+    """Extended HedgeRegime enum tests."""
+
+    def test_all_four_values(self):
+        from src.strategy.vixy_hedge_sizing import HedgeRegime
+        assert len(HedgeRegime) == 4
+
+    def test_normal_value(self):
+        from src.strategy.vixy_hedge_sizing import HedgeRegime
+        assert HedgeRegime.NORMAL.value == "normal"
+
+    def test_crisis_value(self):
+        from src.strategy.vixy_hedge_sizing import HedgeRegime
+        assert HedgeRegime.CRISIS.value == "crisis"
+
+
+# ---------------------------------------------------------------------------
+# HedgeAction extended
+# ---------------------------------------------------------------------------
+
+class TestHedgeActionExtended:
+    """Extended HedgeAction enum tests."""
+
+    def test_all_four_values(self):
+        from src.strategy.vixy_hedge_sizing import HedgeAction
+        assert len(HedgeAction) == 4
+
+    def test_increase_value(self):
+        from src.strategy.vixy_hedge_sizing import HedgeAction
+        assert HedgeAction.INCREASE.value == "increase"
+
+    def test_maintain_value(self):
+        from src.strategy.vixy_hedge_sizing import HedgeAction
+        assert HedgeAction.MAINTAIN.value == "maintain"
+
+    def test_decrease_value(self):
+        from src.strategy.vixy_hedge_sizing import HedgeAction
+        assert HedgeAction.DECREASE.value == "decrease"
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT_CONFIG validation
+# ---------------------------------------------------------------------------
+
+class TestDefaultConfig:
+    """Test DEFAULT_CONFIG values."""
+
+    def test_is_dict(self):
+        from src.strategy.vixy_hedge_sizing import DEFAULT_CONFIG
+        assert isinstance(DEFAULT_CONFIG, dict)
+
+    def test_has_key_thresholds(self):
+        from src.strategy.vixy_hedge_sizing import DEFAULT_CONFIG
+        # Should have VIX threshold keys
+        assert any("vix" in k.lower() or "threshold" in k.lower() for k in DEFAULT_CONFIG)
+
+
+# ---------------------------------------------------------------------------
+# VIXYHedgeConfig dataclass extended
+# ---------------------------------------------------------------------------
+
+class TestVIXYHedgeConfigExtended:
+    """Extended VIXYHedgeConfig tests."""
+
+    def test_all_fields(self):
+        from dataclasses import fields
+        from src.strategy.vixy_hedge_sizing import VIXYHedgeConfig
+        field_names = {f.name for f in fields(VIXYHedgeConfig)}
+        assert len(field_names) > 0  # Has fields
+
+
+# ---------------------------------------------------------------------------
+# VIXYHedgeSignal dataclass extended
+# ---------------------------------------------------------------------------
+
+class TestVIXYHedgeSignalExtended:
+    """Extended VIXYHedgeSignal tests."""
+
+    def test_all_fields(self):
+        from dataclasses import fields
+        from src.strategy.vixy_hedge_sizing import VIXYHedgeSignal
+        field_names = {f.name for f in fields(VIXYHedgeSignal)}
+        assert len(field_names) > 0
+
+
+# ---------------------------------------------------------------------------
+# CLI test
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    """Test main() callable."""
+
+    def test_main_callable(self):
+        from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer
+        # No main() function in this module, just verify class is usable
+        assert VIXYHedgeSizer is not None

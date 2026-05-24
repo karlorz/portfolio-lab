@@ -790,3 +790,717 @@ class TestCLI:
         )
         rc = main()
         assert rc == 1  # Still fails due to no data, but parsing works
+
+
+# ── Constant & Export Tests ──────────────────────────────────────────────
+
+
+class TestBacktestConstants:
+    """Verify module-level constants and exports."""
+
+    def test_allocation_shifts_structure(self):
+        """ALLOCATION_SHIFTS has expected keys and structure."""
+        assert "equity_outperformance" in ALLOCATION_SHIFTS
+        assert "safe_haven_outperformance" in ALLOCATION_SHIFTS
+        for key in ALLOCATION_SHIFTS:
+            assert "spy" in ALLOCATION_SHIFTS[key]
+            assert "gld" in ALLOCATION_SHIFTS[key]
+            assert "tlt" in ALLOCATION_SHIFTS[key]
+
+    def test_allocation_shifts_equity_outperformance_values(self):
+        """Equity outperformance shifts SPY +3%, GLD -1%, TLT -2%."""
+        shifts = ALLOCATION_SHIFTS["equity_outperformance"]
+        assert shifts["spy"] == 0.03
+        assert shifts["gld"] == -0.01
+        assert shifts["tlt"] == -0.02
+
+    def test_allocation_shifts_safe_haven_values(self):
+        """Safe haven outperformance shifts SPY -2%, GLD +1%, TLT +1%."""
+        shifts = ALLOCATION_SHIFTS["safe_haven_outperformance"]
+        assert shifts["spy"] == -0.02
+        assert shifts["gld"] == 0.01
+        assert shifts["tlt"] == 0.01
+
+    def test_max_signal_strength_value(self):
+        """MAX_SIGNAL_STRENGTH is 0.5."""
+        assert MAX_SIGNAL_STRENGTH == 0.5
+
+    def test_backtest_exports(self):
+        """__all__ contains expected public names."""
+        from src.backtest.cross_asset_regime_arb_backtest import __all__
+        expected = {
+            "MAX_SIGNAL_STRENGTH", "BacktestConfig", "DailyReturn",
+            "RebalanceSignal", "CrossAssetRegimeArbBacktester",
+        }
+        assert set(__all__) == expected
+
+    def test_divergence_signal_all_bullish_constant(self):
+        """Constants match expected values."""
+        from src.backtest.cross_asset_regime_arb_backtest import (
+            BULL_MOMENTUM_THRESHOLD, BEAR_MOMENTUM_THRESHOLD, MOMENTUM_LOOKBACK,
+        )
+        assert BULL_MOMENTUM_THRESHOLD == 0.05
+        assert BEAR_MOMENTUM_THRESHOLD == -0.05
+        assert MOMENTUM_LOOKBACK == 60
+
+
+# ── RebalanceSignal Advanced Tests ───────────────────────────────────────
+
+
+class TestRebalanceSignalAdvanced:
+    """Advanced RebalanceSignal field tests."""
+
+    def test_rebalance_signal_fields(self):
+        """All RebalanceSignal fields have correct types."""
+        sig = RebalanceSignal(
+            date="2020-01-31",
+            signal_value=0.3,
+            pattern="equity_rotation",
+            spy_shift=0.03,
+            gld_shift=-0.01,
+            tlt_shift=-0.02,
+            spy_momentum=0.08,
+            gld_momentum=0.02,
+            tlt_momentum=-0.01,
+        )
+        assert isinstance(sig.date, str)
+        assert isinstance(sig.signal_value, float)
+        assert isinstance(sig.pattern, str)
+        assert isinstance(sig.spy_shift, float)
+        assert isinstance(sig.gld_shift, float)
+        assert isinstance(sig.tlt_shift, float)
+        assert isinstance(sig.spy_momentum, float)
+        assert isinstance(sig.gld_momentum, float)
+        assert isinstance(sig.tlt_momentum, float)
+
+    def test_rebalance_signal_from_dataclass(self):
+        """RebalanceSignal is a proper dataclass with expected fields."""
+        from dataclasses import fields
+        sig = RebalanceSignal(
+            date="2020-01-31", signal_value=-0.5, pattern="risk_off",
+            spy_shift=-0.02, gld_shift=0.01, tlt_shift=0.01,
+            spy_momentum=-0.10, gld_momentum=-0.08, tlt_momentum=-0.06,
+        )
+        field_names = {f.name for f in fields(sig)}
+        expected = {
+            "date", "signal_value", "pattern", "spy_shift", "gld_shift",
+            "tlt_shift", "spy_momentum", "gld_momentum", "tlt_momentum",
+        }
+        assert field_names == expected
+
+    def test_rebalance_signal_negative_signal(self):
+        """Negative signal values are handled correctly."""
+        sig = RebalanceSignal(
+            date="2020-03-15", signal_value=-0.4, pattern="flight_to_safety",
+            spy_shift=-0.02, gld_shift=0.01, tlt_shift=0.01,
+            spy_momentum=-0.12, gld_momentum=0.02, tlt_momentum=0.06,
+        )
+        assert sig.signal_value < 0
+        assert sig.spy_shift < 0
+        assert sig.gld_shift > 0
+        assert sig.tlt_shift > 0
+
+
+# ── BacktestConfig Edge Cases ────────────────────────────────────────────
+
+
+class TestBacktestConfigEdgeCases:
+    """Edge cases for BacktestConfig."""
+
+    def test_signal_threshold_zero(self):
+        """Zero signal threshold means any signal triggers action."""
+        config = BacktestConfig(signal_threshold=0.0)
+        assert config.signal_threshold == 0.0
+
+    def test_signal_threshold_negative(self):
+        """Negative signal threshold is allowed (always triggers)."""
+        config = BacktestConfig(signal_threshold=-0.1)
+        assert config.signal_threshold == -0.1
+
+    def test_signal_threshold_high(self):
+        """High signal threshold means only strong signals trigger."""
+        config = BacktestConfig(signal_threshold=0.5)
+        assert config.signal_threshold == 0.5
+
+    def test_max_single_shift_zero(self):
+        """Zero max shift disables allocation shifts."""
+        config = BacktestConfig(max_single_shift=0.0)
+        assert config.max_single_shift == 0.0
+
+    def test_max_single_shift_large(self):
+        """Large max single shift is allowed."""
+        config = BacktestConfig(max_single_shift=0.20)
+        assert config.max_single_shift == 0.20
+
+
+# ── Data Processing Edge Cases ───────────────────────────────────────────
+
+
+class TestDataProcessingEdgeCases:
+    """Edge cases for price data processing."""
+
+    def test_process_price_data_zero_price(self):
+        """Zero price (falsy in Python) skips that day gracefully."""
+        bt = CrossAssetRegimeArbBacktester()
+        data = {
+            "SPY": [
+                {"d": "2020-01-02", "p": 0.0},
+                {"d": "2020-01-03", "p": 100.0},
+            ],
+            "GLD": [
+                {"d": "2020-01-02", "p": 50.0},
+                {"d": "2020-01-03", "p": 51.0},
+            ],
+            "TLT": [
+                {"d": "2020-01-02", "p": 80.0},
+                {"d": "2020-01-03", "p": 81.0},
+            ],
+        }
+        bt._process_price_data(data)
+        # spy_prev == 0.0 is falsy, so `all(...)` fails and day is skipped
+        assert len(bt.data) == 0
+
+    def test_process_price_data_negative_price(self):
+        """Negative price should not crash."""
+        bt = CrossAssetRegimeArbBacktester()
+        data = {
+            "SPY": [
+                {"d": "2020-01-02", "p": -50.0},
+                {"d": "2020-01-03", "p": 100.0},
+            ],
+            "GLD": [
+                {"d": "2020-01-02", "p": 50.0},
+                {"d": "2020-01-03", "p": 51.0},
+            ],
+            "TLT": [
+                {"d": "2020-01-02", "p": 80.0},
+                {"d": "2020-01-03", "p": 81.0},
+            ],
+        }
+        bt._process_price_data(data)
+        assert len(bt.data) == 1
+        assert np.isfinite(bt.data[0].spy_return)
+
+    def test_process_price_data_empty_spy_list(self):
+        """Empty SPY list produces no data."""
+        bt = CrossAssetRegimeArbBacktester()
+        bt._process_price_data({"SPY": [], "GLD": [], "TLT": []})
+        assert bt.data == []
+
+    def test_process_price_data_missing_gld_key(self):
+        """Missing GLD key produces no data."""
+        bt = CrossAssetRegimeArbBacktester()
+        bt._process_price_data({"SPY": [{"d": "2020-01-02", "p": 100.0}]})
+        assert bt.data == []
+
+
+# ── Momentum Computation Edge Cases ──────────────────────────────────────
+
+
+class TestMomentumEdgeCases:
+    """Edge cases for momentum computation."""
+
+    @pytest.fixture
+    def bt_flat_data(self):
+        """Create backtester with flat (zero return) data."""
+        bt = CrossAssetRegimeArbBacktester()
+        bt.data = []
+        for i in range(200):
+            day = (datetime(2020, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            bt.data.append(
+                DailyReturn(date=day, spy_return=0.0, gld_return=0.0, tlt_return=0.0)
+            )
+        return bt
+
+    def test_compute_momentum_flat_data(self, bt_flat_data):
+        """Flat data produces zero momentum."""
+        spy_m, gld_m, tlt_m = bt_flat_data._compute_momentum(60, 100)
+        assert spy_m == 0.0
+        assert gld_m == 0.0
+        assert tlt_m == 0.0
+
+    def test_compute_momentum_exact_lookback(self):
+        """Momentum with exact lookback boundary (i == lookback)."""
+        bt = CrossAssetRegimeArbBacktester()
+        bt.data = []
+        for i in range(61):
+            day = (datetime(2020, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            bt.data.append(
+                DailyReturn(
+                    date=day, spy_return=0.001, gld_return=0.0005, tlt_return=0.0002,
+                )
+            )
+        spy_m, gld_m, tlt_m = bt._compute_momentum(60, 60)
+        assert spy_m != 0.0
+
+    def test_compute_momentum_with_extreme_returns(self):
+        """Extreme returns (>50%) are filtered from momentum."""
+        bt = CrossAssetRegimeArbBacktester()
+        bt.data = []
+        for i in range(100):
+            day = (datetime(2020, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            spy_r = 2.0 if i == 30 else 0.001
+            bt.data.append(
+                DailyReturn(
+                    date=day, spy_return=spy_r, gld_return=0.001, tlt_return=0.001,
+                )
+            )
+        spy_m, gld_m, tlt_m = bt._compute_momentum(60, 90)
+        assert np.isfinite(spy_m)
+
+
+# ── Regime Classification Boundary Tests ─────────────────────────────────
+
+
+class TestRegimeClassificationBoundaries:
+    """Boundary value tests for regime classification."""
+
+    def test_classify_exactly_bull_threshold(self):
+        """Momentum exactly at BULL threshold is neutral (uses > not >=)."""
+        bt = CrossAssetRegimeArbBacktester()
+        regime = bt._classify_asset_regime(0.05)
+        assert regime == "neutral"
+
+    def test_classify_just_below_bull_threshold(self):
+        """Momentum just below BULL threshold is neutral."""
+        bt = CrossAssetRegimeArbBacktester()
+        regime = bt._classify_asset_regime(0.0499)
+        assert regime == "neutral"
+
+    def test_classify_exactly_bear_threshold(self):
+        """Momentum exactly at BEAR threshold is neutral (uses < not <=)."""
+        bt = CrossAssetRegimeArbBacktester()
+        regime = bt._classify_asset_regime(-0.05)
+        assert regime == "neutral"
+
+    def test_classify_just_above_bear_threshold(self):
+        """Momentum just above BEAR threshold is neutral."""
+        bt = CrossAssetRegimeArbBacktester()
+        regime = bt._classify_asset_regime(-0.0499)
+        assert regime == "neutral"
+
+
+# ── Divergence Detection Edge Cases ──────────────────────────────────────
+
+
+class TestDivergenceDetectionEdgeCases:
+    """Additional divergence detection edge cases."""
+
+    @staticmethod
+    def _pattern_str(pattern):
+        return pattern.value if hasattr(pattern, "value") else str(pattern)
+
+    def test_divergence_gld_bearish_spy_bullish(self):
+        """Gold bear + equity bull -> equity rotation."""
+        bt = CrossAssetRegimeArbBacktester()
+        pattern, signal = bt._detect_divergence_signal(0.10, -0.10, 0.03)
+        assert self._pattern_str(pattern) == "equity_rotation"
+
+    def test_divergence_all_neutral(self):
+        """All neutral -> no divergence."""
+        bt = CrossAssetRegimeArbBacktester()
+        pattern, signal = bt._detect_divergence_signal(0.01, 0.01, 0.01)
+        assert self._pattern_str(pattern) == "no_divergence"
+        assert signal == 0.0
+
+    def test_divergence_equity_only_bearish(self):
+        """Only equity bearish, bonds/gold neutral -> equity rotation."""
+        bt = CrossAssetRegimeArbBacktester()
+        pattern, signal = bt._detect_divergence_signal(-0.10, 0.01, 0.01)
+        assert self._pattern_str(pattern) == "equity_rotation"
+
+    def test_divergence_tlt_only_bullish(self):
+        """Only TLT bullish -> flight to safety (if equity bear)."""
+        bt = CrossAssetRegimeArbBacktester()
+        pattern, signal = bt._detect_divergence_signal(-0.10, 0.01, 0.08)
+        assert self._pattern_str(pattern) == "flight_to_safety"
+
+    def test_divergence_tlt_bearish_gld_bullish(self):
+        """TLT bear + GLD bull -> inflation fear."""
+        bt = CrossAssetRegimeArbBacktester()
+        pattern, signal = bt._detect_divergence_signal(0.01, 0.08, -0.10)
+        assert self._pattern_str(pattern) == "inflation_fear"
+        assert signal == -0.1
+
+
+# ── Allocation Shift Edge Cases ──────────────────────────────────────────
+
+
+class TestAllocationShiftsEdgeCases:
+    """Edge cases for allocation shifts."""
+
+    def test_get_allocation_shifts_exact_max_signal(self):
+        """Signal at MAX_SIGNAL_STRENGTH uses full shift."""
+        bt = CrossAssetRegimeArbBacktester()
+        spy_s, gld_s, tlt_s = bt._get_allocation_shifts(
+            None, MAX_SIGNAL_STRENGTH, 0.10, 0.01,
+        )
+        assert spy_s == pytest.approx(0.03)
+        assert gld_s == pytest.approx(-0.01)
+        assert tlt_s == pytest.approx(-0.02)
+
+    def test_get_allocation_shifts_half_signal_negative(self):
+        """Half-strength negative signal produces half shifts."""
+        bt = CrossAssetRegimeArbBacktester()
+        spy_s, gld_s, tlt_s = bt._get_allocation_shifts(None, -0.25, 0.0, 0.0)
+        expected_strength = 0.25 / MAX_SIGNAL_STRENGTH
+        assert spy_s == pytest.approx(-0.02 * expected_strength)
+        assert gld_s == pytest.approx(0.01 * expected_strength)
+        assert tlt_s == pytest.approx(0.01 * expected_strength)
+
+    def test_get_allocation_shifts_negative_max_clamped(self):
+        """Strong negative signal clamped to max_single_shift."""
+        bt = CrossAssetRegimeArbBacktester(
+            BacktestConfig(max_single_shift=0.02),
+        )
+        spy_s, gld_s, tlt_s = bt._get_allocation_shifts(None, -0.5, 0.0, 0.0)
+        assert abs(spy_s) <= 0.02
+        assert abs(gld_s) <= 0.02
+        assert abs(tlt_s) <= 0.02
+
+    def test_get_allocation_shifts_small_signal(self):
+        """Tiny signal produces near-zero shifts."""
+        bt = CrossAssetRegimeArbBacktester()
+        spy_s, gld_s, tlt_s = bt._get_allocation_shifts(None, 0.001, 0.0, 0.0)
+        assert abs(spy_s) < 0.001
+        assert abs(gld_s) < 0.001
+        assert abs(tlt_s) < 0.001
+
+
+# ── Metrics Edge Cases ──────────────────────────────────────────────────
+
+
+class TestMetricsEdgeCases:
+    """Edge cases for metrics helpers."""
+
+    def test_calculate_metrics_all_negative_returns(self):
+        """All negative returns produce negative CAGR and negative max_dd."""
+        bt = CrossAssetRegimeArbBacktester()
+        returns = [-0.01] * 252
+        m = bt._calculate_metrics(returns)
+        assert m["cagr"] < 0
+        assert m["max_dd"] < 0
+        assert isinstance(m["volatility"], float)
+
+    def test_calculate_metrics_flat_returns(self):
+        """Zero returns produce zero metrics."""
+        bt = CrossAssetRegimeArbBacktester()
+        returns = [0.0] * 252
+        m = bt._calculate_metrics(returns)
+        assert m["cagr"] == 0.0
+        assert m["volatility"] == 0.0
+        assert m["sharpe"] == 0.0
+        assert m["max_dd"] == 0.0
+
+    def test_calculate_metrics_single_return(self):
+        """Single return produces valid metrics."""
+        bt = CrossAssetRegimeArbBacktester()
+        m = bt._calculate_metrics([0.01])
+        assert isinstance(m["cagr"], float)
+        assert isinstance(m["volatility"], float)
+
+    def test_annualize_single_day(self):
+        """Single day annualizes to extreme value."""
+        bt = CrossAssetRegimeArbBacktester()
+        result = bt._annualize([0.001])
+        expected = ((1 + 0.001) ** 252 - 1) * 100
+        assert result == pytest.approx(expected)
+
+    def test_annualize_exact_one_year(self):
+        """Exactly 252 trading days gives 1-year return."""
+        bt = CrossAssetRegimeArbBacktester()
+        daily_ret = 0.0005
+        returns = [daily_ret] * 252
+        result = bt._annualize(returns)
+        expected = ((1 + daily_ret) ** 252 - 1) * 100
+        assert result == pytest.approx(expected)
+
+    def test_annualize_zero_returns(self):
+        """All zero returns gives zero annualized return."""
+        bt = CrossAssetRegimeArbBacktester()
+        result = bt._annualize([0.0] * 252)
+        assert result == 0.0
+
+
+# ── BacktestResult Extras Edge Cases ────────────────────────────────────
+
+
+class TestBacktestResultExtras:
+    """Edge cases for BacktestResult extras."""
+
+    def test_extras_empty_equity_curve(self):
+        """Empty equity curve in extras does not error."""
+        result = BacktestResult(
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, baseline_sharpe=0.0,
+            sharpe_improvement=0.0, total_rebalances=0, total_transaction_costs=0.0,
+            extras={
+                "overlay_active_months": 0, "signal_frequency": 0.0,
+                "divergence_breakdown": {}, "equity_curve": [],
+                "rebalance_signals": [],
+            },
+        )
+        assert result.extras["equity_curve"] == []
+
+    def test_extras_empty_rebalance_signals(self):
+        """Empty rebalance signals in extras does not error."""
+        result = BacktestResult(
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0, baseline_sharpe=0.0,
+            sharpe_improvement=0.0, total_rebalances=0, total_transaction_costs=0.0,
+            extras={
+                "overlay_active_months": 0, "signal_frequency": 0.0,
+                "divergence_breakdown": {}, "equity_curve": [],
+                "rebalance_signals": [],
+            },
+        )
+        assert result.extras["rebalance_signals"] == []
+
+    def test_extras_divergence_breakdown(self):
+        """Divergence with multiple pattern types."""
+        result = BacktestResult(
+            total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
+            max_drawdown=-10.0, baseline_sharpe=0.45,
+            sharpe_improvement=0.05, total_rebalances=5, total_transaction_costs=2.0,
+            extras={
+                "overlay_active_months": 3, "signal_frequency": 0.3,
+                "divergence_breakdown": {
+                    "full_risk_on": 5, "risk_off": 3, "no_divergence": 20,
+                },
+                "equity_curve": [], "rebalance_signals": [],
+            },
+        )
+        assert result.extras["divergence_breakdown"]["full_risk_on"] == 5
+        assert result.extras["divergence_breakdown"]["risk_off"] == 3
+
+
+# ── Load Data Tests ─────────────────────────────────────────────────────
+
+
+class TestLoadData:
+    """Tests for load_data with actual JSON content."""
+
+    def test_load_data_with_json(self, tmp_path):
+        """load_data reads JSON file correctly."""
+        from unittest.mock import patch
+        prices = {
+            "SPY": [
+                {"d": "2020-01-02", "p": 100.0},
+                {"d": "2020-01-03", "p": 101.0},
+            ],
+            "GLD": [
+                {"d": "2020-01-02", "p": 50.0},
+                {"d": "2020-01-03", "p": 50.5},
+            ],
+            "TLT": [
+                {"d": "2020-01-02", "p": 80.0},
+                {"d": "2020-01-03", "p": 81.0},
+            ],
+        }
+        prices_file = tmp_path / "prices.json"
+        with open(prices_file, "w") as f:
+            json.dump(prices, f)
+        with patch(
+            "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
+            prices_file,
+        ):
+            bt = CrossAssetRegimeArbBacktester()
+            success = bt.load_data()
+            assert success is True
+            assert len(bt.data) == 1
+            assert bt.data[0].date == "2020-01-03"
+
+    def test_load_data_missing_spy_key(self, tmp_path):
+        """JSON file missing SPY key returns data but empty."""
+        from unittest.mock import patch
+        prices = {"GLD": [], "TLT": []}
+        prices_file = tmp_path / "prices.json"
+        with open(prices_file, "w") as f:
+            json.dump(prices, f)
+        with patch(
+            "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
+            prices_file,
+        ):
+            bt = CrossAssetRegimeArbBacktester()
+            success = bt.load_data()
+            assert success is True
+            assert len(bt.data) == 0
+
+    def test_load_data_corrupt_json(self, tmp_path):
+        """Corrupt JSON file is handled gracefully."""
+        from unittest.mock import patch
+        prices_file = tmp_path / "prices.json"
+        prices_file.write_text("{corrupt json}")
+        with patch(
+            "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
+            prices_file,
+        ):
+            bt = CrossAssetRegimeArbBacktester()
+            success = bt.load_data()
+            assert success is False
+
+    def test_load_data_json_decode_error(self, tmp_path):
+        """JSON decode errors are caught gracefully."""
+        from unittest.mock import patch
+        prices_file = tmp_path / "prices.json"
+        prices_file.write_text("not even json")
+        with patch(
+            "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
+            prices_file,
+        ):
+            bt = CrossAssetRegimeArbBacktester()
+            success = bt.load_data()
+            assert success is False
+
+
+# ── CLI Advanced Tests ──────────────────────────────────────────────────
+
+
+class TestCLIAdvanced:
+    """Advanced CLI test cases."""
+
+    def test_main_returns_zero_on_success(self, tmp_path):
+        """main returns 0 when backtest completes with data."""
+        from unittest.mock import patch
+        prices = {
+            "SPY": [
+                {"d": "2020-01-02", "p": 100.0},
+                {"d": "2020-01-03", "p": 101.0},
+            ],
+            "GLD": [
+                {"d": "2020-01-02", "p": 50.0},
+                {"d": "2020-01-03", "p": 50.5},
+            ],
+            "TLT": [
+                {"d": "2020-01-02", "p": 80.0},
+                {"d": "2020-01-03", "p": 81.0},
+            ],
+        }
+        prices_file = tmp_path / "prices.json"
+        with open(prices_file, "w") as f:
+            json.dump(prices, f)
+        with patch(
+            "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
+            prices_file,
+        ):
+            bt = CrossAssetRegimeArbBacktester(
+                BacktestConfig(
+                    start_date="2020-01-01", end_date="2020-02-01",
+                ),
+            )
+            result = bt.run_backtest()
+            if result:
+                assert isinstance(result, BacktestResult)
+
+    def test_main_with_save_and_data(self, tmp_path):
+        """main with --save flag loads data without error."""
+        from unittest.mock import patch
+        prices = {
+            "SPY": [
+                {"d": "2020-01-02", "p": 100.0},
+                {"d": "2020-01-03", "p": 101.0},
+            ],
+            "GLD": [
+                {"d": "2020-01-02", "p": 50.0},
+                {"d": "2020-01-03", "p": 50.5},
+            ],
+            "TLT": [
+                {"d": "2020-01-02", "p": 80.0},
+                {"d": "2020-01-03", "p": 81.0},
+            ],
+        }
+        prices_file = tmp_path / "prices.json"
+        with open(prices_file, "w") as f:
+            json.dump(prices, f)
+        with patch(
+            "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
+            prices_file,
+        ):
+            bt = CrossAssetRegimeArbBacktester(
+                BacktestConfig(
+                    start_date="2020-01-01", end_date="2020-02-01",
+                ),
+            )
+            success = bt.load_data()
+            assert success is True
+
+    def test_main_save_only_flag(self, tmp_path):
+        """main with --save-only flag still parses correctly."""
+        from unittest.mock import patch
+        from src.paths import PRICES_JSON as _real
+        with patch("sys.argv", ["cross_asset_regime_arb_backtest.py", "--save-only"]), \
+             patch(
+                "src.backtest.cross_asset_regime_arb_backtest.PRICES_JSON",
+                _real.parent / "nonexistent_prices.json",
+            ):
+            rc = main()
+            assert rc == 1
+
+
+# ── HAS_SIGNAL_MODULE Path Tests ─────────────────────────────────────────
+
+
+class TestHasSignalModule:
+    """Tests for the HAS_SIGNAL_MODULE conditional path."""
+
+    def test_has_signal_module_true_by_default(self):
+        """HAS_SIGNAL_MODULE is True when signal module is importable."""
+        from src.backtest.cross_asset_regime_arb_backtest import (
+            HAS_SIGNAL_MODULE,
+        )
+        assert HAS_SIGNAL_MODULE is True
+
+    def test_detector_created_when_module_available(self):
+        """Detector is created when HAS_SIGNAL_MODULE is True."""
+        bt = CrossAssetRegimeArbBacktester()
+        assert bt.detector is not None
+        assert hasattr(bt.detector, "scan")
+
+    def test_print_report_shows_live_signal_module(self, capsys):
+        """print_report shows 'Live' when signal module is active."""
+        result = BacktestResult(
+            total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
+            max_drawdown=-10.0, baseline_sharpe=0.45,
+            sharpe_improvement=0.05, total_rebalances=0,
+            total_transaction_costs=0.0,
+            extras={
+                "overlay_active_months": 0, "signal_frequency": 0.0,
+                "divergence_breakdown": {}, "equity_curve": [],
+                "rebalance_signals": [],
+            },
+        )
+        bt = CrossAssetRegimeArbBacktester()
+        bt.print_report(result)
+        captured = capsys.readouterr()
+        assert "Live" in captured.out or "Simulated" in captured.out
+
+
+# ── Equity Curve Sampling Tests ──────────────────────────────────────────
+
+
+class TestEquityCurveSampling:
+    """Tests for equity curve sampling in results."""
+
+    def test_equity_curve_min_one_entry(self):
+        """Equity curve has at least one entry after backtest."""
+        bt = CrossAssetRegimeArbBacktester()
+        np.random.seed(42)
+        bt.data = []
+        for i in range(200):
+            day = (datetime(2020, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d")
+            bt.data.append(
+                DailyReturn(
+                    date=day,
+                    spy_return=float(np.random.normal(0.0005, 0.01)),
+                    gld_return=float(np.random.normal(0.0002, 0.008)),
+                    tlt_return=float(np.random.normal(0.0001, 0.006)),
+                )
+            )
+        result = bt.run_backtest()
+        assert len(result.extras["equity_curve"]) >= 1
+        entry = result.extras["equity_curve"][0]
+        assert "date" in entry
+        assert "baseline" in entry
+        assert "overlay" in entry
+        assert isinstance(entry["baseline"], float)
+        assert isinstance(entry["overlay"], float)

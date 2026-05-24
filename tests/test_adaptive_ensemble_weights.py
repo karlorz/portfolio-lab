@@ -737,5 +737,595 @@ class TestAdaptiveWeightsStateDataclass:
         assert state.adjusted_weights["s1"] == 0.5
 
 
+# ── Config Edge Cases ─────────────────────────────────────────────────────────
+
+
+class TestConfigEdgeCases:
+    """Configuration override and edge-case behavior."""
+
+    def test_empty_config_falls_back_to_defaults(self):
+        """Empty config dict should use all DEFAULT_CONFIG values."""
+        aew = AdaptiveEnsembleWeights(config={})
+        for key, value in DEFAULT_CONFIG.items():
+            assert aew.config[key] == value, f"Mismatch for config key {key}"
+
+    def test_partial_config_merges_with_defaults(self):
+        """Partial override keeps unspecified defaults."""
+        aew = AdaptiveEnsembleWeights(config={"baseline_sharpe": 2.0})
+        assert aew.config["baseline_sharpe"] == 2.0
+        assert aew.config["min_multiplier"] == DEFAULT_CONFIG["min_multiplier"]
+        assert aew.config["max_multiplier"] == DEFAULT_CONFIG["max_multiplier"]
+        assert aew.config["neg_sharpe_penalty"] == DEFAULT_CONFIG["neg_sharpe_penalty"]
+
+    def test_clamp_with_inverted_bounds(self):
+        """min_multiplier > max_multiplier: np.clip caps at max, does not crash."""
+        aew = AdaptiveEnsembleWeights(config={
+            "min_multiplier": 1.5,
+            "max_multiplier": 0.5,
+        })
+        result = aew._raw_multiplier(2.0)
+        assert isinstance(result, float)
+        # np.clip with inverted bounds clips to the upper bound (max)
+        assert result == 0.5
+
+
+# ── Multiplier Edge Cases (precedence, boundaries) ──────────────────────────
+
+
+class TestMultiplierEdgeCases:
+    """Multiplier-computation precedence & combined edge cases."""
+
+    def test_negative_sharpe_with_scarce_data(self, adaptive_weights):
+        """Negative Sharpe + scarce data: penalty scaled toward 1.0."""
+        attrib = {"total_readings": 5, "sharpe_contribution": -0.5}
+        mult = adaptive_weights._compute_multiplier("test", attrib)
+        # raw = 0.25 (penalty), data_ratio = 5/20 = 0.25
+        # result = 1.0 + (0.25 - 1.0) * 0.25 = 0.8125
+        assert 0.25 <= mult <= 1.0
+        assert mult < 1.0
+
+    def test_zero_readings_with_none_sharpe(self, adaptive_weights):
+        """Zero readings check precedes None-Sharpe check."""
+        attrib = {"total_readings": 0, "sharpe_contribution": None}
+        mult = adaptive_weights._compute_multiplier("test", attrib)
+        assert mult == 1.0
+
+    def test_zero_readings_with_nan_sharpe(self, adaptive_weights):
+        """Zero readings check precedes NaN-Sharpe check."""
+        attrib = {"total_readings": 0, "sharpe_contribution": float("nan")}
+        mult = adaptive_weights._compute_multiplier("test", attrib)
+        assert mult == 1.0
+
+    def test_exactly_min_readings_boundary(self, adaptive_weights):
+        """Exactly min_readings_per_source: data_ratio=1.0 => raw multiplier."""
+        min_r = adaptive_weights.config["min_readings_per_source"]
+        attrib = {"total_readings": min_r, "sharpe_contribution": 0.8}
+        mult = adaptive_weights._compute_multiplier("test", attrib)
+        raw = adaptive_weights._raw_multiplier(0.8)
+        assert mult == raw
+
+    def test_one_reading_below_min(self, adaptive_weights):
+        """One reading: heavily pulled toward 1.0."""
+        attrib = {"total_readings": 1, "sharpe_contribution": 2.0}
+        mult = adaptive_weights._compute_multiplier("test", attrib)
+        assert mult == pytest.approx(1.05, abs=0.01)
+
+    def test_none_sharpe_with_plenty_readings(self, adaptive_weights):
+        """None Sharpe with sufficient readings: None check triggers first."""
+        attrib = {"total_readings": 100, "sharpe_contribution": None}
+        mult = adaptive_weights._compute_multiplier("test", attrib)
+        assert mult == 1.0
+
+    def test_nan_sharpe_with_plenty_readings(self, adaptive_weights):
+        """NaN Sharpe with sufficient readings: NaN check triggers first."""
+        attrib = {"total_readings": 100, "sharpe_contribution": float("nan")}
+        mult = adaptive_weights._compute_multiplier("test", attrib)
+        assert mult == 1.0
+
+    def test_scarce_data_on_negative_sharpe_boundary(self, adaptive_weights):
+        """One reading below min, negative Sharpe: penalty scaled up toward 1."""
+        attrib = {"total_readings": 1, "sharpe_contribution": -0.5}
+        mult = adaptive_weights._compute_multiplier("test", attrib)
+        # raw = 0.25, data_ratio = 0.05 => 1.0 + (0.25 - 1.0) * 0.05 = 0.9625
+        assert 0.25 <= mult < 1.0
+
+
+# ── Weight Update Edge Cases ──────────────────────────────────────────────────
+
+
+class TestWeightUpdateEdgeCases:
+    """Edge cases in update_weights beyond normal attribution data."""
+
+    def test_missing_sources_key(self, adaptive_weights):
+        """Attribution without 'sources' key should fall back to base weights."""
+        attribution = {"timestamp": "now"}
+        adapted = adaptive_weights.update_weights(attribution, "normal")
+        assert adapted == adaptive_weights.base_weights
+        # multipliers should all be 1.0
+        for mult in adaptive_weights.multipliers.values():
+            assert mult == 1.0
+
+    def test_sources_is_none(self, adaptive_weights):
+        """sources=None should be treated same as empty dict."""
+        attribution = {"timestamp": "now", "sources": None}
+        adapted = adaptive_weights.update_weights(attribution, "normal")
+        # .get("sources", {}) on None returns None, which is falsy
+        # Actually: if not sources -> True since None is falsy -> base weights
+        assert adapted == adaptive_weights.base_weights
+
+    def test_all_sources_identical_sharpe(self):
+        """All sources with same Sharpe => weights proportional to base (no min clamp distortion)."""
+        # Use high base weights and no min/max clamping to verify proportionality
+        weights = AdaptiveEnsembleWeights(
+            base_weights={"src_a": 0.5, "src_b": 0.3, "src_c": 0.2},
+            config={"min_weight": 0.001, "max_weight": 0.999, "min_multiplier": 0.1, "max_multiplier": 10.0},
+        )
+        attr = {
+            "timestamp": "now",
+            "sources": {
+                "src_a": {"total_readings": 40, "sharpe_contribution": 0.6},
+                "src_b": {"total_readings": 40, "sharpe_contribution": 0.6},
+                "src_c": {"total_readings": 40, "sharpe_contribution": 0.6},
+            },
+        }
+        adapted = weights.update_weights(attr, "normal")
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        # With identical multipliers and no clamping, weights stay proportional to base
+        # src_a / src_b should be ~ 0.5/0.3 = 1.667
+        ratio_ab = adapted["src_a"] / adapted["src_b"]
+        assert abs(ratio_ab - 1.667) < 0.1
+
+    def test_attribution_only_extra_sources(self, adaptive_weights):
+        """Sources in attribution but not in baseline: use avg_weight as base."""
+        attribution = {
+            "timestamp": "now",
+            "sources": {
+                "extra_one": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 1.2,
+                    "avg_weight": 0.02,
+                },
+                "extra_two": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.8,
+                    "avg_weight": 0.03,
+                },
+            },
+        }
+        weights = AdaptiveEnsembleWeights(base_weights={})  # empty baseline
+        adapted = weights.update_weights(attribution, "normal")
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        assert "extra_one" in adapted
+        assert "extra_two" in adapted
+
+    def test_single_source_zero_sharpe(self):
+        """Single source with zero Sharpe yields no_data_multiplier."""
+        weights = AdaptiveEnsembleWeights(base_weights={"src": 1.0})
+        attr = {
+            "timestamp": "now",
+            "sources": {"src": {"total_readings": 30, "sharpe_contribution": 0.0}},
+        }
+        adapted = weights.update_weights(attr, "normal")
+        assert abs(adapted.get("src", 0) - 1.0) < 0.01
+        assert weights.multipliers["src"] == 1.0
+
+    def test_single_source_negative_sharpe(self):
+        """Single source with negative Sharpe gets penalty but min weight."""
+        weights = AdaptiveEnsembleWeights(base_weights={"src": 1.0})
+        attr = {
+            "timestamp": "now",
+            "sources": {"src": {"total_readings": 30, "sharpe_contribution": -0.5}},
+        }
+        adapted = weights.update_weights(attr, "normal")
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        assert adapted["src"] >= weights.config["min_weight"]
+
+    def test_attribution_source_missing_sharpe_field(self, adaptive_weights):
+        """Attribution source dict without sharpe_contribution key."""
+        attribution = {
+            "timestamp": "now",
+            "sources": {
+                "tsfm_momentum": {"total_readings": 30},  # no sharpe_contribution
+            },
+        }
+        adapted = adaptive_weights.update_weights(attribution, "normal")
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        # missing sharpe defaults to 0 in .get(), which returns no_data_multiplier=1.0
+        assert adaptive_weights.multipliers.get("tsfm_momentum") == 1.0
+
+    def test_attribution_source_missing_total_readings(self, adaptive_weights):
+        """Attribution source dict without total_readings key."""
+        attribution = {
+            "timestamp": "now",
+            "sources": {
+                "tsfm_momentum": {"sharpe_contribution": 0.8},  # no total_readings
+            },
+        }
+        # default total_readings = 0 => no_data_multiplier
+        adapted = adaptive_weights.update_weights(attribution, "normal")
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        assert adaptive_weights.multipliers.get("tsfm_momentum") == 1.0
+
+    def test_different_regime_preserved(self, adaptive_weights, sample_attribution_good):
+        """Regime passed to update_weights is stored."""
+        for regime in ("normal", "crisis", "high_vol", "low_growth"):
+            aew = AdaptiveEnsembleWeights(base_weights=adaptive_weights.base_weights)
+            aew.state_file = adaptive_weights.state_file
+            aew.update_weights(sample_attribution_good, regime)
+            assert aew.current_regime == regime
+
+
+# ── Normalization Edge Cases ──────────────────────────────────────────────────
+
+
+class TestNormalizationEdgeCases:
+    """Normalization loop and edge-case handling."""
+
+    def test_all_sources_at_max_weight(self):
+        """Many sources all clipped to max_weight re-normalize correctly."""
+        weights = AdaptiveEnsembleWeights(
+            base_weights={f"s{i}": 0.5 for i in range(5)},
+            config={"max_weight": 0.30, "min_weight": 0.01},
+        )
+        attr = {
+            "timestamp": "now",
+            "sources": {f"s{i}": {"total_readings": 50, "sharpe_contribution": 3.0}
+                        for i in range(5)},
+        }
+        adapted = weights.update_weights(attr, "normal")
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        for w in adapted.values():
+            assert w <= weights.config["max_weight"] + 1e-6
+
+    def test_single_source_min_weight(self):
+        """Single source with very negative Sharpe: floor at min_weight."""
+        weights = AdaptiveEnsembleWeights(
+            base_weights={"src": 1.0},
+            config={"min_weight": 0.02},
+        )
+        attr = {
+            "timestamp": "now",
+            "sources": {"src": {"total_readings": 50, "sharpe_contribution": -5.0}},
+        }
+        adapted = weights.update_weights(attr, "normal")
+        assert adapted["src"] >= weights.config["min_weight"]
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+
+    def test_many_iterations_to_converge(self):
+        """Multiple sources bouncing below min_weight after normalization."""
+        config = {
+            "min_weight": 0.10,
+            "max_weight": 0.60,
+            "neg_sharpe_penalty": 0.25,
+        }
+        weights = AdaptiveEnsembleWeights(
+            base_weights={"good": 0.7, "bad1": 0.1, "bad2": 0.1, "bad3": 0.1},
+            config=config,
+        )
+        attr = {
+            "timestamp": "now",
+            "sources": {
+                "good": {"total_readings": 50, "sharpe_contribution": 1.5},
+                "bad1": {"total_readings": 50, "sharpe_contribution": -1.0},
+                "bad2": {"total_readings": 50, "sharpe_contribution": -2.0},
+                "bad3": {"total_readings": 50, "sharpe_contribution": -3.0},
+            },
+        }
+        adapted = weights.update_weights(attr, "normal")
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        for w in adapted.values():
+            assert w >= config["min_weight"] - 1e-6
+
+    def test_empty_attribution_returns_empty(self):
+        """Empty base + no sources => empty result."""
+        weights = AdaptiveEnsembleWeights(base_weights={})
+        adapted = weights.update_weights({"sources": {}}, "normal")
+        assert adapted == {}
+
+    def test_very_many_sources(self):
+        """Many sources (30+) should normalize without numerical issues."""
+        base = {f"s{i}": 1.0 / 30 for i in range(30)}
+        sources = {
+            f"s{i}": {"total_readings": 30, "sharpe_contribution": 0.3 + (i % 10) * 0.2}
+            for i in range(30)
+        }
+        weights = AdaptiveEnsembleWeights(base_weights=base)
+        adapted = weights.update_weights({"sources": sources, "timestamp": "now"}, "normal")
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+
+
+# ── State Persistence Edge Cases ──────────────────────────────────────────────
+
+
+class TestStatePersistenceEdgeCases:
+    """Save/load edge cases beyond basic round-trip."""
+
+    def test_history_trimmed_to_fifty(self, adaptive_weights, sample_attribution_good):
+        """History list is trimmed to last 50 entries on save."""
+        # Manually add 60 history entries
+        for i in range(60):
+            adaptive_weights.history.append(WeightAdjustment(
+                timestamp=f"2026-01-{i+1:02d}T00:00:00",
+                regime="normal", source="s1",
+                base_weight=0.1, multiplier=1.0, adjusted_weight=0.1,
+                sharpe_contribution=0.5, total_readings=30,
+            ))
+        adaptive_weights._save_state()
+        # Reload
+        adaptive_weights._load_state()
+        assert len(adaptive_weights.history) <= 50
+        # The oldest entry should be gone
+        timestamps = [h.timestamp for h in adaptive_weights.history]
+        assert "2026-01-01T00:00:00" not in timestamps
+
+    def test_save_load_io_error_does_not_crash(self, adaptive_weights):
+        """_save_state catches IOError and logs warning."""
+        from unittest.mock import patch
+        with patch("builtins.open", side_effect=IOError("Disk full")):
+            adaptive_weights.adjusted_weights = {"s1": 0.6}
+            adaptive_weights._save_state()  # should not raise
+
+    def test_save_load_json_decode_error(self, adaptive_weights):
+        """Corrupted state file should return False from _load_state."""
+        adaptive_weights.state_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(adaptive_weights.state_file, "w") as f:
+            f.write("{not json}")
+        assert not adaptive_weights._load_state()
+
+    def test_save_load_empty_baseline(self):
+        """Save/load with empty baseline weights."""
+        weights = AdaptiveEnsembleWeights(base_weights={})
+        weights.adjusted_weights = {}
+        weights.multipliers = {}
+        weights._save_state()
+        loaded = weights._load_state()
+        assert loaded
+        assert weights.base_weights == {}
+
+    def test_load_without_prior_save(self, adaptive_weights):
+        """State file does not exist => _load_state returns False."""
+        if adaptive_weights.state_file.exists():
+            adaptive_weights.state_file.unlink()
+        assert not adaptive_weights._load_state()
+        # adjusted_weights remain empty
+        assert adaptive_weights.adjusted_weights == {}
+
+
+# ── GetStateDict Edge Cases ───────────────────────────────────────────────────
+
+
+class TestGetStateDictEdgeCases:
+    """get_state_dict before/after updates and with empty state."""
+
+    def test_before_any_update(self, adaptive_weights):
+        """get_state_dict before update: available=False."""
+        state = adaptive_weights.get_state_dict()
+        assert state["available"] is False
+        assert state["num_adjusted_sources"] == 0
+        assert state["top_changes"] == []
+
+    def test_after_reset(self, adaptive_weights, sample_attribution_good):
+        """get_state_dict after reset: top_changes should be empty/small."""
+        adaptive_weights.update_weights(sample_attribution_good, "normal")
+        adaptive_weights.reset_to_baseline()
+        state = adaptive_weights.get_state_dict()
+        assert state["available"] is True
+
+    def test_state_dict_without_baseline(self):
+        """get_state_dict without baseline: no top_changes."""
+        weights = AdaptiveEnsembleWeights(base_weights={})
+        weights.adjusted_weights = {"s1": 0.5}
+        weights.multipliers = {"s1": 1.0}
+        state = weights.get_state_dict()
+        assert state["num_adjusted_sources"] == 1
+        assert state["top_changes"] == []  # no baseline to compare against
+
+
+# ── CLI Edge Cases ────────────────────────────────────────────────────────────
+
+
+class TestCLIEdgeCases:
+    """Additional CLI command test coverage."""
+
+    def test_cli_reset_no_state(self, tmp_state_dir, monkeypatch):
+        """CLI reset without any prior update should not crash."""
+        monkeypatch.setattr(
+            "sys.argv", ["adaptive_ensemble_weights", "reset"],
+        )
+        from src.strategy.adaptive_ensemble_weights import main
+        # reset calls _save_state which creates parent dirs
+        rc = main()
+        assert rc == 0
+
+    def test_cli_update_with_attribution_file_direct(self, tmp_state_dir, monkeypatch, sample_attribution_good):
+        """CLI update flow when attribution exists in default location."""
+        # Write attribution to ATTRIBUTION_DIR with expected naming convention
+        attr_dir = Path(tmp_state_dir) / "attribution"
+        attr_dir.mkdir(parents=True, exist_ok=True)
+        attr_file = attr_dir / "attribution_20260524.json"
+        with open(attr_file, "w") as f:
+            json.dump(sample_attribution_good, f)
+
+        monkeypatch.setattr(
+            "sys.argv", ["adaptive_ensemble_weights", "update", "--regime", "normal"],
+        )
+        from unittest.mock import patch
+        with patch("src.strategy.adaptive_ensemble_weights._get_base_weights_from_voter",
+                   return_value={s: 0.05 for s in sample_attribution_good["sources"]}):
+            from src.strategy.adaptive_ensemble_weights import main
+            rc = main()
+        assert rc == 0
+
+    def test_cli_unknown_command(self, tmp_state_dir, monkeypatch):
+        """CLI with unknown command prints help and exits with error code 2."""
+        monkeypatch.setattr(
+            "sys.argv", ["adaptive_ensemble_weights", "unknown_command"],
+        )
+        with pytest.raises(SystemExit) as exc:
+            from src.strategy.adaptive_ensemble_weights import main
+            main()
+        assert exc.value.code == 2
+
+
+# ── Dataclass Field Validation ────────────────────────────────────────────────
+
+
+class TestWeightAdjustmentDataclassExtended:
+    """Extended dataclass validation for WeightAdjustment."""
+
+    def test_negative_base_weight(self):
+        """WeightAdjustment can hold a negative base_weight."""
+        wa = WeightAdjustment(
+            timestamp="now", regime="normal", source="s1",
+            base_weight=-0.1, multiplier=1.0, adjusted_weight=-0.1,
+            sharpe_contribution=-0.5, total_readings=30,
+        )
+        assert wa.base_weight == -0.1
+
+    def test_zero_total_readings(self):
+        """WeightAdjustment with zero total_readings is valid."""
+        wa = WeightAdjustment(
+            timestamp="now", regime="normal", source="s1",
+            base_weight=0.1, multiplier=1.0, adjusted_weight=0.1,
+            sharpe_contribution=0.0, total_readings=0,
+        )
+        assert wa.total_readings == 0
+
+    def test_empty_source_string(self):
+        """WeightAdjustment with empty source string."""
+        wa = WeightAdjustment(
+            timestamp="now", regime="normal", source="",
+            base_weight=0.0, multiplier=1.0, adjusted_weight=0.0,
+            sharpe_contribution=0.0, total_readings=0,
+        )
+        assert wa.source == ""
+
+    def test_large_float_values(self):
+        """Very large multiplier should be storable."""
+        wa = WeightAdjustment(
+            timestamp="now", regime="normal", source="s1",
+            base_weight=1e6, multiplier=1e6, adjusted_weight=1e12,
+            sharpe_contribution=1e6, total_readings=1000000,
+        )
+        assert wa.base_weight == 1e6
+        assert wa.multiplier == 1e6
+
+
+class TestAdaptiveWeightsStateDataclassExtended:
+    """Extended dataclass validation for AdaptiveWeightsState."""
+
+    def test_empty_dicts(self):
+        """State with all empty dicts."""
+        state = AdaptiveWeightsState(
+            timestamp="now", regime="normal",
+            adjusted_weights={}, multipliers={}, history=[],
+            baseline_weights={}, config=DEFAULT_CONFIG,
+        )
+        assert state.adjusted_weights == {}
+        assert state.history == []
+
+    def test_minimal_config(self):
+        """State with minimal config subset."""
+        state = AdaptiveWeightsState(
+            timestamp="now", regime="crisis",
+            adjusted_weights={"s1": 0.4, "s2": 0.6},
+            multipliers={"s1": 0.8, "s2": 1.2},
+            history=[],
+            baseline_weights={"s1": 0.5, "s2": 0.5},
+            config={"window_days": 30},
+        )
+        assert state.config["window_days"] == 30
+
+    def test_dict_conversion_roundtrip(self):
+        """asdict() output should recreate the same object."""
+        original = AdaptiveWeightsState(
+            timestamp="2026-05-24", regime="high_vol",
+            adjusted_weights={"a": 0.3, "b": 0.7},
+            multipliers={"a": 0.6, "b": 1.4},
+            history=[{"ts": "now", "src": "a"}],
+            baseline_weights={"a": 0.5, "b": 0.5},
+            config=DEFAULT_CONFIG,
+        )
+        d = asdict(original)
+        restored = AdaptiveWeightsState(**d)
+        assert restored.regime == original.regime
+        assert restored.adjusted_weights == original.adjusted_weights
+        assert restored.history == original.history
+
+
+# ── Reset Edge Cases ──────────────────────────────────────────────────────────
+
+
+class TestResetEdgeCases:
+    """Additional reset behavior."""
+
+    def test_reset_before_any_update(self, adaptive_weights):
+        """Reset without prior update returns base weights."""
+        result = adaptive_weights.reset_to_baseline()
+        assert result == adaptive_weights.base_weights
+        assert adaptive_weights.multipliers == {k: 1.0 for k in adaptive_weights.base_weights}
+
+    def test_reset_empty_base_weights(self):
+        """Reset with empty base weights returns empty dict."""
+        weights = AdaptiveEnsembleWeights(base_weights={})
+        result = weights.reset_to_baseline()
+        assert result == {}
+        assert weights.multipliers == {}
+
+    def test_reset_saves_state(self, tmp_state_dir):
+        """Reset persists state to file."""
+        weights = AdaptiveEnsembleWeights(
+            base_weights={"a": 0.7, "b": 0.3},
+        )
+        # Trigger save by reset
+        weights.reset_to_baseline()
+        assert weights.state_file.exists()
+        with open(weights.state_file) as f:
+            state = json.load(f)
+        assert state["adjusted_weights"]["a"] == 0.7
+
+
+# ── GetAdjustedWeights / GetMultipliers Edge Cases ────────────────────────────
+
+
+class TestGetAccessorsEdgeCases:
+    """get_adjusted_weights / get_multipliers edge cases."""
+
+    def test_get_adjusted_weights_before_update_loads_state(self, adaptive_weights):
+        """get_adjusted_weights with no in-memory data tries to load from file."""
+        # No state file exists either
+        result = adaptive_weights.get_adjusted_weights()
+        # Should be empty dict since no state file
+        assert result == {}
+
+    def test_get_multipliers_before_update_loads_state(self, adaptive_weights):
+        """get_multipliers with no in-memory data tries to load from file."""
+        result = adaptive_weights.get_multipliers()
+        assert result == {}
+
+
+# ── Save State Parent Dir Creation ────────────────────────────────────────────
+
+
+class TestSaveStateParentDir:
+    """_save_state creates parent directories automatically."""
+
+    def test_save_creates_parent_dirs(self, monkeypatch):
+        """_save_state creates parent directory if it doesn't exist."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            deep_path = Path(tmp) / "a" / "b" / "c" / "state.json"
+            monkeypatch.setattr(
+                "src.strategy.adaptive_ensemble_weights.STATE_FILE", deep_path,
+            )
+            weights = AdaptiveEnsembleWeights(
+                base_weights={"src": 1.0},
+                config={"min_weight": 0.01},
+            )
+            weights.adjusted_weights = {"src": 1.0}
+            weights._save_state()
+            assert deep_path.exists()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

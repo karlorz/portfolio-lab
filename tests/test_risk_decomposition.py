@@ -165,6 +165,18 @@ class TestComputeReturns:
         returns = _compute_returns(prices)
         assert np.all(returns > 0)
 
+    def test_empty_array(self):
+        """Empty price array should produce empty returns."""
+        returns = _compute_returns(np.array([]))
+        assert len(returns) == 0
+
+    def test_negative_prices_not_allowed(self):
+        """Negative prices produce NaN in log returns; verify no crash."""
+        prices = np.array([100.0, -50.0, 200.0])
+        with np.errstate(invalid='ignore'):
+            returns = _compute_returns(prices)
+        assert len(returns) == 2
+
 
 class TestOLSBeta:
     def test_perfect_correlation(self):
@@ -240,6 +252,27 @@ class TestOLSBeta:
         beta, t_stat, p_val = _ols_beta(x, y)
         assert abs(beta + 2.0) < 0.01
 
+    def test_minimum_n_3(self):
+        """Exactly 3 observations should produce a valid beta."""
+        x = np.array([1.0, 2.0, 3.0])
+        y = x.copy()  # Perfect fit
+        beta, t_stat, p_val = _ols_beta(x, y)
+        assert abs(beta - 1.0) < 0.01
+
+    def test_large_beta_values(self):
+        """Very large beta (e.g., 100x) should be estimated correctly."""
+        x = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y = 100.0 * x
+        beta, t_stat, p_val = _ols_beta(x, y)
+        assert abs(beta - 100.0) < 0.01
+
+    def test_multidimensional_input(self):
+        """2D arrays should be flattened without error."""
+        x = np.array([[1.0], [2.0], [3.0], [4.0], [5.0]])
+        y = np.array([[2.0], [4.0], [6.0], [8.0], [10.0]])
+        beta, t_stat, p_val = _ols_beta(x, y)
+        assert abs(beta - 2.0) < 0.01
+
 
 class TestBuildFactorReturns:
     def test_basic(self, synthetic_prices):
@@ -306,6 +339,29 @@ class TestBuildFactorReturns:
         assert len(factor_rets["crypto"]) == 0
         assert len(factor_rets["fx"]) == 0
 
+    def test_different_length_series(self):
+        """Symbols with different-length price series should not crash."""
+        n_long, n_short = 200, 100
+        prices = {
+            "SPY": _make_synthetic_prices(n_long, 100, 0.01, 42),
+            "TLT": _make_synthetic_prices(n_short, 100, 0.008, 43),
+            "GLD": _make_synthetic_prices(n_long, 100, 0.012, 44),
+            "BTC-USD": _make_synthetic_prices(n_long, 100, 0.02, 45),
+            "ETH-USD": _make_synthetic_prices(n_long, 100, 0.025, 46),
+            "EFA": _make_synthetic_prices(n_long, 100, 0.01, 47),
+        }
+        factor_rets = _build_factor_returns(prices)
+        assert "equity" in factor_rets
+        assert len(factor_rets["equity"]) > 0
+        # duration factor (TLT) has shorter data but should still produce returns
+        assert len(factor_rets["duration"]) > 0
+
+    def test_empty_factor_defs(self):
+        """Empty factor definitions dict should produce empty result."""
+        prices = {"SPY": _make_synthetic_prices(100, 100, 0.01, 42)}
+        factor_rets = _build_factor_returns(prices, factor_defs={})
+        assert factor_rets == {}
+
 
 class TestAlignSeries:
     def test_equal_length(self):
@@ -357,6 +413,29 @@ class TestAlignSeries:
         a, fm = _align_series(asset, factors)
         assert len(a) == 0
 
+    def test_min_len_less_than_two(self):
+        """When min aligned length < 2, empty arrays returned."""
+        asset = np.array([1.0])
+        factors = {"eq": np.array([0.1])}
+        a, fm = _align_series(asset, factors)
+        assert len(a) == 0
+        assert fm.shape == (0, 1)
+
+    def test_all_factors_empty(self):
+        """All factors with zero length should return empty aligned series."""
+        asset = np.array([1.0, 2.0, 3.0])
+        factors = {"eq": np.array([]), "dur": np.array([])}
+        a, fm = _align_series(asset, factors)
+        assert len(a) == 0
+        assert fm.shape == (0, 2)
+
+    def test_single_observation_align(self):
+        """Single observation (length=1) should return empty (min_len < 2)."""
+        asset = np.array([1.0, 2.0])
+        factors = {"eq": np.array([0.1])}
+        a, fm = _align_series(asset, factors)
+        assert len(a) == 0
+
 
 # ---------------------------------------------------------------------------
 # Tests: RiskDecomposer
@@ -394,6 +473,19 @@ class TestRiskDecomposerInit:
         assert len(decomposer.factor_keys) == 2
         assert "equity" in decomposer.factor_keys
         assert "gold" not in decomposer.factor_keys
+
+    def test_init_auto_load_fallback(self, monkeypatch):
+        """When prices_data is None, _load_prices_from_pipeline is called."""
+        import src.monitor.risk_decomposition as rd_mod
+        called = False
+        def fake_load():
+            nonlocal called
+            called = True
+            return {}
+        monkeypatch.setattr(rd_mod, "_load_prices_from_pipeline", fake_load)
+        decomposer = RiskDecomposer()  # No prices_data → triggers auto-load
+        assert called
+        assert len(decomposer.prices) == 0
 
 
 class TestEstimateAssetBetas:
@@ -435,6 +527,39 @@ class TestEstimateAssetBetas:
         assert betas["equity"].t_stat > 2.0
         assert betas["equity"].p_value < 0.05
 
+    def test_returns_shorter_than_window(self, synthetic_prices):
+        """Returns shorter than window should use all available data."""
+        short_rets = _compute_returns(synthetic_prices["SPY"])[:20]  # Only 20 obs
+        decomposer = RiskDecomposer(window=60, prices_data=synthetic_prices)
+        betas = decomposer.estimate_asset_betas("SPY", returns=short_rets)
+        # Should still produce betas using the 20 obs
+        assert len(betas) > 0
+        assert "equity" in betas
+
+    def test_aligned_data_less_than_three(self, synthetic_prices):
+        """When alignment yields < 3 obs, empty dict returned."""
+        # Build a decomposer with very short factor returns
+        prices = {"SPY": np.array([100.0, 101.0, 102.0])}
+        decomposer = RiskDecomposer(window=60, prices_data=prices)
+        betas = decomposer.estimate_asset_betas("SPY")
+        assert betas == {}
+
+    def test_zero_variance_asset_returns(self, synthetic_prices):
+        """Asset with constant (zero variance) returns should produce empty betas."""
+        constant_rets = np.zeros(100)
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        betas = decomposer.estimate_asset_betas("SPY", returns=constant_rets)
+        # All aligned returns are zero → each factor will have beta=0
+        # but factor variance is non-zero, so _ols_beta returns beta=0
+        assert betas == {} or all(abs(b.beta) < 1e-10 for b in betas.values())
+
+    def test_betas_include_all_factor_keys(self, synthetic_prices):
+        """Betas dict should contain all factor keys."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        betas = decomposer.estimate_asset_betas("SPY")
+        for fkey in decomposer.factor_keys:
+            assert fkey in betas, f"Missing key {fkey} in betas"
+
 
 class TestDecomposeAsset:
     def test_basic_decomposition(self, synthetic_prices):
@@ -470,6 +595,39 @@ class TestDecomposeAsset:
         assert ad.systematic_var >= 0
         assert ad.idiosyncratic_var >= 0
         assert ad.total_var >= 0
+
+    def test_weight_zero(self, synthetic_prices):
+        """Weight=0 should still produce a valid decomposition."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        ad = decomposer.decompose_asset("SPY", 0.0)
+        assert ad is not None
+        assert ad.weight == 0.0
+        assert ad.total_var > 0
+
+    def test_insufficient_aligned_data(self):
+        """Factor data too short relative to asset → None."""
+        prices = {
+            "SPY": _make_synthetic_prices(100, 100, 0.01, 42),
+            "TLT": _make_synthetic_prices(100, 100, 0.01, 43),
+            "GLD": _make_synthetic_prices(100, 100, 0.01, 44),
+            "BTC-USD": _make_synthetic_prices(100, 100, 0.01, 45),
+            "ETH-USD": _make_synthetic_prices(100, 100, 0.01, 46),
+            "EFA": _make_synthetic_prices(100, 100, 0.01, 47),
+        }
+        # Set window larger than available data to reduce aligned length
+        decomposer = RiskDecomposer(window=200, prices_data=prices)
+        ad = decomposer.decompose_asset("SPY", 0.5)
+        # With 100 price points, we get 99 returns; window=200 uses all 99
+        # Then _align_series min_len from factors = 99 → aligned = 99 → should work
+        assert ad is not None, "Should still work with 99 obs and window=200"
+
+    def test_variances_relationship(self, synthetic_prices):
+        """systematic_var + idiosyncratic_var should approx = total_var."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        ad = decomposer.decompose_asset("SPY", 0.5)
+        assert ad is not None
+        total_from_components = ad.systematic_var + ad.idiosyncratic_var
+        assert abs(total_from_components - ad.total_var) < 1e-10
 
 
 class TestPortfolioDecomposition:
@@ -522,6 +680,44 @@ class TestPortfolioDecomposition:
         assert len(result.asset_decompositions) == 2
         assert result.total_portfolio_volatility > 0
 
+    def test_non_normalized_weights(self, synthetic_prices):
+        """Weights not summing to 1 should be normalized."""
+        weights = {"SPY": 46, "GLD": 38, "TLT": 16}  # Sums to 100
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        result = decomposer.decompose(weights=weights)
+        # After normalization, should be ~0.46, 0.38, 0.16
+        assert abs(result.portfolio_weights["SPY"] - 0.46) < 0.01
+        assert abs(result.portfolio_weights["GLD"] - 0.38) < 0.01
+        assert abs(result.portfolio_weights["TLT"] - 0.16) < 0.01
+
+    def test_correlation_matrix_in_result(self, synthetic_prices):
+        """Factor correlation matrix should be present and valid."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        result = decomposer.decompose()
+        assert result.factor_correlation_matrix is not None
+        # Check diagonal entries are 1.0
+        for fkey in decomposer.factor_keys:
+            fname = FACTOR_DEFINITIONS[fkey]["name"]
+            assert fname in result.factor_correlation_matrix
+            assert abs(result.factor_correlation_matrix[fname][fname] - 1.0) < 0.001
+
+    def test_num_observations_matches_factor_data(self, synthetic_prices):
+        """num_observations should reflect min factor data length."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        result = decomposer.decompose()
+        # All factors use the same synthetic data → all same length
+        expected_obs = min(
+            len(frets) for frets in decomposer.factor_returns.values() if len(frets) > 0
+        )
+        assert result.num_observations == expected_obs
+
+    def test_component_sums_close_to_total(self, synthetic_prices):
+        """systematic_pct + idiosyncratic_pct should sum to ~100%."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        result = decomposer.decompose()
+        total = result.systematic_pct + result.idiosyncratic_pct
+        assert abs(total - 100.0) < 5.0
+
 
 class TestSummaryString:
     def test_summary_format(self, synthetic_prices):
@@ -540,6 +736,25 @@ class TestSummaryString:
         result = decomposer.decompose()
         summary = result.summary_string()
         assert "█" in summary  # Bar characters
+
+    def test_summary_no_correlation(self):
+        """Summary should handle missing factor_correlation_matrix."""
+        result = PortfolioRiskDecomposition(
+            timestamp="2026-05-16T12:00:00",
+            portfolio_weights={"SPY": 1.0},
+            total_portfolio_variance=0.0001,
+            total_portfolio_volatility=0.1587,
+            factor_contributions={"equity": 100.0},
+            systematic_pct=100.0,
+            idiosyncratic_pct=0.0,
+            asset_decompositions={},
+            window=60,
+            num_observations=500,
+            factor_correlation_matrix=None,
+        )
+        summary = result.summary_string()
+        assert "Risk Factor Decomposition" in summary
+        assert "Total Portfolio Vol" in summary
 
 
 class TestToDict:
@@ -570,6 +785,52 @@ class TestToDict:
                 assert "p_value" in beta
                 assert "significant" in beta
 
+    def test_to_dict_factor_betas_already_dicts(self):
+        """to_dict() handles factor_betas that are already plain dicts."""
+        betas_as_dicts = {
+            "equity": {"beta": 0.9, "t_stat": 15.0, "p_value": 0.0, "significant": True, "factor_name": "Equity"},
+        }
+        ad = AssetRiskDecomposition(
+            symbol="SPY", weight=0.5, r_squared=0.85,
+            factor_betas=betas_as_dicts,  # type: ignore
+            idiosyncratic_var=0.0001, systematic_var=0.0005, total_var=0.0006,
+        )
+        result = PortfolioRiskDecomposition(
+            timestamp="2026-05-16T12:00:00",
+            portfolio_weights={"SPY": 0.5},
+            total_portfolio_variance=0.0006,
+            total_portfolio_volatility=0.15,
+            factor_contributions={"equity": 100.0},
+            systematic_pct=83.3,
+            idiosyncratic_pct=16.7,
+            asset_decompositions={"SPY": ad},
+            window=60,
+            num_observations=500,
+        )
+        d = result.to_dict()
+        spy_betas = d["asset_decompositions"]["SPY"]["factor_betas"]
+        assert spy_betas["equity"]["beta"] == 0.9
+        assert spy_betas["equity"]["t_stat"] == 15.0
+
+    def test_to_dict_factor_correlation_none(self):
+        """to_dict() handles factor_correlation_matrix=None."""
+        result = PortfolioRiskDecomposition(
+            timestamp="2026-05-16T12:00:00",
+            portfolio_weights={"SPY": 1.0},
+            total_portfolio_variance=0.0001,
+            total_portfolio_volatility=0.1587,
+            factor_contributions={"equity": 100.0},
+            systematic_pct=100.0,
+            idiosyncratic_pct=0.0,
+            asset_decompositions={},
+            window=60,
+            num_observations=500,
+            factor_correlation_matrix=None,
+        )
+        d = result.to_dict()
+        assert "factor_correlation_matrix" in d
+        assert d["factor_correlation_matrix"] is None
+
 
 class TestFactorCorrelations:
     def test_get_factor_correlations(self, synthetic_prices):
@@ -590,6 +851,17 @@ class TestFactorCorrelations:
         for i, f1 in enumerate(factors):
             for j, f2 in enumerate(factors):
                 assert abs(corr[f1][f2] - corr[f2][f1]) < 0.001
+
+    def test_correlation_insufficient_min_len(self):
+        """When min factor data length < 2, empty dict returned."""
+        prices = {
+            "SPY": np.array([100.0, 101.0]),
+            "TLT": np.array([100.0, 101.0]),
+            "GLD": np.array([100.0, 101.0]),
+        }
+        decomposer = RiskDecomposer(window=60, prices_data=prices)
+        corr = decomposer.get_factor_correlations()
+        assert corr == {}
 
 
 class TestCheckAsset:
@@ -905,6 +1177,142 @@ class TestEdgeCases:
         decomposer = RiskDecomposer(window=60, prices_data=prices)
         corr = decomposer.get_factor_correlations()
         assert corr == {}
+
+    def test_decompose_with_crypto_exposure(self, synthetic_prices):
+        """Portfolio with crypto should not crash; crypto factor may have data."""
+        weights = {"SPY": 0.5, "GLD": 0.3, "TLT": 0.2}
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        result = decomposer.decompose(weights=weights)
+        assert "crypto" in result.factor_contributions
+
+    def test_decompose_portfolio_custom_window(self, synthetic_prices, monkeypatch):
+        """decompose_portfolio with custom window should work."""
+        import src.monitor.risk_decomposition as rd_mod
+        monkeypatch.setattr(rd_mod, "_load_prices_from_pipeline", lambda: synthetic_prices)
+        result = decompose_portfolio(weights={"SPY": 0.5, "GLD": 0.5}, window=90)
+        assert isinstance(result, PortfolioRiskDecomposition)
+        assert result.window == 90
+        assert result.total_portfolio_volatility > 0
+
+    def test_verify_systematic_idio_sum(self, synthetic_prices):
+        """systematic_pct + idiosyncratic_pct should equal ~100%."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        result = decomposer.decompose()
+        total = result.systematic_pct + result.idiosyncratic_pct
+        assert abs(total - 100.0) < 5.0
+
+    def test_decompose_asset_missing_from_prices(self, synthetic_prices):
+        """Asset not in price data → decompose_asset returns None."""
+        decomposer = RiskDecomposer(prices_data=synthetic_prices)
+        ad = decomposer.decompose_asset("DEF_NOT_IN_DATA", 0.5)
+        assert ad is None
+
+    def test_decompose_value_error_no_assets_decomposable(self):
+        """When no assets can be decomposed, ValueError is raised."""
+        prices = {
+            "SPY": np.array([100.0, 101.0]),  # Only 2 data points → can't decompose
+            "GLD": np.array([100.0, 101.0]),
+            "TLT": np.array([100.0, 101.0]),
+        }
+        decomposer = RiskDecomposer(window=60, prices_data=prices)
+        with pytest.raises(ValueError, match="No assets could be decomposed"):
+            decomposer.decompose(weights={"SPY": 0.5, "GLD": 0.3, "TLT": 0.2})
+
+    def test_decompose_all_weights_zero_value_error(self):
+        """All zero weights should raise ValueError."""
+        prices = {"SPY": _make_synthetic_prices(100, 100, 0.01, 42)}
+        decomposer = RiskDecomposer(window=60, prices_data=prices)
+        with pytest.raises(ValueError, match="must sum to > 0"):
+            decomposer.decompose(weights={"SPY": 0.0})
+
+
+# ---------------------------------------------------------------------------
+# Tests: _load_prices_from_pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestLoadPricesFromPipeline:
+    """Tests for _load_prices_from_pipeline with mocked file system."""
+
+    def test_load_from_public_data(self, tmp_path, monkeypatch):
+        """Load from public/data/prices.json."""
+        import src.monitor.risk_decomposition as rd_mod
+
+        prices_dir = tmp_path / "public" / "data"
+        prices_dir.mkdir(parents=True)
+        data = {"SPY": [{"d": "2024-01-01", "p": 100.0}, {"d": "2024-01-02", "p": 101.0}]}
+        (prices_dir / "prices.json").write_text(json.dumps(data))
+        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        result = rd_mod._load_prices_from_pipeline()
+        assert "SPY" in result
+        assert len(result["SPY"]) == 2
+
+    def test_load_from_data_fallback(self, tmp_path, monkeypatch):
+        """Fallback to data/prices.json when public path missing."""
+        import src.monitor.risk_decomposition as rd_mod
+
+        prices_dir = tmp_path / "data"
+        prices_dir.mkdir(parents=True)
+        data = {"GLD": [{"d": "2024-01-01", "p": 180.0}]}
+        (prices_dir / "prices.json").write_text(json.dumps(data))
+        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        result = rd_mod._load_prices_from_pipeline()
+        assert "GLD" in result
+
+    def test_load_neither_exists(self, tmp_path, monkeypatch):
+        """When neither path exists, empty dict returned."""
+        import src.monitor.risk_decomposition as rd_mod
+
+        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        result = rd_mod._load_prices_from_pipeline()
+        assert result == {}
+
+    def test_load_empty_symbol_data(self, tmp_path, monkeypatch):
+        """Symbol with empty entries list is skipped."""
+        import src.monitor.risk_decomposition as rd_mod
+
+        prices_dir = tmp_path / "public" / "data"
+        prices_dir.mkdir(parents=True)
+        data = {"SPY": [], "GLD": [{"d": "2024-01-01", "p": 180.0}]}
+        (prices_dir / "prices.json").write_text(json.dumps(data))
+        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        result = rd_mod._load_prices_from_pipeline()
+        assert "SPY" not in result
+        assert "GLD" in result
+
+    def test_load_sorts_by_date(self, tmp_path, monkeypatch):
+        """Prices should be sorted chronologically (date order)."""
+        import src.monitor.risk_decomposition as rd_mod
+
+        prices_dir = tmp_path / "public" / "data"
+        prices_dir.mkdir(parents=True)
+        data = {
+            "SPY": [
+                {"d": "2024-01-03", "p": 102.0},
+                {"d": "2024-01-01", "p": 100.0},
+                {"d": "2024-01-02", "p": 101.0},
+            ]
+        }
+        (prices_dir / "prices.json").write_text(json.dumps(data))
+        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        result = rd_mod._load_prices_from_pipeline()
+        assert np.allclose(result["SPY"], [100.0, 101.0, 102.0])
+
+
+# ---------------------------------------------------------------------------
+# Tests: _load_prices_from_pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestDecomposePortfolioEdgeCases:
+    """Additional edge cases for decompose_portfolio convenience function."""
+
+    def test_decompose_portfolio_default_window(self, synthetic_prices, monkeypatch):
+        """decompose_portfolio with default window=60."""
+        import src.monitor.risk_decomposition as rd_mod
+        monkeypatch.setattr(rd_mod, "_load_prices_from_pipeline", lambda: synthetic_prices)
+        result = decompose_portfolio(weights={"SPY": 0.5, "GLD": 0.5})
+        assert result.window == 60
 
 
 # ---------------------------------------------------------------------------

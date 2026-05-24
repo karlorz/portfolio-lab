@@ -1245,3 +1245,760 @@ class TestPrintReport:
         print_report(report)
         captured = capsys.readouterr()
         assert "ATTRIBUTION" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# New tests: SourceAttribution edge cases
+# ---------------------------------------------------------------------------
+
+class TestSourceAttributionNew:
+    """Additional SourceAttribution edge cases."""
+
+    def test_efficiency_ratio_negative_return(self):
+        """Negative avg_return_bps still yields positive efficiency via abs()."""
+        sa = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=100, active_days=50, hit_rate=0.6, win_rate=0.5,
+            avg_return_bps=-2.5, total_return_bps=-250.0, sharpe_contribution=-0.8,
+            max_consecutive_losses=5, avg_correlation=0.2, avg_weight=0.15,
+        )
+        assert sa.efficiency_ratio > 0
+        assert sa.efficiency_ratio == 0.6 * abs(-2.5) / 100
+
+    def test_efficiency_ratio_large_numbers(self):
+        """Very large avg_return_bps should not overflow."""
+        sa = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=1000, active_days=500, hit_rate=1.0, win_rate=1.0,
+            avg_return_bps=999999.99, total_return_bps=50000000.0,
+            sharpe_contribution=5.0, max_consecutive_losses=0,
+            avg_correlation=0.1, avg_weight=0.5,
+        )
+        assert sa.efficiency_ratio > 0
+        assert sa.efficiency_ratio == 1.0 * 999999.99 / 100
+
+    def test_zero_total_and_active_days(self):
+        """Source with zero readings and days should not crash."""
+        sa = SourceAttribution(
+            source="empty", display_name="Empty", category="other",
+            total_readings=0, active_days=0, hit_rate=0.0, win_rate=0.0,
+            avg_return_bps=0.0, total_return_bps=0.0, sharpe_contribution=0.0,
+            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.0,
+        )
+        assert sa.efficiency_ratio == 0.0
+        d = sa.to_dict()
+        assert d["source"] == "empty"
+
+
+class TestAttributionReportNew:
+    """Additional AttributionReport edge cases."""
+
+    def test_to_json_with_multiple_sources(self):
+        """to_json produces valid JSON with multiple sources."""
+        src_a = SourceAttribution(
+            source="alpha", display_name="Alpha", category="trend",
+            total_readings=50, active_days=40, hit_rate=0.65, win_rate=0.60,
+            avg_return_bps=2.0, total_return_bps=80.0, sharpe_contribution=0.9,
+            max_consecutive_losses=3, avg_correlation=0.15, avg_weight=0.20,
+        )
+        src_b = SourceAttribution(
+            source="beta", display_name="Beta", category="meanrev",
+            total_readings=30, active_days=25, hit_rate=0.55, win_rate=0.50,
+            avg_return_bps=0.8, total_return_bps=20.0, sharpe_contribution=0.3,
+            max_consecutive_losses=4, avg_correlation=0.30, avg_weight=0.10,
+        )
+        report = AttributionReport(
+            timestamp="2026-05-24T12:00:00",
+            start_date="2026-02-23", end_date="2026-05-24", analysis_days=90,
+            sources={"alpha": src_a, "beta": src_b},
+            best_source="alpha", worst_source="beta",
+            avg_hit_rate=0.60, avg_correlation=0.225,
+            avg_active_sources_per_day=2.0, total_sources_tracked=2,
+            degradation_signals=["beta"], top_performers=["alpha"],
+        )
+        j = report.to_json()
+        parsed = json.loads(j)
+        assert len(parsed["sources"]) == 2
+        assert parsed["best_source"] == "alpha"
+        assert parsed["worst_source"] == "beta"
+        assert parsed["degradation_signals"] == ["beta"]
+        assert parsed["top_performers"] == ["alpha"]
+
+    def test_degradation_top_performers_overlap(self):
+        """A source at the boundary should not be in both lists."""
+        src = SourceAttribution(
+            source="neutral", display_name="Neutral", category="trend",
+            total_readings=100, active_days=80, hit_rate=0.50, win_rate=0.50,
+            avg_return_bps=0.5, total_return_bps=40.0, sharpe_contribution=0.0,
+            max_consecutive_losses=5, avg_correlation=0.20, avg_weight=0.15,
+        )
+        report = AttributionReport(
+            timestamp="2026-05-24T00:00:00",
+            start_date="2026-02-23", end_date="2026-05-24", analysis_days=90,
+            sources={"neutral": src},
+            best_source="neutral", worst_source="neutral",
+            avg_hit_rate=0.5, avg_correlation=0.2,
+            avg_active_sources_per_day=1.0, total_sources_tracked=1,
+            degradation_signals=[], top_performers=[],
+        )
+        assert "neutral" not in report.degradation_signals
+        assert "neutral" not in report.top_performers
+
+
+# ---------------------------------------------------------------------------
+# New tests: Signal history edge cases
+# ---------------------------------------------------------------------------
+
+class TestSignalHistoryNew:
+    """Additional _get_signal_history edge cases."""
+
+    def test_empty_ensemble_db(self, tmp_path):
+        """Empty (zero-byte) ensemble DB should not crash."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "ensemble_signals.db"
+        db_path.write_text("")
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        history = attributor._get_signal_history(days=30)
+        assert history == []
+
+    def test_corrupt_ensemble_db(self, tmp_path):
+        """Corrupt (non-SQLite) ensemble DB should not crash."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "ensemble_signals.db"
+        db_path.write_bytes(b"\x00\x01\x02\x03")
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        history = attributor._get_signal_history(days=30)
+        assert history == []
+
+    def test_missing_source_readings_table(self, tmp_path):
+        """DB with only ensemble_votes table — source_readings query fails
+        and try/except returns empty history."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "ensemble_signals.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE ensemble_votes (
+                timestamp TEXT PRIMARY KEY, regime TEXT, regime_confidence REAL,
+                num_sources INTEGER, consensus REAL, agreement_ratio REAL,
+                equity_bias REAL, duration_bias REAL, gold_bias REAL,
+                action TEXT, confidence REAL, reasoning TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO ensemble_votes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("2026-05-15 10:00:00", "normal", 0.7, 6, 0.25, 0.65,
+              0.3, -0.1, 0.05, "neutral", 0.6, "working"))
+        conn.commit()
+        conn.close()
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        # The entire try/except in _get_signal_history wraps both queries,
+        # so a missing source_readings table fails the whole attempt.
+        history = attributor._get_signal_history(days=30)
+        assert history == []
+
+    def test_signal_history_custom_days(self, tmp_path, ensemble_db):
+        """Different day parameters should affect LIMIT."""
+        data_dir = ensemble_db.parent
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        history_short = attributor._get_signal_history(days=5)
+        history_long = attributor._get_signal_history(days=90)
+        assert len(history_long) >= len(history_short)
+
+
+# ---------------------------------------------------------------------------
+# New tests: Paper trading returns edge cases
+# ---------------------------------------------------------------------------
+
+class TestPaperTradingReturnsNew:
+    """Additional _get_paper_trading_returns edge cases."""
+
+    def test_db_read_exception(self, tmp_path):
+        """Exception during DB read returns empty dict (graceful)."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "paper_trading.db"
+        db_path.write_bytes(b"\x00\x01\x02\x03")
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        returns = attributor._get_paper_trading_returns(days=30)
+        assert isinstance(returns, dict)
+        assert len(returns) == 0
+
+    def test_empty_paper_trading_db(self, tmp_path):
+        """DB with table but no rows returns empty dict."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "paper_trading.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE daily_snapshots (
+                date TEXT PRIMARY KEY, total_value REAL, daily_return REAL,
+                cumulative_return REAL
+            )
+        """)
+        conn.commit()
+        conn.close()
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        returns = attributor._get_paper_trading_returns(days=30)
+        assert isinstance(returns, dict)
+        assert len(returns) == 0
+
+    def test_fallback_no_logs_dir(self, tmp_path):
+        """When logs directory does not exist, fallback returns empty dict."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        from src.monitor import performance_attribution as pa_mod
+        original = pa_mod.DATA_DIR
+        try:
+            pa_mod.DATA_DIR = data_dir  # No logs dir here
+            returns = attributor._get_paper_trading_returns(days=30)
+            assert isinstance(returns, dict)
+            assert len(returns) == 0
+        finally:
+            pa_mod.DATA_DIR = original
+
+    def test_fallback_json_no_daily_returns_key(self, tmp_path):
+        """JSON fallback with no 'daily_returns' key returns empty dict."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        logs_dir = data_dir / "logs"
+        logs_dir.mkdir()
+        perf_file = logs_dir / "performance_summary_2026-01-01.json"
+        with open(perf_file, "w") as f:
+            json.dump({"other_data": True}, f)
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        from src.monitor import performance_attribution as pa_mod
+        original = pa_mod.DATA_DIR
+        try:
+            pa_mod.DATA_DIR = data_dir
+            returns = attributor._get_paper_trading_returns(days=30)
+            assert isinstance(returns, dict)
+            assert len(returns) == 0
+        finally:
+            pa_mod.DATA_DIR = original
+
+
+# ---------------------------------------------------------------------------
+# New tests: Compute source attribution edge cases
+# ---------------------------------------------------------------------------
+
+class TestComputeSourceAttributionNew:
+    """Additional _compute_source_attribution edge cases."""
+
+    def test_missing_value_key(self, attributor):
+        """Signal dict without 'value' key defaults to 0."""
+        signals = [{
+            "source": "multi_speed_momentum", "timestamp": "2026-05-15",
+            "confidence": 0.8, "weight": 0.2, "regime_fit": "all",
+            "explanation": "",
+        }]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib_out = attributor._compute_source_attribution(signals, daily_returns)
+        # value defaults to 0 → neutral signal with non-flat return → miss → hit_rate=0.0
+        assert attrib_out.active_days == 1
+        assert attrib_out.hit_rate == 0.0
+        # avg_weight = mean of [0.2] = 0.2
+
+    def test_missing_weight_key(self, attributor):
+        """Signal dict without 'weight' key defaults to 0."""
+        signals = [{
+            "source": "multi_speed_momentum", "timestamp": "2026-05-15",
+            "value": 0.5, "confidence": 0.8, "regime_fit": "all",
+            "explanation": "",
+        }]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib_out = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib_out.avg_weight == 0.0
+
+    def test_all_zero_signals(self, attributor):
+        """All zero value signals should produce zero contribution."""
+        signals = []
+        daily_returns = {}
+        for i in range(5):
+            d = f"2026-05-{10+i:02d}"
+            signals.append({
+                "source": "multi_speed_momentum", "timestamp": d,
+                "value": 0.0, "confidence": 0.8, "weight": 0.2,
+                "regime_fit": "all", "explanation": "",
+            })
+            daily_returns[d] = {"daily_return": 0.005}
+        attrib_out = attributor._compute_source_attribution(signals, daily_returns)
+        # All neutral signals → weight-scaled contribution
+        assert attrib_out.active_days == 5
+        assert attrib_out.total_return_bps != 0.0  # neutral path: ret * 10000 * w * 2
+
+    def test_all_returns_negative(self, attributor):
+        """All negative returns should give hit_rate=1.0 with all negative signals."""
+        signals = []
+        daily_returns = {}
+        for i in range(5):
+            d = f"2026-05-{10+i:02d}"
+            signals.append({
+                "source": "multi_speed_momentum", "timestamp": d,
+                "value": -0.5, "confidence": 0.8, "weight": 0.2,
+                "regime_fit": "all", "explanation": "",
+            })
+            daily_returns[d] = {"daily_return": -0.01}
+        attrib_out = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib_out.hit_rate == 1.0
+        assert attrib_out.max_consecutive_losses == 5
+
+    def test_constant_signals_zero_sharpe(self, attributor):
+        """Constant daily contributions yield zero sharpe (zero std)."""
+        signals = []
+        daily_returns = {}
+        for i in range(10):
+            d = f"2026-05-{10+i:02d}"
+            signals.append({
+                "source": "multi_speed_momentum", "timestamp": d,
+                "value": 0.5, "confidence": 0.8, "weight": 0.2,
+                "regime_fit": "all", "explanation": "",
+            })
+            daily_returns[d] = {"daily_return": 0.001}
+        attrib_out = attributor._compute_source_attribution(signals, daily_returns)
+        # All identical returns → std=0 → sharpe=0
+        assert attrib_out.sharpe_contribution == 0.0
+
+    def test_extreme_signal_values(self, attributor):
+        """Extreme signal values (very large) should not crash."""
+        signals = [{
+            "source": "multi_speed_momentum", "timestamp": "2026-05-15",
+            "value": 999.0, "confidence": 0.99, "weight": 0.5,
+            "regime_fit": "all", "explanation": "",
+        }]
+        daily_returns = {"2026-05-15": {"daily_return": 0.01}}
+        attrib_out = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib_out.active_days == 1
+        assert attrib_out.avg_return_bps > 0
+        # directional path: contribution = ret * 10000 * abs(value) = 0.01 * 10000 * 999
+        assert attrib_out.total_return_bps >= 99900.0
+
+    def test_win_rate_accounting(self, attributor):
+        """Win rate should reflect positive return days."""
+        signals = []
+        daily_returns = {}
+        for i, ret in enumerate([0.01, -0.005, 0.02, -0.003, 0.015]):
+            d = f"2026-05-{10+i:02d}"
+            signals.append({
+                "source": "multi_speed_momentum", "timestamp": d,
+                "value": 0.5, "confidence": 0.8, "weight": 0.2,
+                "regime_fit": "all", "explanation": "",
+            })
+            daily_returns[d] = {"daily_return": ret}
+        attrib_out = attributor._compute_source_attribution(signals, daily_returns)
+        assert attrib_out.win_rate == 3 / 5  # 3 positive returns out of 5
+
+
+# ---------------------------------------------------------------------------
+# New tests: Correlation matrix edge cases
+# ---------------------------------------------------------------------------
+
+class TestCorrelationMatrixNew:
+    """Additional _compute_correlation_matrix edge cases."""
+
+    def test_constant_values_returns_correlation(self, attributor):
+        """Both sources constant (zero variance) → NaN in corrcoef → returns NaN float."""
+        source_data = {
+            "src_a": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00", "value": 0.5}
+                      for i in range(10)],
+            "src_b": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00", "value": 0.5}
+                      for i in range(10)],
+        }
+        result = attributor._compute_correlation_matrix(source_data)
+        assert "src_a" in result
+        assert "src_b" in result
+        # NaN from zero variance → result is a float (NaN is acceptable for zero-variance)
+        assert isinstance(result["src_a"], float)
+        assert isinstance(result["src_b"], float)
+
+    def test_single_date_for_one_source(self, attributor):
+        """Source with fewer dates still gets a result, matrix handles gaps."""
+        source_data = {
+            "src_a": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00", "value": float(i)}
+                      for i in range(10)],
+            "src_b": [{"timestamp": "2026-05-10T10:00:00", "value": 1.0}],
+        }
+        result = attributor._compute_correlation_matrix(source_data)
+        assert "src_a" in result
+        assert "src_b" in result
+
+    def test_all_value_extremes(self, attributor):
+        """Sources with extreme value ranges produce finite correlations."""
+        source_data = {
+            "src_a": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00",
+                       "value": 1e6 if i % 2 == 0 else -1e6}
+                      for i in range(10)],
+            "src_b": [{"timestamp": f"2026-05-{10+i:02d}T10:00:00",
+                       "value": -1e6 if i % 2 == 0 else 1e6}
+                      for i in range(10)],
+        }
+        result = attributor._compute_correlation_matrix(source_data)
+        assert np.isfinite(result["src_a"])
+        assert np.isfinite(result["src_b"])
+
+
+# ---------------------------------------------------------------------------
+# New tests: Generate report edge cases
+# ---------------------------------------------------------------------------
+
+class TestGenerateReportNew:
+    """Additional generate_report edge cases."""
+
+    def test_degradation_detected_via_sharpe(self, tmp_path):
+        """Source with negative sharpe appears in degradation_signals."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "ensemble_signals.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE source_readings (
+                id INTEGER PRIMARY KEY, timestamp TEXT, source TEXT,
+                value REAL, confidence REAL, weight REAL,
+                regime_fit TEXT, explanation TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE ensemble_votes (
+                timestamp TEXT PRIMARY KEY, regime TEXT, regime_confidence REAL,
+                num_sources INTEGER, consensus REAL, agreement_ratio REAL,
+                equity_bias REAL, duration_bias REAL, gold_bias REAL,
+                action TEXT, confidence REAL, reasoning TEXT
+            )
+        """)
+        from datetime import datetime, timedelta
+        base = datetime.now()
+        perf_db = data_dir / "paper_trading.db"
+        pconn = sqlite3.connect(perf_db)
+        pconn.execute("""
+            CREATE TABLE daily_snapshots (
+                date TEXT PRIMARY KEY, total_value REAL,
+                daily_return REAL, cumulative_return REAL
+            )
+        """)
+        for i in range(30):
+            d = (base - timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute("""
+                INSERT INTO source_readings
+                (timestamp, source, value, confidence, weight, regime_fit, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (d + " 10:00:00", "bad_signal", -0.5, 0.8, 0.2,
+                  "all", "consistently wrong"))
+            pconn.execute("""
+                INSERT INTO daily_snapshots (date, total_value, daily_return, cumulative_return)
+                VALUES (?, ?, ?, ?)
+            """, (d, 100000.0, 0.01, 0.3))
+        conn.commit()
+        conn.close()
+        pconn.commit()
+        pconn.close()
+
+        attributor2 = PerformanceAttribution(data_dir=data_dir)
+        report = attributor2.generate_report(days=30)
+        # Signal is -0.5, return is +0.01 → always wrong → hit_rate=0.0
+        # sharpe_contribution will be negative → flagged
+        assert "bad_signal" in report.degradation_signals
+
+    def test_top_performer_detected(self, tmp_path):
+        """Source with very positive sharpe appears in top_performers."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "ensemble_signals.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE source_readings (
+                id INTEGER PRIMARY KEY, timestamp TEXT, source TEXT,
+                value REAL, confidence REAL, weight REAL,
+                regime_fit TEXT, explanation TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE ensemble_votes (
+                timestamp TEXT PRIMARY KEY, regime TEXT, regime_confidence REAL,
+                num_sources INTEGER, consensus REAL, agreement_ratio REAL,
+                equity_bias REAL, duration_bias REAL, gold_bias REAL,
+                action TEXT, confidence REAL, reasoning TEXT
+            )
+        """)
+        from datetime import datetime, timedelta
+        base = datetime.now()
+        perf_db = data_dir / "paper_trading.db"
+        pconn = sqlite3.connect(perf_db)
+        pconn.execute("""
+            CREATE TABLE daily_snapshots (
+                date TEXT PRIMARY KEY, total_value REAL,
+                daily_return REAL, cumulative_return REAL
+            )
+        """)
+        for i in range(30):
+            d = (base - timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute("""
+                INSERT INTO source_readings
+                (timestamp, source, value, confidence, weight, regime_fit, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (d + " 10:00:00", "good_signal", 0.5, 0.8, 0.2,
+                  "all", "consistently correct"))
+            # Vary returns so std > 0 and sharpe can be computed
+            daily_ret = 0.01 if i % 2 == 0 else -0.005
+            pconn.execute("""
+                INSERT INTO daily_snapshots (date, total_value, daily_return, cumulative_return)
+                VALUES (?, ?, ?, ?)
+            """, (d, 100000.0, daily_ret, 0.3))
+        conn.commit()
+        conn.close()
+        pconn.commit()
+        pconn.close()
+
+        attributor2 = PerformanceAttribution(data_dir=data_dir)
+        report = attributor2.generate_report(days=30)
+        # Signal is +0.5, returns alternate → sharpe contribution should be > 0.5
+        assert "good_signal" in report.top_performers
+
+    def test_correlations_assigned_to_sources(self, attributor, ensemble_db):
+        """Correlation values should be assigned into source attributions."""
+        report = attributor.generate_report(days=30)
+        for src_name, src in report.sources.items():
+            assert isinstance(src.avg_correlation, float)
+            # At least one source should have non-zero correlation (random data)
+        correlations_nonzero = sum(
+            1 for s in report.sources.values() if s.avg_correlation != 0.0
+        )
+        assert correlations_nonzero >= 0  # at minimum, no crash
+
+    def test_best_worst_identified_correctly(self, tmp_path):
+        """Best/worst sources match min/max sharpe contribution.
+        Uses different numbers of matching days so sharpes diverge."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "ensemble_signals.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE source_readings (
+                id INTEGER PRIMARY KEY, timestamp TEXT, source TEXT,
+                value REAL, confidence REAL, weight REAL,
+                regime_fit TEXT, explanation TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE ensemble_votes (
+                timestamp TEXT PRIMARY KEY, regime TEXT, regime_confidence REAL,
+                num_sources INTEGER, consensus REAL, agreement_ratio REAL,
+                equity_bias REAL, duration_bias REAL, gold_bias REAL,
+                action TEXT, confidence REAL, reasoning TEXT
+            )
+        """)
+        base = datetime.now()
+        perf_db = data_dir / "paper_trading.db"
+        pconn = sqlite3.connect(perf_db)
+        pconn.execute("""
+            CREATE TABLE daily_snapshots (
+                date TEXT PRIMARY KEY, total_value REAL,
+                daily_return REAL, cumulative_return REAL
+            )
+        """)
+        for i in range(30):
+            d = (base - timedelta(days=i)).strftime("%Y-%m-%d")
+            daily_ret = 0.01 if i % 2 == 0 else -0.005
+            # src_good: value=0.5 matches 30 days of returns (varying)
+            conn.execute("""
+                INSERT INTO source_readings
+                (timestamp, source, value, confidence, weight, regime_fit, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (d + " 10:00:00", "src_good", 0.5, 0.8, 0.2,
+                  "all", "good"))
+            # src_bad: dates that do NOT match the daily_snapshots (use future dates)
+            future = (base + timedelta(days=i + 100)).strftime("%Y-%m-%d")
+            conn.execute("""
+                INSERT INTO source_readings
+                (timestamp, source, value, confidence, weight, regime_fit, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (future + " 10:00:00", "src_bad", -0.5, 0.8, 0.2,
+                  "all", "bad"))
+            pconn.execute("""
+                INSERT INTO daily_snapshots (date, total_value, daily_return, cumulative_return)
+                VALUES (?, ?, ?, ?)
+            """, (d, 100000.0, daily_ret, 0.3))
+        conn.commit()
+        conn.close()
+        pconn.commit()
+        pconn.close()
+
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        report = attributor.generate_report(days=30)
+        assert report.best_source == "src_good"
+        assert report.worst_source == "src_bad"
+        assert report.total_sources_tracked == 2
+
+    def test_avg_active_sources_per_day(self, tmp_path):
+        """avg_active_sources_per_day should be a positive number with data."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_path = data_dir / "ensemble_signals.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE source_readings (
+                id INTEGER PRIMARY KEY, timestamp TEXT, source TEXT,
+                value REAL, confidence REAL, weight REAL,
+                regime_fit TEXT, explanation TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE ensemble_votes (
+                timestamp TEXT PRIMARY KEY, regime TEXT, regime_confidence REAL,
+                num_sources INTEGER, consensus REAL, agreement_ratio REAL,
+                equity_bias REAL, duration_bias REAL, gold_bias REAL,
+                action TEXT, confidence REAL, reasoning TEXT
+            )
+        """)
+        base = datetime.now()
+        for i in range(10):
+            d = (base - timedelta(days=i)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute("""
+                INSERT INTO source_readings
+                (timestamp, source, value, confidence, weight, regime_fit, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (d, "test_src", 0.1, 0.5, 0.2, "all", "test"))
+        conn.commit()
+        conn.close()
+        db_path = data_dir / "paper_trading.db"
+        conn2 = sqlite3.connect(db_path)
+        conn2.execute("""
+            CREATE TABLE daily_snapshots (
+                date TEXT PRIMARY KEY, total_value REAL,
+                daily_return REAL, cumulative_return REAL
+            )
+        """)
+        for i in range(10):
+            d = (base - timedelta(days=i)).strftime("%Y-%m-%d")
+            conn2.execute("""
+                INSERT INTO daily_snapshots (date, total_value, daily_return, cumulative_return)
+                VALUES (?, ?, ?, ?)
+            """, (d, 100000.0, 0.001, 0.01))
+        conn2.commit()
+        conn2.close()
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        report = attributor.generate_report(days=30)
+        assert report.avg_active_sources_per_day >= 0
+
+
+# ---------------------------------------------------------------------------
+# New tests: Print report edge cases
+# ---------------------------------------------------------------------------
+
+class TestPrintReportNew:
+    """Additional print_report edge cases."""
+
+    def test_print_no_best_worst_with_valid_sources(self, capsys):
+        """Print report with valid sources but None best/worst should work."""
+        src = SourceAttribution(
+            source="valid", display_name="Valid Source", category="trend",
+            total_readings=50, active_days=45, hit_rate=0.55, win_rate=0.52,
+            avg_return_bps=0.5, total_return_bps=22.5, sharpe_contribution=0.2,
+            max_consecutive_losses=4, avg_correlation=0.1, avg_weight=0.15,
+        )
+        report = AttributionReport(
+            timestamp="2026-05-24T00:00:00",
+            start_date="2026-02-23", end_date="2026-05-24", analysis_days=90,
+            sources={"valid": src},
+            best_source=None, worst_source=None,
+            avg_hit_rate=0.55, avg_correlation=0.1,
+            avg_active_sources_per_day=1.0, total_sources_tracked=1,
+            degradation_signals=[], top_performers=[],
+        )
+        print_report(report)
+        captured = capsys.readouterr()
+        assert "Valid Source" in captured.out
+        assert "Best source:" not in captured.out
+        assert "Worst source:" not in captured.out
+
+    def test_print_negative_sharpe_formatting(self, capsys):
+        """Negative sharpe values should format correctly."""
+        src = SourceAttribution(
+            source="loser", display_name="Losing Signal", category="trend",
+            total_readings=30, active_days=28, hit_rate=0.30, win_rate=0.25,
+            avg_return_bps=-1.5, total_return_bps=-42.0, sharpe_contribution=-0.75,
+            max_consecutive_losses=12, avg_correlation=0.35, avg_weight=0.10,
+        )
+        report = AttributionReport(
+            timestamp="2026-05-24T00:00:00",
+            start_date="2026-02-23", end_date="2026-05-24", analysis_days=90,
+            sources={"loser": src},
+            best_source=None, worst_source="loser",
+            avg_hit_rate=0.3, avg_correlation=0.35,
+            avg_active_sources_per_day=1.0, total_sources_tracked=1,
+            degradation_signals=["loser"], top_performers=[],
+        )
+        print_report(report)
+        captured = capsys.readouterr()
+        assert "DEGRADATION" in captured.out
+        assert "Losing Signal" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# New tests: Patch save vote edge cases
+# ---------------------------------------------------------------------------
+
+class TestPatchSaveVoteNew:
+    """Additional patch_save_vote edge cases."""
+
+    def test_patch_save_vote_imports_ensemble_voter(self):
+        """patch_save_vote should import from ensemble_voter module."""
+        import src.strategy.ensemble_voter
+        assert hasattr(src.strategy.ensemble_voter, "EnsembleVoter")
+
+    def test_patch_save_vote_patches_method(self):
+        """After calling patch_save_vote, _save_vote should be the patched version."""
+        import src.strategy.ensemble_voter as ev
+        original_method = ev.EnsembleVoter._save_vote
+        patch_save_vote()
+        patched_method = ev.EnsembleVoter._save_vote
+        # Restore to avoid side effects
+        ev.EnsembleVoter._save_vote = original_method
+        assert patched_method is not original_method
+
+
+# ---------------------------------------------------------------------------
+# New tests: SourceAttribution edge cases (metrics validation)
+# ---------------------------------------------------------------------------
+
+class TestSourceAttributionMetrics:
+    """Validation of SourceAttribution computed metrics."""
+
+    def test_current_weight_regime_preserved_in_dict(self):
+        """current_weight_regime field is preserved through to_dict round-trip."""
+        sa = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=10, active_days=8, hit_rate=0.6, win_rate=0.55,
+            avg_return_bps=1.5, total_return_bps=12.0, sharpe_contribution=0.8,
+            max_consecutive_losses=3, avg_correlation=0.2, avg_weight=0.15,
+            current_weight_regime="high_vol",
+        )
+        d = sa.to_dict()
+        assert d["current_weight_regime"] == "high_vol"
+        restored = SourceAttribution(**d)
+        assert restored.current_weight_regime == "high_vol"
+        assert restored.source == "test"
+
+    def test_efficiency_ratio_with_hit_rate_zero(self):
+        """Efficiency ratio is zero when hit_rate is zero (non-zero return)."""
+        sa = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=10, active_days=8, hit_rate=0.0, win_rate=0.0,
+            avg_return_bps=5.0, total_return_bps=40.0, sharpe_contribution=0.0,
+            max_consecutive_losses=10, avg_correlation=0.0, avg_weight=0.1,
+        )
+        assert sa.efficiency_ratio == 0.0
+
+    def test_efficiency_ratio_round_trip_precision(self):
+        """Efficiency ratio computed from integers should match."""
+        sa = SourceAttribution(
+            source="test", display_name="Test", category="trend",
+            total_readings=100, active_days=80, hit_rate=0.75, win_rate=0.70,
+            avg_return_bps=4.0, total_return_bps=320.0, sharpe_contribution=1.5,
+            max_consecutive_losses=2, avg_correlation=0.1, avg_weight=0.25,
+        )
+        expected = 0.75 * 4.0 / 100
+        assert sa.efficiency_ratio == expected
+

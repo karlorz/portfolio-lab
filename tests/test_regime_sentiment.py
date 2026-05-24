@@ -430,3 +430,123 @@ class TestAllocationWeights:
         assert weights["SPY"] <= 0.70
         assert weights["GLD"] <= 0.50
         assert weights["TLT"] <= 0.25
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.strategy.regime_sentiment as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.strategy.regime_sentiment as mod
+        assert len(mod.__all__) == 4
+
+
+# ---------------------------------------------------------------------------
+# RegimeSentiment enum extended
+# ---------------------------------------------------------------------------
+
+class TestRegimeSentimentExtended:
+    """Extended RegimeSentiment enum tests."""
+
+    def test_all_five_values(self):
+        assert len(RegimeSentiment) == 5
+
+    def test_extreme_values(self):
+        assert RegimeSentiment.EXTREME_BULLISH.value == "extreme_bullish"
+        assert RegimeSentiment.EXTREME_BEARISH.value == "extreme_bearish"
+
+
+# ---------------------------------------------------------------------------
+# RegimeSentimentIntegrator extended
+# ---------------------------------------------------------------------------
+
+class TestIntegratorExtended:
+    """Extended integrator tests."""
+
+    def _make_integrator(self):
+        return RegimeSentimentIntegrator()
+
+    def test_classify_combined_regime_boundaries(self):
+        integrator = self._make_integrator()
+        # Uses risk_on/risk_off terminology, not bullish/bearish
+        assert integrator.classify_combined_regime(0.8) in ("risk_on", "extreme_risk_on")
+        assert integrator.classify_combined_regime(-0.8) in ("risk_off", "extreme_risk_off")
+        assert integrator.classify_combined_regime(0.0) == "neutral"
+
+    def test_position_scaling_normal(self):
+        integrator = self._make_integrator()
+        scale = integrator.calculate_position_scaling("neutral")
+        assert isinstance(scale, float)
+        assert scale > 0
+
+    def test_map_sentiment_known_values(self):
+        integrator = self._make_integrator()
+        for regime in ["extreme_bullish", "bullish", "neutral", "bearish", "extreme_bearish"]:
+            score = integrator.map_sentiment_to_score(regime)
+            assert -1 <= score <= 1
+
+    def test_map_technical_known_values(self):
+        integrator = self._make_integrator()
+        for regime in ["early_expansion", "late_expansion", "contraction", "recovery", "neutral"]:
+            score = integrator.map_technical_to_score(regime)
+            assert -1 <= score <= 1
+
+    def test_circuit_breaker_levels(self):
+        integrator = self._make_integrator()
+        for score in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+            cb = integrator.determine_circuit_breaker(score)
+            assert isinstance(cb, str)
+
+    def test_adjust_weights_returns_tuple(self):
+        integrator = self._make_integrator()
+        tech_w, sent_w = integrator.adjust_weights(0.7, 0.6)
+        assert isinstance(tech_w, float)
+        assert isinstance(sent_w, float)
+
+    def test_calculate_allocation_tilts_returns_tuple(self):
+        integrator = self._make_integrator()
+        eq, bond, gold = integrator.calculate_allocation_tilts(0.5, "risk_on")
+        assert isinstance(eq, float)
+        assert isinstance(bond, float)
+        assert isinstance(gold, float)
+
+
+# ---------------------------------------------------------------------------
+# RegimeSentimentPipeline extended
+# ---------------------------------------------------------------------------
+
+class TestPipelineExtended:
+    """Extended pipeline tests."""
+
+    def test_init_with_data_dir(self, tmp_path):
+        pipeline = RegimeSentimentPipeline(data_dir=tmp_path)
+        assert pipeline.data_dir == tmp_path
+
+    def test_save_signal(self, tmp_path):
+        pipeline = RegimeSentimentPipeline(data_dir=tmp_path)
+        signal = _make_signal()
+        pipeline.save_signal(signal)
+        # Should create a file
+        import json
+        json_files = list(tmp_path.glob("*.json"))
+        assert len(json_files) >= 1
+
+
+# ---------------------------------------------------------------------------
+# demo callable
+# ---------------------------------------------------------------------------
+
+class TestDemo:
+    """Test demo function callable."""
+
+    def test_demo_callable(self):
+        from src.strategy.regime_sentiment import demo
+        assert callable(demo)
