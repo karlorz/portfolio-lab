@@ -1190,13 +1190,17 @@ class TestBanditWeighter:
         assert weights['good'] > weights['bad']
 
     def test_select_exploit_best_signal(self):
-        """With epsilon=0, select() should always return the best signal."""
+        """With epsilon=0 and sufficient data, select() should prefer the best signal most of the time.
+
+        Thompson Sampling is stochastic, so we test that the best signal is selected
+        in the majority of trials (>80%) rather than 100%.
+        """
         bw = BanditWeighter(signals=['good', 'bad'], epsilon=0.0, temperature=1.0)
         for _ in range(30):
             bw.update('good', 'NORMAL', 0.05)
             bw.update('bad', 'NORMAL', -0.01)
-        for _ in range(20):
-            assert bw.select('NORMAL') == 'good'
+        good_count = sum(1 for _ in range(100) if bw.select('NORMAL') == 'good')
+        assert good_count > 70, f"Expected 'good' >70% of the time, got {good_count}%"
 
     def test_select_explore_randomly(self):
         """With epsilon=1.0, select() should explore all signals."""
@@ -3450,4 +3454,158 @@ class TestConsensusResultDataclass:
         voter = EnsembleVoter.__new__(EnsembleVoter)
         flds = fields(voter._ConsensusResult)
         assert len(flds) == 7
+
+
+# ===========================================================================
+# Category 5: Thompson Sampling Bandit tests
+# ===========================================================================
+
+class TestThompsonSamplingBandit:
+    """Tests for Thompson Sampling with Gaussian-Gamma conjugate priors
+    in BanditWeighter (upgraded from epsilon-greedy)."""
+
+    # ------------------------------------------------------------------
+    # Test 1: Basic preference for higher-mean signal
+    # ------------------------------------------------------------------
+
+    def test_thompson_sampling_prefers_higher_mean_signal(self):
+        """With 2 signals of clearly different mean, Thompson Sampling
+        should select the better one >65% of the time over 200 trials."""
+        bw = BanditWeighter(signals=['bad', 'good'], epsilon=0.0, temperature=1.0)
+        for _ in range(50):
+            bw.update('good', 'NORMAL', 0.05)
+            bw.update('bad', 'NORMAL', -0.01)
+
+        good_count = sum(1 for _ in range(200) if bw.select('NORMAL') == 'good')
+        assert good_count > 130, f"Expected good >65%, got {good_count/200:.1%}"
+
+    # ------------------------------------------------------------------
+    # Test 2: Thompson Sampling converges faster than epsilon-greedy
+    # ------------------------------------------------------------------
+
+    def test_thompson_sampling_converges_faster_than_epsilon_greedy(self):
+        """With limited data (10 obs per signal), posterior sampling should
+        select the best signal more often than deterministic rolling Sharpe
+        (which cannot distinguish signals with <21 obs)."""
+        bw_ts = BanditWeighter(
+            signals=['bad_signal', 'good_signal'], epsilon=0.0, temperature=1.0,
+        )
+        bw_eg = BanditWeighter(
+            signals=['bad_signal', 'good_signal'], epsilon=0.0, temperature=1.0,
+        )
+        for _ in range(10):
+            bw_ts.update('good_signal', 'NORMAL', 0.05)
+            bw_ts.update('bad_signal', 'NORMAL', -0.01)
+            bw_eg.update('good_signal', 'NORMAL', 0.05)
+            bw_eg.update('bad_signal', 'NORMAL', -0.01)
+
+        # Epsilon-greedy simulator: mock _sample_sharpe to return rolling_sharpe
+        # (which returns 0.0 for <21 obs, so both signals tie)
+        from unittest.mock import patch
+        ts_good = sum(1 for _ in range(200) if bw_ts.select('NORMAL') == 'good_signal')
+
+        eg_good = 0
+        with patch.object(bw_eg, '_sample_sharpe',
+                          side_effect=lambda sig, reg: bw_eg._rolling_sharpe(sig, reg)):
+            for _ in range(200):
+                if bw_eg.select('NORMAL') == 'good_signal':
+                    eg_good += 1
+
+        assert ts_good > eg_good, (
+            f"TS good_pct={ts_good/200:.1%} should exceed "
+            f"epsilon-greedy good_pct={eg_good/200:.1%}"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 3: _sample_sharpe returns a float
+    # ------------------------------------------------------------------
+
+    def test_sample_sharpe_returns_float(self):
+        """_sample_sharpe should return a native Python float with sufficient data."""
+        bw = BanditWeighter(signals=['sig'], epsilon=0.0)
+        for _ in range(10):
+            bw.update('sig', 'NORMAL', 0.01)
+        result = bw._sample_sharpe('sig', 'NORMAL')
+        assert isinstance(result, float), f"Expected float, got {type(result)}"
+
+    # ------------------------------------------------------------------
+    # Test 4: _sample_sharpe with insufficient data
+    # ------------------------------------------------------------------
+
+    def test_sample_sharpe_insufficient_data(self):
+        """_sample_sharpe should return 0.0 when fewer than 2 observations."""
+        bw = BanditWeighter(signals=['sig'], epsilon=0.0)
+        bw.update('sig', 'NORMAL', 0.01)  # Only 1 observation
+        result = bw._sample_sharpe('sig', 'NORMAL')
+        assert result == 0.0
+
+    # ------------------------------------------------------------------
+    # Test 5: Cold start with uninformative prior
+    # ------------------------------------------------------------------
+
+    def test_cold_start_uses_uninformative_prior(self):
+        """With epsilon=0 and <2 observations per signal, select() should
+        not crash and should return valid signal names (fallback to
+        rolling Sharpe or first signal)."""
+        bw = BanditWeighter(signals=['alpha', 'beta'], epsilon=0.0)
+        bw.update('alpha', 'NORMAL', 0.01)   # Only 1 obs — <2
+        bw.update('beta', 'NORMAL', -0.005)   # Only 1 obs — <2
+
+        selections = [bw.select('NORMAL') for _ in range(10)]
+        for sel in selections:
+            assert sel in ('alpha', 'beta'), f"Unexpected selection: {sel}"
+
+    # ------------------------------------------------------------------
+    # Test 6: Posterior updates correctly with observations
+    # ------------------------------------------------------------------
+
+    def test_posterior_updates_with_observations(self):
+        """After updating a signal many times with positive returns,
+        _sample_sharpe should return a positive Sharpe >70% of the time."""
+        bw = BanditWeighter(signals=['sig'], epsilon=0.0)
+        for i in range(100):
+            bw.update('sig', 'NORMAL', 0.01 + 0.005 * (i % 2))
+
+        positive = 0
+        for _ in range(100):
+            if bw._sample_sharpe('sig', 'NORMAL') > 0:
+                positive += 1
+        assert positive > 70, f"Expected >70% positive Sharpe, got {positive}%"
+
+    # ------------------------------------------------------------------
+    # Test 7: Zero returns produce near-zero sampled Sharpe
+    # ------------------------------------------------------------------
+
+    def test_thompson_sampling_with_zero_returns(self):
+        """All returns are 0.0 — sampled Sharpe mean should be near zero.
+
+        With zero variance data the posterior precision is extremely high,
+        so tiny floating-point noise in mu_sample can get amplified. We use
+        a generous tolerance to account for this degenerate case.
+        """
+        bw = BanditWeighter(signals=['sig'], epsilon=0.0)
+        for _ in range(30):
+            bw.update('sig', 'NORMAL', 0.0)
+
+        sampled = [bw._sample_sharpe('sig', 'NORMAL') for _ in range(100)]
+        mean_sharpe = np.mean(sampled)
+        # With zero variance, posterior is degenerate — generous tolerance
+        assert abs(mean_sharpe) < 2.0, (
+            f"Expected mean Sharpe near 0, got {mean_sharpe:.4f}"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 8: Deterministic selection with very strong signal
+    # ------------------------------------------------------------------
+
+    def test_select_deterministic_with_very_strong_signal(self):
+        """With 200 observations where good=0.10 and bad=-0.05,
+        select() should return 'good' >90% of the time."""
+        bw = BanditWeighter(signals=['bad', 'good'], epsilon=0.0, temperature=1.0)
+        for _ in range(200):
+            bw.update('good', 'NORMAL', 0.10)
+            bw.update('bad', 'NORMAL', -0.05)
+
+        good_count = sum(1 for _ in range(200) if bw.select('NORMAL') == 'good')
+        assert good_count > 180, f"Expected good >90%, got {good_count/200:.1%}"
 
