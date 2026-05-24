@@ -1175,7 +1175,8 @@ class TestFetchSpotPriceEdgeCases:
                 generator._fetch_spot_price()
 
                 mock_cursor.execute.assert_called_once_with(
-                    "SELECT close FROM prices WHERE symbol='SPY' ORDER BY date DESC LIMIT 1"
+                    "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT 1",
+                    ("SPY",),
                 )
 
     def test_float_conversion_of_db_result(self, generator):
@@ -1240,7 +1241,8 @@ class TestFetchVixLevelEdgeCases:
                 generator._fetch_vix_level()
 
                 mock_cursor.execute.assert_called_once_with(
-                    "SELECT close FROM prices WHERE symbol='VIX' ORDER BY date DESC LIMIT 1"
+                    "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT 1",
+                    ("VIX",),
                 )
 
     def test_term_structure_file_reads_latest_date(self, generator):

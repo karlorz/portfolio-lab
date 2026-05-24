@@ -419,8 +419,8 @@ class CollarSignalGenerator:
             reason=reason,
         )
 
-    def _fetch_spot_price(self) -> float:
-        """Fetch current SPY price from market data."""
+    def _fetch_price(self, symbol: str, fallback: float) -> float:
+        """Fetch latest close price for a symbol from the market DB."""
         db_path = MARKET_DB
         if db_path.exists():
             try:
@@ -428,31 +428,25 @@ class CollarSignalGenerator:
                 with sqlite_connect(str(db_path)) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "SELECT close FROM prices WHERE symbol='SPY' ORDER BY date DESC LIMIT 1"
+                        "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT 1",
+                        (symbol,),
                     )
                     row = cursor.fetchone()
                 if row:
                     return float(row[0])
             except Exception as e:
-                logger.warning("Failed to fetch SPY spot price from DB: %s", e)
-        return 550.0  # fallback
+                logger.warning("Failed to fetch %s price from DB: %s", symbol, e)
+        return fallback
+
+    def _fetch_spot_price(self) -> float:
+        """Fetch current SPY price from market data."""
+        return self._fetch_price("SPY", 550.0)
 
     def _fetch_vix_level(self) -> float:
         """Fetch current VIX level."""
-        db_path = MARKET_DB
-        if db_path.exists():
-            try:
-                import sqlite3
-                with sqlite_connect(str(db_path)) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT close FROM prices WHERE symbol='VIX' ORDER BY date DESC LIMIT 1"
-                    )
-                    row = cursor.fetchone()
-                if row:
-                    return float(row[0])
-            except Exception as e:
-                logger.warning("Failed to fetch VIX level from DB: %s", e)
+        vix = self._fetch_price("VIX", None)
+        if vix is not None:
+            return vix
 
         # Try alternative data sources
         vix_path = DATA_DIR / "vix_term_structure.json"
