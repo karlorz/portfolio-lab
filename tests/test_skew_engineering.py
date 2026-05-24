@@ -533,5 +533,198 @@ class TestEdgeCases:
             assert isinstance(regime, str)
 
 
+class TestSkewMetricsExtended:
+    """Extended tests for SkewMetrics dataclass."""
+
+    def test_all_fields_in_to_dict(self):
+        m = SkewMetrics(symbol="SPY", timestamp="2026-01-01T00:00:00")
+        d = m.to_dict()
+        expected_keys = {
+            "symbol", "timestamp", "window_21d", "window_63d", "window_252d",
+            "upside_var_21d", "downside_var_21d", "skew_ratio_21d", "regime_21d",
+            "upside_var_63d", "downside_var_63d", "skew_ratio_63d", "regime_63d",
+            "upside_var_252d", "downside_var_252d", "skew_ratio_252d", "regime_252d",
+            "composite_regime", "vol_penalty", "effective_vol_target", "n_obs",
+        }
+        assert set(d.keys()) == expected_keys
+
+    def test_custom_symbol(self):
+        m = SkewMetrics(symbol="GLD", timestamp="2026-01-01")
+        assert m.symbol == "GLD"
+
+    def test_default_regime_is_normal(self):
+        m = SkewMetrics(symbol="SPY", timestamp="2026-01-01")
+        assert m.regime_21d == SkewRegime.NORMAL
+        assert m.regime_63d == SkewRegime.NORMAL
+        assert m.regime_252d == SkewRegime.NORMAL
+        assert m.composite_regime == SkewRegime.NORMAL
+
+    def test_default_skew_ratio_is_one(self):
+        m = SkewMetrics(symbol="SPY", timestamp="2026-01-01")
+        assert m.skew_ratio_21d == 1.0
+        assert m.skew_ratio_63d == 1.0
+        assert m.skew_ratio_252d == 1.0
+
+    def test_zero_observations(self):
+        m = SkewMetrics(symbol="SPY", timestamp="2026-01-01", n_obs=0)
+        assert m.n_obs == 0
+
+
+class TestSkewStateExtended:
+    """Extended tests for SkewState dataclass."""
+
+    def test_all_fields_in_to_dict(self):
+        s = SkewState(
+            symbol="SPY", last_update="2026-01-01", composite_regime="ELEVATED",
+            vol_penalty=0.12, side_computed=True, n_obs=200,
+        )
+        d = s.to_dict()
+        expected_keys = {"symbol", "last_update", "composite_regime", "vol_penalty", "side_computed", "n_obs"}
+        assert set(d.keys()) == expected_keys
+
+    def test_from_dict_roundtrip(self):
+        s = SkewState(
+            symbol="GLD", last_update="2026-02-01", composite_regime="HIGH",
+            vol_penalty=0.20, side_computed=False, n_obs=100,
+        )
+        loaded = SkewState.from_dict(s.to_dict())
+        assert loaded.symbol == s.symbol
+        assert loaded.composite_regime == s.composite_regime
+        assert loaded.vol_penalty == s.vol_penalty
+        assert loaded.side_computed == s.side_computed
+        assert loaded.n_obs == s.n_obs
+
+    def test_side_computed_boolean(self):
+        s = SkewState(symbol="SPY", last_update="2026-01-01", composite_regime="NORMAL",
+                      vol_penalty=0.05, side_computed=True, n_obs=50)
+        assert s.side_computed is True
+
+
+class TestSkewRegimeExtended:
+    """Extended tests for SkewRegime constants."""
+
+    def test_regime_string_values(self):
+        assert SkewRegime.NORMAL == "NORMAL"
+        assert SkewRegime.ELEVATED == "ELEVATED"
+        assert SkewRegime.HIGH == "HIGH"
+
+    def test_threshold_ordering(self):
+        assert SkewRegime.THRESHOLD_ELEVATED < SkewRegime.THRESHOLD_HIGH
+
+    def test_penalty_ordering(self):
+        assert SkewRegime.PENALTY_NORMAL < SkewRegime.PENALTY_ELEVATED < SkewRegime.PENALTY_HIGH
+
+    def test_penalty_bounds(self):
+        assert 0 < SkewRegime.PENALTY_NORMAL < 1
+        assert 0 < SkewRegime.PENALTY_ELEVATED < 1
+        assert 0 < SkewRegime.PENALTY_HIGH < 1
+
+
+class TestSkewEngineExtended:
+    """Extended SkewEngine tests."""
+
+    def test_engine_default_symbol(self):
+        engine = SkewEngine()
+        assert engine.symbol == "SPY"
+
+    def test_engine_custom_symbol(self):
+        engine = SkewEngine(symbol="GLD")
+        assert engine.symbol == "GLD"
+
+    @patch.object(SkewEngine, "_get_prices")
+    def test_compute_returns_skew_metrics(self, mock_prices):
+        np.random.seed(42)
+        mock_prices.return_value = np.random.randn(260) * 0.01
+        engine = SkewEngine()
+        metrics = engine.compute()
+        assert isinstance(metrics, SkewMetrics)
+
+    @patch.object(SkewEngine, "_get_prices")
+    def test_compute_with_empty_data(self, mock_prices):
+        mock_prices.return_value = np.array([])
+        engine = SkewEngine()
+        metrics = engine.compute()
+        assert metrics.n_obs == 0
+
+    @patch.object(SkewEngine, "_get_prices")
+    def test_vol_adjustment_normal_skew(self, mock_prices):
+        """Normal skew should give minimal adjustment."""
+        np.random.seed(42)
+        mock_prices.return_value = np.random.randn(260) * 0.01
+        engine = SkewEngine()
+        target = 0.10
+        adjusted = engine.get_vol_adjustment(target_vol=target)
+        assert adjusted > 0
+        assert adjusted <= target
+
+    @patch.object(SkewEngine, "_get_prices")
+    def test_vol_adjustment_high_skew(self, mock_prices):
+        """High skew should give larger adjustment."""
+        np.random.seed(42)
+        n = 260
+        returns = np.random.randn(n) * 0.005
+        for i in range(20):
+            idx = np.random.randint(0, n)
+            returns[idx] = -0.06
+        mock_prices.return_value = returns
+        engine = SkewEngine()
+        adjusted = engine.get_vol_adjustment(target_vol=0.10)
+        assert adjusted < 0.10  # Should be reduced
+        assert adjusted >= 0.10 * (1 - SkewRegime.PENALTY_HIGH) - 0.001
+
+    def test_compute_skew_ratio_exactly_at_threshold(self):
+        """Test behavior near regime thresholds."""
+        engine = SkewEngine()
+        # Create returns that produce ratio near 1.3
+        np.random.seed(42)
+        returns = np.random.randn(100) * 0.01
+        _, _, ratio, regime = engine.compute_skew_ratio(returns, 63)
+        # Just verify it produces a valid regime
+        assert regime in (SkewRegime.NORMAL, SkewRegime.ELEVATED, SkewRegime.HIGH)
+
+    def test_compute_skew_ratio_different_windows(self):
+        """Different window sizes should give different results."""
+        engine = SkewEngine()
+        np.random.seed(42)
+        returns = np.random.randn(260) * 0.01
+        _, _, ratio_21, _ = engine.compute_skew_ratio(returns, 21)
+        _, _, ratio_63, _ = engine.compute_skew_ratio(returns, 63)
+        _, _, ratio_252, _ = engine.compute_skew_ratio(returns, 252)
+        # All should be positive
+        assert ratio_21 > 0
+        assert ratio_63 > 0
+        assert ratio_252 > 0
+
+
+class TestStateFileConstant:
+    """Test STATE_FILE constant."""
+
+    def test_state_file_is_path(self):
+        assert isinstance(STATE_FILE, Path)
+
+    def test_state_file_name(self):
+        assert STATE_FILE.name == "skew_state.json"
+
+
+class TestCLIExtended:
+    """Extended CLI tests."""
+
+    def test_main_callable(self):
+        from src.monitor.skew_engineering import main
+        assert callable(main)
+
+    def test_cli_compute_callable(self):
+        from src.monitor.skew_engineering import cli_compute
+        assert callable(cli_compute)
+
+    def test_cli_summary_callable(self):
+        from src.monitor.skew_engineering import cli_summary
+        assert callable(cli_summary)
+
+    def test_cli_adjust_callable(self):
+        from src.monitor.skew_engineering import cli_adjust
+        assert callable(cli_adjust)
+
+
 if __name__ == "__main__":
     pytest.main(["-v", __file__])

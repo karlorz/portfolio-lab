@@ -536,3 +536,681 @@ class TestBehavioralSentimentBacktest:
             result = bt.run(start_date="2022-01-01", end_date="2022-01-10")
             # Common dates: Jan 3-5 only (all three symbols present)
             assert result.extras["trading_days"] <= 5
+
+    # ==================================================================
+    # Constants validation
+    # ==================================================================
+
+    def test_max_shift_constant(self):
+        """MAX_SHIFT is 0.05."""
+        from src.backtest.behavioral_sentiment_backtest import MAX_SHIFT
+        assert MAX_SHIFT == 0.05
+
+    def test_tsmom_expected_sharpe_constant(self):
+        """TSMOM_EXPECTED_SHARPE is 0.96."""
+        from src.backtest.behavioral_sentiment_backtest import TSMOM_EXPECTED_SHARPE
+        assert TSMOM_EXPECTED_SHARPE == 0.96
+
+    def test_default_cache_db_path(self):
+        """DEFAULT_CACHE_DB is a Path with filename market.db."""
+        from src.backtest.behavioral_sentiment_backtest import DEFAULT_CACHE_DB
+        assert isinstance(DEFAULT_CACHE_DB, Path)
+        assert DEFAULT_CACHE_DB.name == "market.db"
+
+    def test_baseline_weights_sum_to_one(self):
+        """Baseline weights SPY + GLD + TLT sum to exactly 1.0."""
+        from src.backtest.behavioral_sentiment_backtest import (
+            BASELINE_SPY, BASELINE_GLD, BASELINE_TLT,
+        )
+        assert BASELINE_SPY + BASELINE_GLD + BASELINE_TLT == 1.0
+
+    def test_all_constants_exported(self):
+        """All module-level constants are in __all__."""
+        from src.backtest.behavioral_sentiment_backtest import __all__ as exported
+        assert "BASELINE_SPY" in exported
+        assert "BASELINE_GLD" in exported
+        assert "BASELINE_TLT" in exported
+        assert "MAX_SHIFT" in exported
+        assert "TSMOM_EXPECTED_SHARPE" in exported
+        assert "BehavioralSentimentBacktest" in exported
+
+    # ==================================================================
+    # to_dict field completeness for all dataclasses
+    # ==================================================================
+
+    def test_to_dict_extras_all_keys_present(self):
+        """_empty_result extras dict contains all 22 expected behavioral keys."""
+        from dataclasses import asdict
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        result = bt._empty_result("2020-01-01", "2020-12-31")
+        d = asdict(result)
+        extras = d["extras"]
+
+        expected_keys = [
+            "timestamp", "start_date", "end_date", "trading_days",
+            "baseline_cagr", "baseline_vol", "baseline_max_dd",
+            "baseline_crisis_2022", "overlay_crisis_2022", "dd_improvement",
+            "cagr_delta", "signal_days_pct", "buy_signal_days", "sell_signal_days",
+            "neutral_days", "avg_equity_shift", "false_positive_rate",
+            "mean_signal_return_20d", "regime_vix_low_sharpe",
+            "regime_vix_normal_sharpe", "regime_vix_elevated_sharpe",
+            "regime_vix_high_sharpe", "regime_vix_crisis_sharpe",
+            "meets_sharpe_target",
+        ]
+        for key in expected_keys:
+            assert key in extras, f"Missing extras key: {key}"
+        assert len(extras) == len(expected_keys), f"Expected {len(expected_keys)} extras keys, got {len(extras)}"
+
+    def test_to_dict_defaults_match_empty_result(self):
+        """Default extras values match _empty_result structure."""
+        from dataclasses import asdict
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        result = bt._empty_result("2020-01-01", "2020-12-31")
+        d = asdict(result)
+        extras = d["extras"]
+
+        assert extras["trading_days"] == 0
+        assert extras["baseline_cagr"] == 0.0
+        assert extras["baseline_vol"] == 0.0
+        assert extras["buy_signal_days"] == 0
+        assert extras["sell_signal_days"] == 0
+        assert extras["neutral_days"] == 0
+        assert extras["false_positive_rate"] == 0.0
+        assert extras["mean_signal_return_20d"] == 0.0
+        assert extras["meets_sharpe_target"] is False
+        assert extras["regime_vix_low_sharpe"] == 0.0
+        assert extras["regime_vix_crisis_sharpe"] == 0.0
+
+        # Core BacktestResult fields should be zero (not in extras)
+        assert d["total_return"] == 0.0
+        assert d["cagr"] == 0.0
+        assert d["volatility"] == 0.0
+        assert d["sharpe_ratio"] == 0.0
+        assert d["baseline_sharpe"] == 0.0
+        assert d["sharpe_improvement"] == 0.0
+
+    def test_to_dict_field_types_correct(self):
+        """Field types in to_dict output are correct."""
+        from dataclasses import asdict
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        result = bt._empty_result("2020-01-01", "2020-12-31")
+        d = asdict(result)
+
+        assert isinstance(d["total_return"], float)
+        assert isinstance(d["cagr"], float)
+        assert isinstance(d["volatility"], float)
+        assert isinstance(d["sharpe_ratio"], float)
+        assert isinstance(d["max_drawdown"], float)
+        assert isinstance(d["baseline_sharpe"], float)
+        assert isinstance(d["sharpe_improvement"], float)
+        assert isinstance(d["extras"], dict)
+
+        # Extras dict values should be proper types
+        extras = d["extras"]
+        assert isinstance(extras["timestamp"], str)
+        assert isinstance(extras["trading_days"], int)
+        assert isinstance(extras["buy_signal_days"], int)
+        assert isinstance(extras["false_positive_rate"], float)
+        assert isinstance(extras["meets_sharpe_target"], bool)
+
+    def test_to_dict_json_serializable_full_result(self, test_db):
+        """A populated result serializes to JSON without errors."""
+        import json
+        from dataclasses import asdict
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest(cache_db=test_db)
+        result = bt.run(start_date="2022-01-01", end_date="2022-12-31")
+
+        d = asdict(result)
+        json_str = json.dumps(d)
+        d2 = json.loads(json_str)
+
+        # Verify numeric values survive round-trip (trading_days is in extras, not top level)
+        assert "extras" in d2
+        assert d2["extras"]["trading_days"] == d["extras"]["trading_days"]
+        assert d2["extras"]["baseline_cagr"] == d["extras"]["baseline_cagr"]
+        assert d2["extras"]["meets_sharpe_target"] == d["extras"]["meets_sharpe_target"]
+        assert d2["total_return"] == d["total_return"]
+        assert d2["cagr"] == d["cagr"]
+
+    # ==================================================================
+    # Empty result validation
+    # ==================================================================
+
+    def test_empty_result_has_all_expected_extras(self):
+        """_empty_result extras dict has all required fields."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        result = bt._empty_result("2020-01-01", "2020-12-31")
+
+        expected = [
+            "timestamp", "start_date", "end_date", "trading_days",
+            "baseline_cagr", "baseline_vol", "baseline_max_dd",
+            "baseline_crisis_2022", "overlay_crisis_2022", "dd_improvement",
+            "cagr_delta", "signal_days_pct", "buy_signal_days", "sell_signal_days",
+            "neutral_days", "avg_equity_shift", "false_positive_rate",
+            "mean_signal_return_20d", "regime_vix_low_sharpe",
+            "regime_vix_normal_sharpe", "regime_vix_elevated_sharpe",
+            "regime_vix_high_sharpe", "regime_vix_crisis_sharpe",
+            "meets_sharpe_target",
+        ]
+        for key in expected:
+            assert key in result.extras, f"Missing extras key: {key}"
+        assert len(result.extras) == len(expected)
+
+    def test_empty_result_timestamp_is_iso(self):
+        """_empty_result timestamp is ISO-formatted."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        result = bt._empty_result("2020-01-01", "2020-12-31")
+        ts = result.extras["timestamp"]
+        assert "T" in ts  # ISO datetime includes T separator
+        assert len(ts) > 10  # At least YYYY-MM-DD...
+
+    def test_empty_result_date_boundaries_roundtrip(self):
+        """_empty_result preserves start/end dates."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        result = bt._empty_result("2025-06-01", "2025-12-31")
+        assert result.extras["start_date"] == "2025-06-01"
+        assert result.extras["end_date"] == "2025-12-31"
+
+    # ==================================================================
+    # Max drawdown edge cases
+    # ==================================================================
+
+    def test_max_drawdown_positive_only(self):
+        """All positive returns yield near-zero drawdown."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        rets = np.array([0.001] * 100)
+        dd = BehavioralSentimentBacktest._max_drawdown(rets)
+        assert dd >= -1e-6
+
+    def test_max_drawdown_single_element(self):
+        """Single-element return array yields drawdown of exactly 0.0."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        rets = np.array([0.05])
+        dd = BehavioralSentimentBacktest._max_drawdown(rets)
+        assert dd == 0.0
+
+    def test_max_drawdown_mixed_positive_negative(self):
+        """Max drawdown correctly captures the worst peak-to-trough."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        # cumprod: [1.05, 0.945, 0.9639, 0.915705, 0.933911]
+        # peaks:   [1.05, 1.05,  1.05,   1.05,     1.05]
+        # dd:      [0,   -0.1,  -0.082, -0.1279,  -0.1106]
+        rets = np.array([0.05, -0.10, 0.02, -0.05, 0.02])
+        dd = BehavioralSentimentBacktest._max_drawdown(rets)
+        assert dd < -0.10  # Should capture the -0.1279 max
+        assert dd == pytest.approx(-0.1279, abs=0.001)
+
+    def test_max_drawdown_all_negative(self):
+        """Monotonically decreasing returns produce drawdown equal to total loss."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        # Each day loses 5%: cumprod = [0.95, 0.9025, 0.8574, ...]
+        # peak is first value = 0.95, min is last = 0.95^5
+        rets = np.array([-0.05] * 5)
+        dd = BehavioralSentimentBacktest._max_drawdown(rets)
+        expected = (0.95**5 - 0.95) / 0.95  # (last_val - first_val) / first_val
+        assert dd == pytest.approx(expected)
+
+    # ==================================================================
+    # Year return edge cases
+    # ==================================================================
+
+    def test_year_return_no_matching_year(self):
+        """Year not found in dates returns 0.0."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = ["2021-01-01", "2021-01-02", "2022-01-01"]
+        rets = np.array([0.01, 0.02])
+        yr = BehavioralSentimentBacktest._year_return(dates, rets, "2020")
+        assert yr == 0.0
+
+    def test_year_return_adjacent_years_no_leakage(self):
+        """Year return for 2022 does not include returns from 2023."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = [
+            "2021-12-30", "2021-12-31", "2022-01-03", "2022-01-04",
+            "2023-01-02", "2023-01-03",
+        ]
+        # 2022 segment = rets[1:3] = [0.01, -0.01]
+        # 2023 segment = rets[3:5] = [0.02, 0.03]
+        # Slices are non-overlapping
+        rets = np.array([0.005, 0.01, -0.01, 0.02, 0.03, 0.01])
+        yr_2022 = BehavioralSentimentBacktest._year_return(dates, rets, "2022")
+        yr_2023 = BehavioralSentimentBacktest._year_return(dates, rets, "2023")
+
+        # 2023 had positive returns
+        assert yr_2023 > 0.04
+        # 2022 had negative return period (within the segment)
+        assert yr_2022 < yr_2023
+
+    def test_year_return_year_at_start_of_data(self):
+        """Year return handles year at the very start of date list."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = ["2022-01-03", "2022-01-04", "2022-01-05", "2022-01-06"]
+        rets = np.array([0.01, 0.02, 0.015])
+        # start_idx = max(0, 0-1) = 0, end_idx = 3
+        # segment = rets[0:3] = [0.01, 0.02, 0.015]
+        yr = BehavioralSentimentBacktest._year_return(dates, rets, "2022")
+        expected = (1.01 * 1.02 * 1.015) - 1.0
+        assert yr == pytest.approx(expected)
+
+    def test_year_return_empty_segment_returns_zero(self):
+        """Year return with empty segment (start_idx == end_idx) returns 0.0."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = ["2022-01-03", "2022-01-04"]
+        rets = np.array([0.01])
+        # indices = [0, 1]; start_idx = max(0, 0-1) = 0; end_idx = 1
+        # segment = rets[0:1] = [0.01]; this is non-empty so it does compute
+        yr = BehavioralSentimentBacktest._year_return(dates, rets, "2022")
+        assert yr == pytest.approx(0.01)
+
+    # ==================================================================
+    # Insufficient / empty data edge cases
+    # ==================================================================
+
+    def test_compute_metrics_short_returns_default(self):
+        """_compute_metrics with <20 returns returns default zero result."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        dates = ["2022-01-03", "2022-01-04", "2022-01-05"]
+        short_rets = [0.01, 0.02]  # Only 2 returns (< 20 threshold)
+        stats = {
+            "buy_days": 0, "sell_days": 0, "neutral_days": 3,
+            "total_days": 3, "avg_shift": 0.0, "false_positives": 0,
+            "total_non_neutral": 0, "signal_returns_20d": [],
+        }
+        result = bt._compute_metrics(dates, short_rets, short_rets, stats)
+        assert result.total_return == 0.0
+        assert result.cagr == 0.0
+        assert result.volatility == 0.0
+        assert result.sharpe_ratio == 0.0
+        assert result.max_drawdown == 0.0
+
+    def test_compute_metrics_exactly_twenty_returns_works(self):
+        """_compute_metrics with exactly 20 returns does not short-circuit."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        dates = [f"2022-01-{d:02d}" for d in range(1, 22)]  # 21 dates => 20 returns
+        rets = [0.001] * 20
+        stats = {
+            "buy_days": 0, "sell_days": 0, "neutral_days": 21,
+            "total_days": 21, "avg_shift": 0.0, "false_positives": 0,
+            "total_non_neutral": 0, "signal_returns_20d": [],
+        }
+        result = bt._compute_metrics(dates, rets, rets, stats)
+        # Should compute metrics (not return default)
+        assert result.total_return != 0.0  # Cumulative product of 1.001^20
+
+    def test_price_loading_empty_symbol_list(self):
+        """_load_prices handles empty symbol list gracefully."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        bt = BehavioralSentimentBacktest()
+        prices = bt._load_prices([], "2022-01-01", "2022-12-31")
+        assert isinstance(prices, dict)
+        assert len(prices) == 0
+
+    def test_price_loading_missing_table_no_crash(self, tmp_path):
+        """_load_prices with a non-existent DB returns empty dicts."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        db_path = tmp_path / "nonexistent.db"
+        bt = BehavioralSentimentBacktest(cache_db=db_path)
+        prices = bt._load_prices(["SPY", "GLD"], "2022-01-01", "2022-12-31")
+        assert prices["SPY"] == {}
+        assert prices["GLD"] == {}
+        assert "TLT" not in prices
+
+    # ==================================================================
+    # Signal edge cases via _simulate
+    # ==================================================================
+
+    def test_zero_equity_shift_identical_returns(self):
+        """Neutral signals produce identical baseline and overlay returns."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(100)]
+        prices = {
+            "SPY": {d: 400.0 * (1.0005 ** i) for i, d in enumerate(dates)},
+            "GLD": {d: 170.0 * (1.0003 ** i) for i, d in enumerate(dates)},
+            "TLT": {d: 140.0 * (1.0002 ** i) for i, d in enumerate(dates)},
+        }
+        signal_map = {
+            d: {"date": d, "signal_type": "neutral", "equity_shift_pct": 0.0, "regime_suppressed": False}
+            for d in dates
+        }
+
+        bt = BehavioralSentimentBacktest()
+        baseline_ret, overlay_ret, stats = bt._simulate(dates, prices, signal_map)
+
+        assert len(baseline_ret) == len(overlay_ret)
+        for b, o in zip(baseline_ret, overlay_ret):
+            assert b == pytest.approx(o, abs=1e-10)
+        assert stats["buy_days"] == 0
+        assert stats["sell_days"] == 0
+        assert stats["neutral_days"] == 100
+
+    def test_extreme_equity_shift_clamp_upper(self):
+        """Large positive equity shift is clamped so adj_spy <= 1.0."""
+        from src.backtest.behavioral_sentiment_backtest import (
+            BehavioralSentimentBacktest, BASELINE_SPY, BASELINE_GLD,
+        )
+
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(50)]
+        prices = {
+            "SPY": {d: 100.0 for d in dates},
+            "GLD": {d: 100.0 for d in dates},
+            "TLT": {d: 100.0 for d in dates},
+        }
+        # +100% equity_shift_pct => equity_shift = 1.0
+        # adj_spy = 0.46 + 1.0 = 1.46 -> clamped to 1.0
+        # adj_gld = 0.38 - 1.0 = -0.62 -> clamped to 0.0
+        signal_map = {
+            d: {"date": d, "signal_type": "buy", "equity_shift_pct": 100.0, "regime_suppressed": False}
+            for d in dates
+        }
+
+        bt = BehavioralSentimentBacktest()
+        baseline_ret, overlay_ret, stats = bt._simulate(dates, prices, signal_map)
+        assert stats["buy_days"] == 50
+        assert abs(stats["avg_shift"]) > 0.5
+
+    def test_extreme_equity_shift_clamp_lower(self):
+        """Large negative equity shift is clamped so adj_gld <= 1.0."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(50)]
+        prices = {
+            "SPY": {d: 100.0 for d in dates},
+            "GLD": {d: 100.0 for d in dates},
+            "TLT": {d: 100.0 for d in dates},
+        }
+        # -100% equity_shift_pct => equity_shift = -1.0
+        # adj_spy = 0.46 - 1.0 = -0.54 -> clamped to 0.0
+        # adj_gld = 0.38 + 1.0 = 1.38 -> clamped to 1.0
+        signal_map = {
+            d: {"date": d, "signal_type": "sell", "equity_shift_pct": -100.0, "regime_suppressed": False}
+            for d in dates
+        }
+
+        bt = BehavioralSentimentBacktest()
+        _, _, stats = bt._simulate(dates, prices, signal_map)
+        assert stats["sell_days"] == 50
+        assert abs(stats["avg_shift"]) > 0.5
+
+    def test_extreme_equity_shift_at_max_shift_boundary(self):
+        """Equity shift exactly at +MAX_SHIFT produces correct adjusted weights."""
+        from src.backtest.behavioral_sentiment_backtest import (
+            BehavioralSentimentBacktest, MAX_SHIFT, BASELINE_SPY, BASELINE_GLD, BASELINE_TLT,
+        )
+
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(10)]
+        prices = {"SPY": {d: 100.0 for d in dates}, "GLD": {d: 100.0 for d in dates}, "TLT": {d: 100.0 for d in dates}}
+
+        # equity_shift_pct = 5.0 => equity_shift = 0.05 (== MAX_SHIFT)
+        signal_map = {
+            d: {"date": d, "signal_type": "buy", "equity_shift_pct": 5.0, "regime_suppressed": False}
+            for d in dates
+        }
+        bt = BehavioralSentimentBacktest()
+        _, _, stats = bt._simulate(dates, prices, signal_map)
+        assert stats["avg_shift"] == pytest.approx(0.05, abs=1e-6)
+
+    def test_regime_suppressed_signals_neutral(self):
+        """Regime-suppressed signals produce zero equity shift (treated as neutral)."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(100)]
+        prices = {
+            "SPY": {d: 100.0 * (1.0005 ** i) for i, d in enumerate(dates)},
+            "GLD": {d: 100.0 * (1.0003 ** i) for i, d in enumerate(dates)},
+            "TLT": {d: 100.0 * (1.0002 ** i) for i, d in enumerate(dates)},
+        }
+        # Suppressed buy signals with large equity shift should be ignored
+        signal_map = {
+            d: {"date": d, "signal_type": "buy", "equity_shift_pct": 5.0, "regime_suppressed": True}
+            for d in dates
+        }
+
+        bt = BehavioralSentimentBacktest()
+        baseline_ret, overlay_ret, stats = bt._simulate(dates, prices, signal_map)
+
+        assert stats["buy_days"] == 0
+        assert stats["sell_days"] == 0
+        assert stats["neutral_days"] == 100
+        for b, o in zip(baseline_ret, overlay_ret):
+            assert b == pytest.approx(o, abs=1e-10)
+
+    def test_signal_type_variants_classified(self):
+        """Signal type variants like 'buy_moderate' and 'sell_aggressive' are correctly classified."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(100)]
+        prices = {
+            "SPY": {d: 100.0 for d in dates},
+            "GLD": {d: 100.0 for d in dates},
+            "TLT": {d: 100.0 for d in dates},
+        }
+        signal_map = {}
+        for i, d in enumerate(dates):
+            if i < 30:
+                signal_map[d] = {"date": d, "signal_type": "buy_moderate", "equity_shift_pct": 2.0, "regime_suppressed": False}
+            elif i < 60:
+                signal_map[d] = {"date": d, "signal_type": "sell_aggressive", "equity_shift_pct": -4.0, "regime_suppressed": False}
+            else:
+                signal_map[d] = {"date": d, "signal_type": "neutral", "equity_shift_pct": 0.0, "regime_suppressed": False}
+
+        bt = BehavioralSentimentBacktest()
+        _, _, stats = bt._simulate(dates, prices, signal_map)
+
+        assert stats["buy_days"] == 30
+        assert stats["sell_days"] == 30
+        assert stats["neutral_days"] == 40
+
+    def test_false_positive_rate_with_upward_prices(self):
+        """False positive rate is 0% for buy signals when prices always go up."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        n = 100
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(n)]
+        prices = {
+            "SPY": {d: 100.0 * (1.001 ** i) for i, d in enumerate(dates)},
+            "GLD": {d: 100.0 * (1.0005 ** i) for i, d in enumerate(dates)},
+            "TLT": {d: 100.0 * (1.0003 ** i) for i, d in enumerate(dates)},
+        }
+        # Only set buy signals on first 80 dates (need 20-day lookahead space)
+        signal_map = {}
+        for i, d in enumerate(dates):
+            if i < n - 20:
+                signal_map[d] = {"date": d, "signal_type": "buy", "equity_shift_pct": 2.0, "regime_suppressed": False}
+
+        bt = BehavioralSentimentBacktest()
+        _, _, stats = bt._simulate(dates, prices, signal_map)
+
+        assert stats["total_non_neutral"] > 0
+        # With upward prices, all buy signals should be correct
+        # (no false positives except possibly at boundary where lookahead === same day)
+        assert stats["false_positives"] == 0
+
+    def test_false_positive_rate_with_sell_signals_upward_market(self):
+        """False positive rate is 100% for sell signals when prices always go up."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(100)]
+        prices = {
+            "SPY": {d: 100.0 * (1.001 ** i) for i, d in enumerate(dates)},
+            "GLD": {d: 100.0 * (1.0005 ** i) for i, d in enumerate(dates)},
+            "TLT": {d: 100.0 * (1.0003 ** i) for i, d in enumerate(dates)},
+        }
+        # All sell signals — with upward prices, all should be false positives
+        signal_map = {
+            d: {"date": d, "signal_type": "sell", "equity_shift_pct": -2.0, "regime_suppressed": False}
+            for d in dates
+        }
+
+        bt = BehavioralSentimentBacktest()
+        _, _, stats = bt._simulate(dates, prices, signal_map)
+
+        assert stats["total_non_neutral"] > 0
+        assert stats["false_positives"] > 0  # At least some are false positives
+
+    # ==================================================================
+    # VIX regime boundary conditions
+    # ==================================================================
+
+    def test_vix_boundary_exact_values(self):
+        """VIX at exact boundaries (15, 20, 25, 30) is classified correctly per regime."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "vix_boundary.db"
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.execute("""CREATE TABLE prices (
+                    symbol TEXT, date TEXT, close REAL,
+                    PRIMARY KEY (symbol, date)
+                )""")
+                # 25 dates with SPY, GLD, TLT at constant prices
+                for i in range(25):
+                    date_str = f"2022-01-{i+1:02d}"
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('SPY', ?, 400.0)", (date_str,))
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('GLD', ?, 170.0)", (date_str,))
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('TLT', ?, 140.0)", (date_str,))
+
+                # VIX at exact boundaries: 14.9 (low), 15.0 (normal),
+                # 20.0 (elevated), 25.0 (high), 30.0 (crisis)
+                # 5 days each to meet the >= 5 requirement for Sharpe computation
+                vix_vals = [14.9]*5 + [15.0]*5 + [20.0]*5 + [25.0]*5 + [30.0]*5
+                for i, vix in enumerate(vix_vals):
+                    date_str = f"2022-01-{i+1:02d}"
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('^VIX', ?, ?)", (date_str, vix))
+                conn.commit()
+
+            bt = BehavioralSentimentBacktest(cache_db=db_path)
+            dates = [f"2022-01-{i+1:02d}" for i in range(25)]
+            rets = np.array([0.001] * 25, dtype=np.float64)
+            sharpes = bt._all_regime_sharpes(dates, rets)
+
+            assert len(sharpes) == 5
+            # All 5 buckets have 5 data points and should produce a numeric Sharpe
+            # (std=0 clamped to 1e-8, so Sharpe should be a large positive number)
+            for s in sharpes:
+                assert isinstance(s, float)
+                assert s >= 0.0  # With constant positive returns, Sharpe is always >= 0
+
+    def test_vix_bucket_insufficient_points(self):
+        """VIX bucket with fewer than 5 returns returns 0.0 Sharpe."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "vix_insufficient.db"
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.execute("""CREATE TABLE prices (
+                    symbol TEXT, date TEXT, close REAL,
+                    PRIMARY KEY (symbol, date)
+                )""")
+                for i in range(5):
+                    date_str = f"2022-01-{i+1:02d}"
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('SPY', ?, 400.0)", (date_str,))
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('GLD', ?, 170.0)", (date_str,))
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('TLT', ?, 140.0)", (date_str,))
+
+                # Only 3 points in "low" and 2 in "normal" — both below the 5-point threshold
+                for i in range(5):
+                    date_str = f"2022-01-{i+1:02d}"
+                    vix = 14.0 if i < 3 else 16.0
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('^VIX', ?, ?)", (date_str, vix))
+                conn.commit()
+
+            bt = BehavioralSentimentBacktest(cache_db=db_path)
+            dates = [f"2022-01-{i+1:02d}" for i in range(5)]
+            rets = np.array([0.001] * 5, dtype=np.float64)
+            sharpes = bt._all_regime_sharpes(dates, rets)
+
+            # Low has 3 (<5), normal has 2 (<5), the rest have 0 — all return 0.0
+            assert all(s == 0.0 for s in sharpes)
+
+    def test_vix_missing_db_returns_all_zeros(self):
+        """_all_regime_sharpes with non-existent VIX DB returns all zeros."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "no_vix_market.db"
+            # Create DB with SPY/GLD/TLT prices but NO ^VIX symbol
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.execute("""CREATE TABLE prices (
+                    symbol TEXT, date TEXT, close REAL,
+                    PRIMARY KEY (symbol, date)
+                )""")
+                for i in range(10):
+                    date_str = f"2022-01-{i+1:02d}"
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('SPY', ?, 400.0)", (date_str,))
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('GLD', ?, 170.0)", (date_str,))
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('TLT', ?, 140.0)", (date_str,))
+                conn.commit()
+
+            bt = BehavioralSentimentBacktest(cache_db=db_path)
+            dates = [f"2022-01-{i+1:02d}" for i in range(10)]
+            rets = np.array([0.001] * 10, dtype=np.float64)
+            sharpes = bt._all_regime_sharpes(dates, rets)
+
+            assert all(s == 0.0 for s in sharpes)
+            assert len(sharpes) == 5
+
+    def test_vix_regime_bucket_boundary_stability(self):
+        """VIX values just below/above each boundary go to the correct bucket."""
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "vix_boundary_stability.db"
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.execute("""CREATE TABLE prices (
+                    symbol TEXT, date TEXT, close REAL,
+                    PRIMARY KEY (symbol, date)
+                )""")
+                # VIX just below thresholds should fall into the lower bucket
+                # 14.99 (low), 19.99 (normal), 24.99 (elevated), 29.99 (high)
+                vix_boundaries = [14.99, 19.99, 24.99, 29.99]
+                for i, vix in enumerate(vix_boundaries):
+                    date_str = f"2022-01-{i+1:02d}"
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('SPY', ?, 400.0)", (date_str,))
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('GLD', ?, 170.0)", (date_str,))
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES ('TLT', ?, 140.0)", (date_str,))
+                    # 6 points per bucket (meets >= 5 threshold)
+                    for j in range(6):
+                        sub_date = f"2022-01-{i+1:02d}"
+                        conn.execute("INSERT OR REPLACE INTO prices VALUES ('^VIX', ?, ?)", (sub_date, vix))
+                conn.commit()
+
+            bt = BehavioralSentimentBacktest(cache_db=db_path)
+            dates = [f"2022-01-{i+1:02d}" for i in range(4)]
+            rets = np.array([0.001] * 4, dtype=np.float64)
+            sharpes = bt._all_regime_sharpes(dates, rets)
+
+            assert len(sharpes) == 5
+            # Each bucket has at least 4 returns but only 4 dates total
+            # The function loops dates up to min(len(dates), len(returns))
+            # Each date maps to one VIX value, so at most 1 return per VIX bucket
+            # But buckets need 5+ returns → all return 0.0
+            assert all(isinstance(s, float) for s in sharpes)

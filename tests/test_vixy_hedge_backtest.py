@@ -14,12 +14,18 @@ import numpy as np
 import pytest
 
 from src.backtest.vixy_hedge_backtest import (
+    TRADING_DAYS_PER_YEAR,
+    MONTHLY_TRADING_DAYS,
+    CRISIS_YEARS,
+    BASE_SYMBOLS,
+    VIX_SYMBOL,
     BacktestConfig,
     DailyPrices,
     WalkForwardVIXYBacktester,
+    _result_to_dict,
 )
 from src.backtest.metrics import BacktestResult
-from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer
+from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer, HedgeRegime
 
 
 # ── BacktestConfig Tests ─────────────────────────────────────────────────
@@ -107,6 +113,98 @@ class TestBacktestResult:
         assert result.extras["regime_breakdown"]["normal"]["avg_hedge_pct"] == 1.2
         assert result.total_rebalances == 120
         assert result.extras["config_snapshot"]["max_hedge_pct"] == 6.0
+
+    def test_to_dict_all_core_fields(self):
+        """_result_to_dict should include all 7 core fields."""
+        result = BacktestResult(
+            total_return=10.5, cagr=8.2, volatility=12.3,
+            sharpe_ratio=0.85, max_drawdown=-15.4,
+            total_rebalances=120, total_transaction_costs=45.5,
+            extras={},
+        )
+        d = _result_to_dict(result)
+        assert d["total_return"] == 10.5
+        assert d["cagr"] == 8.2
+        assert d["volatility"] == 12.3
+        assert d["sharpe_ratio"] == 0.85
+        assert d["max_drawdown"] == -15.4
+        assert d["total_rebalances"] == 120
+        assert d["total_transaction_costs"] == 45.5
+        # Optional fields should be absent when None
+        assert "baseline_sharpe" not in d
+        assert "sharpe_improvement" not in d
+        assert "crisis_returns" not in d
+
+    def test_to_dict_optional_fields_included_when_set(self):
+        """Optional fields (baseline_sharpe, sharpe_improvement, crisis_returns) appear when not None."""
+        result = BacktestResult(
+            total_return=5.0, cagr=3.0, volatility=10.0,
+            sharpe_ratio=0.5, max_drawdown=-10.0,
+            baseline_sharpe=0.45, sharpe_improvement=0.05,
+            total_rebalances=30, total_transaction_costs=15.0,
+            crisis_returns={"2008": -12.3, "2020": -1.5},
+            extras={},
+        )
+        d = _result_to_dict(result)
+        assert d["baseline_sharpe"] == 0.45
+        assert d["sharpe_improvement"] == 0.05
+        assert d["crisis_returns"]["2008"] == -12.3
+
+    def test_to_dict_extras_merged(self):
+        """Extras dict keys should be merged into the output dict."""
+        result = BacktestResult(
+            total_return=5.0, cagr=3.0, volatility=10.0,
+            sharpe_ratio=0.5, max_drawdown=-10.0,
+            total_rebalances=30, total_transaction_costs=15.0,
+            extras={
+                "hedge_active_days": 500,
+                "avg_hedge_pct": 1.5,
+                "regime_breakdown": {"normal": {"count": 100}},
+            },
+        )
+        d = _result_to_dict(result)
+        assert d["hedge_active_days"] == 500
+        assert d["avg_hedge_pct"] == 1.5
+        assert d["regime_breakdown"]["normal"]["count"] == 100
+
+    def test_to_dict_large_values_roundtrip(self):
+        """Very large metric values should survive to_dict round-trip."""
+        result = BacktestResult(
+            total_return=999999.99, cagr=50000.0, volatility=999.99,
+            sharpe_ratio=9.9999, max_drawdown=-99.99,
+            total_rebalances=999999, total_transaction_costs=1e6,
+            extras={"custom_big": 1e12},
+        )
+        d = _result_to_dict(result)
+        assert d["total_return"] == 999999.99
+        assert d["cagr"] == 50000.0
+        assert d["total_rebalances"] == 999999
+        assert d["custom_big"] == 1e12
+        # Confirm JSON-serializable
+        json.dumps(d)  # Should not raise
+
+    def test_to_dict_negative_values(self):
+        """Negative metric values should be handled properly in to_dict."""
+        result = BacktestResult(
+            total_return=-50.0, cagr=-8.0, volatility=25.0,
+            sharpe_ratio=-0.3, max_drawdown=-45.0,
+            total_rebalances=50, total_transaction_costs=-10.0,
+            extras={"negative_test": -99.9},
+        )
+        d = _result_to_dict(result)
+        assert d["total_return"] == -50.0
+        assert d["sharpe_ratio"] == -0.3
+        json.dumps(d)  # Should not raise
+
+    def test_crisis_returns_none_to_dict(self):
+        """crisis_returns=None should not produce a 'crisis_returns' key in the dict."""
+        result = BacktestResult(
+            total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
+            max_drawdown=0.0,
+            extras={},
+        )
+        d = _result_to_dict(result)
+        assert "crisis_returns" not in d
 
     def test_json_serializable(self):
         """All fields in extras must be JSON-serializable."""
@@ -321,6 +419,135 @@ class TestWalkForwardVIXYBacktester:
         finally:
             Path(output_path).unlink()
 
+    def test_compute_vix_proxy_at_21_day_boundary(self):
+        """VIX proxy with exactly 21 trading days should compute a real value, not default."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        vix = bt._compute_vix_proxy(MONTHLY_TRADING_DAYS)
+        # idx=21 means days [0..21] = 22 prices, so 21 returns
+        assert vix > 0.0
+        assert vix < 100.0
+
+    def test_compute_vix_proxy_insufficient_history_variants(self):
+        """VIX proxy should return 18 when fewer than 5 returns available."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        # idx=0: zero history -> 18.0
+        assert bt._compute_vix_proxy(0) == 18.0
+        # idx=1: only 2 prices -> 1 return -> insufficient -> 18.0
+        assert bt._compute_vix_proxy(1) == 18.0
+        # idx=4: only 5 prices -> 4 returns -> insufficient (<5) -> 18.0
+        assert bt._compute_vix_proxy(4) == 18.0
+        # idx=5: 6 prices -> 5 returns -> sufficient -> real computation
+        vix = bt._compute_vix_proxy(5)
+
+    def test_compute_vix_proxy_stable_output(self):
+        """VIX proxy should produce deterministic output with synthetic data."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        vix_a = bt._compute_vix_proxy(100)
+        vix_b = bt._compute_vix_proxy(100)
+        assert vix_a == vix_b
+
+    def test_get_vix_level_none_falls_back_to_proxy(self):
+        """When DailyPrices.vix is None, _get_vix_level should use proxy."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        # Force vix to None on first price, then check
+        original_vix = bt._daily_prices[50].vix
+        bt._daily_prices[50].vix = None
+        level = bt._get_vix_level(50)
+        assert level > 0.0
+        bt._daily_prices[50].vix = original_vix
+
+    def test_get_vix_level_zero_falls_back_to_proxy(self):
+        """When DailyPrices.vix is 0, _get_vix_level should use proxy (0 is not > 0)."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        original_vix = bt._daily_prices[50].vix
+        bt._daily_prices[50].vix = 0.0
+        level = bt._get_vix_level(50)
+        assert level > 0.0  # Falls back to proxy
+        bt._daily_prices[50].vix = original_vix
+
+    def test_get_vix_level_valid_returns_direct(self):
+        """When DailyPrices.vix is a positive float, _get_vix_level returns it directly."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        bt._daily_prices[50].vix = 25.5
+        level = bt._get_vix_level(50)
+        assert level == 25.5
+
+    def test_compute_portfolio_return_zero_prices(self):
+        """Portfolio return with zero SPY price should not crash and use fallback of 0.0."""
+        bt = WalkForwardVIXYBacktester()
+        p0 = DailyPrices(date="2020-01-01", spy=0.0, gld=100.0, tlt=100.0)
+        p1 = DailyPrices(date="2020-01-02", spy=100.0, gld=101.0, tlt=102.0)
+        ret = bt._compute_portfolio_return(p0, p1, 0.46, 0.38, 0.16, 0.0)
+        # spy_ret=0.0 (division by zero fallback), gld_ret=0.01, tlt_ret=0.02
+        # ret = 0.46*0 + 0.38*0.01 + 0.16*0.02 + 0 = 0.0038 + 0.0032 = 0.007
+        assert abs(ret - 0.007) < 1e-10
+
+    def test_compute_portfolio_return_negative_spy(self):
+        """Portfolio return with negative SPY return should trigger VIXY inverse gain."""
+        bt = WalkForwardVIXYBacktester()
+        p0 = DailyPrices(date="2020-01-01", spy=100.0, gld=100.0, tlt=100.0)
+        p1 = DailyPrices(date="2020-01-02", spy=90.0, gld=100.0, tlt=100.0)
+        # spy_ret=-0.10, vixy_ret = -(-0.10)*3.5 = 0.35
+        # 6% VIXY hedge: ret = 0.40*(-0.10) + 0.38*0 + 0.16*0 + 0.06*0.35
+        # = -0.04 + 0.021 = -0.019
+        ret = bt._compute_portfolio_return(p0, p1, 0.40, 0.38, 0.16, 0.06)
+        expected = 0.40 * -0.10 + 0.06 * 0.35
+        assert abs(ret - expected) < 1e-10
+
+    def test_build_prices_lookup_all_symbols(self):
+        """_build_prices_lookup should contain SPY, GLD, TLT for every date."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        lookup = bt._build_prices_lookup()
+        assert len(lookup) == len(bt._daily_prices)
+        for date_key, prices in lookup.items():
+            assert "SPY" in prices
+            assert "GLD" in prices
+            assert "TLT" in prices
+            assert prices["SPY"] > 0
+            assert prices["GLD"] > 0
+            assert prices["TLT"] > 0
+
+    def test_compute_regime_breakdown_empty_tracker(self):
+        """Empty regime tracker should return empty dict."""
+        bt = WalkForwardVIXYBacktester()
+        breakdown = bt._compute_regime_breakdown([])
+        assert breakdown == {}
+
+    def test_compute_regime_breakdown_single_entry(self):
+        """Single entry regime tracker should produce valid breakdown."""
+        bt = WalkForwardVIXYBacktester()
+        tracker = [
+            {"date": "2020-01-15", "vix_level": 25.0, "regime": "elevated", "hedge_pct": 2.5},
+        ]
+        breakdown = bt._compute_regime_breakdown(tracker)
+        assert "elevated" in breakdown
+        assert breakdown["elevated"]["count"] == 1
+        assert breakdown["elevated"]["avg_hedge_pct"] == 2.5
+        assert breakdown["elevated"]["max_hedge_pct"] == 2.5
+        assert breakdown["elevated"]["pct_of_time"] == 100.0
+
+    def test_compute_regime_breakdown_multiple_regimes(self):
+        """Multiple VIX regimes should each appear in breakdown with correct percentages."""
+        bt = WalkForwardVIXYBacktester()
+        tracker = [
+            {"date": "2020-01-15", "vix_level": 15.0, "regime": "normal", "hedge_pct": 1.0},
+            {"date": "2020-01-16", "vix_level": 25.0, "regime": "elevated", "hedge_pct": 2.5},
+            {"date": "2020-01-17", "vix_level": 35.0, "regime": "stress", "hedge_pct": 3.5},
+            {"date": "2020-01-18", "vix_level": 45.0, "regime": "crisis", "hedge_pct": 4.5},
+        ]
+        breakdown = bt._compute_regime_breakdown(tracker)
+        assert len(breakdown) == 4
+        assert breakdown["normal"]["pct_of_time"] == 25.0
+        assert breakdown["crisis"]["pct_of_time"] == 25.0
+        assert breakdown["elevated"]["avg_hedge_pct"] == 2.5
+
 
 # ── Edge Cases ────────────────────────────────────────────────────────────
 
@@ -370,3 +597,139 @@ class TestEdgeCases:
         # With VIX=0, compute_allocation returns 0 (below floor), so hedged ≈ baseline
         # Small differences from different transaction costs
         assert abs(len(hedge_equity) - len(baseline_equity)) <= 1
+
+    def test_sizer_classify_regime_boundaries(self):
+        """VIX exactly at regime boundaries should be classified correctly."""
+        sizer = VIXYHedgeSizer()
+        # Boundary at 20: VIX 19.99 -> NORMAL, VIX 20.00 -> ELEVATED
+        assert sizer.classify_regime(19.99) == HedgeRegime.NORMAL
+        assert sizer.classify_regime(20.00) == HedgeRegime.ELEVATED
+        # Boundary at 30: VIX 29.99 -> ELEVATED, VIX 30.00 -> STRESS
+        assert sizer.classify_regime(29.99) == HedgeRegime.ELEVATED
+        assert sizer.classify_regime(30.00) == HedgeRegime.STRESS
+        # Boundary at 40: VIX 39.99 -> STRESS, VIX 40.00 -> CRISIS
+        assert sizer.classify_regime(39.99) == HedgeRegime.STRESS
+        assert sizer.classify_regime(40.00) == HedgeRegime.CRISIS
+
+    def test_sizer_allocation_at_regime_boundaries(self):
+        """VIXY allocation at exact regime boundaries should respect floor/ceiling."""
+        sizer = VIXYHedgeSizer()
+        # VIX=20: ELEVATED, raw=2.0, floor=1.0 ceiling=3.5 -> 2.0
+        assert sizer.compute_allocation(20.0) == 2.0
+        # VIX=30: STRESS, raw=3.0, floor=2.0 ceiling=6.0 -> 3.0
+        assert sizer.compute_allocation(30.0) == 3.0
+        # VIX=40: CRISIS, raw=4.0, floor=3.0 ceiling=10.0 -> 4.0
+        assert sizer.compute_allocation(40.0) == 4.0
+
+    def test_extreme_vix_100_does_not_crash(self):
+        """VIX at 100 should not cause overflow or crash."""
+        sizer = VIXYHedgeSizer()
+        alloc = sizer.compute_allocation(100.0)
+        # raw=10.0, CRISIS floor=3.0 ceiling=10.0 -> 10.0
+        assert alloc == 10.0
+
+    def test_extreme_vix_200_clipped_to_max(self):
+        """VIX at 200 should be clipped to max_hedge_pct (10.0)."""
+        sizer = VIXYHedgeSizer()
+        alloc = sizer.compute_allocation(200.0)
+        # raw=20.0, CRISIS floor=3.0 ceiling=10.0 -> 10.0 (clipped)
+        assert alloc == 10.0
+
+    def test_negative_vix_clipped_to_floor(self):
+        """Negative VIX level should clip to NORMAL regime floor (0%)."""
+        sizer = VIXYHedgeSizer()
+        alloc = sizer.compute_allocation(-5.0)
+        # raw=-0.5, NORMAL floor=0.0 ceiling=2.0 -> 0.0
+        assert alloc == 0.0
+
+    def test_sizer_allocation_vix_1_to_19_ramp(self):
+        """VIX between 1 and 19 should produce monotonically increasing allocation."""
+        sizer = VIXYHedgeSizer()
+        prev = 0.0
+        for vix_int in range(1, 20):
+            alloc = sizer.compute_allocation(float(vix_int))
+            assert alloc >= prev
+            prev = alloc
+
+    def test_run_hedged_tracker_integrity(self):
+        """Hedge tracker should maintain internal consistency (allocations count matches days)."""
+        bt = WalkForwardVIXYBacktester(
+            BacktestConfig(start_date="2020-01-01", end_date="2020-06-01")
+        )
+        bt.load_data()
+        equity, tracker, regime_tracker = bt._run_hedged(bt._daily_prices, bt.config)
+        # Allocations should have len(prices)-1 entries (one per daily return)
+        assert len(tracker["allocations"]) == len(bt._daily_prices) - 1
+        # Rebalances should match regime_tracker entries
+        assert tracker["rebalances"] == len(regime_tracker)
+
+    def test_compute_crisis_returns_hedged_gap_years(self):
+        """Crisis years with no data should be silently skipped."""
+        bt = WalkForwardVIXYBacktester()
+        bt.load_data()
+        # Use a short date range that doesn't include any crisis years
+        lookup = bt._build_prices_lookup()
+        short_dates = [d for d in bt._trading_dates if d < "2008-01-01"]
+        if not short_dates:
+            short_dates = bt._trading_dates[:100]
+        result = bt._compute_crisis_returns_hedged(
+            lookup, short_dates, [100000.0] * len(short_dates), 100000.0
+        )
+        # Should not raise; may have fewer or no entries
+        assert isinstance(result, dict)
+
+    def test_compute_crisis_returns_hedged_zero_equity(self):
+        """Crisis returns with zero equity values should be handled."""
+        bt = WalkForwardVIXYBacktester()
+        lookup = {"2020-01-02": {"SPY": 100.0, "GLD": 100.0, "TLT": 100.0}}
+        result = bt._compute_crisis_returns_hedged(
+            lookup, ["2020-01-02"], [0.0], 100000.0
+        )
+        assert isinstance(result, dict)
+
+    def test_no_data_in_date_range_synthetic_fallback(self):
+        """Date range with no data should trigger synthetic data fallback."""
+        bt = WalkForwardVIXYBacktester(
+            BacktestConfig(start_date="1990-01-01", end_date="1990-06-01")
+        )
+        bt.load_data()
+        # Should have generated synthetic data
+        assert len(bt._daily_prices) > 0
+        assert len(bt._trading_dates) > 0
+
+    def test_config_zero_transaction_cost(self):
+        """Zero transaction cost should not cause math errors."""
+        bt = WalkForwardVIXYBacktester(
+            BacktestConfig(transaction_cost_bps=0.0)
+        )
+        bt.load_data()
+        _, tracker, _ = bt._run_hedged(bt._daily_prices, bt.config)
+        assert tracker["total_costs"] == 0.0
+
+
+# ── Constants Tests ───────────────────────────────────────────────────
+
+
+class TestConstants:
+    """Test module-level constants."""
+
+    def test_trading_days_per_year(self):
+        assert TRADING_DAYS_PER_YEAR == 252
+
+    def test_monthly_trading_days(self):
+        assert MONTHLY_TRADING_DAYS == 21
+
+    def test_crisis_years(self):
+        assert CRISIS_YEARS == ["2008", "2020", "2022"]
+
+    def test_base_symbols(self):
+        assert BASE_SYMBOLS == ["SPY", "GLD", "TLT"]
+
+    def test_vix_symbol(self):
+        assert VIX_SYMBOL == "^VIX"
+
+    def test_crisis_years_immutability(self):
+        """CRISIS_YEARS should not be accidentally mutated by code."""
+        original = list(CRISIS_YEARS)
+        _ = CRISIS_YEARS + ["2024"]  # This creates a new list; verify original unchanged
+        assert CRISIS_YEARS == original

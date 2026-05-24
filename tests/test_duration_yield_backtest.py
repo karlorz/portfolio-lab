@@ -5,6 +5,7 @@ classify_regime_from_spread, calculate_returns/Sharpe/max_drawdown/CAGR,
 run_backtest with synthetic data, save_results, print_results, and CLI.
 """
 import json
+from dataclasses import asdict
 
 import pytest
 import pandas as pd
@@ -28,7 +29,7 @@ from src.backtest.duration_yield_backtest import (
     save_results,
     print_results,
 )
-from src.backtest.metrics import BacktestResult
+from src.backtest.metrics import BacktestResult, BacktestMetrics
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +117,44 @@ class TestConstants:
     def test_transaction_cost(self):
         assert TRANSACTION_COST == 0.0010
 
+    def test_static_allocation_sum(self):
+        """Static allocation should sum to the bond portfolio target (0.36)."""
+        total = sum(STATIC_ALLOCATION.values())
+        assert total == pytest.approx(0.36, abs=1e-10)
+
+    def test_dynamic_allocations_sum(self):
+        """Each regime allocation dict should also sum to 0.36."""
+        for regime, alloc in DYNAMIC_ALLOCATIONS.items():
+            total = sum(alloc.values())
+            assert total == pytest.approx(0.36, abs=1e-10), (
+                f"{regime} allocation sums to {total}, expected 0.36"
+            )
+
+    def test_dynamic_allocations_have_all_etfs(self):
+        """Every regime allocation must contain tlt, ief, and shy keys."""
+        required = {"tlt", "ief", "shy"}
+        for regime, alloc in DYNAMIC_ALLOCATIONS.items():
+            assert required.issubset(alloc.keys()), (
+                f"{regime} allocation missing: {required - alloc.keys()}"
+            )
+
+    def test_regime_effective_duration_positive(self):
+        """All regime effective durations must be strictly positive."""
+        for regime, duration in REGIME_EFFECTIVE_DURATION.items():
+            assert duration > 0, f"{regime} duration must be positive, got {duration}"
+
+    def test_expense_ratios_range(self):
+        """All expense ratios must be between 0 and 1 (0% to 100%)."""
+        for ticker, ratio in EXPENSE_RATIOS.items():
+            assert 0 < ratio < 1, (
+                f"{ticker} expense ratio {ratio} out of range (0, 1)"
+            )
+
+    def test_shy_has_lowest_expense(self):
+        """SHY should have the same expense ratio as TLT and IEF."""
+        assert EXPENSE_RATIOS["shy"] == EXPENSE_RATIOS["tlt"]
+        assert EXPENSE_RATIOS["ief"] == EXPENSE_RATIOS["tlt"]
+
 
 # ---------------------------------------------------------------------------
 # BacktestResult Tests
@@ -167,6 +206,68 @@ class TestBacktestResult:
         assert r.extras["sharpe_delta"] < 0
         assert r.extras["cagr_delta"] < 0
 
+    def test_asdict_core_fields(self):
+        """asdict() should contain all core BacktestResult fields."""
+        r = BacktestResult(
+            total_return=100.0, cagr=8.0, volatility=12.0, sharpe_ratio=0.75,
+            max_drawdown=-20.0,
+            extras={"static_sharpe": 0.70},
+        )
+        d = asdict(r)
+        for field in ("total_return", "cagr", "volatility", "sharpe_ratio",
+                      "max_drawdown", "total_rebalances", "total_transaction_costs",
+                      "extras"):
+            assert field in d, f"asdict missing field: {field}"
+
+    def test_asdict_extras_preserved(self):
+        """The extras dict should be preserved verbatim through asdict()."""
+        extras = {
+            "static_sharpe": 0.80, "dynamic_sharpe": 0.85,
+            "regime_days": {"flat": 100},
+        }
+        r = BacktestResult(
+            total_return=100.0, cagr=8.0, volatility=12.0, sharpe_ratio=0.75,
+            max_drawdown=-20.0, extras=extras,
+        )
+        d = asdict(r)
+        assert d["extras"]["static_sharpe"] == 0.80
+        assert d["extras"]["regime_days"]["flat"] == 100
+
+    def test_asdict_crisis_returns(self):
+        """crisis_returns field should survive asdict round-trip."""
+        crisis = {"2008": -0.10, "2020": -0.05, "2022": -0.13}
+        r = BacktestResult(
+            total_return=100.0, cagr=8.0, volatility=12.0, sharpe_ratio=0.75,
+            max_drawdown=-20.0, extras={}, crisis_returns=crisis,
+        )
+        d = asdict(r)
+        assert d["crisis_returns"] == crisis
+
+    def test_asdict_field_types(self):
+        """Verify that core fields have the correct types after asdict()."""
+        r = BacktestResult(
+            total_return=100.0, cagr=8.0, volatility=12.0, sharpe_ratio=0.75,
+            max_drawdown=-20.0, total_rebalances=5,
+            extras={"key": "value"},
+        )
+        d = asdict(r)
+        assert isinstance(d["total_rebalances"], int)
+        assert isinstance(d["total_return"], float)
+        assert isinstance(d["cagr"], float)
+        assert isinstance(d["extras"], dict)
+
+    def test_backtest_metrics_dataclass(self):
+        """BacktestMetrics should have the same core fields as BacktestResult."""
+        m = BacktestMetrics(
+            total_return=50.0, cagr=6.0, volatility=10.0, sharpe_ratio=0.60,
+            max_drawdown=-15.0,
+        )
+        d = asdict(m)
+        for field in ("total_return", "cagr", "volatility", "sharpe_ratio",
+                      "max_drawdown"):
+            assert field in d
+            assert isinstance(d[field], float)
+
 
 # ---------------------------------------------------------------------------
 # classify_regime_from_spread Tests
@@ -198,6 +299,38 @@ class TestClassifyRegime:
         assert classify_regime_from_spread(0.75) == "flat"
         assert classify_regime_from_spread(0.76) == "steep"
 
+    def test_extreme_values(self):
+        """Very large positive/negative spreads should still classify correctly."""
+        assert classify_regime_from_spread(-10.0) == "inverted"
+        assert classify_regime_from_spread(-100.0) == "inverted"
+        assert classify_regime_from_spread(10.0) == "steep"
+        assert classify_regime_from_spread(100.0) == "steep"
+
+    def test_high_precision_boundaries(self):
+        """Boundary with many decimal places should behave consistently."""
+        # -0.2500000001 → inverted (epsilon below boundary)
+        assert classify_regime_from_spread(-0.2500000001) == "inverted"
+        # 0.7500000001 → steep (epsilon above boundary)
+        assert classify_regime_from_spread(0.7500000001) == "steep"
+        # Exactly -0.25 → flat (boundary is flat)
+        assert classify_regime_from_spread(-0.25) == "flat"
+        # Exactly 0.75 → flat (boundary is flat)
+        assert classify_regime_from_spread(0.75) == "flat"
+
+    def test_near_boundary_inverted(self):
+        """Values infinitesimally close to -0.25 boundary."""
+        assert classify_regime_from_spread(-0.249999) == "flat"
+        assert classify_regime_from_spread(-0.250001) == "inverted"
+
+    def test_classify_regime_zero_spread(self):
+        """Zero spread should classify as flat."""
+        assert classify_regime_from_spread(0.0) == "flat"
+
+    def test_classify_regime_small_positive(self):
+        """Very small positive spread near zero is flat."""
+        assert classify_regime_from_spread(0.001) == "flat"
+        assert classify_regime_from_spread(0.0001) == "flat"
+
 
 # ---------------------------------------------------------------------------
 # calculate_returns Tests
@@ -224,6 +357,32 @@ class TestCalculateReturns:
         s = pd.Series([100, 95])
         rets = calculate_returns(s)
         assert rets.iloc[1] == pytest.approx(-0.05)
+
+    def test_constant_prices(self):
+        """All identical prices should yield all zero returns."""
+        s = pd.Series([100.0] * 10)
+        rets = calculate_returns(s)
+        assert (rets == 0.0).all()
+
+    def test_single_element(self):
+        """A single-element series should return a single zero."""
+        s = pd.Series([100.0])
+        rets = calculate_returns(s)
+        assert len(rets) == 1
+        assert rets.iloc[0] == 0.0
+
+    def test_empty_series(self):
+        """An empty series should return an empty series."""
+        s = pd.Series([], dtype=float)
+        rets = calculate_returns(s)
+        assert len(rets) == 0
+
+    def test_returns_preserves_index(self):
+        """Return series should preserve the input index."""
+        idx = pd.date_range("2020-01-01", periods=5, freq="B")
+        s = pd.Series([100, 102, 101, 103, 105], index=idx)
+        rets = calculate_returns(s)
+        pd.testing.assert_index_equal(rets.index, idx)
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +412,31 @@ class TestCalculateSharpe:
         # Excess = 0.0005 - 0.04/252 ≈ 0.000341
         assert sharpe > 0
 
+    def test_negative_sharpe(self):
+        """Consistently negative returns should produce a negative Sharpe."""
+        rets = pd.Series(np.full(252, -0.001))
+        sharpe = calculate_sharpe(rets)
+        assert sharpe < 0
+
+    def test_constant_positive_returns(self):
+        """Constant returns equal to risk-free rate produce zero excess -> zero vol -> zero Sharpe."""
+        rets = pd.Series(np.full(100, 0.02 / 252))
+        assert calculate_sharpe(rets) == 0.0
+
+    def test_large_risk_free_rate(self):
+        """When risk_free_rate exceeds all returns, Sharpe should be negative."""
+        rng = np.random.RandomState(999)
+        rets = pd.Series(rng.normal(-0.0005, 0.01, 252))
+        sharpe = calculate_sharpe(rets, risk_free_rate=0.10)
+        assert sharpe < 0
+
+    def test_sharpe_with_all_equal_excess(self):
+        """All returns equal and exactly matching risk-free rate -> Sharpe is 0 (zero vol)."""
+        rf = 0.02
+        rets = pd.Series(np.full(252, rf / 252))
+        sharpe = calculate_sharpe(rets, risk_free_rate=rf)
+        assert sharpe == 0.0
+
 
 # ---------------------------------------------------------------------------
 # calculate_max_drawdown Tests
@@ -275,6 +459,31 @@ class TestCalculateMaxDrawdown:
         rets = pd.Series([0.0] * 10 + [-0.50] + [0.0] * 10)
         mdd = calculate_max_drawdown(rets)
         assert mdd == pytest.approx(-0.50)
+
+    def test_monotonic_increasing(self):
+        """Returns that are always positive should have a zero drawdown."""
+        rets = pd.Series([0.001] * 100)
+        mdd = calculate_max_drawdown(rets)
+        assert mdd == 0.0
+
+    def test_monotonic_decreasing(self):
+        """Returns that are always negative should have drawdown == total loss."""
+        rets = pd.Series([-0.01] * 100)
+        mdd = calculate_max_drawdown(rets)
+        # Each day loses 1%, cumulative loss is large
+        assert mdd < -0.5
+
+    def test_recovery_after_drawdown(self):
+        """After a drop and full recovery, max DD should reflect the drop."""
+        rets = pd.Series([0.0, -0.30, 0.0, 0.0, 0.0, 0.4286, 0.0])
+        mdd = calculate_max_drawdown(rets)
+        assert mdd == pytest.approx(-0.30, abs=1e-4)
+
+    def test_drawdown_empty_series(self):
+        """Empty series should return NaN (no crash)."""
+        rets = pd.Series([], dtype=float)
+        mdd = calculate_max_drawdown(rets)
+        assert np.isnan(mdd) or mdd == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +509,30 @@ class TestCalculateCAGR:
         rets = pd.Series([-0.001] * 252)
         cagr = calculate_cagr(rets)
         assert cagr < 0
+
+    def test_short_period_boundary(self):
+        """Exactly 25 trading days (~0.099 years) should still produce a CAGR."""
+        rets = pd.Series([0.001] * 25)
+        cagr = calculate_cagr(rets)
+        # 25/252 ≈ 0.0992 which is < 0.1, so returns 0.0
+        assert cagr == 0.0
+
+    def test_single_day_return(self):
+        """A single day should return 0.0 (< 0.1 years)."""
+        rets = pd.Series([0.01])
+        assert calculate_cagr(rets) == 0.0
+
+    def test_cagr_exact_one_year(self):
+        """Exactly 252 trading days should produce a valid CAGR."""
+        rets = pd.Series([0.0005] * 252)
+        cagr = calculate_cagr(rets)
+        total = (1.0005 ** 252) - 1
+        assert cagr == pytest.approx(total, rel=0.01)
+
+    def test_cagr_zero_total_return(self):
+        """All zero returns should produce CAGR of 0."""
+        rets = pd.Series([0.0] * 252)
+        assert calculate_cagr(rets) == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +600,98 @@ class TestRunBacktest:
         regimes_df = _make_regimes_df(dates, "flat")
         result = run_backtest(prices_df, regimes_df)
         assert result is not None
+
+    def test_volatility_positive(self):
+        """Both static and dynamic volatility should be positive."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        assert result.extras["static_volatility"] > 0
+        assert result.extras["dynamic_volatility"] > 0
+
+    def test_max_dd_non_positive(self):
+        """Max drawdown should be <= 0."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        assert result.extras["static_max_dd"] <= 0
+        assert result.extras["dynamic_max_dd"] <= 0
+
+    def test_timestamp_in_extras(self):
+        """The extras dict should contain an ISO-format timestamp."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        assert "timestamp" in result.extras
+        assert isinstance(result.extras["timestamp"], str)
+        # Should be parseable as ISO format
+        parsed = datetime.fromisoformat(result.extras["timestamp"])
+        assert parsed is not None
+
+    def test_all_regimes_present(self):
+        """With cycling synthetic data, all three regimes should appear."""
+        prices_df, regimes_df = _make_synthetic_data(504)
+        result = run_backtest(prices_df, regimes_df)
+        regime_days = result.extras["regime_days"]
+        for regime in ("flat", "inverted", "steep"):
+            assert regime_days.get(regime, 0) > 0, f"{regime} not present"
+
+    def test_regime_transitions_non_negative(self):
+        """Regime transitions count should be >= 0."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        assert result.extras["regime_transitions"] >= 0
+
+    def test_crisis_2020_populated(self):
+        """Crisis returns for 2020 should be populated when data covers 2020."""
+        prices_df, regimes_df = _make_synthetic_data(504, start="2019-01-01")
+        result = run_backtest(prices_df, regimes_df)
+        assert isinstance(result.extras["crisis_2020_static"], float)
+        assert isinstance(result.extras["crisis_2020_dynamic"], float)
+
+    def test_crisis_2022_populated(self):
+        """Crisis returns for 2022 should be populated when data covers 2022."""
+        prices_df, regimes_df = _make_synthetic_data(504, start="2020-01-01")
+        result = run_backtest(prices_df, regimes_df)
+        assert isinstance(result.extras["crisis_2022_static"], float)
+        assert isinstance(result.extras["crisis_2022_dynamic"], float)
+
+    def test_rebalancing_costs_non_negative(self):
+        """Rebalancing costs should never be negative."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        assert result.extras["rebalancing_costs"] >= 0
+
+    def test_result_total_return_is_scaled(self):
+        """total_return field should be scaled to percentage (not decimal)."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        # Total return as a percentage should be a reasonable magnitude
+        assert isinstance(result.total_return, float)
+        assert result.total_return > -100  # Not a complete loss
+        assert result.total_return < 10000  # Sanity check upper bound
+
+    def test_result_cagr_is_scaled(self):
+        """cagr field should be scaled to percentage."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        assert isinstance(result.cagr, float)
+        # CAGR scaled to percentage should be non-zero for positive drift data
+        assert result.cagr != 0.0
+
+    def test_result_volatility_is_scaled(self):
+        """volatility field should be scaled to percentage."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        assert isinstance(result.volatility, float)
+        assert result.volatility > 0
+        assert result.volatility < 100  # Sanity check
+
+    def test_start_end_date_in_extras(self):
+        """start_date and end_date should be in the extras dict."""
+        prices_df, regimes_df = _make_synthetic_data(252)
+        result = run_backtest(prices_df, regimes_df)
+        assert "start_date" in result.extras
+        assert "end_date" in result.extras
+        assert isinstance(result.extras["start_date"], str)
+        assert isinstance(result.extras["end_date"], str)
 
 
 # ---------------------------------------------------------------------------

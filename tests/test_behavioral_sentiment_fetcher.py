@@ -774,5 +774,179 @@ class TestConstants:
         assert CACHE_TTL_HOURS > 0
 
 
+class TestOptionsSentimentExtended:
+    """Extended tests for OptionsSentiment dataclass."""
+
+    def test_all_fields(self):
+        o = OptionsSentiment(
+            timestamp="2026-01-01", skew_index=145.0, vix=18.5,
+            vix9d=17.2, vix9d_ratio=0.93, put_call_ratio=0.85,
+            fear_greed_score=-1.5,
+        )
+        assert o.skew_index == 145.0
+        assert o.vix == 18.5
+        assert o.vix9d_ratio == 0.93
+        assert o.fear_greed_score == -1.5
+
+    def test_to_dict_completeness(self):
+        o = OptionsSentiment(
+            timestamp="2026-01-01", skew_index=130.0, vix=20.0,
+            vix9d=19.0, vix9d_ratio=0.95, put_call_ratio=1.0,
+            fear_greed_score=0.0,
+        )
+        d = o.to_dict()
+        expected_keys = {"timestamp", "skew_index", "vix", "vix9d", "vix9d_ratio",
+                         "put_call_ratio", "fear_greed_score"}
+        assert set(d.keys()) == expected_keys
+
+
+class TestRetailFlowExtended:
+    """Extended tests for RetailFlow dataclass."""
+
+    def test_all_fields(self):
+        r = RetailFlow(
+            timestamp="2026-01-01", retail_call_put_ratio=0.7,
+            retail_buy_sell_imbalance=0.3, retail_top_100_correlation=0.2,
+            small_lot_premium_ratio=1.1,
+        )
+        assert r.retail_call_put_ratio == 0.7
+        assert r.retail_buy_sell_imbalance == 0.3
+
+    def test_to_dict_completeness(self):
+        r = RetailFlow(
+            timestamp="2026-01-01", retail_call_put_ratio=1.0,
+            retail_buy_sell_imbalance=0.0, retail_top_100_correlation=0.0,
+            small_lot_premium_ratio=1.0,
+        )
+        d = r.to_dict()
+        expected_keys = {"timestamp", "retail_call_put_ratio", "retail_buy_sell_imbalance",
+                         "retail_top_100_correlation", "small_lot_premium_ratio"}
+        assert set(d.keys()) == expected_keys
+
+
+class TestSocialIntensityExtended:
+    """Extended tests for SocialIntensity dataclass."""
+
+    def test_all_fields(self):
+        s = SocialIntensity(
+            timestamp="2026-01-01", mention_velocity_7d=1.5,
+            sentiment_divergence=-0.3, bot_activity_flag=True,
+            influencer_concentration=0.6,
+            reddit_sentiment=0.4, reddit_mention_velocity_1h=5.0,
+            reddit_mention_velocity_24h=80.0, reddit_virality_flag=True,
+            reddit_engagement_score=75.0, reddit_data_source="reddit_api",
+        )
+        assert s.mention_velocity_7d == 1.5
+        assert s.bot_activity_flag is True
+        assert s.reddit_sentiment == 0.4
+        assert s.reddit_virality_flag is True
+
+    def test_to_dict_completeness(self):
+        s = SocialIntensity(
+            timestamp="2026-01-01", mention_velocity_7d=1.0,
+            sentiment_divergence=0.0, bot_activity_flag=False,
+            influencer_concentration=0.5,
+        )
+        d = s.to_dict()
+        expected_keys = {"timestamp", "mention_velocity_7d", "sentiment_divergence",
+                         "bot_activity_flag", "influencer_concentration",
+                         "reddit_sentiment", "reddit_mention_velocity_1h",
+                         "reddit_mention_velocity_24h", "reddit_virality_flag",
+                         "reddit_engagement_score", "reddit_data_source"}
+        assert set(d.keys()) == expected_keys
+
+    def test_default_reddit_fields(self):
+        s = SocialIntensity(
+            timestamp="2026-01-01", mention_velocity_7d=1.0,
+            sentiment_divergence=0.0, bot_activity_flag=False,
+            influencer_concentration=0.5,
+        )
+        assert s.reddit_sentiment == 0.0
+        assert s.reddit_virality_flag is False
+        assert s.reddit_data_source == "proxy"
+
+
+class TestBehavioralSentimentSnapshotExtended:
+    """Extended tests for BehavioralSentimentSnapshot dataclass."""
+
+    def test_to_dict_serializes_nested(self):
+        opts = OptionsSentiment(
+            timestamp="2026-01-01", skew_index=130.0, vix=20.0,
+            vix9d=19.0, vix9d_ratio=0.95, put_call_ratio=1.0,
+            fear_greed_score=0.0,
+        )
+        retail = RetailFlow(
+            timestamp="2026-01-01", retail_call_put_ratio=1.0,
+            retail_buy_sell_imbalance=0.0, retail_top_100_correlation=0.0,
+            small_lot_premium_ratio=1.0,
+        )
+        social = SocialIntensity(
+            timestamp="2026-01-01", mention_velocity_7d=1.0,
+            sentiment_divergence=0.0, bot_activity_flag=False,
+            influencer_concentration=0.5,
+        )
+        snap = BehavioralSentimentSnapshot(
+            timestamp="2026-01-01", options=opts, retail=retail,
+            social=social, composite_score=0.5, signal_type="greed",
+            confidence=0.7, data_fresh=True,
+        )
+        d = snap.to_dict()
+        assert "options" in d
+        assert isinstance(d["options"], dict)
+        assert "retail" in d
+        assert isinstance(d["retail"], dict)
+        assert "social" in d
+        assert isinstance(d["social"], dict)
+        assert d["composite_score"] == 0.5
+        assert d["signal_type"] == "greed"
+
+    def test_signal_type_values(self):
+        """Valid signal types."""
+        for st in ("extreme_fear", "fear", "neutral", "greed", "extreme_greed"):
+            opts = OptionsSentiment(
+                timestamp="2026-01-01", skew_index=130.0, vix=20.0,
+                vix9d=19.0, vix9d_ratio=0.95, put_call_ratio=1.0,
+                fear_greed_score=0.0,
+            )
+            retail = RetailFlow(
+                timestamp="2026-01-01", retail_call_put_ratio=1.0,
+                retail_buy_sell_imbalance=0.0, retail_top_100_correlation=0.0,
+                small_lot_premium_ratio=1.0,
+            )
+            social = SocialIntensity(
+                timestamp="2026-01-01", mention_velocity_7d=1.0,
+                sentiment_divergence=0.0, bot_activity_flag=False,
+                influencer_concentration=0.5,
+            )
+            snap = BehavioralSentimentSnapshot(
+                timestamp="2026-01-01", options=opts, retail=retail,
+                social=social, composite_score=0.0, signal_type=st,
+                confidence=0.5, data_fresh=True,
+            )
+            assert snap.signal_type == st
+
+
+class TestConstantsExtended:
+    """Extended constant validation tests."""
+
+    def test_extreme_fear_threshold(self):
+        assert EXTREME_FEAR_THRESHOLD == -2.0
+
+    def test_extreme_greed_threshold(self):
+        assert EXTREME_GREED_THRESHOLD == 2.0
+
+    def test_fear_threshold(self):
+        assert FEAR_THRESHOLD == -1.0
+
+    def test_greed_threshold(self):
+        assert GREED_THRESHOLD == 1.0
+
+    def test_threshold_ordering(self):
+        assert EXTREME_FEAR_THRESHOLD < FEAR_THRESHOLD < GREED_THRESHOLD < EXTREME_GREED_THRESHOLD
+
+    def test_reddit_available_is_bool(self):
+        assert isinstance(REDDIT_AVAILABLE, bool)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

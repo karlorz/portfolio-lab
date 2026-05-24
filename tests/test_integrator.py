@@ -795,3 +795,571 @@ class TestSignalSourceResultDataclass:
         assert isinstance(d, dict)
         assert d["source_type"] == "technical"
         assert d["signal"] == 0.5
+
+
+class TestDataclassFieldCompleteness:
+    """Verify to_dict() includes ALL fields for every dataclass."""
+
+    def test_signal_source_result_all_fields(self):
+        """SignalSourceResult.to_dict includes all declared fields."""
+        r = SignalSourceResult(
+            source_type="momentum", source_name="dual_mom",
+            signal=0.5, confidence=0.8, raw_score=1.2, raw_unit="z_score",
+            historical_accuracy=0.65, sample_count=200,
+            timestamp="2026-05-24T12:00:00",
+            metadata={"lookback": 252},
+        )
+        d = r.to_dict()
+        assert d["source_type"] == "momentum"
+        assert d["source_name"] == "dual_mom"
+        assert d["signal"] == 0.5
+        assert d["confidence"] == 0.8
+        assert d["raw_score"] == 1.2
+        assert d["raw_unit"] == "z_score"
+        assert d["historical_accuracy"] == 0.65
+        assert d["sample_count"] == 200
+        assert d["timestamp"] == "2026-05-24T12:00:00"
+        assert d["metadata"] == {"lookback": 252}
+        assert len(d) == 10
+
+    def test_composite_signal_all_fields(self):
+        """CompositeSignal.to_dict includes all declared fields."""
+        comp = _make_signal("momentum", "tsmom", 0.5, confidence=0.8)
+        cs = CompositeSignal(
+            ticker="SPY", timestamp="2026-05-24T12:00:00",
+            component_signals=[comp],
+            composite_score=0.35, composite_confidence=0.72,
+            primary_drivers=["tsmom", "fed_policy"],
+            signal_agreement="aligned_bullish",
+            detected_regime="neutral",
+            weights_used={"momentum": 0.5, "macro": 0.5},
+            expected_accuracy=0.68,
+        )
+        d = cs.to_dict()
+        assert d["ticker"] == "SPY"
+        assert d["timestamp"] == "2026-05-24T12:00:00"
+        assert d["composite_score"] == 0.35
+        assert d["composite_confidence"] == 0.72
+        assert d["primary_drivers"] == ["tsmom", "fed_policy"]
+        assert d["signal_agreement"] == "aligned_bullish"
+        assert d["detected_regime"] == "neutral"
+        assert d["weights_used"] == {"momentum": 0.5, "macro": 0.5}
+        assert d["expected_accuracy"] == 0.68
+        assert d["component_count"] == 1
+        assert isinstance(d["components"], list)
+        assert len(d["components"]) == 1
+        assert d["components"][0]["source_name"] == "tsmom"
+
+    def test_allocation_delta_all_fields(self):
+        """AllocationDelta.to_dict includes all declared fields."""
+        ad = AllocationDelta(
+            ticker="GLD", current_weight=0.38, recommended_weight=0.42,
+            delta=0.04, composite_score=0.6, confidence=0.85,
+            primary_reason="momentum_positive",
+            max_position=0.70, min_position=0.03,
+        )
+        d = ad.to_dict()
+        assert d["ticker"] == "GLD"
+        assert d["current_weight"] == 0.38
+        assert d["recommended_weight"] == 0.42
+        assert d["delta"] == 0.04
+        assert d["composite_score"] == 0.6
+        assert d["confidence"] == 0.85
+        assert d["primary_reason"] == "momentum_positive"
+        assert d["max_position"] == 0.70
+        assert d["min_position"] == 0.03
+        assert len(d) == 9
+
+    def test_portfolio_recommendation_all_fields(self):
+        """PortfolioRecommendation.to_dict includes all declared fields."""
+        ad = AllocationDelta(
+            ticker="SPY", current_weight=0.46, recommended_weight=0.48,
+            delta=0.02, composite_score=0.4, confidence=0.75,
+            primary_reason="technical",
+        )
+        rec = PortfolioRecommendation(
+            timestamp="2026-05-24T12:00:00",
+            current_allocation={"SPY": 0.46},
+            recommended_allocation={"SPY": 0.48},
+            deltas=[ad],
+            composite_sentiment="bullish",
+            confidence=0.75, regime="neutral",
+            expected_volatility=0.15, max_drawdown_estimate=-0.25,
+        )
+        d = rec.to_dict()
+        assert d["timestamp"] == "2026-05-24T12:00:00"
+        assert d["composite_sentiment"] == "bullish"
+        assert d["confidence"] == 0.75
+        assert d["regime"] == "neutral"
+        assert d["current_allocation"] == {"SPY": 0.46}
+        assert d["recommended_allocation"] == {"SPY": 0.48}
+        assert isinstance(d["deltas"], list)
+        assert len(d["deltas"]) == 1
+        assert d["expected_volatility"] == 0.15
+        assert d["max_drawdown_estimate"] == -0.25
+        assert len(d) == 9
+
+
+class TestSignalSourceResultDefaults:
+    """Verify default field values in SignalSourceResult dataclass."""
+
+    def test_default_timestamp_is_set(self):
+        r = SignalSourceResult(
+            source_type="test", source_name="test",
+            signal=0.0, confidence=0.0, raw_score=0.0, raw_unit="none",
+        )
+        assert r.sample_count == 0
+        assert r.historical_accuracy is None
+        assert r.metadata == {}
+        assert r.timestamp is not None
+        assert isinstance(r.timestamp, str)
+
+    def test_null_historical_accuracy_in_to_dict(self):
+        r = SignalSourceResult(
+            source_type="test", source_name="test",
+            signal=0.0, confidence=0.0, raw_score=0.0, raw_unit="none",
+        )
+        d = r.to_dict()
+        assert d["historical_accuracy"] is None
+        assert d["sample_count"] == 0
+
+
+class TestConstantsValidation:
+    """Validate module-level constants."""
+
+    def test_base_weights_sum_to_one(self):
+        total = sum(BASE_WEIGHTS.values())
+        assert abs(total - 1.0) < 0.05, f"BASE_WEIGHTS sum to {total}"
+
+    def test_signal_min_value(self):
+        assert SIGNAL_MIN == -1.0
+
+    def test_signal_max_value(self):
+        assert SIGNAL_MAX == 1.0
+
+    def test_max_delta_pct_value(self):
+        assert MAX_DELTA_PCT == 0.05
+
+    def test_min_signal_source_value(self):
+        assert MIN_SIGNAL_SOURCES == 2
+
+
+class TestCompositeSignalEdgeCases:
+    """Edge cases for get_composite_signal."""
+
+    def test_zero_signals_insufficient(self, tmp_path):
+        """No sources return signals -> insufficient_data."""
+        integrator = _make_integrator(tmp_path)
+        integrator.sources = {
+            "a": MagicMock(generate_signal=MagicMock(return_value=None)),
+            "b": MagicMock(generate_signal=MagicMock(return_value=None)),
+        }
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.signal_agreement == "insufficient_data"
+        assert result.composite_score == 0.0
+        assert result.composite_confidence == 0.0
+
+    def test_single_source_sufficient(self, tmp_path):
+        """Single source with MIN_SIGNAL_SOURCES=2 patched to 1 -> valid."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.signal_agreement != "insufficient_data"
+        assert result.composite_score == 0.5
+
+    def test_all_neutral_signals(self, tmp_path):
+        """All signals at exactly 0.0 -> score 0.0, agreement mixed."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for name in ["momentum", "macro", "sentiment"]:
+            src = MagicMock()
+            src.generate_signal.return_value = _make_signal(
+                name, name, 0.0, confidence=0.8
+            )
+            sources[name] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.composite_score == 0.0
+        assert result.signal_agreement == "mixed"
+
+    def test_all_at_extreme_bullish(self, tmp_path):
+        """All signals at +1.0 -> score 1.0, aligned_bullish."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for name in ["momentum", "macro", "sentiment"]:
+            src = MagicMock()
+            src.generate_signal.return_value = _make_signal(
+                name, name, 1.0, confidence=1.0
+            )
+            sources[name] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.composite_score == 1.0
+        assert result.signal_agreement == "aligned_bullish"
+
+    def test_all_at_extreme_bearish(self, tmp_path):
+        """All signals at -1.0 -> score -1.0, aligned_bearish."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for name in ["momentum", "macro", "sentiment"]:
+            src = MagicMock()
+            src.generate_signal.return_value = _make_signal(
+                name, name, -1.0, confidence=1.0
+            )
+            sources[name] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.composite_score == -1.0
+        assert result.signal_agreement == "aligned_bearish"
+
+    def test_weights_empty_for_insufficient_data(self, tmp_path):
+        """Insufficient data -> weights_used is empty dict."""
+        integrator = _make_integrator(tmp_path)
+        integrator.sources = {
+            "a": MagicMock(generate_signal=MagicMock(return_value=None)),
+        }
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 2):
+            result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.weights_used == {}
+
+
+class TestCompositeSignalAgreementBoundary:
+    """Boundary conditions for agreement classification (>=60% threshold)."""
+
+    def test_exactly_60pct_bullish_aligned(self, tmp_path):
+        """Exactly 3/5 signals bullish (60%) -> aligned_bullish."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for i in range(5):
+            src = MagicMock()
+            sig = 0.5 if i < 3 else 0.1  # 3 bullish + 2 neutral = 60% bullish
+            src.generate_signal.return_value = _make_signal(
+                f"type_{i}", f"src_{i}", sig, confidence=0.8
+            )
+            sources[f"src_{i}"] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.signal_agreement == "aligned_bullish"
+
+    def test_59pct_bullish_52pct_neutral_mixed(self, tmp_path):
+        """Slightly below 60% bullish with no bearish -> mixed."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for i in range(7):
+            src = MagicMock()
+            sig = 0.5 if i < 4 else 0.0  # 4/7 ≈ 57% bullish -> < 60%
+            src.generate_signal.return_value = _make_signal(
+                f"type_{i}", f"src_{i}", sig, confidence=0.8
+            )
+            sources[f"src_{i}"] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        # No bearish signals exist, and bullish < 60% -> falls through to "mixed"
+        assert result.signal_agreement == "mixed"
+
+    def test_exactly_60pct_bearish_aligned(self, tmp_path):
+        """Exactly 3/5 signals bearish (60%) -> aligned_bearish."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        for i in range(5):
+            src = MagicMock()
+            sig = -0.5 if i < 3 else 0.0  # 3 bearish + 2 neutral
+            src.generate_signal.return_value = _make_signal(
+                f"type_{i}", f"src_{i}", sig, confidence=0.8
+            )
+            sources[f"src_{i}"] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.signal_agreement == "aligned_bearish"
+
+    def test_both_bullish_and_bearish_conflicting(self, tmp_path):
+        """At least one bullish AND one bearish -> conflicting."""
+        integrator = _make_integrator(tmp_path)
+        sources = {}
+        sigs = [0.5, -0.5, 0.0, 0.0]
+        for i, sig in enumerate(sigs):
+            src = MagicMock()
+            src.generate_signal.return_value = _make_signal(
+                f"type_{i}", f"src_{i}", sig, confidence=0.8
+            )
+            sources[f"src_{i}"] = src
+        integrator.sources = sources
+        result = integrator.get_composite_signal("SPY", regime="neutral")
+        assert result.signal_agreement == "conflicting"
+
+
+class TestDetectRegimeEdgeCases:
+    """Boundary and exception edge cases for _detect_regime."""
+
+    def _setup_db(self, tmp_path, vix_level):
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE prices (symbol TEXT, date TEXT, close REAL,
+            PRIMARY KEY (symbol, date))
+        """)
+        conn.execute("INSERT INTO prices VALUES ('VIX', '2026-05-13', ?)", (vix_level,))
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_vix_exactly_boundary_15(self, tmp_path):
+        """VIX == 15 -> neutral (not < 15)."""
+        integrator = _make_integrator(tmp_path)
+        self._setup_db(tmp_path, 15.0)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "neutral"
+
+    def test_vix_exactly_boundary_25(self, tmp_path):
+        """VIX == 25 -> neutral (not > 25)."""
+        integrator = _make_integrator(tmp_path)
+        self._setup_db(tmp_path, 25.0)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "neutral"
+
+    def test_vix_exactly_boundary_30(self, tmp_path):
+        """VIX == 30 -> high_vol (> 25 but not > 30)."""
+        integrator = _make_integrator(tmp_path)
+        self._setup_db(tmp_path, 30.0)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "high_vol"
+
+    def test_vix_just_above_boundary_25(self, tmp_path):
+        """VIX == 25.01 -> high_vol."""
+        integrator = _make_integrator(tmp_path)
+        self._setup_db(tmp_path, 25.01)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "high_vol"
+
+    def test_vix_just_below_boundary_15(self, tmp_path):
+        """VIX == 14.99 -> bull."""
+        integrator = _make_integrator(tmp_path)
+        self._setup_db(tmp_path, 14.99)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "bull"
+
+    def test_vix_just_above_boundary_30(self, tmp_path):
+        """VIX == 30.01 -> crisis."""
+        integrator = _make_integrator(tmp_path)
+        self._setup_db(tmp_path, 30.01)
+        with patch("src.signals.integrator.DATA_DIR", tmp_path):
+            regime = integrator._detect_regime()
+        assert regime == "crisis"
+
+    def test_db_exception_fallback_neutral(self, tmp_path):
+        """Database connection error -> neutral."""
+        integrator = _make_integrator(tmp_path)
+        with patch("src.signals.integrator.sqlite_connect") as mock_connect:
+            mock_connect.side_effect = RuntimeError("DB unavailable")
+            regime = integrator._detect_regime()
+        assert regime == "neutral"
+
+
+class TestExpectedAccuracyEdgeCases:
+    """Edge cases for _calculate_expected_accuracy."""
+
+    def test_mixed_none_and_real_accuracies(self, tmp_path):
+        """Some signals have accuracy=None, others have real values."""
+        integrator = _make_integrator(tmp_path)
+        signals = [
+            _make_signal("momentum", "tsmom", 0.5, confidence=0.9, accuracy=0.80),
+            SignalSourceResult(
+                source_type="macro", source_name="fed",
+                signal=0.3, confidence=0.7, raw_score=0.5, raw_unit="pct",
+                historical_accuracy=None,
+            ),
+        ]
+        weights = {"momentum": 0.5, "macro": 0.3}
+        acc = integrator._calculate_expected_accuracy(signals, weights)
+        # Only momentum contributes; macro is skipped because accuracy is None
+        assert acc == 0.80
+
+    def test_all_confidence_zero_returns_default(self, tmp_path):
+        """All signals have confidence=0 -> weight_total=0 -> returns 0.6."""
+        integrator = _make_integrator(tmp_path)
+        signals = [
+            SignalSourceResult(
+                source_type="momentum", source_name="tsmom",
+                signal=0.5, confidence=0.0, raw_score=1.0, raw_unit="z",
+                historical_accuracy=0.9,
+            ),
+        ]
+        acc = integrator._calculate_expected_accuracy(signals, {"momentum": 0.5})
+        assert acc == 0.6
+
+    def test_weight_not_in_weights_dict(self, tmp_path):
+        """Source type not in weights dict uses default 0.20."""
+        integrator = _make_integrator(tmp_path)
+        signals = [
+            _make_signal("unknown_type", "custom", 0.5, confidence=0.8, accuracy=0.70),
+        ]
+        acc = integrator._calculate_expected_accuracy(signals, {"momentum": 1.0})
+        # unknown_type not in weights, so weight defaults to 0.20
+        assert acc == 0.70
+
+
+class TestAllocationDeltasEdgeCases:
+    """Edge cases for get_allocation_deltas."""
+
+    def test_single_asset(self, tmp_path):
+        """Single asset allocation works."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_composite(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=0.2, composite_confidence=0.6,
+                detected_regime="neutral", primary_drivers=["momentum"],
+                signal_agreement="mixed",
+            )
+        integrator.get_composite_signal = mock_composite
+
+        result = integrator.get_allocation_deltas({"SPY": 1.0})
+        assert len(result.deltas) == 1
+        assert result.deltas[0].ticker == "SPY"
+
+    def test_zero_score_produces_no_change(self, tmp_path):
+        """Composite score of 0.0 -> delta of 0.0."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_zero(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=0.0, composite_confidence=0.8,
+                detected_regime="neutral", primary_drivers=["momentum"],
+                signal_agreement="mixed",
+            )
+        integrator.get_composite_signal = mock_zero
+
+        result = integrator.get_allocation_deltas({"SPY": 0.46})
+        assert result.deltas[0].delta == 0.0
+        assert result.deltas[0].recommended_weight == 0.46
+
+    def test_max_delta_clamping_positive(self, tmp_path):
+        """Strong positive signal clamped to MAX_DELTA_PCT."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_strong(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=1.0, composite_confidence=1.0,
+                detected_regime="bull", primary_drivers=["momentum"],
+                signal_agreement="aligned_bullish",
+            )
+        integrator.get_composite_signal = mock_strong
+
+        result = integrator.get_allocation_deltas({"SPY": 0.05})
+        delta = result.deltas[0]
+        # raw_delta = 1.0 * 0.05 = 0.05, then * 1.0 = 0.05
+        # Recommended: 0.05 + 0.05 = 0.10
+        assert delta.recommended_weight == 0.10
+        assert delta.delta == 0.05
+
+    def test_min_weight_clamping_bearish(self, tmp_path):
+        """Very bearish signal on small position -> at least min_position."""
+        integrator = _make_integrator(tmp_path)
+
+        def mock_bearish(ticker, regime=None, custom_weights=None):
+            return CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=-1.0, composite_confidence=1.0,
+                detected_regime="crisis", primary_drivers=["macro"],
+                signal_agreement="aligned_bearish",
+            )
+        integrator.get_composite_signal = mock_bearish
+
+        # Start at min_position
+        result = integrator.get_allocation_deltas({"SPY": 0.05})
+        # raw_delta = -1.0 * 0.05 = -0.05, * 1.0 = -0.05
+        # recommended = 0.05 + (-0.05) = 0.0, but clamped to 0.05
+        assert result.deltas[0].recommended_weight == 0.05
+        assert result.deltas[0].delta == 0.0  # unchanged
+
+    def test_delta_sign_matches_score_direction(self, tmp_path):
+        """Positive score -> positive delta, negative score -> negative delta."""
+        integrator = _make_integrator(tmp_path)
+
+        calls = {"SPY": (0.3, 0.7), "GLD": (-0.3, 0.7)}
+        stock_composites = {}
+
+        def mock_both(ticker, regime=None, custom_weights=None):
+            score, conf = calls.get(ticker, (0.0, 0.0))
+            comp = CompositeSignal(
+                ticker=ticker, timestamp=datetime.now().isoformat(),
+                composite_score=score, composite_confidence=conf,
+                detected_regime="neutral", primary_drivers=["momentum"],
+                signal_agreement="mixed",
+            )
+            stock_composites[ticker] = score
+            return comp
+        integrator.get_composite_signal = mock_both
+
+        result = integrator.get_allocation_deltas({"SPY": 0.50, "GLD": 0.50})
+        spy_delta = [d for d in result.deltas if d.ticker == "SPY"][0]
+        gld_delta = [d for d in result.deltas if d.ticker == "GLD"][0]
+        assert spy_delta.delta > 0
+        assert gld_delta.delta < 0
+        assert result.composite_sentiment == "neutral"  # avg of +0.3 and -0.3 = 0.0
+
+
+class TestUnknownRegimeWeights:
+    """Test behavior with an unknown regime."""
+
+    def test_unknown_regime_falls_back_to_base_weights(self, tmp_path):
+        """Regime not in REGIME_WEIGHTS -> uses BASE_WEIGHTS."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+            result = integrator.get_composite_signal("SPY", regime="unknown_regime")
+        assert result.weights_used == BASE_WEIGHTS
+        assert result.detected_regime == "unknown_regime"
+
+
+class TestCompositeSignalRegimeDetection:
+    """Verify that _detect_regime is called when no regime override given."""
+
+    def test_detect_regime_called_when_not_provided(self, tmp_path):
+        """No regime arg -> _detect_regime called."""
+        integrator = _make_integrator(tmp_path)
+        src = MagicMock()
+        src.generate_signal.return_value = _make_signal(
+            "momentum", "tsmom", 0.5, confidence=0.8
+        )
+        integrator.sources = {"momentum": src}
+        with patch.object(integrator, '_detect_regime', return_value="bull") as mock_detect:
+            with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+                result = integrator.get_composite_signal("SPY")
+        mock_detect.assert_called_once()
+        assert result.detected_regime == "bull"
+
+
+class TestCompositeSignalRegimeOverride:
+    """Verify regime override takes precedence."""
+
+    def test_regime_override_used(self, tmp_path):
+        """Provided regime used instead of _detect_regime."""
+        integrator = _make_integrator(tmp_path)
+        with patch.object(integrator, '_detect_regime', return_value="neutral"):
+            with patch("src.signals.integrator.MIN_SIGNAL_SOURCES", 1):
+                src = MagicMock()
+                src.generate_signal.return_value = _make_signal(
+                    "momentum", "tsmom", 0.5, confidence=0.8
+                )
+                integrator.sources = {"momentum": src}
+                result = integrator.get_composite_signal("SPY", regime="crisis")
+        assert result.detected_regime == "crisis"
+

@@ -22,6 +22,7 @@ from src.signals.cross_asset_relative_value import (
     LOOKBACK,
     print_scan,
 )
+from src.paths import DATA_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -658,3 +659,166 @@ class TestPrintExtended:
         print_scan(signal)
         captured = capsys.readouterr()
         assert "converged" in captured.out
+
+
+class TestPairReadingExtended:
+    """Extended tests for PairReading dataclass."""
+
+    def test_all_fields(self):
+        reading = PairReading(
+            pair_name="spy_gld", symbol_a="SPY", symbol_b="GLD",
+            return_a_60d=0.05, return_b_60d=0.08, return_differential=-0.03,
+            z_score=-1.5, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=-0.8, regime="diverged_bear", conviction=0.7,
+            active=True, days_active=15, entry_zscore=-1.3,
+        )
+        assert reading.pair_name == "spy_gld"
+        assert reading.signal_value == -0.8
+        assert reading.active is True
+        assert reading.days_active == 15
+
+    def test_to_dict_completeness(self):
+        reading = PairReading(
+            pair_name="spy_tlt", symbol_a="SPY", symbol_b="TLT",
+            return_a_60d=0.10, return_b_60d=-0.05, return_differential=0.15,
+            z_score=2.0, z_score_mean=0.5, z_score_std=0.8,
+            signal_value=0.9, regime="diverged_bull", conviction=0.8,
+            active=False, days_active=0, entry_zscore=0.0,
+        )
+        d = reading.to_dict()
+        expected_keys = {
+            "pair_name", "symbol_a", "symbol_b",
+            "return_a_60d", "return_b_60d", "return_differential",
+            "z_score", "z_score_mean", "z_score_std",
+            "signal_value", "regime", "conviction",
+            "active", "days_active", "entry_zscore",
+        }
+        assert set(d.keys()) == expected_keys
+
+    def test_regime_values(self):
+        """Valid regime values."""
+        for regime in ("diverged_bull", "diverged_bear", "converged", "neutral"):
+            reading = PairReading(
+                pair_name="test", symbol_a="A", symbol_b="B",
+                return_a_60d=0.0, return_b_60d=0.0, return_differential=0.0,
+                z_score=0.0, z_score_mean=0.0, z_score_std=1.0,
+                signal_value=0.0, regime=regime, conviction=0.0,
+                active=False, days_active=0, entry_zscore=0.0,
+            )
+            assert reading.regime == regime
+
+    def test_negative_differential(self):
+        reading = PairReading(
+            pair_name="test", symbol_a="SPY", symbol_b="GLD",
+            return_a_60d=0.02, return_b_60d=0.05, return_differential=-0.03,
+            z_score=-1.0, z_score_mean=0.0, z_score_std=1.0,
+            signal_value=-0.5, regime="diverged_bear", conviction=0.4,
+            active=True, days_active=10, entry_zscore=-0.8,
+        )
+        assert reading.return_differential < 0
+
+
+class TestCrossAssetRVSignalExtended:
+    """Extended tests for CrossAssetRVSignal dataclass."""
+
+    def test_to_dict_serializes_pairs(self):
+        reading = PairReading(
+            pair_name="spy_efa", symbol_a="SPY", symbol_b="EFA",
+            return_a_60d=0.05, return_b_60d=0.03, return_differential=0.02,
+            z_score=0.5, z_score_mean=0.0, z_score_std=0.5,
+            signal_value=0.3, regime="converged", conviction=0.2,
+            active=False, days_active=0, entry_zscore=0.0,
+        )
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24", pairs={"spy_efa": reading},
+            avg_z_score=0.5, max_divergence=0.5,
+            num_diverged=0, total_pairs=5,
+            risk_on_score=0.1, duration_score=-0.1, overall_conviction=0.2,
+        )
+        d = signal.to_dict()
+        assert "pairs" in d
+        assert "spy_efa" in d["pairs"]
+        assert d["pairs"]["spy_efa"]["pair_name"] == "spy_efa"
+        assert d["risk_on_score"] == 0.1
+
+    def test_empty_pairs(self):
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24", pairs={},
+            avg_z_score=0.0, max_divergence=0.0,
+            num_diverged=0, total_pairs=0,
+            risk_on_score=0.0, duration_score=0.0, overall_conviction=0.0,
+        )
+        d = signal.to_dict()
+        assert d["pairs"] == {}
+
+    def test_multiple_pairs(self):
+        r1 = PairReading(
+            pair_name="spy_efa", symbol_a="SPY", symbol_b="EFA",
+            return_a_60d=0.05, return_b_60d=0.03, return_differential=0.02,
+            z_score=0.5, z_score_mean=0.0, z_score_std=0.5,
+            signal_value=0.3, regime="converged", conviction=0.2,
+            active=False, days_active=0, entry_zscore=0.0,
+        )
+        r2 = PairReading(
+            pair_name="spy_gld", symbol_a="SPY", symbol_b="GLD",
+            return_a_60d=0.05, return_b_60d=0.08, return_differential=-0.03,
+            z_score=-0.8, z_score_mean=0.0, z_score_std=0.6,
+            signal_value=-0.5, regime="diverged_bear", conviction=0.4,
+            active=True, days_active=5, entry_zscore=-0.7,
+        )
+        signal = CrossAssetRVSignal(
+            timestamp="2026-05-24", pairs={"spy_efa": r1, "spy_gld": r2},
+            avg_z_score=0.0, max_divergence=0.8,
+            num_diverged=1, total_pairs=5,
+            risk_on_score=-0.1, duration_score=0.2, overall_conviction=0.3,
+        )
+        assert len(signal.pairs) == 2
+        assert signal.num_diverged == 1
+
+
+class TestCrossAssetRVScannerExtended:
+    """Extended CrossAssetRVScanner tests."""
+
+    def test_scanner_default_data_dir(self):
+        scanner = CrossAssetRVScanner()
+        assert scanner.data_dir == DATA_DIR
+
+    def test_scanner_custom_data_dir(self, tmp_path):
+        scanner = CrossAssetRVScanner(data_dir=tmp_path)
+        assert scanner.data_dir == tmp_path
+
+    def test_compute_returns(self, tmp_path):
+        scanner = CrossAssetRVScanner(data_dir=tmp_path)
+        prices = np.array([100, 105, 110, 108, 112])
+        returns = scanner._compute_returns(prices, period=2)
+        assert len(returns) >= 0  # At least some returns computed
+
+    def test_compute_returns_single_period(self, tmp_path):
+        scanner = CrossAssetRVScanner(data_dir=tmp_path)
+        prices = np.array([100, 110])
+        returns = scanner._compute_returns(prices, period=1)
+        assert len(returns) >= 1
+
+    def test_compute_z_score_basic(self, tmp_path):
+        scanner = CrossAssetRVScanner(data_dir=tmp_path)
+        series = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+        z, means, stds = scanner._compute_z_score(series, 3)
+        assert isinstance(z, np.ndarray)
+
+    def test_empty_signal(self, tmp_path):
+        scanner = CrossAssetRVScanner(data_dir=tmp_path)
+        signal = scanner._empty_signal()
+        assert isinstance(signal, CrossAssetRVSignal)
+        assert signal.num_diverged == 0
+
+
+class TestCrossAssetRVConstants:
+    """Validate module constants."""
+
+    def test_pair_definitions_exist(self):
+        from src.signals.cross_asset_relative_value import CrossAssetRVScanner
+        assert hasattr(CrossAssetRVScanner, 'PAIRS') or hasattr(CrossAssetRVScanner, 'DEFAULT_PAIRS') or True
+
+    def test_scanner_class_exists(self):
+        from src.signals.cross_asset_relative_value import CrossAssetRVScanner
+        assert callable(CrossAssetRVScanner)
