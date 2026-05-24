@@ -271,3 +271,163 @@ class TestCompareWithEnsembleSource:
             result = bridge.compare_with_ensemble_source("other")
 
         assert result["recommendation"] == "standalone"
+
+
+class TestWeightToSignalExtended:
+    """Additional _weight_to_signal edge cases."""
+
+    def test_large_positive_delta(self):
+        """Very large positive delta should still return +1.0."""
+        assert OrchestratorEnsembleBridge._weight_to_signal(1.0, 0.0) == 1.0
+
+    def test_large_negative_delta(self):
+        """Very large negative delta should still return -1.0."""
+        assert OrchestratorEnsembleBridge._weight_to_signal(-1.0, 0.0) == -1.0
+
+    def test_symmetry(self):
+        """Positive and negative deltas of same magnitude should give symmetric results."""
+        assert (OrchestratorEnsembleBridge._weight_to_signal(0.03, 0.0) ==
+                -OrchestratorEnsembleBridge._weight_to_signal(-0.03, 0.0))
+
+    def test_moderate_underweight_boundary(self):
+        """Delta = -0.021 should give -0.5."""
+        assert OrchestratorEnsembleBridge._weight_to_signal(-0.021, 0.0) == -0.5
+
+    def test_moderate_overweight_boundary(self):
+        """Delta = 0.049 should give +0.5."""
+        assert OrchestratorEnsembleBridge._weight_to_signal(0.049, 0.0) == 0.5
+
+    def test_zero_current_zero_baseline(self):
+        """Both zero → delta 0 → neutral."""
+        assert OrchestratorEnsembleBridge._weight_to_signal(0.0, 0.0) == 0.0
+
+
+class TestUnifiedSignalReadingExtended:
+    """Additional UnifiedSignalReading edge cases."""
+
+    def test_to_dict_serializable(self):
+        """to_dict should produce JSON-serializable output."""
+        signal = UnifiedSignalReading(
+            timestamp="2026-05-23T00:00:00", source="test", value=0.1,
+            confidence=0.9, weight=0.20,
+            spy_signal=0.0, gld_signal=0.0, tlt_signal=0.0,
+            ief_signal=0.0, shy_signal=0.0, btc_signal=0.0, eth_signal=0.0,
+            risk_signal=0.0, execution_signal=0.0,
+            explanation="", num_overlays_active=0, conflict_count=0,
+        )
+        d = signal.to_dict()
+        serialized = json.dumps(d)
+        assert isinstance(serialized, str)
+
+    def test_to_signal_reading_source_mapping(self):
+        """to_signal_reading should always map to UNIFIED_OVERLAY source."""
+        signal = UnifiedSignalReading(
+            timestamp="2026-05-23T00:00:00", source="custom_source",
+            value=0.5, confidence=0.7, weight=0.20,
+            spy_signal=0.1, gld_signal=-0.1, tlt_signal=0.0,
+            ief_signal=0.0, shy_signal=0.0, btc_signal=0.0, eth_signal=0.0,
+            risk_signal=0.0, execution_signal=0.0,
+            explanation="Custom", num_overlays_active=1, conflict_count=0,
+        )
+        reading = signal.to_signal_reading()
+        assert reading.source == SignalSource.UNIFIED_OVERLAY
+
+    def test_negative_signals_in_asset_map(self):
+        """Negative signals should be preserved in asset_signals."""
+        signal = UnifiedSignalReading(
+            timestamp="2026-05-23T00:00:00", source="test",
+            value=-0.3, confidence=0.6, weight=0.20,
+            spy_signal=-0.5, gld_signal=-0.2, tlt_signal=-0.1,
+            ief_signal=-0.05, shy_signal=0.0, btc_signal=-0.1, eth_signal=-0.05,
+            risk_signal=-0.4, execution_signal=-0.2,
+            explanation="Bearish", num_overlays_active=3, conflict_count=0,
+        )
+        reading = signal.to_signal_reading()
+        assert reading.asset_signals["SPY"] == -0.5
+        assert reading.asset_signals["GLD"] == -0.2
+
+    def test_all_signal_fields_present_in_dict(self):
+        """to_dict should include all fields."""
+        signal = UnifiedSignalReading(
+            timestamp="2026-05-23T00:00:00", source="test",
+            value=0.1, confidence=0.8, weight=0.20,
+            spy_signal=0.3, gld_signal=0.1, tlt_signal=-0.05,
+            ief_signal=0.0, shy_signal=0.0, btc_signal=0.1, eth_signal=0.05,
+            risk_signal=-0.1, execution_signal=0.2,
+            explanation="All fields", num_overlays_active=4, conflict_count=1,
+        )
+        d = signal.to_dict()
+        expected_fields = {
+            "timestamp", "source", "value", "confidence", "weight",
+            "spy_signal", "gld_signal", "tlt_signal", "ief_signal",
+            "shy_signal", "btc_signal", "eth_signal", "risk_signal",
+            "execution_signal", "explanation", "num_overlays_active",
+            "conflict_count",
+        }
+        assert expected_fields.issubset(set(d.keys()))
+
+
+class TestBridgeConvenienceFunctions:
+    """Test standalone convenience functions."""
+
+    def test_get_unified_ensemble_signal(self):
+        """get_unified_ensemble_signal should return UnifiedSignalReading."""
+        from src.strategy.orchestrator_ensemble_bridge import get_unified_ensemble_signal
+        with patch.object(OrchestratorEnsembleBridge, 'generate_signal') as mock_gen:
+            mock_gen.return_value = UnifiedSignalReading(
+                timestamp="2026-05-23T00:00:00", source="test",
+                value=0.1, confidence=0.8, weight=0.20,
+                spy_signal=0.0, gld_signal=0.0, tlt_signal=0.0,
+                ief_signal=0.0, shy_signal=0.0, btc_signal=0.0, eth_signal=0.0,
+                risk_signal=0.0, execution_signal=0.0,
+                explanation="", num_overlays_active=0, conflict_count=0,
+            )
+            result = get_unified_ensemble_signal()
+            assert isinstance(result, UnifiedSignalReading)
+
+    def test_get_unified_ensemble_reading(self):
+        """get_unified_ensemble_reading should return SignalReading."""
+        from src.strategy.orchestrator_ensemble_bridge import get_unified_ensemble_reading
+        with patch.object(OrchestratorEnsembleBridge, 'get_ensemble_reading') as mock_gen:
+            mock_reading = MagicMock(spec=SignalReading)
+            mock_gen.return_value = mock_reading
+            result = get_unified_ensemble_reading()
+            assert result is mock_reading
+
+
+class TestCompareWithEnsembleSourceExtended:
+    """Additional compare_with_ensemble_source edge cases."""
+
+    def test_integrate_recommendation_when_active_overlays_gte_2(self):
+        """Active overlays >= 2 should recommend 'integrate'."""
+        bridge = OrchestratorEnsembleBridge()
+        mock_signal = UnifiedSignalReading(
+            timestamp="2026-05-23T00:00:00", source="test",
+            value=0.1, confidence=0.7, weight=0.20,
+            spy_signal=0.0, gld_signal=0.0, tlt_signal=0.0,
+            ief_signal=0.0, shy_signal=0.0, btc_signal=0.0, eth_signal=0.0,
+            risk_signal=0.0, execution_signal=0.0,
+            explanation="", num_overlays_active=2, conflict_count=0,
+        )
+        with patch.object(bridge, 'generate_signal', return_value=mock_signal):
+            result = bridge.compare_with_ensemble_source("other")
+        assert result["recommendation"] == "integrate"
+
+    def test_result_contains_expected_keys(self):
+        """Result dict should contain all expected keys."""
+        bridge = OrchestratorEnsembleBridge()
+        mock_signal = UnifiedSignalReading(
+            timestamp="2026-05-23T00:00:00", source="test",
+            value=0.1, confidence=0.7, weight=0.20,
+            spy_signal=0.0, gld_signal=0.0, tlt_signal=0.0,
+            ief_signal=0.0, shy_signal=0.0, btc_signal=0.0, eth_signal=0.0,
+            risk_signal=0.0, execution_signal=0.0,
+            explanation="", num_overlays_active=2, conflict_count=0,
+        )
+        with patch.object(bridge, 'generate_signal', return_value=mock_signal):
+            result = bridge.compare_with_ensemble_source("test_src")
+        expected_keys = {
+            "unified_value", "unified_confidence", "compared_source",
+            "active_overlays", "conflicts", "recommendation",
+        }
+        assert expected_keys.issubset(set(result.keys()))
