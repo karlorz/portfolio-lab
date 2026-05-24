@@ -38,8 +38,6 @@ import numpy as np
 # project root, logging
 # ---------------------------------------------------------------------------
 
-from src.paths import PROJECT_ROOT as project_root
-
 
 __all__ = ['FactorBeta', 'AssetRiskDecomposition', 'PortfolioRiskDecomposition', 'RiskDecomposer', 'decompose_portfolio']
 
