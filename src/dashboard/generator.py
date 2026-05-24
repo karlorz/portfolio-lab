@@ -73,7 +73,7 @@ class DashboardGenerator:
                             "v": entry.get("total_value", 0),
                             "r": entry.get("daily_return", 0)
                         })
-                    except Exception as e:
+                    except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                         logger.warning("Failed to parse performance log entry: %s", e)
 
         output = {
@@ -82,13 +82,13 @@ class DashboardGenerator:
             "paper_portfolio": paper_perf,
             "generated_at": datetime.now().isoformat()
         }
-        
+
         out_path = PUBLIC_DIR / "dashboard.json"
         with open(out_path, 'w') as f:
             json.dump(output, f)
-        
+
         return out_path
-    
+
     def generate_signals_json(self) -> Path:
         """Generate current signals and allocations."""
         cursor = self.conn.cursor()
@@ -192,7 +192,7 @@ class DashboardGenerator:
                             "shares": round(order.get("shares", 0), 2),
                             "value": round(order.get("fill_value", 0), 2)
                         })
-                    except Exception as e:
+                    except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                         logger.warning("Failed to parse order log entry: %s", e)
 
         # Add factor rotation signals if engine available
@@ -209,7 +209,7 @@ class DashboardGenerator:
                     "signal_strength": factor_rotation_result.get("signal_strength", 0.0),
                     "recommendation": factor_rotation_result.get("recommendation", {}),
                 }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Factor rotation not available: %s", e)
 
         # Add yield curve data from yields.json
@@ -231,9 +231,9 @@ class DashboardGenerator:
             vol_parity_data = vol_allocator.get_current_allocation()
             if vol_parity_data:
                 vol_parity_signal = vol_parity_data.get('allocation')
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Convexity harvest / vol parity not available: %s", e)
-        
+
         # Add LLM sentiment signals (v2.30 Phase 5)
         sentiment_signal = None
         try:
@@ -253,9 +253,9 @@ class DashboardGenerator:
                 macro_texts=[],
             )
             sentiment_signal = sentiment_signal.to_dict()
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("LLM sentiment not available: %s", e)
-        
+
         # Add ensemble voting signals (v2.20 Phase 3)
         ensemble_signal = None
         try:
@@ -272,17 +272,17 @@ class DashboardGenerator:
                     "action": ensemble_result.action,
                     "confidence": ensemble_result.confidence,
                 }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Ensemble voting not available: %s", e)
-        
+
         # Add sector rotation momentum signals (v2.40 Phase 5)
         sector_momentum_signal = None
         try:
             sector_momentum_signal = self._generate_sector_momentum_signals(vix_level=vix_level)
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             # Sector momentum not available yet
             logger.warning("Sector momentum not available: %s", e)
-        
+
         # Add smart rebalancing status (v2.90)
         smart_rebalance_data = None
         try:
@@ -329,7 +329,7 @@ class DashboardGenerator:
                     'remaining_budget_pct': 100,
                     'status': gate.get_status(),
                 }
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
             logger.warning("Dashboard generation error: %s", e)
 
         # Add alternative data signals (v2.60 Phase 3)
@@ -371,9 +371,9 @@ class DashboardGenerator:
                         "sources_count": safe_get(alt_data_raw, "raw_data", "sources_count"),
                         "data_freshness_hours": safe_get(alt_data_raw, "raw_data", "data_freshness_hours")
                     }
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Alternative data signal not available: %s", e)
-        
+
         # Load broker data (Phase 4: live trading prep)
         broker_data = self._load_broker_data()
 
@@ -426,7 +426,7 @@ class DashboardGenerator:
                     "Real-time SKEW/PCR data needed for behavioral alpha."
                 ),
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Behavioral sentiment not available: %s", e)
 
         # Stacking ensemble dashboard data (v3.10)
@@ -456,7 +456,7 @@ class DashboardGenerator:
                     "Signal frequency and shift magnitude are binding constraints."
                 ),
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Stacking ensemble not available: %s", e)
 
         # Factor rotation dashboard data (v3.00) — reuses factor_rotation_result from above
@@ -476,7 +476,7 @@ class DashboardGenerator:
                         "Defensive tool — best in high-vol regimes (Sharpe 1.474)."
                     ),
                 }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Factor rotation dashboard not available: %s", e)
 
         output = {
@@ -536,7 +536,7 @@ class DashboardGenerator:
                     broker["last_sync"] = last.get("timestamp")
                     broker["positions"] = last.get("broker_positions", [])
                     broker["drift"] = last.get("drift", [])
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load position sync log: %s", e)
 
         # Check broker orders log
@@ -549,7 +549,7 @@ class DashboardGenerator:
                     if line.strip():
                         recent.append(json.loads(line))
                 broker["recent_orders"] = list(reversed(recent))
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load broker orders log: %s", e)
 
         # Check kill switch
@@ -559,7 +559,7 @@ class DashboardGenerator:
                 with open(kill_file) as f:
                     ks = json.load(f)
                 broker["kill_switch"] = ks.get("enabled", False)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load kill switch state: %s", e)
 
         return broker
@@ -603,7 +603,7 @@ class DashboardGenerator:
                     garch_cvar["var_95"] = cvar_check.get("var_95", -0.0127)
                     garch_cvar["cvar_ratio"] = cvar_check.get("cvar_ratio", 1.51)
                     garch_cvar["garch_active"] = cvar_check.get("garch_active", True)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Using default values: %s", e)
 
         return garch_cvar
@@ -647,9 +647,9 @@ class DashboardGenerator:
                             entropy["concentration_risk"] = "high"
                         else:
                             entropy["concentration_risk"] = "critical"
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Using default values: %s", e)
-        
+
         return entropy
 
     def _generate_ml_signals(self) -> Dict:
@@ -723,9 +723,9 @@ class DashboardGenerator:
                             "probabilities": {k: round(v, 3) for k, v in probs.items()},
                             "heuristic": True,  # Not ML-based yet
                         }
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
                 signals["error"] = str(e)
-        
+
         # Check for grid search results
         grid_file = DATA_DIR / "grid_search_results.jsonl"
         if grid_file.exists():
@@ -741,7 +741,7 @@ class DashboardGenerator:
                             "sharpe": latest.get("sharpe"),
                             "volatility": latest.get("volatility"),
                         }
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load grid search results: %s", e)
 
         return signals
@@ -801,8 +801,8 @@ class DashboardGenerator:
             }
             
             result["duration_allocation"] = regime_allocations.get(regime, regime_allocations["normal"])
-            
-        except Exception as e:
+
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to load yield curve data: %s", e)
         
         return result
@@ -1015,7 +1015,7 @@ class DashboardGenerator:
                     {"name": "portfolio-lab-health", "status": "unknown", "state": "scheduled"},
                     {"name": "portfolio-lab-build", "status": "unknown", "state": "scheduled"},
                 ]
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             health_data["system_status"] = "degraded"
             health_data["error"] = f"Failed to get cron status: {str(e)}"
         
@@ -1037,7 +1037,7 @@ class DashboardGenerator:
                         "days_stale": days_stale,
                         "status": "fresh" if days_stale <= 1 else "stale" if days_stale <= 3 else "critical"
                     }
-                except Exception as e:
+                except (ValueError, TypeError) as e:
                     logger.warning("Failed to parse data freshness date '%s': %s", last_date, e)
 
         # Get signal health from SignalHealthTracker
@@ -1052,7 +1052,7 @@ class DashboardGenerator:
                 "alerts": signal_health_report.get("alerts", []),
                 "overall_health": signal_health_report.get("overall_health", "unknown")
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             health_data["signal_health"] = {
                 "error": f"Failed to get signal health: {str(e)}",
                 "status": "unavailable"
@@ -1086,7 +1086,7 @@ class DashboardGenerator:
             signals = generate_sector_signals(historical_path, vix=vix)
             return signals
 
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Failed to generate sector momentum signals: %s", e)
             return None
     
@@ -1103,7 +1103,7 @@ class DashboardGenerator:
                 json.dump(report, f, indent=2, default=str)
             
             return out_path
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
             # Fallback: empty analytics
             report = {
                 "status": "error",
@@ -1123,7 +1123,7 @@ class DashboardGenerator:
             dashboard = gen.generate()
             gen.save(dashboard)
             return gen.OUTPUT_PATH
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Overlay dashboard generation failed: %s", e)
             return None
 
@@ -1182,7 +1182,7 @@ class DashboardGenerator:
 
             return out_path
 
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Failed to generate graduation data: %s", e)
             return None
 
