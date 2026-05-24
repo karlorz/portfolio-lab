@@ -47,6 +47,8 @@ class RegimeGate:
         "international_momentum": {"CRISIS"},
         "behavioral_sentiment": {"NORMAL", "HIGH_VOL", "CRISIS"},  # net-negative in all but LOW_VOL
         "cross_asset_regime_arb": {"LOW_VOL"},  # marginal when markets are calm
+        "cross_asset_rv": {"HIGH_VOL", "CRISIS"},  # v961: -8.68 Sharpe, mean-reversion fails in volatile regimes
+        "unified_overlay": {"NORMAL", "HIGH_VOL", "CRISIS"},  # v961: positive only in LOW_VOL/RECOVERY
     }
 
     # Minimum days in a regime before allowing gate changes (hysteresis)

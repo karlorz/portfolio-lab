@@ -87,14 +87,14 @@ class TestFilterWeights:
         gate = RegimeGate()
         weights = {
             "multi_speed_momentum": 0.10,
-            "cross_asset_rv": 0.15,
             "alternative_data": 0.25,
+            "cross_asset_rv": 0.15,
             "international_momentum": 0.20,
         }
         filtered = gate.filter_weights(weights, "CRISIS")
         assert filtered["multi_speed_momentum"] == 0.0
         assert filtered["international_momentum"] == 0.0
-        assert filtered["cross_asset_rv"] == 0.15
+        assert filtered["cross_asset_rv"] == 0.0  # OFF in CRISIS (v961)
         assert filtered["alternative_data"] == 0.25
 
     def test_normal_regime_no_zeroing(self):
@@ -113,11 +113,11 @@ class TestFilterWeights:
         gate = RegimeGate()
         weights = {
             SignalSource.MULTI_SPEED_MOM: 0.05,
-            SignalSource.CROSS_ASSET_RV: 0.15,
+            SignalSource.ALTERNATIVE_DATA: 0.15,
         }
         filtered = gate.filter_weights(weights, "CRISIS")
         assert filtered[SignalSource.MULTI_SPEED_MOM] == 0.0
-        assert filtered[SignalSource.CROSS_ASSET_RV] == 0.15
+        assert filtered[SignalSource.ALTERNATIVE_DATA] == 0.15
 
 
 class TestGetActiveSignalNames:
@@ -125,14 +125,14 @@ class TestGetActiveSignalNames:
         gate = RegimeGate()
         all_signals = [
             "multi_speed_momentum",
-            "cross_asset_rv",
             "alternative_data",
+            "unknown_signal",
         ]
         active = gate.get_active_signal_names(all_signals, "CRISIS")
-        # MSM OFF, but cross_asset_rv and alternative_data ON
+        # MSM OFF, but alternative_data and unknown_signal ON
         assert "multi_speed_momentum" not in active
-        assert "cross_asset_rv" in active
         assert "alternative_data" in active
+        assert "unknown_signal" in active
 
     def test_normal_all_active(self):
         gate = RegimeGate()
@@ -318,8 +318,9 @@ class TestRegimeGateClassifiers:
         """gate() only returns signals that have explicit rules, not all known signals."""
         gate = RegimeGate()
         active = gate.gate("NORMAL")
-        # cross_asset_rv and alternative_data are NOT in gate_rules
-        assert "cross_asset_rv" not in active
+        # cross_asset_rv IS now in gate_rules and ON in NORMAL (v961)
+        assert "cross_asset_rv" in active
+        # alternative_data is NOT in gate_rules
         assert "alternative_data" not in active
 
     def test_gate_with_hysteresis_exactly_at_boundary(self):
@@ -400,12 +401,12 @@ class TestRegimeGateEdgeCases:
         weights = {
             "multi_speed_momentum": 0.2,
             "international_momentum": 0.2,
-            "cross_asset_rv": 0.2,
+            "alternative_data": 0.2,
         }
         filtered = gate.filter_weights(weights, "CRISIS")
         assert filtered["multi_speed_momentum"] == 0.0
         assert filtered["international_momentum"] == 0.0
-        assert filtered["cross_asset_rv"] == 0.2
+        assert filtered["alternative_data"] == 0.2
 
     def test_filter_weights_signal_name_with_spaces(self):
         """Signal names can contain spaces and still be matched."""
@@ -477,6 +478,8 @@ class TestRegimeGateEdgeCases:
         assert "international_momentum" in RegimeGate.GATE_RULES
         assert "behavioral_sentiment" in RegimeGate.GATE_RULES
         assert "cross_asset_regime_arb" in RegimeGate.GATE_RULES
+        assert "cross_asset_rv" in RegimeGate.GATE_RULES  # v961
+        assert "unified_overlay" in RegimeGate.GATE_RULES  # v961
 
     def test_gate_rules_deep_copy_independence(self):
         """Modifying a gate instance's rules must NOT affect class defaults."""
@@ -513,13 +516,15 @@ class TestRegimeGateEdgeCases:
 class TestRegimeGateGatingRules:
     """Comprehensive matrix test: every signal x every regime = correct ON/OFF."""
 
-    # Full truth table derived from GATE_RULES
+    # Full truth table derived from GATE_RULES (v961)
     # signal                     | NORMAL | LOW_VOL | HIGH_VOL | CRISIS | RECOVERY
     # multi_speed_momentum       |  ON    |   ON    |   OFF    |  OFF   |   ON
     # international_momentum     |  ON    |   ON    |   ON     |  OFF   |   ON
-    # behavioral_sentiment       |  OFF   |   ON    |   OFF    |  OFF   |   ON(implied)
+    # behavioral_sentiment       |  OFF   |   ON    |   OFF    |  OFF   |   ON
     # cross_asset_regime_arb     |  ON    |   OFF   |   ON     |  ON    |   ON
-    # cross_asset_rv (no rules)  |  ON    |   ON    |   ON     |  ON    |   ON
+    # cross_asset_rv (v961)      |  ON    |   ON    |   OFF    |  OFF   |   ON
+    # unified_overlay (v961)     |  OFF   |   ON    |   OFF    |  OFF   |   ON
+    # alternative_data (unruled) |  ON    |   ON    |   ON     |  ON    |   ON
 
     def test_msm_on_in_low_vol(self):
         gate = RegimeGate()
@@ -562,10 +567,9 @@ class TestRegimeGateGatingRules:
         assert not gate.is_active("cross_asset_regime_arb", "LOW_VOL")
 
     def test_unruled_signals_always_active(self):
-        """Signals without rules (cross_asset_rv, alternative_data) are ON everywhere."""
+        """Signals without rules (alternative_data) are ON everywhere."""
         gate = RegimeGate()
         for regime in ("NORMAL", "LOW_VOL", "HIGH_VOL", "CRISIS", "RECOVERY"):
-            assert gate.is_active("cross_asset_rv", regime)
             assert gate.is_active("alternative_data", regime)
 
     def test_gate_returns_low_vol_correctly(self):
@@ -605,18 +609,18 @@ class TestRegimeGateGatingRules:
     def test_get_active_signal_names_unruled_included(self):
         """get_active_signal_names includes signals NOT in gate_rules."""
         gate = RegimeGate()
-        sigs = ["cross_asset_rv", "multi_speed_momentum"]
+        sigs = ["alternative_data", "multi_speed_momentum"]
         active = gate.get_active_signal_names(sigs, "CRISIS")
-        assert "cross_asset_rv" in active  # no rules = always active
+        assert "alternative_data" in active  # no rules = always active
         assert "multi_speed_momentum" not in active  # OFF in CRISIS
 
     def test_update_from_performance_can_gate_unruled_signal(self):
         """update_from_performance can add rules for signals not in GATE_RULES."""
         gate = RegimeGate()
-        assert gate.is_active("cross_asset_rv", "CRISIS")
-        gate.update_from_performance({"CRISIS": {"cross_asset_rv": -0.5}})
-        assert not gate.is_active("cross_asset_rv", "CRISIS")
-        assert gate.is_active("cross_asset_rv", "NORMAL")
+        assert gate.is_active("alternative_data", "CRISIS")
+        gate.update_from_performance({"CRISIS": {"alternative_data": -0.5}})
+        assert not gate.is_active("alternative_data", "CRISIS")
+        assert gate.is_active("alternative_data", "NORMAL")
 
 
 class TestRegimeGateSerialization:
@@ -748,14 +752,14 @@ class TestRegimeGateIntegration:
             SignalSource.MULTI_SPEED_MOM: 0.10,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.15,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.05,
-            SignalSource.UNIFIED_OVERLAY: 0.20,
+            SignalSource.ALTERNATIVE_DATA: 0.20,
         }
-        # In CRISIS: MSM OFF, INTL_MOM OFF, REGIME_ARB ON, UNIFIED always ON
+        # In CRISIS: MSM OFF, INTL_MOM OFF, REGIME_ARB ON, ALT_DATA always ON
         filtered_crisis = gate.filter_weights(weights, "CRISIS")
         assert filtered_crisis[SignalSource.MULTI_SPEED_MOM] == 0.0
         assert filtered_crisis[SignalSource.INTERNATIONAL_MOMENTUM] == 0.0
         assert filtered_crisis[SignalSource.CROSS_ASSET_REGIME_ARB] == 0.05
-        assert filtered_crisis[SignalSource.UNIFIED_OVERLAY] == 0.20
+        assert filtered_crisis[SignalSource.ALTERNATIVE_DATA] == 0.20
         # In LOW_VOL: MSM ON, INTL_MOM ON, REGIME_ARB OFF
         # Use uppercase "LOW_VOL" to match gate rule keys (not Regime.LOW_VOL.value which is lowercase)
         filtered_low_vol = gate.filter_weights(weights, "LOW_VOL")
@@ -818,7 +822,53 @@ class TestRegimeGateIntegration:
     def test_get_active_signal_names_after_update(self):
         """get_active_signal_names reflects dynamic updates."""
         gate = RegimeGate()
-        sigs = ["cross_asset_rv", "multi_speed_momentum"]
-        assert "cross_asset_rv" in gate.get_active_signal_names(sigs, "CRISIS")
-        gate.update_from_performance({"CRISIS": {"cross_asset_rv": -1.0}})
-        assert "cross_asset_rv" not in gate.get_active_signal_names(sigs, "CRISIS")
+        sigs = ["alternative_data", "multi_speed_momentum"]
+        assert "alternative_data" in gate.get_active_signal_names(sigs, "CRISIS")
+        gate.update_from_performance({"CRISIS": {"alternative_data": -1.0}})
+        assert "alternative_data" not in gate.get_active_signal_names(sigs, "CRISIS")
+
+
+class TestV961GateRules:
+    """Tests for v961 gate rules: cross_asset_rv and unified_overlay."""
+
+    # cross_asset_rv: OFF in HIGH_VOL and CRISIS, ON elsewhere
+    def test_cross_asset_rv_off_in_high_vol(self):
+        gate = RegimeGate()
+        assert not gate.is_active("cross_asset_rv", "HIGH_VOL")
+
+    def test_cross_asset_rv_off_in_crisis(self):
+        gate = RegimeGate()
+        assert not gate.is_active("cross_asset_rv", "CRISIS")
+
+    def test_cross_asset_rv_on_in_normal(self):
+        gate = RegimeGate()
+        assert gate.is_active("cross_asset_rv", "NORMAL")
+
+    def test_cross_asset_rv_on_in_low_vol(self):
+        gate = RegimeGate()
+        assert gate.is_active("cross_asset_rv", "LOW_VOL")
+
+    def test_cross_asset_rv_on_in_recovery(self):
+        gate = RegimeGate()
+        assert gate.is_active("cross_asset_rv", "RECOVERY")
+
+    # unified_overlay: OFF in NORMAL, HIGH_VOL, CRISIS; ON in LOW_VOL, RECOVERY
+    def test_unified_overlay_off_in_normal(self):
+        gate = RegimeGate()
+        assert not gate.is_active("unified_overlay", "NORMAL")
+
+    def test_unified_overlay_off_in_high_vol(self):
+        gate = RegimeGate()
+        assert not gate.is_active("unified_overlay", "HIGH_VOL")
+
+    def test_unified_overlay_off_in_crisis(self):
+        gate = RegimeGate()
+        assert not gate.is_active("unified_overlay", "CRISIS")
+
+    def test_unified_overlay_on_in_low_vol(self):
+        gate = RegimeGate()
+        assert gate.is_active("unified_overlay", "LOW_VOL")
+
+    def test_unified_overlay_on_in_recovery(self):
+        gate = RegimeGate()
+        assert gate.is_active("unified_overlay", "RECOVERY")
