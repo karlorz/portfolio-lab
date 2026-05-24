@@ -691,3 +691,84 @@ class TestCLI:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+# ---------------------------------------------------------------------------
+# Kill Switch Gate -- comprehensive coverage
+# ---------------------------------------------------------------------------
+
+class TestKillSwitchGate:
+    """Kill switch gate: every code path through the execute_orders kill switch."""
+
+    # ------------------------------------------------------------------
+    # Enabled / disabled
+    # ------------------------------------------------------------------
+
+    @patch.object(OrderRouter, 'is_ready', return_value=True)
+    def test_kill_switch_enabled_blocks_orders(self, mock_ready):
+        """Kill switch enabled -> execute_orders returns status=blocked."""
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            with open(os.path.join(d, "kill_switch.json"), "w") as f:
+                json.dump({"enabled": True, "reason": "market_crash"}, f)
+
+            orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+            result = router.execute_orders(orders, dry_run=False)
+            assert result["status"] == "blocked"
+            assert "Kill switch" in result["message"]
+
+    @patch.object(OrderRouter, 'is_ready', return_value=True)
+    def test_kill_switch_disabled_allows_orders(self, mock_ready):
+        """Kill switch disabled -> orders NOT blocked by kill switch (may fail later)."""
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            with open(os.path.join(d, "kill_switch.json"), "w") as f:
+                json.dump({"enabled": False}, f)
+
+            orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+            result = router.execute_orders(orders, dry_run=False)
+            assert result["status"] != "blocked"
+
+    # ------------------------------------------------------------------
+    # Corrupt / missing file
+    # ------------------------------------------------------------------
+
+    @patch.object(OrderRouter, 'is_ready', return_value=True)
+    def test_corrupt_kill_switch_blocks_for_safety(self, mock_ready):
+        """Corrupt kill_switch.json must block (fail-closed)."""
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            with open(os.path.join(d, "kill_switch.json"), "w") as f:
+                f.write("not valid json")
+
+            orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+            result = router.execute_orders(orders, dry_run=False)
+            assert result["status"] == "blocked"
+            assert "unreadable" in result["message"].lower()
+
+    @patch.object(OrderRouter, 'is_ready', return_value=True)
+    def test_kill_switch_not_present_allows_orders(self, mock_ready):
+        """No kill_switch.json file -> orders proceed (no kill switch check hit)."""
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+            # No kill_switch.json exists -- check is skipped, execute proceeds
+            result = router.execute_orders(orders, dry_run=True)
+            assert result["status"] != "blocked"
+
+    # ------------------------------------------------------------------
+    # Disable flag
+    # ------------------------------------------------------------------
+
+    @patch.object(OrderRouter, 'is_ready', return_value=True)
+    def test_kill_switch_check_can_be_disabled(self, mock_ready):
+        """kill_switch_check=False skips kill switch even when enabled."""
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            with open(os.path.join(d, "kill_switch.json"), "w") as f:
+                json.dump({"enabled": True, "reason": "market_crash"}, f)
+
+            orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+            result = router.execute_orders(orders, dry_run=False, kill_switch_check=False)
+            # Should NOT be blocked (gate is bypassed)
+            assert result["status"] != "blocked"

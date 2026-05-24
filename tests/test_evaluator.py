@@ -1385,3 +1385,110 @@ class TestDeduplicateToDailyExtended:
         result = _deduplicate_to_daily(h)
         assert len(result) == 1
         assert result[0]["value"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Kill Switch Trigger -- evaluator main() kill switch file creation/clearing
+# ---------------------------------------------------------------------------
+
+class TestKillSwitchTrigger:
+    """Kill switch trigger: file creation when risk breached, clearing when clear."""
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_risk_breach_creates_kill_switch_file(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, capsys,
+    ):
+        """Risk breach -> .kill_switch_paper created with correct JSON."""
+        from src.strategy.evaluator import main
+
+        with (
+            patch('src.strategy.evaluator.DATA_DIR', tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch('src.strategy.evaluator.Portfolio') as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = "max_drawdown_-25.0%"
+            mock_portfolio.total_value.return_value = 75000
+            MockPortfolio.return_value = mock_portfolio
+
+            main()
+
+        kill_file = tmp_path / ".kill_switch_paper"
+        assert kill_file.exists()
+        with open(kill_file) as f:
+            data = json.load(f)
+        assert data["reason"] == "max_drawdown_-25.0%"
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_no_risk_breach_clears_kill_switch(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, capsys,
+    ):
+        """No risk breach -> stale .kill_switch_paper file is deleted."""
+        from src.strategy.evaluator import main
+
+        # Create stale kill switch file manually
+        stale = tmp_path / ".kill_switch_paper"
+        stale.write_text('{"reason": "old_breach", "timestamp": "2026-01-01T00:00:00"}')
+        assert stale.exists()
+
+        with (
+            patch('src.strategy.evaluator.DATA_DIR', tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch('src.strategy.evaluator.Portfolio') as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = None
+            mock_portfolio.total_value.return_value = 100000
+            mock_portfolio.calculate_orders.return_value = []
+            mock_portfolio.cash = 100000
+            mock_portfolio.positions = {}
+            mock_portfolio.mode = "paper"
+            mock_portfolio.history = [{"total_value": 100000}]
+            MockPortfolio.return_value = mock_portfolio
+
+            main()
+
+        # Stale kill switch file should be deleted
+        assert not stale.exists()
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_kill_switch_file_contains_reason_and_timestamp(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, capsys,
+    ):
+        """Kill switch JSON has expected structure: reason + timestamp."""
+        from src.strategy.evaluator import main
+
+        with (
+            patch('src.strategy.evaluator.DATA_DIR', tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch('src.strategy.evaluator.Portfolio') as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = "max_position_SPY_55.0%"
+            mock_portfolio.total_value.return_value = 75000
+            MockPortfolio.return_value = mock_portfolio
+
+            main()
+
+        kill_file = tmp_path / ".kill_switch_paper"
+        assert kill_file.exists()
+        with open(kill_file) as f:
+            data = json.load(f)
+        assert "reason" in data
+        assert "timestamp" in data
+        assert isinstance(data["reason"], str)
+        assert isinstance(data["timestamp"], str)
+        assert len(data["reason"]) > 0
+        assert len(data["timestamp"]) > 0
