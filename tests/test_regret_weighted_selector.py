@@ -733,3 +733,194 @@ class TestAdjustWeightsExtended:
             "normal",
         )
         assert result.lambda_used == selector.regret_lambda
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.strategy.regret_weighted_selector as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+
+# ---------------------------------------------------------------------------
+# Constants validation extended
+# ---------------------------------------------------------------------------
+
+class TestConstantsExtended:
+    """Extended constants validation."""
+
+    def test_num_assets(self):
+        from src.strategy.regret_weighted_selector import NUM_ASSETS
+        assert NUM_ASSETS == 7
+
+    def test_default_rolling_window_positive(self):
+        assert DEFAULT_ROLLING_WINDOW > 0
+
+    def test_default_regret_lambda_range(self):
+        assert 0 < DEFAULT_REGRET_LAMBDA <= 1.0
+
+    def test_min_covariance_periods_positive(self):
+        assert MIN_COVARIANCE_PERIODS > 0
+
+    def test_threshold_ordering(self):
+        assert REGRET_LOW_THRESHOLD < REGRET_HIGH_THRESHOLD
+
+    def test_max_penalty_range(self):
+        assert 0 < REGRET_MAX_PENALTY <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# SignalRegretMetrics dataclass extended
+# ---------------------------------------------------------------------------
+
+class TestSignalRegretMetricsExtended:
+    """Extended SignalRegretMetrics dataclass tests."""
+
+    def test_all_fields(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(SignalRegretMetrics)}
+        expected = {
+            "source", "asset_covariances", "regret_contribution",
+            "regret_normalized", "regret_penalty", "regime_current",
+            "num_periods", "missing_data",
+        }
+        assert field_names == expected
+
+    def test_missing_data_default(self):
+        m = SignalRegretMetrics(
+            source="test", asset_covariances={}, regret_contribution=0.0,
+            regret_normalized=0.0, regret_penalty=0.0, regime_current="normal",
+            num_periods=10,
+        )
+        assert m.missing_data is False
+
+
+# ---------------------------------------------------------------------------
+# RegretAdjustmentResult dataclass extended
+# ---------------------------------------------------------------------------
+
+class TestRegretAdjustmentResultExtended:
+    """Extended RegretAdjustmentResult dataclass tests."""
+
+    def test_all_fields(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(RegretAdjustmentResult)}
+        expected = {
+            "adjusted_weights", "regret_metrics", "lambda_used",
+            "num_signals", "signals_with_high_regret",
+            "signals_with_low_regret", "avg_regret",
+        }
+        assert field_names == expected
+
+    def test_result_with_empty_metrics(self):
+        result = RegretAdjustmentResult(
+            adjusted_weights={}, regret_metrics={}, lambda_used=0.3,
+            num_signals=0, signals_with_high_regret=[],
+            signals_with_low_regret=[], avg_regret=0.0,
+        )
+        assert result.num_signals == 0
+
+
+# ---------------------------------------------------------------------------
+# RegretWeightedState extended
+# ---------------------------------------------------------------------------
+
+class TestRegretWeightedStateExtended:
+    """Extended RegretWeightedState tests."""
+
+    def test_from_dict_roundtrip(self):
+        state = RegretWeightedState(
+            signal_history={"sig_a": [0.1, 0.2]},
+            decision_history={"sig_a": [0.3, 0.4]},
+            rolling_window=60,
+            last_regime="normal",
+            last_ensemble_decision=0.5,
+        )
+        d = state.to_dict()
+        restored = RegretWeightedState.from_dict(d)
+        assert restored.rolling_window == 60
+        assert restored.last_regime == "normal"
+
+    def test_from_dict_empty(self):
+        restored = RegretWeightedState.from_dict({})
+        assert restored.rolling_window == DEFAULT_ROLLING_WINDOW
+
+
+# ---------------------------------------------------------------------------
+# RegretWeightedSelector extended
+# ---------------------------------------------------------------------------
+
+class TestRegretWeightedSelectorExtended:
+    """Extended selector tests."""
+
+    @pytest.fixture
+    def selector(self):
+        return RegretWeightedSelector()
+
+    def test_get_state_diagnostics(self, selector):
+        diag = selector.get_state_diagnostics()
+        assert isinstance(diag, dict)
+
+    def test_adjust_weights_preserves_total(self, selector):
+        """Sum of adjusted weights should be close to sum of original."""
+        signals = {"sig_a": 0.5, "sig_b": 0.3, "sig_c": 0.2}
+        portfolio_vol = 0.15
+        base_weights = {"sig_a": 0.4, "sig_b": 0.4, "sig_c": 0.2}
+        result = selector.adjust_weights(signals, portfolio_vol, base_weights, "normal")
+        total = sum(result.adjusted_weights.values())
+        assert total == pytest.approx(1.0, abs=0.05)
+
+    def test_adjust_weights_with_single_signal(self, selector):
+        """Single signal should still work."""
+        signals = {"sig_a": 1.0}
+        result = selector.adjust_weights(signals, 0.15, {"sig_a": 1.0}, "normal")
+        assert "sig_a" in result.adjusted_weights
+
+    def test_get_regime_penalty_multiplier(self):
+        assert RegretWeightedSelector._get_regime_penalty_multiplier("crisis") > 1.0
+        assert RegretWeightedSelector._get_regime_penalty_multiplier("normal") == 1.0
+
+    def test_get_adjusted_weights_callable(self, selector):
+        """get_adjusted_weights should be callable."""
+        weights = selector.get_adjusted_weights(
+            {"sig_a": 0.5, "sig_b": 0.5},
+            {"sig_a": 1.0, "sig_b": -1.0},
+            0.3,
+            "normal",
+        )
+        assert isinstance(weights, dict)
+
+
+# ---------------------------------------------------------------------------
+# apply_regret_adjustment convenience function
+# ---------------------------------------------------------------------------
+
+class TestApplyRegretAdjustment:
+    """Test the convenience function."""
+
+    def test_returns_dict(self):
+        from src.strategy.regret_weighted_selector import apply_regret_adjustment
+        result = apply_regret_adjustment(
+            {"sig_a": 0.5, "sig_b": 0.5},
+            {"sig_a": 1.0, "sig_b": -1.0},
+            0.3,
+        )
+        assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# CLI test
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    """Test main() callable."""
+
+    def test_main_callable(self):
+        from src.strategy.regret_weighted_selector import main
+        assert callable(main)

@@ -398,5 +398,407 @@ class TestDeflatedSharpeRatio:
         assert 0.0 <= dsr_skewed <= 1.0
 
 
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+class TestModuleConstants:
+    """Test public module-level constants."""
+
+    def test_trading_days_per_year(self):
+        from src.backtest.metrics import TRADING_DAYS_PER_YEAR
+        assert TRADING_DAYS_PER_YEAR == 252
+
+    def test_default_crisis_years(self):
+        from src.backtest.metrics import DEFAULT_CRISIS_YEARS
+        assert DEFAULT_CRISIS_YEARS == ['2008', '2020', '2022']
+
+    def test_rebalance_frequency_days(self):
+        from src.backtest.metrics import REBALANCE_FREQUENCY_DAYS
+        assert REBALANCE_FREQUENCY_DAYS == 21
+
+    def test_default_transaction_cost_bps(self):
+        from src.backtest.metrics import DEFAULT_TRANSACTION_COST_BPS
+        assert DEFAULT_TRANSACTION_COST_BPS == 10.0
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestAllExports:
+    """Validate __all__ matches module exports."""
+
+    def test_all_exports_defined(self):
+        from src.backtest import metrics as m
+        exports = m.__all__
+        assert isinstance(exports, list)
+        assert len(exports) == 11
+
+    def test_all_exported_names_exist(self):
+        """Every name in __all__ must be accessible on the module."""
+        from src.backtest import metrics as m
+        for name in m.__all__:
+            assert hasattr(m, name), f"{name} declared in __all__ but not in module"
+
+    def test_all_exports_are_public(self):
+        """No __all__ entry should start with underscore."""
+        from src.backtest import metrics as m
+        for name in m.__all__:
+            assert not name.startswith('_'), f"{name} in __all__ starts with underscore"
+
+
+# ---------------------------------------------------------------------------
+# compute_metrics — additional edge cases
+# ---------------------------------------------------------------------------
+
+class TestComputeMetricsEdgeCases:
+    """Additional edge cases for compute_metrics beyond basic tests."""
+
+    def test_constant_curve_zero_sharpe(self):
+        """Flat equity curve should give 0% return and 0 Sharpe."""
+        curve = [100000] * 10
+        m = compute_metrics(curve, 100000)
+        assert m.total_return == 0.0
+        assert m.cagr == 0.0
+        assert m.volatility == 0.0
+        assert m.sharpe_ratio == 0.0
+        assert m.max_drawdown == 0.0
+
+    def test_constant_curve_above_initial(self):
+        """Flat curve above initial capital: positive return, zero vol, zero sharpe."""
+        curve = [110000] * 10
+        m = compute_metrics(curve, 100000)
+        assert m.total_return > 0
+        assert m.volatility == 0.0
+        assert m.sharpe_ratio == 0.0
+
+    def test_all_negative_curve(self):
+        """Every step loses money (sequential halving)."""
+        curve = [100000, 50000, 25000, 12500]
+        m = compute_metrics(curve, 100000)
+        assert m.total_return < 0
+        assert m.cagr < 0
+        assert m.sharpe_ratio == 0.0  # negative CAGR / positive vol = 0 (clamped)
+        assert m.max_drawdown < -50  # lost >50% peak-to-trough
+
+    def test_single_step_up(self):
+        """Single step from 100k to 105k."""
+        curve = [100000, 105000]
+        m = compute_metrics(curve, 100000)
+        assert m.total_return == 5.0  # 5%
+        assert m.max_drawdown == 0.0
+        assert m.cagr > 0
+
+    def test_extreme_positive_values(self):
+        """Very large values should not overflow."""
+        curve = [1e6, 1.5e6, 2.25e6, 3.375e6]
+        m = compute_metrics(curve, 1e6)
+        assert m.total_return > 200
+        assert m.cagr > 0
+        # Note: constant returns → std=0 → vol=0 → sharpe=0 (div-by-zero protected)
+
+    def test_zero_initial_positive_curve(self):
+        """Zero initial capital with non-zero curve: total_return/cagr=0, vol/sharpe computed."""
+        curve = [0, 100, 200]
+        m = compute_metrics(curve, 0)
+        assert m.total_return == 0.0
+        assert m.cagr == 0.0
+        # Returns are [0.0, 1.0] — vol is non-zero but sharpe is clamped to 0
+        assert m.sharpe_ratio == 0.0
+        assert m.max_drawdown == -100.0  # peak 200 → first value 0 → 100% dd
+
+    def test_negative_initial_capital(self):
+        """Negative initial capital should not crash."""
+        curve = [-10000, -5000, -2000]
+        m = compute_metrics(curve, -10000)
+        # Should not raise; results are not financially meaningful
+        assert isinstance(m.total_return, float)
+
+    def test_volatility_with_single_return(self):
+        """Volatility should be computable from 2 data points (1 return)."""
+        curve = [100000, 105000]
+        m = compute_metrics(curve, 100000)
+        assert m.volatility == 0.0  # std of single value = 0
+        # With 252 trading days, CAGR = 105000/100000^(252/1) - 1 = 5^252 - 1 ≈ huge
+        assert m.cagr > 0
+
+    def test_uneven_steps(self):
+        """Mix of positive and negative daily returns."""
+        curve = [100000, 102000, 101000, 103000, 99000, 105000]
+        m = compute_metrics(curve, 100000)
+        assert m.total_return == 5.0  # (105000/100000 - 1) * 100 = 5%
+        assert m.sharpe_ratio != 0
+        assert m.max_drawdown < 0  # had a drawdown from 103k to 99k
+
+    def test_negative_to_positive_recovery(self):
+        """Curve dips then recovers — max_drawdown captures the dip."""
+        curve = [100000, 80000, 70000, 90000, 110000]
+        m = compute_metrics(curve, 100000)
+        assert m.max_drawdown <= -30.0  # (70k peak-to-trough from 100k peak)
+        assert m.total_return == 10.0  # 10% total return
+
+
+# ---------------------------------------------------------------------------
+# compute_deflated_sharpe_ratio — additional edge cases
+# ---------------------------------------------------------------------------
+
+class TestDeflatedSharpeRatioEdgeCases:
+    """Additional edge cases for compute_deflated_sharpe_ratio."""
+
+    def test_n_trials_zero_returns_zero(self):
+        dsr = compute_deflated_sharpe_ratio(0.79, n_trials=0, n_observations=5371)
+        assert dsr == 0.0
+
+    def test_n_trials_negative_returns_zero(self):
+        dsr = compute_deflated_sharpe_ratio(0.79, n_trials=-1, n_observations=5371)
+        assert dsr == 0.0
+
+    def test_n_observations_zero_returns_zero(self):
+        dsr = compute_deflated_sharpe_ratio(0.79, n_trials=10, n_observations=0)
+        assert dsr == 0.0
+
+    def test_n_observations_negative_returns_zero(self):
+        dsr = compute_deflated_sharpe_ratio(0.79, n_trials=10, n_observations=-5)
+        assert dsr == 0.0
+
+    def test_single_trial_zero_sharpe_returns_zero(self):
+        dsr = compute_deflated_sharpe_ratio(0.0, n_trials=1, n_observations=1000)
+        assert dsr == 0.0
+
+    def test_two_trials(self):
+        """n_trials=2 is a boundary case (not > 2 for sigma_max formula)."""
+        dsr = compute_deflated_sharpe_ratio(0.50, n_trials=2, n_observations=1000)
+        assert 0.0 <= dsr <= 1.0
+
+    def test_very_large_n_trials(self):
+        """Large number of trials should still produce valid DSR."""
+        dsr = compute_deflated_sharpe_ratio(0.79, n_trials=10000, n_observations=5371)
+        assert 0.0 <= dsr <= 1.0
+
+    def test_tiny_sharpe_with_one_trial(self):
+        """Very small but positive Sharpe with 1 trial."""
+        dsr = compute_deflated_sharpe_ratio(0.01, n_trials=1, n_observations=100)
+        assert dsr > 0.50  # 1 trial, no penalty
+
+    def test_negative_sharpe_returns_low_dsr(self):
+        """Negative Sharpe should produce DSR near 0."""
+        dsr = compute_deflated_sharpe_ratio(-0.50, n_trials=10, n_observations=1000)
+        assert dsr < 0.50
+
+    def test_sigma_max_non_positive_edge(self):
+        """When sigma_max <= 0, DSR should be 1.0 if sharpe > expected_max, else 0.0."""
+        # Force variance to near zero by using very high kurtosis cancellation
+        dsr = compute_deflated_sharpe_ratio(0.0, n_trials=10, n_observations=1000)
+        assert dsr == 0.0
+
+    def test_dsr_monotonic_in_sharpe(self):
+        """DSR should be monotonically non-decreasing with Sharpe."""
+        sharpes = [0.1, 0.2, 0.3, 0.4, 0.5]
+        dsrs = [compute_deflated_sharpe_ratio(s, n_trials=10, n_observations=500) for s in sharpes]
+        for i in range(1, len(dsrs)):
+            assert dsrs[i] >= dsrs[i - 1], f"DSR not monotonic at index {i}: {dsrs}"
+
+    def test_dsr_monotonic_in_observations(self):
+        """DSR should be monotonically non-decreasing with more observations."""
+        obs_list = [50, 100, 500, 1000]
+        dsrs = [compute_deflated_sharpe_ratio(0.30, n_trials=10, n_observations=n) for n in obs_list]
+        for i in range(1, len(dsrs)):
+            assert dsrs[i] >= dsrs[i - 1], f"DSR not monotonic in obs at index {i}: {dsrs}"
+
+
+# ---------------------------------------------------------------------------
+# compute_crisis_returns — additional edge cases
+# ---------------------------------------------------------------------------
+
+class TestComputeCrisisReturnsEdgeCases:
+    """Additional edge cases for compute_crisis_returns."""
+
+    def test_with_equity_curve(self):
+        prices = {'2020-01-02': {'SPY': 100}}
+        trading_days = ['2020-01-02', '2020-06-01', '2020-12-31']
+        equity_curve = [100000, 95000, 105000]
+        result = compute_crisis_returns(
+            prices, trading_days,
+            crisis_years=['2020'],
+            equity_curve=equity_curve,
+        )
+        assert '2020' in result
+        assert result['2020'] < 0  # Had a drawdown
+
+    def test_with_equity_curve_no_drawdown(self):
+        """Monotonically increasing equity curve should have 0% crisis drawdown."""
+        prices = {'2020-01-02': {'SPY': 100}}
+        trading_days = ['2020-01-02', '2020-06-01', '2020-12-31']
+        equity_curve = [100000, 110000, 120000]
+        result = compute_crisis_returns(
+            prices, trading_days,
+            crisis_years=['2020'],
+            equity_curve=equity_curve,
+        )
+        assert '2020' in result
+        assert result['2020'] == 0.0
+
+    def test_equity_curve_missing_day(self):
+        """When a trading day is not in equity_curve, it should skip."""
+        prices = {'2020-01-02': {'SPY': 100}}
+        trading_days = ['2020-01-02', '2020-06-01', '2020-12-31']
+        equity_curve = [100000]  # only 1 value for 3 days
+        result = compute_crisis_returns(
+            prices, trading_days,
+            crisis_years=['2020'],
+            equity_curve=equity_curve,
+        )
+        # Only first day maps; single value → 0% drawdown, -0.0 result
+        assert '2020' in result
+        assert result['2020'] == 0.0
+
+    def test_empty_prices(self):
+        result = compute_crisis_returns({}, ['2022-01-03', '2022-12-30'])
+        assert '2022' not in result
+
+    def test_single_day_in_year(self):
+        prices = {'2022-01-03': {'SPY': 100}}
+        result = compute_crisis_returns(prices, ['2022-01-03'])
+        assert '2022' not in result  # Need at least 2 days
+
+    def test_zero_starting_value_with_equity_curve(self):
+        trading_days = ['2020-01-02']
+        equity_curve = [0]
+        result = compute_crisis_returns(
+            {}, trading_days,
+            crisis_years=['2020'],
+            equity_curve=equity_curve,
+        )
+        assert '2020' not in result  # Less than 2 days
+
+    def test_custom_base_weights_with_fallback(self):
+        """When equity_curve is not provided, base_weights are used."""
+        prices = {
+            '2022-01-03': {'AAA': 100},
+            '2022-06-01': {'AAA': 90},
+            '2022-12-30': {'AAA': 80},
+        }
+        result = compute_crisis_returns(
+            prices, ['2022-01-03', '2022-06-01', '2022-12-30'],
+            base_weights={'AAA': 1.0},
+        )
+        assert '2022' in result
+        assert result['2022'] <= -20.0  # 100->80 with 100% weight
+
+
+# ---------------------------------------------------------------------------
+# print_metrics_report — additional coverage
+# ---------------------------------------------------------------------------
+
+class TestPrintMetricsReportEdgeCases:
+    """Additional edge cases for print_metrics_report."""
+
+    def test_with_rebalances(self, capsys):
+        m = BacktestMetrics(
+            total_return=15.0, cagr=9.5, volatility=11.0,
+            sharpe_ratio=0.86, max_drawdown=-18.0,
+            total_rebalances=24, total_transaction_costs=120.0,
+        )
+        print_metrics_report(m)
+        captured = capsys.readouterr()
+        assert "Rebalances: 24" in captured.out
+        assert "Transaction Costs: 120.00" in captured.out
+
+    def test_zero_rebalances_no_output(self, capsys):
+        """When total_rebalances is 0, rebalance lines should not appear."""
+        m = BacktestMetrics(
+            total_return=10.0, cagr=8.0, volatility=12.0,
+            sharpe_ratio=0.67, max_drawdown=-15.0,
+            total_rebalances=0, total_transaction_costs=0.0,
+        )
+        print_metrics_report(m)
+        captured = capsys.readouterr()
+        assert "Rebalances" not in captured.out
+        assert "Transaction Costs" not in captured.out
+
+    def test_default_title(self, capsys):
+        m = BacktestMetrics(
+            total_return=5.0, cagr=4.0, volatility=10.0,
+            sharpe_ratio=0.40, max_drawdown=-10.0,
+        )
+        print_metrics_report(m)
+        captured = capsys.readouterr()
+        assert "Backtest Results" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# save_results_json — additional coverage
+# ---------------------------------------------------------------------------
+
+class TestSaveResultsJsonEdgeCases:
+    """Additional edge cases for save_results_json."""
+
+    def test_empty_dict(self, tmp_path):
+        path = tmp_path / "empty.json"
+        save_results_json({}, output_path=str(path))
+        assert path.exists()
+        with open(path) as f:
+            loaded = json.load(f)
+        assert loaded == {}
+
+    def test_none_path_no_default_dir(self):
+        # Should not crash
+        save_results_json({"key": "val"}, output_path=None, default_dir=None)
+
+    def test_nested_numpy_arrays(self, tmp_path):
+        path = tmp_path / "nested_np.json"
+        data = {
+            "means": np.array([1.1, 2.2, 3.3]),
+            "matrix": np.array([[1, 2], [3, 4]]),
+            "scalar": np.float64(3.14),
+        }
+        save_results_json(data, output_path=str(path))
+        with open(path) as f:
+            loaded = json.load(f)
+        assert loaded["means"] == [1.1, 2.2, 3.3]
+        assert loaded["matrix"] == [[1, 2], [3, 4]]
+        assert abs(loaded["scalar"] - 3.14) < 1e-10
+
+    def test_explicit_path_overrides_default_dir(self, tmp_path):
+        explicit = tmp_path / "explicit.json"
+        default_dir = tmp_path / "subdir"
+        save_results_json({"key": "val"}, output_path=str(explicit), default_dir=default_dir)
+        assert explicit.exists()
+        assert not (default_dir / "backtest_results.json").exists()
+
+    def test_json_serializer_raises_on_unknown_type(self):
+        from src.backtest.metrics import _json_serializer
+        with pytest.raises(TypeError):
+            _json_serializer(object())
+
+
+# ---------------------------------------------------------------------------
+# Cross-module consistency
+# ---------------------------------------------------------------------------
+
+class TestCrossModuleConsistency:
+    """Verify consistency between metrics.py and its dependencies."""
+
+    def test_backtest_config_uses_base_allocation(self):
+        from src.paths import BASE_ALLOCATION
+        cfg = BacktestConfig()
+        assert cfg.base_weights == BASE_ALLOCATION
+
+    def test_backtest_config_uses_etf_costs(self):
+        from src.costs.etf_cost_table import ETF_COST_BPS
+        cfg = BacktestConfig()
+        for sym, cost in ETF_COST_BPS.items():
+            assert cfg.transaction_costs_by_symbol[sym] == cost
+
+    def test_backtest_config_defaults_match_constants(self):
+        from src.backtest.metrics import (
+            REBALANCE_FREQUENCY_DAYS, DEFAULT_TRANSACTION_COST_BPS,
+        )
+        cfg = BacktestConfig()
+        assert cfg.rebalance_frequency_days == REBALANCE_FREQUENCY_DAYS
+        assert cfg.transaction_cost_bps == DEFAULT_TRANSACTION_COST_BPS
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

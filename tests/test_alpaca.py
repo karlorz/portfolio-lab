@@ -564,5 +564,979 @@ class TestPaperTradingManagerExtended:
         assert 'dry_run' in result or 'status' in result
 
 
+class TestOrderRequestValidation:
+    """OrderRequest field validation tests."""
+
+    def test_limit_order_requires_price(self):
+        """Limit order with no limit_price should raise ValueError."""
+        req = OrderRequest(
+            symbol='SPY', qty=1.0, side=OrderSide.BUY,
+            order_type=OrderType.LIMIT, limit_price=None,
+        )
+        client = AlpacaClient()
+        # Patch _get_client to avoid TradingClient import
+        with patch.object(client, '_get_client', return_value=MagicMock()):
+            with pytest.raises(ValueError, match="Limit price required"):
+                client.submit_order(req)
+
+    def test_custom_time_in_force(self):
+        """to_dict should reflect custom time_in_force."""
+        req = OrderRequest(
+            symbol='SPY', qty=1.0, side=OrderSide.BUY,
+            time_in_force='gtc',
+        )
+        d = req.to_dict()
+        assert d['time_in_force'] == 'gtc'
+
+
+class TestOrderEdgeCases:
+    """Order edge cases — string attributes, partial fills."""
+
+    def test_from_alpaca_with_string_attrs(self):
+        """from_alpaca handles plain string attributes (no .value)."""
+        mock_order = MagicMock()
+        mock_order.id = 'str-id'
+        mock_order.symbol = 'SPY'
+        mock_order.qty = 5.0
+        mock_order.filled_qty = 2.0
+        # Set side/type/status as plain strings (no .value attribute)
+        mock_order.side = 'buy'
+        mock_order.type = 'market'
+        mock_order.status = 'partially_filled'
+        mock_order.created_at = '2026-01-10T10:00:00'
+        mock_order.filled_at = '2026-01-10T10:05:00'
+        mock_order.filled_avg_price = 584.5
+
+        order = Order.from_alpaca(mock_order)
+        assert order.side == 'buy'
+        assert order.type == 'market'
+        assert order.status == 'partially_filled'
+        assert order.filled_qty == 2.0
+        assert order.filled_avg_price == 584.5
+
+    def test_from_alpaca_partial_fill(self):
+        """from_alpaca with partial fill (filled_qty < qty)."""
+        mock_order = MagicMock()
+        mock_order.id = 'partial-1'
+        mock_order.symbol = 'SPY'
+        mock_order.qty = 10.0
+        mock_order.filled_qty = 7.5
+        mock_order.side.value = 'buy'
+        mock_order.type.value = 'market'
+        mock_order.status.value = 'partially_filled'
+        mock_order.created_at = datetime(2026, 5, 24, 10, 0, 0)
+        mock_order.filled_at = datetime(2026, 5, 24, 10, 0, 30)
+        mock_order.filled_avg_price = 585.25
+
+        order = Order.from_alpaca(mock_order)
+        assert order.filled_qty == 7.5
+        assert order.filled_qty < order.qty
+        assert order.status == 'partially_filled'
+
+
+class TestPositionEdgeCases:
+    """Position edge cases — high precision values."""
+
+    def test_from_alpaca_with_high_precision(self):
+        """from_alpaca handles high-precision float values."""
+        mock_pos = MagicMock()
+        mock_pos.symbol = 'SPY'
+        mock_pos.qty = 10.1234
+        mock_pos.avg_entry_price = 500.1234
+        mock_pos.current_price = 585.9876
+        mock_pos.market_value = 5927.89
+        mock_pos.unrealized_pl = 867.89
+        mock_pos.unrealized_plpc = 0.1736
+
+        pos = Position.from_alpaca(mock_pos)
+        assert pos.qty == 10.1234
+        assert pos.avg_entry_price == 500.1234
+        assert pos.current_price == 585.9876
+
+
+class TestAlpacaClientAccount:
+    """AlpacaClient.get_account success path."""
+
+    def test_get_account_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_account = MagicMock()
+        mock_account.id = 'acc-001'
+        mock_account.status = 'ACTIVE'
+        mock_account.currency = 'USD'
+        mock_account.cash = 50000.0
+        mock_account.portfolio_value = 100000.0
+        mock_account.equity = 100000.0
+        mock_account.buying_power = 200000.0
+        mock_account.maintenance_margin = 25000.0
+        mock_account.initial_margin = 50000.0
+        mock_account.daytrade_count = 0
+        mock_account.last_equity = 95000.0
+
+        mock_trading = MagicMock()
+        mock_trading.get_account.return_value = mock_account
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            result = client.get_account()
+
+        assert result['id'] == 'acc-001'
+        assert result['status'] == 'ACTIVE'
+        assert result['cash'] == 50000.0
+        assert result['equity'] == 100000.0
+        assert result['buying_power'] == 200000.0
+        assert result['daytrade_count'] == 0
+        assert result['paper'] is True
+        assert result['last_equity'] == 95000.0
+
+    def test_get_account_last_equity_none(self):
+        """get_account handles None last_equity."""
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_account = MagicMock()
+        mock_account.id = 'acc-002'
+        mock_account.status = 'ACTIVE'
+        mock_account.currency = 'USD'
+        mock_account.cash = 0.0
+        mock_account.portfolio_value = 0.0
+        mock_account.equity = 0.0
+        mock_account.buying_power = 0.0
+        mock_account.maintenance_margin = 0.0
+        mock_account.initial_margin = 0.0
+        mock_account.daytrade_count = 0
+        mock_account.last_equity = None
+
+        mock_trading = MagicMock()
+        mock_trading.get_account.return_value = mock_account
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            result = client.get_account()
+
+        assert result['last_equity'] is None
+
+
+class TestAlpacaClientSubmitOrder:
+    """AlpacaClient.submit_order success/failure paths."""
+
+    def _patch_sdk_names(self):
+        """Return context managers patching SDK names not available when alpaca-py absent."""
+        return [
+            patch('src.broker.alpaca.MarketOrderRequest'),
+            patch('src.broker.alpaca.LimitOrderRequest'),
+            patch('src.broker.alpaca.TimeInForce'),
+        ]
+
+    def test_submit_market_order_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_result = MagicMock()
+        mock_result.id = 'mkt-1'
+        mock_result.symbol = 'SPY'
+        mock_result.qty = 10.0
+        mock_result.filled_qty = 10.0
+        mock_result.side.value = 'buy'
+        mock_result.type.value = 'market'
+        mock_result.status.value = 'filled'
+        mock_result.created_at = datetime(2026, 5, 24, 10, 0, 0)
+        mock_result.filled_at = datetime(2026, 5, 24, 10, 0, 1)
+        mock_result.filled_avg_price = 585.0
+
+        mock_trading = MagicMock()
+        mock_trading.submit_order.return_value = mock_result
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch('src.broker.alpaca.MarketOrderRequest', create=True), \
+             patch('src.broker.alpaca.LimitOrderRequest', create=True), \
+             patch('src.broker.alpaca.TimeInForce', create=True) as mock_tif, \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            mock_tif.DAY = 'day'
+            req = OrderRequest(symbol='SPY', qty=10.0, side=OrderSide.BUY)
+            order = client.submit_order(req)
+
+        assert order.id == 'mkt-1'
+        assert order.symbol == 'SPY'
+        assert order.side == 'buy'
+        assert order.filled_qty == 10.0
+        assert order.filled_avg_price == 585.0
+
+    def test_submit_limit_order_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_result = MagicMock()
+        mock_result.id = 'lmt-1'
+        mock_result.symbol = 'GLD'
+        mock_result.qty = 5.0
+        mock_result.filled_qty = 0.0
+        mock_result.side.value = 'buy'
+        mock_result.type.value = 'limit'
+        mock_result.status.value = 'pending'
+        mock_result.created_at = datetime(2026, 5, 24, 10, 0, 0)
+        mock_result.filled_at = None
+        mock_result.filled_avg_price = None
+
+        mock_trading = MagicMock()
+        mock_trading.submit_order.return_value = mock_result
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch('src.broker.alpaca.MarketOrderRequest', create=True), \
+             patch('src.broker.alpaca.LimitOrderRequest', create=True), \
+             patch('src.broker.alpaca.TimeInForce', create=True) as mock_tif, \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            mock_tif.DAY = 'day'
+            req = OrderRequest(
+                symbol='GLD', qty=5.0, side=OrderSide.BUY,
+                order_type=OrderType.LIMIT, limit_price=200.0,
+            )
+            order = client.submit_order(req)
+
+        assert order.id == 'lmt-1'
+        assert order.type == 'limit'
+        assert order.status == 'pending'
+        assert order.filled_qty == 0.0
+
+    def test_submit_order_custom_time_in_force(self):
+        """submit_order with custom time_in_force maps to Alpaca enum."""
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_result = MagicMock()
+        mock_result.id = 'gtc-1'
+        mock_result.symbol = 'SPY'
+        mock_result.qty = 1.0
+        mock_result.filled_qty = 0.0
+        mock_result.side.value = 'buy'
+        mock_result.type.value = 'market'
+        mock_result.status.value = 'pending'
+        mock_result.created_at = datetime(2026, 5, 24, 10, 0, 0)
+        mock_result.filled_at = None
+        mock_result.filled_avg_price = None
+
+        mock_trading = MagicMock()
+        mock_trading.submit_order.return_value = mock_result
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch('src.broker.alpaca.MarketOrderRequest', create=True), \
+             patch('src.broker.alpaca.LimitOrderRequest', create=True), \
+             patch('src.broker.alpaca.TimeInForce', create=True) as mock_tif, \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            mock_tif.DAY = 'day'
+            req = OrderRequest(
+                symbol='SPY', qty=1.0, side=OrderSide.BUY,
+                time_in_force='gtc',
+            )
+            order = client.submit_order(req)
+
+        assert order.id == 'gtc-1'
+
+
+class TestAlpacaClientOrders:
+    """AlpacaClient order retrieval and cancellation."""
+
+    def test_get_orders_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_order = MagicMock()
+        mock_order.id = 'o-1'
+        mock_order.symbol = 'SPY'
+        mock_order.qty = 10.0
+        mock_order.filled_qty = 5.0
+        mock_order.side.value = 'buy'
+        mock_order.type.value = 'market'
+        mock_order.status.value = 'partially_filled'
+        mock_order.created_at = datetime(2026, 5, 24, 9, 30, 0)
+        mock_order.filled_at = datetime(2026, 5, 24, 9, 35, 0)
+        mock_order.filled_avg_price = 584.0
+
+        mock_trading = MagicMock()
+        mock_trading.get_orders.return_value = [mock_order]
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            orders = client.get_orders(limit=50)
+
+        assert len(orders) == 1
+        assert orders[0].symbol == 'SPY'
+        assert orders[0].status == 'partially_filled'
+
+    def test_get_orders_empty(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.get_orders.return_value = []
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            orders = client.get_orders()
+
+        assert len(orders) == 0
+
+    def test_cancel_order_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.cancel_order_by_id.return_value = None
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            result = client.cancel_order('order-123')
+
+        assert result is True
+
+    def test_cancel_order_failure(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.cancel_order_by_id.side_effect = RuntimeError("Order not found")
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            result = client.cancel_order('bad-id')
+
+        assert result is False
+
+    def test_cancel_all_orders_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.cancel_orders.return_value = ['id-1', 'id-2']
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            count = client.cancel_all_orders()
+
+        assert count == 2
+
+    def test_cancel_all_orders_failure(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.cancel_orders.side_effect = RuntimeError("API error")
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            count = client.cancel_all_orders()
+
+        assert count == 0
+
+    def test_cancel_all_orders_empty_result(self):
+        """cancel_all_orders returns 0 when SDK returns None."""
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.cancel_orders.return_value = None
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            count = client.cancel_all_orders()
+
+        assert count == 0
+
+
+class TestAlpacaClientPositions:
+    """AlpacaClient position retrieval and closure."""
+
+    def test_get_positions_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_pos = MagicMock()
+        mock_pos.symbol = 'SPY'
+        mock_pos.qty = 10.0
+        mock_pos.avg_entry_price = 500.0
+        mock_pos.current_price = 585.0
+        mock_pos.market_value = 5850.0
+        mock_pos.unrealized_pl = 850.0
+        mock_pos.unrealized_plpc = 0.17
+
+        mock_trading = MagicMock()
+        mock_trading.get_all_positions.return_value = [mock_pos]
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            positions = client.get_positions()
+
+        assert len(positions) == 1
+        assert positions[0].symbol == 'SPY'
+        assert positions[0].unrealized_pl == 850.0
+
+    def test_get_positions_empty(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.get_all_positions.return_value = []
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            positions = client.get_positions()
+
+        assert len(positions) == 0
+
+    def test_get_position_not_found(self):
+        """get_position returns None when symbol not held."""
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.get_open_position.side_effect = RuntimeError("position not found")
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            pos = client.get_position('AAPL')
+
+        assert pos is None
+
+    def test_get_position_found(self):
+        """get_position returns Position when symbol is held."""
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_pos = MagicMock()
+        mock_pos.symbol = 'SPY'
+        mock_pos.qty = 10.0
+        mock_pos.avg_entry_price = 500.0
+        mock_pos.current_price = 585.0
+        mock_pos.market_value = 5850.0
+        mock_pos.unrealized_pl = 850.0
+        mock_pos.unrealized_plpc = 0.17
+
+        mock_trading = MagicMock()
+        mock_trading.get_open_position.return_value = mock_pos
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            pos = client.get_position('SPY')
+
+        assert pos is not None
+        assert pos.symbol == 'SPY'
+        assert pos.qty == 10.0
+
+    def test_close_position_with_qty(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_result = MagicMock()
+        mock_result.id = 'close-1'
+        mock_result.symbol = 'SPY'
+        mock_result.qty = 5.0
+        mock_result.filled_qty = 5.0
+        mock_result.side.value = 'sell'
+        mock_result.type.value = 'market'
+        mock_result.status.value = 'filled'
+        mock_result.created_at = datetime(2026, 5, 24, 10, 0, 0)
+        mock_result.filled_at = datetime(2026, 5, 24, 10, 0, 5)
+        mock_result.filled_avg_price = 585.0
+
+        mock_trading = MagicMock()
+        mock_trading.close_position.return_value = mock_result
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            order = client.close_position('SPY', qty=5.0)
+
+        assert order.id == 'close-1'
+        mock_trading.close_position.assert_called_with('SPY', 5.0)
+
+    def test_close_position_without_qty(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_result = MagicMock()
+        mock_result.id = 'close-all'
+        mock_result.symbol = 'SPY'
+        mock_result.qty = 10.0
+        mock_result.filled_qty = 10.0
+        mock_result.side.value = 'sell'
+        mock_result.type.value = 'market'
+        mock_result.status.value = 'filled'
+        mock_result.created_at = datetime(2026, 5, 24, 10, 0, 0)
+        mock_result.filled_at = datetime(2026, 5, 24, 10, 0, 5)
+        mock_result.filled_avg_price = 585.0
+
+        mock_trading = MagicMock()
+        mock_trading.close_position.return_value = mock_result
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            order = client.close_position('SPY')
+
+        assert order.id == 'close-all'
+        mock_trading.close_position.assert_called_with('SPY')
+
+    def test_close_position_raises(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.close_position.side_effect = RuntimeError("Insufficient liquidity")
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            with pytest.raises(RuntimeError, match="Failed to close position SPY"):
+                client.close_position('SPY')
+
+    def test_close_all_positions_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_result = MagicMock()
+        mock_result.id = 'close-all-1'
+        mock_result.symbol = 'SPY'
+        mock_result.qty = 10.0
+        mock_result.filled_qty = 10.0
+        mock_result.side.value = 'sell'
+        mock_result.type.value = 'market'
+        mock_result.status.value = 'filled'
+        mock_result.created_at = datetime(2026, 5, 24, 10, 0, 0)
+        mock_result.filled_at = datetime(2026, 5, 24, 10, 0, 5)
+        mock_result.filled_avg_price = 585.0
+
+        mock_trading = MagicMock()
+        mock_trading.close_all_positions.return_value = [mock_result]
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            orders = client.close_all_positions()
+
+        assert len(orders) == 1
+        assert orders[0].symbol == 'SPY'
+
+    def test_close_all_positions_raises(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_trading = MagicMock()
+        mock_trading.close_all_positions.side_effect = RuntimeError("API error")
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            with pytest.raises(RuntimeError, match="Failed to close all positions"):
+                client.close_all_positions()
+
+
+class TestAlpacaClientMarketData:
+    """AlpacaClient market data methods."""
+
+    def test_get_clock_success(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_clock = MagicMock()
+        mock_clock.timestamp = datetime(2026, 5, 24, 12, 0, 0)
+        mock_clock.is_open = True
+        mock_clock.next_open = datetime(2026, 5, 25, 9, 30, 0)
+        mock_clock.next_close = datetime(2026, 5, 24, 16, 0, 0)
+
+        mock_trading = MagicMock()
+        mock_trading.get_clock.return_value = mock_clock
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            clock = client.get_clock()
+
+        assert clock['is_open'] is True
+        assert clock['timestamp'] == '2026-05-24T12:00:00'
+        assert clock['next_close'] == '2026-05-24T16:00:00'
+
+    def test_get_bars_default(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_bar = MagicMock()
+        mock_bar.timestamp = datetime(2026, 5, 24, 10, 0, 0)
+        mock_bar.open = 580.0
+        mock_bar.high = 586.0
+        mock_bar.low = 579.0
+        mock_bar.close = 585.0
+        mock_bar.volume = 1000000
+
+        mock_bars = MagicMock()
+        mock_bars.data = {'SPY': [mock_bar]}
+
+        mock_data = MagicMock()
+        mock_data.get_stock_bars.return_value = mock_bars
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch('src.broker.alpaca.StockBarsRequest'), \
+             patch('src.broker.alpaca.TimeFrame') as mock_tf, \
+             patch.object(client, '_get_data_client', return_value=mock_data):
+            mock_tf.Minute = 'Min'
+            mock_tf.Day = 'Day'
+            result = client.get_bars('SPY')
+
+        assert len(result) == 1
+        assert result[0]['close'] == 585.0
+        assert result[0]['volume'] == 1000000
+        assert result[0]['open'] == 580.0
+
+    def test_get_bars_minute_timeframe(self):
+        """get_bars with 1Min timeframe should map correctly."""
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_bar = MagicMock()
+        mock_bar.timestamp = datetime(2026, 5, 24, 9, 30, 0)
+        mock_bar.open = 580.0
+        mock_bar.high = 581.0
+        mock_bar.low = 579.5
+        mock_bar.close = 580.5
+        mock_bar.volume = 50000
+
+        mock_bars = MagicMock()
+        mock_bars.data = {'SPY': [mock_bar]}
+
+        mock_data = MagicMock()
+        mock_data.get_stock_bars.return_value = mock_bars
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch('src.broker.alpaca.StockBarsRequest'), \
+             patch('src.broker.alpaca.TimeFrame') as mock_tf, \
+             patch.object(client, '_get_data_client', return_value=mock_data):
+            mock_tf.Minute = 'Min'
+            mock_tf.Day = 'Day'
+            result = client.get_bars('SPY', timeframe='1Min', limit=10)
+
+        assert len(result) == 1
+        assert result[0]['high'] == 581.0
+
+    def test_get_bars_empty_data(self):
+        """get_bars returns empty list when no data for symbol."""
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_bars = MagicMock()
+        mock_bars.data = {}
+
+        mock_data = MagicMock()
+        mock_data.get_stock_bars.return_value = mock_bars
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch('src.broker.alpaca.StockBarsRequest'), \
+             patch('src.broker.alpaca.TimeFrame') as mock_tf, \
+             patch.object(client, '_get_data_client', return_value=mock_data):
+            mock_tf.Minute = 'Min'
+            mock_tf.Day = 'Day'
+            result = client.get_bars('UNKNOWN')
+
+        assert len(result) == 0
+
+
+class TestAlpacaClientFetchPriceEdge:
+    """_fetch_price edge cases."""
+
+    def test_fetch_price_sqlite_error(self, tmp_path):
+        """_fetch_price handles sqlite3.Error gracefully."""
+        db_path = tmp_path / "market.db"
+        _init_db(db_path)
+        client = AlpacaClient()
+
+        with patch('src.broker.alpaca.sqlite_connect', side_effect=sqlite3.Error("corrupt")):
+            price = client._fetch_price('SPY', str(db_path))
+
+        assert price == 0.0
+
+    def test_fetch_price_with_default_db_path(self, tmp_path):
+        """_fetch_price falls back to MARKET_DB when no path given."""
+        client = AlpacaClient()
+        with patch('src.broker.alpaca.MARKET_DB', str(tmp_path / "nonexistent.db")):
+            price = client._fetch_price('SPY')
+
+        assert price == 0.0
+
+
+class TestAlpacaClientConfigEdge:
+    """is_ready / is_configured edge cases."""
+
+    def test_is_ready_with_all_prerequisites(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True):
+            assert client.is_ready() is True
+
+    def test_is_configured_only_key(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = None
+        assert client.is_configured() is False
+
+    def test_is_configured_only_secret(self):
+        client = AlpacaClient()
+        client.api_key = None
+        client.api_secret = 'secret'
+        assert client.is_configured() is False
+
+
+class TestAlpacaClientGetClient:
+    """_get_client / _get_data_client lazy init and error handling."""
+
+    def test_get_client_raises_import_error(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', False):
+            with pytest.raises(ImportError, match="alpaca-py SDK not installed"):
+                client._get_client()
+
+    def test_get_data_client_raises_import_error(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', False):
+            with pytest.raises(ImportError, match="alpaca-py SDK not installed"):
+                client._get_data_client()
+
+
+class TestAlpacaClientSubmitOrderSide:
+    """Submit order side enum mapping correctness."""
+
+    def test_submit_order_sell_side(self):
+        """Sell order maps side correctly."""
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_result = MagicMock()
+        mock_result.id = 'sell-1'
+        mock_result.symbol = 'SPY'
+        mock_result.qty = 10.0
+        mock_result.filled_qty = 10.0
+        mock_result.side.value = 'sell'
+        mock_result.type.value = 'market'
+        mock_result.status.value = 'filled'
+        mock_result.created_at = datetime(2026, 5, 24, 10, 0, 0)
+        mock_result.filled_at = datetime(2026, 5, 24, 10, 0, 1)
+        mock_result.filled_avg_price = 585.0
+
+        mock_trading = MagicMock()
+        mock_trading.submit_order.return_value = mock_result
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch('src.broker.alpaca.MarketOrderRequest', create=True), \
+             patch('src.broker.alpaca.LimitOrderRequest', create=True), \
+             patch('src.broker.alpaca.TimeInForce', create=True) as mock_tif, \
+             patch.object(client, '_get_client', return_value=mock_trading):
+            mock_tif.DAY = 'day'
+            req = OrderRequest(symbol='SPY', qty=10.0, side=OrderSide.SELL)
+            order = client.submit_order(req)
+
+        assert order.side == 'sell'
+
+
+class TestPaperTradingManagerExecuteRebalance:
+    """PaperTradingManager.execute_rebalance edge cases."""
+
+    def test_execute_rebalance_sells_untargeted(self, tmp_path):
+        """Positions not in target_allocations generate sell orders."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_account = {'equity': 100000.0}
+        mock_positions = [
+            Position('SPY', 10, 500.0, 585.0, 5850.0, 850.0, 0.17),
+            Position('TLT', 20, 95.0, 92.0, 1840.0, -60.0, -0.032),
+        ]
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value=mock_account), \
+             patch.object(manager.client, 'get_positions', return_value=mock_positions):
+            # SPY in targets, TLT not in targets -> sell TLT
+            result = manager.execute_rebalance(
+                {'SPY': 0.60}, total_value=100000, dry_run=True
+            )
+
+        assert result['order_count'] == 2  # buy SPY + sell TLT
+
+    def test_execute_rebalance_skips_small_new_position(self, tmp_path):
+        """New position with target_value < $10 is skipped."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_account = {'equity': 100000.0}
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value=mock_account), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, '_fetch_price', return_value=200.0):
+            # target_value = 100000 * 0.00005 = $5 < $10 -> skip
+            result = manager.execute_rebalance(
+                {'TINY': 0.00005}, total_value=100000, dry_run=True
+            )
+
+        assert result['order_count'] == 0
+
+    def test_execute_rebalance_skips_unpriced_new_position(self, tmp_path):
+        """New position with _fetch_price returning 0 is skipped."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_account = {'equity': 100000.0}
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value=mock_account), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, '_fetch_price', return_value=0.0):
+            result = manager.execute_rebalance(
+                {'UNKNOWN': 0.50}, total_value=100000, dry_run=True
+            )
+
+        assert result['order_count'] == 0
+
+    def test_execute_rebalance_live_submit(self, tmp_path):
+        """Dry_run=False actually submits orders via client."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_account = {'equity': 100000.0}
+        mock_positions = [
+            Position('SPY', 10, 500.0, 585.0, 5850.0, 850.0, 0.17),
+        ]
+
+        submitted = []
+
+        def mock_submit(order_req):
+            submitted.append(order_req)
+            return Order(
+                id=f'exec-{len(submitted)}',
+                symbol=order_req.symbol,
+                qty=order_req.qty,
+                filled_qty=order_req.qty,
+                side=order_req.side.value,
+                type=order_req.order_type.value,
+                status='filled',
+                created_at='2026-05-24T10:00:00',
+                filled_at='2026-05-24T10:00:05',
+                filled_avg_price=585.0,
+            )
+
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value=mock_account), \
+             patch.object(manager.client, 'get_positions', return_value=mock_positions), \
+             patch.object(manager.client, 'submit_order', side_effect=mock_submit):
+            result = manager.execute_rebalance(
+                {'SPY': 0.60}, total_value=100000, dry_run=False
+            )
+
+        assert result['dry_run'] is False
+        assert result['order_count'] > 0
+        assert len(result['orders_submitted']) > 0
+        assert len(submitted) > 0
+
+    def test_execute_rebalance_partial_failure(self, tmp_path):
+        """One order fails but others still submit."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_account = {'equity': 100000.0}
+        mock_positions = [
+            Position('SPY', 10, 500.0, 585.0, 5850.0, 850.0, 0.17),
+            Position('TLT', 20, 95.0, 92.0, 1840.0, -60.0, -0.032),
+        ]
+
+        call_count = [0]
+
+        def mock_submit(order_req):
+            call_count[0] += 1
+            if order_req.symbol == 'TLT':
+                raise RuntimeError("Insufficient buying power")
+            return Order(
+                id='exec-1',
+                symbol=order_req.symbol,
+                qty=order_req.qty,
+                filled_qty=order_req.qty,
+                side=order_req.side.value,
+                type=order_req.order_type.value,
+                status='filled',
+                created_at='2026-05-24T10:00:00',
+                filled_at='2026-05-24T10:00:05',
+                filled_avg_price=585.0,
+            )
+
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value=mock_account), \
+             patch.object(manager.client, 'get_positions', return_value=mock_positions), \
+             patch.object(manager.client, 'submit_order', side_effect=mock_submit):
+            result = manager.execute_rebalance(
+                {'SPY': 0.60, 'TLT': 0.30}, total_value=100000, dry_run=False
+            )
+
+        assert result['dry_run'] is False
+        errors = [o for o in result['orders_submitted'] if 'error' in o]
+        successes = [o for o in result['orders_submitted'] if 'error' not in o]
+        assert len(errors) == 1
+        assert len(successes) >= 1
+
+    def test_execute_rebalance_exception_handled(self, tmp_path):
+        """Exception during rebalance returns error status."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_account = {'equity': 100000.0}
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value=mock_account), \
+             patch.object(manager.client, 'get_positions', side_effect=RuntimeError("API down")):
+            result = manager.execute_rebalance(
+                {'SPY': 0.60}, total_value=100000, dry_run=True
+            )
+
+        assert result['status'] == 'error'
+        assert 'API down' in result['message']
+
+
+class TestCheckAlpacaStatusExtended:
+    """check_alpaca_status success and error paths."""
+
+    def test_connected_success(self):
+        """check_alpaca_status returns connected=True when API works."""
+        mock_account = {
+            'status': 'ACTIVE',
+            'equity': 100000.0,
+            'cash': 50000.0,
+        }
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.dict(os.environ, {'ALPACA_API_KEY': 'k', 'ALPACA_API_SECRET': 's'}, clear=True), \
+             patch('src.broker.alpaca.AlpacaClient.get_account', return_value=mock_account):
+            status = check_alpaca_status()
+
+        assert status['connected'] is True
+        assert status['account_status'] == 'ACTIVE'
+        assert status['equity'] == 100000.0
+        assert status['cash'] == 50000.0
+
+    def test_connected_error(self):
+        """check_alpaca_status returns error details when get_account fails."""
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.dict(os.environ, {'ALPACA_API_KEY': 'k', 'ALPACA_API_SECRET': 's'}, clear=True), \
+             patch('src.broker.alpaca.AlpacaClient.get_account',
+                   side_effect=RuntimeError("403 Forbidden")):
+            status = check_alpaca_status()
+
+        assert status['connected'] is False
+        assert 'error' in status
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

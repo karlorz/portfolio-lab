@@ -399,5 +399,376 @@ class TestConvenienceFunctions:
         assert carry["eth_carry_bps"] == 0.0
 
 
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.strategy.crypto_staking as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.strategy.crypto_staking as mod
+        assert len(mod.__all__) == 6
+
+
+# ---------------------------------------------------------------------------
+# Constants validation
+# ---------------------------------------------------------------------------
+
+class TestConstantsExtended:
+    """Extended constants validation."""
+
+    def test_base_issuance_rate_range(self):
+        model = ETHStakingModel()
+        assert 0.0 < model.BASE_ISSUANCE_RATE < 0.02
+
+    def test_base_fee_revenue_range(self):
+        model = ETHStakingModel()
+        assert 0.0 < model.BASE_FEE_REVENUE < 0.05
+
+    def test_min_staking_ratio_positive(self):
+        model = ETHStakingModel()
+        assert 0 < model.MIN_STAKING_RATIO < 1.0
+
+    def test_max_staking_ratio_is_one(self):
+        model = ETHStakingModel()
+        assert model.MAX_STAKING_RATIO == 1.0
+
+    def test_default_staking_ratio_range(self):
+        model = ETHStakingModel()
+        assert model.MIN_STAKING_RATIO <= model.DEFAULT_STAKING_RATIO <= model.MAX_STAKING_RATIO
+
+    def test_fallback_yield_range(self):
+        model = ETHStakingModel()
+        assert 0.01 <= model.FALLBACK_YIELD <= 0.10
+
+    def test_estimated_ratios_keys_format(self):
+        model = ETHStakingModel()
+        for key in model.ESTIMATED_RATIOS:
+            # Should be like "2026-Q1"
+            assert "Q" in key
+            parts = key.split("-Q")
+            assert len(parts) == 2
+            assert parts[1].isdigit()
+
+    def test_estimated_ratios_values_in_range(self):
+        model = ETHStakingModel()
+        for key, val in model.ESTIMATED_RATIOS.items():
+            assert model.MIN_STAKING_RATIO <= val <= model.MAX_STAKING_RATIO
+
+    def test_estimated_ratios_monotonic(self):
+        model = ETHStakingModel()
+        values = list(model.ESTIMATED_RATIOS.values())
+        assert values == sorted(values), "Ratios should increase over time"
+
+
+# ---------------------------------------------------------------------------
+# StakingSource extended
+# ---------------------------------------------------------------------------
+
+class TestStakingSourceExtended:
+    """Extended StakingSource enum tests."""
+
+    def test_all_four_sources(self):
+        assert len(StakingSource) == 4
+
+    def test_live_value(self):
+        assert StakingSource.LIVE.value == "live"
+
+    def test_estimated_value(self):
+        assert StakingSource.ESTIMATED.value == "estimated"
+
+    def test_fallback_value(self):
+        assert StakingSource.FALLBACK.value == "fallback"
+
+    def test_none_value(self):
+        assert StakingSource.NONE.value == "none"
+
+
+# ---------------------------------------------------------------------------
+# ETHStakingMetrics extended
+# ---------------------------------------------------------------------------
+
+class TestETHStakingMetricsExtended:
+    """Extended ETHStakingMetrics dataclass tests."""
+
+    def test_all_fields_in_dataclass(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(ETHStakingMetrics)}
+        expected = {
+            "annual_yield", "staking_ratio", "total_staked_eth",
+            "source", "timestamp", "confidence",
+            "real_yield", "excess_over_rfr", "is_attractive",
+        }
+        assert field_names == expected
+
+    def test_is_attractive_boolean(self):
+        metrics = ETHStakingMetrics(
+            annual_yield=0.07, staking_ratio=0.28, total_staked_eth=33.6,
+            source=StakingSource.ESTIMATED, timestamp="2026-01-01",
+            confidence=0.7, real_yield=0.04, excess_over_rfr=0.03,
+            is_attractive=True,
+        )
+        assert isinstance(metrics.is_attractive, bool)
+
+    def test_confidence_range(self):
+        model = ETHStakingModel()
+        m = model.estimate_yield()
+        assert 0 <= m.confidence <= 1.0
+
+    def test_real_yield_can_be_negative(self):
+        """If CPI > yield, real_yield is negative."""
+        model = ETHStakingModel()
+        model._cpi_rate = 0.10  # artificially high CPI
+        m = model.estimate_yield(staking_ratio=0.28)
+        # With clamped yield in [0.01, 0.08] and CPI=0.10, real_yield < 0
+        assert m.real_yield < 0
+
+    def test_timestamp_is_string(self):
+        model = ETHStakingModel()
+        m = model.estimate_yield()
+        assert isinstance(m.timestamp, str)
+
+
+# ---------------------------------------------------------------------------
+# StakingAllocationInfluence extended
+# ---------------------------------------------------------------------------
+
+class TestStakingAllocationInfluenceExtended2:
+    """Extended StakingAllocationInfluence tests."""
+
+    def test_all_fields_in_dataclass(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(StakingAllocationInfluence)}
+        expected = {
+            "eth_preference", "eth_btc_ratio", "btc_weight",
+            "eth_weight", "total_crypto", "yield_contribution_bps",
+            "recommendation",
+        }
+        assert field_names == expected
+
+    def test_recommendation_is_string(self):
+        model = ETHStakingModel()
+        inf = model.compute_allocation_influence(0.03, 0.02)
+        assert isinstance(inf.recommendation, str)
+        assert len(inf.recommendation) > 0
+
+    def test_eth_btc_ratio_range(self):
+        model = ETHStakingModel()
+        inf = model.compute_allocation_influence(0.03, 0.02)
+        assert 0 <= inf.eth_btc_ratio <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# estimate_yield extended
+# ---------------------------------------------------------------------------
+
+class TestEstimateYieldExtended:
+    """Extended estimate_yield edge cases."""
+
+    def test_yield_clamped_min(self):
+        """Yield should be clamped to >= 1%."""
+        model = ETHStakingModel()
+        # Extreme high staking ratio → low yield
+        m = model.estimate_yield(staking_ratio=1.0, fee_revenue=0.0, issuance_rate=0.001)
+        assert m.annual_yield >= 0.01
+
+    def test_yield_clamped_max(self):
+        """Yield should be clamped to <= 8%."""
+        model = ETHStakingModel()
+        m = model.estimate_yield(staking_ratio=0.10, fee_revenue=0.05, issuance_rate=0.02)
+        assert m.annual_yield <= 0.08
+
+    def test_staking_ratio_clamped(self):
+        """Staking ratio returned should be within min/max bounds."""
+        model = ETHStakingModel()
+        m = model.estimate_yield(staking_ratio=0.01)  # Below MIN
+        assert m.staking_ratio >= model.MIN_STAKING_RATIO
+        m2 = model.estimate_yield(staking_ratio=5.0)  # Above MAX
+        assert m2.staking_ratio <= model.MAX_STAKING_RATIO
+
+    def test_source_preserved(self):
+        """Source parameter should be preserved in output."""
+        model = ETHStakingModel()
+        m = model.estimate_yield(source=StakingSource.LIVE)
+        assert m.source == StakingSource.LIVE
+
+    def test_confidence_by_source(self):
+        """ESTIMATED source → 0.7 confidence, other → 0.4."""
+        model = ETHStakingModel()
+        m_est = model.estimate_yield(source=StakingSource.ESTIMATED)
+        m_live = model.estimate_yield(source=StakingSource.LIVE)
+        assert m_est.confidence == 0.7
+        assert m_live.confidence == 0.4
+
+    def test_total_staked_eth_proportional(self):
+        """Total staked ETH should equal 120 * staking_ratio."""
+        model = ETHStakingModel()
+        m = model.estimate_yield(staking_ratio=0.25)
+        assert m.total_staked_eth == pytest.approx(120.0 * 0.25, abs=0.1)
+
+
+# ---------------------------------------------------------------------------
+# compute_crypto_carry extended
+# ---------------------------------------------------------------------------
+
+class TestComputeCryptoCarryExtended:
+    """Extended compute_crypto_carry tests."""
+
+    def test_zero_weights(self):
+        """Both weights zero → zero carry."""
+        model = ETHStakingModel()
+        carry = model.compute_crypto_carry(0.0, 0.0)
+        assert carry["total_carry_bps"] == 0.0
+
+    def test_btc_carry_always_zero(self):
+        """BTC should always have zero carry."""
+        model = ETHStakingModel()
+        carry = model.compute_crypto_carry(0.05, 0.02)
+        assert carry["btc_carry_bps"] == 0.0
+        assert carry["btc_yield_pct"] == 0.0
+
+    def test_eth_carry_positive_when_eth_weight_positive(self):
+        """ETH carry should be positive when ETH weight > 0."""
+        model = ETHStakingModel()
+        carry = model.compute_crypto_carry(0.0, 0.05)
+        assert carry["eth_carry_bps"] > 0
+
+    def test_carry_keys(self):
+        """Verify all expected keys in carry dict."""
+        model = ETHStakingModel()
+        carry = model.compute_crypto_carry(0.03, 0.02)
+        expected_keys = {
+            "eth_staking_yield_pct", "eth_staking_ratio_pct", "btc_yield_pct",
+            "eth_carry_bps", "btc_carry_bps", "total_carry_bps",
+            "total_crypto_pct", "yield_enhancement_bps",
+            "is_attractive", "excess_over_rfr_pct", "real_yield_pct", "note",
+        }
+        assert set(carry.keys()) == expected_keys
+
+    def test_yield_enhancement_when_crypto_positive(self):
+        """Yield enhancement should be positive when crypto > 0 and carry > 0."""
+        model = ETHStakingModel()
+        carry = model.compute_crypto_carry(0.03, 0.02)
+        if carry["total_carry_bps"] > 0:
+            assert carry["yield_enhancement_bps"] > 0
+
+
+# ---------------------------------------------------------------------------
+# compute_allocation_influence extended
+# ---------------------------------------------------------------------------
+
+class TestComputeAllocationInfluenceExtended:
+    """Extended allocation influence tests."""
+
+    def test_weights_sum_to_total(self):
+        """BTC + ETH weights should equal total_crypto."""
+        model = ETHStakingModel()
+        inf = model.compute_allocation_influence(0.04, 0.03)
+        assert inf.btc_weight + inf.eth_weight == pytest.approx(inf.total_crypto, abs=0.001)
+
+    def test_eth_split_max_70_pct(self):
+        """ETH split should never exceed 70%."""
+        model = ETHStakingModel()
+        # Make staking very attractive
+        model._risk_free_rate = 0.0
+        inf = model.compute_allocation_influence(0.03, 0.02)
+        assert inf.eth_btc_ratio <= 0.70
+
+    def test_zero_crypto_allocation(self):
+        """Zero crypto → zero weights and zero yield."""
+        model = ETHStakingModel()
+        inf = model.compute_allocation_influence(0.0, 0.0)
+        assert inf.btc_weight == 0.0
+        assert inf.eth_weight == 0.0
+        assert inf.total_crypto == 0.0
+        assert inf.yield_contribution_bps == 0.0
+
+    def test_custom_base_splits(self):
+        """Custom base splits should be respected when not attractive."""
+        model = ETHStakingModel()
+        # Make staking not attractive by setting high RFR
+        model._risk_free_rate = 0.50
+        inf = model.compute_allocation_influence(0.03, 0.02, base_btc_split=0.5, base_eth_split=0.5)
+        assert inf.eth_btc_ratio == 0.5
+
+
+# ---------------------------------------------------------------------------
+# set_external_staking_ratio and set_risk_free_rate extended
+# ---------------------------------------------------------------------------
+
+class TestSettersExtended:
+    """Extended setter method tests."""
+
+    def test_external_staking_ratio_affects_yield(self):
+        """Setting external ratio should change yield computation."""
+        model = ETHStakingModel()
+        m1 = model.estimate_yield(staking_ratio=0.25)
+        model.set_external_staking_ratio(0.35)
+        m2 = model.get_live_yield()
+        # Different ratio → different yield
+        assert m2.staking_ratio != m1.staking_ratio
+
+    def test_risk_free_rate_affects_attractiveness(self):
+        """Setting high RFR should make staking not attractive."""
+        model = ETHStakingModel()
+        model.set_risk_free_rate(0.50)
+        m = model.get_live_yield()
+        assert not m.is_attractive
+
+    def test_risk_free_rate_zero_makes_attractive(self):
+        """Zero RFR should make staking attractive."""
+        model = ETHStakingModel()
+        model.set_risk_free_rate(0.0)
+        m = model.get_live_yield()
+        assert m.is_attractive
+
+
+# ---------------------------------------------------------------------------
+# State persistence tests
+# ---------------------------------------------------------------------------
+
+class TestStatePersistence:
+    """Tests for state file save/load."""
+
+    def test_state_file_is_path(self):
+        assert isinstance(STATE_FILE, Path)
+
+    def test_load_state_returns_dict(self):
+        model = ETHStakingModel()
+        assert isinstance(model._state, dict)
+
+
+# ---------------------------------------------------------------------------
+# CLI and convenience functions extended
+# ---------------------------------------------------------------------------
+
+class TestCLIExtended:
+    """Extended CLI tests."""
+
+    def test_main_callable(self):
+        from src.strategy.crypto_staking import main
+        assert callable(main)
+
+    def test_get_staking_status_callable(self):
+        from src.strategy.crypto_staking import get_staking_status
+        assert callable(get_staking_status)
+
+    def test_get_carry_summary_callable(self):
+        from src.strategy.crypto_staking import get_carry_summary
+        assert callable(get_carry_summary)
+
+    def test_get_carry_summary_with_custom_weights(self):
+        from src.strategy.crypto_staking import get_carry_summary
+        carry = get_carry_summary(crypto_weight=0.10, eth_share=0.60)
+        assert carry["total_carry_bps"] > 0
+        assert carry["total_crypto_pct"] == pytest.approx(10.0)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

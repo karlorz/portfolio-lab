@@ -15,6 +15,7 @@ from src.backtest.run_actual_ubt_validation import (
     align_series,
     calculate_metrics,
     calculate_correlation,
+    load_historical_data,
 )
 
 
@@ -264,3 +265,239 @@ class TestCalculateCorrelation:
         r2 = rng.normal(0, 0.01, 1000).tolist()
         corr = calculate_correlation(r1, r2)
         assert abs(corr) < 0.2
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.backtest.run_actual_ubt_validation as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.backtest.run_actual_ubt_validation as mod
+        assert len(mod.__all__) == 7
+
+
+# ---------------------------------------------------------------------------
+# load_historical_data tests
+# ---------------------------------------------------------------------------
+
+class TestLoadHistoricalData:
+    """Tests for load_historical_data."""
+
+    def test_returns_dict(self):
+        with patch('src.backtest.run_actual_ubt_validation.json.load', return_value={"SPY": []}):
+            with patch('builtins.open', MagicMock()):
+                result = load_historical_data()
+                assert isinstance(result, dict)
+
+    def test_missing_file_raises(self):
+        with patch('builtins.open', side_effect=FileNotFoundError):
+            with pytest.raises(FileNotFoundError):
+                load_historical_data()
+
+
+# ---------------------------------------------------------------------------
+# extract_prices extended
+# ---------------------------------------------------------------------------
+
+class TestExtractPricesExtended:
+    """Extended extract_prices edge cases."""
+
+    def test_empty_data(self):
+        dates, prices = extract_prices({}, "SPY")
+        assert dates == []
+        assert prices == []
+
+    def test_multiple_entries(self):
+        data = {
+            "SPY": [
+                {"date": "2024-01-01", "adjClose": 100},
+                {"date": "2024-01-02", "adjClose": 101},
+                {"date": "2024-01-03", "adjClose": 102},
+            ]
+        }
+        dates, prices = extract_prices(data, "SPY")
+        assert len(dates) == 3
+        assert prices == [100.0, 101.0, 102.0]
+
+
+# ---------------------------------------------------------------------------
+# calculate_returns extended
+# ---------------------------------------------------------------------------
+
+class TestCalculateReturnsExtended:
+    """Extended calculate_returns edge cases."""
+
+    def test_constant_prices(self):
+        prices = [100.0] * 10
+        returns = calculate_returns(prices)
+        assert all(r == 0.0 for r in returns)
+
+    def test_increasing_prices(self):
+        prices = [100.0, 101.0, 102.0]
+        returns = calculate_returns(prices)
+        assert all(r > 0 for r in returns)
+
+    def test_decreasing_prices(self):
+        prices = [100.0, 99.0, 98.0]
+        returns = calculate_returns(prices)
+        assert all(r < 0 for r in returns)
+
+
+# ---------------------------------------------------------------------------
+# find_overlap extended
+# ---------------------------------------------------------------------------
+
+class TestFindOverlapExtended:
+    """Extended find_overlap edge cases."""
+
+    def test_partial_overlap_start(self):
+        dates1 = ["2024-01-01", "2024-01-02", "2024-01-03"]
+        dates2 = ["2024-01-03", "2024-01-04", "2024-01-05"]
+        result = find_overlap(dates1, dates2)
+        assert result is not None
+        start, end, count = result
+        assert start == "2024-01-03"
+        assert end == "2024-01-03"
+        assert count == 1
+
+    def test_sorted_dates(self):
+        dates1 = ["2024-01-05", "2024-01-01", "2024-01-03"]
+        dates2 = ["2024-01-02", "2024-01-04", "2024-01-06"]
+        result = find_overlap(dates1, dates2)
+        # Should find overlap regardless of input order
+        if result is not None:
+            start, end, count = result
+            assert start <= end
+
+
+# ---------------------------------------------------------------------------
+# align_series extended
+# ---------------------------------------------------------------------------
+
+class TestAlignSeriesExtended:
+    """Extended align_series edge cases."""
+
+    def test_partial_overlap_keeps_common(self):
+        dates1 = ["2024-01-01", "2024-01-02", "2024-01-03"]
+        prices1 = [100.0, 101.0, 102.0]
+        dates2 = ["2024-01-02", "2024-01-03", "2024-01-04"]
+        prices2 = [200.0, 201.0, 202.0]
+        dates, p1, p2 = align_series(dates1, prices1, dates2, prices2)
+        # Only common dates should remain
+        assert len(p1) == len(p2)
+        assert len(dates) == 2  # 2024-01-02 and 2024-01-03
+
+    def test_aligned_prices_match(self):
+        dates1 = ["2024-01-01", "2024-01-02"]
+        prices1 = [100.0, 101.0]
+        dates2 = ["2024-01-01", "2024-01-02"]
+        prices2 = [200.0, 201.0]
+        dates, p1, p2 = align_series(dates1, prices1, dates2, prices2)
+        assert p1 == [100.0, 101.0]
+        assert p2 == [200.0, 201.0]
+
+
+# ---------------------------------------------------------------------------
+# calculate_metrics extended
+# ---------------------------------------------------------------------------
+
+class TestCalculateMetricsExtended:
+    """Extended calculate_metrics edge cases."""
+
+    def test_all_keys_present(self):
+        returns = [0.01, -0.005, 0.02, 0.003]
+        dates = ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"]
+        metrics = calculate_metrics(returns, dates, "Test")
+        expected_keys = {
+            'scenario', 'startDate', 'endDate', 'days',
+            'cagr', 'volatility', 'sharpe', 'maxDrawdown',
+            'calmar', 'totalReturn', 'trackingErrorVsTLT',
+            'volatilityDecayEstimate', 'annualizedExpenseImpact',
+        }
+        assert set(metrics.keys()) == expected_keys
+
+    def test_dates_populated(self):
+        returns = [0.01, -0.005]
+        dates = ["2024-01-01", "2024-01-02"]
+        metrics = calculate_metrics(returns, dates, "Test")
+        assert metrics['startDate'] == "2024-01-01"
+        assert metrics['endDate'] == "2024-01-02"
+
+    def test_days_equals_return_count(self):
+        returns = [0.01] * 50
+        metrics = calculate_metrics(returns, ["2024-01-01"] * 50, "Test")
+        assert metrics['days'] == 50
+
+    def test_sharpe_with_zero_vol(self):
+        returns = [0.0] * 10
+        metrics = calculate_metrics(returns, ["2024-01-01"] * 10, "Test")
+        assert metrics['sharpe'] == 0  # zero vol → sharpe = 0
+
+    def test_total_return_computation(self):
+        returns = [0.1, 0.1]  # 1.1 * 1.1 - 1 = 0.21
+        metrics = calculate_metrics(returns, ["2024-01-01", "2024-01-02"], "Test")
+        assert metrics['totalReturn'] == pytest.approx(0.21, abs=0.001)
+
+    def test_default_expense_ratio(self):
+        returns = [0.01] * 252
+        metrics = calculate_metrics(returns, ["2024-01-01"] * 252, "Generic")
+        # Default expense ratio for non-UBT/TMF is 0.0015
+        assert metrics['annualizedExpenseImpact'] < 0
+
+    def test_tracking_error_zero_when_no_base(self):
+        returns = [0.01] * 252
+        metrics = calculate_metrics(returns, ["2024-01-01"] * 252, "Test")
+        assert metrics['trackingErrorVsTLT'] == 0
+
+    def test_calmar_with_zero_drawdown(self):
+        """No drawdown → calmar = cagr."""
+        returns = [0.001] * 252
+        metrics = calculate_metrics(returns, ["2024-01-01"] * 252, "Test")
+        assert isinstance(metrics['calmar'], float)
+
+
+# ---------------------------------------------------------------------------
+# calculate_correlation extended
+# ---------------------------------------------------------------------------
+
+class TestCalculateCorrelationExtended:
+    """Extended calculate_correlation edge cases."""
+
+    def test_self_correlation_is_one(self):
+        r = [0.01, -0.02, 0.03, -0.01, 0.02]
+        corr = calculate_correlation(r, r)
+        assert corr == pytest.approx(1.0)
+
+    def test_constant_series(self):
+        """Constant series correlation may be NaN, but should not crash."""
+        r1 = [0.01, 0.01, 0.01]
+        r2 = [0.02, 0.02, 0.02]
+        corr = calculate_correlation(r1, r2)
+        # NaN is acceptable here, just shouldn't crash
+        assert isinstance(corr, float) or np.isnan(corr)
+
+    def test_short_series(self):
+        r1 = [0.01, -0.01]
+        r2 = [-0.01, 0.01]
+        corr = calculate_correlation(r1, r2)
+        assert -1.0 <= corr <= 1.0 or np.isnan(corr)
+
+
+# ---------------------------------------------------------------------------
+# CLI test
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    """Test main() callable."""
+
+    def test_main_callable(self):
+        from src.backtest.run_actual_ubt_validation import main
+        assert callable(main)

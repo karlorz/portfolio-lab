@@ -36,10 +36,17 @@ except ImportError:
     class OrderSide(Enum):
         BUY = "buy"
         SELL = "sell"
-    
+
     class OrderType(Enum):
         MARKET = "market"
         LIMIT = "limit"
+
+    # Stubs so tests can patch these names on the module
+    MarketOrderRequest = None
+    LimitOrderRequest = None
+    TimeInForce = None
+    StockBarsRequest = None
+    TimeFrame = None
 
 
 @dataclass
@@ -440,7 +447,7 @@ class PaperTradingManager:
                     # New position
                     if target_value < 10:
                         continue
-                    estimated_price = self._fetch_price(symbol)
+                    estimated_price = self.client._fetch_price(symbol)
                     if estimated_price <= 0:
                         continue  # Skip if no price available
                     qty = target_value / estimated_price
