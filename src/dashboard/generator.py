@@ -197,16 +197,17 @@ class DashboardGenerator:
 
         # Add factor rotation signals if engine available
         factor_rotation_signal = None
+        factor_rotation_result = None
         try:
             from src.strategy.factor_rotation import FactorMomentumEngine
             engine = FactorMomentumEngine()
-            result = engine.evaluate()
-            if result and "error" not in result:
+            factor_rotation_result = engine.evaluate()
+            if factor_rotation_result and "error" not in factor_rotation_result:
                 factor_rotation_signal = {
-                    "selected_factors": result.get("selected_factors", []),
-                    "allocation": result.get("allocation", {}),
-                    "signal_strength": result.get("signal_strength", 0.0),
-                    "recommendation": result.get("recommendation", {}),
+                    "selected_factors": factor_rotation_result.get("selected_factors", []),
+                    "allocation": factor_rotation_result.get("allocation", {}),
+                    "signal_strength": factor_rotation_result.get("signal_strength", 0.0),
+                    "recommendation": factor_rotation_result.get("recommendation", {}),
                 }
         except Exception as e:
             logger.warning("Factor rotation not available: %s", e)
@@ -458,19 +459,17 @@ class DashboardGenerator:
         except Exception as e:
             logger.warning("Stacking ensemble not available: %s", e)
 
-        # Factor rotation dashboard data (v3.00)
+        # Factor rotation dashboard data (v3.00) — reuses factor_rotation_result from above
         factor_rotation_dashboard = None
         try:
             from src.strategy.factor_rotation import FactorMomentumEngine
 
-            engine = FactorMomentumEngine()
-            result = engine.evaluate()
-            if result and "error" not in result:
-                allocations = result.get("allocation", {})
+            if factor_rotation_result is not None and "error" not in factor_rotation_result:
+                allocations = factor_rotation_result.get("allocation", {})
                 factor_rotation_dashboard = {
                     "active": True,
-                    "selected_factors": result.get("selected_factors", []),
-                    "signal_strength": round(result.get("signal_strength", 0.0), 2),
+                    "selected_factors": factor_rotation_result.get("selected_factors", []),
+                    "signal_strength": round(factor_rotation_result.get("signal_strength", 0.0), 2),
                     "factor_allocations": allocations,
                     "backtest_finding": (
                         "Factor rotation reduces MaxDD by 5.8pp (2021-2026). "
