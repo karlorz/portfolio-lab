@@ -155,7 +155,7 @@ class FactorDataManager:
                         p.get("low"), p["close"], p.get("volume")
                     ))
                     count += 1
-                except Exception as e:
+                except (KeyError, ValueError, TypeError, sqlite3.Error) as e:
                     logger.warning("Failed to insert price for %s %s: %s", symbol, p.get("date"), e)
             conn.commit()
         
@@ -347,7 +347,7 @@ class FactorDataManager:
             metadata["last_updated"] = datetime.now().isoformat()
             with open(self.metadata_path, "w") as f:
                 json.dump(metadata, f, indent=2)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to update metadata: %s", e)
 
 

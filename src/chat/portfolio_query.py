@@ -200,7 +200,7 @@ def answer_query(question: str, dashboard: Optional[Dict[str, Any]] = None) -> s
         try:
             from src.monitor.unified_dashboard import generate_unified_dashboard
             dashboard = generate_unified_dashboard()
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Failed to generate unified dashboard, using empty fallback: %s", e)
             dashboard = {}
 
@@ -220,7 +220,7 @@ def answer_query(question: str, dashboard: Optional[Dict[str, Any]] = None) -> s
             messages=[{"role": "user", "content": question}],
         )
         return response.content[0].text.strip()
-    except Exception as e:
+    except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
         logger.warning("LLM query failed: %s, using fallback", e)
         return fallback_answer(question, dashboard)
 

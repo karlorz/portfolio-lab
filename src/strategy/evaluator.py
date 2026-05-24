@@ -254,7 +254,7 @@ class Portfolio:
                 # Trigger kill if CVaR exceeds 3× VaR (extreme tail risk)
                 if metrics.cvar_ratio > 3.0 and metrics.filter_active:
                     return f"extreme_tail_risk_cvar_ratio_{metrics.cvar_ratio:.1f}"
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, ImportError, OSError) as e:
                 logger.warning("GARCH-CVaR computation failed, skipping tail risk check: %s", e)
 
         # Position concentration check
@@ -286,7 +286,7 @@ class Portfolio:
 
             with open(report_path, 'w') as f:
                 json.dump(data, f, indent=2, default=str)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
             logger.warning("Failed to write GARCH health report: %s", e)
 
     @staticmethod

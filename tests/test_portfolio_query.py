@@ -118,7 +118,7 @@ class TestAnswerQuery:
 
     def test_returns_fallback_on_error(self, sample_dashboard):
         mock_client = MagicMock()
-        mock_client.messages.create.side_effect = Exception("API down")
+        mock_client.messages.create.side_effect=ConnectionError("API down")
 
         with patch("src.chat.portfolio_query.ANTHROPIC_AVAILABLE", True):
             with patch("src.chat.portfolio_query.Anthropic", return_value=mock_client):
@@ -293,7 +293,7 @@ class TestAnswerQueryExtended:
 
     def test_dashboard_generation_failure(self):
         """If dashboard generation fails, should use empty fallback."""
-        with patch("src.monitor.unified_dashboard.generate_unified_dashboard", side_effect=Exception("DB error")):
+        with patch("src.monitor.unified_dashboard.generate_unified_dashboard", side_effect=RuntimeError("DB error")):
             with patch("src.chat.portfolio_query.ANTHROPIC_AVAILABLE", False):
                 result = answer_query("What is my equity exposure?")
                 assert isinstance(result, str)  # Should not crash

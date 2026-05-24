@@ -170,7 +170,7 @@ class CollarOptionsBridge:
                 if data:
                     latest = max(data.keys())
                     return data[latest].get("vix_spot", 16.0)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load VIX term structure: %s", e)
         return 16.0
 

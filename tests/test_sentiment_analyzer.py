@@ -637,7 +637,7 @@ class TestSentimentAnalyzerInit:
     def test_init_handles_analyzer_exception(self):
         """When SentimentAnalyzer() raises, analyzer is set to None."""
         with patch("src.strategy.sentiment_analyzer.SentimentAnalyzer",
-                   side_effect=Exception("API key not found")):
+                   side_effect=RuntimeError("API key not found")):
             pipe = SentimentAnalyzerPipeline()
             assert pipe.analyzer is None
 

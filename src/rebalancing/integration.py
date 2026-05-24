@@ -104,7 +104,7 @@ class SmartRebalanceGate:
 
             vpin = self._vpin_engine.calculate_vpin(symbol)
             return vpin if vpin is not None else 0.30
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, OSError) as e:
             logger.warning("Failed to compute VPIN for %s, using default 0.30: %s", symbol, e)
             return 0.30
 
