@@ -171,5 +171,193 @@ class TestLoadHistoricalBars:
             assert not (df['open'] == df['high']).all()
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+# ── BVCCalculator Extended ─────────────────────────────────────
+
+class TestBVCCalculatorExtended:
+    def test_classify_bar_at_midprice(self):
+        """Close exactly at midprice should split volume roughly equally."""
+        calc = BVCCalculator()
+        # midprice = (110+90)/2 = 100, close = 100
+        bar = calc.classify_bar(datetime.now(), 100, 110, 90, 100, 1000000)
+        assert bar.buy_volume > 0
+        assert bar.sell_volume > 0
+
+    def test_zero_volume_bar(self):
+        """Zero volume bar should not crash."""
+        calc = BVCCalculator()
+        bar = calc.classify_bar(datetime.now(), 100, 110, 90, 105, 0)
+        assert bar.buy_volume == 0
+        assert bar.sell_volume == 0
+
+    def test_imbalance_fewer_bars_than_window(self):
+        """Should work when fewer bars than window size."""
+        calc = BVCCalculator()
+        calc.classify_bar(datetime.now(), 100, 105, 95, 102, 500000)
+        calc.classify_bar(datetime.now(), 102, 107, 97, 103, 500000)
+        buy, sell, imbalance = calc.get_buy_sell_imbalance(window=20)
+        assert -1.0 <= imbalance <= 1.0
+
+    def test_add_bar_method(self):
+        """add_bar should accept BVCBar objects."""
+        calc = BVCCalculator()
+        bar = BVCBar(
+            timestamp=datetime.now(), open=100.0, high=105.0,
+            low=95.0, close=102.0, volume=500000,
+            buy_volume=300000, sell_volume=200000,
+            vpin_local=0.35,
+        )
+        calc.add_bar(bar)
+        # Should have 1 bar in history
+        assert len(calc.bars) == 1
+
+
+# ── VPINSignal ─────────────────────────────────────────────────
+
+class TestVPINSignal:
+    def test_to_signal_snapshot(self):
+        """VPINSignal should convert to SignalSnapshot."""
+        signal = VPINSignal(
+            timestamp=datetime.now(),
+            vpin=0.35,
+            vpin_ma=0.30,
+            vpin_std=0.05,
+            z_score=1.0,
+            percentile=75.0,
+            regime="elevated",
+            confidence=0.8,
+            toxicity_level=0.65,
+            recommendation="delay",
+            expected_cost_impact=5.0,
+        )
+        snapshot = signal.to_signal_snapshot()
+        assert snapshot is not None
+        assert hasattr(snapshot, 'source')
+        assert snapshot.source == "vpin_bvc"
+        assert snapshot.value == -0.1  # "delay" → -0.1
+
+    def test_to_signal_snapshot_execute(self):
+        """Execute recommendation should map to +0.2 value."""
+        signal = VPINSignal(
+            timestamp=datetime.now(),
+            vpin=0.15, vpin_ma=0.30, vpin_std=0.05,
+            z_score=-3.0, percentile=10.0, regime="low",
+            confidence=0.9, toxicity_level=0.1,
+            recommendation="execute", expected_cost_impact=1.0,
+        )
+        snapshot = signal.to_signal_snapshot()
+        assert snapshot.value == 0.2
+
+    def test_to_signal_snapshot_avoid(self):
+        """Avoid recommendation should map to -0.4 value."""
+        signal = VPINSignal(
+            timestamp=datetime.now(),
+            vpin=0.70, vpin_ma=0.30, vpin_std=0.05,
+            z_score=8.0, percentile=99.0, regime="high",
+            confidence=0.95, toxicity_level=0.9,
+            recommendation="avoid", expected_cost_impact=20.0,
+        )
+        snapshot = signal.to_signal_snapshot()
+        assert snapshot.value == -0.4
+
+
+# ── VPINEngine Extended ────────────────────────────────────────
+
+class TestVPINEngineExtended:
+    def _feed_bars(self, engine, symbol, n=100, seed=42):
+        import numpy as np
+        np.random.seed(seed)
+        base = 500.0
+        for i in range(n):
+            ret = np.random.normal(0.001, 0.015)
+            c = base * (1 + ret)
+            h = max(base, c) * (1 + abs(np.random.normal(0, 0.005)))
+            l = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
+            engine.process_bar(symbol, datetime.now(), base, h, l, c, 500000)
+            base = c
+
+    def test_multiple_symbols(self):
+        engine = VPINEngine(volume_bucket_size=100000, symbols=['SPY', 'GLD'])
+        self._feed_bars(engine, 'SPY', n=200)
+        self._feed_bars(engine, 'GLD', n=200)
+        vpin_spy = engine.calculate_vpin('SPY')
+        vpin_gld = engine.calculate_vpin('GLD')
+        assert vpin_spy is not None
+        assert vpin_gld is not None
+        # Both should be valid VPIN values
+        assert 0.0 <= vpin_spy <= 1.0
+        assert 0.0 <= vpin_gld <= 1.0
+
+    def test_signal_has_all_fields(self):
+        engine = VPINEngine(volume_bucket_size=50000, symbols=['SPY'])
+        self._feed_bars(engine, 'SPY', n=500)
+        signal = engine.get_signal('SPY')
+        if signal is not None:
+            assert signal.vpin >= 0
+            assert signal.regime in ('low', 'normal', 'elevated', 'high')
+            assert signal.recommendation in ('execute', 'delay', 'avoid')
+            assert signal.confidence >= 0
+
+
+# ── RebalanceOptimizer ─────────────────────────────────────────
+
+class TestRebalanceOptimizer:
+    def _make_engine_with_data(self):
+        import numpy as np
+        engine = VPINEngine(volume_bucket_size=100000, symbols=['SPY'])
+        base = 500.0
+        np.random.seed(42)
+        for i in range(300):
+            ret = np.random.normal(0.001, 0.015)
+            c = base * (1 + ret)
+            h = max(base, c) * (1 + abs(np.random.normal(0, 0.005)))
+            l = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
+            engine.process_bar('SPY', datetime.now(), base, h, l, c, 500000)
+            base = c
+        return engine
+
+    def test_should_execute_now_returns_tuple(self):
+        from src.signals.vpin_bvc import RebalanceOptimizer
+        engine = self._make_engine_with_data()
+        opt = RebalanceOptimizer(vpin_engine=engine)
+        result = opt.should_execute_now('SPY')
+        assert isinstance(result, tuple)
+        assert len(result) == 3  # (should_execute, reason, confidence)
+
+    def test_execution_quality_report(self):
+        from src.signals.vpin_bvc import RebalanceOptimizer
+        engine = self._make_engine_with_data()
+        opt = RebalanceOptimizer(vpin_engine=engine)
+        report = opt.get_execution_quality_report()
+        assert isinstance(report, dict)
+
+
+# ── VPINSignalAdapter ──────────────────────────────────────────
+
+class TestVPINSignalAdapter:
+    def _make_engine_with_data(self):
+        import numpy as np
+        engine = VPINEngine(volume_bucket_size=100000, symbols=['SPY'])
+        base = 500.0
+        np.random.seed(42)
+        for i in range(300):
+            ret = np.random.normal(0.001, 0.015)
+            c = base * (1 + ret)
+            h = max(base, c) * (1 + abs(np.random.normal(0, 0.005)))
+            l = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
+            engine.process_bar('SPY', datetime.now(), base, h, l, c, 500000)
+            base = c
+        return engine
+
+    def test_to_ensemble_signal_returns_dict(self):
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        engine = self._make_engine_with_data()
+        adapter = VPINSignalAdapter(vpin_engine=engine)
+        result = adapter.to_ensemble_signal('SPY')
+        assert isinstance(result, dict)
+
+    def test_rebalance_timing_signal(self):
+        from src.signals.vpin_bvc import VPINSignalAdapter
+        engine = self._make_engine_with_data()
+        adapter = VPINSignalAdapter(vpin_engine=engine)
+        result = adapter.get_rebalance_timing_signal()
+        assert isinstance(result, dict)
