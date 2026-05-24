@@ -4,7 +4,6 @@ Generates momentum-based signals for EFA/EEM overlay strategy
 """
 
 import json
-import sqlite3
 from src.paths import sqlite_connect
 from dataclasses import dataclass, asdict
 from datetime import datetime

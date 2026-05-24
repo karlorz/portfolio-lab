@@ -504,7 +504,7 @@ class SignalHealthTracker:
             # Compute current IC and recent IC history
             try:
                 current_ic = self.compute_ic(source, lookback_days=lookback_days)
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, sqlite3.Error):
                 continue
 
             if current_ic is None:
@@ -525,7 +525,7 @@ class SignalHealthTracker:
                     ic_val = self.compute_ic(source, lookback_days=window_days, end_date=window_end)
                     if ic_val is not None:
                         ic_history.append(ic_val)
-                except Exception:
+                except (ValueError, TypeError, RuntimeError, sqlite3.Error):
                     continue
 
             if not ic_history:

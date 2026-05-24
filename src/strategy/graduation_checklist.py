@@ -528,7 +528,7 @@ class GraduationChecklist:
             dsr = compute_deflated_sharpe_ratio(
                 sharpe_ratio=sharpe, n_trials=94, n_observations=n_obs,
             )
-        except Exception:
+        except (ImportError, ValueError, ZeroDivisionError, OverflowError):
             dsr = 0.0
 
         return CheckResult(

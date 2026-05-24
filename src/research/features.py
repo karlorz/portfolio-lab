@@ -5,7 +5,6 @@ Generates features from price data, VIX, and market microstructure.
 import os
 import json
 import logging
-import sqlite3
 import numpy as np
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass

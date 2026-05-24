@@ -534,7 +534,7 @@ def check_graduation_criteria(portfolio: Portfolio):
         dsr = compute_deflated_sharpe_ratio(
             sharpe_ratio=sharpe, n_trials=94, n_observations=len(returns),
         )
-    except Exception:
+    except (ImportError, ValueError, ZeroDivisionError, OverflowError):
         dsr = 0.0  # If DSR can't be computed, fail closed
 
     if sharpe > MIN_SHARPE and max_dd < MAX_DD and win_rate > MIN_WIN_RATE and dsr >= MIN_DSR:

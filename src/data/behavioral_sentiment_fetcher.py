@@ -6,7 +6,6 @@ for contrarian sentiment overlay strategy.
 v2.70 Phase 4: Integrated Reddit Sentiment for real social data
 """
 
-import sqlite3
 import json
 from datetime import datetime, timedelta, timezone
 

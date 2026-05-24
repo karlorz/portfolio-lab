@@ -4,7 +4,6 @@ Wraps BehavioralSentimentFetcher with z-score normalization,
 regime-gated suppression, and contrarian allocation signals.
 """
 
-import sqlite3
 from src.paths import sqlite_connect
 import logging
 from datetime import datetime, timedelta

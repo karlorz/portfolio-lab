@@ -156,7 +156,7 @@ def generate_brief_sections(dashboard: Dict[str, Any]) -> List[BriefSection]:
         model_text_parts.append(f"DSR={dsr:.2f} (94 configs)")
         if dsr < 0.50:
             model_severity = "warning"
-    except Exception:
+    except (ImportError, ValueError, ZeroDivisionError, OverflowError):
         model_text_parts.append("DSR: unavailable")
 
     # Black-Litterman posterior — shows BL weight perspective
