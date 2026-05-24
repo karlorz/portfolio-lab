@@ -225,9 +225,9 @@ class OptionsChainFetcher:
         if self.has_api_access:
             try:
                 return await self._fetch_from_api(underlying)
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
                 logger.error("API fetch failed: %s, falling back to simulation", e)
-        
+
         return await self._generate_simulated_chain(underlying)
     
     async def _fetch_from_api(self, underlying: str) -> OptionsChain:
@@ -248,7 +248,7 @@ class OptionsChainFetcher:
             
             async with session.get(url, headers=headers) as resp:
                 if resp.status != 200:
-                    raise Exception(f"API error: {resp.status}")
+                    raise RuntimeError(f"API error: {resp.status}")
                 
                 data = await resp.json()
                 
@@ -301,7 +301,7 @@ class OptionsChainFetcher:
                 volume=int(quote_data.get("volume", 0)),
                 open_interest=int(quote_data.get("open_interest", 0)),
             )
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, IndexError, AttributeError) as e:
             logger.warning("Failed to parse option data: %s", e)
             return None
     
@@ -333,7 +333,7 @@ class OptionsChainFetcher:
                     vix_row = cursor.fetchone()
                     if vix_row:
                         vix = float(vix_row[0])
-        except Exception as e:
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to load SPY/VIX prices from DB: %s", e)
 
         today = date.today()

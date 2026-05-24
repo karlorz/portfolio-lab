@@ -4,6 +4,7 @@ Position synchronization between Alpaca broker and local portfolio-lab state.
 import os
 import sys
 import json
+import sqlite3
 import logging
 from typing import Dict, List, Any
 from datetime import datetime
@@ -97,7 +98,7 @@ class PositionSync:
         try:
             positions = self.client.get_positions()
             return {p.symbol: p for p in positions}
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             logger.warning("Error fetching broker positions: %s", e)
             return {}
     
@@ -216,8 +217,8 @@ class PositionSync:
                     f.write(json.dumps(report) + "\n")
             
             return report
-            
-        except Exception as e:
+
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError, sqlite3.Error) as e:
             error_report = {
                 "timestamp": datetime.now().isoformat(),
                 "status": "error",
@@ -285,8 +286,8 @@ class PositionSync:
                 "positions_updated": len(broker_positions),
                 "positions_removed": len(local_symbols - broker_symbols),
             }
-            
-        except Exception as e:
+
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError, sqlite3.Error) as e:
             return {
                 "status": "error",
                 "message": str(e),

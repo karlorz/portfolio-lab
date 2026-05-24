@@ -107,10 +107,10 @@ class OrderRouter:
                 ))
             
             return signals
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Error loading signals: %s", e)
             return []
-    
+
     def get_current_positions(self) -> Dict[str, Dict[str, float]]:
         """Get current broker positions."""
         if not self.client.is_ready():
@@ -125,10 +125,10 @@ class OrderRouter:
                 }
                 for p in positions
             }
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             logger.warning("Error fetching positions: %s", e)
             return {}
-    
+
     def calculate_orders(
         self,
         signals: List[Signal],
@@ -293,7 +293,7 @@ class OrderRouter:
                         order_dict["attempts"] = attempt + 1
                         executed.append(order_dict)
                         break
-                    except Exception as e:
+                    except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError, ImportError) as e:
                         if attempt < max_retries - 1:
                             wait = 2 ** attempt  # 1s, 2s backoff
                             time.sleep(wait)

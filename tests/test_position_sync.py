@@ -238,7 +238,7 @@ class TestSyncReport:
         sync.client = MagicMock()
         sync.client.is_ready.return_value = True
         sync.client.paper = True
-        sync.get_local_positions = MagicMock(side_effect=Exception("DB error"))
+        sync.get_local_positions = MagicMock(side_effect=RuntimeError("DB error"))
 
         result = sync.sync()
         assert result["status"] == "error"
@@ -314,7 +314,7 @@ class TestReconcileToBroker:
         sync = self._make_sync()
         sync.client = MagicMock()
         sync.client.is_ready.return_value = True
-        sync.get_broker_positions = MagicMock(side_effect=Exception("Broker error"))
+        sync.get_broker_positions = MagicMock(side_effect=RuntimeError("Broker error"))
 
         result = sync.reconcile_to_broker()
         assert result["status"] == "error"
@@ -584,7 +584,7 @@ class TestSyncExtended:
         """sync() should handle exceptions gracefully."""
         sync = self._make_sync()
         sync.client.is_ready.return_value = True
-        sync.client.get_account.side_effect = Exception("API error")
+        sync.client.get_account.side_effect = RuntimeError("API error")
         sync.get_local_positions = lambda: {}
         sync.get_broker_positions = lambda: {}
         result = sync.sync()
@@ -720,7 +720,7 @@ class TestGetBrokerPositions:
         sync = self._make_sync()
         sync.client = MagicMock()
         sync.client.is_ready.return_value = True
-        sync.client.get_positions.side_effect = Exception("Connection failed")
+        sync.client.get_positions.side_effect = ConnectionError("Connection failed")
         result = sync.get_broker_positions()
         assert result == {}
 

@@ -255,20 +255,20 @@ class AlpacaClient:
         try:
             client.cancel_order_by_id(order_id)
             return True
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             logger.warning("Error cancelling order %s: %s", order_id, e)
             return False
-    
+
     def cancel_all_orders(self) -> int:
         """Cancel all open orders."""
         client = self._get_client()
         try:
             result = client.cancel_orders()
             return len(result) if result else 0
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             logger.warning("Error cancelling all orders: %s", e)
             return 0
-    
+
     def get_positions(self) -> List[Position]:
         """Get current positions."""
         client = self._get_client()
@@ -281,7 +281,7 @@ class AlpacaClient:
         try:
             position = client.get_open_position(symbol)
             return Position.from_alpaca(position)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             logger.warning("Failed to get position for %s: %s", symbol, e)
             return None
 
@@ -294,16 +294,16 @@ class AlpacaClient:
             else:
                 result = client.close_position(symbol)
             return Order.from_alpaca(result)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError) as e:
             raise RuntimeError(f"Failed to close position {symbol}: {e}")
-    
+
     def close_all_positions(self) -> List[Order]:
         """Close all positions."""
         client = self._get_client()
         try:
             results = client.close_all_positions(cancel_orders=True)
             return [Order.from_alpaca(o) for o in results]
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError) as e:
             raise RuntimeError(f"Failed to close all positions: {e}")
     
     def get_clock(self) -> Dict[str, Any]:
@@ -394,9 +394,9 @@ class PaperTradingManager:
                 }) + "\n")
             
             return result
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             return {"status": "error", "message": str(e)}
-    
+
     def execute_rebalance(
         self, 
         target_allocations: Dict[str, float], 
@@ -477,7 +477,7 @@ class PaperTradingManager:
                     try:
                         order = self.client.submit_order(order_req)
                         orders_submitted.append(asdict(order))
-                    except Exception as e:
+                    except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
                         orders_submitted.append({
                             "error": str(e),
                             "request": order_req.to_dict()
@@ -505,8 +505,8 @@ class PaperTradingManager:
                 }) + "\n")
             
             return result
-            
-        except Exception as e:
+
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             return {"status": "error", "message": str(e)}
 
 
@@ -528,7 +528,7 @@ def check_alpaca_status() -> Dict[str, Any]:
             status["equity"] = account.get("equity")
             status["cash"] = account.get("cash")
             status["connected"] = True
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             status["connected"] = False
             status["error"] = str(e)
     else:
