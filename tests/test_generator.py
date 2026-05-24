@@ -1819,19 +1819,14 @@ class TestSectorMomentumSignals:
         gen.conn.close()
 
     def test_passes_vix_to_generate(self, tmp_path):
-        """Vix level from DB is passed to generate_sector_signals."""
+        """Vix level is passed to generate_sector_signals via vix_level parameter."""
         gen, db_path = _make_generator(tmp_path)
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("INSERT INTO prices VALUES ('^VIX', ?, ?)",
-                     (datetime.now().strftime("%Y-%m-%d"), 18.5))
-        conn.commit()
-        conn.close()
         mock_signals = {"SPY": {"momentum": 0.5}}
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 with patch("src.strategy.sector_momentum_calc.generate_sector_signals",
                           return_value=mock_signals) as mock_gen:
-                    result = gen._generate_sector_momentum_signals()
+                    result = gen._generate_sector_momentum_signals(vix_level=18.5)
         assert result == mock_signals
         # Verify vix was passed
         _, kwargs = mock_gen.call_args
@@ -1839,19 +1834,17 @@ class TestSectorMomentumSignals:
         gen.conn.close()
 
     def test_vix_fetch_failure_defaults_zero(self, tmp_path):
-        """VIX DB failure defaults to 0 for vix parameter."""
+        """When vix_level is None (no VIX data), vix parameter defaults to 0."""
         gen, db_path = _make_generator(tmp_path)
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("DROP TABLE IF EXISTS prices")
-        conn.commit()
-        conn.close()
         mock_signals = {"SPY": {"momentum": 0.5}}
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 with patch("src.strategy.sector_momentum_calc.generate_sector_signals",
                           return_value=mock_signals) as mock_gen:
-                    result = gen._generate_sector_momentum_signals()
+                    result = gen._generate_sector_momentum_signals(vix_level=None)
         assert result == mock_signals
+        _, kwargs = mock_gen.call_args
+        assert kwargs.get("vix") == 0
         gen.conn.close()
 
     def test_none_when_no_vix_row(self, tmp_path):
