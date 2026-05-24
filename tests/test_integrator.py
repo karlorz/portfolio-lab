@@ -578,3 +578,220 @@ class TestSQLParameterization:
         source = inspect.getsource(SignalIntegrator.get_signal_history)
         assert ".format(days)" not in source, \
             "SQL query still uses .format(days) — must use ? parameterized query"
+
+
+class TestStoreComposite:
+    """Test _store_composite method."""
+
+    def test_store_composite_writes_to_db(self, tmp_path):
+        from src.signals.integrator import SignalIntegrator, CompositeSignal, init_database
+        import sqlite3
+
+        with patch("src.signals.integrator.DB_PATH", tmp_path / "test.db"):
+            init_database()
+            integrator = SignalIntegrator()
+            integrator.db_path = tmp_path / "test.db"
+
+            composite = CompositeSignal(
+                timestamp=datetime.now().isoformat(),
+                ticker="SPY",
+                composite_score=0.35,
+                composite_confidence=0.80,
+                detected_regime="neutral",
+                primary_drivers=["technical"],
+                component_signals=[],
+            )
+            integrator._store_composite(composite)
+
+            with sqlite3.connect(str(tmp_path / "test.db")) as conn:
+                rows = conn.execute("SELECT COUNT(*) FROM composite_signals").fetchone()
+            assert rows[0] == 1
+
+
+class TestStoreRecommendation:
+    """Test _store_recommendation method."""
+
+    def test_store_recommendation_writes_to_db(self, tmp_path):
+        from src.signals.integrator import (
+            SignalIntegrator, PortfolioRecommendation, AllocationDelta, init_database,
+        )
+        import sqlite3
+
+        with patch("src.signals.integrator.DB_PATH", tmp_path / "test.db"):
+            init_database()
+            integrator = SignalIntegrator()
+            integrator.db_path = tmp_path / "test.db"
+
+            rec = PortfolioRecommendation(
+                timestamp=datetime.now().isoformat(),
+                current_allocation={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+                recommended_allocation={"SPY": 0.48, "GLD": 0.36, "TLT": 0.16},
+                deltas=[
+                    AllocationDelta(
+                        ticker="SPY", current_weight=0.46, recommended_weight=0.48,
+                        delta=0.02, composite_score=0.4, confidence=0.75,
+                        primary_reason="technical",
+                    ),
+                ],
+                composite_sentiment="neutral",
+                confidence=0.75,
+                regime="neutral",
+            )
+            integrator._store_recommendation(rec)
+
+            with sqlite3.connect(str(tmp_path / "test.db")) as conn:
+                rows = conn.execute("SELECT COUNT(*) FROM portfolio_recommendations").fetchone()
+            assert rows[0] == 1
+
+
+class TestSignalSourceNormalize:
+    """Test SignalSource._normalize_signal method."""
+
+    def test_normalize_midpoint(self):
+        from src.signals.integrator import TechnicalSignal
+        sig = TechnicalSignal()
+        result = sig._normalize_signal(0.5, 0.0, 1.0)
+        assert result == 0.0
+
+    def test_normalize_at_max(self):
+        from src.signals.integrator import TechnicalSignal
+        sig = TechnicalSignal()
+        result = sig._normalize_signal(1.0, 0.0, 1.0)
+        assert result == 1.0
+
+    def test_normalize_at_min(self):
+        from src.signals.integrator import TechnicalSignal
+        sig = TechnicalSignal()
+        result = sig._normalize_signal(0.0, 0.0, 1.0)
+        assert result == -1.0
+
+    def test_normalize_equal_range_returns_zero(self):
+        from src.signals.integrator import TechnicalSignal
+        sig = TechnicalSignal()
+        result = sig._normalize_signal(0.5, 0.5, 0.5)
+        assert result == 0.0
+
+    def test_normalize_clips_above_range(self):
+        from src.signals.integrator import TechnicalSignal
+        sig = TechnicalSignal()
+        result = sig._normalize_signal(2.0, 0.0, 1.0)
+        assert result == 1.0
+
+    def test_normalize_clips_below_range(self):
+        from src.signals.integrator import TechnicalSignal
+        sig = TechnicalSignal()
+        result = sig._normalize_signal(-1.0, 0.0, 1.0)
+        assert result == -1.0
+
+
+class TestCalculateExpectedAccuracy:
+    """Test SignalIntegrator._calculate_expected_accuracy."""
+
+    def test_with_no_signals_returns_default(self, tmp_path):
+        from src.signals.integrator import SignalIntegrator, init_database
+
+        with patch("src.signals.integrator.DB_PATH", tmp_path / "test.db"):
+            init_database()
+            integrator = SignalIntegrator()
+            integrator.db_path = tmp_path / "test.db"
+            result = integrator._calculate_expected_accuracy([], {"technical": 0.3})
+            assert result == 0.5
+
+    def test_with_signals_averages_accuracies(self, tmp_path):
+        from src.signals.integrator import SignalIntegrator, SignalSourceResult, init_database
+
+        with patch("src.signals.integrator.DB_PATH", tmp_path / "test.db"):
+            init_database()
+            integrator = SignalIntegrator()
+            integrator.db_path = tmp_path / "test.db"
+
+            signals = [
+                SignalSourceResult(
+                    source_type="technical", source_name="tech",
+                    signal=0.5, confidence=0.8,
+                    raw_score=1.5, raw_unit="z_score",
+                    historical_accuracy=0.7,
+                ),
+                SignalSourceResult(
+                    source_type="macro", source_name="macro",
+                    signal=0.3, confidence=0.6,
+                    raw_score=0.8, raw_unit="pct_change",
+                    historical_accuracy=0.5,
+                ),
+            ]
+            result = integrator._calculate_expected_accuracy(signals, {"technical": 0.5, "macro": 0.3})
+            assert 0.0 <= result <= 1.0
+
+
+class TestPortfolioRecommendationDataclass:
+    """Test PortfolioRecommendation dataclass methods."""
+
+    def test_to_dict(self):
+        from src.signals.integrator import PortfolioRecommendation
+
+        rec = PortfolioRecommendation(
+            timestamp="2026-05-24T10:00:00",
+            current_allocation={"SPY": 0.46},
+            recommended_allocation={"SPY": 0.48},
+            deltas=[],
+            composite_sentiment="neutral",
+            confidence=0.75,
+            regime="neutral",
+        )
+        d = rec.to_dict()
+        assert isinstance(d, dict)
+        assert d["composite_sentiment"] == "neutral"
+        assert "current_allocation" in d
+
+
+class TestAllocationDeltaDataclass:
+    """Test AllocationDelta dataclass methods."""
+
+    def test_to_dict(self):
+        from src.signals.integrator import AllocationDelta
+
+        delta = AllocationDelta(
+            ticker="SPY", current_weight=0.46, recommended_weight=0.48,
+            delta=0.02, composite_score=0.4, confidence=0.75,
+            primary_reason="technical",
+        )
+        d = delta.to_dict()
+        assert isinstance(d, dict)
+        assert d["ticker"] == "SPY"
+        assert d["delta"] == 0.02
+
+
+class TestCompositeSignalDataclass:
+    """Test CompositeSignal dataclass methods."""
+
+    def test_to_dict(self):
+        from src.signals.integrator import CompositeSignal
+
+        cs = CompositeSignal(
+            timestamp="2026-05-24T10:00:00",
+            ticker="SPY", composite_score=0.35, composite_confidence=0.80,
+            detected_regime="neutral",
+            primary_drivers=["technical"], component_signals=[],
+        )
+        d = cs.to_dict()
+        assert isinstance(d, dict)
+        assert d["composite_score"] == 0.35
+        assert d["component_count"] == 0
+
+
+class TestSignalSourceResultDataclass:
+    """Test SignalSourceResult dataclass methods."""
+
+    def test_to_dict(self):
+        from src.signals.integrator import SignalSourceResult
+
+        result = SignalSourceResult(
+            source_type="technical", source_name="tech",
+            signal=0.5, confidence=0.8,
+            raw_score=1.5, raw_unit="z_score",
+            historical_accuracy=0.7,
+        )
+        d = result.to_dict()
+        assert isinstance(d, dict)
+        assert d["source_type"] == "technical"
+        assert d["signal"] == 0.5
