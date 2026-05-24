@@ -1547,6 +1547,29 @@ class TestShouldSkip:
         voter = EnsembleVoter()
         assert voter._should_skip(SignalSource.ALTERNATIVE_DATA, set(), Regime.NORMAL)
 
+    def test_regime_arb_respects_skip_gate(self):
+        """_collect_regime_arb_signal should skip when not in active_sources."""
+        voter = EnsembleVoter()
+        # When CROSS_ASSET_REGIME_ARB is not in active_sources, it should be skipped
+        active = {SignalSource.MULTI_SPEED_MOM, SignalSource.CROSS_ASSET_RV}
+        assert voter._should_skip(SignalSource.CROSS_ASSET_REGIME_ARB, active, Regime.NORMAL)
+
+    def test_regime_arb_not_skipped_when_active(self):
+        """_collect_regime_arb_signal should NOT skip when in active_sources."""
+        voter = EnsembleVoter()
+        active = {SignalSource.CROSS_ASSET_REGIME_ARB}
+        assert not voter._should_skip(SignalSource.CROSS_ASSET_REGIME_ARB, active, Regime.NORMAL)
+
+    def test_regime_arb_skipped_in_low_vol_regime(self):
+        """CROSS_ASSET_REGIME_ARB has zero weight in LOW_VOL, so it should be skipped."""
+        voter = EnsembleVoter()
+        # In LOW_VOL, REGIME_WEIGHTS gives CROSS_ASSET_REGIME_ARB weight 0.0
+        # So the active_sources set won't include it
+        weights = REGIME_WEIGHTS[Regime.LOW_VOL]
+        active = {src for src, w in weights.items() if w > 0}
+        assert SignalSource.CROSS_ASSET_REGIME_ARB not in active
+        assert voter._should_skip(SignalSource.CROSS_ASSET_REGIME_ARB, active, Regime.LOW_VOL)
+
 
 # ===========================================================================
 # Additional consensus computation edge cases
