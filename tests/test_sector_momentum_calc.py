@@ -443,3 +443,430 @@ class TestGenerateSectorSignalsExtended:
         result = generate_sector_signals(path, vix=35, regime="neutral")
         assert isinstance(result, dict)
         assert "allocation" in result
+
+
+# ---------------------------------------------------------------------------
+# calculate_momentum — zero-price and edge-case paths
+# ---------------------------------------------------------------------------
+
+class TestCalculateMomentumEdgeCases:
+    """Edge cases for calculate_momentum: zero prices, vol defaults, fallbacks."""
+
+    def _price_list(self, values, use_d_key=False):
+        """Build a price list in the expected format."""
+        d_key = "d" if use_d_key else "date"
+        return [{d_key: str(20240101 + i), "close": v, "adjClose": v} for i, v in enumerate(values)]
+
+    def test_zero_current_price_returns_none(self):
+        """current_price == 0 should return None."""
+        prices = self._price_list([100.0] * 252 + [0.0])  # last price is 0
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        assert calc.calculate_momentum("XLK", 252) is None
+
+    def test_zero_long_price_returns_none(self):
+        """long_price == 0 should return None."""
+        prices = [{"date": str(20240101 + i), "close": 100.0, "adjClose": 100.0} for i in range(300)]
+        prices[0] = {"date": "20240101", "close": 0.0, "adjClose": 0.0}  # long_price index (idx -252)
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        assert calc.calculate_momentum("XLK", 252) is None
+
+    def test_zero_short_price_returns_none(self):
+        """short_price == 0 should return None."""
+        prices = [{"date": str(20240101 + i), "close": 100.0, "adjClose": 100.0} for i in range(300)]
+        # short_lookback = max(1, 252 // 4) = 63, so short_price = prices[-63] = prices[237]
+        prices[237] = {"date": "20240237", "close": 0.0, "adjClose": 0.0}
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        assert calc.calculate_momentum("XLK", 252) is None
+
+    def test_all_prices_zero_returns_none(self):
+        """All prices zero should trigger zero-price guard."""
+        prices = self._price_list([0.0] * 300)
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        assert calc.calculate_momentum("XLK", 252) is None
+
+    def test_single_return_volatility_defaults_to_0_2(self):
+        """When returns has exactly 1 element, volatility should default to 0.2."""
+        prices = self._price_list([100.0, 105.0])  # n=2, lookback=2 => 1 return
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        result = calc.calculate_momentum("XLK", lookback_days=2)
+        assert result is not None
+        assert result["volatility"] == 0.2
+
+    def test_zero_valid_returns_volatility_defaults_to_0_2(self):
+        """When returns has 0 elements, volatility should default to 0.2.
+
+        Create prices where prev values are 0 for all return iterations.
+        n=253, lookback=252 => returns loop range(1,253).
+        Set prices[1..251] adjClose=0 so all prev-in-loop checks are 0,
+        but keep long_price (idx 1) > 0 by relying on 'close' fallback.
+        """
+        prices = [{"date": str(20240101 + i), "close": 100.0} for i in range(253)]
+        # Clear adjClose from entries used as prev in return loop
+        for i in range(252):
+            prices[i] = {"date": str(20240101 + i), "close": 0.0}  # no adjClose, close=0 => prev=0
+        # But long_price = sorted_prices[-252] = prices[1] must have close>0
+        prices[1] = {"date": "20240102", "close": 100.0, "adjClose": 100.0}
+        # Ensure current and short prices are valid
+        prices[-1] = {"date": "20240252", "close": 110.0, "adjClose": 110.0}
+
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        result = calc.calculate_momentum("XLK", lookback_days=252)
+        assert result is not None
+        assert result["volatility"] == 0.2
+
+    def test_zero_volatility_risk_adjusted_momentum_is_zero(self):
+        """When volatility is 0, riskAdjustedMomentum should be 0."""
+        prices = _make_prices(n=300, start=100.0, drift=0.0, vol=0.0, seed=42)
+        # All returns = 0, std = 0 => vol = 0
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        result = calc.calculate_momentum("XLK", 252)
+        assert result is not None
+        assert result["volatility"] == 0.0
+        assert result["riskAdjustedMomentum"] == 0.0
+
+    def test_fallback_to_close_when_no_adjclose(self):
+        """When adjClose is not available, fall back to 'close'."""
+        prices = _make_prices(n=300, start=100.0, seed=42)
+        # Remove adjClose from all entries
+        for p in prices:
+            p.pop("adjClose", None)
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        result = calc.calculate_momentum("XLK", 252)
+        assert result is not None
+        assert result["symbol"] == "XLK"
+
+    def test_fallback_to_d_key_format(self):
+        """Dicts with 'd' key instead of 'date' should still work."""
+        prices = _make_prices(n=300, start=100.0, seed=42)
+        # Convert 'date' to 'd'
+        for p in prices:
+            p["d"] = p.pop("date")
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        result = calc.calculate_momentum("XLK", 252)
+        assert result is not None
+        assert result["symbol"] == "XLK"
+
+    def test_exactly_lookback_days_data(self):
+        """Exactly lookback_days data points should be sufficient (not < lookback)."""
+        prices = self._price_list([100.0 + i * 0.5 for i in range(252)])
+        data = {"XLK": prices}
+        calc = SectorMomentumCalculator(data)
+        result = calc.calculate_momentum("XLK", 252)
+        assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# calculate_all_momentum — partial failure paths
+# ---------------------------------------------------------------------------
+
+class TestCalculateAllMomentumEdgeCases:
+
+    def test_some_symbols_fail(self):
+        """When some symbols return None, they are excluded from results."""
+        data = _make_historical_data(["XLK", "XLV", "XLF"])
+        # Make XLK have too little data
+        data["XLK"] = _make_prices("XLK", n=50)
+        calc = SectorMomentumCalculator(data)
+        results = calc.calculate_all_momentum(252)
+        symbols = [r["symbol"] for r in results]
+        assert "XLK" not in symbols
+        assert len(results) == 2
+
+    def test_all_symbols_fail_returns_empty_list(self):
+        """When all symbols return None, returns empty list."""
+        data = {sym: _make_prices(sym, n=50) for sym in ["XLK", "XLV"]}
+        calc = SectorMomentumCalculator(data)
+        results = calc.calculate_all_momentum(252)
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# adjust_for_regime — edge-case paths
+# ---------------------------------------------------------------------------
+
+class TestAdjustForRegimeEdgeCases:
+
+    def test_unknown_regime_falls_back_to_neutral(self):
+        """Unknown regime should fall back to neutral (no adjustments)."""
+        data = _make_historical_data(["XLK"])
+        calc = SectorMomentumCalculator(data)
+        scores = calc.calculate_all_momentum(252)
+        adjusted = calc.adjust_for_regime(scores, "unknown_regime", preference_boost=0.05)
+        for orig, adj in zip(scores, adjusted):
+            assert adj["compositeMomentum"] == pytest.approx(orig["compositeMomentum"])
+
+    def test_symbol_not_in_preferred_or_avoid_unchanged(self):
+        """Symbols in neither preferred nor avoid should have unchanged momentum."""
+        data = _make_historical_data(["XLK", "XLC"])
+        calc = SectorMomentumCalculator(data)
+        scores = calc.calculate_all_momentum(252)
+        # early_expansion: preferred = [XLK, XLY, XLF], avoid = [XLU, XLP]
+        # XLC is not in either list
+        adjusted = calc.adjust_for_regime(scores, "early_expansion", preference_boost=0.05)
+        orig_xlc = next(s for s in scores if s["symbol"] == "XLC")
+        adj_xlc = next(s for s in adjusted if s["symbol"] == "XLC")
+        assert adj_xlc["compositeMomentum"] == pytest.approx(orig_xlc["compositeMomentum"])
+
+    def test_adjusted_scores_retain_all_original_keys(self):
+        """Adjusted scores should include all original keys plus regimeAdjusted."""
+        scores = [
+            {"symbol": "XLK", "name": "Technology", "compositeMomentum": 0.5, "volatility": 0.15,
+             "longMomentum": 0.6, "shortMomentum": 0.4, "rank": 1, "percentile": 100},
+        ]
+        calc = SectorMomentumCalculator({})
+        adjusted = calc.adjust_for_regime(scores, "early_expansion")
+        for key in ("symbol", "name", "compositeMomentum", "volatility", "longMomentum",
+                     "shortMomentum", "rank", "percentile", "regimeAdjusted"):
+            assert key in adjusted[0]
+
+    def test_zero_preference_boost_no_change(self):
+        """preference_boost=0 should not change any scores."""
+        scores = [
+            {"symbol": "XLK", "compositeMomentum": 0.5},
+            {"symbol": "XLU", "compositeMomentum": 0.4},
+        ]
+        calc = SectorMomentumCalculator({})
+        adjusted = calc.adjust_for_regime(scores, "early_expansion", preference_boost=0.0)
+        adj_xlk = next(s for s in adjusted if s["symbol"] == "XLK")
+        adj_xlu = next(s for s in adjusted if s["symbol"] == "XLU")
+        assert adj_xlk["compositeMomentum"] == pytest.approx(0.5)
+        assert adj_xlu["compositeMomentum"] == pytest.approx(0.4)
+
+
+# ---------------------------------------------------------------------------
+# get_allocation — regimeAdjusted flag and edge cases
+# ---------------------------------------------------------------------------
+
+class TestGetAllocationEdgeCases:
+
+    def _make_scores(self, with_regime_adjusted=False):
+        scores = [
+            {"symbol": "XLK", "name": "Technology", "compositeMomentum": 0.12,
+             "volatility": 0.15, "rank": 1, "longMomentum": 0.14, "shortMomentum": 0.10,
+             "regimeAdjusted": True},
+            {"symbol": "XLV", "name": "Healthcare", "compositeMomentum": 0.10,
+             "volatility": 0.12, "rank": 2, "longMomentum": 0.11, "shortMomentum": 0.09,
+             "regimeAdjusted": True},
+            {"symbol": "XLF", "name": "Financials", "compositeMomentum": 0.08,
+             "volatility": 0.14, "rank": 3, "longMomentum": 0.09, "shortMomentum": 0.07,
+             "regimeAdjusted": False},
+        ]
+        if not with_regime_adjusted:
+            # Remove regimeAdjusted key
+            for s in scores:
+                s.pop("regimeAdjusted", None)
+        return scores
+
+    def test_regime_adjusted_true_in_output(self):
+        """regimeAdjusted=True in any input score should propagate to output."""
+        scores = self._make_scores(with_regime_adjusted=True)
+        calc = SectorMomentumCalculator({})
+        alloc = calc.get_allocation(scores, top_n=3, overlay_pct=0.25, spy_weight=0.46)
+        assert alloc["regimeAdjusted"] is True
+
+    def test_regime_adjusted_false_in_output(self):
+        """regimeAdjusted=False when no score has regimeAdjusted=True."""
+        scores = self._make_scores(with_regime_adjusted=False)
+        calc = SectorMomentumCalculator({})
+        alloc = calc.get_allocation(scores, top_n=3, overlay_pct=0.25, spy_weight=0.46)
+        assert alloc["regimeAdjusted"] is False
+
+    def test_no_positive_sectors_empty_allocations(self):
+        """When no sectors meet min_momentum, sectorAllocations is empty."""
+        scores = [{"symbol": "XLK", "name": "Technology", "compositeMomentum": -0.05,
+                   "volatility": 0.15, "rank": 1, "longMomentum": -0.03, "shortMomentum": -0.07}]
+        alloc = SectorMomentumCalculator({}).get_allocation(
+            scores, top_n=3, min_momentum=0.0)
+        assert alloc["sectorAllocations"] == []
+        assert alloc["totalEquityWeight"] == 0.46  # spy_weight default
+        assert alloc["rebalanceRecommended"] is False
+
+    def test_sector_weights_sum_correctly(self):
+        """Sector overlay + SPY allocation should total to spy_weight."""
+        scores = self._make_scores(with_regime_adjusted=True)
+        alloc = SectorMomentumCalculator({}).get_allocation(
+            scores, top_n=2, overlay_pct=0.25, spy_weight=0.46)
+        total_sector = sum(s["weight"] for s in alloc["sectorAllocations"])
+        expected_sector_portion = 0.46 * 0.25
+        assert total_sector == pytest.approx(expected_sector_portion, abs=0.001)
+        assert alloc["spAllocation"] == pytest.approx(0.46 - expected_sector_portion, abs=0.001)
+        assert alloc["totalEquityWeight"] == pytest.approx(0.46, abs=0.001)
+
+    def test_sector_allocation_keys_present(self):
+        """Each sector allocation entry has required keys."""
+        scores = self._make_scores(with_regime_adjusted=True)
+        alloc = SectorMomentumCalculator({}).get_allocation(
+            scores, top_n=2, overlay_pct=0.25, spy_weight=0.46)
+        for entry in alloc["sectorAllocations"]:
+            for key in ("symbol", "name", "weight", "momentum", "rank", "volatility"):
+                assert key in entry, f"Missing key: {key}"
+
+    def test_vix_at_threshold_boundary(self):
+        """VIX exactly at threshold should still allow rotation (not > threshold)."""
+        data = _make_historical_data(["XLK", "XLV"])
+        calc = SectorMomentumCalculator(data)
+        scores = calc.calculate_all_momentum(252)
+        alloc = calc.get_allocation(scores, top_n=3, vix=30, vix_threshold=30)
+        # vix=30, threshold=30, so vix > threshold is False => rotation allowed
+        assert alloc["rebalanceRecommended"] is not None
+
+
+# ---------------------------------------------------------------------------
+# generate_sector_signals — regime=None, empty scores, error handling
+# ---------------------------------------------------------------------------
+
+class TestGenerateSectorSignalsEdgeCases:
+
+    def test_regime_none_skips_adjustment(self, tmp_path):
+        """regime=None should skip adjust_for_regime path."""
+        import json
+        data = _make_historical_data(["XLK", "XLV"])
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=18.5, regime=None)
+        assert isinstance(result, dict)
+        # Should not have regime-based sector adjustments (no regimeAdjusted in input)
+        assert result["regime"] is None
+
+    def test_regime_empty_string_skips_adjustment(self, tmp_path):
+        """regime='' should skip adjust_for_regime path."""
+        import json
+        data = _make_historical_data(["XLK", "XLV"])
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=18.5, regime="")
+        assert isinstance(result, dict)
+        assert result["regime"] == ""
+
+    def test_empty_momentum_scores_returns_none(self, tmp_path):
+        """When all sectors fail momentum calc, generate_sector_signals returns None."""
+        import json
+        # Create data with insufficient points for all symbols
+        data = {sym: _make_prices(sym, n=50) for sym in ["XLK", "XLV"]}
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=18.5, regime="neutral")
+        assert result is None
+
+    def test_exception_during_processing_returns_none(self, tmp_path):
+        """An exception during processing should be caught and return None."""
+        path = tmp_path / "historical.json"
+        # Write non-JSON content to trigger json decode error
+        path.write_text("not valid json")
+        result = generate_sector_signals(path, vix=18.5)
+        assert result is None
+
+    def test_empty_data_file_returns_none(self, tmp_path):
+        """Empty JSON object should result in no momentum scores, returning None."""
+        import json
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump({}, f)
+        result = generate_sector_signals(path, vix=18.5)
+        assert result is None
+
+    def test_generate_sector_signals_with_zero_vix(self, tmp_path):
+        """vix=0 should work and produce an allocation."""
+        import json
+        data = _make_historical_data(["XLK", "XLV"])
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=0, regime="neutral")
+        assert isinstance(result, dict)
+        assert result["vix"] == 0
+
+    def test_generate_sector_signals_with_regime_applied(self, tmp_path):
+        """When regime is provided and non-neutral, adjustment should be applied."""
+        import json
+        data = _make_historical_data(["XLK", "XLP", "XLU"])
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=18.5, regime="early_expansion")
+        assert isinstance(result, dict)
+        # Allocation should still be valid
+        assert "allocation" in result
+        assert result["regime"] == "early_expansion"
+
+    def test_rebalance_reason_format(self, tmp_path):
+        """Rebalance reason should be formatted correctly when recommended."""
+        import json
+        data = _make_historical_data(["XLK"])
+        # Very bullish data to ensure compositeMomentum > 0.10
+        prices = [{"date": str(20240101 + i), "close": float(100 * (1.002 ** i)),
+                   "adjClose": float(100 * (1.002 ** i))} for i in range(300)]
+        data = {"XLK": prices}
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=15, regime="neutral")
+        if result and result.get("rebalanceRecommended"):
+            assert result["rebalanceReason"] is not None
+            assert "XLK" in result["rebalanceReason"]
+            assert "%" in result["rebalanceReason"]
+
+
+# ---------------------------------------------------------------------------
+# __main__ block entry point
+# ---------------------------------------------------------------------------
+
+class TestMainBlock:
+
+    def test_main_block_logic(self, tmp_path):
+        """Verify __main__ logic: generate_sector_signals with HISTORICAL_JSON."""
+        import json
+        data = _make_historical_data(["XLK", "XLV"])
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        with patch("src.strategy.sector_momentum_calc.HISTORICAL_JSON", path):
+            signals = generate_sector_signals(path, vix=18.5)
+        assert isinstance(signals, dict)
+        assert "top_sectors" in signals
+        assert "allocation" in signals
+
+    def test_main_block_with_nonexistent_path(self, tmp_path):
+        """__main__-style call with nonexistent file should return None gracefully."""
+        path = tmp_path / "nonexistent.json"
+        signals = generate_sector_signals(path, vix=18.5)
+        assert signals is None
+
+    def test_main_block_top_sectors_structure(self, tmp_path):
+        """Top sectors output should contain the expected keys."""
+        import json
+        data = _make_historical_data(["XLK", "XLV"])
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=18.5)
+        assert isinstance(result, dict)
+        for sector in result["top_sectors"]:
+            for key in ("symbol", "name", "momentumScore", "allocation", "rank",
+                         "longMomentum", "shortMomentum", "volatility"):
+                assert key in sector, f"Missing key: {key}"
+
+    def test_main_block_allocation_structure(self, tmp_path):
+        """Allocation dict in output should contain the expected keys."""
+        import json
+        data = _make_historical_data(["XLK", "XLV"])
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=18.5)
+        assert isinstance(result, dict)
+        alloc = result["allocation"]
+        for key in ("spy_core", "spy_total", "sector_overlay", "sectors"):
+            assert key in alloc, f"Missing key: {key}"

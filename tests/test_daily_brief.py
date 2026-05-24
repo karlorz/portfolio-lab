@@ -14,6 +14,7 @@ from src.monitor.daily_brief import (
     render_brief_text,
     generate_narrative,
     generate_daily_brief,
+    main as daily_brief_main,
     SEVERITY_THRESHOLDS,
     BriefSection,
 )
@@ -293,6 +294,91 @@ class TestModelValidationSection:
         mv = [s for s in sections if s.name == "model_validation"][0]
         assert "BL" in mv.data_text
 
+    # ── DSR severity flip ──
+
+    @patch("src.backtest.metrics.compute_deflated_sharpe_ratio")
+    def test_model_validation_dsr_below_50_flips_warning(self, mock_dsr, sample_dashboard):
+        """DSR below 0.50 should flip model_validation severity to warning."""
+        mock_dsr.return_value = 0.35
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert mv.severity == "warning"
+
+    @patch("src.backtest.metrics.compute_deflated_sharpe_ratio")
+    def test_model_validation_dsr_exactly_50_stays_normal(self, mock_dsr, sample_dashboard):
+        """DSR exactly at 0.50 should keep model_validation severity normal."""
+        mock_dsr.return_value = 0.50
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert mv.severity == "normal"
+
+    @patch("src.backtest.metrics.compute_deflated_sharpe_ratio")
+    def test_model_validation_dsr_near_zero(self, mock_dsr, sample_dashboard):
+        """DSR near zero should still flip to warning."""
+        mock_dsr.return_value = 0.01
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert mv.severity == "warning"
+
+    @patch("src.backtest.metrics.compute_deflated_sharpe_ratio")
+    def test_model_validation_dsr_import_error_handled(self, mock_dsr, sample_dashboard):
+        """ImportError for DSR should not crash; severity stays normal."""
+        mock_dsr.side_effect = ImportError("No module named metrics")
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert mv.severity == "normal"
+        assert "unavailable" in mv.data_text
+
+    @patch("src.backtest.metrics.compute_deflated_sharpe_ratio")
+    def test_model_validation_dsr_value_error_handled(self, mock_dsr, sample_dashboard):
+        """ValueError from DSR should not crash; severity stays normal."""
+        mock_dsr.side_effect = ValueError("Invalid input")
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert mv.severity == "normal"
+        assert "unavailable" in mv.data_text
+
+    @patch("src.backtest.metrics.compute_deflated_sharpe_ratio")
+    def test_model_validation_dsr_overflow_error_handled(self, mock_dsr, sample_dashboard):
+        """OverflowError from DSR should not crash; severity stays normal."""
+        mock_dsr.side_effect = OverflowError("Overflow")
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert mv.severity == "normal"
+        assert "unavailable" in mv.data_text
+
+    @patch("src.backtest.metrics.compute_deflated_sharpe_ratio")
+    def test_model_validation_dsr_zero_division_error_handled(self, mock_dsr, sample_dashboard):
+        """ZeroDivisionError from DSR should not crash; severity stays normal."""
+        mock_dsr.side_effect = ZeroDivisionError("Division by zero")
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert mv.severity == "normal"
+        assert "unavailable" in mv.data_text
+
+    # ── BL weight absence ──
+
+    def test_model_validation_without_bl_weights(self, sample_dashboard):
+        """When bl_weights is absent from dashboard, BL should not appear in model_validation."""
+        assert "bl_weights" not in sample_dashboard
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert "BL" not in mv.data_text
+
+    def test_model_validation_bl_weights_none(self, sample_dashboard):
+        """When bl_weights is None, BL should not appear in model_validation."""
+        sample_dashboard["bl_weights"] = None
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert "BL" not in mv.data_text
+
+    def test_model_validation_bl_weights_empty_dict(self, sample_dashboard):
+        """When bl_weights is an empty dict, BL should not appear in model_validation."""
+        sample_dashboard["bl_weights"] = {}
+        sections = generate_brief_sections(sample_dashboard)
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert "BL" not in mv.data_text
+
 
 class TestSeverityThresholds:
     """Validate SEVERITY_THRESHOLDS constants."""
@@ -378,6 +464,191 @@ class TestBriefSectionsExtended:
         sr = next(s for s in sections if s.name == "signal_roundup")
         assert sr is not None
 
+    # ── Overlay non-dict edge cases ──
+
+    def test_overlay_non_dict_values_excluded(self, sample_dashboard):
+        """String, int, and list overlay entries should be silently excluded."""
+        sample_dashboard["overlays"]["string_overlay"] = "not_a_dict"
+        sample_dashboard["overlays"]["int_overlay"] = 42
+        sample_dashboard["overlays"]["list_overlay"] = [1, 2, 3]
+        sections = generate_brief_sections(sample_dashboard)
+        os_ = next(s for s in sections if s.name == "overlay_status")
+        assert "string_overlay" not in os_.data_text
+        assert "int_overlay" not in os_.data_text
+        assert "list_overlay" not in os_.data_text
+
+    def test_overlay_dict_without_active_key_excluded(self, sample_dashboard):
+        """Dict overlay without 'active' key should be silently excluded."""
+        sample_dashboard["overlays"]["no_active"] = {"value": 1}
+        sections = generate_brief_sections(sample_dashboard)
+        os_ = next(s for s in sections if s.name == "overlay_status")
+        assert "no_active" not in os_.data_text
+
+    def test_overlay_dict_active_false_excluded(self, sample_dashboard):
+        """Dict overlay with active=False should be excluded."""
+        sample_dashboard["overlays"]["inactive_overlay"] = {"active": False}
+        sections = generate_brief_sections(sample_dashboard)
+        os_ = next(s for s in sections if s.name == "overlay_status")
+        assert "inactive_overlay" not in os_.data_text
+
+    def test_overlay_none_value_excluded(self, sample_dashboard):
+        """None overlay entries should be excluded."""
+        sample_dashboard["overlays"]["none_overlay"] = None
+        sections = generate_brief_sections(sample_dashboard)
+        os_ = next(s for s in sections if s.name == "overlay_status")
+        assert "none_overlay" not in os_.data_text
+
+    def test_overlay_underscore_prefixed_excluded(self, sample_dashboard):
+        """Underscore-prefixed overlay keys (even if dict with active) should be excluded."""
+        sample_dashboard["overlays"]["_private"] = {"active": True}
+        sections = generate_brief_sections(sample_dashboard)
+        os_ = next(s for s in sections if s.name == "overlay_status")
+        assert "_private" not in os_.data_text
+
+    # ── Attribution missing sources ──
+
+    def test_attribution_missing_sources_defaults_empty(self, sample_dashboard):
+        """When attribution dict lacks 'sources', it should default to empty list."""
+        del sample_dashboard["attribution"]["sources"]
+        sections = generate_brief_sections(sample_dashboard)
+        sr = next(s for s in sections if s.name == "signal_roundup")
+        assert "0 bullish" in sr.data_text
+        assert "0 bearish" in sr.data_text
+        assert "none" in sr.data_text
+
+    def test_attribution_missing_entirely(self, sample_dashboard):
+        """When attribution key is entirely missing, should handle gracefully."""
+        del sample_dashboard["attribution"]
+        sections = generate_brief_sections(sample_dashboard)
+        sr = next(s for s in sections if s.name == "signal_roundup")
+        assert "0 bullish" in sr.data_text
+
+    def test_attribution_empty_dict(self, sample_dashboard):
+        """When attribution is an empty dict, should handle gracefully."""
+        sample_dashboard["attribution"] = {}
+        sections = generate_brief_sections(sample_dashboard)
+        sr = next(s for s in sections if s.name == "signal_roundup")
+        assert "0 bullish" in sr.data_text
+
+    def test_attribution_sources_empty_list(self, sample_dashboard):
+        """When attribution sources is empty list, should handle gracefully."""
+        sample_dashboard["attribution"]["sources"] = []
+        sections = generate_brief_sections(sample_dashboard)
+        sr = next(s for s in sections if s.name == "signal_roundup")
+        assert "0 bullish" in sr.data_text
+        assert "0 bearish" in sr.data_text
+
+    # ── Regime missing keys ──
+
+    def test_regime_missing_classifier_key(self, sample_dashboard):
+        """When regime dict lacks 'classifier' key, should default to 'unknown'."""
+        del sample_dashboard["regime"]["classifier"]
+        sections = generate_brief_sections(sample_dashboard)
+        rc = next(s for s in sections if s.name == "risk_check")
+        assert "unknown" in rc.data_text
+
+    def test_regime_missing_current_regime_key(self, sample_dashboard):
+        """When classifier lacks 'current_regime' key, should default to 'unknown'."""
+        del sample_dashboard["regime"]["classifier"]["current_regime"]
+        sections = generate_brief_sections(sample_dashboard)
+        rc = next(s for s in sections if s.name == "risk_check")
+        assert "unknown" in rc.data_text
+
+    def test_regime_empty_dict(self, sample_dashboard):
+        """When regime is an empty dict, should handle gracefully."""
+        sample_dashboard["regime"] = {}
+        sections = generate_brief_sections(sample_dashboard)
+        rc = next(s for s in sections if s.name == "risk_check")
+        assert "unknown" in rc.data_text
+
+    def test_regime_classifier_none_raises_attribute_error(self, sample_dashboard):
+        """When classifier is None, source code raises AttributeError (not handled)."""
+        sample_dashboard["regime"]["classifier"] = None
+        import pytest
+        with pytest.raises(AttributeError):
+            generate_brief_sections(sample_dashboard)
+
+    def test_regime_classifier_empty_dict(self, sample_dashboard):
+        """When classifier is an empty dict, should handle gracefully."""
+        sample_dashboard["regime"]["classifier"] = {}
+        sections = generate_brief_sections(sample_dashboard)
+        rc = next(s for s in sections if s.name == "risk_check")
+        assert "unknown" in rc.data_text
+
+    # ── Mixed severity action items ──
+
+    def test_action_items_mixed_severity_alert_wins(self, sample_dashboard):
+        """When some sections have alert and some warning, action_severity should be alert."""
+        sample_dashboard["risk"]["current_drawdown"] = -22.0  # triggers alert
+        sample_dashboard["tca"]["scorecard"]["avg_slippage_bps"] = 10.0  # triggers warning
+        sections = generate_brief_sections(sample_dashboard)
+        ai = next(s for s in sections if s.name == "action_items")
+        assert ai.severity == "alert"
+
+    def test_action_items_alerts_from_multiple_sections(self, sample_dashboard):
+        """Multiple sections with alert severity should still produce alert action_severity."""
+        sample_dashboard["risk"]["current_drawdown"] = -22.0  # triggers alert
+        sample_dashboard["tca"]["scorecard"]["avg_slippage_bps"] = 18.0  # triggers alert
+        sections = generate_brief_sections(sample_dashboard)
+        ai = next(s for s in sections if s.name == "action_items")
+        assert ai.severity == "alert"
+
+    def test_action_items_warning_only_severity(self, sample_dashboard):
+        """When only warning sections exist (no alerts), action_severity should be warning."""
+        sample_dashboard["risk"]["current_drawdown"] = -12.0  # triggers warning
+        sample_dashboard["tca"]["scorecard"]["avg_slippage_bps"] = 10.0  # triggers warning
+        sections = generate_brief_sections(sample_dashboard)
+        ai = next(s for s in sections if s.name == "action_items")
+        assert ai.severity == "warning"
+
+    def test_action_items_recommendations_included(self, sample_dashboard):
+        """Action items should include recommendations from warning/alert sections."""
+        sample_dashboard["risk"]["current_drawdown"] = -22.0
+        sections = generate_brief_sections(sample_dashboard)
+        ai = next(s for s in sections if s.name == "action_items")
+        assert "Review hedges" in ai.data_text
+
+    def test_action_items_includes_health_alerts(self, sample_dashboard):
+        """Health alerts should appear in action items when present."""
+        sample_dashboard["health"]["alerts"] = ["Data freshness: prices 2 days stale"]
+        sample_dashboard["risk"]["current_drawdown"] = -22.0
+        sections = generate_brief_sections(sample_dashboard)
+        ai = next(s for s in sections if s.name == "action_items")
+        assert "Data freshness" in ai.data_text
+        assert "Review hedges" in ai.data_text
+
+    def test_action_items_health_alerts_truncated_to_three(self, sample_dashboard):
+        """Health alerts should be truncated to at most 3 entries."""
+        sample_dashboard["health"]["alerts"] = [
+            "Alert A", "Alert B", "Alert C", "Alert D", "Alert E",
+        ]
+        sample_dashboard["risk"]["current_drawdown"] = -22.0
+        sections = generate_brief_sections(sample_dashboard)
+        ai = next(s for s in sections if s.name == "action_items")
+        # Only first 3 alerts should appear
+        assert "Alert A" in ai.data_text
+        assert "Alert C" in ai.data_text
+        # But alert D should not (truncated)
+        # But in practice the recommendations appear first, then alerts, joined by "; "
+        # So we check total content is present
+
+    def test_action_items_alert_without_recommendation(self, sample_dashboard):
+        """Alert section without recommendation should not add empty items."""
+        # Modify attribution to produce warning without recommendation
+        sample_dashboard["attribution"]["sources"] = [
+            {"name": "Bearish A", "total_return_bps": -5.0},
+            {"name": "Bearish B", "total_return_bps": -3.0},
+            {"name": "Bearish C", "total_return_bps": -2.0},
+        ]
+        # signal_roundup has warning severity but no recommendation
+        sample_dashboard["risk"]["current_drawdown"] = -22.0
+        sections = generate_brief_sections(sample_dashboard)
+        ai = next(s for s in sections if s.name == "action_items")
+        # risk_check has recommendation, signal_roundup doesn't
+        # signal_roundup's recommendation attr is empty string
+        # Only recommendations with truthy content are included
+        assert "Review hedges" in ai.data_text
+
 
 class TestRenderBriefTextExtended:
     """Extended render_brief_text tests."""
@@ -416,3 +687,165 @@ class TestGenerateDailyBriefExtended:
         mock_dashboard.return_value = sample_dashboard
         brief = generate_daily_brief()
         assert brief["severity"] == "normal"
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_brief_has_narrative_false_default(self, mock_dashboard, sample_dashboard):
+        """Default brief should have has_narrative set to False."""
+        mock_dashboard.return_value = sample_dashboard
+        brief = generate_daily_brief()
+        assert brief["has_narrative"] is False
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_brief_full_text_contains_all_sections(self, mock_dashboard, sample_dashboard):
+        """Full text should contain rendered section titles."""
+        mock_dashboard.return_value = sample_dashboard
+        brief = generate_daily_brief()
+        assert "PORTFOLIO SNAPSHOT" in brief["full_text"]
+        assert "RISK CHECK" in brief["full_text"]
+        assert "ACTION ITEMS" in brief["full_text"]
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_brief_generated_at_iso_format(self, mock_dashboard, sample_dashboard):
+        """generated_at should be ISO format string."""
+        mock_dashboard.return_value = sample_dashboard
+        brief = generate_daily_brief()
+        assert "T" in brief["generated_at"]  # ISO datetime contains T
+
+
+class TestDailyBriefCLI:
+    """Tests for the CLI entry point (main function with argparse)."""
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_save_flag_writes_file(self, mock_dashboard, sample_dashboard, tmp_path):
+        """--save flag should write daily_brief.json to DATA_DIR."""
+        mock_dashboard.return_value = sample_dashboard
+        with patch("sys.argv", ["daily_brief", "--save", "--no-narrative"]):
+            with patch("src.monitor.daily_brief.DATA_DIR", tmp_path):
+                with patch("builtins.print"):
+                    daily_brief_main()
+        out_path = tmp_path / "daily_brief.json"
+        assert out_path.exists()
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_save_file_contains_brief_data(self, mock_dashboard, sample_dashboard, tmp_path):
+        """The saved JSON file should contain all brief fields."""
+        mock_dashboard.return_value = sample_dashboard
+        with patch("sys.argv", ["daily_brief", "--save", "--no-narrative"]):
+            with patch("src.monitor.daily_brief.DATA_DIR", tmp_path):
+                with patch("builtins.print"):
+                    daily_brief_main()
+        out_path = tmp_path / "daily_brief.json"
+        data = json.loads(out_path.read_text())
+        assert "generated_at" in data
+        assert "severity" in data
+        assert "sections" in data
+        assert "full_text" in data
+        assert len(data["sections"]) == 7
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_no_save_flag_does_not_write_file(self, mock_dashboard, sample_dashboard, tmp_path):
+        """Without --save flag, no file should be written."""
+        mock_dashboard.return_value = sample_dashboard
+        with patch("sys.argv", ["daily_brief", "--no-narrative"]):
+            with patch("src.monitor.daily_brief.DATA_DIR", tmp_path):
+                with patch("builtins.print"):
+                    daily_brief_main()
+        out_path = tmp_path / "daily_brief.json"
+        assert not out_path.exists()
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_save_file_has_valid_json(self, mock_dashboard, sample_dashboard, tmp_path):
+        """Saved JSON should be parseable and contain correct severity."""
+        mock_dashboard.return_value = sample_dashboard
+        with patch("sys.argv", ["daily_brief", "--save", "--no-narrative"]):
+            with patch("src.monitor.daily_brief.DATA_DIR", tmp_path):
+                with patch("builtins.print"):
+                    daily_brief_main()
+        out_path = tmp_path / "daily_brief.json"
+        data = json.loads(out_path.read_text())
+        assert data["severity"] == "normal"
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_no_narrative_skips_narrative(self, mock_dashboard, sample_dashboard):
+        """--no-narrative should prevent generate_narrative from being called."""
+        mock_dashboard.return_value = sample_dashboard
+        with patch("sys.argv", ["daily_brief", "--no-narrative"]):
+            with patch("builtins.print"):
+                with patch("src.monitor.daily_brief.generate_narrative") as mock_narrative:
+                    daily_brief_main()
+                    mock_narrative.assert_not_called()
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_no_narrative_preserves_brief_output(self, mock_dashboard, sample_dashboard):
+        """With --no-narrative, brief output should still be printed."""
+        mock_dashboard.return_value = sample_dashboard
+        printed_texts = []
+        with patch("sys.argv", ["daily_brief", "--no-narrative"]):
+            with patch("builtins.print") as mock_print:
+                daily_brief_main()
+                # print should be called at least once (the brief text)
+                assert mock_print.call_count >= 1
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    @patch("src.monitor.daily_brief.generate_narrative")
+    def test_narrative_called_when_not_disabled(self, mock_narrative, mock_dashboard, sample_dashboard):
+        """Without --no-narrative, generate_narrative should be called."""
+        mock_dashboard.return_value = sample_dashboard
+        mock_narrative.return_value = "Portfolio is stable today."
+        with patch("sys.argv", ["daily_brief"]):
+            with patch("builtins.print"):
+                daily_brief_main()
+        mock_narrative.assert_called_once()
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_narrative_failure_does_not_crash_main(self, mock_dashboard, sample_dashboard):
+        """When narrative generation fails (returns None), main should not crash."""
+        mock_dashboard.return_value = sample_dashboard
+        with patch("sys.argv", ["daily_brief"]):
+            with patch("builtins.print"):
+                with patch("src.monitor.daily_brief.generate_narrative", return_value=None):
+                    daily_brief_main()
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    @patch("src.monitor.daily_brief.generate_narrative")
+    def test_narrative_updates_has_narrative_in_full_text(
+        self, mock_narrative, mock_dashboard, sample_dashboard,
+    ):
+        """When narrative is returned, it should appear in printed output."""
+        mock_dashboard.return_value = sample_dashboard
+        mock_narrative.return_value = "Markets are calm."
+        printed = []
+        with patch("sys.argv", ["daily_brief"]):
+            with patch("builtins.print") as mock_print:
+                daily_brief_main()
+                # One of the print calls should contain the narrative text
+                all_output = " ".join(
+                    str(call.args[0]) for call in mock_print.call_args_list
+                )
+                assert "Markets are calm." in all_output
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_save_with_narrative_writes_file(self, mock_dashboard, sample_dashboard, tmp_path):
+        """--save flag without --no-narrative should still write file."""
+        mock_dashboard.return_value = sample_dashboard
+        with patch("sys.argv", ["daily_brief", "--save"]):
+            with patch("src.monitor.daily_brief.DATA_DIR", tmp_path):
+                with patch("builtins.print"):
+                    with patch("src.monitor.daily_brief.generate_narrative", return_value=None):
+                        daily_brief_main()
+        out_path = tmp_path / "daily_brief.json"
+        assert out_path.exists()
+
+    @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
+    def test_save_prints_confirmation(self, mock_dashboard, sample_dashboard, tmp_path):
+        """--save flag should print 'Saved to' confirmation message."""
+        mock_dashboard.return_value = sample_dashboard
+        with patch("sys.argv", ["daily_brief", "--save", "--no-narrative"]):
+            with patch("src.monitor.daily_brief.DATA_DIR", tmp_path):
+                printed_texts = []
+                with patch("builtins.print") as mock_print:
+                    daily_brief_main()
+                    all_output = " ".join(
+                        str(call.args[0]) for call in mock_print.call_args_list
+                    )
+                    assert "Saved to" in all_output

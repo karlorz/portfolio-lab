@@ -21,6 +21,10 @@ from src.monitor.cvar_metrics import (
     compute_cvar_metrics,
     load_history,
     save_history,
+    export_metrics,
+    fetch_portfolio_returns,
+    display_metrics,
+    main,
 )
 
 

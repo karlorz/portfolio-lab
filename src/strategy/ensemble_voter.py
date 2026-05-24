@@ -459,7 +459,7 @@ class EnsembleVoter:
         self._collect_cross_asset_rv_signal(readings)
         self._collect_intl_momentum_signal(readings, active_sources, regime)
         self._collect_alt_data_signal(readings, active_sources, regime)
-        self._collect_regime_arb_signal(readings)
+        self._collect_regime_arb_signal(readings, active_sources, regime)
         self._collect_unified_overlay_signal(readings, active_sources, regime)
 
         self.current_readings = readings
@@ -557,8 +557,10 @@ class EnsembleVoter:
         except Exception as e:
             logger.debug("Alternative data unavailable: %s", e)
 
-    def _collect_regime_arb_signal(self, readings: Dict) -> None:
+    def _collect_regime_arb_signal(self, readings: Dict, active_sources, regime: Optional[Regime]) -> None:
         """Collect cross-asset regime arbitrage signal."""
+        if self._should_skip(SignalSource.CROSS_ASSET_REGIME_ARB, active_sources, regime):
+            return
         try:
             from src.signals.cross_asset_regime_arb import CrossAssetRegimeArbDetector
             arb_detector = CrossAssetRegimeArbDetector()
@@ -566,7 +568,7 @@ class EnsembleVoter:
             if snapshot.is_active:
                 readings[SignalSource.CROSS_ASSET_REGIME_ARB] = snapshot.to_signal_reading()
         except ImportError:
-            pass
+            logger.debug("Cross-asset regime arb module not available")
         except Exception as e:
             logger.debug("Cross-asset regime arb unavailable: %s", e)
 
