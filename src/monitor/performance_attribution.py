@@ -187,7 +187,7 @@ class PerformanceAttribution:
                         "reasoning": row["reasoning"],
                     })
 
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, sqlite3.Error) as e:
             logger.error("Error reading signal history: %s", e)
 
         return history
@@ -213,7 +213,7 @@ class PerformanceAttribution:
                             "daily_return": row["daily_return"],
                             "cumulative_return": row["cumulative_return"],
                         }
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, sqlite3.Error) as e:
                 logger.warning("Could not read paper trading DB: %s", e)
 
         # Fallback: check json reports
@@ -232,7 +232,7 @@ class PerformanceAttribution:
                                 "daily_return": dr["return"],
                                 "cumulative_return": dr["cumulative"],
                             }
-                except Exception as e:
+                except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                     logger.warning("Could not read performance file: %s", e)
 
         return daily_returns
@@ -526,7 +526,7 @@ class PerformanceAttribution:
                 sources[src_key] = SourceAttribution(**src_data)
             data["sources"] = sources
             return AttributionReport(**data)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Error loading report: %s", e)
             return None
 
@@ -620,7 +620,7 @@ def patch_save_vote():
                         reading.regime_fit,
                         reading.explanation[:500] if reading.explanation else "",
                     ))
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, sqlite3.Error) as e:
             logger.warning("Failed to save source readings: %s", e)
 
     ev.EnsembleVoter._save_vote = patched_save

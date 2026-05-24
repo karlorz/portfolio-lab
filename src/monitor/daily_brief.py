@@ -265,7 +265,7 @@ def generate_narrative(dashboard: Dict[str, Any]) -> Optional[str]:
             messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text.strip()
-    except Exception as e:
+    except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
         logger.warning("Narrative generation failed: %s", e)
         return None
 
@@ -275,7 +275,7 @@ def generate_daily_brief() -> Dict[str, Any]:
     try:
         from src.monitor.unified_dashboard import generate_unified_dashboard
         dashboard = generate_unified_dashboard()
-    except Exception as e:
+    except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
         logger.exception("Failed to generate unified dashboard: %s", e)
         dashboard = {}
 
@@ -318,7 +318,7 @@ def main():
                     [BriefSection(**s) for s in brief["sections"]], narrative
                 )
                 brief["has_narrative"] = True
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Failed to generate unified dashboard narrative: %s", e)
 
     print(brief["full_text"])

@@ -810,7 +810,7 @@ def main():
         else:
             parser.print_help()
 
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
         logger.error("Error: %s", e)
         sys.exit(1)
 

@@ -100,7 +100,7 @@ class OverlayDashboardGenerator:
                                f"call ${signal.call_strike:.0f}, "
                                f"put ${signal.put_strike:.0f}",
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
     def _get_crypto_data(self) -> Dict[str, Any]:
@@ -121,7 +121,7 @@ class OverlayDashboardGenerator:
                 "status_text": f"Crypto: {signal.composite_weight:.1%}, "
                                f"BTC {signal.btc_signal.momentum_6m:+.1%} 6m",
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
     def _get_bond_duration_data(self) -> Dict[str, Any]:
@@ -146,7 +146,7 @@ class OverlayDashboardGenerator:
                                f"({signal.curve_regime}/{signal.rate_direction}), "
                                f"dur {signal.effective_duration:.0f}yr",
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
     def _get_calendar_data(self) -> Dict[str, Any]:
@@ -165,7 +165,7 @@ class OverlayDashboardGenerator:
                 "status_text": f"Calendar: {signal.urgency_modifier:.2f}x, "
                                f"{len(signal.active_windows)} windows active",
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
     def _get_kurtosis_data(self) -> Dict[str, Any]:
@@ -187,7 +187,7 @@ class OverlayDashboardGenerator:
                 "status_text": f"Kurtosis: {signal.regime} "
                                f"(k={signal.kurtosis_60d:.1f}, KER={signal.ker_ratio:.2f})",
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
     def _get_mean_reversion_data(self) -> Dict[str, Any]:
@@ -215,7 +215,7 @@ class OverlayDashboardGenerator:
                 "status_text": f"Unified: SPY {rec.spy:.1%}, GLD {rec.gld:.1%}, "
                                f"Sharpe est {rec.estimated_sharpe:.3f}",
             }
-        except Exception as e:
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
     def _assess_portfolio_risk(self, data: Dict) -> Tuple[str, List[str]]:

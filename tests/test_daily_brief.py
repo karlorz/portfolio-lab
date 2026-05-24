@@ -214,7 +214,7 @@ class TestGenerateNarrative:
 
     def test_returns_none_on_api_error(self, sample_dashboard):
         mock_client = MagicMock()
-        mock_client.messages.create.side_effect = Exception("API error")
+        mock_client.messages.create.side_effect = RuntimeError("API error")
 
         with patch("src.monitor.daily_brief.ANTHROPIC_AVAILABLE", True):
             with patch("src.monitor.daily_brief.Anthropic", return_value=mock_client):
@@ -253,7 +253,7 @@ class TestGenerateDailyBrief:
 
     @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
     def test_empty_dashboard_fallback(self, mock_dashboard):
-        mock_dashboard.side_effect = Exception("Dashboard error")
+        mock_dashboard.side_effect = RuntimeError("Dashboard error")
         brief = generate_daily_brief()
         assert "sections" in brief
         assert brief["severity"] == "normal"

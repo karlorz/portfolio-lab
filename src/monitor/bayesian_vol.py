@@ -18,6 +18,7 @@ Usage:
 import json
 import logging
 import math
+import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional, List, Tuple
@@ -264,7 +265,6 @@ class BayesianVolPipeline:
 
         if db_path.exists():
             try:
-                import sqlite3
                 with sqlite_connect(str(db_path)) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
@@ -279,7 +279,7 @@ class BayesianVolPipeline:
                         window_rets = returns[i-20:i]
                         vol = float(np.std(window_rets) * math.sqrt(252))
                         vols.append(vol)
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError, sqlite3.Error) as e:
                 logger.warning("Failed to fetch volatility history: %s", e)
 
         if not vols:
