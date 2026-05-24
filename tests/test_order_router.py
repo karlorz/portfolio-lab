@@ -566,5 +566,128 @@ class TestRebalanceExtended:
             assert call_kwargs[1].get("dry_run", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else True) is True
 
 
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify module exports."""
+
+    def test_signal_class(self):
+        assert Signal is not None
+
+    def test_order_plan_class(self):
+        assert OrderPlan is not None
+
+    def test_order_router_class(self):
+        assert OrderRouter is not None
+
+
+# ---------------------------------------------------------------------------
+# Signal dataclass tests
+# ---------------------------------------------------------------------------
+
+class TestSignalDataclass:
+    """Test Signal dataclass."""
+
+    def test_required_fields(self):
+        s = Signal("SPY", 0.50)
+        assert s.symbol == "SPY"
+        assert s.target_allocation == 0.50
+
+    def test_default_values(self):
+        s = Signal("GLD", 0.30)
+        assert s.current_allocation is None
+        assert s.signal_type == "rebalance"
+        assert s.confidence == 1.0
+
+    def test_custom_values(self):
+        s = Signal("TLT", 0.20, current_allocation=0.15, signal_type="trend", confidence=0.8)
+        assert s.current_allocation == 0.15
+        assert s.signal_type == "trend"
+        assert s.confidence == 0.8
+
+
+# ---------------------------------------------------------------------------
+# OrderPlan dataclass tests
+# ---------------------------------------------------------------------------
+
+class TestOrderPlanDataclass:
+    """Test OrderPlan dataclass."""
+
+    def test_buy_plan(self):
+        plan = OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "underweight")
+        assert plan.symbol == "SPY"
+        assert plan.side == "BUY"
+        assert plan.qty == 10
+
+    def test_sell_plan(self):
+        plan = OrderPlan("GLD", "SELL", 5, "MARKET", 1000, "overweight")
+        assert plan.side == "SELL"
+
+    def test_limit_order_type(self):
+        plan = OrderPlan("TLT", "BUY", 3, "LIMIT", 500, "rebalance")
+        assert plan.order_type == "LIMIT"
+
+
+# ---------------------------------------------------------------------------
+# OrderRouter extended tests
+# ---------------------------------------------------------------------------
+
+class TestOrderRouterExtended:
+    """Extended OrderRouter tests."""
+
+    def test_is_ready_with_mock_client(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = MagicMock()
+            router.client.is_ready.return_value = True
+            assert router.is_ready() is True
+
+    def test_is_ready_no_client(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = None
+            # client=None causes AttributeError, so we test the behavior
+            with pytest.raises(AttributeError):
+                router.is_ready()
+
+    def test_load_signals_returns_list(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            signals = router.load_signals()
+            assert isinstance(signals, list)
+
+    def test_get_current_positions_no_client(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            router.client = None
+            # client=None causes AttributeError
+            with pytest.raises(AttributeError):
+                router.get_current_positions()
+
+    def test_calculate_orders_no_signal_change(self):
+        """Positions matching target should produce no orders."""
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            signals = [Signal("SPY", 0.50, current_allocation=0.50)]
+            positions = {"SPY": {"qty": 10, "market_value": 5000}}
+            orders = router.calculate_orders(signals, positions, total_value=10000)
+            # No significant drift → no order
+            assert all(o.symbol != "SPY" for o in orders) or len(orders) == 0
+
+
+# ---------------------------------------------------------------------------
+# CLI test
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    """Test main() callable."""
+
+    def test_main_callable(self):
+        from src.broker.order_router import main
+        assert callable(main)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

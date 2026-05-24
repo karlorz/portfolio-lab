@@ -526,7 +526,7 @@ class TechnicalSignal(SignalSource):
         avg_gain = statistics.mean(gains) if gains else 0
         avg_loss = statistics.mean(losses) if losses else 0.0001
         
-        rs = avg_gain / avg_loss
+        rs = avg_gain / max(avg_loss, 0.0001)
         rsi = 100 - (100 / (1 + rs))
         
         # Convert RSI to signal (oversold = bullish, overbought = bearish)
@@ -1119,7 +1119,10 @@ class SignalIntegrator:
             recommended[ticker] = recommended_weight
         
         # Determine overall sentiment
-        avg_score = statistics.mean([d.composite_score for d in deltas])
+        if not deltas:
+            avg_score = 0.0
+        else:
+            avg_score = statistics.mean([d.composite_score for d in deltas])
         if avg_score > 0.3:
             sentiment = "bullish"
         elif avg_score < -0.3:
@@ -1128,7 +1131,10 @@ class SignalIntegrator:
             sentiment = "neutral"
         
         # Calculate confidence
-        avg_confidence = statistics.mean([d.confidence for d in deltas])
+        if not deltas:
+            avg_confidence = 0.0
+        else:
+            avg_confidence = statistics.mean([d.confidence for d in deltas])
         
         recommendation = PortfolioRecommendation(
             timestamp=datetime.now().isoformat(),

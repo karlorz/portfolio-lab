@@ -355,3 +355,193 @@ class TestCalculateVixAllocationExtended:
         _, _, vol_low = allocator.calculate_vix_allocation(signal_low)
         _, _, vol_high = allocator.calculate_vix_allocation(signal_high)
         assert vol_high > vol_low
+
+
+# ---------------------------------------------------------------------------
+# __all__ export validation
+# ---------------------------------------------------------------------------
+
+class TestExports:
+    """Verify __all__ exports."""
+
+    def test_all_exports_present(self):
+        import src.strategy.vol_parity_allocator as mod
+        for name in mod.__all__:
+            assert hasattr(mod, name), f"Missing export: {name}"
+
+    def test_all_count(self):
+        import src.strategy.vol_parity_allocator as mod
+        assert len(mod.__all__) == 2
+
+
+# ---------------------------------------------------------------------------
+# VolParityAllocation dataclass extended
+# ---------------------------------------------------------------------------
+
+class TestVolParityAllocationExtended:
+    """Extended VolParityAllocation dataclass tests."""
+
+    def test_all_fields(self):
+        from dataclasses import fields
+        field_names = {f.name for f in fields(VolParityAllocation)}
+        expected = {
+            "date", "target_volatility", "spy_pct", "gld_pct", "tlt_pct",
+            "core_vol_contribution", "vix_short_pct", "vix_tail_pct",
+            "vix_vol_contribution", "cash_pct", "expected_portfolio_vol",
+            "expected_max_dd", "rebalance_triggered", "rebalance_reason",
+        }
+        assert field_names == expected
+
+    def test_to_dict(self):
+        alloc = VolParityAllocation(
+            date="2026-01-01", target_volatility=10.0,
+            spy_pct=46.0, gld_pct=38.0, tlt_pct=16.0,
+            core_vol_contribution=11.0,
+            vix_short_pct=3.0, vix_tail_pct=1.0, vix_vol_contribution=5.0,
+            cash_pct=4.0, expected_portfolio_vol=10.0, expected_max_dd=-15.0,
+            rebalance_triggered=False, rebalance_reason=None,
+        )
+        d = alloc.to_dict()
+        assert d["spy_pct"] == 46.0
+        assert d["date"] == "2026-01-01"
+
+    def test_total_allocation(self):
+        alloc = VolParityAllocation(
+            date="2026-01-01", target_volatility=10.0,
+            spy_pct=46.0, gld_pct=38.0, tlt_pct=16.0,
+            core_vol_contribution=11.0,
+            vix_short_pct=3.0, vix_tail_pct=1.0, vix_vol_contribution=5.0,
+            cash_pct=4.0, expected_portfolio_vol=10.0, expected_max_dd=-15.0,
+            rebalance_triggered=False, rebalance_reason=None,
+        )
+        assert alloc.total_allocation == pytest.approx(46+38+16+3+1+4)
+
+    def test_total_vol_contribution(self):
+        alloc = VolParityAllocation(
+            date="2026-01-01", target_volatility=10.0,
+            spy_pct=46.0, gld_pct=38.0, tlt_pct=16.0,
+            core_vol_contribution=11.0,
+            vix_short_pct=3.0, vix_tail_pct=1.0, vix_vol_contribution=5.0,
+            cash_pct=4.0, expected_portfolio_vol=10.0, expected_max_dd=-15.0,
+            rebalance_triggered=False, rebalance_reason=None,
+        )
+        assert alloc.total_vol_contribution == pytest.approx(11.0 + 5.0)
+
+    def test_rebalance_reason_none(self):
+        alloc = VolParityAllocation(
+            date="2026-01-01", target_volatility=10.0,
+            spy_pct=46.0, gld_pct=38.0, tlt_pct=16.0,
+            core_vol_contribution=11.0,
+            vix_short_pct=3.0, vix_tail_pct=1.0, vix_vol_contribution=5.0,
+            cash_pct=4.0, expected_portfolio_vol=10.0, expected_max_dd=-15.0,
+            rebalance_triggered=False, rebalance_reason=None,
+        )
+        assert alloc.rebalance_reason is None
+
+
+# ---------------------------------------------------------------------------
+# VolatilityParityAllocator constants
+# ---------------------------------------------------------------------------
+
+class TestAllocatorConstants:
+    """Test allocator class constants."""
+
+    def test_target_volatility(self):
+        assert VolatilityParityAllocator.TARGET_VOLATILITY == 10.0
+
+    def test_core_asset_vols(self):
+        vols = VolatilityParityAllocator.CORE_ASSET_VOLS
+        assert "SPY" in vols
+        assert "GLD" in vols
+        assert "TLT" in vols
+        assert all(v > 0 for v in vols.values())
+
+    def test_max_vix_short_pct(self):
+        assert VolatilityParityAllocator.MAX_VIX_SHORT_PCT == 5.0
+
+    def test_max_vix_tail_pct(self):
+        assert VolatilityParityAllocator.MAX_VIX_TAIL_PCT == 2.0
+
+    def test_rebalance_threshold(self):
+        assert VolatilityParityAllocator.REBALANCE_THRESHOLD == 10.0
+
+    def test_vix_caps_positive(self):
+        assert VolatilityParityAllocator.MAX_VIX_SHORT_PCT > 0
+        assert VolatilityParityAllocator.MAX_VIX_TAIL_PCT > 0
+
+
+# ---------------------------------------------------------------------------
+# generate_allocation extended
+# ---------------------------------------------------------------------------
+
+class TestGenerateAllocationExtended:
+    """Extended generate_allocation tests."""
+
+    def _make_allocator(self):
+        with patch.object(VolatilityParityAllocator, '__init__', lambda self, **kw: None):
+            alloc = VolatilityParityAllocator.__new__(VolatilityParityAllocator)
+            alloc.target_vol = 10.0
+            alloc.vix_strategy = MagicMock()
+            alloc.vix_manager = MagicMock()
+            alloc.last_allocation = None
+            return alloc
+
+    def test_returns_vol_parity_allocation(self):
+        allocator = self._make_allocator()
+        signal = _make_convexity_signal(vix_level=20, allocation_pct=3.0)
+        allocator.vix_strategy.generate_signal.return_value = signal
+        with patch.object(allocator, 'calculate_core_allocation', return_value=({"SPY": 46, "GLD": 38, "TLT": 16}, 11.0)), \
+             patch.object(allocator, 'calculate_vix_allocation', return_value=(3.0, 1.0, 5.0)):
+            result = allocator.generate_allocation("2026-01-01")
+            assert isinstance(result, VolParityAllocation)
+
+    def test_allocation_date_matches(self):
+        allocator = self._make_allocator()
+        signal = _make_convexity_signal(vix_level=20, allocation_pct=3.0)
+        allocator.vix_strategy.generate_signal.return_value = signal
+        with patch.object(allocator, 'calculate_core_allocation', return_value=({"SPY": 46, "GLD": 38, "TLT": 16}, 11.0)), \
+             patch.object(allocator, 'calculate_vix_allocation', return_value=(3.0, 1.0, 5.0)):
+            result = allocator.generate_allocation("2026-05-24")
+            assert result.date == "2026-05-24"
+
+    def test_high_vix_more_cash(self):
+        """High VIX (>25) should set base cash at 18% before scaling."""
+        allocator = self._make_allocator()
+        signal = _make_convexity_signal(vix_level=30, allocation_pct=3.0)
+        allocator.vix_strategy.generate_signal.return_value = signal
+        with patch.object(allocator, 'calculate_core_allocation', return_value=({"SPY": 40, "GLD": 30, "TLT": 10}, 11.0)), \
+             patch.object(allocator, 'calculate_vix_allocation', return_value=(3.0, 1.0, 5.0)):
+            result = allocator.generate_allocation("2026-01-01")
+            # High VIX path is taken, cash may be scaled if total > 100
+            assert result.cash_pct > 0
+
+    def test_rebalance_triggered_on_drift(self):
+        """Should trigger rebalance when drift exceeds threshold."""
+        allocator = self._make_allocator()
+        # Set last_allocation with very different weights
+        allocator.last_allocation = VolParityAllocation(
+            date="2026-01-01", target_volatility=10.0,
+            spy_pct=30.0, gld_pct=38.0, tlt_pct=16.0,
+            core_vol_contribution=11.0,
+            vix_short_pct=3.0, vix_tail_pct=1.0, vix_vol_contribution=5.0,
+            cash_pct=18.0, expected_portfolio_vol=10.0, expected_max_dd=-15.0,
+            rebalance_triggered=False, rebalance_reason=None,
+        )
+        signal = _make_convexity_signal(vix_level=20, allocation_pct=3.0)
+        allocator.vix_strategy.generate_signal.return_value = signal
+        with patch.object(allocator, 'calculate_core_allocation', return_value=({"SPY": 46, "GLD": 38, "TLT": 16}, 11.0)), \
+             patch.object(allocator, 'calculate_vix_allocation', return_value=(3.0, 1.0, 5.0)):
+            result = allocator.generate_allocation("2026-01-02")
+            assert result.rebalance_triggered is True
+
+
+# ---------------------------------------------------------------------------
+# CLI test
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    """Test main() callable."""
+
+    def test_main_callable(self):
+        from src.strategy.vol_parity_allocator import main
+        assert callable(main)

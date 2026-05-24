@@ -3,6 +3,7 @@
 Tests for alternative data module — data classes, adapters, composite signals,
 earnings predictions.
 """
+import io
 import json
 import sqlite3
 
@@ -897,6 +898,556 @@ class TestConstantsExtended:
     def test_client_class(self):
         from src.data.alternative_data import AlternativeDataClient
         assert hasattr(AlternativeDataClient, "SOURCE_WEIGHTS")
+
+
+# ---------------------------------------------------------------------------
+# Adapter init with custom db_path
+# ---------------------------------------------------------------------------
+
+class TestAdapterInitCustom:
+    """Test adapters can be initialized with custom db paths."""
+
+    def test_satellite_custom_db_path(self, tmp_path):
+        db = tmp_path / "custom.db"
+        with patch("src.data.alternative_data.ALT_DATA_DB", db):
+            adapter = SatelliteDataAdapter()
+            adapter.db_path = db
+        assert adapter.source_name == "satellite"
+        assert adapter.db_path == db
+
+    def test_credit_card_custom_db_path(self, tmp_path):
+        db = tmp_path / "custom.db"
+        with patch("src.data.alternative_data.ALT_DATA_DB", db):
+            adapter = CreditCardAdapter()
+            adapter.db_path = db
+        assert adapter.source_name == "credit_card"
+        assert adapter.db_path == db
+
+    def test_supply_chain_custom_db_path(self, tmp_path):
+        db = tmp_path / "custom.db"
+        with patch("src.data.alternative_data.ALT_DATA_DB", db):
+            adapter = SupplyChainAdapter()
+            adapter.db_path = db
+        assert adapter.source_name == "supply_chain"
+        assert adapter.db_path == db
+
+
+# ---------------------------------------------------------------------------
+# Non-member ticker handling (tickers not in the adapter's known set)
+# ---------------------------------------------------------------------------
+
+class TestNonMemberTicker:
+    """Test behavior when ticker is not in the adapter's known set."""
+
+    def test_satellite_non_retail_returns_empty(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SatelliteDataAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            data = adapter.fetch_data("MSFT", days=30)
+        assert data == []
+
+    def test_credit_card_non_consumer_returns_empty(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = CreditCardAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            data = adapter.fetch_data("JPM", days=30)
+        assert data == []
+
+    def test_supply_chain_non_supply_returns_empty(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SupplyChainAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            data = adapter.fetch_data("JPM", days=30)
+        assert data == []
+
+
+class TestNonMemberSignal:
+    """Signal for a non-member ticker should return zero-confidence signal."""
+
+    def test_satellite_non_retail_signal_zero_confidence(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SatelliteDataAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = adapter.calculate_signal("MSFT", days=30)
+        assert signal.score == 0.0
+        assert signal.confidence == 0.0
+        assert signal.trend_direction == "insufficient_data"
+
+    def test_credit_card_non_consumer_signal_zero_confidence(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = CreditCardAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = adapter.calculate_signal("JPM", days=30)
+        assert signal.score == 0.0
+        assert signal.confidence == 0.0
+        assert signal.trend_direction == "insufficient_data"
+
+    def test_supply_chain_non_supply_signal_zero_confidence(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SupplyChainAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = adapter.calculate_signal("JPM", days=30)
+        assert signal.score == 0.0
+        assert signal.confidence == 0.0
+        assert signal.trend_direction == "insufficient_data"
+
+
+# ---------------------------------------------------------------------------
+# Database round-trip tests
+# ---------------------------------------------------------------------------
+
+class TestDatabaseRoundTrip:
+    """Store data rows and read them back for each table."""
+
+    def test_satellite_store_and_read(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SatelliteDataAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+
+            rows = [("AAPL", "2026-01-15", 80.0, 5.0, 2500, 0.85, "synthetic")]
+            adapter._store_data(rows)
+
+            with sqlite3.connect(str(tmp_path / "alt.db")) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT ticker, date, parking_occupancy_pct FROM satellite_data WHERE ticker = ?", ("AAPL",))
+                result = cursor.fetchone()
+
+        assert result is not None
+        assert result[0] == "AAPL"
+        assert result[1] == "2026-01-15"
+        assert result[2] == 80.0
+
+    def test_credit_card_store_and_read(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = CreditCardAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+
+            rows = [("AMZN", "2026-01-15", 12.0, 1.0, 105.0, 52.0, 75.0, 0.82, "synthetic")]
+            adapter._store_data(rows)
+
+            with sqlite3.connect(str(tmp_path / "alt.db")) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT ticker, spending_growth_yoy FROM credit_card_data WHERE ticker = ?", ("AMZN",))
+                result = cursor.fetchone()
+
+        assert result is not None
+        assert result[0] == "AMZN"
+        assert result[1] == 12.0
+
+    def test_supply_chain_store_and_read(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SupplyChainAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+
+            rows = [("NKE", "2026-01-15", 105.0, 42.0, 22.0, 145.0, 0.75, "synthetic")]
+            adapter._store_data(rows)
+
+            with sqlite3.connect(str(tmp_path / "alt.db")) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT ticker, container_throughput_index FROM supply_chain_data WHERE ticker = ?", ("NKE",))
+                result = cursor.fetchone()
+
+        assert result is not None
+        assert result[0] == "NKE"
+        assert result[1] == 105.0
+
+
+# ---------------------------------------------------------------------------
+# Signal calculation edge cases
+# ---------------------------------------------------------------------------
+
+class TestSignalCalcEdgeCases:
+    """Edge cases in calculate_signal for each adapter."""
+
+    def test_satellite_calculate_signal_minimal_days(self, tmp_path):
+        """Very short days parameter should still produce a signal."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SatelliteDataAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = adapter.calculate_signal("WMT", days=1)
+        assert isinstance(signal, AlternativeDataSignal)
+        assert -1.0 <= signal.score <= 1.0
+        assert signal.period_days == 1
+
+    def test_credit_card_signal_large_days(self, tmp_path):
+        """Large days parameter should still produce valid signal."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = CreditCardAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = adapter.calculate_signal("AMZN", days=200)
+        assert isinstance(signal, AlternativeDataSignal)
+        assert signal.period_days == 200
+
+    def test_satellite_signal_default_days(self, tmp_path):
+        """Default days parameter (30) should work."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SatelliteDataAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = adapter.calculate_signal("COST")
+        assert signal.period_days == 30
+
+    def test_supply_chain_raw_unit_is_composite_index(self, tmp_path):
+        """Supply chain signal raw_unit should be composite_index."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SupplyChainAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = adapter.calculate_signal("AAPL", days=30)
+        assert signal.raw_unit == "composite_index"
+
+
+# ---------------------------------------------------------------------------
+# CLI main function tests
+# ---------------------------------------------------------------------------
+
+class TestCLIMain:
+    """Test the CLI main() argument parsing and dispatching."""
+
+    def test_no_args_prints_usage(self):
+        from src.data.alternative_data import main as cli_main
+        with patch("sys.argv", ["alternative_data.py"]):
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                with pytest.raises(SystemExit):
+                    cli_main()
+        output = mock_stdout.getvalue()
+        assert "Usage:" in output
+
+    def test_unknown_command_exits(self):
+        from src.data.alternative_data import main as cli_main
+        with patch("sys.argv", ["alternative_data.py", "unknown_cmd"]):
+            with patch("sys.stdout", new_callable=io.StringIO):
+                with pytest.raises(SystemExit):
+                    cli_main()
+
+    def test_fetch_missing_ticker_exits(self):
+        from src.data.alternative_data import main as cli_main
+        with patch("sys.argv", ["alternative_data.py", "fetch", "--source", "satellite"]):
+            with patch("sys.stdout", new_callable=io.StringIO):
+                with pytest.raises(SystemExit):
+                    cli_main()
+
+    def test_earnings_missing_quarter_exits(self):
+        from src.data.alternative_data import main as cli_main
+        with patch("sys.argv", ["alternative_data.py", "earnings", "--ticker", "AAPL"]):
+            with patch("sys.stdout", new_callable=io.StringIO):
+                with pytest.raises(SystemExit):
+                    cli_main()
+
+    def test_earnings_missing_ticker_exits(self):
+        from src.data.alternative_data import main as cli_main
+        with patch("sys.argv", ["alternative_data.py", "earnings", "--quarter", "Q4-2025"]):
+            with patch("sys.stdout", new_callable=io.StringIO):
+                with pytest.raises(SystemExit):
+                    cli_main()
+
+    def test_batch_missing_tickers_exits(self):
+        from src.data.alternative_data import main as cli_main
+        with patch("sys.argv", ["alternative_data.py", "batch"]):
+            with patch("sys.stdout", new_callable=io.StringIO):
+                with pytest.raises(SystemExit):
+                    cli_main()
+
+    def test_fetch_satellite_calls_adapter(self, tmp_path):
+        from src.data.alternative_data import main as cli_main
+        db = tmp_path / "alt.db"
+        with patch("src.data.alternative_data.ALT_DATA_DB", db):
+            with patch("sys.argv", ["alternative_data.py", "fetch", "--ticker", "AAPL", "--source", "satellite"]):
+                with patch("sys.stdout", new_callable=io.StringIO):
+                    cli_main()
+
+    def test_composite_command_runs(self, tmp_path):
+        from src.data.alternative_data import main as cli_main
+        db = tmp_path / "alt.db"
+        with patch("src.data.alternative_data.ALT_DATA_DB", db):
+            with patch("sys.argv", ["alternative_data.py", "composite", "--ticker", "AAPL"]):
+                with patch("sys.stdout", new_callable=io.StringIO):
+                    cli_main()
+
+
+# ---------------------------------------------------------------------------
+# Client delegation tests
+# ---------------------------------------------------------------------------
+
+class TestClientDelegation:
+    """Test that AlternativeDataClient helper methods delegate to adapters."""
+
+    def test_get_satellite_signal_delegates(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            with patch.object(client.satellite, "calculate_signal", return_value=None) as mock_method:
+                result = client.get_satellite_signal("AAPL", days=45)
+        mock_method.assert_called_once_with("AAPL", 45)
+        assert result is None
+
+    def test_get_credit_card_signal_delegates(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            with patch.object(client.credit_card, "calculate_signal", return_value=None) as mock_method:
+                result = client.get_credit_card_signal("AMZN", days=60)
+        mock_method.assert_called_once_with("AMZN", 60)
+        assert result is None
+
+    def test_get_supply_chain_signal_delegates(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            with patch.object(client.supply_chain, "calculate_signal", return_value=None) as mock_method:
+                result = client.get_supply_chain_signal("NKE", days=90)
+        mock_method.assert_called_once_with("NKE", 90)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Earnings prediction boundary conditions
+# ---------------------------------------------------------------------------
+
+class TestEarningsPredictionEdgeCases:
+    """Test boundary conditions in get_earnings_prediction mapping."""
+
+    def test_score_just_above_05_predicts_beat(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            composite = CompositeSignal(
+                ticker="SPY", composite_score=0.51, composite_confidence=0.7,
+                satellite_score=0.5, credit_card_score=0.6, supply_chain_score=0.4,
+                primary_driver="credit_card", signal_agreement="aligned",
+            )
+            client.get_composite_signal = lambda t, d=30: composite
+            pred = client.get_earnings_prediction("SPY", "Q1-2026")
+        assert pred is not None
+        assert pred.revenue_direction == "beat"
+        assert pred.predicted_revenue_growth > 10.0
+
+    def test_score_just_below_neg_02_predicts_miss(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            composite = CompositeSignal(
+                ticker="SPY", composite_score=-0.21, composite_confidence=0.7,
+                satellite_score=-0.3, credit_card_score=-0.4,
+                primary_driver="credit_card", signal_agreement="aligned",
+            )
+            client.get_composite_signal = lambda t, d=30: composite
+            pred = client.get_earnings_prediction("SPY", "Q1-2026")
+        assert pred is not None
+        assert pred.revenue_direction == "miss"
+        assert pred.predicted_revenue_growth < 0
+
+    def test_exact_zero_score_inline(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            composite = CompositeSignal(
+                ticker="SPY", composite_score=0.0, composite_confidence=0.6,
+                satellite_score=0.0, credit_card_score=0.0,
+                primary_driver="credit_card", signal_agreement="neutral",
+            )
+            client.get_composite_signal = lambda t, d=30: composite
+            pred = client.get_earnings_prediction("SPY", "Q1-2026")
+        assert pred is not None
+        assert pred.revenue_direction == "inline"
+        assert pred.predicted_revenue_growth == 0.0
+
+    def test_score_at_02_boundary_beat(self, tmp_path):
+        """Score exactly 0.2 falls into the > -0.2 && <= 0.2 bucket -> inline."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            composite = CompositeSignal(
+                ticker="SPY", composite_score=0.2, composite_confidence=0.6,
+                satellite_score=0.2, credit_card_score=0.3,
+                primary_driver="credit_card", signal_agreement="aligned",
+            )
+            client.get_composite_signal = lambda t, d=30: composite
+            pred = client.get_earnings_prediction("SPY", "Q1-2026")
+        assert pred is not None
+        # score == 0.2 fails the > 0.2 check, falls to elif > -0.2 -> inline
+        assert pred.revenue_direction == "inline"
+        assert pred.predicted_revenue_growth == 3.0
+
+    def test_all_signals_none_in_prediction(self, tmp_path):
+        """When composite has no per-source scores, primary_signals should be empty."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            composite = CompositeSignal(
+                ticker="SPY", composite_score=0.3, composite_confidence=0.6,
+                primary_driver="satellite", signal_agreement="insufficient_data",
+            )
+            client.get_composite_signal = lambda t, d=30: composite
+            pred = client.get_earnings_prediction("SPY", "Q1-2026")
+        assert pred is not None
+        assert pred.primary_signals == []
+
+
+# ---------------------------------------------------------------------------
+# Database resilience tests
+# ---------------------------------------------------------------------------
+
+class TestDatabaseResilience:
+    """Test database creation and resilience under various conditions."""
+
+    def test_init_database_creates_data_dir(self, tmp_path):
+        """DATA_DIR should be created if it doesn't exist."""
+        new_dir = tmp_path / "nonexistent" / "deep" / "dir"
+        with patch("src.data.alternative_data.DATA_DIR", new_dir):
+            with patch("src.data.alternative_data.ALT_DATA_DB", new_dir / "alt.db"):
+                init_database()
+        assert new_dir.exists()
+        assert (new_dir / "alt.db").exists()
+
+    def test_double_init_preserves_inserted_data(self, tmp_path):
+        """Calling init_database twice should not wipe existing data."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+
+            # Insert data directly
+            with sqlite3.connect(str(tmp_path / "alt.db")) as conn:
+                conn.execute("""
+                    INSERT INTO alt_data_signals
+                    (ticker, source, signal_type, score, confidence, raw_value,
+                     period_days, z_score, percentile, trend_direction, data_timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, ("TEST", "satellite", "test", 0.5, 0.8, 10.0, 30, 1.0, 75.0, "improving", "2026-01-01"))
+
+            # Re-init
+            init_database()
+
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM alt_data_signals WHERE ticker = ?", ("TEST",))
+            count = cursor.fetchone()[0]
+
+        assert count == 1
+
+    def test_unique_constraint_on_ticker_date(self, tmp_path):
+        """satellite_data UNIQUE(ticker, date) should prevent duplicate rows."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SatelliteDataAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+
+            rows = [
+                ("AAPL", "2026-01-15", 80.0, 5.0, 2500, 0.85, "test"),
+                ("AAPL", "2026-01-15", 85.0, 6.0, 2600, 0.90, "test"),  # same ticker+date
+            ]
+            adapter._store_data(rows)
+
+            with sqlite3.connect(str(tmp_path / "alt.db")) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM satellite_data WHERE ticker = ? AND date = ?", ("AAPL", "2026-01-15"))
+                count = cursor.fetchone()[0]
+
+        # INSERT OR REPLACE -> second row replaces first, so count should be 1
+        assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# Signal store round-trip tests
+# ---------------------------------------------------------------------------
+
+class TestSignalStoreRoundTrip:
+    """Test that _store_signal persists signals correctly for each adapter."""
+
+    def _make_signal(self, ticker: str, source: str, score: float = 0.5) -> AlternativeDataSignal:
+        return AlternativeDataSignal(
+            ticker=ticker, source=source, signal_type="test",
+            score=score, confidence=0.7, raw_value=10.0, raw_unit="pct",
+            period_days=30, z_score=1.0, percentile=75.0,
+            trend_direction="stable", data_timestamp="2026-01-01",
+        )
+
+    def test_satellite_store_signal(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SatelliteDataAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = self._make_signal("AAPL", "satellite")
+            adapter._store_signal(signal)
+
+            with sqlite3.connect(str(tmp_path / "alt.db")) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT ticker, score, confidence FROM alt_data_signals WHERE ticker = ?", ("AAPL",))
+                row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == "AAPL"
+        assert row[1] == 0.5
+        assert row[2] == 0.7
+
+    def test_credit_card_store_signal(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = CreditCardAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = self._make_signal("AMZN", "credit_card", score=-0.3)
+            adapter._store_signal(signal)
+
+            with sqlite3.connect(str(tmp_path / "alt.db")) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT ticker, score FROM alt_data_signals WHERE ticker = ?", ("AMZN",))
+                row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == "AMZN"
+        assert row[1] == -0.3
+
+    def test_supply_chain_store_signal(self, tmp_path):
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            adapter = SupplyChainAdapter()
+            adapter.db_path = tmp_path / "alt.db"
+            signal = self._make_signal("NKE", "supply_chain", score=0.8)
+            adapter._store_signal(signal)
+
+            with sqlite3.connect(str(tmp_path / "alt.db")) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT ticker, score FROM alt_data_signals WHERE ticker = ?", ("NKE",))
+                row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == "NKE"
+        assert row[1] == 0.8
+
+
+# ---------------------------------------------------------------------------
+# Batch signals edge cases
+# ---------------------------------------------------------------------------
+
+class TestBatchSignalsExtended:
+    """Additional batch signal tests."""
+
+    def test_batch_includes_non_member_tickers(self, tmp_path):
+        """Batch with mixed member and non-member tickers should return all."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            results = client.get_batch_signals(["AAPL", "JPM"], days=30)
+
+        assert "AAPL" in results
+        assert "JPM" in results
+        # JPM is not in any ticker set, so composite confidence should be 0.0
+        assert results["JPM"].composite_confidence == 0.0
+
+    def test_batch_single_ticker(self, tmp_path):
+        """Batch with a single ticker should return one result."""
+        with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
+            init_database()
+            client = AlternativeDataClient()
+            results = client.get_batch_signals(["WMT"], days=30)
+        assert len(results) == 1
+        assert "WMT" in results
 
 
 if __name__ == '__main__':

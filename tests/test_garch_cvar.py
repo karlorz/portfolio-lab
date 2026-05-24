@@ -82,6 +82,34 @@ class TestGARCHParams:
         params = GARCHParams(omega=0.0, alpha=0.1, beta=0.85, persistence=0.95)
         assert not params.is_stable()
 
+    def test_stable_at_high_persistence(self):
+        """Persistence just below 0.9999 boundary should be stable."""
+        params = GARCHParams(omega=0.000001, alpha=0.1, beta=0.8998, persistence=0.9998)
+        assert params.is_stable()
+
+    def test_unstable_at_boundary_persistence(self):
+        """Persistence exactly 0.9999 is NOT stable (boundary exclusion)."""
+        params = GARCHParams(omega=0.000001, alpha=0.1, beta=0.8999, persistence=0.9999)
+        assert not params.is_stable()
+
+    def test_stable_with_minimal_omega(self):
+        """Very small but positive omega is still stable."""
+        params = GARCHParams(omega=1e-10, alpha=0.1, beta=0.85, persistence=0.95)
+        assert params.is_stable()
+
+    def test_zero_persistence_stable(self):
+        """Zero persistence (no ARCH/GARCH effect) with positive omega is stable."""
+        params = GARCHParams(omega=0.000001, alpha=0.0, beta=0.0, persistence=0.0)
+        assert params.is_stable()
+
+    def test_negative_alpha(self):
+        """Negative alpha is physically invalid but the dataclass permits it; is_stable
+        only checks persistence and omega."""
+        params = GARCHParams(omega=0.000001, alpha=-0.1, beta=0.85, persistence=0.75)
+        assert params.alpha == -0.1
+        # persistence < 0.9999 and omega > 0 -> is_stable True despite negative alpha
+        assert params.is_stable()
+
 
 # -----------------------------------------------------------------------------
 # GARCHFilteredCVaR Initialization Tests
@@ -122,6 +150,21 @@ class TestGARCHCVaRInitialization:
     def test_skewt_dist(self):
         calc = GARCHFilteredCVaR(dist="skewt")
         assert calc.dist == "skewt"
+
+    def test_zero_window(self):
+        """Zero window should be accepted (edge case for lookback)."""
+        calc = GARCHFilteredCVaR(window=0)
+        assert calc.window == 0
+
+    def test_single_retry(self):
+        """Single convergence retry is a valid configuration."""
+        calc = GARCHFilteredCVaR(convergence_retries=1)
+        assert calc.convergence_retries == 1
+
+    def test_invalid_distribution_accepted(self):
+        """Literal types are not enforced at runtime; the constructor accepts any string."""
+        calc = GARCHFilteredCVaR(dist="invalid_dist")
+        assert calc.dist == "invalid_dist"
 
 
 # -----------------------------------------------------------------------------
@@ -177,11 +220,44 @@ class TestFitGARCH:
             with patch('src.monitor.garch_cvar.arch_model', None):
                 calc = GARCHFilteredCVaR()
                 returns = _make_returns_garch_like(n=252)
-                
+
                 params, cond_vol = calc.fit_garch(returns)
-                
+
                 assert params is None
                 assert cond_vol is None
+
+    @pytest.mark.skipif(not ARCH_AVAILABLE, reason="arch library not available")
+    def test_fit_params_unstable_retries_exhausted(self):
+        """When fit succeeds but parameters are unstable, retries are attempted.
+        If all retries are exhausted, returns (None, None)."""
+        calc = GARCHFilteredCVaR(convergence_retries=2)
+        returns = _make_returns_garch_like(n=252)
+
+        with patch('src.monitor.garch_cvar.arch_model') as mock_model:
+            mock_instance = MagicMock()
+            mock_result = MagicMock()
+            # persistence = 0.5 + 0.5 = 1.0 >= 0.9999 -> unstable
+            mock_result.params = {'omega': 0.000001, 'alpha[1]': 0.5, 'beta[1]': 0.5}
+            mock_result.conditional_volatility = np.ones(252) / 100.0
+            mock_instance.fit.return_value = mock_result
+            mock_model.return_value = mock_instance
+
+            params, cond_vol = calc.fit_garch(returns)
+
+            assert params is None
+            assert cond_vol is None
+            # Both retries attempted
+            assert mock_instance.fit.call_count == 2
+
+    def test_fit_empty_returns(self):
+        """fit_garch should return (None, None) for empty returns regardless of ARCH."""
+        calc = GARCHFilteredCVaR()
+        returns = np.array([])
+
+        params, cond_vol = calc.fit_garch(returns)
+
+        assert params is None
+        assert cond_vol is None
 
 
 # -----------------------------------------------------------------------------
@@ -221,6 +297,25 @@ class TestStandardizeReturns:
         # Should use min_vol instead of zero
         assert np.all(np.isfinite(std_returns))
 
+    def test_standardize_negative_vol(self):
+        """Negative conditional volatility is floored to min_vol."""
+        calc = GARCHFilteredCVaR()
+        returns = np.array([0.01, -0.02])
+        cond_vol = np.array([-0.01, 0.015])  # First element is negative
+
+        std_returns = calc.standardize_returns(returns, cond_vol, min_vol=1e-6)
+
+        assert np.all(np.isfinite(std_returns))
+        # Negative vol floored to min_vol; positive vol used directly
+        assert std_returns[0] == returns[0] / 1e-6
+        assert std_returns[1] == returns[1] / 0.015
+
+    def test_standardize_empty_arrays(self):
+        """Empty returns and cond_vol should produce empty standardized returns."""
+        calc = GARCHFilteredCVaR()
+        std_returns = calc.standardize_returns(np.array([]), np.array([]))
+        assert len(std_returns) == 0
+
 
 # -----------------------------------------------------------------------------
 # rescale_cvar Tests
@@ -247,6 +342,23 @@ class TestRescaleCVaR:
         rescaled = calc.rescale_cvar(cvar_std, current_vol)
         
         assert rescaled < 0  # Should remain negative (loss)
+
+    def test_rescale_zero_volatility(self):
+        """Scaling by zero volatility yields zero."""
+        calc = GARCHFilteredCVaR()
+        assert calc.rescale_cvar(-2.0, 0.0) == 0.0
+
+    def test_rescale_negative_volatility(self):
+        """Negative volatility flips the sign of the result."""
+        calc = GARCHFilteredCVaR()
+        result = calc.rescale_cvar(-2.0, -0.01)
+        assert result > 0  # Negative * negative = positive
+
+    def test_rescale_high_volatility(self):
+        """Very high current volatility produces proportionally larger CVaR."""
+        calc = GARCHFilteredCVaR()
+        result = calc.rescale_cvar(-2.0, 0.1)  # 10 % daily vol
+        assert result == pytest.approx(-0.2)
 
 
 # -----------------------------------------------------------------------------
@@ -363,6 +475,74 @@ class TestCompute:
                 assert not metrics.filter_active
                 assert "not available" in metrics.filter_reason.lower()
 
+    def test_compute_arch_available_fallback(self):
+        """Verify fallback reason is 'GARCH failed to converge' when arch is
+        available but fitting raises an error."""
+        calc = GARCHFilteredCVaR(convergence_retries=1)
+        returns = _make_returns_garch_like(n=252)
+
+        with patch('src.monitor.garch_cvar.ARCH_AVAILABLE', True):
+            with patch('src.monitor.garch_cvar.arch_model') as mock_model:
+                mock_instance = MagicMock()
+                mock_instance.fit.side_effect = ValueError("Convergence failed")
+                mock_model.return_value = mock_instance
+
+                metrics = calc.compute(returns)
+
+                assert not metrics.filter_active
+                assert metrics.filter_reason == "GARCH failed to converge"
+
+    def test_compute_unstable_params_fallback(self):
+        """When fit succeeds but params are unstable, fallback to historical CVaR."""
+        calc = GARCHFilteredCVaR(convergence_retries=1)
+        returns = _make_returns_garch_like(n=252)
+
+        with patch('src.monitor.garch_cvar.ARCH_AVAILABLE', True):
+            with patch('src.monitor.garch_cvar.arch_model') as mock_model:
+                mock_instance = MagicMock()
+                mock_result = MagicMock()
+                mock_result.params = {'omega': 0.000001, 'alpha[1]': 0.5, 'beta[1]': 0.5}
+                mock_result.conditional_volatility = np.ones(252) / 100.0
+                mock_instance.fit.return_value = mock_result
+                mock_model.return_value = mock_instance
+
+                metrics = calc.compute(returns)
+
+                assert not metrics.filter_active
+                assert "converge" in metrics.filter_reason.lower()
+
+    def test_compute_stores_state(self):
+        """Verify _last_params and _last_volatility are preserved after compute."""
+        calc = GARCHFilteredCVaR()
+        returns = _make_returns_garch_like(n=252)
+
+        with patch('src.monitor.garch_cvar.ARCH_AVAILABLE', True):
+            with patch('src.monitor.garch_cvar.arch_model') as mock_model:
+                mock_instance = MagicMock()
+                mock_result = MagicMock()
+                mock_result.params = {'omega': 0.01, 'alpha[1]': 0.15, 'beta[1]': 0.80}
+                cond_vol_raw = np.linspace(0.5, 3.0, 252)
+                mock_result.conditional_volatility = cond_vol_raw
+                mock_instance.fit.return_value = mock_result
+                mock_model.return_value = mock_instance
+
+                metrics = calc.compute(returns)
+
+                assert calc._last_params is not None
+                assert calc._last_params.omega == 0.01 / 10000.0  # scaled by factor^2
+                assert calc._last_params.alpha == 0.15
+                assert calc._last_params.beta == 0.80
+                assert calc._last_volatility is not None
+                assert metrics.filter_active
+                assert metrics.garch_filtered
+
+    def test_compute_with_skewt_dist(self):
+        """Compute works with skewt distribution."""
+        calc = GARCHFilteredCVaR(dist="skewt")
+        returns = _make_returns_iid(n=252)
+        metrics = calc.compute(returns)
+        assert isinstance(metrics, GARCHCVaRMetrics)
+
 
 # -----------------------------------------------------------------------------
 # calculate_garch_cvar Convenience Function
@@ -391,6 +571,13 @@ class TestCalculateGARCHCVaR:
         # Should accept different distributions
         metrics_t = calculate_garch_cvar(returns, dist="t")
         assert isinstance(metrics_t, GARCHCVaRMetrics)
+
+    def test_calculate_garch_cvar_drawdowns(self):
+        """Drawdown parameters are passed through to metrics."""
+        returns = _make_returns_iid(n=252)
+        metrics = calculate_garch_cvar(returns, current_drawdown=-0.04, max_drawdown=-0.20)
+        assert metrics.current_drawdown == pytest.approx(-4.0, abs=0.1)
+        assert metrics.max_drawdown == pytest.approx(-20.0, abs=0.1)
 
 
 # -----------------------------------------------------------------------------
@@ -454,6 +641,21 @@ class TestCompareCvarMethods:
         
         # CVaR breach rate should be <= VaR breach rate (tail average)
         assert cvar_breach <= var_breach
+
+    def test_compare_cvar_methods_different_alpha(self):
+        """Comparison works with custom alpha values."""
+        returns = _make_returns_iid(n=252)
+        comparison = compare_cvar_methods(returns, alpha=0.01)
+        assert comparison["target_breach_rate"] == 1.0  # 1 %
+        assert "var" in comparison["historical"]
+        assert comparison["historical"]["var"] < 0
+
+    def test_compare_cvar_methods_constant_returns(self):
+        """Comparison handles constant returns (zero volatility)."""
+        returns = np.full(252, 0.001)
+        comparison = compare_cvar_methods(returns)
+        assert "historical" in comparison
+        assert "garch_filtered" in comparison
 
 
 # -----------------------------------------------------------------------------
@@ -577,6 +779,98 @@ class TestPerformance:
         elapsed = time.time() - start
         
         assert elapsed < 1.0, f"Calculation took {elapsed:.2f}s, expected < 1s"
+
+
+# -----------------------------------------------------------------------------
+# get_params Tests
+# -----------------------------------------------------------------------------
+
+class TestGetParams:
+    """Test GARCHFilteredCVaR.get_params() method."""
+
+    def test_get_params_none_before_fit(self):
+        """get_params returns None when no fit has been performed."""
+        calc = GARCHFilteredCVaR()
+        assert calc.get_params() is None
+
+    def test_get_params_dict_after_state_set(self):
+        """get_params returns parameter dict when _last_params is set."""
+        calc = GARCHFilteredCVaR()
+        calc._last_params = GARCHParams(omega=0.000001, alpha=0.1, beta=0.85, persistence=0.95)
+
+        params = calc.get_params()
+        assert isinstance(params, dict)
+        assert params["omega"] == 0.000001
+        assert params["alpha"] == 0.1
+        assert params["beta"] == 0.85
+        assert params["persistence"] == 0.95
+
+
+# -----------------------------------------------------------------------------
+# GARCHCVaRMetrics Dataclass Direct Tests
+# -----------------------------------------------------------------------------
+
+class TestGARCHCVaRMetricsDirect:
+    """Test direct construction of GARCHCVaRMetrics dataclass."""
+
+    def test_direct_creation_all_fields(self):
+        """Create GARCHCVaRMetrics directly with all fields populated."""
+        from src.monitor.garch_cvar import GARCHCVaRMetrics
+
+        metrics = GARCHCVaRMetrics(
+            timestamp="2025-01-01T00:00:00",
+            var_95=-1.5,
+            cvar_95=-2.5,
+            cvar_ratio=1.67,
+            tail_severity="moderate",
+            max_drawdown=-25.0,
+            current_drawdown=-5.0,
+            volatility_annual=12.5,
+            garch_filtered=True,
+            garch_omega=0.000001,
+            garch_alpha=0.1,
+            garch_beta=0.85,
+            garch_persistence=0.95,
+            conditional_volatility_current=1.5,
+            historical_volatility=12.0,
+            filter_active=True,
+            filter_reason=None,
+        )
+        assert metrics.garch_filtered
+        assert metrics.garch_alpha == 0.1
+        assert metrics.var_95 == -1.5
+        assert metrics.filter_active
+        assert metrics.filter_reason is None
+        assert metrics.garch_persistence == 0.95
+
+    def test_direct_creation_fallback(self):
+        """Create GARCHCVaRMetrics in fallback mode with null GARCH fields."""
+        from src.monitor.garch_cvar import GARCHCVaRMetrics
+
+        metrics = GARCHCVaRMetrics(
+            timestamp="2025-01-01T00:00:00",
+            var_95=-1.2,
+            cvar_95=-1.8,
+            cvar_ratio=1.5,
+            tail_severity="moderate",
+            max_drawdown=-25.0,
+            current_drawdown=-3.0,
+            volatility_annual=10.0,
+            garch_filtered=False,
+            garch_omega=None,
+            garch_alpha=None,
+            garch_beta=None,
+            garch_persistence=None,
+            conditional_volatility_current=None,
+            historical_volatility=10.0,
+            filter_active=False,
+            filter_reason="arch library not available",
+        )
+        assert not metrics.garch_filtered
+        assert metrics.garch_omega is None
+        assert metrics.garch_alpha is None
+        assert not metrics.filter_active
+        assert metrics.filter_reason == "arch library not available"
 
 
 if __name__ == "__main__":

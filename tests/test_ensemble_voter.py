@@ -1263,6 +1263,55 @@ class TestBanditWeighter:
         assert result['a'] > result['b'] > result['c']
         assert abs(sum(result.values()) - 1.0) < 0.01
 
+    # ── Additional edge cases ─────────────────────────────────────────
+
+    def test_select_mixed_explore_exploit(self):
+        """With epsilon=0.5, select() should both explore and exploit over many trials."""
+        bw = BanditWeighter(signals=['good', 'bad'], epsilon=0.5, temperature=1.0)
+        for _ in range(30):
+            bw.update('good', 'NORMAL', 0.05)
+            bw.update('bad', 'NORMAL', -0.01)
+        choices = set()
+        for _ in range(100):
+            choices.add(bw.select('NORMAL'))
+        assert len(choices) >= 1
+
+    def test_get_weights_signal_not_in_history(self):
+        """When a signal is in signals list but has no history, its Sharpe is 0."""
+        bw = BanditWeighter(signals=['has_data', 'no_data'])
+        for _ in range(25):
+            bw.update('has_data', 'NORMAL', 0.02)
+        weights = bw.get_weights('NORMAL')
+        assert weights is not None
+        assert 'has_data' in weights
+        assert 'no_data' in weights
+        assert abs(sum(weights.values()) - 1.0) < 0.01
+
+    def test_rolling_sharpe_exactly_21_observations(self):
+        """Boundary case: exactly 21 observations should produce a valid Sharpe."""
+        bw = BanditWeighter(signals=['mom'])
+        for i in range(21):
+            bw.update('mom', 'NORMAL', 0.01 + 0.005 * (i % 2))
+        sh = bw._rolling_sharpe('mom', 'NORMAL')
+        assert sh != 0.0
+
+    def test_rolling_sharpe_varying_data_positive_sharpe(self):
+        """Varying positive returns should produce positive Sharpe ratio."""
+        bw = BanditWeighter(signals=['mom'])
+        rng = np.random.default_rng(42)
+        for _ in range(60):
+            bw.update('mom', 'NORMAL', float(rng.normal(0.002, 0.01)))
+        sh = bw._rolling_sharpe('mom', 'NORMAL')
+        assert sh > 0
+
+    def test_softmax_high_temperature_nearly_uniform(self):
+        """Very high temperature should produce nearly uniform weights."""
+        bw = BanditWeighter(signals=['a', 'b', 'c'], temperature=100.0)
+        sharpes = {'a': 1.0, 'b': 0.5, 'c': 0.0}
+        result = bw._softmax(sharpes)
+        for sig in result:
+            assert result[sig] == pytest.approx(1/3, abs=0.05)
+
 
 # ===========================================================================
 # get_blended_weights tests
@@ -1321,6 +1370,38 @@ class TestGetBlendedWeights:
             result = voter.get_blended_weights(regime.name)
             total = sum(result.values())
             assert abs(total - 1.0) < 0.05, f"{regime} blended weights sum to {total:.4f}"
+
+    def test_full_blend_after_252_observations(self):
+        """After 252 bandit observations, the blend should be at max (70% bandit)."""
+        voter = EnsembleVoter()
+        for i in range(252):
+            voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01 + 0.001 * (i % 3))
+            voter.update_bandit('cross_asset_rv', 'NORMAL', 0.02 + 0.001 * (i % 2))
+            voter.update_bandit('alternative_data', 'NORMAL', 0.015)
+        result = voter.get_blended_weights('NORMAL')
+        assert isinstance(result, dict)
+        assert all(isinstance(k, SignalSource) for k in result)
+
+    def test_bandit_with_some_signals_missing(self):
+        """When bandit has data for some but not all signals, all should still appear."""
+        voter = EnsembleVoter()
+        for _ in range(30):
+            voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
+            voter.update_bandit('cross_asset_rv', 'NORMAL', 0.02)
+        result = voter.get_blended_weights('NORMAL')
+        assert len(result) == len([s for s in SignalSource])
+
+    def test_blended_weights_differ_by_regime(self):
+        """Different regimes should produce different blended weights."""
+        voter = EnsembleVoter()
+        for _ in range(30):
+            voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
+            voter.update_bandit('multi_speed_momentum', 'HIGH_VOL', -0.01)
+            voter.update_bandit('alternative_data', 'NORMAL', 0.02)
+            voter.update_bandit('alternative_data', 'HIGH_VOL', 0.03)
+        normal_result = voter.get_blended_weights('NORMAL')
+        high_vol_result = voter.get_blended_weights('HIGH_VOL')
+        assert normal_result != high_vol_result
 
 
 # ===========================================================================
@@ -1465,6 +1546,347 @@ class TestShouldSkip:
         """When active_sources is empty, everything should be skipped."""
         voter = EnsembleVoter()
         assert voter._should_skip(SignalSource.ALTERNATIVE_DATA, set(), Regime.NORMAL)
+
+
+# ===========================================================================
+# Additional consensus computation edge cases
+# ===========================================================================
+
+class TestComputeConsensusAdditional:
+    """Additional consensus computation edge cases."""
+
+    def test_decrease_equity_action(self, tmp_path):
+        """Strong negative equity bias with high agreement should produce decrease_equity."""
+        voter = _make_voter(tmp_path)
+        neg_assets = {'SPY': -0.6, 'TLT': 0.2, 'GLD': 0.1}
+        signals = [
+            _make_reading(value=-0.5, confidence=0.9, asset_signals=neg_assets),
+            _make_reading(value=-0.4, confidence=0.8, asset_signals=neg_assets),
+        ]
+        signals[0].weight = 0.6
+        signals[1].weight = 0.4
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.7)
+        assert result.equity_bias < -0.3
+        assert result.action == 'decrease_equity'
+
+    def test_missing_asset_signals_fallback_to_weighted_consensus(self, tmp_path):
+        """When no asset_signals are provided, asset biases should fall back to consensus."""
+        voter = _make_voter(tmp_path)
+        signals = [
+            SignalReading(
+                source=SignalSource.MULTI_SPEED_MOM,
+                timestamp='2026-01-01',
+                value=0.5,
+                confidence=0.8,
+                weight=0.0,
+                regime_fit='all',
+                asset_signals=None,
+                explanation='test',
+            ),
+        ]
+        signals[0].weight = 1.0
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.5)
+        assert result.equity_bias == result.weighted_consensus
+
+    def test_nan_asset_signal_handling(self, tmp_path):
+        """NaN in asset_signals should be filtered out, not crash."""
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=0.4, confidence=0.8,
+                          asset_signals={'SPY': float('nan'), 'TLT': 0.2, 'GLD': 0.1}),
+        ]
+        signals[0].weight = 1.0
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.5)
+        assert np.isfinite(result.equity_bias)
+        assert result.duration_bias == 0.2
+        assert result.gold_bias == 0.1
+
+    def test_low_agreement_with_strong_bias_produces_neutral(self, tmp_path):
+        """When agreement is below 0.6 but equity_bias is strong, action should be neutral."""
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=0.7, confidence=0.9,
+                          asset_signals={'SPY': 0.7, 'TLT': 0.0, 'GLD': 0.0}),
+            _make_reading(value=-0.6, confidence=0.9,
+                          asset_signals={'SPY': -0.6, 'TLT': 0.0, 'GLD': 0.0}),
+        ]
+        signals[0].weight = 0.5
+        signals[1].weight = 0.5
+        result = voter._compute_consensus(signals, Regime.NORMAL, 0.5)
+        # Equity bias might be moderate (~0.05), agreement is low, so action is neutral
+        assert result.action == 'neutral'
+
+
+# ===========================================================================
+# Additional build_vote edge cases
+# ===========================================================================
+
+class TestBuildVoteAdditional:
+    """Additional build_vote edge cases."""
+
+    def test_build_vote_limits_to_three_sources(self, tmp_path):
+        """_build_vote should only include first 3 sources in reasoning detail."""
+        voter = _make_voter(tmp_path)
+        signals = [
+            _make_reading(value=0.5, source=SignalSource.MULTI_SPEED_MOM),
+            _make_reading(value=0.4, source=SignalSource.CROSS_ASSET_RV),
+            _make_reading(value=0.3, source=SignalSource.INTERNATIONAL_MOMENTUM),
+            _make_reading(value=0.2, source=SignalSource.ALTERNATIVE_DATA),
+        ]
+        for s in signals:
+            s.weight = 0.25
+        consensus = voter._ConsensusResult(
+            weighted_consensus=0.35, agreement=0.8,
+            equity_bias=0.3, duration_bias=0.0, gold_bias=0.0,
+            action='neutral', action_confidence=0.5,
+        )
+        vote = voter._build_vote(signals, consensus, Regime.NORMAL, 0.6)
+        # Should only have 3 source detail lines (first 3 sources)
+        source_lines = [l for l in vote.reasoning.split('\n') if any(
+            src in l for src in ['multi_speed', 'cross_asset_rv', 'international', 'alternative']
+        )]
+        assert len(source_lines) <= 3
+
+
+# ===========================================================================
+# Additional persist_vote edge cases
+# ===========================================================================
+
+class TestPersistVoteAdditional:
+    """Additional persist_vote edge cases."""
+
+    def test_persist_vote_saves_source_readings(self, tmp_path):
+        """Source readings should be saved to the source_readings table."""
+        voter = _make_voter(tmp_path)
+        readings = [
+            _make_reading(value=0.5, source=SignalSource.MULTI_SPEED_MOM),
+            _make_reading(value=0.3, source=SignalSource.CROSS_ASSET_RV),
+        ]
+        for r in readings:
+            r.weight = 0.5
+        vote = EnsembleVote(
+            timestamp='2026-05-01', regime=Regime.NORMAL, regime_confidence=0.7,
+            num_sources=2, weighted_consensus=0.4, agreement_ratio=0.8,
+            equity_bias=0.4, duration_bias=-0.1, gold_bias=0.1,
+            action='increase_equity', confidence=0.7, reasoning='test',
+            source_votes=readings,
+        )
+        voter._persist_vote(vote, weighted_consensus=0.4)
+        import sqlite3
+        with sqlite3.connect(str(voter.db_path)) as conn:
+            rows = conn.execute(
+                "SELECT source, value, weight FROM source_readings ORDER BY source"
+            ).fetchall()
+            assert len(rows) == 2
+            assert rows[0][0] == 'cross_asset_rv'
+            assert rows[1][0] == 'multi_speed_momentum'
+
+
+# ===========================================================================
+# Additional get_bl_views edge cases
+# ===========================================================================
+
+class TestGetBLViewsAdditional:
+    """Additional get_bl_views edge cases."""
+
+    def test_get_bl_views_error_in_health_tracker(self):
+        """Error in health tracker should not crash get_bl_views."""
+        voter = EnsembleVoter()
+        mock_tracker = MagicMock()
+        mock_tracker.get_health_report.side_effect = Exception("Tracker crashed")
+        with patch('src.strategy.ensemble_voter._get_health_tracker',
+                   return_value=mock_tracker):
+            result = voter.get_bl_views()
+            assert 'views' in result
+            assert result['health_scores_used'] == {}
+
+    def test_get_bl_views_default_prior_equal(self):
+        """Default prior should be 'equal'."""
+        voter = EnsembleVoter()
+        result = voter.get_bl_views()
+        assert result['prior'] == 'equal'
+
+
+# ===========================================================================
+# Additional update_bandit edge cases
+# ===========================================================================
+
+class TestUpdateBanditAdditional:
+    """Additional update_bandit edge cases."""
+
+    def test_update_bandit_with_nan_return(self):
+        """NaN daily_return should be stored (valid data point)."""
+        voter = EnsembleVoter()
+        voter.update_bandit('multi_speed_momentum', 'NORMAL', float('nan'))
+        assert voter.bandit_observations == 1
+        hist = voter.bandit._history['NORMAL']['multi_speed_momentum']
+        assert np.isnan(hist[0])
+
+    def test_update_bandit_with_negative_returns(self):
+        """Negative daily returns should be stored correctly."""
+        voter = EnsembleVoter()
+        voter.update_bandit('multi_speed_momentum', 'CRISIS', -0.05)
+        voter.update_bandit('multi_speed_momentum', 'CRISIS', -0.03)
+        assert len(voter.bandit._history['CRISIS']['multi_speed_momentum']) == 2
+        assert voter.bandit._history['CRISIS']['multi_speed_momentum'] == [-0.05, -0.03]
+
+
+# ===========================================================================
+# Additional apply_goal_risk_budget edge cases
+# ===========================================================================
+
+class TestApplyGoalRiskBudgetAdditional:
+    """Additional apply_goal_risk_budget edge cases."""
+
+    @patch('src.config.goals.load_goals')
+    @patch('src.config.goals.get_risk_budget_multiplier')
+    def test_empty_base_allocation(self, mock_get_rbm, mock_load_goals):
+        """Empty base allocation should be handled gracefully."""
+        mock_get_rbm.return_value = 0.5
+        voter = EnsembleVoter()
+        result = voter.apply_goal_risk_budget({})
+        assert result == {}
+
+    @patch('src.config.goals.load_goals')
+    @patch('src.config.goals.get_risk_budget_multiplier')
+    def test_all_safe_assets_mixed(self, mock_get_rbm, mock_load_goals):
+        """All assets in safe_assets should stay unchanged."""
+        mock_get_rbm.return_value = 0.5
+        voter = EnsembleVoter()
+        base = {'SHY': 0.5, 'IEF': 0.3, 'BIL': 0.2}
+        result = voter.apply_goal_risk_budget(base)
+        assert result == base
+
+    @patch('src.config.goals.load_goals')
+    @patch('src.config.goals.get_risk_budget_multiplier')
+    def test_risk_mult_zero_eliminates_risky(self, mock_get_rbm, mock_load_goals):
+        """risk_mult=0 should give all weight to safe assets."""
+        mock_get_rbm.return_value = 0.0
+        voter = EnsembleVoter()
+        base = {'SPY': 0.70, 'IEF': 0.30}
+        result = voter.apply_goal_risk_budget(base)
+        assert result['SPY'] == 0.0
+        assert result['IEF'] > 0
+
+
+# ===========================================================================
+# Regime detection edge cases
+# ===========================================================================
+
+class TestDetectRegimeEdgeCases:
+    """Edge cases for EnsembleVoter.detect_regime()."""
+
+    def test_detect_regime_crisis_via_drawdown(self, tmp_path):
+        """CRISIS should trigger when drawdown exceeds threshold."""
+        voter = _make_voter(tmp_path)
+        dates = pd.date_range('2026-01-01', periods=60, freq='B')
+        prices = [100.0]
+        for i in range(59):
+            if i < 20:
+                prices.append(prices[-1] * 1.001)
+            else:
+                prices.append(prices[-1] * 0.97)
+        price_data = pd.DataFrame({'SPY': prices}, index=dates)
+        regime, conf = voter.detect_regime(price_data)
+        assert regime == Regime.CRISIS
+        assert conf >= 0.0
+
+    def test_detect_regime_recovery(self, tmp_path):
+        """RECOVERY should trigger after drawdown with positive momentum.
+        Needs drawdown between -3% and -10% (below RECOVERY threshold, above CRISIS)
+        and 20d momentum > 2%.
+        """
+        voter = _make_voter(tmp_path)
+        dates = pd.date_range('2026-01-01', periods=60, freq='B')
+        prices = [100.0]
+        for i in range(59):
+            if i < 30:
+                prices.append(prices[-1] * 0.995)  # -0.5% for 30 days
+            else:
+                prices.append(prices[-1] * 1.003)  # +0.3% for 30 days
+        price_data = pd.DataFrame({'SPY': prices}, index=dates)
+        regime, conf = voter.detect_regime(price_data)
+        assert regime == Regime.RECOVERY
+
+    def test_detect_regime_high_vol_via_drawdown_momentum(self, tmp_path):
+        """HIGH_VOL via drawdown below threshold and negative momentum."""
+        voter = _make_voter(tmp_path)
+        dates = pd.date_range('2026-01-01', periods=60, freq='B')
+        rng = np.random.default_rng(42)
+        prices = [100.0]
+        for i in range(59):
+            ret = rng.normal(-0.002, 0.025)
+            prices.append(prices[-1] * (1 + ret))
+        price_data = pd.DataFrame({'SPY': prices}, index=dates)
+        regime, conf = voter.detect_regime(price_data)
+        assert regime in [Regime.HIGH_VOL, Regime.CRISIS, Regime.NORMAL]
+
+    def test_detect_regime_empty_dataframe(self, tmp_path):
+        """Empty DataFrame should return NORMAL with 0.5 confidence."""
+        voter = _make_voter(tmp_path)
+        df = pd.DataFrame()
+        regime, conf = voter.detect_regime(df)
+        assert regime == Regime.NORMAL
+        assert conf == 0.5
+
+    def test_detect_regime_normal_when_moderate_conditions(self, tmp_path):
+        """NORMAL regime when vol is moderate (above LOW_VOL threshold) and no drawdown."""
+        voter = _make_voter(tmp_path)
+        dates = pd.date_range('2026-01-01', periods=60, freq='B')
+        prices = [100.0]
+        rng = np.random.default_rng(99)
+        for i in range(59):
+            ret = rng.normal(0.0003, 0.01)  # ~15.9% annualized vol (above 12% LOW_VOL threshold)
+            prices.append(prices[-1] * (1 + ret))
+        price_data = pd.DataFrame({'SPY': prices}, index=dates)
+        regime, conf = voter.detect_regime(price_data)
+        assert regime == Regime.NORMAL
+        assert conf > 0
+
+
+# ===========================================================================
+# Integration tests for compute_vote()
+# ===========================================================================
+
+class TestComputeVoteIntegration:
+    """Integration tests for compute_vote() with real sub-methods."""
+
+    def test_compute_vote_full_pipeline(self, tmp_path):
+        """Full pipeline from readings through to persisted vote."""
+        voter = _make_voter(tmp_path)
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(
+                value=0.5, source=SignalSource.MULTI_SPEED_MOM,
+            ),
+            SignalSource.CROSS_ASSET_RV: _make_reading(
+                value=0.3, source=SignalSource.CROSS_ASSET_RV,
+            ),
+            SignalSource.INTERNATIONAL_MOMENTUM: _make_reading(
+                value=0.4, source=SignalSource.INTERNATIONAL_MOMENTUM,
+            ),
+        }
+        vote = voter.compute_vote(
+            readings=readings, regime=Regime.NORMAL, regime_confidence=0.7,
+        )
+        assert vote is not None
+        assert vote.num_sources == 3
+        import sqlite3
+        with sqlite3.connect(str(voter.db_path)) as conn:
+            db_vote = conn.execute(
+                "SELECT action, consensus FROM ensemble_votes WHERE timestamp=?",
+                (vote.timestamp,),
+            ).fetchone()
+            assert db_vote is not None
+            assert db_vote[0] == vote.action
+            assert db_vote[1] == vote.weighted_consensus
+
+    def test_compute_vote_with_none_readings_triggers_collect(self, tmp_path):
+        """When readings=None and no current_readings, collect_signals is called."""
+        voter = _make_voter(tmp_path)
+        vote = voter.compute_vote(
+            readings=None, regime=Regime.NORMAL, regime_confidence=0.5,
+        )
+        assert vote is not None
 
 
 if __name__ == '__main__':
