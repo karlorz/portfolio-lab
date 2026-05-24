@@ -440,6 +440,11 @@ class SmartRebalancingController:
 
         # All checks passed — execute
         cost = self.estimate_total_cost_bps(drift_details, vpin, in_window)
+        per_symbol_costs = {
+            sym: self.estimate_per_symbol_cost_bps(sym, vpin, in_window) * drift
+            for sym, drift in drift_details.items()
+            if drift > 0
+        }
         return RebalanceDecisionResult(
             decision=RebalanceDecision.EXECUTE,
             urgency=urgency,
@@ -452,6 +457,7 @@ class SmartRebalancingController:
                 'in_optimal_window': in_window,
                 'ytd_cost_bps': self.cost_tracker.ytd_total_bps,
                 'remaining_budget_pct': self.cost_tracker.remaining_budget_pct,
+                'per_symbol_cost_bps': per_symbol_costs,
             },
         )
 

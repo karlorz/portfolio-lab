@@ -608,3 +608,31 @@ class TestEstimateTotalCostBps:
         if result.decision == RebalanceDecision.EXECUTE:
             # Cost should reflect per-ETF pricing, not flat rate
             assert result.estimated_cost_bps > 0
+
+
+# ---------------------------------------------------------------------------
+# Per-symbol cost breakdown in metadata
+# ---------------------------------------------------------------------------
+
+class TestPerSymbolCostBreakdown:
+
+    def test_execute_includes_per_symbol_costs(self):
+        ctrl = SmartRebalancingController()
+        portfolio = _drifted_portfolio(0.15)
+        market = _make_market(vpin=0.30)
+        now = datetime(2026, 5, 13, 12, 0)
+        result = ctrl.should_rebalance(portfolio, market, now=now)
+        if result.decision == RebalanceDecision.EXECUTE:
+            assert 'per_symbol_cost_bps' in result.metadata
+            per_sym = result.metadata['per_symbol_cost_bps']
+            assert isinstance(per_sym, dict)
+            # At least one symbol should have a cost entry
+            assert len(per_sym) > 0
+
+    def test_skip_has_no_per_symbol_costs(self):
+        ctrl = SmartRebalancingController()
+        portfolio = _make_portfolio()  # No drift
+        market = _make_market(vpin=0.30)
+        result = ctrl.should_rebalance(portfolio, market)
+        assert result.decision == RebalanceDecision.SKIP_LOW_DRIFT
+        assert 'per_symbol_cost_bps' not in result.metadata
