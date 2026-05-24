@@ -56,7 +56,7 @@ def _get_health_tracker():
             from src.signals.health_tracker import SignalHealthTracker
             _health_tracker = SignalHealthTracker()
         except Exception as e:
-            logger.debug("SignalHealthTracker unavailable: %s", e)
+            logger.warning("SignalHealthTracker unavailable: %s", e)
     return _health_tracker
 
 
@@ -549,7 +549,7 @@ class EnsembleVoter:
         except ImportError:
             pass
         except Exception as e:
-            logger.debug("Multi-speed momentum unavailable: %s", e)
+            logger.warning("Multi-speed momentum unavailable: %s", e)
 
     def _collect_cross_asset_rv_signal(self, readings: Dict) -> None:
         """Collect cross-asset relative value signal."""
@@ -562,7 +562,7 @@ class EnsembleVoter:
         except ImportError:
             pass
         except Exception as e:
-            logger.debug("Cross-asset RV unavailable: %s", e)
+            logger.warning("Cross-asset RV unavailable: %s", e)
 
     def _collect_intl_momentum_signal(
         self, readings: Dict, active_sources, regime: Optional[Regime],
@@ -604,7 +604,7 @@ class EnsembleVoter:
         except ImportError:
             pass
         except Exception as e:
-            logger.debug("International momentum unavailable: %s", e)
+            logger.warning("International momentum unavailable: %s", e)
 
     def _collect_alt_data_signal(
         self, readings: Dict, active_sources, regime: Optional[Regime],
@@ -621,7 +621,7 @@ class EnsembleVoter:
         except ImportError:
             pass
         except Exception as e:
-            logger.debug("Alternative data unavailable: %s", e)
+            logger.warning("Alternative data unavailable: %s", e)
 
     def _collect_regime_arb_signal(self, readings: Dict, active_sources, regime: Optional[Regime]) -> None:
         """Collect cross-asset regime arbitrage signal."""
@@ -634,9 +634,9 @@ class EnsembleVoter:
             if snapshot.is_active:
                 readings[SignalSource.CROSS_ASSET_REGIME_ARB] = snapshot.to_signal_reading()
         except ImportError:
-            logger.debug("Cross-asset regime arb module not available")
+            logger.warning("Cross-asset regime arb module not available")
         except Exception as e:
-            logger.debug("Cross-asset regime arb unavailable: %s", e)
+            logger.warning("Cross-asset regime arb unavailable: %s", e)
 
     def _collect_unified_overlay_signal(
         self, readings: Dict, active_sources, regime: Optional[Regime],
@@ -652,7 +652,7 @@ class EnsembleVoter:
         except ImportError:
             pass
         except Exception as e:
-            logger.debug("Unified overlay unavailable: %s", e)
+            logger.warning("Unified overlay unavailable: %s", e)
 
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
@@ -1044,7 +1044,7 @@ class EnsembleVoter:
                         confidence=reading.confidence,
                     )
         except Exception as e:
-            logger.debug("Health tracking log failed: %s", e)
+            logger.warning("Health tracking log failed: %s", e)
 
         return weighted_signals
 
@@ -1328,7 +1328,7 @@ class EnsembleVoter:
                     score = data.get('health_score', 0.5)
                     health_scores[source_name] = score
             except Exception as e:
-                logger.debug("Could not get health scores for BL views: %s", e)
+                logger.warning("Could not get health scores for BL views: %s", e)
 
         views = map_biases_to_views(
             equity_bias=vote.equity_bias,
