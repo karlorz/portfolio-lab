@@ -286,42 +286,43 @@ def main():
     sweep = DBCWeightSweep()
     result = sweep.run_sweep()
 
-    print("=" * 60)
-    print("DBC COMMODITY WEIGHT SWEEP v4.90")
-    print("=" * 60)
-    print(f"Baseline Sharpe: {result.baseline_sharpe:.3f}")
-    print(f"Baseline CAGR: {result.baseline_cagr:.2f}%")
-    print(f"Baseline Vol: {result.baseline_vol:.2f}%")
-    print(f"Baseline Max DD: {result.baseline_max_dd:.2f}%")
-    print()
-    print(f"{'Wt':>4} {'Src':>4} {'CAGR':>7} {'Vol':>6} {'Sharpe':>7} "
-          f"{'ΔSh':>7} {'MaxDD':>7} {'Crisis08':>8}")
-    print("-" * 60)
+    logger.info("=" * 60)
+    logger.info("DBC COMMODITY WEIGHT SWEEP v4.90")
+    logger.info("=" * 60)
+    logger.info("Baseline Sharpe: %.3f", result.baseline_sharpe)
+    logger.info("Baseline CAGR: %.2f%%", result.baseline_cagr)
+    logger.info("Baseline Vol: %.2f%%", result.baseline_vol)
+    logger.info("Baseline Max DD: %.2f%%", result.baseline_max_dd)
+    logger.info("")
+    logger.info("%4s %4s %7s %6s %7s %7s %8s",
+                "Wt", "Src", "CAGR", "Vol", "Sharpe", "ΔSh", "Crisis08")
+    logger.info("-" * 60)
     for row in result.rows:
         marker = " ★" if (row.dbc_weight == result.best_weight and
                           row.funded_from == result.best_source) else ""
-        print(f"{row.dbc_weight:>3.0%} {row.funded_from:>4} "
-              f"{row.cagr:>6.2f}% {row.vol:>5.2f}% "
-              f"{row.sharpe:>7.3f} {row.sharpe_delta:>+7.3f} "
-              f"{row.max_dd:>6.2f}% {row.crisis_2008:>8.2f}%{marker}")
-    print()
-    print("Best:", result.recommendation)
-    print(f"Worthwhile: {result.is_worthwhile}")
-    print("=" * 60)
+        logger.info("%3.0f%% %4s %6.2f%% %5.2f%% %7.3f %+7.3f %7.2f%%%s",
+                    row.dbc_weight * 100, row.funded_from,
+                    row.cagr, row.vol,
+                    row.sharpe, row.sharpe_delta,
+                    row.crisis_2008, marker)
+    logger.info("")
+    logger.info("Best: %s", result.recommendation)
+    logger.info("Worthwhile: %s", result.is_worthwhile)
+    logger.info("=" * 60)
 
     if "--save" in sys.argv:
         out = sweep.data_dir / "backtest_results" / "dbc_sweep.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         save_results_json(result.to_dict(), output_path=str(out))
-        print(f"Saved to {out}")
+        logger.info("Saved to %s", out)
 
     if "--table" in sys.argv:
-        print()
-        print("Regime-Gating Note:")
-        print("  Backwardation (DBC > 200d MA): +8% expected annual")
-        print("  Contango (DBC < 200d MA): -12% expected annual")
-        print("  Regime-gating DBC could improve results by +0.01-0.02 Sharpe")
-        print("  Recommend: only allocate when DBC in backwardation")
+        logger.info("")
+        logger.info("Regime-Gating Note:")
+        logger.info("  Backwardation (DBC > 200d MA): +8%% expected annual")
+        logger.info("  Contango (DBC < 200d MA): -12%% expected annual")
+        logger.info("  Regime-gating DBC could improve results by +0.01-0.02 Sharpe")
+        logger.info("  Recommend: only allocate when DBC in backwardation")
 
 
 if __name__ == "__main__":

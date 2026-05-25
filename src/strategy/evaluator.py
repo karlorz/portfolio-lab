@@ -80,8 +80,7 @@ class Portfolio:
             "updated": datetime.now().isoformat(),
             "mode": self.mode
         }
-        with open(self.state_file, 'w') as f:
-            save_results_json(state, output_path=str(self.state_file))
+        save_results_json(state, output_path=str(self.state_file))
     
     def total_value(self, prices: Dict[str, float]) -> float:
         position_value = sum(
@@ -285,8 +284,7 @@ class Portfolio:
                 data["status"] = "healthy"
             data["summary"] = {"passed": 1, "total_checks": 1}
 
-            with open(report_path, 'w') as f:
-                save_results_json(data, output_path=str(report_path))
+            save_results_json(data, output_path=str(report_path))
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
             logger.warning("Failed to write GARCH health report: %s", e)
 

@@ -25,6 +25,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR
+from src.backtest.metrics import save_results_json
 
 
 
@@ -173,8 +174,7 @@ class GraduationChecklist:
             },
         }
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(report, f, indent=2, default=str)
+        save_results_json(report, output_path=str(path))
         return path
 
     def progress_summary(self, results: Dict[str, CheckResult]) -> Dict:
