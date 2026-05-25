@@ -311,8 +311,8 @@ class DashboardGenerator:
                 for src in ensemble_result.source_votes:
                     source_breakdown.append({
                         "source": src.source.value if hasattr(src.source, 'value') else str(src.source),
-                        "direction": src.direction,
-                        "strength": round(src.strength, 3),
+                        "direction": "bullish" if src.value > 0 else ("bearish" if src.value < 0 else "neutral"),
+                        "strength": round(abs(src.value), 3),
                         "confidence": round(src.confidence, 3),
                         "weight": round(src.weight, 3),
                     })
@@ -496,7 +496,7 @@ class DashboardGenerator:
             prediction = integrator.predict({})
             stacking_ensemble_dashboard = {
                 "active": True,
-                "stacking_available": integrator._model is not None,
+                "stacking_available": integrator.model is not None,
                 "prediction_direction": prediction.direction if prediction else "neutral",
                 "confidence": prediction.confidence if prediction else 0.5,
                 "probability_bullish": prediction.probability_bullish if prediction else 0.33,
