@@ -79,8 +79,7 @@ def calculate_metrics(returns, dates, scenario, base_returns=None, expected_mult
     total_return = np.prod([1 + r for r in returns]) - 1
     years = len(returns) / 252
     cagr = pow(1 + total_return, 1/years) - 1 if years > 0 else 0
-    
-    np.mean(returns)
+
     daily_vol = np.std(returns, ddof=1)
     annualized_vol = daily_vol * sqrt(252)
     
