@@ -29,6 +29,8 @@ import { KurtosisRegimePanel } from './KurtosisRegimePanel';
 import { ModelValidationPanel } from './ModelValidationPanel';
 import { StackingEnsemblePanel } from './StackingEnsemblePanel';
 import { ChatPanel } from './ChatPanel';
+import { EnsembleVotingPanel } from './EnsembleVotingPanel';
+import { AlternativeDataPanel } from './AlternativeDataPanel';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -544,6 +546,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             <PortfolioExplainabilityPanel data={explainability} />
 
             {/* Model & Ensemble Panels */}
+            <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <EnsembleVotingPanel data={(signals as any)?.ensemble_voting ?? null} />
+              <AlternativeDataPanel data={(signals as any)?.alternative_data ?? null} />
+            </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
               <FactorRotationPanel data={(signals as any)?.factor_rotation ?? null} />
               <StackingEnsemblePanel data={(signals as any)?.stacking_ensemble ?? null} />

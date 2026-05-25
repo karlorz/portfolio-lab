@@ -264,6 +264,15 @@ class DashboardGenerator:
             ensemble_engine = EnsembleVoter()
             ensemble_result = ensemble_engine.compute_vote()
             if ensemble_result:
+                source_breakdown = []
+                for src in ensemble_result.source_votes:
+                    source_breakdown.append({
+                        "source": src.source.value if hasattr(src.source, 'value') else str(src.source),
+                        "direction": src.direction,
+                        "strength": round(src.strength, 3),
+                        "confidence": round(src.confidence, 3),
+                        "weight": round(src.weight, 3),
+                    })
                 ensemble_signal = {
                     "regime": ensemble_result.regime.value,
                     "regime_confidence": ensemble_result.regime_confidence,
@@ -271,6 +280,11 @@ class DashboardGenerator:
                     "agreement_ratio": ensemble_result.agreement_ratio,
                     "action": ensemble_result.action,
                     "confidence": ensemble_result.confidence,
+                    "equity_bias": round(ensemble_result.equity_bias, 3),
+                    "duration_bias": round(ensemble_result.duration_bias, 3),
+                    "gold_bias": round(ensemble_result.gold_bias, 3),
+                    "num_sources": ensemble_result.num_sources,
+                    "source_breakdown": source_breakdown,
                 }
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Ensemble voting not available: %s", e)
