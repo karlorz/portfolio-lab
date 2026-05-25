@@ -14,6 +14,10 @@
 |- **Graduation checklist v2**: 12 criteria (added regime_coverage, signal_diversity, sharpe_ci_lower)
 |- **Periodic rebalancing**: forces rebalance if drift >2% and 30+ days since last trade
 |- **LTTB downsampling**: src/utils/lttb.ts — auto-downsample charts from 5371 to 600 points preserving visual shape
+|- **Signal staleness detection**: DashboardGenerator checks signal timestamps against 4h TTL (SIGNAL_STALENESS_TTL_HOURS), reports stale signals in signals.json
+|- **External alerting**: src/monitor/alerting.py — webhook-based PASS→WARN→HALT state-transition alerting (ALERT_WEBHOOK_URL env var), staleness + drift checks
+|- **pytest importlib mode**: --import-mode=importlib via addopts in pyproject.toml — eliminates sys.modules pollution class of bugs
+|- **Dynamic MSM gating**: TSMOM is_gated_off now uses regime-based check instead of hardcoded True
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
