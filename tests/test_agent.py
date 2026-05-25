@@ -899,9 +899,8 @@ class TestRun:
         result = agent.run()
         assert isinstance(result, dict)  # Returns daily summary
         assert "days" in result
-        # DB should be closed
-        with pytest.raises(sqlite3.ProgrammingError):
-            agent.conn.execute("SELECT 1")
+        # DB should be closed (lazy property resets to None)
+        assert agent._conn is None
 
     def test_run_with_crisis_trigger(self, patched_paths, seeded_db, monkeypatch):
         monkeypatch.setattr(agent_module, "DB_PATH", seeded_db)
@@ -915,9 +914,8 @@ class TestRun:
         assert result is None  # Returns None when triggers are processed
         # Trigger should be consumed
         assert not trigger_file.exists()
-        # DB should be closed
-        with pytest.raises(sqlite3.ProgrammingError):
-            agent.conn.execute("SELECT 1")
+        # DB should be closed (lazy property resets to None)
+        assert agent._conn is None
 
     def test_run_with_trigger_creates_wiki_page(self, patched_paths, seeded_db, monkeypatch):
         monkeypatch.setattr(agent_module, "DB_PATH", seeded_db)

@@ -351,19 +351,19 @@ class FactorDataManager:
 
 def fetch_factor_prices_from_pipeline(symbol: str, prices_data: Optional[Dict] = None) -> List[Dict]:
     """Fetch price data from existing prices.json pipeline.
-    
+
     Integrates with the existing Yahoo Finance data pipeline to populate
     factor ETF historical data from public/data/prices.json.
     """
     import json
-    from src.paths import PRICES_JSON
+    from src.data.price_cache import get_prices
 
     if prices_data is None:
-        if not PRICES_JSON.exists():
-            logger.warning("Prices file not found: %s", PRICES_JSON)
+        try:
+            prices_data = get_prices()
+        except FileNotFoundError:
+            logger.warning("Prices file not found")
             return []
-        with open(PRICES_JSON, 'r') as f:
-            prices_data = json.load(f)
     
     if symbol not in prices_data:
         logger.warning("No data for %s in prices.json", symbol)

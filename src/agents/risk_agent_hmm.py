@@ -71,7 +71,6 @@ else:
 
 # Paths
 MODEL_PATH = DATA_DIR / "hmm_regime_model.pkl"
-PRICES_PATH = PROJECT_ROOT / "public" / "data" / "prices.json"
 
 # Regime definitions
 class MarketRegime(Enum):
@@ -444,27 +443,26 @@ class PortfolioRegimeManager:
         """Load price data for a ticker."""
         if ticker in self.price_cache:
             return self.price_cache[ticker]
-        
-        if PRICES_PATH.exists():
-            try:
-                with open(PRICES_PATH) as f:
-                    data = json.load(f)
-                
-                if ticker in data:
-                    ticker_data = data[ticker]
-                    if isinstance(ticker_data, list) and len(ticker_data) > 0:
-                        dates = [item['d'] for item in ticker_data]
-                        prices = [item['p'] for item in ticker_data]
-                        df = pd.DataFrame({
-                            'date': pd.to_datetime(dates),
-                            'close': prices
-                        })
-                        df.set_index('date', inplace=True)
-                        self.price_cache[ticker] = df
-                        return df
-            except Exception as e:
-                logger.info(f"Error loading prices for {ticker}: {e}")
-        
+
+        try:
+            from src.data.price_cache import get_prices
+            data = get_prices()
+
+            if ticker in data:
+                ticker_data = data[ticker]
+                if isinstance(ticker_data, list) and len(ticker_data) > 0:
+                    dates = [item['d'] for item in ticker_data]
+                    prices = [item['p'] for item in ticker_data]
+                    df = pd.DataFrame({
+                        'date': pd.to_datetime(dates),
+                        'close': prices
+                    })
+                    df.set_index('date', inplace=True)
+                    self.price_cache[ticker] = df
+                    return df
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            logger.info(f"Error loading prices for {ticker}: {e}")
+
         return None
     
     def detect_portfolio_regime(

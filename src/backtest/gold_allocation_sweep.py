@@ -103,8 +103,8 @@ class GoldAllocationSweep:
 
     def _load_prices(self) -> None:
         """Load real price data from prices.json."""
-        with open(self.data_path) as f:
-            raw = json.load(f)
+        from src.data.price_cache import get_prices
+        raw = get_prices()
 
         for symbol in ["SPY", "GLD", "TLT", "IEF"]:
             if symbol in raw:

@@ -222,24 +222,12 @@ def load_prices(symbol: str = "SPY") -> Optional[np.ndarray]:
     Format: {"SPY": [{"d": "2021-05-10", "p": 390.34}, ...], ...}
     Returns nx1 numpy array of close prices, earliest to latest.
     """
-    # Try multiple possible locations
-    candidates = [
-        PRICES_JSON,
-        DATA_DIR / "prices.json",
-    ]
-    price_file = None
-    for p in candidates:
-        if p.exists():
-            price_file = p
-            break
-
-    if price_file is None:
+    try:
+        from src.data.price_cache import get_prices
+        raw = get_prices()
+    except FileNotFoundError:
         logger.error("Price data not found")
         return None
-
-    try:
-        with open(price_file) as f:
-            raw = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         logger.error("Failed to load price data: %s", e)
         return None

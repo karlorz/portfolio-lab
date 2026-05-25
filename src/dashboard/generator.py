@@ -61,8 +61,8 @@ class DashboardGenerator:
         if self.conn is not None:
             try:
                 self.conn.close()
-            except Exception:
-                pass
+            except (OSError, sqlite3.Error) as e:
+                logger.warning("Error closing SQLite connection: %s", e)
             self.conn = None
     
     def generate_performance_json(self) -> Path:

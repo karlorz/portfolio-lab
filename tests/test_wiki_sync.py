@@ -662,8 +662,8 @@ class TestRun:
     def test_run_closes_connection(self, wiki_sync, db_with_regimes, perf_log, orders_log):
         """run() closes the SQLite connection."""
         wiki_sync.run()
-        with pytest.raises(sqlite3.ProgrammingError):
-            wiki_sync.conn.execute("SELECT 1")
+        # close() sets _conn to None; accessing conn would create a new one
+        assert wiki_sync._conn is None
 
 
 # ---------------------------------------------------------------------------

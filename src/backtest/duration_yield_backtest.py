@@ -36,7 +36,6 @@ __all__ = ['STATIC_ALLOCATION', 'DYNAMIC_ALLOCATIONS', 'REGIME_EFFECTIVE_DURATIO
 logger = logging.getLogger(__name__)
 
 # Paths
-PRICES_PATH = DATA_DIR / "prices.json"
 YIELDS_PATH = DATA_DIR / "yields.json"
 OUTPUT_PATH = DATA_DIR / ".duration_backtest_results.json"
 
@@ -77,8 +76,8 @@ TRANSACTION_COST = 0.0010  # 10 bps per trade
 def load_price_data() -> pd.DataFrame:
     """Load price data from prices.json."""
     logger.info("Loading price data...")
-    with open(PRICES_PATH) as f:
-        data = json.load(f)
+    from src.data.price_cache import get_prices
+    data = get_prices()
 
     # prices.json format: {symbol: [{"d": date, "p": price}, ...]}
     # Convert to DataFrame with dates as rows and symbols as columns

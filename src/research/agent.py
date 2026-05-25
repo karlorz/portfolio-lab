@@ -21,12 +21,33 @@ WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
 WORK_DIR = _WORK_DIR
 DB_PATH = DATA_DIR / "market.db"
 
-logger = logging.getLogger(__name__)
+
 class ResearchAgent:
     def __init__(self):
-        self.conn = sqlite_connect(DB_PATH)
-        self.conn.row_factory = sqlite3.Row
+        self._conn = None
         WORK_DIR.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def conn(self):
+        """Lazy connection with row factory."""
+        if self._conn is None:
+            self._conn = sqlite_connect(DB_PATH)
+            self._conn.row_factory = sqlite3.Row
+        return self._conn
+
+    @conn.setter
+    def conn(self, value):
+        """Allow tests to inject a connection."""
+        self._conn = value
+
+    def close(self):
+        """Close the database connection."""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except (OSError, sqlite3.Error):
+                pass
+            self._conn = None
     
     def check_triggers(self) -> List[Dict]:
         """Check for research triggers."""
@@ -209,31 +230,33 @@ created: {timestamp}
         """Main research agent loop."""
         logger.info("Research Agent Starting")
 
-        triggers = self.check_triggers()
+        try:
+            triggers = self.check_triggers()
 
-        if not triggers:
-            logger.info("No triggers found, checking for scheduled analysis...")
-            # Run daily summary analysis
-            return self.run_daily_summary()
-        
-        for trigger in triggers:
-            logger.info("Processing trigger: %s", trigger.get('type'))
+            if not triggers:
+                logger.info("No triggers found, checking for scheduled analysis...")
+                # Run daily summary analysis
+                return self.run_daily_summary()
 
-            analysis = self.analyze_regime(trigger)
-            logger.info("Analysis complete: %s", analysis.get('recommended_action'))
+            for trigger in triggers:
+                logger.info("Processing trigger: %s", trigger.get('type'))
 
-            if self.should_delegate_claude(analysis):
-                work_file = self.delegate_to_claude(analysis, trigger)
-                logger.info("Delegated to Claude Code: %s", work_file)
+                analysis = self.analyze_regime(trigger)
+                logger.info("Analysis complete: %s", analysis.get('recommended_action'))
 
-                # In a real system, this would spawn Claude Code
-                # For now, we create a human-readable task file
-                self.create_claude_prompt(work_file, analysis)
+                if self.should_delegate_claude(analysis):
+                    work_file = self.delegate_to_claude(analysis, trigger)
+                    logger.info("Delegated to Claude Code: %s", work_file)
 
-            wiki_page = self.crystallize_to_wiki(analysis)
-            logger.info("Crystallized to wiki: %s", wiki_page)
+                    # In a real system, this would spawn Claude Code
+                    # For now, we create a human-readable task file
+                    self.create_claude_prompt(work_file, analysis)
 
-        self.conn.close()
+                wiki_page = self.crystallize_to_wiki(analysis)
+                logger.info("Crystallized to wiki: %s", wiki_page)
+        finally:
+            self.close()
+
         logger.info("Research Agent Complete")
     
     def create_claude_prompt(self, work_file: Path, analysis: Dict):
@@ -323,8 +346,8 @@ Work item: {work_file}
         }
         
         logger.info("Daily summary: %s", summary)
-        
-        self.conn.close()
+
+        self.close()
         return summary
 
 if __name__ == "__main__":

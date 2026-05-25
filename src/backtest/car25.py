@@ -335,13 +335,12 @@ def load_prices_data(data_path: Optional[str] = None) -> Dict:
     Format: {symbol: [{d: date, p: price}, ...], ...}
     """
     if data_path is None:
-        # Default to project data directory
-        data_file = DATA_DIR / 'prices.json'
+        from src.data.price_cache import get_prices
+        return get_prices()
     else:
         data_file = Path(data_path)
-    
-    with open(str(data_file), 'r') as f:
-        return json.load(f)
+        with open(str(data_file), 'r') as f:
+            return json.load(f)
 
 
 def calculate_portfolio_returns(

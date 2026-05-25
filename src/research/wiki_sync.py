@@ -27,8 +27,29 @@ class WikiSync:
     def __init__(self):
         RAW_DIR.mkdir(parents=True, exist_ok=True)
         (WIKI_DIR / "compound").mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite_connect(DB_PATH)
-        self.conn.row_factory = sqlite3.Row
+        self._conn = None
+
+    @property
+    def conn(self):
+        """Lazy connection with row factory."""
+        if self._conn is None:
+            self._conn = sqlite_connect(DB_PATH)
+            self._conn.row_factory = sqlite3.Row
+        return self._conn
+
+    @conn.setter
+    def conn(self, value):
+        """Allow tests to inject a connection."""
+        self._conn = value
+
+    def close(self):
+        """Close the database connection."""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except (OSError, sqlite3.Error):
+                pass
+            self._conn = None
     
     def hash_file(self, content: str) -> str:
         """Generate SHA256 hash for raw provenance."""
@@ -426,7 +447,7 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
         for p in app_data:
             print(f"  Synced (app): {p}")
 
-        self.conn.close()
+        self.close()
         print(f"[{datetime.now()}] Wiki Sync Complete ({len(wiki_pages)} wiki, {len(app_data)} app)")
 
 if __name__ == "__main__":
