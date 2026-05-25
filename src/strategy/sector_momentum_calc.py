@@ -5,12 +5,15 @@ Calculates momentum signals for SPDR sector ETFs
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 import numpy as np
 
 from src.paths import HISTORICAL_JSON
+
+logger = logging.getLogger(__name__)
 from src.utils import safe_get
 
 
@@ -283,7 +286,7 @@ def generate_sector_signals(historical_path: Path, vix: float = 0, regime: str =
         }
         
     except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
-        print(f"Error generating sector signals: {e}")
+        logger.error("Error generating sector signals: %s", e)
         return None
 
 

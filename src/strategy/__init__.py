@@ -4,6 +4,7 @@ __all__ = [
     "adaptive_ensemble_weights",
     "adaptive_sizing",
     "basis_pursuit_selector",
+    "black_litterman_mapper",
     "convexity_harvest",
     "crypto_staking",
     "ensemble_voter",
