@@ -590,10 +590,15 @@ class UnifiedOrchestrator:
                 raw = json.load(f)
             prices = {}
             for sym in ("SPY", "GLD", "TLT"):
-                if sym.lower() in raw:
-                    prices[sym] = raw[sym.lower()]["p"]
-                elif sym in raw:
-                    prices[sym] = raw[sym]["p"]
+                key = sym.lower() if sym.lower() in raw else sym
+                if key not in raw:
+                    continue
+                val = raw[key]
+                if isinstance(val, list):
+                    # Compact format: [{d: "...", p: ...}, ...]
+                    prices[sym] = [pt["p"] for pt in val if "p" in pt]
+                elif isinstance(val, dict) and "p" in val:
+                    prices[sym] = val["p"]
 
             if len(prices) < 3:
                 return None
