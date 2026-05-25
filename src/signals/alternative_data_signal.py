@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 
 from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
 from src.backtest.metrics import save_results_json
+from src.data.price_cache import get_prices
 
 
 __all__ = ['SYMBOLS_REQUIRED', 'ComponentSignal', 'AlternativeDataComposite', 'EnsembleSignal', 'AlternativeDataSignalGenerator']
@@ -106,10 +107,9 @@ class AlternativeDataSignalGenerator:
     # ---- Data loading ----
 
     def _load_prices(self) -> Dict[str, List[Dict]]:
-        """Load price data from JSON."""
+        """Load price data from JSON (TTL-cached)."""
         if self._prices is None:
-            with open(self.prices_path) as f:
-                self._prices = json.load(f)
+            self._prices = get_prices()
         assert self._prices is not None, "Prices failed to load"
         return self._prices
 

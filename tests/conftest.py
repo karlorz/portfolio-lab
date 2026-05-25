@@ -132,6 +132,15 @@ def _reset_sklearn_safe_flag():
     _sklearn_safe_active = False
 
 
+@pytest.fixture(autouse=True)
+def _clear_price_cache():
+    """Invalidate TTL price cache between tests to prevent stale data."""
+    from src.data.price_cache import invalidate_price_cache
+    invalidate_price_cache()
+    yield
+    invalidate_price_cache()
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # pytest hooks
 # ═══════════════════════════════════════════════════════════════════════════

@@ -46,8 +46,9 @@ from dataclasses import dataclass, asdict
 from src.paths import sqlite_connect
 from datetime import datetime
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ
 from src.backtest.metrics import save_results_json
+from src.data.price_cache import get_prices
 
 
 __all__ = ['SPEED_TIERS', 'VOL_TARGET', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'ASSET_TICKERS', 'DEFAULT_BASE_ALLOCATION', 'SpeedMomentumSignal', 'EnsembleSignal', 'MultiSpeedPortfolio', 'MultiSpeedMomentum', 'MultiSpeedBacktester']
@@ -80,10 +81,7 @@ SPEED_TIERS = {
     }
 }
 
-VOL_TARGET = 0.15              # 15% target volatility (annualized)
-MAX_DEVIATION = 0.10           # ±10% max deviation from base allocation
-MIN_WEIGHT = 0.05              # Minimum 5% per asset
-REBALANCE_FREQ = 21            # Monthly rebalancing
+# VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ imported from src.paths
 
 ASSET_TICKERS = {
     'SPY': 'SPY',
@@ -225,12 +223,11 @@ class MultiSpeedMomentum:
         self._prices_df: Optional[pd.DataFrame] = None
     
     def _load_prices(self) -> pd.DataFrame:
-        """Load price data from JSON."""
+        """Load price data from JSON (TTL-cached file read)."""
         if self._prices_df is not None:
             return self._prices_df
-        
-        with open(self.prices_path, 'r') as f:
-            data = json.load(f)
+
+        data = get_prices()
         
         records = []
         for symbol, entries in data.items():

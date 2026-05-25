@@ -40,8 +40,9 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
+from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION, VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ
 from src.backtest.metrics import save_results_json
+from src.data.price_cache import get_prices
 
 
 __all__ = ['LOOKBACK_DAYS', 'SKIP_DAYS', 'VOL_WINDOW', 'VOL_TARGET', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'ASSET_TICKERS', 'DEFAULT_BASE_ALLOCATION', 'TSMOMSignal', 'TSMOMPortfolio', 'TSMOMOverlay', 'TSMOMBacktester']
@@ -56,10 +57,7 @@ PRICES_PATH = PRICES_JSON
 LOOKBACK_DAYS = 252        # 12 months (trading days)
 SKIP_DAYS = 21             # Skip most recent month (avoid short-term reversal)
 VOL_WINDOW = 20            # 20-day volatility estimation
-VOL_TARGET = 0.15          # 15% target volatility (annualized)
-MAX_DEVIATION = 0.10       # ±10% max deviation from base allocation
-MIN_WEIGHT = 0.05          # Minimum 5% per asset
-REBALANCE_FREQ = 21        # Monthly rebalancing (or drift-based)
+# VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ imported from src.paths
 
 # Asset mapping
 ASSET_TICKERS = {
@@ -189,31 +187,29 @@ class TSMOMOverlay:
         self.signal_history: List[TSMOMSignal] = []
         
     def load_prices(self, ticker: str) -> Optional[pd.DataFrame]:
-        """Load price data for a ticker."""
+        """Load price data for a ticker (TTL-cached file read)."""
         if ticker in self.price_cache:
             return self.price_cache[ticker]
-        
-        # Try to load from prices.json
-        if PRICES_PATH.exists():
-            try:
-                with open(PRICES_PATH) as f:
-                    data = json.load(f)
-                
-                if ticker in data:
-                    ticker_data = data[ticker]
-                    # Format: [{'d': '2005-01-03', 'p': 81.38}, ...]
-                    if isinstance(ticker_data, list) and len(ticker_data) > 0:
-                        dates = [item['d'] for item in ticker_data]
-                        prices = [item['p'] for item in ticker_data]
-                        df = pd.DataFrame({
-                            'date': pd.to_datetime(dates),
-                            'close': prices
-                        })
-                        df.set_index('date', inplace=True)
-                        self.price_cache[ticker] = df
-                        return df
-            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
-                logger.warning("Error loading prices for %s: %s", ticker, e)
+
+        # Use shared TTL-cached file read
+        try:
+            data = get_prices()
+
+            if ticker in data:
+                ticker_data = data[ticker]
+                # Format: [{'d': '2005-01-03', 'p': 81.38}, ...]
+                if isinstance(ticker_data, list) and len(ticker_data) > 0:
+                    dates = [item['d'] for item in ticker_data]
+                    prices = [item['p'] for item in ticker_data]
+                    df = pd.DataFrame({
+                        'date': pd.to_datetime(dates),
+                        'close': prices
+                    })
+                    df.set_index('date', inplace=True)
+                    self.price_cache[ticker] = df
+                    return df
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
+            logger.warning("Error loading prices for %s: %s", ticker, e)
 
         return None
 

@@ -969,27 +969,19 @@ class TestDataLoadingFullCoverage:
 
     def test_load_empty_json_file(self, tmp_path):
         """Valid JSON with empty dict should return False (no dates)."""
-        data_dir = tmp_path / "empty_json"
-        data_dir.mkdir()
-        with open(data_dir / "prices.json", "w") as f:
-            json.dump({}, f)
-        scanner = CrossAssetRVScanner(data_dir=data_dir)
-        assert scanner._load_price_data() is False
+        with patch('src.signals.cross_asset_relative_value.get_prices', return_value={}):
+            scanner = CrossAssetRVScanner(data_dir=tmp_path)
+            assert scanner._load_price_data() is False
 
     def test_load_empty_symbol_arrays(self, tmp_path):
         """Symbols with empty list entries should produce no dates."""
-        data_dir = tmp_path / "empty_arr"
-        data_dir.mkdir()
         prices = {"SPY": [], "QQQ": [], "GLD": []}
-        with open(data_dir / "prices.json", "w") as f:
-            json.dump(prices, f)
-        scanner = CrossAssetRVScanner(data_dir=data_dir)
-        assert scanner._load_price_data() is False
+        with patch('src.signals.cross_asset_relative_value.get_prices', return_value=prices):
+            scanner = CrossAssetRVScanner(data_dir=tmp_path)
+            assert scanner._load_price_data() is False
 
     def test_load_missing_keys_skipped(self, tmp_path):
         """Entries missing 'd' or 'p' keys should be silently skipped."""
-        data_dir = tmp_path / "missing_keys"
-        data_dir.mkdir()
         prices = {
             "SPY": [
                 {"d": "2026-01-01", "p": 500.0},
@@ -997,10 +989,9 @@ class TestDataLoadingFullCoverage:
                 {"d": "2026-01-03", "p": 502.0},
             ]
         }
-        with open(data_dir / "prices.json", "w") as f:
-            json.dump(prices, f)
-        scanner = CrossAssetRVScanner(data_dir=data_dir)
-        result = scanner._load_price_data()
+        with patch('src.signals.cross_asset_relative_value.get_prices', return_value=prices):
+            scanner = CrossAssetRVScanner(data_dir=tmp_path)
+            result = scanner._load_price_data()
         assert result is True
         assert "SPY" in scanner.prices
         assert len(scanner.prices["SPY"]) == 2  # 2 valid entries
@@ -1037,16 +1028,13 @@ class TestDataLoadingFullCoverage:
 
     def test_load_single_valid_date(self, tmp_path):
         """Single date entry should load successfully."""
-        data_dir = tmp_path / "single_date"
-        data_dir.mkdir()
         prices = {
             "SPY": [{"d": "2026-01-01", "p": 500.0}],
             "GLD": [{"d": "2026-01-01", "p": 180.0}],
         }
-        with open(data_dir / "prices.json", "w") as f:
-            json.dump(prices, f)
-        scanner = CrossAssetRVScanner(data_dir=data_dir)
-        assert scanner._load_price_data() is True
+        with patch('src.signals.cross_asset_relative_value.get_prices', return_value=prices):
+            scanner = CrossAssetRVScanner(data_dir=tmp_path)
+            assert scanner._load_price_data() is True
         assert len(scanner.dates) == 1
 
 

@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.backtest.metrics import save_results_json
+from src.data.price_cache import get_prices
 
 
 __all__ = ['MOMENTUM_LOOKBACK', 'VOL_LOOKBACK', 'MIN_HISTORY', 'DIVERGENCE_LOOKBACK', 'BULL_MOMENTUM_THRESHOLD', 'BEAR_MOMENTUM_THRESHOLD', 'STRONG_MOMENTUM_THRESHOLD', 'HIGH_VOL_THRESHOLD', 'AssetRegime', 'BondRegime', 'GoldRegime', 'DivergencePattern', 'AssetRegimeReading', 'BondRegimeReading', 'GoldRegimeReading', 'DivergenceReading', 'CrossAssetRegimeArbSignal', 'CrossAssetRegimeArbDetector', 'print_signal_report']
@@ -212,15 +213,9 @@ class CrossAssetRegimeArbDetector:
     # ---- Data Loading ----
 
     def _load_prices(self) -> bool:
-        """Load price data from public/data/prices.json."""
-        prices_file = self.data_dir / "prices.json"
-        if not prices_file.exists():
-            logger.warning("Prices file not found: %s", prices_file)
-            return False
-
+        """Load price data from public/data/prices.json (TTL-cached)."""
         try:
-            with open(prices_file) as f:
-                all_prices = json.load(f)
+            all_prices = get_prices()
 
             required = ["SPY", "TLT", "GLD"]
             for sym in required:
@@ -233,7 +228,7 @@ class CrossAssetRegimeArbDetector:
             spy_count = len(self.prices.get('SPY', []))
             logger.debug("Loaded prices for %s (%d data points)", price_keys, spy_count)
             return True
-        except (json.JSONDecodeError, KeyError) as e:
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
             logger.warning("Failed to load prices: %s", e)
             return False
 

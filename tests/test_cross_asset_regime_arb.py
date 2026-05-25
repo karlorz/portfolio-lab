@@ -180,14 +180,10 @@ class TestDataLoading:
     """Tests for price data loading."""
 
     def test_load_prices_success(self, sample_prices, tmp_path):
-        """Detector loads prices from JSON file."""
-        # Write sample prices to temp file
-        prices_file = tmp_path / "prices.json"
-        with open(prices_file, "w") as f:
-            json.dump(sample_prices, f)
-
-        detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
-        result = detector._load_prices()
+        """Detector loads prices from JSON file (via TTL cache)."""
+        with patch('src.signals.cross_asset_regime_arb.get_prices', return_value=sample_prices):
+            detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
+            result = detector._load_prices()
 
         assert result is True
         assert "SPY" in detector.prices
@@ -197,29 +193,24 @@ class TestDataLoading:
 
     def test_load_prices_file_not_found(self, tmp_path):
         """Loading from non-existent path returns False."""
-        detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
-        result = detector._load_prices()
+        with patch('src.signals.cross_asset_regime_arb.get_prices', side_effect=FileNotFoundError):
+            detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
+            result = detector._load_prices()
         assert result is False
 
     def test_load_prices_missing_symbol(self, tmp_path):
         """Missing required symbol returns False."""
         bad_data = {"SPY": [{"d": "2026-01-01", "p": 100.0}]}
-        prices_file = tmp_path / "prices.json"
-        with open(prices_file, "w") as f:
-            json.dump(bad_data, f)
-
-        detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
-        result = detector._load_prices()
+        with patch('src.signals.cross_asset_regime_arb.get_prices', return_value=bad_data):
+            detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
+            result = detector._load_prices()
         assert result is False
 
     def test_load_prices_empty_data(self, tmp_path):
         """Empty price file returns False."""
-        prices_file = tmp_path / "prices.json"
-        with open(prices_file, "w") as f:
-            json.dump({}, f)
-
-        detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
-        result = detector._load_prices()
+        with patch('src.signals.cross_asset_regime_arb.get_prices', return_value={}):
+            detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
+            result = detector._load_prices()
         assert result is False
 
 
@@ -533,9 +524,10 @@ class TestFullScan:
 
     def test_scan_no_data(self):
         """No price data returns None."""
-        detector = CrossAssetRegimeArbDetector()
-        detector.data_dir = Path("/nonexistent")
-        signal = detector.scan()
+        with patch('src.signals.cross_asset_regime_arb.get_prices', side_effect=FileNotFoundError):
+            detector = CrossAssetRegimeArbDetector()
+            detector.data_dir = Path("/nonexistent")
+            signal = detector.scan()
         assert signal is None
 
     def test_signal_value_range(self, detector_with_prices):
@@ -617,9 +609,10 @@ class TestEnsembleAPI:
 
     def test_get_ensemble_signal_no_data(self):
         """No data returns fallback signal."""
-        detector = CrossAssetRegimeArbDetector()
-        detector.data_dir = Path("/nonexistent")
-        result = detector.get_ensemble_signal()
+        with patch('src.signals.cross_asset_regime_arb.get_prices', side_effect=FileNotFoundError):
+            detector = CrossAssetRegimeArbDetector()
+            detector.data_dir = Path("/nonexistent")
+            result = detector.get_ensemble_signal()
         assert result["active"] is False
         assert result["signal_value"] == 0.0
 
@@ -1328,9 +1321,10 @@ class TestOutputFunctions:
 
     def test_get_signal_snapshot_no_data(self):
         """get_signal_snapshot with no data returns inactive snapshot."""
-        detector = CrossAssetRegimeArbDetector()
-        detector.data_dir = Path("/nonexistent")
-        snapshot = detector.get_signal_snapshot()
+        with patch('src.signals.cross_asset_regime_arb.get_prices', side_effect=FileNotFoundError):
+            detector = CrossAssetRegimeArbDetector()
+            detector.data_dir = Path("/nonexistent")
+            snapshot = detector.get_signal_snapshot()
         assert snapshot is not None
         assert snapshot.is_active is False
 

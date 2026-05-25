@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **12356 safe** (12356 Python + 214 TypeScript, 27 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **12425 safe** (12213 Python + 214 TypeScript, 27 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 15/15** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -29,6 +29,8 @@
 |- **DashboardGenerator context manager**: `__enter__`/`__exit__` + `close()` + `try/finally` in `run()` prevents SQLite connection leaks on exceptions
 |- **Evaluator print→logging**: check_graduation_criteria, kill switch, and trigger creation use logger instead of print() for production observability
 |- **WIKI_DIR/WORK_DIR env vars**: configurable via environment variables with fallback defaults in src/paths.py
+|- **TTL price cache**: src/data/price_cache.py — cachetools.TTLCache(maxsize=1, ttl=30s) eliminates redundant prices.json reads across 5 signal modules (PRICE_CACHE_TTL_SECONDS env var), ~10MB peak memory savings per cron cycle
+|- **Shared strategy constants**: VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ consolidated in src/paths.py (env-var configurable) — imported by tsmom_overlay.py and multi_speed_momentum.py
 |- **MSM transient error resilience**: _is_msm_gated caches last-known regime and defers to it on SQLite failures instead of gating off
 |- **Dead import cleanup**: removed unused `import sqlite3` from 7 source files
 

@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PRICES_JSON
 from src.backtest.metrics import save_results_json
+from src.data.price_cache import get_prices
 
 
 __all__ = ['ZSCORE_ENTRY', 'ZSCORE_EXIT', 'LOOKBACK', 'MIN_HISTORY', 'PairReading', 'CrossAssetRVSignal', 'CrossAssetRVScanner', 'print_scan']
@@ -135,21 +136,9 @@ class CrossAssetRVScanner:
         self.state_path = self.state_dir / "cross_asset_rv_state.json"
 
     def _load_price_data(self) -> bool:
-        """Load price data from JSON file."""
-        prices_path = self.data_dir.parent / "public" / "data" / "prices.json"
-        if not prices_path.exists():
-            prices_path = self.data_dir / "prices.json"
-        if not prices_path.exists():
-            # Try project root
-            prices_path = PRICES_JSON
-
-        if not prices_path.exists():
-            logger.error("Price data not found: %s", prices_path)
-            return False
-
+        """Load price data from JSON file (TTL-cached)."""
         try:
-            with open(prices_path) as f:
-                raw = json.load(f)
+            raw = get_prices()
 
             # Build date-indexed arrays for each symbol
             symbol_data: Dict[str, Dict[str, float]] = {}

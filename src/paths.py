@@ -61,6 +61,14 @@ REGIME_OVERRIDES: Dict[str, Optional[Dict[str, float]]] = {
     "normal": None,  # Use BASE_ALLOCATION (46/38/16)
 }
 
+# ── Shared strategy parameters ────────────────────────────────────────
+# Used by tsmom_overlay.py and multi_speed_momentum.py.
+# Single source of truth — import from here instead of repeating.
+VOL_TARGET: float = float(os.environ.get("VOL_TARGET", "0.15"))       # 15% target volatility
+MAX_DEVIATION: float = float(os.environ.get("MAX_DEVIATION", "0.10")) # ±10% max allocation drift
+MIN_WEIGHT: float = float(os.environ.get("MIN_WEIGHT", "0.05"))       # Minimum 5% per asset
+REBALANCE_FREQ: int = int(os.environ.get("REBALANCE_FREQ", "21"))     # Monthly rebalancing
+
 
 def sqlite_connect(db_path: Union[str, Path], **kwargs) -> sqlite3.Connection:
     """Open a SQLite connection with WAL journal mode enabled.
