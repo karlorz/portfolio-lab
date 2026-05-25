@@ -29,11 +29,13 @@
 |- **DashboardGenerator context manager**: `__enter__`/`__exit__` + `close()` + `try/finally` in `run()` prevents SQLite connection leaks on exceptions
 |- **Evaluator print→logging**: check_graduation_criteria, kill switch, and trigger creation use logger instead of print() for production observability
 |- **WIKI_DIR/WORK_DIR env vars**: configurable via environment variables with fallback defaults in src/paths.py
-|- **TTL price cache**: src/data/price_cache.py — cachetools.TTLCache(maxsize=1, ttl=30s) eliminates redundant prices.json reads across 12 signal/strategy modules (PRICE_CACHE_TTL_SECONDS env var), ~10MB peak memory savings per cron cycle
+|- **TTL price cache**: src/data/price_cache.py — cachetools.TTLCache(maxsize=1, ttl=30s) eliminates redundant prices.json reads across 18 modules (PRICE_CACHE_TTL_SECONDS env var), ~10MB peak memory savings per cron cycle
 |- **Shared strategy constants**: VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ consolidated in src/paths.py (env-var configurable) — imported by tsmom_overlay.py and multi_speed_momentum.py
 |- **Broker error handling**: alpaca.py submit_order() returns None on failure, get_orders() returns [] on failure
 |- **SPC state persistence**: spc_monitor.py save_state/load_state — JSON serialization to DATA_DIR/spc_state.json, wired into DashboardGenerator
 |- **VPIN query cache**: vpin_bvc.py TTLCache(maxsize=64, ttl=300s) for SQLite OHLCV queries
+|- **Lazy SQLite connections**: ResearchAgent/WikiSync use lazy property with setter + close() + try/finally, generator.py close() narrows except
+|- **MARKET_DB constant**: 7 modules consolidated from DATA_DIR/"market.db" to src/paths.MARKET_DB
 |- **MSM transient error resilience**: _is_msm_gated caches last-known regime and defers to it on SQLite failures instead of gating off
 |- **Dead import cleanup**: removed unused `import sqlite3` from 7 source files
 
