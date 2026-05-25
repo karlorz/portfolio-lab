@@ -9,6 +9,9 @@
 | - Test count: **12356 safe** (0 failures, 27 skipped, 12456 collected)
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
+|- **Overlay data pipeline**: overlay_dashboard data merged into signals.json — 9 panels now render with real data
+|- **Graduation checklist v2**: 12 criteria (added regime_coverage, signal_diversity, sharpe_ci_lower)
+|- **Periodic rebalancing**: forces rebalance if drift >2% and 30+ days since last trade
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
