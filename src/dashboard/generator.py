@@ -1253,7 +1253,45 @@ class DashboardGenerator:
             bl_input = voter.get_bl_views()
 
             views = bl_input["views"]
-            result = run_black_litterman(views)
+
+            # Compute covariance matrix from price data in market.db
+            symbols = list(views.symbols) if hasattr(views, 'symbols') else ['SPY', 'TLT', 'GLD']
+            import pandas as pd
+            price_data = {}
+            for sym in symbols:
+                try:
+                    rows = self.conn.execute(
+                        "SELECT date, close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 252",
+                        (sym,)
+                    ).fetchall()
+                    if rows:
+                        price_data[sym] = pd.Series(
+                            {r[0]: r[1] for r in reversed(rows)}
+                        )
+                except (sqlite3.OperationalError, KeyError):
+                    continue
+
+            # Try full BL optimization (requires PyPortfolioOpt)
+            bl_weights = None
+            posterior_returns = None
+            result = None
+            if len(price_data) >= 2:
+                try:
+                    prices_df = pd.DataFrame(price_data)
+                    returns = prices_df.pct_change().dropna()
+                    available = [s for s in symbols if s in returns.columns]
+                    cov_matrix = returns[available].cov().values * 252  # Annualized
+                    result = run_black_litterman(cov_matrix, views)
+                    bl_weights = result.bl_weights
+                    posterior_returns = result.posterior_returns
+                except (ImportError, ValueError) as e:
+                    logger.info("BL optimization unavailable (%s), using views-only output", e)
+
+            # Fallback: use views without full BL optimization
+            if bl_weights is None:
+                bl_weights = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
+            if posterior_returns is None:
+                posterior_returns = {}
 
             # Use base allocation as prior
             prior = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
@@ -1275,10 +1313,12 @@ class DashboardGenerator:
 
             bl_data = {
                 "prior_weights": prior,
-                "posterior_weights": result.bl_weights,
+                "posterior_weights": bl_weights,
+                "posterior_returns": posterior_returns,
                 "views": view_list,
-                "tau": result.tau,
+                "tau": bl_input.get("tau", 0.15),
                 "view_confidence_method": "idzorek",
+                "optimization_available": result is not None,
                 "health_scores": bl_input.get("health_scores_used", {}),
                 "biases": {
                     "equity": round(bl_input.get("equity_bias", 0.0), 3),
@@ -1370,7 +1410,12 @@ class DashboardGenerator:
             from src.signals.tsmom_overlay import TSMOMOverlay
 
             overlay = TSMOMOverlay()
-            signals = overlay.compute_signals()
+            tickers = ['SPY', 'GLD', 'TLT']
+            signals = []
+            for ticker in tickers:
+                sig = overlay.compute_signal(ticker)
+                if sig is not None:
+                    signals.append(sig)
 
             # Build speed breakdown from multi-speed TSMOM
             speed_breakdown = []
@@ -1407,10 +1452,10 @@ class DashboardGenerator:
     def generate_cross_asset_rv_json(self) -> Optional[Path]:
         """Generate cross-asset relative value data for dashboard."""
         try:
-            from src.signals.cross_asset_relative_value import CrossAssetRelativeValueSignal
+            from src.signals.cross_asset_relative_value import CrossAssetRVScanner
 
-            signal_gen = CrossAssetRelativeValueSignal()
-            signal = signal_gen.generate()
+            scanner = CrossAssetRVScanner()
+            signal = scanner.scan_all()
 
             rv_data = {
                 "signal_value": signal.composite_signal if hasattr(signal, 'composite_signal') else 0.0,
