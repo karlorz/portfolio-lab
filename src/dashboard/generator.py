@@ -1570,6 +1570,39 @@ class DashboardGenerator:
             logger.warning("Failed to copy explainability data: %s", e)
             return None
 
+    def generate_risk_decomposition_json(self) -> Path:
+        """Generate risk factor decomposition for dashboard."""
+        output_path = PUBLIC_DIR / "risk_decomposition.json"
+
+        try:
+            from src.monitor.risk_decomposition import decompose_portfolio
+
+            result = decompose_portfolio(weights=BASE_ALLOCATION)
+            data = result.to_dict()
+            data["generated_at"] = datetime.now().isoformat()
+            save_results_json(data, output_path=str(output_path))
+            return output_path
+
+        except ImportError:
+            logger.warning("scipy not available — skipping risk decomposition")
+            fallback = {
+                "status": "unavailable",
+                "reason": "scipy not installed",
+                "generated_at": datetime.now().isoformat(),
+            }
+            save_results_json(fallback, output_path=str(output_path))
+            return output_path
+
+        except (OSError, ValueError, TypeError, RuntimeError) as e:
+            logger.warning("Risk decomposition failed: %s", e)
+            fallback = {
+                "status": "error",
+                "reason": str(e),
+                "generated_at": datetime.now().isoformat(),
+            }
+            save_results_json(fallback, output_path=str(output_path))
+            return output_path
+
     def run(self):
         """Generate all dashboard files."""
         logger.info("Generating dashboard data...")
@@ -1590,6 +1623,7 @@ class DashboardGenerator:
             self.generate_tsmom_json(),
             self.generate_cross_asset_rv_json(),
             self.generate_explainability_json(),
+            self.generate_risk_decomposition_json(),
         ]
 
         # Overlay dashboard (separate path — may fail gracefully)

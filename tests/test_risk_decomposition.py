@@ -1237,45 +1237,46 @@ class TestLoadPricesFromPipeline:
     def test_load_from_public_data(self, tmp_path, monkeypatch):
         """Load from public/data/prices.json."""
         import src.monitor.risk_decomposition as rd_mod
+        import src.paths as paths_mod
 
-        prices_dir = tmp_path / "public" / "data"
-        prices_dir.mkdir(parents=True)
+        prices_file = tmp_path / "prices.json"
         data = {"SPY": [{"d": "2024-01-01", "p": 100.0}, {"d": "2024-01-02", "p": 101.0}]}
-        (prices_dir / "prices.json").write_text(json.dumps(data))
-        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        prices_file.write_text(json.dumps(data))
+        monkeypatch.setattr(paths_mod, "PRICES_JSON", prices_file)
         result = rd_mod._load_prices_from_pipeline()
         assert "SPY" in result
         assert len(result["SPY"]) == 2
 
     def test_load_from_data_fallback(self, tmp_path, monkeypatch):
-        """Fallback to data/prices.json when public path missing."""
+        """Fallback loads from PRICES_JSON path."""
         import src.monitor.risk_decomposition as rd_mod
+        import src.paths as paths_mod
 
-        prices_dir = tmp_path / "data"
-        prices_dir.mkdir(parents=True)
+        prices_file = tmp_path / "prices.json"
         data = {"GLD": [{"d": "2024-01-01", "p": 180.0}]}
-        (prices_dir / "prices.json").write_text(json.dumps(data))
-        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        prices_file.write_text(json.dumps(data))
+        monkeypatch.setattr(paths_mod, "PRICES_JSON", prices_file)
         result = rd_mod._load_prices_from_pipeline()
         assert "GLD" in result
 
     def test_load_neither_exists(self, tmp_path, monkeypatch):
-        """When neither path exists, empty dict returned."""
+        """When PRICES_JSON path doesn't exist, empty dict returned."""
         import src.monitor.risk_decomposition as rd_mod
+        import src.paths as paths_mod
 
-        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        monkeypatch.setattr(paths_mod, "PRICES_JSON", tmp_path / "nonexistent.json")
         result = rd_mod._load_prices_from_pipeline()
         assert result == {}
 
     def test_load_empty_symbol_data(self, tmp_path, monkeypatch):
         """Symbol with empty entries list is skipped."""
         import src.monitor.risk_decomposition as rd_mod
+        import src.paths as paths_mod
 
-        prices_dir = tmp_path / "public" / "data"
-        prices_dir.mkdir(parents=True)
+        prices_file = tmp_path / "prices.json"
         data = {"SPY": [], "GLD": [{"d": "2024-01-01", "p": 180.0}]}
-        (prices_dir / "prices.json").write_text(json.dumps(data))
-        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        prices_file.write_text(json.dumps(data))
+        monkeypatch.setattr(paths_mod, "PRICES_JSON", prices_file)
         result = rd_mod._load_prices_from_pipeline()
         assert "SPY" not in result
         assert "GLD" in result
@@ -1283,9 +1284,9 @@ class TestLoadPricesFromPipeline:
     def test_load_sorts_by_date(self, tmp_path, monkeypatch):
         """Prices should be sorted chronologically (date order)."""
         import src.monitor.risk_decomposition as rd_mod
+        import src.paths as paths_mod
 
-        prices_dir = tmp_path / "public" / "data"
-        prices_dir.mkdir(parents=True)
+        prices_file = tmp_path / "prices.json"
         data = {
             "SPY": [
                 {"d": "2024-01-03", "p": 102.0},
@@ -1293,8 +1294,8 @@ class TestLoadPricesFromPipeline:
                 {"d": "2024-01-02", "p": 101.0},
             ]
         }
-        (prices_dir / "prices.json").write_text(json.dumps(data))
-        monkeypatch.setattr(rd_mod, "project_root", tmp_path, raising=False)
+        prices_file.write_text(json.dumps(data))
+        monkeypatch.setattr(paths_mod, "PRICES_JSON", prices_file)
         result = rd_mod._load_prices_from_pipeline()
         assert np.allclose(result["SPY"], [100.0, 101.0, 102.0])
 

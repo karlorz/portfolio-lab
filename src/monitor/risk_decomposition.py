@@ -190,11 +190,9 @@ def _load_prices_from_pipeline() -> Dict[str, np.ndarray]:
     Returns:
         dict mapping symbol -> 1D numpy array of daily close prices (oldest first)
     """
-    prices_path = project_root / "public" / "data" / "prices.json"
-    if not prices_path.exists():
-        # Fallback: try data/prices.json
-        prices_path = project_root / "data" / "prices.json"
+    from src.paths import PRICES_JSON
 
+    prices_path = PRICES_JSON
     if not prices_path.exists():
         logger.warning("Prices file not found: %s", prices_path)
         return {}
