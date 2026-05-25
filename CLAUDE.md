@@ -75,7 +75,7 @@ Max per-signal cap: 50%
 - `src/strategy/` — overlays & strategy (unified_orchestrator, vixy_hedge_sizing, evaluator, ensemble_voter with BanditWeighter, factor_rotation, adaptive_ensemble_weights, turnover_validator, graduation_checklist, adaptive_sizing, risk_parity_weight_overlay, vol_parity_allocator, black_litterman_mapper)
 - `src/backtest/` — backtest engines. **Use `src/backtest/metrics.py`** for BacktestResult/BacktestMetrics/compute_metrics()/compute_deflated_sharpe_ratio() (canonical shared dataclass + computation, eliminates copy-paste)
 - `src/broker/` — broker integration (order_router, position_sync, collar_options_bridge, options_utils)
-- `src/monitor/` — monitoring (garch_cvar, cvar_metrics, risk_decomposition, performance_attribution, unified_dashboard, daily_brief, rebalance_health)
+- `src/monitor/` — monitoring (garch_cvar, cvar_metrics, risk_decomposition [wired to dashboard], performance_attribution, unified_dashboard, daily_brief, rebalance_health)
 - `src/agents/` — MARL system (ML-gated, see below)
 - `src/data/` — data fetchers (Yahoo Finance, behavioral sentiment, international)
 - `src/costs/` — transaction cost models (etf_cost_table with per-ETF costs and regime multipliers)
