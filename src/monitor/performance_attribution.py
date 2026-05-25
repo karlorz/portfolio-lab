@@ -32,6 +32,7 @@ import numpy as np
 
 from src.paths import DATA_DIR
 from src.utils import safe_get
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['SIGNAL_SOURCE_META', 'SourceAttribution', 'AttributionReport', 'PerformanceAttribution', 'print_report', 'patch_save_vote']
@@ -507,8 +508,7 @@ class PerformanceAttribution:
         self.attribution_dir.mkdir(parents=True, exist_ok=True)
         filename = f"attribution_{report.timestamp[:10]}.json"
         path = self.attribution_dir / filename
-        with open(path, "w") as f:
-            json.dump(report.to_dict(), f, indent=2, default=str)
+        save_results_json(report.to_dict(), output_path=str(path))
         logger.info("Saved attribution report: %s", path)
         return path
 

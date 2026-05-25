@@ -25,6 +25,7 @@ from typing import Optional, List, Tuple
 import numpy as np
 
 from src.paths import SIGNALS_DIR
+from src.backtest.metrics import save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -299,8 +300,7 @@ class KurtosisRegimeSignalGenerator:
         )
 
     def save_signal(self, signal: KurtosisRegimeSignal):
-        with open(self.OUTPUT_PATH, "w") as f:
-            json.dump(signal.to_dict(), f, indent=2)
+        save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
 
 
 def detect_kurtosis_regime(returns: Optional[List[float]] = None) -> KurtosisRegimeSignal:
@@ -311,6 +311,7 @@ def detect_kurtosis_regime(returns: Optional[List[float]] = None) -> KurtosisReg
 
 def main():
     import sys
+    logging.basicConfig(level=logging.INFO, force=True)
     gen = KurtosisRegimeSignalGenerator()
 
     # Generate test returns: normal + some fat-tail periods
@@ -323,30 +324,30 @@ def main():
 
     signal = gen.generate_signal(returns)
 
-    print("=" * 60)
-    print("KURTOSIS REGIME DETECTOR v4.91")
-    print("=" * 60)
-    print(f"Timestamp: {signal.timestamp}")
-    print()
-    print("Kurtosis (absolute):")
-    print(f"  20-day: {signal.kurtosis_20d:.2f}")
-    print(f"  60-day: {signal.kurtosis_60d:.2f}")
-    print(f"  120-day: {signal.kurtosis_120d:.2f}")
-    print(f"  KER: {signal.ker_ratio:.3f}")
-    print()
-    print(f"Regime: {signal.regime}")
-    print(f"Confidence: {signal.regime_confidence:.1%}")
-    print(f"Transitioning: {signal.is_transitioning}")
-    print()
-    print("Strategy Routing:")
-    print(f"  Preference: {signal.strategy_preference}")
-    print(f"  TSMOM (trend): {signal.tsom_weight:.0%}")
-    print(f"  Mean-Reversion: {signal.mr_weight:.0%}")
-    print()
-    print(f"Fat Tail Risk: {signal.fat_tail_risk:.1%}")
-    print(f"Recommended Exposure: {signal.recommended_exposure:.0%}")
-    print(f"Explanation: {signal.explanation}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("KURTOSIS REGIME DETECTOR v4.91")
+    logger.info("=" * 60)
+    logger.info("Timestamp: %s", signal.timestamp)
+    logger.info("")
+    logger.info("Kurtosis (absolute):")
+    logger.info("  20-day: %.2f", signal.kurtosis_20d)
+    logger.info("  60-day: %.2f", signal.kurtosis_60d)
+    logger.info("  120-day: %.2f", signal.kurtosis_120d)
+    logger.info("  KER: %.3f", signal.ker_ratio)
+    logger.info("")
+    logger.info("Regime: %s", signal.regime)
+    logger.info("Confidence: %.1f%%", signal.regime_confidence * 100)
+    logger.info("Transitioning: %s", signal.is_transitioning)
+    logger.info("")
+    logger.info("Strategy Routing:")
+    logger.info("  Preference: %s", signal.strategy_preference)
+    logger.info("  TSMOM (trend): %.0f%%", signal.tsom_weight * 100)
+    logger.info("  Mean-Reversion: %.0f%%", signal.mr_weight * 100)
+    logger.info("")
+    logger.info("Fat Tail Risk: %.1f%%", signal.fat_tail_risk * 100)
+    logger.info("Recommended Exposure: %.0f%%", signal.recommended_exposure * 100)
+    logger.info("Explanation: %s", signal.explanation)
+    logger.info("=" * 60)
 
     if "--save" in sys.argv:
         gen.save_signal(signal)

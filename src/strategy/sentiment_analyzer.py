@@ -21,6 +21,7 @@ from collections import deque
 logger = logging.getLogger(__name__)
 import numpy as np
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR
 
 from src.llm.sentiment_client import SentimentAnalyzer, SentimentResult
@@ -346,9 +347,8 @@ class SentimentAnalyzerPipeline:
             filename = f"sentiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
         filepath = self.data_dir / filename
-        with open(filepath, 'w') as f:
-            json.dump(sentiment.to_dict(), f, indent=2)
-        
+        save_results_json(sentiment.to_dict(), output_path=str(filepath))
+
         return filepath
     
     def load_sentiment_history(self, days: int = 30) -> List[AggregatedSentiment]:

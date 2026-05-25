@@ -38,6 +38,7 @@ from src.paths import BASE_ALLOCATION, DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_
 from src.signals.calendar_seasonality import get_calendar_modifier
 from src.signals.bond_duration_signal import generate_bond_duration_signal
 from src.signals.collar_signal import generate_collar_signal
+from src.backtest.metrics import save_results_json
 from src.signals.crypto_momentum import generate_crypto_signal
 
 
@@ -207,9 +208,7 @@ class UnifiedOrchestrator:
         return {"last_unified": None, "conflict_history": []}
 
     def _save_state(self):
-        self.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.STATE_FILE, "w") as f:
-            json.dump(self._state, f, indent=2)
+        save_results_json(self._state, output_path=str(self.STATE_FILE))
 
     def _fetch_vix_level(self) -> float:
         """Fetch VIX level from market DB for overlay gating."""
@@ -619,9 +618,7 @@ class UnifiedOrchestrator:
 
     def save_recommendation(self, rec: UnifiedRecommendation):
         out = self.STATE_FILE.parent / "signals" / "unified_recommendation.json"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w") as f:
-            json.dump(rec.to_dict(), f, indent=2)
+        save_results_json(rec.to_dict(), output_path=str(out))
 
 
 def get_unified_recommendation() -> UnifiedRecommendation:

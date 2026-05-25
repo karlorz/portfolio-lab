@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, WORK_DIR as _WORK_DIR, sqlite_connect
+from src.backtest.metrics import save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +147,7 @@ class ResearchAgent:
         
         # Save work item for Claude Code
         work_file = WORK_DIR / f"claude_{work_item['id']}.json"
-        with open(work_file, 'w') as f:
-            json.dump(work_item, f, indent=2)
+        save_results_json(work_item, output_path=str(work_file))
         
         return work_file
     

@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Dict, Optional
 from enum import Enum
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR
 
 
@@ -127,9 +128,7 @@ class ETHStakingModel:
 
     def _save_state(self):
         """Persist current state."""
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(STATE_FILE, "w") as f:
-            json.dump(self._state, f, indent=2)
+        save_results_json(self._state, output_path=str(STATE_FILE))
 
     def estimate_yield(
         self,

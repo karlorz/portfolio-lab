@@ -44,6 +44,7 @@ from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION, sqlite_connect
 from src.agents.agent_graph import AgentGraph
 from src.agents.marl_trainer import MARLTrainer, MarketEnvironment
 from src.agents.base_agent import AgentObservation
+from src.backtest.metrics import save_results_json
 
 # Try to import signal integrator
 try:
@@ -493,8 +494,7 @@ def main():
     print(json.dumps(result, indent=2))
     
     if args.output:
-        with open(args.output, 'w') as f:
-            json.dump(result, f, indent=2)
+        save_results_json(result, output_path=args.output)
         print(f"\nSaved to {args.output}")
 
 

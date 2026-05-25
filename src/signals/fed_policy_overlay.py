@@ -50,6 +50,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 
 from src.paths import DATA_DIR, BASE_ALLOCATION
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['FRED_SERIES', 'FRED_CACHE', 'fetch_fred_series', 'fetch_all_fred_data', 'calculate_inflation_yoy', 'calculate_real_rate', 'FedPolicyRegime', 'classify_fed_regime', 'FedPolicyOverlay']
@@ -150,8 +151,7 @@ def fetch_all_fred_data(cache_path: Path = FRED_CACHE, force_refresh: bool = Fal
     # Cache results
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     cache_data = {k: v.to_dict('records') for k, v in data.items()}
-    with open(cache_path, 'w') as f:
-        json.dump(cache_data, f, indent=2, default=str)
+    save_results_json(cache_data, output_path=str(cache_path))
     
     return data
 

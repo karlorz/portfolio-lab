@@ -35,6 +35,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PRICES_JSON
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['ZSCORE_ENTRY', 'ZSCORE_EXIT', 'LOOKBACK', 'MIN_HISTORY', 'PairReading', 'CrossAssetRVSignal', 'CrossAssetRVScanner', 'print_scan']
@@ -464,8 +465,7 @@ class CrossAssetRVScanner:
 
     def _save_state(self, state: Dict) -> None:
         try:
-            with open(self.state_path, "w") as f:
-                json.dump(state, f, indent=2)
+            save_results_json(state, output_path=str(self.state_path))
         except (OSError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to save state: %s", e)
 

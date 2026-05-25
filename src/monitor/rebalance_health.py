@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['generate']
@@ -153,14 +154,12 @@ def generate() -> dict[str, Any]:
 def main():
     data = generate()
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUTPUT_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+    save_results_json(data, output_path=str(OUTPUT_PATH))
 
     # Also copy to public/data/ for dashboard fetch
     public_dir = PUBLIC_DATA_DIR
     public_dir.mkdir(parents=True, exist_ok=True)
-    with open(public_dir / "rebalance_health.json", "w") as f:
-        json.dump(data, f, indent=2)
+    save_results_json(data, output_path=str(public_dir / "rebalance_health.json"))
 
     print(f"Rebalance health data exported to {OUTPUT_PATH}")
     print(f"  Executions: {data['total_executions']}")

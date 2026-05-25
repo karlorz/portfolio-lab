@@ -21,6 +21,7 @@ from enum import Enum
 
 import numpy as np
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, BASE_ALLOCATION
 
 from src.strategy.sentiment_analyzer import (
@@ -362,9 +363,8 @@ class RegimeSentimentPipeline:
             filename = f"regime_signal_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
         filepath = self.data_dir / filename
-        with open(filepath, 'w') as f:
-            json.dump(signal.to_dict(), f, indent=2)
-        
+        save_results_json(signal.to_dict(), output_path=str(filepath))
+
         return filepath
     
     def get_current_allocation_weights(

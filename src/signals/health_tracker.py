@@ -21,6 +21,7 @@ from enum import Enum
 import logging
 
 from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['SignalSource', 'SignalHealthStatus', 'SignalPrediction', 'HealthScore', 'DecayAlert', 'SignalHealthTracker', 'backfill_predictions']
@@ -187,8 +188,7 @@ class SignalHealthTracker:
     def _save_state(self):
         """Save tracker state to disk."""
         self.state["last_health_calculation"] = datetime.now().isoformat()
-        with open(STATE_PATH, 'w') as f:
-            json.dump(self.state, f, indent=2)
+        save_results_json(self.state, output_path=str(STATE_PATH))
     
     def log_prediction(self, prediction: SignalPrediction):
         """

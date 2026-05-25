@@ -30,6 +30,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR
 
 
@@ -448,9 +449,7 @@ class RegretWeightedSelector:
             if len(perf_data) > 100:
                 perf_data = perf_data[-100:]
 
-            perf_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(perf_path, "w") as f:
-                json.dump(perf_data, f, indent=2)
+            save_results_json(perf_data, output_path=str(perf_path))
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("Failed to track regret-weighted performance: %s", e)
 
@@ -473,10 +472,8 @@ class RegretWeightedSelector:
     def _save_state(self) -> None:
         """Save state to JSON file."""
         path = self._resolve_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with open(path, "w") as f:
-                json.dump(self.state.to_dict(), f, indent=2)
+            save_results_json(self.state.to_dict(), output_path=str(path))
         except OSError as e:
             logger.warning("Failed to save regret-weighted state: %s", e)
 

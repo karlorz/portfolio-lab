@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, NamedTuple
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['ORDERS_LOG', 'PERFORMANCE_LOG', 'PAPER_CONFIG', 'REGIME_OVERRIDES', 'Position', 'Portfolio', 'get_current_regime', 'get_latest_vix', 'get_latest_prices', 'calculate_performance', 'check_graduation_criteria']
@@ -80,7 +81,7 @@ class Portfolio:
             "mode": self.mode
         }
         with open(self.state_file, 'w') as f:
-            json.dump(state, f, indent=2, default=str)
+            save_results_json(state, output_path=str(self.state_file))
     
     def total_value(self, prices: Dict[str, float]) -> float:
         position_value = sum(
@@ -285,7 +286,7 @@ class Portfolio:
             data["summary"] = {"passed": 1, "total_checks": 1}
 
             with open(report_path, 'w') as f:
-                json.dump(data, f, indent=2, default=str)
+                save_results_json(data, output_path=str(report_path))
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
             logger.warning("Failed to write GARCH health report: %s", e)
 
@@ -437,12 +438,12 @@ def main():
         # In live mode, this would liquidate
         # Write kill_switch.json (read by order_router and dashboard)
         with open(DATA_DIR / "kill_switch.json", 'w') as f:
-            json.dump({
+            save_results_json({
                 "enabled": True,
                 "reason": kill_reason,
                 "mode": mode,
                 "timestamp": datetime.now().isoformat(),
-            }, f)
+            }, output_path=str(DATA_DIR / "kill_switch.json"))
         return
 
     # Clear stale kill switch if risk limits are no longer breached
@@ -596,8 +597,7 @@ def check_graduation_criteria(portfolio: Portfolio):
         }
         
         trigger_path = DATA_DIR / ".promote_to_live"
-        with open(trigger_path, 'w') as f:
-            json.dump(trigger, f, indent=2)
+        save_results_json(trigger, output_path=str(trigger_path))
         
         print(f"Created promotion trigger: {trigger_path}")
 

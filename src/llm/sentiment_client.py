@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.paths import LLM_COSTS_DIR
+from src.backtest.metrics import save_results_json
 
 import logging
 
@@ -199,8 +200,7 @@ class CostTracker:
         date_str = datetime.now().strftime("%Y-%m-%d")
         report_path = LLM_COSTS_DIR / f"costs_{date_str}.json"
         report = {"date": date_str, "updated_at": datetime.now().isoformat(), **self.to_dict()}
-        with open(report_path, "w") as f:
-            json.dump(report, f, indent=2)
+        save_results_json(report, output_path=str(report_path))
         return report_path
 
 

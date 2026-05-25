@@ -727,11 +727,9 @@ class TestExportExtended:
             probability_neutral=0.1, fallback_used=False,
         )
         integrator.prediction_history.append(pred)
-        result = integrator.export_prediction_log(Path('/nonexistent/dir/file.json'))
+        with patch("builtins.open", side_effect=PermissionError("denied")):
+            result = integrator.export_prediction_log(Path('/nonexistent/dir/file.json'))
         assert result is False
-
-
-class TestAccuracyStatsExtended:
     """Extended accuracy stats tests."""
 
     def test_window_filtering(self):
@@ -1799,7 +1797,8 @@ class TestExportEdgeCases:
                                    probability_bullish=0.8, probability_bearish=0.1,
                                    probability_neutral=0.1, fallback_used=False)
         integrator.prediction_history.append(pred)
-        result = integrator.export_prediction_log(Path("/nonexistent_dir/file.json"))
+        with patch("builtins.open", side_effect=PermissionError("denied")):
+            result = integrator.export_prediction_log(Path("/nonexistent_dir/file.json"))
         assert result is False
 
     def test_export_single_prediction(self, tmp_path):

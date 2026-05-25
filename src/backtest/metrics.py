@@ -379,11 +379,21 @@ def save_results_json(data: dict, output_path: str = None, default_dir: Path = N
 
 
 def _json_serializer(obj):
-    """Handle numpy types in JSON serialization."""
+    """Handle numpy and pandas types in JSON serialization."""
     if isinstance(obj, (np.integer,)):
         return int(obj)
     if isinstance(obj, (np.floating,)):
         return float(obj)
     if isinstance(obj, np.ndarray):
         return obj.tolist()
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    try:
+        import pandas as pd
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        if isinstance(obj, pd.Timedelta):
+            return obj.total_seconds()
+    except ImportError:
+        pass
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")

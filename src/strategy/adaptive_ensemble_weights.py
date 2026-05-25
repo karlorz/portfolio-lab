@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import numpy as np
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, ATTRIBUTION_DIR
 
 
@@ -318,7 +319,6 @@ class AdaptiveEnsembleWeights:
     def _save_state(self):
         """Persist current state to JSON."""
         try:
-            self.state_file.parent.mkdir(parents=True, exist_ok=True)
             state = {
                 "timestamp": datetime.now().isoformat(),
                 "regime": self.current_regime,
@@ -328,8 +328,7 @@ class AdaptiveEnsembleWeights:
                 "baseline_weights": self.base_weights,
                 "config": self.config,
             }
-            with open(self.state_file, "w") as f:
-                json.dump(state, f, indent=2, default=str)
+            save_results_json(state, output_path=str(self.state_file))
             logger.debug("Saved adaptive weights state to %s", self.state_file)
         except (OSError, TypeError, ValueError) as e:
             logger.warning("Failed to save adaptive weights state: %s", e)

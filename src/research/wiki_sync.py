@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, sqlite_connect
+from src.backtest.metrics import save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -221,11 +222,10 @@ Based on recent regime patterns:
             "raw_entries_count": len(entries),
         }
 
-        with open(page_path, 'w') as f:
-            json.dump(summary, f, indent=2, default=str)
+        save_results_json(summary, output_path=str(page_path))
 
         return page_path
-    
+
     def sync_order_history(self) -> Optional[Path]:
         """Sync recent orders to app-level data directory.
 
@@ -267,11 +267,10 @@ Based on recent regime patterns:
             },
         }
 
-        with open(page_path, 'w') as f:
-            json.dump(summary, f, indent=2, default=str)
+        save_results_json(summary, output_path=str(page_path))
 
         return page_path
-    
+
     def update_knowledge_md(self):
         """Update knowledge.md to link new pages."""
         knowledge_path = WIKI_DIR / "knowledge.md"

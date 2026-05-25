@@ -884,29 +884,29 @@ class FactorRotationBacktest:
 # CLI Interface
 def main():
     import sys
-    
+    logging.basicConfig(level=logging.INFO, force=True)
+
     engine = FactorMomentumEngine()
     
     if len(sys.argv) < 2:
-        print("Factor Momentum Rotation Strategy")
-        print("=" * 70)
-        print("\nCommands:")
-        print("  evaluate      - Run factor evaluation and generate rotation signal")
-        print("  status        - Quick status check")
-        print("  compare       - Compare all factors by momentum")
-        print("\nUniverse:")
+        logger.info("Factor Momentum Rotation Strategy")
+        logger.info("=" * 70)
+        logger.info("\nCommands:")
+        logger.info("  evaluate      - Run factor evaluation and generate rotation signal")
+        logger.info("  status        - Quick status check")
+        logger.info("  compare       - Compare all factors by momentum")
+        logger.info("\nUniverse:")
         for symbol, info in engine.FACTORS.items():
-            print(f"  {symbol:6} - {info['name']:<15} ({info['category']})")
-        print()
+            logger.info("  %6s - %-15s (%s)", symbol, info['name'], info['category'])
         sys.exit(0)
-    
+
     cmd = sys.argv[1]
-    
+
     if cmd == "evaluate":
         # Check for flags
         use_ml = "--ml" in sys.argv
         use_tsfm = "--tsfm" in sys.argv
-        
+
         if use_tsfm:
             result = engine.evaluate_tsfm()
             mode_label = "TSFM (v2.15)"
@@ -916,128 +916,134 @@ def main():
         else:
             result = engine.evaluate()
             mode_label = "STANDARD"
-        
-        print(f"\n{'='*70}")
-        print(f"FACTOR MOMENTUM ROTATION SIGNAL [{mode_label}]")
-        print(f"{'='*70}")
-        print(f"Timestamp: {result['timestamp']}")
-        print(f"Signal Strength: {result.get('signal_strength', 0):.0%}")
-        
+
+        logger.info("\n%s", "=" * 70)
+        logger.info("FACTOR MOMENTUM ROTATION SIGNAL [%s]", mode_label)
+        logger.info("%s", "=" * 70)
+        logger.info("Timestamp: %s", result['timestamp'])
+        logger.info("Signal Strength: %.0f%%", result.get('signal_strength', 0) * 100)
+
         if use_tsfm:
-            print(f"VIX Context: {safe_get(result, 'tsfm', 'vix_context', default='N/A')}")
+            logger.info("VIX Context: %s", safe_get(result, 'tsfm', 'vix_context', default='N/A'))
             selected_key = "tsfm"
             selected_factors = safe_get(result, 'tsfm', 'selected_factors_tsfm', default=[])
-            print(f"\nSelected Factors (TSFM): {', '.join(selected_factors) if selected_factors else 'None'}")
-            print(f"\nTSFM Recommendation: {result.get('recommendation_tsfm', 'N/A')}")
-            print(f"\nFormation Period: {safe_get(result, 'tsfm', 'formation_period', default='N/A')}")
-            print(f"Z-Score Cap: {safe_get(result, 'tsfm', 'z_score_cap', default='N/A')}")
+            logger.info("\nSelected Factors (TSFM): %s", ', '.join(selected_factors) if selected_factors else 'None')
+            logger.info("\nTSFM Recommendation: %s", result.get('recommendation_tsfm', 'N/A'))
+            logger.info("\nFormation Period: %s", safe_get(result, 'tsfm', 'formation_period', default='N/A'))
+            logger.info("Z-Score Cap: %s", safe_get(result, 'tsfm', 'z_score_cap', default='N/A'))
         elif use_ml:
-            print(f"VIX Context: {result.get('vix_context', 'N/A')}")
+            logger.info("VIX Context: %s", result.get('vix_context', 'N/A'))
             selected_key = "selected_factors_ml"
-            print(f"\nSelected Factors (ML): {', '.join(result.get(selected_key, []))}")
-            print(f"\nML Recommendation: {result.get('ml_recommendation', 'N/A')}")
+            logger.info("\nSelected Factors (ML): %s", ', '.join(result.get(selected_key, [])))
+            logger.info("\nML Recommendation: %s", result.get('ml_recommendation', 'N/A'))
         else:
             selected_key = "selected_factors"
-            print(f"\nSelected Factors: {', '.join(result[selected_key])}")
-            print(f"\nRecommendation: {result['recommendation']}")
-        
-        print(f"\n{'-'*70}")
-        print("ALLOCATION")
-        print(f"{'-'*70}")
-        
+            logger.info("\nSelected Factors: %s", ', '.join(result[selected_key]))
+            logger.info("\nRecommendation: %s", result['recommendation'])
+
+        logger.info("\n%s", "-" * 70)
+        logger.info("ALLOCATION")
+        logger.info("%s", "-" * 70)
+
         # Show appropriate allocation based on mode
         if use_tsfm:
             allocation = safe_get(result, 'tsfm', 'allocation_tsfm', default={})
         else:
             allocation = result['allocation']
-        
+
         for symbol, weight in allocation.items():
-            print(f"  {symbol}: {weight:>6.1%}")
-        
-        print(f"\n{'-'*70}")
+            logger.info("  %s: %6.1f%%", symbol, weight * 100)
+
+        logger.info("\n%s", "-" * 70)
         if use_ml:
-            print("ML-ENHANCED FACTOR SCORES (Ranked by Composite ML Score)")
+            logger.info("ML-ENHANCED FACTOR SCORES (Ranked by Composite ML Score)")
         else:
-            print("ALL FACTOR SCORES (Ranked by Momentum)")
-        print(f"{'-'*70}")
-        
+            logger.info("ALL FACTOR SCORES (Ranked by Momentum)")
+        logger.info("%s", "-" * 70)
+
         if use_ml:
-            print(f"{'Rank':<6} {'Factor':<12} {'12m':<8} {'6m':<8} {'3m':<8} {'ML Score':<12}")
-            
+            logger.info("%-6s %-12s %8s %8s %8s %12s",
+                        "Rank", "Factor", "12m", "6m", "3m", "ML Score")
+
             ml_scores = result.get('ml_scores', {})
             sorted_scores = sorted(
                 ml_scores.items(),
                 key=lambda x: x[1].get('composite_ml_score', 0),
                 reverse=True
             )
-            
+
             for rank, (symbol, data) in enumerate(sorted_scores, 1):
                 factor_name = safe_get(engine.FACTORS, symbol, 'name', default=symbol)
                 base_score = result['current_scores'].get(symbol, {})
-                print(f"{rank:<6} {factor_name:<12} "
-                      f"{base_score.get('return_12m', 0):>+7.1%} "
-                      f"{base_score.get('return_6m', 0):>+7.1%} "
-                      f"{base_score.get('return_3m', 0):>+7.1%} "
-                      f"{data.get('composite_ml_score', 0):>+10.3f}")
+                logger.info("%-6s %-12s %+7.1f%% %+7.1f%% %+7.1f%% %+10.3f",
+                            rank, factor_name,
+                            base_score.get('return_12m', 0) * 100,
+                            base_score.get('return_6m', 0) * 100,
+                            base_score.get('return_3m', 0) * 100,
+                            data.get('composite_ml_score', 0))
         else:
-            print(f"{'Rank':<6} {'Factor':<12} {'12m':<8} {'6m':<8} {'3m':<8} {'Vol':<8} {'Score':<10}")
-            print(f"{'-'*70}")
-            
+            logger.info("%-6s %-12s %8s %8s %8s %8s %10s",
+                        "Rank", "Factor", "12m", "6m", "3m", "Vol", "Score")
+            logger.info("%s", "-" * 70)
+
             scores = result['current_scores']
             sorted_scores = sorted(
                 scores.items(),
                 key=lambda x: x[1]['momentum_score'],
                 reverse=True
             )
-            
+
             for symbol, data in sorted_scores:
-                print(f"{data['rank']:<6} {data['factor_name']:<12} "
-                      f"{data['return_12m']:>+7.1%} {data['return_6m']:>+7.1%} "
-                      f"{data['return_3m']:>+7.1%} {data['volatility']:>7.1%} "
-                      f"{data['momentum_score']:>+9.3f}")
-        
-        print(f"{'='*70}\n")
-        
+                logger.info("%-6s %-12s %+7.1f%% %+7.1f%% %+7.1f%% %7.1f%% %+9.3f",
+                            data['rank'], data['factor_name'],
+                            data['return_12m'] * 100, data['return_6m'] * 100,
+                            data['return_3m'] * 100, data['volatility'] * 100,
+                            data['momentum_score'])
+
+        logger.info("%s\n", "=" * 70)
+
         # Output JSON for integration
-        print(json.dumps(result, indent=2, default=str))
+        logger.info(json.dumps(result, indent=2, default=str))
         
     elif cmd == "status":
         result = engine.evaluate()
-        print(json.dumps({
+        logger.info(json.dumps({
             "available": len(result.get('current_scores', {})) > 0,
             "selected": result.get('selected_factors', []),
             "signal_strength": result.get('signal_strength', 0),
             "recommendation": result.get('recommendation', ''),
             "factor_count": len(result.get('current_scores', {}))
         }, indent=2))
-    
+
     elif cmd == "compare":
         result = engine.evaluate()
-        
-        print(f"\nFactor Comparison (sorted by momentum score)")
-        print(f"{'='*70}")
-        
+
+        logger.info("\nFactor Comparison (sorted by momentum score)")
+        logger.info("%s", "=" * 70)
+
         scores = result['current_scores']
         sorted_scores = sorted(
             scores.items(),
             key=lambda x: x[1]['momentum_score'],
             reverse=True
         )
-        
-        print(f"{'Rank':<6} {'Symbol':<8} {'Factor':<15} {'Category':<10} {'Score':<10} {'Action'}")
-        print(f"{'-'*70}")
-        
+
+        logger.info("%-6s %-8s %-15s %-10s %10s %s",
+                    "Rank", "Symbol", "Factor", "Category", "Score", "Action")
+        logger.info("%s", "-" * 70)
+
         for symbol, data in sorted_scores:
             action = "HOLD" if symbol in result.get('selected_factors', []) else "AVOID"
             marker = "✓" if action == "HOLD" else " "
-            print(f"{marker} {data['rank']:<5} {symbol:<8} {data['factor_name']:<15} "
-                  f"{data['category']:<10} {data['momentum_score']:>+9.3f} {action}")
-        
-        print(f"{'='*70}\n")
-    
+            logger.info("%s %-5s %-8s %-15s %-10s %+9.3f %s",
+                        marker, data['rank'], symbol, data['factor_name'],
+                        data['category'], data['momentum_score'], action)
+
+        logger.info("%s\n", "=" * 70)
+
     else:
-        print(f"Unknown command: {cmd}")
-        print("Usage: python factor_rotation.py [evaluate|status|compare]")
+        logger.info("Unknown command: %s", cmd)
+        logger.info("Usage: python factor_rotation.py [evaluate|status|compare]")
 
 
 if __name__ == "__main__":

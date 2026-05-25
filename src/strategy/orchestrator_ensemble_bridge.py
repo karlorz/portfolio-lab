@@ -19,6 +19,7 @@ from typing import Dict
 
 import numpy as np
 
+from src.backtest.metrics import save_results_json
 from src.paths import SIGNALS_DIR
 from .unified_orchestrator import UnifiedOrchestrator
 from .ensemble_voter import SignalSource, SignalReading
@@ -205,9 +206,7 @@ class OrchestratorEnsembleBridge:
         return -1.0
 
     def save_signal(self, signal: UnifiedSignalReading):
-        self._ensure_dirs()
-        with open(self.OUTPUT_PATH, "w") as f:
-            json.dump(signal.to_dict(), f, indent=2)
+        save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
 
     def get_ensemble_reading(self) -> SignalReading:
         """Get a SignalReading ready for ensemble voter consumption."""
@@ -245,45 +244,46 @@ def get_unified_ensemble_reading() -> SignalReading:
 
 def main():
     import sys
+    logging.basicConfig(level=logging.INFO, force=True)
     bridge = OrchestratorEnsembleBridge()
     signal = bridge.generate_signal()
 
-    print("=" * 60)
-    print("ORCHESTRATOR-ENSEMBLE VOTER BRIDGE v4.90")
-    print("=" * 60)
-    print(f"Timestamp: {signal.timestamp}")
-    print(f"Source: {signal.source}")
-    print()
-    print("Composite Signal:")
-    print(f"  Value: {signal.value:+.3f}")
-    print(f"  Confidence: {signal.confidence:.1%}")
-    print(f"  Weight: {signal.weight:.0%} (recommended in ensemble)")
-    print()
-    print("Asset Directional Signals (-1 bearish to +1 bullish):")
-    print(f"  SPY: {signal.spy_signal:+.1f}")
-    print(f"  GLD: {signal.gld_signal:+.1f}")
-    print(f"  TLT: {signal.tlt_signal:+.1f}")
-    print(f"  IEF: {signal.ief_signal:+.1f}")
-    print(f"  SHY: {signal.shy_signal:+.1f}")
-    print(f"  BTC: {signal.btc_signal:+.1f}")
-    print(f"  ETH: {signal.eth_signal:+.1f}")
-    print()
-    print(f"Risk Signal: {signal.risk_signal:+.1f}")
-    print(f"Execution Signal: {signal.execution_signal:.2f}")
-    print()
-    print(f"Active Overlays: {signal.num_overlays_active}/4")
-    print(f"Conflicts: {signal.conflict_count}")
-    print()
-    print(f"Explanation: {signal.explanation}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("ORCHESTRATOR-ENSEMBLE VOTER BRIDGE v4.90")
+    logger.info("=" * 60)
+    logger.info("Timestamp: %s", signal.timestamp)
+    logger.info("Source: %s", signal.source)
+    logger.info("")
+    logger.info("Composite Signal:")
+    logger.info("  Value: %+.3f", signal.value)
+    logger.info("  Confidence: %.1f%%", signal.confidence * 100)
+    logger.info("  Weight: %.0f%% (recommended in ensemble)", signal.weight * 100)
+    logger.info("")
+    logger.info("Asset Directional Signals (-1 bearish to +1 bullish):")
+    logger.info("  SPY: %+.1f", signal.spy_signal)
+    logger.info("  GLD: %+.1f", signal.gld_signal)
+    logger.info("  TLT: %+.1f", signal.tlt_signal)
+    logger.info("  IEF: %+.1f", signal.ief_signal)
+    logger.info("  SHY: %+.1f", signal.shy_signal)
+    logger.info("  BTC: %+.1f", signal.btc_signal)
+    logger.info("  ETH: %+.1f", signal.eth_signal)
+    logger.info("")
+    logger.info("Risk Signal: %+.1f", signal.risk_signal)
+    logger.info("Execution Signal: %.2f", signal.execution_signal)
+    logger.info("")
+    logger.info("Active Overlays: %s/4", signal.num_overlays_active)
+    logger.info("Conflicts: %s", signal.conflict_count)
+    logger.info("")
+    logger.info("Explanation: %s", signal.explanation)
+    logger.info("=" * 60)
 
     if "--save" in sys.argv:
         bridge.save_signal(signal)
 
     if "--reading" in sys.argv:
         reading = bridge.get_ensemble_reading()
-        print(f"\nEnsembleVoter SignalReading ready: "
-              f"source={reading.source.value}, value={reading.value:.3f}")
+        logger.info("EnsembleVoter SignalReading ready: "
+              "source=%s, value=%.3f", reading.source.value, reading.value)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from enum import Enum
 from typing import Optional, Dict, List, Tuple, Set
 
 from src.paths import SIGNALS_DIR
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['CalendarWindow', 'SeasonalityEffect', 'CalendarSeasonalitySignal', 'NYSECalendar', 'CalendarSeasonalityDetector', 'CalendarSeasonalitySignalGenerator', 'get_calendar_modifier', 'check_calendar']
@@ -618,8 +619,7 @@ class CalendarSeasonalitySignalGenerator:
         )
 
     def save_signal(self, signal: CalendarSeasonalitySignal):
-        with open(self.OUTPUT_PATH, "w") as f:
-            json.dump(signal.to_dict(), f, indent=2)
+        save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
 
 
 def get_calendar_modifier(d: Optional[date] = None) -> float:

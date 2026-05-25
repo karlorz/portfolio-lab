@@ -48,6 +48,7 @@ from src.paths import sqlite_connect
 from datetime import datetime
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['SPEED_TIERS', 'VOL_TARGET', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'ASSET_TICKERS', 'DEFAULT_BASE_ALLOCATION', 'SpeedMomentumSignal', 'EnsembleSignal', 'MultiSpeedPortfolio', 'MultiSpeedMomentum', 'MultiSpeedBacktester']
@@ -804,8 +805,7 @@ def main():
             result = signal.to_dict()
             print(json.dumps(result, indent=2))
             if args.output:
-                with open(args.output, 'w') as f:
-                    json.dump(result, f, indent=2)
+                save_results_json(result, output_path=args.output)
         else:
             print(json.dumps({'error': f'Could not compute signal for {args.ticker}'}))
     
@@ -821,8 +821,7 @@ def main():
         result = backtester.run_backtest()
         print(json.dumps(result, indent=2, default=str))
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(result, f, indent=2)
+            save_results_json(result, output_path=args.output)
 
     elif args.command == 'live':
         base_alloc = _parse_portfolio_arg(args.portfolio)
@@ -838,8 +837,7 @@ def main():
             print(f"\nSaved to database: {DB_PATH}")
         
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(output, f, indent=2)
+            save_results_json(output, output_path=args.output)
     
     elif args.command == 'status':
         print("Multi-Speed Momentum Ensemble v2.56 - Status")

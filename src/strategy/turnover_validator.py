@@ -32,6 +32,7 @@ MIN_SIGNAL_HISTORY = 5               # minimum history needed for computation
 DEFAULT_SIGNAL_COST = 0.0005         # assumed transaction cost per signal unit (5bps, median ETF cost)
 DEFAULT_RISK_FREE_RATE = 0.05        # annual risk-free rate for marginal score
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR
 
 
@@ -328,10 +329,8 @@ class TurnoverValidator:
     def _save_state(self) -> None:
         """Save state to JSON file."""
         path = self._resolve_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with open(path, "w") as f:
-                json.dump(self.state.to_dict(), f, indent=2)
+            save_results_json(self.state.to_dict(), output_path=str(path))
         except OSError as e:
             logger.warning("Failed to save turnover validator state: %s", e)
 

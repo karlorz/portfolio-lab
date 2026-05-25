@@ -36,6 +36,7 @@ class VIXTermStructure:
 
 
 from src.paths import DATA_DIR
+from src.backtest.metrics import save_results_json
 
 
 class VIXDataManager:
@@ -75,12 +76,7 @@ class VIXDataManager:
     def _save_cached_data(self):
         """Save VIX data to cache"""
         try:
-            with open(self.VIX_FILE, 'w') as f:
-                json.dump(
-                    {date: ts.to_dict() for date, ts in self.data.items()},
-                    f,
-                    indent=2
-                )
+            save_results_json({date: ts.to_dict() for date, ts in self.data.items()}, output_path=str(self.VIX_FILE))
         except (OSError, TypeError) as e:
             logger.warning("Error saving VIX cache: %s", e)
     

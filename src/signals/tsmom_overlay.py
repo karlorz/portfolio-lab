@@ -41,6 +41,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['LOOKBACK_DAYS', 'SKIP_DAYS', 'VOL_WINDOW', 'VOL_TARGET', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'ASSET_TICKERS', 'DEFAULT_BASE_ALLOCATION', 'TSMOMSignal', 'TSMOMPortfolio', 'TSMOMOverlay', 'TSMOMBacktester']
@@ -698,8 +699,7 @@ def main():
             result = signal.to_dict()
             print(json.dumps(result, indent=2))
             if args.output:
-                with open(args.output, 'w') as f:
-                    json.dump(result, f, indent=2)
+                save_results_json(result, output_path=args.output)
         else:
             print(json.dumps({"error": f"Could not compute signal for {args.ticker}"}))
     
@@ -721,8 +721,7 @@ def main():
         result = backtester.run_backtest(rebalance_freq=args.freq)
         print(json.dumps(result, indent=2))
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(result, f, indent=2)
+            save_results_json(result, output_path=args.output)
     
     elif args.command == 'live':
         parts = args.portfolio.split('/')
@@ -737,8 +736,7 @@ def main():
         result = overlay.get_current_recommendation(base_alloc)
         print(json.dumps(result, indent=2))
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(result, f, indent=2)
+            save_results_json(result, output_path=args.output)
     
     elif args.command == 'status':
         print("TSMOM Overlay v2.52 - Status")

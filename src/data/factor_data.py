@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from src.paths import FACTORS_DIR, sqlite_connect
+from src.backtest.metrics import save_results_json
 from dataclasses import dataclass, asdict
 import logging
 
@@ -125,9 +126,8 @@ class FactorDataManager:
                 "quality_weights": QUALITY_WEIGHTS,
                 "last_updated": None,
             }
-            with open(self.metadata_path, "w") as f:
-                json.dump(metadata, f, indent=2)
-    
+            save_results_json(metadata, output_path=str(self.metadata_path))
+
     def store_prices(self, symbol: str, prices: List[Dict]) -> int:
         """Store price data for a factor ETF.
         
@@ -344,8 +344,7 @@ class FactorDataManager:
             with open(self.metadata_path, "r") as f:
                 metadata = json.load(f)
             metadata["last_updated"] = datetime.now().isoformat()
-            with open(self.metadata_path, "w") as f:
-                json.dump(metadata, f, indent=2)
+            save_results_json(metadata, output_path=str(self.metadata_path))
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to update metadata: %s", e)
 

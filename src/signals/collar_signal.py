@@ -21,6 +21,7 @@ from enum import Enum
 from typing import Optional, Dict
 
 from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR, sqlite_connect
+from src.backtest.metrics import save_results_json
 
 
 
@@ -462,8 +463,7 @@ class CollarSignalGenerator:
 
     def save_signal(self, signal: CollarSignal):
         self.OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.OUTPUT_PATH, "w") as f:
-            json.dump(signal.to_dict(), f, indent=2)
+        save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
         logger.info("Collar signal saved to %s", self.OUTPUT_PATH)
 
 

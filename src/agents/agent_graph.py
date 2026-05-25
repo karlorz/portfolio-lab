@@ -35,6 +35,7 @@ from .sentiment_agent import SentimentAgent
 from .risk_agent import RiskAgent
 from .execution_agent import ExecutionAgent
 from .controller_agent import ControllerAgent
+from src.backtest.metrics import save_results_json
 
 
 class NodeType(Enum):
@@ -353,11 +354,10 @@ class AgentGraph:
         
         # Save metrics
         metrics_path = path / "graph_metrics.json"
-        with open(metrics_path, 'w') as f:
-            json.dump({
-                'metrics': self.metrics,
-                'execution_history_sample': self.execution_history[-100:]
-            }, f, indent=2)
+        save_results_json({
+            'metrics': self.metrics,
+            'execution_history_sample': self.execution_history[-100:]
+        }, output_path=str(metrics_path))
     
     def load(self, path: Path):
         """Load agent graph state."""

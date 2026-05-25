@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['SYMBOLS_REQUIRED', 'ComponentSignal', 'AlternativeDataComposite', 'EnsembleSignal', 'AlternativeDataSignalGenerator']
@@ -449,8 +450,7 @@ class AlternativeDataSignalGenerator:
         """Save signals to disk and update state."""
         # Ensemble format (for ensemble_voter)
         signal_file = self.signals_dir / "alternative_data_latest.json"
-        with open(signal_file, "w") as f:
-            json.dump(asdict(signal), f, indent=2)
+        save_results_json(asdict(signal), output_path=str(signal_file))
 
         # State file (for status tracking)
         state = {
@@ -463,8 +463,7 @@ class AlternativeDataSignalGenerator:
             "component_confidences": composite.component_confidences,
         }
         state_file = self.state_dir / "alternative_data_state.json"
-        with open(state_file, "w") as f:
-            json.dump(state, f, indent=2)
+        save_results_json(state, output_path=str(state_file))
 
     def load_latest_signal(self) -> Optional[EnsembleSignal]:
         """Load most recent signal from disk."""
@@ -541,6 +540,7 @@ class AlternativeDataSignalGenerator:
 
 def main():
     import argparse
+    logging.basicConfig(level=logging.INFO, force=True)
 
     parser = argparse.ArgumentParser(
         description="Alternative Data Signal Generator (v9.00)"
@@ -555,45 +555,45 @@ def main():
     if args.generate:
         signal = generator.generate_signal()
         raw = signal.raw_data
-        print(f"\n{'='*50}")
-        print(f"  Alternative Data Signal — {signal.timestamp}")
-        print(f"{'='*50}")
-        print(f"  Regime:       {signal.regime.upper()}")
-        print(f"  Score:        {raw['composite_score']:+.4f}")
-        print(f"  Confidence:   {raw['confidence']:.2%}")
-        print(f"  Z-Score:      {raw['z_score']:.2f}")
-        print(f"\n  Components:")
+        logger.info("\n%s", "=" * 50)
+        logger.info("  Alternative Data Signal — %s", signal.timestamp)
+        logger.info("%s", "=" * 50)
+        logger.info("  Regime:       %s", signal.regime.upper())
+        logger.info("  Score:        %+.4f", raw['composite_score'])
+        logger.info("  Confidence:   %.2f%%", raw['confidence'] * 100)
+        logger.info("  Z-Score:      %.2f", raw['z_score'])
+        logger.info("\n  Components:")
         for name in sorted(raw.get('components', {}).keys()):
             val = raw['components'].get(name, 0)
             conf = raw['component_confidences'].get(name, 0)
-            print(f"    {name:20s}: {val:+.4f}  (conf={conf:.2%})")
-        print(f"\n  Symbols:       {len(raw.get('symbol_coverage', []))}")
-        print(f"  Freshness:    {raw.get('data_freshness_hours', '?')}h")
-        print(f"{'='*50}")
+            logger.info("    %-20s: %+.4f  (conf=%.2f%%)", name, val, conf * 100)
+        logger.info("\n  Symbols:       %s", len(raw.get('symbol_coverage', [])))
+        logger.info("  Freshness:    %sh", raw.get('data_freshness_hours', '?'))
+        logger.info("%s", "=" * 50)
 
     elif args.status:
         signal = generator.load_latest_signal()
         if signal:
             raw = signal.raw_data
-            print(f"Latest Signal ({signal.timestamp}):")
-            print(f"  Regime:       {signal.regime.upper()}")
-            print(f"  Score:        {raw.get('composite_score', '?'):+}")
-            print(f"  Confidence:   {signal.confidence:.2%}")
-            print(f"  Probability:  {signal.probability:.2%}")
-            print(f"\n  Components:")
+            logger.info("Latest Signal (%s):", signal.timestamp)
+            logger.info("  Regime:       %s", signal.regime.upper())
+            logger.info("  Score:        %s", raw.get('composite_score', '?'))
+            logger.info("  Confidence:   %.2f%%", signal.confidence * 100)
+            logger.info("  Probability:  %.2f%%", signal.probability * 100)
+            logger.info("\n  Components:")
             for name in sorted(raw.get('components', {}).keys()):
                 val = raw['components'].get(name, 0)
-                print(f"    {name:20s}: {val:+.4f}")
+                logger.info("    %-20s: %+.4f", name, val)
         else:
-            print("No signal found. Run with --generate first.")
+            logger.info("No signal found. Run with --generate first.")
 
     elif args.validate:
         signal = generator.load_latest_signal()
         if signal:
             is_valid = generator.validate_signal(signal)
-            print(f"Signal valid: {'Yes' if is_valid else 'No'}")
+            logger.info("Signal valid: %s", 'Yes' if is_valid else 'No')
         else:
-            print("No signal to validate.")
+            logger.info("No signal to validate.")
     else:
         parser.print_help()
 

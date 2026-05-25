@@ -2392,7 +2392,7 @@ class TestCLI:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             captured = capsys.readouterr()
-            assert "Factor Momentum Rotation Strategy" in captured.out
+            assert "Factor Momentum Rotation Strategy" in captured.err
             assert exc_info.value.code == 0
         finally:
             sys.argv = old_argv
@@ -2406,8 +2406,8 @@ class TestCLI:
             from src.strategy.factor_rotation import main
             main()
             captured = capsys.readouterr()
-            assert "Unknown command" in captured.out
-            assert "bogus" in captured.out
+            assert "Unknown command" in captured.err
+            assert "bogus" in captured.err
         finally:
             sys.argv = old_argv
 
@@ -2421,9 +2421,9 @@ class TestCLI:
             # engine will have no data, should output error gracefully
             main()
             captured = capsys.readouterr()
-            assert "FACTOR MOMENTUM ROTATION SIGNAL" in captured.out
-            assert "STANDARD" in captured.out
-            assert "{" in captured.out  # JSON output
+            assert "FACTOR MOMENTUM ROTATION SIGNAL" in captured.err
+            assert "STANDARD" in captured.err
+            assert "{" in captured.err  # JSON output
         finally:
             sys.argv = old_argv
 
@@ -2436,7 +2436,7 @@ class TestCLI:
             from src.strategy.factor_rotation import main
             main()
             captured = capsys.readouterr()
-            assert "ML-ENHANCED" in captured.out
+            assert "ML-ENHANCED" in captured.err
         finally:
             sys.argv = old_argv
 
@@ -2449,7 +2449,7 @@ class TestCLI:
             from src.strategy.factor_rotation import main
             main()
             captured = capsys.readouterr()
-            assert "TSFM (v2.15)" in captured.out
+            assert "TSFM (v2.15)" in captured.err
         finally:
             sys.argv = old_argv
 
@@ -2462,9 +2462,11 @@ class TestCLI:
             from src.strategy.factor_rotation import main
             main()
             captured = capsys.readouterr()
-            assert "{" in captured.out
+            assert "{" in captured.err
             import json
-            data = json.loads(captured.out)
+            # Logger prefix (e.g. "INFO:src.strategy.factor_rotation:") precedes JSON in stderr
+            json_data = captured.err[captured.err.index('{'):]
+            data = json.loads(json_data)
             assert "available" in data
             assert "factor_count" in data
         finally:
@@ -2479,8 +2481,8 @@ class TestCLI:
             from src.strategy.factor_rotation import main
             main()
             captured = capsys.readouterr()
-            assert "Factor Comparison" in captured.out
-            assert "Rank" in captured.out
+            assert "Factor Comparison" in captured.err
+            assert "Rank" in captured.err
         finally:
             sys.argv = old_argv
 
@@ -2493,8 +2495,8 @@ class TestCLI:
             from src.strategy.factor_rotation import main
             main()
             captured = capsys.readouterr()
-            assert "Unknown command" in captured.out
-            assert "Usage:" in captured.out
+            assert "Unknown command" in captured.err
+            assert "Usage:" in captured.err
         finally:
             sys.argv = old_argv
 

@@ -326,6 +326,7 @@ class ConvexityHarvestStrategy:
 
 def main():
     """CLI entry point for convexity harvest strategy"""
+    logging.basicConfig(level=logging.INFO, force=True)
     strategy = ConvexityHarvestStrategy()
     
     if len(sys.argv) > 1 and sys.argv[1] == '--backtest':
@@ -333,44 +334,44 @@ def main():
         start = sys.argv[2] if len(sys.argv) > 2 else '2020-01-01'
         end = sys.argv[3] if len(sys.argv) > 3 else '2024-12-31'
         
-        print(f"Running convexity harvest backtest: {start} to {end}")
+        logger.info("Running convexity harvest backtest: %s to %s", start, end)
         results = strategy.run_backtest(start, end)
-        
-        print("\n=== Backtest Results ===")
-        print(f"Period: {results['start_date']} to {results['end_date']}")
-        print(f"Total Return: {results['total_return_pct']:.2f}%")
-        print(f"Annualized Return: {results['annualized_return_pct']:.2f}%")
-        print(f"Volatility: {results['volatility_pct']:.2f}%")
-        print(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
-        print(f"Max Drawdown: {results['max_drawdown_pct']:.2f}%")
-        print(f"Days with Position: {results['days_with_position']}/{results['total_positions']}")
-        print(f"Exit Events: {results['exit_events']}")
+
+        logger.info("\n=== Backtest Results ===")
+        logger.info("Period: %s to %s", results['start_date'], results['end_date'])
+        logger.info("Total Return: %.2f%%", results['total_return_pct'])
+        logger.info("Annualized Return: %.2f%%", results['annualized_return_pct'])
+        logger.info("Volatility: %.2f%%", results['volatility_pct'])
+        logger.info("Sharpe Ratio: %.2f", results['sharpe_ratio'])
+        logger.info("Max Drawdown: %.2f%%", results['max_drawdown_pct'])
+        logger.info("Days with Position: %s/%s", results['days_with_position'], results['total_positions'])
+        logger.info("Exit Events: %s", results['exit_events'])
         if results['exit_reasons']:
-            print(f"Exit Reasons: {', '.join(results['exit_reasons'])}")
+            logger.info("Exit Reasons: %s", ', '.join(results['exit_reasons']))
     
     elif len(sys.argv) > 1 and sys.argv[1] == '--signal':
         # Get current signal
         signal = strategy.get_current_signal()
-        print(json.dumps(signal, indent=2))
+        logger.info(json.dumps(signal, indent=2))
     
     else:
         # Demo mode - show sample signals
-        print("Convexity Harvest Strategy (v2.21)")
-        print("Usage: python3 convexity_harvest.py [--backtest START END] [--signal]")
-        print()
-        
+        logger.info("Convexity Harvest Strategy (v2.21)")
+        logger.info("Usage: python3 convexity_harvest.py [--backtest START END] [--signal]")
+        logger.info("")
+
         # Generate sample signals for recent dates
         test_dates = ['2024-01-15', '2024-06-15', '2024-10-15', '2025-01-15']
-        print("\nSample Signals:")
+        logger.info("\nSample Signals:")
         for date in test_dates:
             pos = strategy.generate_signal(date)
-            print(f"\n{date}: {pos.position_type.upper()}")
-            print(f"  VIX: {pos.vix_level:.2f}")
-            print(f"  Contango: {pos.contango_pct:.2f}%")
-            print(f"  Allocation: {pos.allocation_pct:.1f}%")
-            print(f"  Expected Roll Yield: {pos.expected_roll_yield:.1f}%")
+            logger.info("\n%s: %s", date, pos.position_type.upper())
+            logger.info("  VIX: %.2f", pos.vix_level)
+            logger.info("  Contango: %.2f%%", pos.contango_pct)
+            logger.info("  Allocation: %.1f%%", pos.allocation_pct)
+            logger.info("  Expected Roll Yield: %.1f%%", pos.expected_roll_yield)
             if pos.exit_triggered:
-                print(f"  ⚠️ EXIT TRIGGERED: {pos.exit_reason}")
+                logger.info("  EXIT TRIGGERED: %s", pos.exit_reason)
 
 
 if __name__ == '__main__':

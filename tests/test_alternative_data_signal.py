@@ -517,7 +517,7 @@ class TestCLI:
         except SystemExit:
             pass
 
-        assert "No signal found" in capsys.readouterr().out
+        assert "No signal found" in capsys.readouterr().err
 
         mod.AlternativeDataSignalGenerator = original_gen
 
@@ -536,7 +536,7 @@ class TestCLI:
         except SystemExit:
             pass
 
-        assert "No signal to validate" in capsys.readouterr().out
+        assert "No signal to validate" in capsys.readouterr().err
 
         mod.AlternativeDataSignalGenerator = original_gen
 

@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Tuple
 
 from src.paths import DATA_DIR
+from src.backtest.metrics import save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -302,8 +303,7 @@ class OverlayDashboardGenerator:
         )
 
     def save(self, dashboard: OverlayDashboardData):
-        with open(self.OUTPUT_PATH, "w") as f:
-            json.dump(dashboard.to_dict(), f, indent=2, default=str)
+        save_results_json(dashboard.to_dict(), output_path=str(self.OUTPUT_PATH))
         logger.info("Dashboard saved to %s", self.OUTPUT_PATH)
 
 

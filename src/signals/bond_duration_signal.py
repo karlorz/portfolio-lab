@@ -29,6 +29,7 @@ from enum import Enum
 from typing import Optional, Dict, Tuple
 
 from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR, sqlite_connect
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['YieldCurveRegime', 'RateDirection', 'DurationPosition', 'BondDurationSignal', 'BondDurationCalculator', 'BondDurationSignalGenerator', 'generate_bond_duration_signal']
@@ -357,8 +358,7 @@ class BondDurationSignalGenerator:
         )
 
     def save_signal(self, signal: BondDurationSignal):
-        with open(self.OUTPUT_PATH, "w") as f:
-            json.dump(signal.to_dict(), f, indent=2)
+        save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
 
 
 def generate_bond_duration_signal(

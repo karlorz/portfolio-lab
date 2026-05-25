@@ -59,6 +59,7 @@ else:
 from src.paths import PROJECT_ROOT, sqlite_connect
 
 from src.signals.stacking_feature_engine import StackingFeatureEngine, SignalSource, Signal, RegimeContext, HistoricalAccuracy
+from src.backtest.metrics import save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -483,8 +484,7 @@ class StackingTrainer:
         
         # Save training result
         result_path = self.model_dir / f"training_result_{model_version}.json"
-        with open(result_path, 'w') as f:
-            json.dump(asdict(result), f, indent=2)
+        save_results_json(asdict(result), output_path=str(result_path))
         
         self.model_version = model_version
         return result

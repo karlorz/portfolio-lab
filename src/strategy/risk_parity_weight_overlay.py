@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
 
 
@@ -399,8 +400,7 @@ def main():
         result = backtester.run_backtest()
         print(json.dumps(result, indent=2, default=str))
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(result, f, indent=2, default=str)
+            save_results_json(result, output_path=args.output)
     
     elif args.command == 'live':
         overlay = RiskParityWeightOverlay(max_deviation=args.max_dev)

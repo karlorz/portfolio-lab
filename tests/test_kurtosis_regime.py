@@ -1060,33 +1060,27 @@ class TestSaveSignal:
     def test_save_signal_writes_file(self, generator):
         """save_signal should write a JSON file to the output path."""
         signal = generator.generate_signal()
-        with patch.object(KurtosisRegimeSignalGenerator, 'OUTPUT_PATH', '/tmp/test_kr_signal.json'):
-            with patch("builtins.open", mock_open()) as mocked_file:
-                generator.save_signal(signal)
-                mocked_file.assert_called_once_with('/tmp/test_kr_signal.json', 'w')
+        with patch("src.regime.kurtosis_regime.save_results_json") as mock_save:
+            generator.save_signal(signal)
+            mock_save.assert_called_once()
+            assert mock_save.call_args[1].get("output_path") or mock_save.call_args[0][1]
 
     def test_save_signal_json_contains_expected_fields(self, generator):
         """Written JSON should contain all signal fields."""
         signal = generator.generate_signal()
-        with patch.object(KurtosisRegimeSignalGenerator, 'OUTPUT_PATH', '/tmp/test_kr_signal.json'):
-            m = mock_open()
-            with patch("builtins.open", m):
-                generator.save_signal(signal)
-                # Get the written content
-                handle = m()
-                written_content = "".join(call.args[0] for call in handle.write.call_args_list)
-                data = json.loads(written_content)
-                expected = {"timestamp", "regime", "kurtosis_60d", "fat_tail_risk"}
-                assert expected.issubset(set(data.keys()))
+        with patch("src.regime.kurtosis_regime.save_results_json") as mock_save:
+            generator.save_signal(signal)
+            data = mock_save.call_args[0][0]
+            expected = {"timestamp", "regime", "kurtosis_60d", "fat_tail_risk"}
+            assert expected.issubset(set(data.keys()))
 
     def test_save_signal_multiple_writes(self, generator):
         """Multiple save calls should each trigger file write."""
         signal = generator.generate_signal()
-        with patch.object(KurtosisRegimeSignalGenerator, 'OUTPUT_PATH', '/tmp/test_kr_multi.json'):
-            with patch("builtins.open", mock_open()) as m:
-                generator.save_signal(signal)
-                generator.save_signal(signal)
-                assert m.call_count == 2
+        with patch("src.regime.kurtosis_regime.save_results_json") as mock_save:
+            generator.save_signal(signal)
+            generator.save_signal(signal)
+            assert mock_save.call_count == 2
 
     def test_save_signal_ensure_dirs_creates_path(self):
         """_ensure_dirs should create the signals directory if missing."""
@@ -1112,24 +1106,24 @@ class TestCLI:
         from src.regime.kurtosis_regime import main
         main()
         captured = capsys.readouterr()
-        assert "KURTOSIS REGIME DETECTOR" in captured.out
+        assert "KURTOSIS REGIME DETECTOR" in captured.err
 
     def test_main_output_contains_all_sections(self, capsys):
         """main() output should include all expected sections."""
         from src.regime.kurtosis_regime import main
         main()
         captured = capsys.readouterr()
-        assert "Regime:" in captured.out
-        assert "Strategy Routing:" in captured.out
-        assert "Fat Tail Risk:" in captured.out
-        assert "Recommended Exposure:" in captured.out
+        assert "Regime:" in captured.err
+        assert "Strategy Routing:" in captured.err
+        assert "Fat Tail Risk:" in captured.err
+        assert "Recommended Exposure:" in captured.err
 
     def test_main_output_contains_timestamp(self, capsys):
         """main() output should include a timestamp string."""
         from src.regime.kurtosis_regime import main
         main()
         captured = capsys.readouterr()
-        assert "Timestamp:" in captured.out
+        assert "Timestamp:" in captured.err
 
     def test_main_with_save_flag_attemtps_file_write(self):
         """main() with --save in sys.argv should call save_signal."""
@@ -1153,13 +1147,16 @@ class TestCLI:
         from src.regime.kurtosis_regime import main
         main()
         captured = capsys.readouterr()
-        lines = captured.out.split("\n")
+        lines = captured.err.split("\n")
         regime_lines = [l for l in lines if "Regime:" in l and "Preference" not in l]
         assert len(regime_lines) > 0
-        assert ":" in regime_lines[0]
-        parts = regime_lines[0].split(":")
-        assert len(parts) == 2
-        assert len(parts[1].strip()) > 0
+        # Strip logger prefix (e.g. "INFO:src.regime.kurtosis_regime:")
+        line = regime_lines[0]
+        # Find "Regime:" after logger prefix
+        idx = line.find("Regime:")
+        assert idx >= 0
+        value = line[idx + len("Regime:"):].strip()
+        assert len(value) > 0
 
 
 class TestModuleExports:

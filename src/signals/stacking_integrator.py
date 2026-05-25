@@ -18,6 +18,8 @@ from datetime import datetime, timedelta
 import json
 import time
 
+from src.backtest.metrics import save_results_json
+
 import numpy as np
 
 
@@ -473,8 +475,7 @@ class StackingIntegrator:
                     'latency_ms': p.latency_ms
                 })
             
-            with open(filepath, 'w') as f:
-                json.dump(records, f, indent=2)
+            save_results_json(records, output_path=str(filepath))
             
             logger.info("Exported %d predictions to %s", len(records), filepath)
             return True

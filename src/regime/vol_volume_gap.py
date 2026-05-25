@@ -34,6 +34,7 @@ from typing import Optional, Dict
 import numpy as np
 
 from src.paths import DATA_DIR, PRICES_JSON
+from src.backtest.metrics import save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -339,8 +340,7 @@ def save_state(result: Dict, state_file: Optional[Path] = None) -> None:
         state_file = STATE_FILE
     state_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(state_file, "w") as f:
-            json.dump(result, f, indent=2, default=str)
+        save_results_json(result, output_path=str(state_file))
         logger.info("State saved to %s", state_file)
     except OSError as e:
         logger.error("Failed to save state: %s", e)

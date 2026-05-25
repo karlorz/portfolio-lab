@@ -20,6 +20,7 @@ from typing import Optional, Dict
 
 
 from src.paths import DATA_DIR
+from src.backtest.metrics import save_results_json
 from .options_utils import OptionsChainFetcher, OptionsChain, OptionQuote
 from ..signals.collar_signal import (
     CollarSignalGenerator, BlackScholesPricer,
@@ -284,8 +285,7 @@ class CollarOptionsBridge:
         )
 
     def save_strikes(self, strikes: LiveCollarStrikes):
-        with open(self.OUTPUT_PATH, "w") as f:
-            json.dump(strikes.to_dict(), f, indent=2, default=str)
+        save_results_json(strikes.to_dict(), output_path=str(self.OUTPUT_PATH))
 
     def compare_with_signal(self, strikes: LiveCollarStrikes) -> Dict:
         """Compare live strikes with Black-Scholes signal estimate."""

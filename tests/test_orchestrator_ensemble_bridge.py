@@ -613,5 +613,5 @@ class TestCLI:
         with patch.object(OrchestratorEnsembleBridge, 'generate_signal', return_value=mock_signal):
             main()
         captured = capsys.readouterr()
-        assert "ORCHESTRATOR-ENSEMBLE VOTER BRIDGE" in captured.out
-        assert "0.100" in captured.out
+        assert "ORCHESTRATOR-ENSEMBLE VOTER BRIDGE" in captured.err
+        assert "0.100" in captured.err

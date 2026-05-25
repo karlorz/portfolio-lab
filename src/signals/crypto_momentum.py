@@ -25,6 +25,7 @@ from typing import List, Tuple
 import numpy as np
 
 from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_connect
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['CryptoVolRegime', 'CryptoSignalState', 'CryptoAssetSignal', 'CryptoCompositeSignal', 'CryptoMomentumCalculator', 'CryptoMomentumSignalGenerator', 'generate_crypto_signal']
@@ -362,8 +363,7 @@ class CryptoMomentumSignalGenerator:
         )
 
     def save_signal(self, signal: CryptoCompositeSignal):
-        with open(self.OUTPUT_PATH, "w") as f:
-            json.dump(signal.to_dict(), f, indent=2)
+        save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
 
 
 def generate_crypto_signal() -> CryptoCompositeSignal:

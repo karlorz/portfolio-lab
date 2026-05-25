@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from src.paths import DATA_DIR
 from src.utils import safe_get
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['SEVERITY_THRESHOLDS', 'BriefSection', 'generate_brief_sections', 'render_brief_text', 'generate_narrative', 'generate_daily_brief']
@@ -325,8 +326,7 @@ def main():
 
     if args.save:
         out_path = DATA_DIR / "daily_brief.json"
-        with open(out_path, "w") as f:
-            json.dump(brief, f, indent=2, default=str)
+        save_results_json(brief, output_path=str(out_path))
         print(f"\nSaved to {out_path}")
 
 

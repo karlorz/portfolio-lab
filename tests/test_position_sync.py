@@ -888,10 +888,10 @@ class TestReconcileExtended:
         # Position should be removed since broker has no positions
         assert result["positions_removed"] == 1
 
-    def test_reconcile_db_error(self):
+    def test_reconcile_db_error(self, tmp_path):
         """Error during DB operations should return error status."""
         sync = PositionSync.__new__(PositionSync)
-        sync.db_path = "/nonexistent_dir/nope.db"
+        sync.db_path = str(tmp_path / "nonexistent_sub" / "nope.db")
         sync.client = MagicMock()
         sync.client.is_ready.return_value = True
         pos = MagicMock()

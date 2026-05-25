@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Optional, List, Tuple
 import numpy as np
 from src.paths import sqlite_connect
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['BayesianVolEstimate', 'BayesianVolModel', 'BayesianVolPipeline', 'estimate_bayesian_vol']
@@ -288,8 +289,7 @@ class BayesianVolPipeline:
 
     def save_estimate(self, result: BayesianVolEstimate):
         out = self.OUTPUT_DIR / f"{result.symbol}_bayesian_vol.json"
-        with open(out, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
+        save_results_json(result.to_dict(), output_path=str(out))
 
 
 def estimate_bayesian_vol(symbol: str = "SPY") -> BayesianVolEstimate:

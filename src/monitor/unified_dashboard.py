@@ -22,6 +22,7 @@ from typing import Any, Dict, Optional
 
 from src.paths import DATA_DIR
 from src.utils import safe_get
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['generate_unified_dashboard', 'print_summary', 'generate_status_text']
@@ -612,9 +613,7 @@ def main():
 
     if "--json" in sys.argv or "--save" in sys.argv:
         out_path = DATA_DIR / "unified_dashboard.json"
-        with open(out_path, "w") as f:
-            # Use default=str for numpy/non-serializable types
-            json.dump(dashboard, f, indent=2, default=str)
+        save_results_json(dashboard, output_path=str(out_path))
         print(f"Saved unified dashboard to {out_path}")
 
     if "--status-text" in sys.argv:

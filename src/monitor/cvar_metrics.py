@@ -20,6 +20,7 @@ from typing import Dict, List, Tuple
 from dataclasses import dataclass, asdict
 
 from src.paths import DATA_DIR, BASE_ALLOCATION, MARKET_DB
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['CVaRMetrics', 'calculate_var', 'calculate_cvar', 'get_tail_severity', 'fetch_portfolio_returns', 'calculate_volatility', 'compute_cvar_metrics', 'load_history', 'save_history', 'export_metrics', 'display_metrics']
@@ -189,8 +190,7 @@ def save_history(history: List[Dict]):
     """Save historical CVaR metrics (keep last 30 days)."""
     # Trim to 30 days (720 entries at 1hr frequency)
     trimmed = history[-720:] if len(history) > 720 else history
-    with open(RISK_HISTORY_PATH, 'w') as f:
-        json.dump(trimmed, f, indent=2)
+    save_results_json(trimmed, output_path=str(RISK_HISTORY_PATH))
 
 
 def export_metrics(metrics: CVaRMetrics):
@@ -214,8 +214,7 @@ def export_metrics(metrics: CVaRMetrics):
         }
     }
     
-    with open(RISK_METRICS_PATH, 'w') as f:
-        json.dump(data, f, indent=2)
+    save_results_json(data, output_path=str(RISK_METRICS_PATH))
     
     # Update history
     history = load_history()

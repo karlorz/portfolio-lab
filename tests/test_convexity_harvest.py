@@ -1090,7 +1090,7 @@ class TestCLIMain:
         return strategy
 
     @patch('src.strategy.convexity_harvest.sys.argv', ['convexity_harvest.py'])
-    def test_main_no_args_demo_mode(self):
+    def test_main_no_args_demo_mode(self, capsys):
         """main() with no args should run demo mode without crashing."""
         from src.strategy.convexity_harvest import ConvexityHarvestStrategy
         import src.strategy.convexity_harvest as ch
@@ -1105,13 +1105,13 @@ class TestCLIMain:
                     allocation_pct=0.0, exit_triggered=False, exit_reason=None,
                 )
                 mock_cls.return_value = instance
-                with patch('builtins.print') as mock_print:
-                    ch.main()
-                    mock_print.assert_any_call("Convexity Harvest Strategy (v2.21)")
+                ch.main()
+                captured = capsys.readouterr()
+                assert "Convexity Harvest Strategy (v2.21)" in captured.err
 
     @patch('src.strategy.convexity_harvest.sys.argv',
            ['convexity_harvest.py', '--backtest', '2020-01-01', '2020-01-10'])
-    def test_main_backtest_with_args(self):
+    def test_main_backtest_with_args(self, capsys):
         """main() with --backtest and custom dates should not crash."""
         from src.strategy.convexity_harvest import ConvexityHarvestStrategy
         import src.strategy.convexity_harvest as ch
@@ -1127,9 +1127,9 @@ class TestCLIMain:
                     "days_with_position": 0, "exit_events": 0, "exit_reasons": [],
                 }
                 mock_cls.return_value = instance
-                with patch('builtins.print') as mock_print:
-                    ch.main()
-                    mock_print.assert_any_call("Running convexity harvest backtest: 2020-01-01 to 2020-01-10")
+                ch.main()
+                captured = capsys.readouterr()
+                assert "Running convexity harvest backtest: 2020-01-01 to 2020-01-10" in captured.err
 
     @patch('src.strategy.convexity_harvest.sys.argv',
            ['convexity_harvest.py', '--backtest'])
@@ -1173,7 +1173,7 @@ class TestCLIMain:
 
     @patch('src.strategy.convexity_harvest.sys.argv',
            ['convexity_harvest.py', '--invalid-flag'])
-    def test_main_invalid_flag(self):
+    def test_main_invalid_flag(self, capsys):
         """main() with an unrecognized flag should fall through to demo mode."""
         import src.strategy.convexity_harvest as ch
         with patch.object(ch.ConvexityHarvestStrategy, '__init__', return_value=None):
@@ -1185,9 +1185,9 @@ class TestCLIMain:
                     allocation_pct=0.0, exit_triggered=False, exit_reason=None,
                 )
                 mock_cls.return_value = instance
-                with patch('builtins.print') as mock_print:
-                    ch.main()
-                    mock_print.assert_any_call("Convexity Harvest Strategy (v2.21)")
+                ch.main()
+                captured = capsys.readouterr()
+                assert "Convexity Harvest Strategy (v2.21)" in captured.err
 
     def test_main_invalid_args_length(self):
         """main() with --backtest but only one date should not crash."""

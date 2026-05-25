@@ -32,6 +32,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['SkewRegime', 'SkewMetrics', 'SkewState', 'SkewEngine', 'cli_compute', 'cli_summary', 'cli_adjust']
@@ -313,8 +314,7 @@ class SkewEngine:
         )
         try:
             DATA_DIR.mkdir(parents=True, exist_ok=True)
-            with open(STATE_FILE, "w") as f:
-                json.dump(state.to_dict(), f, indent=2)
+            save_results_json(state.to_dict(), output_path=str(STATE_FILE))
         except OSError as e:
             logger.error("Failed to save state: %s", e)
 

@@ -22,6 +22,7 @@ from typing import Optional, Dict
 
 import numpy as np
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR
 
 
@@ -387,9 +388,7 @@ class VIXYHedgeSizer:
             last_rebalance=prev.last_rebalance,
         )
 
-        self._state_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._state_file, 'w') as f:
-            json.dump(asdict(self._state), f, indent=2, default=str)
+        save_results_json(asdict(self._state), output_path=str(self._state_file))
         logger.info("VIXY hedge state saved: %s%% allocation", signal.allocation_pct)
 
     def update_after_rebalance(self, actual_allocation: float):
@@ -397,9 +396,7 @@ class VIXYHedgeSizer:
         self.load_state()
         self._state.current_allocation = actual_allocation
         self._state.last_rebalance = datetime.now().isoformat()
-        self._state_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._state_file, 'w') as f:
-            json.dump(asdict(self._state), f, indent=2, default=str)
+        save_results_json(asdict(self._state), output_path=str(self._state_file))
 
     # ── Status Report ─────────────────────────────────────────────────
 

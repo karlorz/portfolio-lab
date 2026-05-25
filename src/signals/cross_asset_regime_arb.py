@@ -35,6 +35,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+from src.backtest.metrics import save_results_json
 
 
 __all__ = ['MOMENTUM_LOOKBACK', 'VOL_LOOKBACK', 'MIN_HISTORY', 'DIVERGENCE_LOOKBACK', 'BULL_MOMENTUM_THRESHOLD', 'BEAR_MOMENTUM_THRESHOLD', 'STRONG_MOMENTUM_THRESHOLD', 'HIGH_VOL_THRESHOLD', 'AssetRegime', 'BondRegime', 'GoldRegime', 'DivergencePattern', 'AssetRegimeReading', 'BondRegimeReading', 'GoldRegimeReading', 'DivergenceReading', 'CrossAssetRegimeArbSignal', 'CrossAssetRegimeArbDetector', 'print_signal_report']
@@ -480,8 +481,7 @@ class CrossAssetRegimeArbDetector:
             self.state["previous_pattern"] = pattern.value
             self.state["last_date"] = date_str
 
-            with open(STATE_FILE, "w") as f:
-                json.dump(self.state, f, indent=2)
+            save_results_json(self.state, output_path=str(STATE_FILE))
         except OSError as e:
             logger.warning("Could not save state: %s", e)
 

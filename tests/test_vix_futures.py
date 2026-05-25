@@ -381,7 +381,7 @@ class TestVIXDataManagerInit:
         mgr.VIX_FILE = tmp_path / "data" / "vix_term_structure.json"
         mgr.data = {}
 
-        with patch.object(Path, "open", side_effect=PermissionError("denied")):
+        with patch("builtins.open", side_effect=PermissionError("denied")):
             with caplog.at_level(logging.WARNING):
                 mgr._save_cached_data()
         assert "Error saving VIX cache" in caplog.text

@@ -48,6 +48,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from itertools import combinations
 
+from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
 
 
@@ -942,9 +943,8 @@ def main():
         result = backtester.run_backtest()
         print(json.dumps(result, indent=2, default=str))
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(result, f, indent=2, default=str)
-    
+            save_results_json(result, output_path=args.output)
+
     elif args.command == 'live':
         network_momentum = NetworkMomentumLeadLag()
         recommendation = network_momentum.get_current_recommendation(DEFAULT_BASE_ALLOCATION)
@@ -955,9 +955,8 @@ def main():
             print(json.dumps({'error': 'Could not compute recommendation'}))
         
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(recommendation.to_dict() if recommendation else {}, f, indent=2)
-    
+            save_results_json(recommendation.to_dict() if recommendation else {}, output_path=args.output)
+
     else:
         parser.print_help()
 

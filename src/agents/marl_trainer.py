@@ -31,6 +31,7 @@ else:
 
 from .base_agent import AgentObservation, AgentAction
 from .agent_graph import AgentGraph
+from src.backtest.metrics import save_results_json
 
 
 @dataclass
@@ -529,8 +530,7 @@ class MARLTrainer:
         }
         
         config_path = Path(path) / "trainer_config.json"
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=2)
+        save_results_json(config, output_path=str(config_path))
     
     def load(self, path: Path):
         """Load training state."""

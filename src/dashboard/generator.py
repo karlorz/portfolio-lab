@@ -14,6 +14,7 @@ import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect
 from src.utils import safe_get
+from src.backtest.metrics import save_results_json
 
 __all__ = [
     "DashboardGenerator",
@@ -84,8 +85,7 @@ class DashboardGenerator:
         }
 
         out_path = PUBLIC_DIR / "dashboard.json"
-        with open(out_path, 'w') as f:
-            json.dump(output, f)
+        save_results_json(output, output_path=str(out_path))
 
         return out_path
 
@@ -509,8 +509,7 @@ class DashboardGenerator:
         }
         
         out_path = PUBLIC_DIR / "signals.json"
-        with open(out_path, 'w') as f:
-            json.dump(output, f, indent=2)
+        save_results_json(output, output_path=str(out_path))
         
         return out_path
 
@@ -905,8 +904,7 @@ class DashboardGenerator:
         }
         
         out_path = PUBLIC_DIR / "stats.json"
-        with open(out_path, 'w') as f:
-            json.dump(output, f)
+        save_results_json(output, output_path=str(out_path))
         
         return out_path
     
@@ -982,8 +980,7 @@ class DashboardGenerator:
         }
         
         out_path = PUBLIC_DIR / "alerts.json"
-        with open(out_path, 'w') as f:
-            json.dump(output, f)
+        save_results_json(output, output_path=str(out_path))
         
         return out_path
     
@@ -1069,8 +1066,7 @@ class DashboardGenerator:
             health_data["system_status"] = "critical"
         
         out_path = PUBLIC_DIR / "health.json"
-        with open(out_path, 'w') as f:
-            json.dump(health_data, f, indent=2)
+        save_results_json(health_data, output_path=str(out_path))
         
         return out_path
     
@@ -1100,9 +1096,8 @@ class DashboardGenerator:
             report = calc.generate_analytics_report()
             
             out_path = PUBLIC_DIR / "analytics.json"
-            with open(out_path, 'w') as f:
-                json.dump(report, f, indent=2, default=str)
-            
+            save_results_json(report, output_path=str(out_path))
+
             return out_path
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
             # Fallback: empty analytics
@@ -1112,8 +1107,7 @@ class DashboardGenerator:
                 "generated_at": datetime.now().isoformat(),
             }
             out_path = PUBLIC_DIR / "analytics.json"
-            with open(out_path, 'w') as f:
-                json.dump(report, f, indent=2)
+            save_results_json(report, output_path=str(out_path))
             return out_path
     
     def generate_overlay_json(self) -> Optional[Path]:
@@ -1178,8 +1172,7 @@ class DashboardGenerator:
             }
 
             out_path = PUBLIC_DIR / "graduation.json"
-            with open(out_path, 'w') as f:
-                json.dump(graduation_data, f, indent=2, default=str)
+            save_results_json(graduation_data, output_path=str(out_path))
 
             return out_path
 
@@ -1216,7 +1209,7 @@ class DashboardGenerator:
             "generated_at": datetime.now().isoformat()
         }
         with open(PUBLIC_DIR / "index.json", 'w') as f:
-            json.dump(index, f)
+            save_results_json(index, output_path=str(PUBLIC_DIR / "index.json"))
 
         self.conn.close()
         logger.info("Dashboard generation complete")

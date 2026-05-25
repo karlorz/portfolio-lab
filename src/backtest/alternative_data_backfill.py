@@ -14,6 +14,7 @@ from typing import List, Dict
 import os
 
 from src.paths import SIGNALS_DIR
+from src.backtest.metrics import save_results_json
 
 
 
@@ -262,8 +263,7 @@ class AlternativeDataBackfill:
         }
         
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=2)
+        save_results_json(data, output_path=str(filepath))
         
         logger.info(f"Saved {len(self.signals)} days of alternative data signals to {filepath}")
     
@@ -343,8 +343,7 @@ def main():
     metadata = backfill.generate_metadata()
     
     metadata_path = str(SIGNALS_DIR / "alternative_data_metadata.json")
-    with open(metadata_path, 'w') as f:
-        json.dump(metadata, f, indent=2)
+    save_results_json(metadata, output_path=str(metadata_path))
     
     print(f"\nMetadata saved to {metadata_path}")
     print("\nBackfill Summary:")
