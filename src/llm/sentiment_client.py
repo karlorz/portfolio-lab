@@ -269,7 +269,7 @@ class LLMClient(ABC):
                     last_error = e
                     if attempt < self.max_retries:
                         wait = self._backoff(attempt)
-                        logger.info(f"[retry {attempt+1}/{self.max_retries}] {type(e).__name__} — waiting {wait:.1f}s", file=sys.stderr)
+                        logger.info(f"[retry {attempt+1}/{self.max_retries}] {type(e).__name__} — waiting {wait:.1f}s")
                         time.sleep(wait)
                         continue
                 # Server errors: retry
@@ -277,7 +277,7 @@ class LLMClient(ABC):
                 if isinstance(e, (openai.APIStatusError, anthropic.APIStatusError)) and status >= 500 and attempt < self.max_retries:
                     last_error = e
                     wait = self._backoff(attempt)
-                    logger.info(f"[retry {attempt+1}/{self.max_retries}] {status} — waiting {wait:.1f}s", file=sys.stderr)
+                    logger.info(f"[retry {attempt+1}/{self.max_retries}] {status} — waiting {wait:.1f}s")
                     time.sleep(wait)
                     continue
                 raise

@@ -112,24 +112,21 @@ def _inject_sdk_stubs():
     _sc_mod.anthropic are None, which breaks @patch() because None
     has no attributes.  We temporarily swap in stub modules that carry
     the exception classes the source code uses in isinstance() checks.
+
+    Always force-inject stubs regardless of current state — other test
+    files (e.g. test_sentiment_analyzer.py) may have left stale mocks
+    on _sc_mod.openai via sys.modules manipulation.
     """
     saved_openai = _sc_mod.openai
     saved_anthropic = _sc_mod.anthropic
-    injected = False
 
-    if _sc_mod.openai is None:
-        _sc_mod.openai = _make_openai_stub()
-        injected = True
-
-    if _sc_mod.anthropic is None:
-        _sc_mod.anthropic = _make_anthropic_stub()
-        injected = True
+    _sc_mod.openai = _make_openai_stub()
+    _sc_mod.anthropic = _make_anthropic_stub()
 
     yield
 
-    if injected:
-        _sc_mod.openai = saved_openai
-        _sc_mod.anthropic = saved_anthropic
+    _sc_mod.openai = saved_openai
+    _sc_mod.anthropic = saved_anthropic
 
 
 @pytest.fixture(scope="module", autouse=True)
