@@ -417,16 +417,16 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             {/* Signal Panels */}
             <div className="mt-4 signal-panels-row">
               <div className="flex-1 min-w-0">
-                <BehavioralSentimentPanel data={(signals as any)?.behavioral_sentiment ?? null} />
+                <BehavioralSentimentPanel data={signals?.behavioral_sentiment ?? null} />
               </div>
               <div className="flex-1 min-w-0">
                 <CryptoAllocationPanel
-                  data={(signals as any)?.crypto_allocation ?? null}
+                  data={signals?.crypto_allocation ?? null}
                   portfolioValue={portfolioValue}
                 />
               </div>
               <div className="flex-1 min-w-0">
-                <CalendarSeasonalityPanel data={(signals as any)?.calendar_seasonality ?? null} />
+                <CalendarSeasonalityPanel data={signals?.calendar_seasonality ?? null} />
               </div>
             </div>
           </div>
@@ -611,23 +611,23 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
             {/* Model & Ensemble Panels */}
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <EnsembleVotingPanel data={(signals as any)?.ensemble_voting ?? null} />
-              <AlternativeDataPanel data={(signals as any)?.alternative_data ?? null} />
+              <EnsembleVotingPanel data={signals?.ensemble_voting ?? null} />
+              <AlternativeDataPanel data={signals?.alternative_data ?? null} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <FactorRotationPanel data={(signals as any)?.factor_rotation ?? null} />
-              <StackingEnsemblePanel data={(signals as any)?.stacking_ensemble ?? null} />
+              <FactorRotationPanel data={signals?.factor_rotation ?? null} />
+              <StackingEnsemblePanel data={signals?.stacking_ensemble ?? null} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <ConvexityHarvestPanel data={(signals as any)?.convexity_harvest ?? null} />
-              <LLMSentimentPanel data={(signals as any)?.llm_sentiment ?? null} />
+              <ConvexityHarvestPanel data={signals?.convexity_harvest ?? null} />
+              <LLMSentimentPanel data={signals?.llm_sentiment ?? null} />
             </div>
             <div className="mt-4">
-              <SectorRotationPanel data={(signals as any)?.sector_rotation ?? null} />
+              <SectorRotationPanel data={signals?.sector_rotation ?? null} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <MLSignalsPanel data={(signals as any)?.ml_signals ?? null} />
-              <FactorRotationDashboardPanel data={(signals as any)?.factor_rotation_dashboard ?? null} />
+              <MLSignalsPanel data={signals?.ml_signals ?? null} />
+              <FactorRotationDashboardPanel data={signals?.factor_rotation_dashboard ?? null} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-3 gap-4">
               <GraduationChecklistPanel data={graduationData} />
@@ -668,7 +668,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             />
             <div className="mt-4">
               <CollarPanel
-                data={(signals as any)?.collar ?? null}
+                data={signals?.collar ?? null}
                 spyPrice={signals?.latest_prices?.SPY}
               />
             </div>
@@ -710,10 +710,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
             <div className="mt-4">
-              <KurtosisRegimePanel data={(signals as any)?.kurtosis_regime ?? null} />
+              <KurtosisRegimePanel data={signals?.kurtosis_regime ?? null} />
             </div>
             <div className="mt-4">
-              <VolatilityParityPanel data={(signals as any)?.volatility_parity ?? null} />
+              <VolatilityParityPanel data={signals?.volatility_parity ?? null} />
             </div>
           </div>
         </PanelErrorBoundary>

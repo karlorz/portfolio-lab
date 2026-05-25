@@ -83,6 +83,30 @@ export interface SignalsData {
   };
   vix_term_structure?: VIXTermStructureData;
   vix_overlay?: VIXOverlayState;
+  // Signal panel data — typed as Record<string, unknown> until each panel
+  // defines a proper interface; remove `as any` casts in LiveDashboard.tsx
+  behavioral_sentiment?: Record<string, unknown>;
+  crypto_allocation?: Record<string, unknown>;
+  calendar_seasonality?: Record<string, unknown>;
+  ensemble_voting?: Record<string, unknown>;
+  alternative_data?: Record<string, unknown>;
+  factor_rotation?: Record<string, unknown>;
+  stacking_ensemble?: Record<string, unknown>;
+  convexity_harvest?: Record<string, unknown>;
+  llm_sentiment?: Record<string, unknown>;
+  sector_rotation?: Record<string, unknown>;
+  factor_rotation_dashboard?: Record<string, unknown>;
+  collar?: Record<string, unknown>;
+  kurtosis_regime?: Record<string, unknown>;
+  volatility_parity?: Record<string, unknown>;
+  // Rebalance health
+  rebalance_health?: Record<string, unknown>;
+  // Risk decomposition
+  risk_decomposition?: Record<string, unknown>;
+  // SPC monitoring
+  spc_flags?: Record<string, unknown>;
+  // Staleness info
+  staleness?: Record<string, unknown>;
 }
 
 export interface Position {
