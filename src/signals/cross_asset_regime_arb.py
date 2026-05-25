@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.backtest.metrics import save_results_json
-from src.data.price_cache import get_prices
+from src.data.price_cache import get_prices, get_prices_df
 
 
 __all__ = ['MOMENTUM_LOOKBACK', 'VOL_LOOKBACK', 'MIN_HISTORY', 'DIVERGENCE_LOOKBACK', 'BULL_MOMENTUM_THRESHOLD', 'BEAR_MOMENTUM_THRESHOLD', 'STRONG_MOMENTUM_THRESHOLD', 'HIGH_VOL_THRESHOLD', 'AssetRegime', 'BondRegime', 'GoldRegime', 'DivergencePattern', 'AssetRegimeReading', 'BondRegimeReading', 'GoldRegimeReading', 'DivergenceReading', 'CrossAssetRegimeArbSignal', 'CrossAssetRegimeArbDetector', 'print_signal_report']
@@ -215,20 +215,26 @@ class CrossAssetRegimeArbDetector:
     def _load_prices(self) -> bool:
         """Load price data from public/data/prices.json (TTL-cached)."""
         try:
-            all_prices = get_prices()
-
             required = ["SPY", "TLT", "GLD"]
+            df = get_prices_df(symbols=required)
+            if df.empty:
+                return False
             for sym in required:
-                if sym not in all_prices:
+                if sym not in df.columns:
                     logger.warning("Required symbol %s not in price data", sym)
                     return False
 
-            self.prices = {sym: all_prices[sym] for sym in required}
+            # Convert DataFrame columns back to raw [{d, p}] format for
+            # compatibility with _get_returns() and _get_volatility()
+            self.prices = {}
+            for sym in required:
+                series = df[sym].dropna()
+                self.prices[sym] = [{"d": str(dt.date()), "p": float(v)} for dt, v in series.items()]
             price_keys = list(self.prices)
             spy_count = len(self.prices.get('SPY', []))
             logger.debug("Loaded prices for %s (%d data points)", price_keys, spy_count)
             return True
-        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        except (FileNotFoundError, ValueError, KeyError) as e:
             logger.warning("Failed to load prices: %s", e)
             return False
 

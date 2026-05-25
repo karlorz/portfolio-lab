@@ -59,7 +59,7 @@ export interface PerformanceMetrics {
 }
 
 export class BacktestEngine {
-  private priceData: Map<string, Map<string, number>> = new Map();
+  priceData: Map<string, Map<string, number>> = new Map();
   private dividendData: Map<string, Map<string, number>> = new Map();
 
   loadData(prices: PriceData[]) {
@@ -233,7 +233,7 @@ export class BacktestEngine {
     return Array.from(allDates).sort();
   }
 
-  private getPrice(symbol: string, date: string): number {
+  getPrice(symbol: string, date: string): number {
     const symbolData = this.priceData.get(symbol);
     if (!symbolData) return 0;
     const price = symbolData.get(date);

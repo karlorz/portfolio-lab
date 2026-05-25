@@ -1202,6 +1202,29 @@ class SignalIntegrator:
         
         return signals
 
+    def get_signal_snapshot(self, ticker: str = "SPY"):
+        """Return signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        composite = self.get_composite_signal(ticker)
+        return SignalSnapshot(
+            source="signal_integrator",
+            timestamp=composite.timestamp,
+            value=composite.composite_score,
+            confidence=composite.composite_confidence,
+            regime_fit=composite.detected_regime,
+            is_active=abs(composite.composite_score) > 0.05,
+            explanation=(
+                f"SignalIntegrator: composite={composite.composite_score:+.3f}, "
+                f"regime={composite.detected_regime}, "
+                f"agreement={composite.signal_agreement}"
+            ),
+            metadata={
+                "primary_drivers": composite.primary_drivers,
+                "signal_agreement": composite.signal_agreement,
+                "expected_accuracy": composite.expected_accuracy,
+            },
+        )
+
 
 # ---------------------------------------------------------------------------
 # CLI Interface

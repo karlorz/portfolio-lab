@@ -101,6 +101,38 @@ class MultiSpeedSignalAdapter:
                 signals[ticker] = signal
         return signals
 
+    def get_signal_snapshot(self, tickers: List[str] = None):
+        """Return aggregate signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        tickers = tickers or ["SPY", "GLD", "TLT"]
+        values = []
+        confidences = []
+        for ticker in tickers:
+            sig = self.generate_signal(ticker)
+            if sig:
+                values.append(sig.signal)
+                confidences.append(sig.confidence)
+        if not values:
+            return SignalSnapshot(
+                source="multi_speed",
+                timestamp=str(datetime.now()),
+                value=0.0,
+                confidence=0.0,
+                is_active=False,
+                explanation="MultiSpeed: no signals available",
+            )
+        avg_value = sum(values) / len(values)
+        avg_conf = sum(confidences) / len(confidences)
+        return SignalSnapshot(
+            source="multi_speed",
+            timestamp=str(datetime.now()),
+            value=float(avg_value),
+            confidence=float(avg_conf),
+            regime_fit="all",
+            is_active=any(v != 0.0 for v in values),
+            explanation=f"MultiSpeed: avg_signal={avg_value:+.3f}, assets={len(values)}",
+        )
+
 
 class RiskParitySignalAdapter:
     """
@@ -170,6 +202,38 @@ class RiskParitySignalAdapter:
             if signal:
                 signals[ticker] = signal
         return signals
+
+    def get_signal_snapshot(self, tickers: List[str] = None):
+        """Return aggregate signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        tickers = tickers or ["SPY", "GLD", "TLT"]
+        values = []
+        confidences = []
+        for ticker in tickers:
+            sig = self.generate_signal(ticker)
+            if sig:
+                values.append(sig.signal)
+                confidences.append(sig.confidence)
+        if not values:
+            return SignalSnapshot(
+                source="risk_parity",
+                timestamp=str(datetime.now()),
+                value=0.0,
+                confidence=0.0,
+                is_active=False,
+                explanation="RiskParity: no signals available",
+            )
+        avg_value = sum(values) / len(values)
+        avg_conf = sum(confidences) / len(confidences)
+        return SignalSnapshot(
+            source="risk_parity",
+            timestamp=str(datetime.now()),
+            value=float(avg_value),
+            confidence=float(avg_conf),
+            regime_fit="all",
+            is_active=any(v != 0.0 for v in values),
+            explanation=f"RiskParity: avg_signal={avg_value:+.3f}, assets={len(values)}",
+        )
 
 
 class NetworkMomentumSignalAdapter:
@@ -255,6 +319,38 @@ class NetworkMomentumSignalAdapter:
             if signal:
                 signals[ticker] = signal
         return signals
+
+    def get_signal_snapshot(self, tickers: List[str] = None):
+        """Return aggregate signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        tickers = tickers or ["SPY", "GLD", "TLT"]
+        values = []
+        confidences = []
+        for ticker in tickers:
+            sig = self.generate_signal(ticker)
+            if sig:
+                values.append(sig.signal)
+                confidences.append(sig.confidence)
+        if not values:
+            return SignalSnapshot(
+                source="network_momentum",
+                timestamp=str(datetime.now()),
+                value=0.0,
+                confidence=0.0,
+                is_active=False,
+                explanation="NetworkMomentum: no signals available",
+            )
+        avg_value = sum(values) / len(values)
+        avg_conf = sum(confidences) / len(confidences)
+        return SignalSnapshot(
+            source="network_momentum",
+            timestamp=str(datetime.now()),
+            value=float(avg_value),
+            confidence=float(avg_conf),
+            regime_fit="all",
+            is_active=any(v != 0.0 for v in values),
+            explanation=f"NetworkMomentum: avg_signal={avg_value:+.3f}, assets={len(values)}",
+        )
 
 
 def get_all_strategy_signals(

@@ -42,7 +42,7 @@ from datetime import datetime
 
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION, VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ
 from src.backtest.metrics import save_results_json
-from src.data.price_cache import get_prices
+from src.data.price_cache import get_prices, get_prices_df
 
 
 __all__ = ['LOOKBACK_DAYS', 'SKIP_DAYS', 'VOL_WINDOW', 'VOL_TARGET', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'ASSET_TICKERS', 'DEFAULT_BASE_ALLOCATION', 'TSMOMSignal', 'TSMOMPortfolio', 'TSMOMOverlay', 'TSMOMBacktester']
@@ -191,27 +191,16 @@ class TSMOMOverlay:
         if ticker in self.price_cache:
             return self.price_cache[ticker]
 
-        # Use shared TTL-cached file read
         try:
-            data = get_prices()
-
-            if ticker in data:
-                ticker_data = data[ticker]
-                # Format: [{'d': '2005-01-03', 'p': 81.38}, ...]
-                if isinstance(ticker_data, list) and len(ticker_data) > 0:
-                    dates = [item['d'] for item in ticker_data]
-                    prices = [item['p'] for item in ticker_data]
-                    df = pd.DataFrame({
-                        'date': pd.to_datetime(dates),
-                        'close': prices
-                    })
-                    df.set_index('date', inplace=True)
-                    self.price_cache[ticker] = df
-                    return df
-        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
+            df = get_prices_df(symbols=[ticker])
+            if df.empty or ticker not in df.columns:
+                return None
+            ticker_df = df[[ticker]].rename(columns={ticker: 'close'})
+            self.price_cache[ticker] = ticker_df
+            return ticker_df
+        except (OSError, ValueError, KeyError) as e:
             logger.warning("Error loading prices for %s: %s", ticker, e)
-
-        return None
+            return None
 
     def calculate_formation_return(
         self,

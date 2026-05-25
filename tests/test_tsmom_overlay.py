@@ -847,21 +847,21 @@ class TestLoadPricesEdgeCases:
     def test_malformed_json_returns_none(self, tmp_path):
         """Corrupted JSON file should return None."""
         overlay = TSMOMOverlay()
-        with patch('src.signals.tsmom_overlay.get_prices', side_effect=json.JSONDecodeError("test", "", 0)):
+        with patch('src.signals.tsmom_overlay.get_prices_df', side_effect=ValueError("test")):
             result = overlay.load_prices('SPY')
         assert result is None
 
     def test_empty_ticker_data_returns_none(self, tmp_path):
         """Empty list for a ticker should return None."""
         overlay = TSMOMOverlay()
-        with patch('src.signals.tsmom_overlay.get_prices', return_value={"SPY": []}):
+        with patch('src.signals.tsmom_overlay.get_prices_df', return_value=pd.DataFrame()):
             result = overlay.load_prices('SPY')
         assert result is None
 
     def test_non_list_data_returns_none(self, tmp_path):
         """Non-list data for a ticker should return None."""
         overlay = TSMOMOverlay()
-        with patch('src.signals.tsmom_overlay.get_prices', return_value={"SPY": {"not": "a list"}}):
+        with patch('src.signals.tsmom_overlay.get_prices_df', return_value=pd.DataFrame()):
             result = overlay.load_prices('SPY')
         assert result is None
 
@@ -875,7 +875,12 @@ class TestLoadPricesEdgeCases:
                 {"d": "2025-01-06", "p": 510.0},
             ]
         }
-        with patch('src.signals.tsmom_overlay.get_prices', return_value=data):
+        records = []
+        for sym, entries in data.items():
+            for e in entries:
+                records.append({"date": e["d"], "ticker": sym, "price": e["p"]})
+        mock_df = pd.DataFrame(records).pivot(index="date", columns="ticker", values="price")
+        with patch('src.signals.tsmom_overlay.get_prices_df', return_value=mock_df):
             df1 = overlay.load_prices('SPY')
             df2 = overlay.load_prices('SPY')  # cache hit
         assert df1 is df2
@@ -884,7 +889,7 @@ class TestLoadPricesEdgeCases:
     def test_ticker_not_in_file_returns_none(self, tmp_path):
         """Asking for a ticker not in the JSON file returns None."""
         overlay = TSMOMOverlay()
-        with patch('src.signals.tsmom_overlay.get_prices', return_value={"GLD": []}):
+        with patch('src.signals.tsmom_overlay.get_prices_df', return_value=pd.DataFrame()):
             result = overlay.load_prices('SPY')
         assert result is None
 
@@ -1185,7 +1190,7 @@ class TestTSMOMBacktesterInternals:
         """_load_all_prices returns None when no prices available."""
         bt = TSMOMBacktester(tickers=['SPY'])
         bt.overlay.price_cache = {}
-        with patch('src.signals.tsmom_overlay.get_prices', return_value={}):
+        with patch('src.signals.tsmom_overlay.get_prices_df', return_value=pd.DataFrame()):
             result = bt._load_all_prices()
         assert result is None
 

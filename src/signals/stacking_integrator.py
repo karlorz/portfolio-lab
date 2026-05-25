@@ -484,6 +484,43 @@ class StackingIntegrator:
             logger.error("Failed to export predictions: %s", e)
             return False
 
+    def get_signal_snapshot(self):
+        """Return signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        if self.prediction_history:
+            pred = self.prediction_history[-1]
+            direction_map = {"bullish": 1.0, "bearish": -1.0, "neutral": 0.0}
+            value = direction_map.get(pred.direction, 0.0)
+            return SignalSnapshot(
+                source="stacking_ensemble",
+                timestamp=pred.timestamp.isoformat() if hasattr(pred.timestamp, "isoformat") else str(pred.timestamp),
+                value=value,
+                confidence=pred.confidence,
+                regime_fit="all",
+                is_active=pred.confidence >= 0.3,
+                explanation=(
+                    f"StackingEnsemble: {pred.direction} "
+                    f"(conf={pred.confidence:.3f}, fallback={pred.fallback_used})"
+                ),
+                metadata={
+                    "direction": pred.direction,
+                    "probability_bullish": pred.probability_bullish,
+                    "probability_bearish": pred.probability_bearish,
+                    "probability_neutral": pred.probability_neutral,
+                    "fallback_used": pred.fallback_used,
+                    "model_version": pred.model_version,
+                },
+            )
+        return SignalSnapshot(
+            source="stacking_ensemble",
+            timestamp=str(datetime.now()),
+            value=0.0,
+            confidence=0.0,
+            regime_fit="all",
+            is_active=False,
+            explanation="StackingEnsemble: no predictions available",
+        )
+
 
 # Convenience function for direct use
 def get_stacking_prediction(

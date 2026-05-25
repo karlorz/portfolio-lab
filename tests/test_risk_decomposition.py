@@ -11,6 +11,7 @@ Covers:
 
 import json
 import numpy as np
+import pandas as pd
 import pytest
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -1235,44 +1236,53 @@ class TestLoadPricesFromPipeline:
     """Tests for _load_prices_from_pipeline with mocked get_prices."""
 
     def test_load_from_public_data(self, monkeypatch):
-        """Load from get_prices data."""
+        """Load from get_prices_df data."""
         import src.data.price_cache as pc_mod
 
         data = {"SPY": [{"d": "2024-01-01", "p": 100.0}, {"d": "2024-01-02", "p": 101.0}]}
-        monkeypatch.setattr(pc_mod, "get_prices", lambda: data)
+        records = [{"date": e["d"], "ticker": sym, "price": e["p"]} for sym, entries in data.items() for e in entries]
+        mock_df = pd.DataFrame(records)
+        mock_df["date"] = pd.to_datetime(mock_df["date"])
+        mock_df = mock_df.pivot(index="date", columns="ticker", values="price")
+        monkeypatch.setattr(pc_mod, "get_prices_df", lambda symbols=None: mock_df)
         from src.monitor.risk_decomposition import _load_prices_from_pipeline
         result = _load_prices_from_pipeline()
         assert "SPY" in result
         assert len(result["SPY"]) == 2
 
     def test_load_from_data_fallback(self, monkeypatch):
-        """Fallback loads from get_prices data."""
+        """Fallback loads from get_prices_df data."""
         import src.data.price_cache as pc_mod
 
         data = {"GLD": [{"d": "2024-01-01", "p": 180.0}]}
-        monkeypatch.setattr(pc_mod, "get_prices", lambda: data)
+        records = [{"date": e["d"], "ticker": sym, "price": e["p"]} for sym, entries in data.items() for e in entries]
+        mock_df = pd.DataFrame(records)
+        mock_df["date"] = pd.to_datetime(mock_df["date"])
+        mock_df = mock_df.pivot(index="date", columns="ticker", values="price")
+        monkeypatch.setattr(pc_mod, "get_prices_df", lambda symbols=None: mock_df)
         from src.monitor.risk_decomposition import _load_prices_from_pipeline
         result = _load_prices_from_pipeline()
         assert "GLD" in result
 
     def test_load_neither_exists(self, monkeypatch):
-        """When get_prices raises FileNotFoundError, empty dict returned."""
+        """When get_prices_df raises FileNotFoundError, empty dict returned."""
         import src.data.price_cache as pc_mod
 
-        def _raise_fnfe():
-            raise FileNotFoundError("no prices file")
-
-        monkeypatch.setattr(pc_mod, "get_prices", _raise_fnfe)
+        monkeypatch.setattr(pc_mod, "get_prices_df", lambda symbols=None: (_ for _ in ()).throw(FileNotFoundError("no prices file")))
         from src.monitor.risk_decomposition import _load_prices_from_pipeline
         result = _load_prices_from_pipeline()
         assert result == {}
 
     def test_load_empty_symbol_data(self, monkeypatch):
-        """Symbol with empty entries list is skipped."""
+        """Symbol with empty entries list is not present in pivoted columns."""
         import src.data.price_cache as pc_mod
 
         data = {"SPY": [], "GLD": [{"d": "2024-01-01", "p": 180.0}]}
-        monkeypatch.setattr(pc_mod, "get_prices", lambda: data)
+        records = [{"date": e["d"], "ticker": sym, "price": e["p"]} for sym, entries in data.items() for e in entries]
+        mock_df = pd.DataFrame(records)
+        mock_df["date"] = pd.to_datetime(mock_df["date"])
+        mock_df = mock_df.pivot(index="date", columns="ticker", values="price")
+        monkeypatch.setattr(pc_mod, "get_prices_df", lambda symbols=None: mock_df)
         from src.monitor.risk_decomposition import _load_prices_from_pipeline
         result = _load_prices_from_pipeline()
         assert "SPY" not in result
@@ -1289,7 +1299,11 @@ class TestLoadPricesFromPipeline:
                 {"d": "2024-01-02", "p": 101.0},
             ]
         }
-        monkeypatch.setattr(pc_mod, "get_prices", lambda: data)
+        records = [{"date": e["d"], "ticker": sym, "price": e["p"]} for sym, entries in data.items() for e in entries]
+        mock_df = pd.DataFrame(records)
+        mock_df["date"] = pd.to_datetime(mock_df["date"])
+        mock_df = mock_df.pivot(index="date", columns="ticker", values="price")
+        monkeypatch.setattr(pc_mod, "get_prices_df", lambda symbols=None: mock_df)
         from src.monitor.risk_decomposition import _load_prices_from_pipeline
         result = _load_prices_from_pipeline()
         assert np.allclose(result["SPY"], [100.0, 101.0, 102.0])

@@ -39,7 +39,7 @@ from enum import Enum
 import logging
 
 from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect
-from src.data.price_cache import get_prices
+from src.data.price_cache import get_prices, get_prices_df
 from src.utils import safe_get
 
 
@@ -470,25 +470,12 @@ class EnsembleVoter:
     def _load_price_data(self) -> Optional[pd.DataFrame]:
         """Load price data from JSON (TTL-cached)."""
         try:
-            data = get_prices()
-        except (FileNotFoundError, json.JSONDecodeError):
-            return None
-        
-        frames = []
-        for symbol, pdata in data.items():
-            if isinstance(pdata, list) and len(pdata) > 0 and 'd' in pdata[0]:
-                df = pd.DataFrame(pdata)
-                df['date'] = pd.to_datetime(df['d'])
-                df.set_index('date', inplace=True)
-                df.rename(columns={'p': symbol}, inplace=True)
-                frames.append(df[[symbol]])
-        
-        if frames:
-            df = pd.concat(frames, axis=1)
-            df.sort_index(inplace=True)
+            df = get_prices_df()
+            if df.empty:
+                return None
             return df
-        
-        return None
+        except (FileNotFoundError, ValueError):
+            return None
     
     def collect_signals(self, date: Optional[str] = None, regime: Optional[Regime] = None) -> Dict[SignalSource, SignalReading]:
         """

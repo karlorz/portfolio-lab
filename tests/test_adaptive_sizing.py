@@ -1279,16 +1279,18 @@ class TestGetSeries:
     """_get_series edge cases."""
 
     def test_no_prices_returns_none(self, tmp_path):
-        """When prices dict is explicitly empty and PRICES_JSON unavailable, returns None."""
+        """When prices DataFrame is explicitly empty, returns None."""
+        import pandas as pd
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         sizer = AdaptiveSizer(data_dir=data_dir)
-        sizer.prices = {}  # Empty dict, not None — triggers the symbol-not-found path
+        sizer._prices_df = pd.DataFrame()  # Empty DataFrame — triggers the symbol-not-found path
         assert sizer._get_series("SPY") is None
 
     def test_missing_symbol_returns_none(self, tmp_path):
+        import pandas as pd
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         sizer = AdaptiveSizer(data_dir=data_dir)
-        sizer.prices = {"QQQ": [{"d": "2024-01-01", "p": 400.0}]}
+        sizer._prices_df = pd.DataFrame({"QQQ": [400.0]})
         assert sizer._get_series("SPY") is None

@@ -162,7 +162,7 @@ function runTacticalBacktest(
 function getPrice(engine: BacktestEngine, symbol: string, date: string): number {
   // Access the price data from the engine via a simple approach
   // We'll just use the engine's public methods indirectly
-  const data = (engine as any).priceData as Map<string, Map<string, number>>;
+  const data = engine.priceData as Map<string, Map<string, number>>;
   const symbolData = data.get(symbol);
   if (!symbolData) return 0;
   const price = symbolData.get(date);

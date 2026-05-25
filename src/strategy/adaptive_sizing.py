@@ -30,8 +30,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+import pandas as pd
+
 from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, sqlite_connect
-from src.data.price_cache import get_prices
+from src.data.price_cache import get_prices, get_prices_df
 from src.backtest.metrics import save_results_json
 
 import numpy as np
@@ -117,7 +119,7 @@ class AdaptiveSizer:
     def __init__(self, data_dir: Optional[Path] = None):
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.state_path = self.data_dir / "adaptive_sizing_state.json"
-        self.prices: Optional[Dict] = None
+        self._prices_df: Optional[pd.DataFrame] = None
         
         # State
         self.last_allocation: Dict[str, float] = dict(BASE_ALLOCATION)
@@ -126,22 +128,22 @@ class AdaptiveSizer:
 
     # ── Factor Loading ───────────────────────────────────────────────────────
 
-    def _load_prices(self) -> Optional[Dict]:
-        """Load price data from JSON (TTL-cached)."""
+    def _load_prices(self) -> Optional[pd.DataFrame]:
+        """Load price data from JSON (TTL-cached DataFrame)."""
         try:
-            self.prices = get_prices()
-            return self.prices
-        except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError) as e:
+            self._prices_df = get_prices_df()
+            return self._prices_df
+        except (FileNotFoundError, ValueError) as e:
             logger.error("Failed to load prices: %s", e)
             return None
 
     def _get_series(self, symbol: str) -> Optional[np.ndarray]:
         """Get price series as numpy array."""
-        if self.prices is None:
+        if not hasattr(self, '_prices_df') or self._prices_df is None:
             self._load_prices()
-        if self.prices is None or symbol not in self.prices:
+        if self._prices_df is None or symbol not in self._prices_df.columns:
             return None
-        return np.array([p["p"] for p in self.prices[symbol]])
+        return self._prices_df[symbol].dropna().values
 
     def _load_regime_state(self) -> Tuple[str, float]:
         """Load current regime — uses state file when available, VIX-based detection as fallback.

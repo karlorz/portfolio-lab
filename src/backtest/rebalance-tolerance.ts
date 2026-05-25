@@ -238,9 +238,9 @@ async function main() {
     for (let i = 0; i < holdings.length; i++) {
       const v = values[i];
       if (v === 0) continue;
-      const spyWt = (holdings[i]['SPY'] || 0) * (engine as any).getPrice('SPY', result.dates[i]) / v;
-      const gldWt = (holdings[i]['GLD'] || 0) * (engine as any).getPrice('GLD', result.dates[i]) / v;
-      const tltWt = (holdings[i]['TLT'] || 0) * (engine as any).getPrice('TLT', result.dates[i]) / v;
+      const spyWt = (holdings[i]['SPY'] || 0) * engine.getPrice('SPY', result.dates[i]) / v;
+      const gldWt = (holdings[i]['GLD'] || 0) * engine.getPrice('GLD', result.dates[i]) / v;
+      const tltWt = (holdings[i]['TLT'] || 0) * engine.getPrice('TLT', result.dates[i]) / v;
       maxSpyDrift = Math.max(maxSpyDrift, Math.abs(spyWt - 0.46));
       maxGldDrift = Math.max(maxGldDrift, Math.abs(gldWt - 0.38));
       maxTltDrift = Math.max(maxTltDrift, Math.abs(tltWt - 0.16));

@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PRICES_JSON
 from src.backtest.metrics import save_results_json
-from src.data.price_cache import get_prices
+from src.data.price_cache import get_prices, get_prices_df
 
 
 __all__ = ['ZSCORE_ENTRY', 'ZSCORE_EXIT', 'LOOKBACK', 'MIN_HISTORY', 'PairReading', 'CrossAssetRVSignal', 'CrossAssetRVScanner', 'print_scan']
@@ -138,43 +138,25 @@ class CrossAssetRVScanner:
     def _load_price_data(self) -> bool:
         """Load price data from JSON file (TTL-cached)."""
         try:
-            raw = get_prices()
-
-            # Build date-indexed arrays for each symbol
-            symbol_data: Dict[str, Dict[str, float]] = {}
-            all_dates: set = set()
-
-            for symbol, entries in raw.items():
-                if isinstance(entries, list) and len(entries) > 0 and isinstance(entries[0], dict):
-                    for entry in entries:
-                        d = entry.get("d", "")
-                        p = entry.get("p", None)
-                        if d and p is not None:
-                            if symbol not in symbol_data:
-                                symbol_data[symbol] = {}
-                            symbol_data[symbol][d] = float(p)
-                            all_dates.add(d)
-
-            if not all_dates:
-                return False
-
-            sorted_dates = sorted(all_dates)
-            self.dates = sorted_dates
-
-            # Build arrays for each pair symbol
+            # Collect all symbols needed by cross-asset pairs
             needed_symbols = set()
             for sym_a, sym_b, _ in CROSS_ASSET_PAIRS.values():
                 needed_symbols.add(sym_a)
                 needed_symbols.add(sym_b)
 
+            df = get_prices_df(symbols=list(needed_symbols))
+
+            if df.empty:
+                return False
+
+            self.dates = [str(d.date()) for d in df.index]
+
             for sym in needed_symbols:
-                if sym in symbol_data:
-                    self.prices[sym] = np.array([
-                        symbol_data[sym].get(d, np.nan) for d in sorted_dates
-                    ])
+                if sym in df.columns:
+                    self.prices[sym] = df[sym].values
                 else:
                     logger.warning("Symbol %s not found in price data", sym)
-                    self.prices[sym] = np.full(len(sorted_dates), np.nan)
+                    self.prices[sym] = np.full(len(df), np.nan)
 
             return True
 

@@ -10,7 +10,7 @@ export async function fetchYahooData(symbol: string, start: string, end: string)
   });
   if (!res.ok) throw new Error(`Failed to fetch ${symbol}: ${res.status}`);
 
-  const data = await res.json() as any;
+  const data = await res.json() as { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ close?: (number | null)[] }>; adjclose?: Array<{ adjclose?: (number | null)[] }> } }> } };
   const result = data.chart?.result?.[0];
   if (!result) throw new Error(`No data for ${symbol}`);
 

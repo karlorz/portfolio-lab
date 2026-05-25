@@ -190,24 +190,17 @@ def _load_prices_from_pipeline() -> Dict[str, np.ndarray]:
     Returns:
         dict mapping symbol -> 1D numpy array of daily close prices (oldest first)
     """
-    from src.data.price_cache import get_prices
+    from src.data.price_cache import get_prices_df
 
     try:
-        raw = get_prices()
+        df = get_prices_df()
     except FileNotFoundError:
         logger.warning("Prices file not found")
         return {}
 
     result: Dict[str, np.ndarray] = {}
-    for symbol, entries in raw.items():
-        if not entries:
-            continue
-        # Sort by date ascending (oldest first)
-        dates = [e["d"] for e in entries]
-        closes = np.array([e["p"] for e in entries], dtype=np.float64)
-        # Sort by date to ensure chronological order
-        order = np.argsort(dates)
-        result[symbol] = closes[order]
+    for symbol in df.columns:
+        result[symbol] = df[symbol].dropna().values
 
     return result
 

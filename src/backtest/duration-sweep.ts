@@ -225,7 +225,7 @@ async function loadPrices(): Promise<PriceData[]> {
   
   // historical.json format: { symbol: [{ date, open, high, low, close, volume }, ...] }
   for (const [symbol, entries] of Object.entries(prices)) {
-    const data = entries as any[];
+    const data = entries as Array<{ date: string; close: number }>;
     for (const entry of data) {
       if (entry.date && entry.close) {
         priceData.push({

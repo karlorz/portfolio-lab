@@ -969,27 +969,24 @@ class TestDataLoadingFullCoverage:
 
     def test_load_empty_json_file(self, tmp_path):
         """Valid JSON with empty dict should return False (no dates)."""
-        with patch('src.signals.cross_asset_relative_value.get_prices', return_value={}):
+        import pandas as pd
+        with patch('src.signals.cross_asset_relative_value.get_prices_df', return_value=pd.DataFrame()):
             scanner = CrossAssetRVScanner(data_dir=tmp_path)
             assert scanner._load_price_data() is False
 
     def test_load_empty_symbol_arrays(self, tmp_path):
         """Symbols with empty list entries should produce no dates."""
-        prices = {"SPY": [], "QQQ": [], "GLD": []}
-        with patch('src.signals.cross_asset_relative_value.get_prices', return_value=prices):
+        import pandas as pd
+        with patch('src.signals.cross_asset_relative_value.get_prices_df', return_value=pd.DataFrame()):
             scanner = CrossAssetRVScanner(data_dir=tmp_path)
             assert scanner._load_price_data() is False
 
     def test_load_missing_keys_skipped(self, tmp_path):
-        """Entries missing 'd' or 'p' keys should be silently skipped."""
-        prices = {
-            "SPY": [
-                {"d": "2026-01-01", "p": 500.0},
-                {"x": "2026-01-02", "y": 501.0},  # missing d and p
-                {"d": "2026-01-03", "p": 502.0},
-            ]
-        }
-        with patch('src.signals.cross_asset_relative_value.get_prices', return_value=prices):
+        """Entries with valid data should load; NaN handling is done by DataFrame."""
+        import pandas as pd
+        dates = pd.to_datetime(["2026-01-01", "2026-01-03"])
+        mock_df = pd.DataFrame({"SPY": [500.0, 502.0]}, index=dates)
+        with patch('src.signals.cross_asset_relative_value.get_prices_df', return_value=mock_df):
             scanner = CrossAssetRVScanner(data_dir=tmp_path)
             result = scanner._load_price_data()
         assert result is True
@@ -997,27 +994,20 @@ class TestDataLoadingFullCoverage:
         assert len(scanner.prices["SPY"]) == 2  # 2 valid entries
 
     def test_load_partial_nan_within_symbol(self, tmp_path):
-        """Valid entries should be loaded; entries with null prices should be skipped."""
+        """Valid entries should be loaded; entries with null prices should be NaN in DataFrame."""
+        import pandas as pd
         data_dir = tmp_path / "null_price"
         data_dir.mkdir()
-        prices = {
-            "SPY": [
-                {"d": "2026-01-01", "p": 500.0},
-                {"d": "2026-01-02", "p": None},
-                {"d": "2026-01-03", "p": 502.0},
-            ],
-            "GLD": [
-                {"d": "2026-01-01", "p": 180.0},
-                {"d": "2026-01-02", "p": 181.0},
-                {"d": "2026-01-03", "p": 182.0},
-            ],
-        }
-        with open(data_dir / "prices.json", "w") as f:
-            json.dump(prices, f)
-        scanner = CrossAssetRVScanner(data_dir=data_dir)
-        result = scanner._load_price_data()
+        dates = pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"])
+        mock_df = pd.DataFrame({
+            "SPY": [500.0, float('nan'), 502.0],
+            "GLD": [180.0, 181.0, 182.0],
+        }, index=dates)
+        with patch('src.signals.cross_asset_relative_value.get_prices_df', return_value=mock_df):
+            scanner = CrossAssetRVScanner(data_dir=data_dir)
+            result = scanner._load_price_data()
         assert result is True
-        # Only 2 dates actually populated for SPY (jan 1 and 3)
+        # Only 2 dates actually populated for SPY (jan 1 and 3) after dropna
         assert len(scanner.dates) >= 2
 
     def test_load_price_data_file_not_found(self, tmp_path):
@@ -1028,11 +1018,10 @@ class TestDataLoadingFullCoverage:
 
     def test_load_single_valid_date(self, tmp_path):
         """Single date entry should load successfully."""
-        prices = {
-            "SPY": [{"d": "2026-01-01", "p": 500.0}],
-            "GLD": [{"d": "2026-01-01", "p": 180.0}],
-        }
-        with patch('src.signals.cross_asset_relative_value.get_prices', return_value=prices):
+        import pandas as pd
+        dates = pd.to_datetime(["2026-01-01"])
+        mock_df = pd.DataFrame({"SPY": [500.0], "GLD": [180.0]}, index=dates)
+        with patch('src.signals.cross_asset_relative_value.get_prices_df', return_value=mock_df):
             scanner = CrossAssetRVScanner(data_dir=tmp_path)
             assert scanner._load_price_data() is True
         assert len(scanner.dates) == 1

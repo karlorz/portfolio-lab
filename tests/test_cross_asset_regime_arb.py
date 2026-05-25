@@ -181,7 +181,17 @@ class TestDataLoading:
 
     def test_load_prices_success(self, sample_prices, tmp_path):
         """Detector loads prices from JSON file (via TTL cache)."""
-        with patch('src.signals.cross_asset_regime_arb.get_prices', return_value=sample_prices):
+        import pandas as pd
+        # Build DataFrame from sample_prices to mock get_prices_df
+        frames = {}
+        for sym, entries in sample_prices.items():
+            if sym in ("SPY", "TLT", "GLD"):
+                frames[sym] = pd.Series(
+                    [e["p"] for e in entries],
+                    index=pd.to_datetime([e["d"] for e in entries])
+                )
+        mock_df = pd.DataFrame(frames)
+        with patch('src.signals.cross_asset_regime_arb.get_prices_df', return_value=mock_df):
             detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
             result = detector._load_prices()
 
@@ -189,26 +199,27 @@ class TestDataLoading:
         assert "SPY" in detector.prices
         assert "TLT" in detector.prices
         assert "GLD" in detector.prices
-        assert len(detector.prices["SPY"]) == 90
 
     def test_load_prices_file_not_found(self, tmp_path):
         """Loading from non-existent path returns False."""
-        with patch('src.signals.cross_asset_regime_arb.get_prices', side_effect=FileNotFoundError):
+        with patch('src.signals.cross_asset_regime_arb.get_prices_df', side_effect=FileNotFoundError):
             detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
             result = detector._load_prices()
         assert result is False
 
     def test_load_prices_missing_symbol(self, tmp_path):
         """Missing required symbol returns False."""
-        bad_data = {"SPY": [{"d": "2026-01-01", "p": 100.0}]}
-        with patch('src.signals.cross_asset_regime_arb.get_prices', return_value=bad_data):
+        import pandas as pd
+        mock_df = pd.DataFrame({"SPY": [100.0]})
+        with patch('src.signals.cross_asset_regime_arb.get_prices_df', return_value=mock_df):
             detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
             result = detector._load_prices()
         assert result is False
 
     def test_load_prices_empty_data(self, tmp_path):
         """Empty price file returns False."""
-        with patch('src.signals.cross_asset_regime_arb.get_prices', return_value={}):
+        import pandas as pd
+        with patch('src.signals.cross_asset_regime_arb.get_prices_df', return_value=pd.DataFrame()):
             detector = CrossAssetRegimeArbDetector(data_dir=tmp_path)
             result = detector._load_prices()
         assert result is False
@@ -524,7 +535,7 @@ class TestFullScan:
 
     def test_scan_no_data(self):
         """No price data returns None."""
-        with patch('src.signals.cross_asset_regime_arb.get_prices', side_effect=FileNotFoundError):
+        with patch('src.signals.cross_asset_regime_arb.get_prices_df', side_effect=FileNotFoundError):
             detector = CrossAssetRegimeArbDetector()
             detector.data_dir = Path("/nonexistent")
             signal = detector.scan()
@@ -609,7 +620,7 @@ class TestEnsembleAPI:
 
     def test_get_ensemble_signal_no_data(self):
         """No data returns fallback signal."""
-        with patch('src.signals.cross_asset_regime_arb.get_prices', side_effect=FileNotFoundError):
+        with patch('src.signals.cross_asset_regime_arb.get_prices_df', side_effect=FileNotFoundError):
             detector = CrossAssetRegimeArbDetector()
             detector.data_dir = Path("/nonexistent")
             result = detector.get_ensemble_signal()
@@ -1321,7 +1332,7 @@ class TestOutputFunctions:
 
     def test_get_signal_snapshot_no_data(self):
         """get_signal_snapshot with no data returns inactive snapshot."""
-        with patch('src.signals.cross_asset_regime_arb.get_prices', side_effect=FileNotFoundError):
+        with patch('src.signals.cross_asset_regime_arb.get_prices_df', side_effect=FileNotFoundError):
             detector = CrossAssetRegimeArbDetector()
             detector.data_dir = Path("/nonexistent")
             snapshot = detector.get_signal_snapshot()

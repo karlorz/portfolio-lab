@@ -84,7 +84,7 @@ export interface SignalsData {
   vix_term_structure?: VIXTermStructureData;
   vix_overlay?: VIXOverlayState;
   // Signal panel data — typed as Record<string, unknown> until each panel
-  // defines a proper interface; remove `as any` casts in LiveDashboard.tsx
+  // defines a proper interface
   behavioral_sentiment?: Record<string, unknown>;
   crypto_allocation?: Record<string, unknown>;
   calendar_seasonality?: Record<string, unknown>;

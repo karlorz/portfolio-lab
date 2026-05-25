@@ -35,7 +35,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_connect
-from src.data.price_cache import get_prices
+from src.data.price_cache import get_prices, get_prices_df
 from src.signals.calendar_seasonality import get_calendar_modifier
 from src.signals.bond_duration_signal import generate_bond_duration_signal
 from src.signals.collar_signal import generate_collar_signal
@@ -582,28 +582,9 @@ class UnifiedOrchestrator:
 
         try:
             # Load prices for covariance estimation (TTL-cached)
-            import pandas as pd
-            raw = get_prices()
-            prices = {}
-            for sym in ("SPY", "GLD", "TLT"):
-                key = sym.lower() if sym.lower() in raw else sym
-                if key not in raw:
-                    continue
-                val = raw[key]
-                if isinstance(val, list):
-                    # Compact format: [{d: "...", p: ...}, ...]
-                    prices[sym] = [pt["p"] for pt in val if "p" in pt]
-                elif isinstance(val, dict) and "p" in val:
-                    prices[sym] = val["p"]
-
-            if len(prices) < 3:
+            df = get_prices_df(symbols=["SPY", "GLD", "TLT"])
+            if df.empty or len(df.columns) < 3:
                 return None
-
-            # Build DataFrame
-            min_len = min(len(v) for v in prices.values())
-            df = pd.DataFrame({
-                sym: prices[sym][-min_len:] for sym in ("SPY", "GLD", "TLT")
-            })
 
             result = compute_bl_weights(
                 prices_df=df,

@@ -349,6 +349,19 @@ class StackingFeatureEngine:
         
         return explanations
 
+    def get_signal_snapshot(self):
+        """Return signal as canonical SignalSnapshot for typed pipeline consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        return SignalSnapshot(
+            source="stacking_feature_engine",
+            timestamp=str(datetime.now()),
+            value=0.0,
+            confidence=0.0,
+            regime_fit="all",
+            is_active=False,
+            explanation="StackingFeatureEngine: feature provider only, no direct signal output",
+        )
+
 
 class StackingAccuracyTracker:
     """
