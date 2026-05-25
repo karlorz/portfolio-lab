@@ -434,8 +434,12 @@ class RegretWeightedSelector:
         try:
             perf_data = []
             if perf_path.exists():
-                with open(perf_path) as f:
-                    perf_data = json.load(f)
+                try:
+                    with open(perf_path) as f:
+                        perf_data = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning("Corrupted regret performance file %s, resetting (regret-weighted performance)", perf_path)
+                    perf_data = []
 
             # Keep last 100 entries
             perf_data.append({
@@ -450,7 +454,7 @@ class RegretWeightedSelector:
                 perf_data = perf_data[-100:]
 
             save_results_json(perf_data, output_path=str(perf_path))
-        except (OSError, json.JSONDecodeError) as e:
+        except (OSError, KeyError, ValueError) as e:
             logger.warning("Failed to track regret-weighted performance: %s", e)
 
     # ------------------------------------------------------------------
