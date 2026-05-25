@@ -461,11 +461,28 @@ class VPINSignalAdapter:
             }
         }
     
+    def get_signal_snapshot(self, tickers=None, date=None):
+        """Generate a SignalSnapshot for ensemble voter consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        signal = self.vpin_engine.get_signal('SPY')
+        if signal is None:
+            return SignalSnapshot(
+                source="vpin_bvc",
+                timestamp=str(datetime.now()),
+                value=0.0,
+                confidence=0.0,
+                regime_fit="all",
+                is_active=False,
+                explanation="VPIN: insufficient data",
+            )
+        return signal.to_signal_snapshot()
+
     def get_rebalance_timing_signal(self) -> Dict[str, Any]:
         """Get signal specifically for rebalancing timing optimization"""
         optimizer = RebalanceOptimizer(self.vpin_engine)
         execute, reason, savings = optimizer.should_execute_now('SPY')
-        
+
         return {
             'source': 'vpin_rebalance',
             'execute_now': execute,

@@ -453,6 +453,11 @@ class VIXTermStructureSignalGenerator:
             reason=f"VIX={vix:.2f}, Slope={components['slope']:.3f}, Regime={regime.value}"
         )
     
+    def get_signal_snapshot(self, tickers=None, date=None):
+        """Generate a SignalSnapshot for ensemble voter consumption."""
+        signal = self.generate_signal()
+        return signal.to_signal_snapshot()
+
     def save_signal(self, signal: VIXTermStructureSignal):
         """Save signal to disk."""
         self.OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)

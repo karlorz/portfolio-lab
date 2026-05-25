@@ -362,6 +362,11 @@ class CryptoMomentumSignalGenerator:
             reason=reason,
         )
 
+    def get_signal_snapshot(self, tickers=None, date=None):
+        """Generate a SignalSnapshot for ensemble voter consumption."""
+        signal = self.generate_signal()
+        return signal.to_signal_snapshot()
+
     def save_signal(self, signal: CryptoCompositeSignal):
         save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
 

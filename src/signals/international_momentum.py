@@ -409,6 +409,24 @@ class InternationalMomentumGenerator:
                 correlation_override=False
             )
     
+    def get_signal_snapshot(self):
+        """Generate a SignalSnapshot for ensemble voter consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        signal = self.get_current_signal()
+        if signal is not None:
+            return signal.to_signal_snapshot()
+
+        return SignalSnapshot(
+            source="international_momentum",
+            timestamp=str(datetime.now()),
+            value=0.0,
+            confidence=0.0,
+            regime_fit="all",
+            is_active=False,
+            explanation="International momentum: no signal data available",
+        )
+
     def get_signal_statistics(self, days: int = 90) -> Dict:
         """Calculate signal statistics over period"""
         history = self.get_signal_history(days)

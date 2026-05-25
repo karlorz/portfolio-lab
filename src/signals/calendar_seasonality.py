@@ -618,6 +618,11 @@ class CalendarSeasonalitySignalGenerator:
             confidence=round(confidence, 1),
         )
 
+    def get_signal_snapshot(self, tickers=None, date=None):
+        """Generate a SignalSnapshot for ensemble voter consumption."""
+        signal = self.generate_signal()
+        return signal.to_signal_snapshot()
+
     def save_signal(self, signal: CalendarSeasonalitySignal):
         save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
 

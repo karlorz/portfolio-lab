@@ -465,6 +465,51 @@ class FedPolicyOverlay:
         
         return self.current_regime
     
+    def get_signal_snapshot(self, tickers=None, date=None):
+        """Generate a SignalSnapshot for ensemble voter consumption."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        # Determine regime and map to signal value
+        if self.current_regime is None:
+            self.detect_regime()
+
+        if self.current_regime is None:
+            return SignalSnapshot(
+                source="fed_policy",
+                timestamp=str(datetime.now()),
+                value=0.0,
+                confidence=0.0,
+                regime_fit="all",
+                is_active=False,
+                explanation="Fed Policy: unable to detect regime",
+            )
+
+        regime_map = {"EASING": 0.5, "NEUTRAL": 0.0, "UNCERTAIN": -0.2, "TIGHTENING": -0.5}
+        value = regime_map.get(self.current_regime.regime, 0.0)
+        shifts = self.current_regime.get_allocation_shift()
+
+        return SignalSnapshot(
+            source="fed_policy",
+            timestamp=self.current_regime.timestamp,
+            value=value,
+            confidence=self.current_regime.confidence,
+            asset_signals=shifts,
+            regime_fit="all",
+            is_active=self.current_regime.confidence > 0.3,
+            explanation=f"Fed Policy: {self.current_regime.regime}, "
+                        f"fed_funds={self.current_regime.fed_funds_rate:.2f}%, "
+                        f"inflation={self.current_regime.inflation_yoy:.2f}%",
+            metadata={
+                "regime": self.current_regime.regime,
+                "fed_funds_rate": self.current_regime.fed_funds_rate,
+                "inflation_yoy": self.current_regime.inflation_yoy,
+                "real_rate_10y": self.current_regime.real_rate_10y,
+                "real_rate_short": self.current_regime.real_rate_short,
+                "yield_curve_10y2y": self.current_regime.yield_curve_10y2y,
+                "regime_factors": self.current_regime.regime_factors,
+            },
+        )
+
     def get_allocation_recommendation(
         self,
         base_allocation: Dict[str, float] = None

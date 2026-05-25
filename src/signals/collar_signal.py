@@ -461,6 +461,11 @@ class CollarSignalGenerator:
                 logger.warning("Failed to parse VIX term structure file: %s", e)
         return 16.0
 
+    def get_signal_snapshot(self, tickers=None, date=None):
+        """Generate a SignalSnapshot for ensemble voter consumption."""
+        signal = self.generate_signal()
+        return signal.to_signal_snapshot()
+
     def save_signal(self, signal: CollarSignal):
         self.OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
         save_results_json(signal.to_dict(), output_path=str(self.OUTPUT_PATH))
