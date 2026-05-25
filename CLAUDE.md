@@ -7,7 +7,7 @@
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
 | - Test count: **12369 safe** (12369 Python + 214 TypeScript, 27 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
-|- **Signal snapshot coverage: 15/15** — all signal modules have get_signal_snapshot() for typed pipeline
+|- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
 |- **Overlay data pipeline**: overlay_dashboard data merged into signals.json — 9 panels now render with real data
@@ -30,14 +30,14 @@
 |- **Evaluator print→logging**: check_graduation_criteria, kill switch, and trigger creation use logger instead of print() for production observability
 |- **WIKI_DIR/WORK_DIR env vars**: configurable via environment variables with fallback defaults in src/paths.py
 |- **TTL price cache**: src/data/price_cache.py — cachetools.TTLCache(maxsize=1, ttl=30s) eliminates redundant prices.json reads across 18 modules (PRICE_CACHE_TTL_SECONDS env var), ~10MB peak memory savings per cron cycle
-|- **get_prices_df()**: cached pivoted DataFrame accessor with symbol subset parameter — used by 3 modules (risk_parity, network_momentum, multi_speed_momentum), eliminates ~30 lines duplicated pivot code per module
+|- **get_prices_df()**: cached pivoted DataFrame accessor with symbol subset parameter — used by 11 modules (risk_parity, network_momentum, multi_speed_momentum, ensemble_voter, tsmom_overlay, risk_decomposition, unified_orchestrator, black_litterman_mapper, cross_asset_regime_arb, cross_asset_relative_value, adaptive_sizing), eliminates ~30 lines duplicated pivot code per module
 |- **Shared strategy constants**: VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ consolidated in src/paths.py (env-var configurable) — imported by tsmom_overlay.py and multi_speed_momentum.py
 |- **Broker error handling**: alpaca.py submit_order() returns None on failure, get_orders() returns [] on failure
 |- **SPC state persistence**: spc_monitor.py save_state/load_state — JSON serialization to DATA_DIR/spc_state.json, wired into DashboardGenerator
 |- **VPIN query cache**: vpin_bvc.py TTLCache(maxsize=64, ttl=300s) for SQLite OHLCV queries
 |- **Lazy SQLite connections**: ResearchAgent/WikiSync use lazy property with setter + close() + try/finally, generator.py close() narrows except
 |- **MARKET_DB constant**: 7 modules consolidated from DATA_DIR/"market.db" to src/paths.MARKET_DB
-|- **TypeScript type safety**: 15 `as any` casts removed from LiveDashboard.tsx, 19 signal fields added to SignalsData interface
+|- **TypeScript type safety**: 22 `as any` casts removed total (15 LiveDashboard.tsx + 7 backtest/fetcher), 19 signal fields added to SignalsData interface, BacktestEngine.priceData and getPrice() made public
 |- **Signal staleness coverage**: extended from 5 to 18 signals monitored for timestamp staleness
 |- **MSM transient error resilience**: _is_msm_gated caches last-known regime and defers to it on SQLite failures instead of gating off
 |- **Dead import cleanup**: removed unused `import sqlite3` from 7 source files
