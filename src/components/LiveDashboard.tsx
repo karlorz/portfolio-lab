@@ -43,6 +43,10 @@ import { AdaptiveSizingPanel } from './AdaptiveSizingPanel';
 import type { AdaptiveSizingData } from './AdaptiveSizingPanel';
 import { VixyHedgeSizingPanel } from './VixyHedgeSizingPanel';
 import type { VixyHedgeSizingData } from './VixyHedgeSizingPanel';
+import { BlackLittermanMapperPanel } from './BlackLittermanMapperPanel';
+import type { BlackLittermanMapperData } from './BlackLittermanMapperPanel';
+import { TurnoverValidatorPanel } from './TurnoverValidatorPanel';
+import type { TurnoverValidatorData } from './TurnoverValidatorPanel';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -67,6 +71,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [graduationData, setGraduationData] = useState<GraduationChecklistData | null>(null);
   const [adaptiveSizingData, setAdaptiveSizingData] = useState<AdaptiveSizingData | null>(null);
   const [vixyHedgeData, setVixyHedgeData] = useState<VixyHedgeSizingData | null>(null);
+  const [blMapperData, setBLMapperData] = useState<BlackLittermanMapperData | null>(null);
+  const [turnoverData, setTurnoverData] = useState<TurnoverValidatorData | null>(null);
 
   const fetchData = async () => {
     try {
@@ -122,14 +128,18 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
       // Fetch new panel data (non-blocking)
       try {
-        const [gradRes, sizingRes, vixyRes] = await Promise.all([
+        const [gradRes, sizingRes, vixyRes, blRes, turnoverRes] = await Promise.all([
           fetch('/data/graduation.json'),
           fetch('/data/adaptive_sizing.json'),
           fetch('/data/vixy_hedge.json'),
+          fetch('/data/black_litterman.json'),
+          fetch('/data/turnover_validator.json'),
         ]);
         if (gradRes.ok) setGraduationData(await gradRes.json());
         if (sizingRes.ok) setAdaptiveSizingData(await sizingRes.json());
         if (vixyRes.ok) setVixyHedgeData(await vixyRes.json());
+        if (blRes.ok) setBLMapperData(await blRes.json());
+        if (turnoverRes.ok) setTurnoverData(await turnoverRes.json());
       } catch { /* panels render gracefully with null data */ }
 
       setError(null);
@@ -596,6 +606,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               <GraduationChecklistPanel data={graduationData} />
               <AdaptiveSizingPanel data={adaptiveSizingData} />
               <VixyHedgeSizingPanel data={vixyHedgeData} />
+            </div>
+            <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <BlackLittermanMapperPanel data={blMapperData} />
+              <TurnoverValidatorPanel data={turnoverData} />
             </div>
             <div className="mt-4">
               <ModelValidationPanel

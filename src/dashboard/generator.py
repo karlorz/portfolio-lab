@@ -7,6 +7,7 @@ Creates static dashboard from SQLite data for Vite/React app consumption.
 import json
 import sqlite3
 import logging
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -1136,6 +1137,114 @@ class DashboardGenerator:
             logger.warning("Overlay dashboard generation failed: %s", e)
             return None
 
+    def generate_adaptive_sizing_json(self) -> Optional[Path]:
+        """Generate adaptive sizing data for dashboard."""
+        try:
+            from src.strategy.adaptive_sizing import AdaptiveSizer
+
+            sizer = AdaptiveSizer()
+            decision = sizer.compute_allocation()
+
+            sizing_data = {
+                "base_allocation": decision.base_allocation,
+                "adjusted_allocation": decision.adjusted_allocation,
+                "adjustments": decision.adjustments,
+                "regime_adjustment": decision.regime_adjustment,
+                "volatility_adjustment": decision.volatility_adjustment,
+                "signal_adjustment": decision.signal_adjustment,
+                "drawdown_adjustment": decision.drawdown_adjustment,
+                "factors": asdict(decision.factors) if hasattr(decision.factors, '__dataclass_fields__') else {},
+                "generated_at": datetime.now().isoformat(),
+            }
+
+            out_path = PUBLIC_DIR / "adaptive_sizing.json"
+            save_results_json(sizing_data, output_path=str(out_path))
+            return out_path
+
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Failed to generate adaptive sizing data: %s", e)
+            return None
+
+    def generate_vixy_hedge_json(self) -> Optional[Path]:
+        """Generate VIXY hedge sizing data for dashboard."""
+        try:
+            from src.strategy.vixy_hedge_sizing import VIXYHedgeSizer
+
+            sizer = VIXYHedgeSizer()
+            status = sizer.status()
+
+            hedge_data = {
+                **status,
+                "generated_at": datetime.now().isoformat(),
+            }
+
+            out_path = PUBLIC_DIR / "vixy_hedge.json"
+            save_results_json(hedge_data, output_path=str(out_path))
+            return out_path
+
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Failed to generate VIXY hedge data: %s", e)
+            return None
+
+    def generate_black_litterman_json(self) -> Optional[Path]:
+        """Generate Black-Litterman mapper data for dashboard."""
+        try:
+            from src.strategy.black_litterman_mapper import map_biases_to_views, run_black_litterman
+
+            # Use base allocation as prior
+            prior = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
+
+            # Run with neutral biases (no active signal override)
+            views = map_biases_to_views(equity_bias=0.0, duration_bias=0.0)
+            result = run_black_litterman(views)
+
+            bl_data = {
+                "prior_weights": prior,
+                "posterior_weights": result.bl_weights,
+                "views": [
+                    {
+                        "signal_name": "base_allocation",
+                        "asset": sym,
+                        "direction": "bullish" if ret > 0 else ("bearish" if ret < 0 else "neutral"),
+                        "confidence": conf,
+                        "expected_return_delta": ret,
+                    }
+                    for sym, ret, conf in zip(views.symbols, views.absolute_views.values() if isinstance(views.absolute_views, dict) else views.absolute_views, views.view_confidences)
+                ] if views.absolute_views else [],
+                "tau": result.tau,
+                "view_confidence_method": "idzorek",
+                "generated_at": datetime.now().isoformat(),
+            }
+
+            out_path = PUBLIC_DIR / "black_litterman.json"
+            save_results_json(bl_data, output_path=str(out_path))
+            return out_path
+
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Failed to generate Black-Litterman data: %s", e)
+            return None
+
+    def generate_turnover_validator_json(self) -> Optional[Path]:
+        """Generate turnover validator data for dashboard."""
+        try:
+            from src.strategy.turnover_validator import TurnoverValidator
+
+            validator = TurnoverValidator()
+            diagnostics = validator.get_state_diagnostics()
+
+            turnover_data = {
+                **diagnostics,
+                "generated_at": datetime.now().isoformat(),
+            }
+
+            out_path = PUBLIC_DIR / "turnover_validator.json"
+            save_results_json(turnover_data, output_path=str(out_path))
+            return out_path
+
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Failed to generate turnover validator data: %s", e)
+            return None
+
     def generate_graduation_json(self) -> Optional[Path]:
         """Generate graduation readiness progress for dashboard.
 
@@ -1206,6 +1315,10 @@ class DashboardGenerator:
             self.generate_health_json(),
             self.generate_analytics_json(),
             self.generate_graduation_json(),
+            self.generate_adaptive_sizing_json(),
+            self.generate_vixy_hedge_json(),
+            self.generate_black_litterman_json(),
+            self.generate_turnover_validator_json(),
         ]
 
         # Overlay dashboard (separate path — may fail gracefully)
