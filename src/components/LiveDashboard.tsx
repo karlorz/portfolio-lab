@@ -20,12 +20,21 @@ import { RebalanceHealthPanel } from './RebalanceHealthPanel';
 import type { RebalanceHealthData } from './RebalanceHealthPanel';
 import { PortfolioExplainabilityPanel } from './PortfolioExplainabilityPanel';
 import type { ExplainabilityData } from './PortfolioExplainabilityPanel';
+import { BehavioralSentimentPanel } from './BehavioralSentimentPanel';
+import { CalendarSeasonalityPanel } from './CalendarSeasonalityPanel';
+import { CollarPanel } from './CollarPanel';
+import { CryptoAllocationPanel } from './CryptoAllocationPanel';
+import { FactorRotationPanel } from './FactorRotationPanel';
+import { KurtosisRegimePanel } from './KurtosisRegimePanel';
+import { ModelValidationPanel } from './ModelValidationPanel';
+import { StackingEnsemblePanel } from './StackingEnsemblePanel';
+import { ChatPanel } from './ChatPanel';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk';
+type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'chat';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -143,7 +152,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'rebalance', label: 'Rebalance' },
     { id: 'analytics', label: 'Analytics' },
     { id: 'options', label: '0DTE', badge: signals?.zero_dte?.positions?.length || undefined },
-    { id: 'auction', label: 'Auction', badge: signals?.closing_auction?.signals?.filter(s => s.should_trade).length || undefined }
+    { id: 'auction', label: 'Auction', badge: signals?.closing_auction?.signals?.filter(s => s.should_trade).length || undefined },
+    { id: 'chat', label: 'Chat' }
   ];
 
   return (
@@ -343,10 +353,26 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             </div>
 
             {/* Duration Overlay Panel */}
-            <DurationOverlayPanel 
+            <DurationOverlayPanel
               yieldCurve={signals?.yield_curve ?? null}
               durationAllocation={signals?.duration_allocation ?? null}
             />
+
+            {/* Signal Panels */}
+            <div className="mt-4 signal-panels-row">
+              <div className="flex-1 min-w-0">
+                <BehavioralSentimentPanel data={(signals as any)?.behavioral_sentiment ?? null} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <CryptoAllocationPanel
+                  data={(signals as any)?.crypto_allocation ?? null}
+                  portfolioValue={portfolioValue}
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <CalendarSeasonalityPanel data={(signals as any)?.calendar_seasonality ?? null} />
+              </div>
+            </div>
           </div>
         )}
 
@@ -516,6 +542,20 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               </div>
             )}
             <PortfolioExplainabilityPanel data={explainability} />
+
+            {/* Model & Ensemble Panels */}
+            <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <FactorRotationPanel data={(signals as any)?.factor_rotation ?? null} />
+              <StackingEnsemblePanel data={(signals as any)?.stacking_ensemble ?? null} />
+            </div>
+            <div className="mt-4">
+              <ModelValidationPanel
+                dsr={null}
+                championSharpe={stats?.paper_portfolio?.sharpe ?? null}
+                blWeights={null}
+                overlayWeights={signals?.target_allocations ?? null}
+              />
+            </div>
           </div>
         )}
 
@@ -529,6 +569,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               vix={signals?.regime?.vix || null}
               weeklyLimitRemaining={2 - (signals?.zero_dte?.weekly_trades_used || 0)}
             />
+            <div className="mt-4">
+              <CollarPanel
+                data={(signals as any)?.collar ?? null}
+                spyPrice={signals?.latest_prices?.SPY}
+              />
+            </div>
           </div>
         )}
 
@@ -556,12 +602,22 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
             <div className="mt-4">
-              <BondMomentumPanel 
+              <BondMomentumPanel
                 signals={signals?.bond_momentum?.signals || []}
                 timestamp={signals?.bond_momentum?.timestamp}
                 ensembleRecommendation={signals?.bond_momentum?.ensemble}
               />
             </div>
+            <div className="mt-4">
+              <KurtosisRegimePanel data={(signals as any)?.kurtosis_regime ?? null} />
+            </div>
+          </div>
+        )}
+
+        {/* Chat Tab */}
+        {activeTab === 'chat' && (
+          <div className="tab-panel chat-panel-container">
+            <ChatPanel />
           </div>
         )}
       </div>

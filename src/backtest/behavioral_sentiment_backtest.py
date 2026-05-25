@@ -32,7 +32,7 @@ from typing import Optional, Dict, List, Tuple
 
 import numpy as np
 
-from src.backtest.metrics import BacktestResult
+from src.backtest.metrics import BacktestResult, save_results_json
 from src.paths import DATA_DIR, sqlite_connect
 
 
@@ -549,6 +549,5 @@ if __name__ == "__main__":
               f"{'MET' if e['meets_sharpe_target'] else 'NOT MET'}")
 
     if args.output:
-        output_path = Path(args.output)
-        output_path.write_text(json.dumps(asdict(result), indent=2))
+        save_results_json(asdict(result), output_path=args.output)
         print(f"\nResults saved to {args.output}")

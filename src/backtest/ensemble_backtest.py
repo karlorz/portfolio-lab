@@ -24,7 +24,7 @@ from typing import Dict, List, Tuple
 from dataclasses import asdict
 from collections import defaultdict
 
-from src.backtest.metrics import BacktestResult
+from src.backtest.metrics import BacktestResult, save_results_json
 from src.paths import MARKET_DB, sqlite_connect
 from src.utils import safe_get
 
@@ -531,8 +531,7 @@ def main():
         engine.validate_target(result, args.target_sharpe)
         
         if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(asdict(result), f, indent=2, default=str)
+            save_results_json(asdict(result), output_path=args.output)
             print(f"\nResults saved to: {args.output}")
     
     elif args.command == "benchmark":

@@ -12,6 +12,7 @@ from math import sqrt, pow
 import numpy as np
 
 from src.paths import HISTORICAL_JSON, DATA_DIR
+from src.backtest.metrics import save_results_json
 
 
 import logging
@@ -298,8 +299,7 @@ def main():
     
     # Save report
     output_path = str(DATA_DIR / "ubt_actual_validation.json")
-    with open(output_path, 'w') as f:
-        json.dump(report, f, indent=2)
+    save_results_json(report, output_path=output_path)
     
     logger.info('Validation complete! Results saved to: %s', output_path)
     print('\n=== VALIDATION SUMMARY ===')

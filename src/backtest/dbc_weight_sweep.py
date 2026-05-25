@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import numpy as np
 
-from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
+from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -312,8 +312,7 @@ def main():
     if "--save" in sys.argv:
         out = sweep.data_dir / "backtest_results" / "dbc_sweep.json"
         out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
+        save_results_json(result.to_dict(), output_path=str(out))
         print(f"Saved to {out}")
 
     if "--table" in sys.argv:

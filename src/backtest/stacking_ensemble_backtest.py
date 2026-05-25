@@ -29,7 +29,7 @@ from typing import Optional, Dict, List
 
 import numpy as np
 
-from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
+from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -481,5 +481,5 @@ if __name__ == "__main__":
               f"{'MET' if result.meets_accuracy_target else 'NOT MET'}")
 
     if args.output:
-        Path(args.output).write_text(json.dumps(result.to_dict(), indent=2))
+        save_results_json(result.to_dict(), output_path=args.output)
         print(f"\nResults saved to {args.output}")

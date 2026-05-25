@@ -137,13 +137,8 @@ class BehavioralSentimentFetcher:
     
     def __init__(self, cache_db: Path = CACHE_DB):
         self.cache_db = cache_db
-        # Instance-level VIX cache to avoid redundant yfinance calls
-        self._vix_cache: Optional[Tuple[float, float]] = None
-        self._vix_cache_time: Optional[datetime] = None
-        self._skew_cache: Optional[float] = None
-        self._skew_cache_time: Optional[datetime] = None
-        self._cpce_cache: Optional[float] = None
-        self._cpce_cache_time: Optional[datetime] = None
+        # Unified yfinance cache: {ticker: (value, fetch_time)}
+        self._yf_cache: Dict[str, Tuple[float, datetime]] = {}
         self._init_cache()
     
     def _init_cache(self):
@@ -219,102 +214,81 @@ class BehavioralSentimentFetcher:
             data_fresh=data['data_fresh']
         )
     
+    def _fetch_yf(self, ticker: str, period: str = "1d", default: float = 0.0,
+                  ttl: float = 60.0) -> float:
+        """Fetch a single value from yfinance with unified TTL cache.
+
+        Args:
+            ticker: Yahoo Finance ticker symbol (e.g. "^VIX", "^SKEW").
+            period: yfinance history period (e.g. "1d", "5d").
+            default: Fallback value if fetch fails.
+            ttl: Cache TTL in seconds (default 60s).
+
+        Returns:
+            Most recent Close price for the ticker, or default.
+        """
+        now = datetime.now()
+        cached = self._yf_cache.get(ticker)
+        if cached is not None:
+            value, fetch_time = cached
+            age = (now - fetch_time).total_seconds()
+            if age < ttl:
+                logger.debug("Using cached yfinance data for %s (age=%.1fs)", ticker, age)
+                return value
+
+        try:
+            hist = yf.Ticker(ticker).history(period=period)
+            if not hist.empty and "Close" in hist.columns:
+                closes = hist["Close"].dropna()
+                if not closes.empty:
+                    raw = float(closes.iloc[-1])
+                    if not math.isnan(raw):
+                        self._yf_cache[ticker] = (raw, now)
+                        return raw
+        except (KeyError, ValueError, TypeError, OSError, RuntimeError, IndexError) as e:
+            logger.warning("yfinance fetch failed for %s: %s", ticker, e)
+
+        self._yf_cache[ticker] = (default, now)
+        return default
+
     def _fetch_vix_data(self) -> Tuple[float, float]:
-        """Fetch VIX and VIX9D from Yahoo Finance via yfinance (cached 60s)"""
-        # Instance-level cache: at most one real fetch per 60 seconds
-        now = datetime.now()
-        if self._vix_cache is not None and self._vix_cache_time is not None:
-            age = now - self._vix_cache_time
-            if age.total_seconds() < 60:
-                logger.debug("Using cached VIX data (age=%.1fs)", age.total_seconds())
-                return self._vix_cache
+        """Fetch VIX and VIX9D from Yahoo Finance (cached via _fetch_yf)."""
+        vix = self._fetch_yf("^VIX", default=16.0)
+        vix9d = self._fetch_yf("^VIX9D", default=vix * 0.9)
+        return (vix, vix9d)
 
-        vix = 16.0   # Default fallback
-        vix9d = 14.4  # Default fallback
-
-        # ^VIX
-        try:
-            ticker = yf.Ticker("^VIX")
-            hist = ticker.history(period="1d")
-            if not hist.empty:
-                raw = float(hist["Close"].iloc[-1])
-                if not math.isnan(raw):
-                    vix = raw
-        except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
-            logger.warning("yfinance fetch failed for ^VIX: %s", e)
-
-        # ^VIX9D (short-term VIX)
-        try:
-            ticker9d = yf.Ticker("^VIX9D")
-            hist9d = ticker9d.history(period="1d")
-            if not hist9d.empty:
-                raw9d = float(hist9d["Close"].iloc[-1])
-                if not math.isnan(raw9d):
-                    vix9d = raw9d
-            else:
-                vix9d = vix * 0.9  # Estimate as 90% of VIX
-        except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
-            logger.warning("yfinance fetch failed for ^VIX9D: %s", e)
-            vix9d = vix * 0.9
-
-        result = (float(vix), float(vix9d))
-        self._vix_cache = result
-        self._vix_cache_time = now
-        return result
-    
     def _fetch_skew_index(self) -> float:
-        """Fetch CBOE SKEW Index from Yahoo Finance via yfinance (cached 60s)"""
-        # Instance-level cache: at most one real fetch per 60 seconds
-        now = datetime.now()
-        if self._skew_cache is not None and self._skew_cache_time is not None:
-            age = now - self._skew_cache_time
-            if age.total_seconds() < 60:
-                return self._skew_cache
-
-        try:
-            ticker = yf.Ticker("^SKEW")
-            hist = ticker.history(period="1d")
-            if not hist.empty:
-                raw = float(hist["Close"].iloc[-1])
-                if not math.isnan(raw):
-                    self._skew_cache = raw
-                    self._skew_cache_time = now
-                    return raw
-        except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
-            logger.warning("yfinance fetch failed for ^SKEW: %s", e)
-
+        """Fetch CBOE SKEW Index (cached via _fetch_yf)."""
+        raw = self._fetch_yf("^SKEW", default=0.0)
+        if raw > 0:
+            return raw
         # Estimate SKEW from VIX if unavailable
         vix, _ = self._fetch_vix_data()
-        estimate = 100 + max(0, (vix - 15)) * 2
-        self._skew_cache = estimate
-        self._skew_cache_time = now
-        return estimate
-    
+        return 100 + max(0, (vix - 15)) * 2
+
     def _fetch_put_call_ratio(self) -> float:
-        """Fetch CBOE equity put/call ratio from Yahoo Finance via yfinance (cached 60s)"""
-        # Instance-level cache: at most one real fetch per 60 seconds
+        """Fetch CBOE equity put/call ratio (5-day average, cached via _fetch_yf)."""
         now = datetime.now()
-        if self._cpce_cache is not None and self._cpce_cache_time is not None:
-            age = now - self._cpce_cache_time
-            if age.total_seconds() < 60:
-                return self._cpce_cache
+        cached = self._yf_cache.get("^CPCE")
+        if cached is not None:
+            value, fetch_time = cached
+            age = (now - fetch_time).total_seconds()
+            if age < 60:
+                return value
 
         try:
-            ticker = yf.Ticker("^CPCE")
-            hist = ticker.history(period="5d")
+            hist = yf.Ticker("^CPCE").history(period="5d")
             if not hist.empty and "Close" in hist.columns:
                 closes = hist["Close"].dropna().tolist()
                 if closes:
-                    result = sum(closes) / len(closes)
-                    self._cpce_cache = result
-                    self._cpce_cache_time = now
-                    return result
-        except (KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+                    avg = sum(closes) / len(closes)
+                    self._yf_cache["^CPCE"] = (avg, now)
+                    return avg
+        except (KeyError, ValueError, TypeError, OSError, RuntimeError, IndexError) as e:
             logger.warning("yfinance fetch failed for ^CPCE: %s", e)
 
-        self._cpce_cache = 0.65  # Historical average
-        self._cpce_cache_time = now
-        return 0.65
+        self._yf_cache["^CPCE"] = (0.65, now)
+        return 0.65  # Historical average
     
     def _estimate_retail_flow(self) -> RetailFlow:
         """Estimate retail positioning from available data"""

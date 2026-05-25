@@ -975,8 +975,8 @@ class TestVixInstanceCaching:
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         # Set cache, then expire it
-        fetcher._vix_cache = (22.5, 20.1)
-        fetcher._vix_cache_time = datetime.now() - timedelta(seconds=120)
+        fetcher._yf_cache["^VIX"] = (22.5, datetime.now() - timedelta(seconds=120))
+        fetcher._yf_cache["^VIX9D"] = (20.1, datetime.now() - timedelta(seconds=120))
         # Now should refetch
         mock_vix = MagicMock()
         mock_vix.history.return_value = pd.DataFrame({"Close": [25.0]})
@@ -1006,8 +1006,7 @@ class TestSkewInstanceCaching:
     def test_skew_cache_resets_after_expiry(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        fetcher._skew_cache = 145.0
-        fetcher._skew_cache_time = datetime.now() - timedelta(seconds=120)
+        fetcher._yf_cache["^SKEW"] = (145.0, datetime.now() - timedelta(seconds=120))
         # Should refetch — use yfinance mock
         mock_ticker = MagicMock()
         mock_ticker.history.return_value = pd.DataFrame({"Close": [155.0]})
@@ -1035,8 +1034,7 @@ class TestCpceInstanceCaching:
     def test_cpce_cache_resets_after_expiry(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        fetcher._cpce_cache = 0.75
-        fetcher._cpce_cache_time = datetime.now() - timedelta(seconds=120)
+        fetcher._yf_cache["^CPCE"] = (0.75, datetime.now() - timedelta(seconds=120))
         mock_ticker = MagicMock()
         mock_ticker.history.return_value = pd.DataFrame({"Close": [0.55]})
         with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
@@ -1578,9 +1576,7 @@ class TestFetcherInitEdgeCases:
     def test_init_clears_instance_caches(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        assert fetcher._vix_cache is None
-        assert fetcher._skew_cache is None
-        assert fetcher._cpce_cache is None
+        assert fetcher._yf_cache == {}
 
 
 if __name__ == "__main__":

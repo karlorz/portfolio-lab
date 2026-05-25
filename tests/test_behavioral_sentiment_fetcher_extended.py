@@ -192,7 +192,7 @@ class TestFetchVixDataEdgeCases:
             assert vix9d == 20.0
 
     def test_nan_in_vix9d_response(self, tmp_path):
-        """NaN in VIX9D -> source only guards NaN on the VIX9D line, so vix9d stays at default 14.4 (not vix*0.9)."""
+        """NaN in VIX9D -> fallback to vix * 0.9 estimate."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         mock_vix = MagicMock()
@@ -202,9 +202,8 @@ class TestFetchVixDataEdgeCases:
         with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=[mock_vix, mock_vix9d]):
             vix, vix9d = fetcher._fetch_vix_data()
             assert vix == 22.0
-            # NaN is not caught by the NaN guard on the VIX9D fallback path,
-            # so vix9d stays at the default 14.4
-            assert vix9d == 14.4
+            # NaN VIX9D falls back to vix * 0.9 estimate
+            assert abs(vix9d - 22.0 * 0.9) < 0.01
 
     def test_inf_in_vix_response(self, tmp_path):
         """Inf values pass through since math.isnan(inf) is False (source limitation)."""
@@ -273,8 +272,8 @@ class TestFetchVixDataEdgeCases:
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         # Seed cache manually
-        fetcher._vix_cache = (22.5, 20.1)
-        fetcher._vix_cache_time = datetime.now()
+        fetcher._yf_cache["^VIX"] = (22.5, datetime.now())
+        fetcher._yf_cache["^VIX9D"] = (20.1, datetime.now())
         with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker") as mock_ticker:
             vix, vix9d = fetcher._fetch_vix_data()
             assert vix == 22.5
@@ -286,8 +285,8 @@ class TestFetchVixDataEdgeCases:
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         # Seed stale cache (61 seconds old)
-        fetcher._vix_cache = (99.0, 88.0)
-        fetcher._vix_cache_time = datetime.now() - timedelta(seconds=61)
+        fetcher._yf_cache["^VIX"] = (99.0, datetime.now() - timedelta(seconds=61))
+        fetcher._yf_cache["^VIX9D"] = (88.0, datetime.now() - timedelta(seconds=61))
         mock_vix = MagicMock()
         mock_vix.history.return_value = pd.DataFrame({"Close": [22.0]})
         mock_vix9d = MagicMock()
@@ -301,7 +300,7 @@ class TestFetchVixDataEdgeCases:
         """No cache yet -> fetches fresh data."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        assert fetcher._vix_cache is None
+        assert fetcher._yf_cache == {}
         mock_vix = MagicMock()
         mock_vix.history.return_value = pd.DataFrame({"Close": [18.5]})
         mock_vix9d = MagicMock()
@@ -372,8 +371,8 @@ class TestFetchSkewIndexEdgeCases:
         """_fetch_skew_index calls _fetch_vix_data which may use instance cache."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        fetcher._vix_cache = (16.0, 14.4)
-        fetcher._vix_cache_time = datetime.now()
+        fetcher._yf_cache["^VIX"] = (16.0, datetime.now())
+        fetcher._yf_cache["^VIX9D"] = (14.4, datetime.now())
         with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("err")):
             skew = fetcher._fetch_skew_index()
             assert skew == 102.0  # Uses cached VIX

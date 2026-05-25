@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import numpy as np
 
-from src.backtest.metrics import BacktestResult
+from src.backtest.metrics import BacktestResult, save_results_json
 from src.paths import BASE_ALLOCATION, DATA_DIR, sqlite_connect
 from src.utils import safe_get
 
@@ -359,8 +359,7 @@ def main():
     if "--save" in sys.argv:
         out = bt.DATA_DIR / "backtest_results" / "real_data_combined.json"
         out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w") as f:
-            json.dump(asdict(result), f, indent=2)
+        save_results_json(asdict(result), output_path=str(out))
         print(f"Saved to {out}")
 
 
