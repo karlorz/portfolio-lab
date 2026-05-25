@@ -1527,6 +1527,19 @@ class DashboardGenerator:
             "behavioral_sentiment": ("timestamp", None),
             "garch_cvar": ("timestamp", None),
             "smart_rebalance": ("generated_at", None),
+            "calendar_seasonality": ("generated_at", None),
+            "crypto_allocation": ("generated_at", None),
+            "factor_rotation": ("generated_at", None),
+            "stacking_ensemble": ("generated_at", None),
+            "convexity_harvest": ("generated_at", None),
+            "llm_sentiment": ("generated_at", None),
+            "sector_rotation": ("generated_at", None),
+            "kurtosis_regime": ("generated_at", None),
+            "volatility_parity": ("generated_at", None),
+            "collar": ("generated_at", None),
+            "bond_momentum": ("generated_at", None),
+            "risk_decomposition": ("generated_at", None),
+            "rebalance_health": ("generated_at", None),
         }
 
         for signal_key, (ts_field, _) in timestamped_signals.items():
