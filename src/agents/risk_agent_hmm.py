@@ -46,6 +46,7 @@ from collections import defaultdict, deque
 from enum import Enum
 
 from src.paths import PROJECT_ROOT, DATA_DIR
+from pathlib import Path
 
 import logging
 
