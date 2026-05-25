@@ -34,7 +34,6 @@ from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 __all__ = ['STATIC_ALLOCATION', 'DYNAMIC_ALLOCATIONS', 'REGIME_EFFECTIVE_DURATION', 'EXPENSE_RATIOS', 'TRANSACTION_COST', 'load_price_data', 'load_yield_curve_data', 'classify_regime_from_spread', 'load_yield_spread_history', 'calculate_returns', 'calculate_sharpe', 'calculate_max_drawdown', 'calculate_cagr', 'run_backtest', 'print_results', 'save_results']
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Paths
@@ -585,4 +584,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     exit(main())

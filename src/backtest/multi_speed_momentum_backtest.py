@@ -29,7 +29,6 @@ from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
 __all__ = ['MultiSpeedMomentum', 'BacktestConfig', 'DailyReturn', 'MultiSpeedMomentumBacktester']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -589,4 +588,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     exit(main())

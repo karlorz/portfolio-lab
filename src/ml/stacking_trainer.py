@@ -60,7 +60,6 @@ from src.paths import PROJECT_ROOT, sqlite_connect
 
 from src.signals.stacking_feature_engine import StackingFeatureEngine, SignalSource, Signal, RegimeContext, HistoricalAccuracy
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -737,4 +736,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     main()

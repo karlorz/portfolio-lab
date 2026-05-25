@@ -19,7 +19,6 @@ from src.paths import MARKET_DB, DATA_DIR
 
 __all__ = ['SignalType', 'ConfidenceLevel', 'InternationalMomentumSignal', 'InternationalMomentumGenerator']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 CACHE_DB = MARKET_DB
@@ -496,4 +495,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     main()

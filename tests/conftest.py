@@ -120,6 +120,18 @@ builtins.__import__ = _guarded_import
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Fixtures — test pollution guards
+# ═══════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture(autouse=True)
+def _reset_sklearn_safe_flag():
+    """Reset _sklearn_safe_active between tests to prevent leak-through."""
+    global _sklearn_safe_active
+    yield
+    _sklearn_safe_active = False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # pytest hooks
 # ═══════════════════════════════════════════════════════════════════════════
 

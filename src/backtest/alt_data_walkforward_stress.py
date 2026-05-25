@@ -14,7 +14,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, List
 
-from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
+from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
 from src.paths import PRICES_JSON, SIGNALS_DIR, BASE_ALLOCATION as WEIGHTS
 
 
@@ -583,9 +583,8 @@ def save_results(result: FullBacktestResult):
     }
 
     output_path = str(SIGNALS_DIR / "alt_data_walkforward_stress_results.json")
-    with open(output_path, 'w') as f:
-        json.dump(output, f, indent=2)
-    logger.info(f"\nResults saved to {output_path}")
+    save_results_json(output, output_path=output_path)
+    logger.info("\nResults saved to %s", output_path)
 
 
 if __name__ == '__main__':

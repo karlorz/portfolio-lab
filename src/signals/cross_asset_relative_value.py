@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PRICES_JSON
@@ -562,4 +561,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

@@ -32,7 +32,6 @@ from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
 
 __all__ = ['BacktestConfig', 'DailyReturn', 'AlternativeDataBacktester']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -817,4 +816,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     exit(main())

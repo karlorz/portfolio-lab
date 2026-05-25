@@ -26,7 +26,6 @@ from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 __all__ = ['SignalSource', 'SignalHealthStatus', 'SignalPrediction', 'HealthScore', 'DecayAlert', 'SignalHealthTracker', 'backfill_predictions']
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Paths
@@ -936,6 +935,7 @@ def backfill_predictions(
 
 # CLI interface
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     import argparse
     
     parser = argparse.ArgumentParser(description="Signal Health Tracker v3.12")

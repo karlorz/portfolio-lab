@@ -31,7 +31,6 @@ from src.utils import safe_get
 __all__ = ['OptionType', 'OptionStatus', 'OptionQuote', 'OptionsChain', 'OptionsChainFetcher', 'OptionsChainCache']
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -501,6 +500,7 @@ class OptionsChainCache:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     import asyncio
     
     async def test():

@@ -35,7 +35,6 @@ REDDIT_ENABLED = False
 _reddit_disabled_warned = False
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -594,6 +593,7 @@ class BehavioralSentimentFetcher:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     import argparse
     
     parser = argparse.ArgumentParser(description='Behavioral Sentiment Fetcher')

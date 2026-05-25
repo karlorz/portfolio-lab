@@ -31,7 +31,6 @@ import numpy as np
 
 from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Accuracy scenarios (from spec)
@@ -435,6 +434,7 @@ class StackingEnsembleBacktest:
 # ------------------------------------------------------------------
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     import argparse
 
     parser = argparse.ArgumentParser(

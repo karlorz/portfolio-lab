@@ -21,7 +21,6 @@ from src.paths import MARKET_DB, sqlite_connect
 from src.utils import safe_get
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -534,4 +533,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     main()

@@ -25,8 +25,6 @@ from ..signals.collar_signal import (
     CollarSignalGenerator, BlackScholesPricer,
 )
 
-logging.basicConfig(level=logging.INFO)
-
 __all__ = [
     'DataSource', 'LiveCollarStrikes', 'CollarOptionsBridge',
 ]
@@ -372,4 +370,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

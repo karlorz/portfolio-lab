@@ -31,8 +31,6 @@ from src.backtest.metrics import (
 )
 from src.utils import safe_get
 
-logging.basicConfig(level=logging.INFO)
-
 __all__ = [
     'CombinedOverlayBacktest', 'run_combined_backtest',
 ]
@@ -482,4 +480,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

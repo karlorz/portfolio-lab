@@ -208,6 +208,30 @@ class GraduationChecklist:
             with open(portfolio_file) as f:
                 state["portfolio"] = json.load(f)
 
+        # Pre-computed paper-trading-performance summary (authoritative metrics)
+        # Glob for the latest file — contains days_tracked, sharpe, max_drawdown, win_rate
+        perf_summary_files = sorted(DATA_DIR.glob("paper-trading-performance-*.json"))
+        if perf_summary_files:
+            latest = perf_summary_files[-1]
+            try:
+                with open(latest) as f:
+                    raw = json.load(f)
+                state["paper_trading_summary"] = {
+                    "days_tracked": raw.get("performance", {}).get("days_tracked", 0),
+                    "sharpe": raw.get("performance", {}).get("sharpe", 0),
+                    "max_drawdown": raw.get("performance", {}).get("max_drawdown", 0),
+                    "win_rate": raw.get("daily_returns_distribution", {}).get("win_rate", 0),
+                    "date": raw.get("date", ""),
+                }
+                logger.info(
+                    "Loaded paper-trading summary from %s: %d days, Sharpe %.2f",
+                    latest.name,
+                    state["paper_trading_summary"]["days_tracked"],
+                    state["paper_trading_summary"]["sharpe"],
+                )
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+                logger.warning("Failed to parse %s: %s", latest.name, exc)
+
         # Performance history
         perf_file = DATA_DIR / "performance.jsonl"
         if perf_file.exists():
@@ -241,17 +265,22 @@ class GraduationChecklist:
 
     def _check_trading_days(self, state: Dict) -> CheckResult:
         """Check minimum trading days of paper trading."""
-        portfolio = state.get("portfolio", {})
-        history = portfolio.get("history", [])
-        
-        # Estimate trading days from unique dates in history
-        unique_dates = set()
-        for entry in history:
-            ts = entry.get("timestamp", "")
-            date_key = ts[:10] if len(ts) >= 10 else ts
-            unique_dates.add(date_key)
-        
-        n_days = max(0, len(unique_dates))
+        # Prefer pre-computed summary over recomputation from portfolio_paper.json
+        summary = state.get("paper_trading_summary", {})
+        if summary.get("days_tracked", 0) > 0:
+            n_days = summary["days_tracked"]
+        else:
+            portfolio = state.get("portfolio", {})
+            history = portfolio.get("history", [])
+
+            # Estimate trading days from unique dates in history
+            unique_dates = set()
+            for entry in history:
+                ts = entry.get("timestamp", "")
+                date_key = ts[:10] if len(ts) >= 10 else ts
+                unique_dates.add(date_key)
+
+            n_days = max(0, len(unique_dates))
         required = int(self.criteria["min_trading_days"]["value"])
         
         return CheckResult(
@@ -264,38 +293,46 @@ class GraduationChecklist:
 
     def _check_sharpe(self, state: Dict) -> CheckResult:
         """Check rolling Sharpe ratio."""
-        portfolio = state.get("portfolio", {})
-        history = portfolio.get("history", [])
-        
-        # Use the last 63 trading days of daily data
-        # Deduplicate to daily first
-        daily = {}
-        for entry in history:
-            ts = entry.get("timestamp", "")
-            date_key = ts[:10] if len(ts) >= 10 else ts
-            daily[date_key] = entry
-        sorted_daily = [daily[d] for d in sorted(daily.keys())]
-        
-        if len(sorted_daily) < 3:
-            return CheckResult(
-                name="min_sharpe",
-                passed=False,
-                value=0.0,
-                required=0.50,
-                description=self.criteria["min_sharpe"]["description"],
-            )
-        
-        # Take last 63 or all available
-        recent = sorted_daily[-63:]
-        returns = [h.get("daily_return", 0) for h in recent]
-        
-        daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
-        sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0
-        
-        # Sanity cap: any Sharpe > 3.0 is unrealistic (intra-day artifact)
-        if sharpe > 3.0:
-            sharpe = 0.0  # Treat as not meeting criteria
-        
+        # Prefer pre-computed summary
+        summary = state.get("paper_trading_summary", {})
+        if summary.get("sharpe", 0) > 0:
+            sharpe = summary["sharpe"]
+            # Sanity cap: any Sharpe > 3.0 is unrealistic (intra-day artifact)
+            if sharpe > 3.0:
+                sharpe = 0.0
+        else:
+            portfolio = state.get("portfolio", {})
+            history = portfolio.get("history", [])
+
+            # Use the last 63 trading days of daily data
+            # Deduplicate to daily first
+            daily = {}
+            for entry in history:
+                ts = entry.get("timestamp", "")
+                date_key = ts[:10] if len(ts) >= 10 else ts
+                daily[date_key] = entry
+            sorted_daily = [daily[d] for d in sorted(daily.keys())]
+
+            if len(sorted_daily) < 3:
+                return CheckResult(
+                    name="min_sharpe",
+                    passed=False,
+                    value=0.0,
+                    required=0.50,
+                    description=self.criteria["min_sharpe"]["description"],
+                )
+
+            # Take last 63 or all available
+            recent = sorted_daily[-63:]
+            returns = [h.get("daily_return", 0) for h in recent]
+
+            daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
+            sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0
+
+            # Sanity cap: any Sharpe > 3.0 is unrealistic (intra-day artifact)
+            if sharpe > 3.0:
+                sharpe = 0.0
+
         required = float(self.criteria["min_sharpe"]["value"])
         return CheckResult(
             name="min_sharpe",
@@ -307,37 +344,42 @@ class GraduationChecklist:
 
     def _check_drawdown(self, state: Dict) -> CheckResult:
         """Check maximum drawdown."""
-        portfolio = state.get("portfolio", {})
-        history = portfolio.get("history", [])
-        
-        if not history:
-            return CheckResult(
-                name="max_drawdown",
-                passed=True,  # No data means no drawdown
-                value=0.0,
-                required=0.15,
-                description=self.criteria["max_drawdown"]["description"],
-            )
-        
-        # Deduplicate to daily
-        daily = {}
-        for entry in history:
-            ts = entry.get("timestamp", "")
-            date_key = ts[:10] if len(ts) >= 10 else ts
-            daily[date_key] = entry
-        sorted_daily = [daily[d] for d in sorted(daily.keys())]
-        
-        peak = sorted_daily[0].get("total_value", 100000)
-        max_dd = 0.0
-        for h in sorted_daily:
-            val = h.get("total_value", 0)
-            if val > peak:
-                peak = val
-            if peak > 0:
-                dd = (peak - val) / peak
-                if dd > max_dd:
-                    max_dd = dd
-        
+        # Prefer pre-computed summary
+        summary = state.get("paper_trading_summary", {})
+        if summary.get("max_drawdown", 0) > 0 or summary.get("days_tracked", 0) > 0:
+            max_dd = summary.get("max_drawdown", 0)
+        else:
+            portfolio = state.get("portfolio", {})
+            history = portfolio.get("history", [])
+
+            if not history:
+                return CheckResult(
+                    name="max_drawdown",
+                    passed=True,  # No data means no drawdown
+                    value=0.0,
+                    required=0.15,
+                    description=self.criteria["max_drawdown"]["description"],
+                )
+
+            # Deduplicate to daily
+            daily = {}
+            for entry in history:
+                ts = entry.get("timestamp", "")
+                date_key = ts[:10] if len(ts) >= 10 else ts
+                daily[date_key] = entry
+            sorted_daily = [daily[d] for d in sorted(daily.keys())]
+
+            peak = sorted_daily[0].get("total_value", 100000)
+            max_dd = 0.0
+            for h in sorted_daily:
+                val = h.get("total_value", 0)
+                if val > peak:
+                    peak = val
+                if peak > 0:
+                    dd = (peak - val) / peak
+                    if dd > max_dd:
+                        max_dd = dd
+
         required = float(self.criteria["max_drawdown"]["value"])
         return CheckResult(
             name="max_drawdown",
@@ -349,28 +391,33 @@ class GraduationChecklist:
 
     def _check_win_rate(self, state: Dict) -> CheckResult:
         """Check win rate (fraction of positive return days)."""
-        portfolio = state.get("portfolio", {})
-        history = portfolio.get("history", [])
-        
-        # Deduplicate to daily
-        daily = {}
-        for entry in history:
-            ts = entry.get("timestamp", "")
-            date_key = ts[:10] if len(ts) >= 10 else ts
-            daily[date_key] = entry
-        sorted_daily = [daily[d] for d in sorted(daily.keys())]
-        
-        if len(sorted_daily) < 3:
-            return CheckResult(
-                name="min_win_rate",
-                passed=False,
-                value=0.0,
-                required=0.40,
-                description=self.criteria["min_win_rate"]["description"],
-            )
-        
-        returns = [h.get("daily_return", 0) for h in sorted_daily]
-        win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0
+        # Prefer pre-computed summary
+        summary = state.get("paper_trading_summary", {})
+        if summary.get("days_tracked", 0) > 0 and "win_rate" in summary:
+            win_rate = summary["win_rate"]
+        else:
+            portfolio = state.get("portfolio", {})
+            history = portfolio.get("history", [])
+
+            # Deduplicate to daily
+            daily = {}
+            for entry in history:
+                ts = entry.get("timestamp", "")
+                date_key = ts[:10] if len(ts) >= 10 else ts
+                daily[date_key] = entry
+            sorted_daily = [daily[d] for d in sorted(daily.keys())]
+
+            if len(sorted_daily) < 3:
+                return CheckResult(
+                    name="min_win_rate",
+                    passed=False,
+                    value=0.0,
+                    required=0.40,
+                    description=self.criteria["min_win_rate"]["description"],
+                )
+
+            returns = [h.get("daily_return", 0) for h in sorted_daily]
+            win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0
         
         required = float(self.criteria["min_win_rate"]["value"])
         return CheckResult(
@@ -503,35 +550,44 @@ class GraduationChecklist:
         """
         required = self.criteria["min_dsr"]["value"]
 
-        # Compute Sharpe from portfolio history (same as _check_sharpe)
-        portfolio = state.get("portfolio", {})
-        history = portfolio.get("history", [])
-        daily = {}
-        for entry in history:
-            ts = entry.get("timestamp", "")
-            date_key = ts[:10] if len(ts) >= 10 else ts
-            daily[date_key] = entry
-        sorted_daily = [daily[d] for d in sorted(daily.keys())]
-        recent = sorted_daily[-63:] if len(sorted_daily) >= 3 else sorted_daily
+        # Prefer pre-computed summary for Sharpe
+        summary = state.get("paper_trading_summary", {})
+        if summary.get("sharpe", 0) > 0:
+            sharpe = summary["sharpe"]
+            n_days = summary.get("days_tracked", 0)
+            if sharpe > 3.0:
+                sharpe = 0.0
+        else:
+            # Compute Sharpe from portfolio history (same as _check_sharpe)
+            portfolio = state.get("portfolio", {})
+            history = portfolio.get("history", [])
+            daily = {}
+            for entry in history:
+                ts = entry.get("timestamp", "")
+                date_key = ts[:10] if len(ts) >= 10 else ts
+                daily[date_key] = entry
+            sorted_daily = [daily[d] for d in sorted(daily.keys())]
+            recent = sorted_daily[-63:] if len(sorted_daily) >= 3 else sorted_daily
 
-        if len(recent) < 3:
-            return CheckResult(
-                name="min_dsr",
-                passed=False,
-                value=0.0,
-                required=required,
-                description=self.criteria["min_dsr"]["description"],
-            )
+            if len(recent) < 3:
+                return CheckResult(
+                    name="min_dsr",
+                    passed=False,
+                    value=0.0,
+                    required=required,
+                    description=self.criteria["min_dsr"]["description"],
+                )
 
-        returns = [h.get("daily_return", 0) for h in recent]
-        daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
-        sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
-        if sharpe > 3.0:
-            sharpe = 0.0
+            returns = [h.get("daily_return", 0) for h in recent]
+            daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
+            sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
+            n_days = len(recent)
+            if sharpe > 3.0:
+                sharpe = 0.0
 
         try:
             from src.backtest.metrics import compute_deflated_sharpe_ratio
-            n_obs = len(returns) * 252  # Scale to annual observations
+            n_obs = n_days * 252  # Scale to annual observations
             dsr = compute_deflated_sharpe_ratio(
                 sharpe_ratio=sharpe, n_trials=94, n_observations=n_obs,
             )

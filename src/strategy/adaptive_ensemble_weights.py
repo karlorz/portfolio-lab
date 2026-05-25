@@ -29,7 +29,6 @@ from src.paths import DATA_DIR, ATTRIBUTION_DIR
 
 __all__ = ['DEFAULT_CONFIG', 'WeightAdjustment', 'AdaptiveWeightsState', 'AdaptiveEnsembleWeights']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 STATE_FILE = DATA_DIR / "adaptive_weights_state.json"
@@ -527,4 +526,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     exit(main())

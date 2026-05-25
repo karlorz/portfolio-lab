@@ -28,7 +28,6 @@ from src.paths import DATA_DIR
 
 __all__ = ['DEFAULT_CONFIG', 'HedgeRegime', 'HedgeAction', 'VIXYHedgeConfig', 'VIXYHedgeSignal', 'VIXYHedgeState', 'VIXYHedgeSizer']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Configuration ──────────────────────────────────────────────────────────
@@ -568,4 +567,5 @@ def _run_backtest(sizer: VIXYHedgeSizer, start_date: str):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

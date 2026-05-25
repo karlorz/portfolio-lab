@@ -16,7 +16,6 @@ __all__ = [
     "multi_speed_momentum",
     "multi_strategy_adapters",
     "regime_gate",
-    "signal_pruner",
     "signal_snapshot",
     "stacking_feature_engine",
     "stacking_integrator",

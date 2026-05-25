@@ -35,7 +35,6 @@ import numpy as np
 
 from src.paths import DATA_DIR, PRICES_JSON
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 STATE_FILE = DATA_DIR / "vol_volume_gap_state.json"
@@ -444,4 +443,5 @@ def main_cli() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main_cli()

@@ -39,7 +39,6 @@ from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
 
 __all__ = ['BacktestConfig', 'DailyData', 'UnifiedOverlayBacktester']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -473,4 +472,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

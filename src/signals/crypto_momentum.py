@@ -29,7 +29,6 @@ from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_connect
 
 __all__ = ['CryptoVolRegime', 'CryptoSignalState', 'CryptoAssetSignal', 'CryptoCompositeSignal', 'CryptoMomentumCalculator', 'CryptoMomentumSignalGenerator', 'generate_crypto_signal']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -417,4 +416,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

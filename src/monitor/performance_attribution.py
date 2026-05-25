@@ -36,7 +36,6 @@ from src.utils import safe_get
 
 __all__ = ['SIGNAL_SOURCE_META', 'SourceAttribution', 'AttributionReport', 'PerformanceAttribution', 'print_report', 'patch_save_vote']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 PAPER_TRADING_DB = DATA_DIR / "paper_trading.db"
@@ -666,4 +665,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

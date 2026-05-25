@@ -28,7 +28,6 @@ from src.signals.cross_asset_relative_value import CrossAssetRVScanner, ZSCORE_E
 
 __all__ = ['BacktestConfig', 'CrossAssetRVBacktester']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -276,4 +275,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

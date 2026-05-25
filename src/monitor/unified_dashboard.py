@@ -26,7 +26,6 @@ from src.utils import safe_get
 
 __all__ = ['generate_unified_dashboard', 'print_summary', 'generate_status_text']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -632,4 +631,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

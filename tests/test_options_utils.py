@@ -1002,6 +1002,21 @@ class TestFunctionBoundaries:
 class TestCliGuard:
     """CLI/__main__ entry point."""
 
+    @staticmethod
+    def _runpy_with_cleanup(module_name):
+        """Run runpy.run_module and clean up sys.modules corruption."""
+        import runpy
+        import sys
+        saved = sys.modules.get(module_name)
+        try:
+            return runpy.run_module(module_name, run_name="__main__")
+        finally:
+            # runpy corrupts sys.modules — restore or remove
+            if saved is not None:
+                sys.modules[module_name] = saved
+            else:
+                sys.modules.pop(module_name, None)
+
     def test_main_runs_via_runpy(self, capsys):
         """Verify __main__ block executes via python -m."""
         import runpy
@@ -1015,7 +1030,7 @@ class TestCliGuard:
             mock_chain.find_optimal_call.return_value = None
             mock_instance.fetch_0dte_chain = AsyncMock(return_value=mock_chain)
 
-            runpy.run_module("src.broker.options_utils", run_name="__main__")
+            self._runpy_with_cleanup("src.broker.options_utils")
 
         captured = capsys.readouterr()
         assert "Fetched" in captured.out or "Best" in captured.out
@@ -1031,7 +1046,7 @@ class TestCliGuard:
             mock_chain.find_optimal_call.return_value = None
             mock_run.return_value = mock_chain
 
-            runpy.run_module("src.broker.options_utils", run_name="__main__")
+            self._runpy_with_cleanup("src.broker.options_utils")
 
         assert mock_run.called
 
@@ -1055,7 +1070,7 @@ class TestCliGuard:
             mock_chain.find_optimal_call.return_value = best
             mock_instance.fetch_0dte_chain = AsyncMock(return_value=mock_chain)
 
-            runpy.run_module("src.broker.options_utils", run_name="__main__")
+            self._runpy_with_cleanup("src.broker.options_utils")
 
         captured = capsys.readouterr()
         assert "Strike:" in captured.out
@@ -1077,7 +1092,7 @@ class TestCliGuard:
             mock_chain.find_optimal_call.return_value = None
             mock_instance.fetch_0dte_chain = AsyncMock(return_value=mock_chain)
 
-            runpy.run_module("src.broker.options_utils", run_name="__main__")
+            self._runpy_with_cleanup("src.broker.options_utils")
 
         assert True  # no crash
 
