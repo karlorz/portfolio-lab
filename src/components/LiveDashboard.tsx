@@ -34,6 +34,9 @@ import { AlternativeDataPanel } from './AlternativeDataPanel';
 import { ConvexityHarvestPanel } from './ConvexityHarvestPanel';
 import { LLMSentimentPanel } from './LLMSentimentPanel';
 import { SectorRotationPanel } from './SectorRotationPanel';
+import { VolatilityParityPanel } from './VolatilityParityPanel';
+import { MLSignalsPanel } from './MLSignalsPanel';
+import { FactorRotationDashboardPanel } from './FactorRotationDashboardPanel';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -564,6 +567,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             <div className="mt-4">
               <SectorRotationPanel data={(signals as any)?.sector_rotation ?? null} />
             </div>
+            <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <MLSignalsPanel data={(signals as any)?.ml_signals ?? null} />
+              <FactorRotationDashboardPanel data={(signals as any)?.factor_rotation_dashboard ?? null} />
+            </div>
             <div className="mt-4">
               <ModelValidationPanel
                 dsr={null}
@@ -626,6 +633,9 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             </div>
             <div className="mt-4">
               <KurtosisRegimePanel data={(signals as any)?.kurtosis_regime ?? null} />
+            </div>
+            <div className="mt-4">
+              <VolatilityParityPanel data={(signals as any)?.volatility_parity ?? null} />
             </div>
           </div>
         )}
