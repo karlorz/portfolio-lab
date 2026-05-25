@@ -50,7 +50,7 @@ from itertools import combinations
 
 from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
-from src.data.price_cache import get_prices
+from src.data.price_cache import get_prices, get_prices_df
 
 
 __all__ = ['LOOKBACK_WINDOWS', 'DEFAULT_WINDOW', 'DTW_RADIUS', 'LEVY_LAGS', 'GRAPH_SPARSITY_ALPHA', 'GRAPH_SMOOTHNESS_BETA', 'MAX_DEVIATION', 'MIN_WEIGHT', 'ASSETS', 'DEFAULT_BASE_ALLOCATION', 'LeadLagMatrix', 'WindowMomentumSignal', 'EnsembleNetworkSignal', 'NetworkMomentumPortfolio', 'NetworkMomentumLeadLag', 'NetworkMomentumBacktester']
@@ -236,26 +236,11 @@ class NetworkMomentumLeadLag:
         self._prices_df: Optional[pd.DataFrame] = None
     
     def _load_prices(self) -> pd.DataFrame:
-        """Load price data from JSON (TTL-cached)."""
+        """Load price data (TTL-cached pivoted DataFrame)."""
         if self._prices_df is not None:
             return self._prices_df
 
-        data = get_prices()
-        
-        records = []
-        for symbol, entries in data.items():
-            for entry in entries:
-                records.append({
-                    'date': entry['d'],
-                    'ticker': symbol,
-                    'price': entry['p']
-                })
-        
-        df = pd.DataFrame(records)
-        df['date'] = pd.to_datetime(df['date'])
-        df = df.pivot(index='date', columns='ticker', values='price')
-        df = df.sort_index()
-        
+        df = get_prices_df()
         self._prices_df = df
         return df
     

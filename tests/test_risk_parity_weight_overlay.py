@@ -717,50 +717,35 @@ class TestLoadPricesEdgeCases:
     def test_file_not_found_raises(self):
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
         overlay._prices_df = None
-        with patch('src.strategy.risk_parity_weight_overlay.get_prices', side_effect=FileNotFoundError):
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices_df', side_effect=FileNotFoundError):
             with pytest.raises(FileNotFoundError):
                 overlay._load_prices()
 
-    def test_empty_json_object_raises(self, tmp_path):
+    def test_empty_df_returns_empty(self, tmp_path):
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
         overlay._prices_df = None
-        with patch('src.strategy.risk_parity_weight_overlay.get_prices', return_value={}):
-            with pytest.raises(KeyError):
-                overlay._load_prices()
-
-    def test_missing_d_key_raises_key_error(self, tmp_path):
-        prices_data = {'SPY': [{'p': 450.0}]}
-        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay._prices_df = None
-        with patch('src.strategy.risk_parity_weight_overlay.get_prices', return_value=prices_data):
-            with pytest.raises(KeyError):
-                overlay._load_prices()
-
-    def test_missing_p_key_raises_key_error(self, tmp_path):
-        prices_data = {'SPY': [{'d': '2026-01-02'}]}
-        overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay._prices_df = None
-        with patch('src.strategy.risk_parity_weight_overlay.get_prices', return_value=prices_data):
-            with pytest.raises(KeyError):
-                overlay._load_prices()
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices_df', return_value=pd.DataFrame()):
+            df = overlay._load_prices()
+        assert df.empty
 
     def test_single_symbol_two_days(self, tmp_path):
-        prices_data = {
-            'SPY': [{'d': '2026-01-02', 'p': 450.0}, {'d': '2026-01-03', 'p': 452.0}],
-        }
+        dates = pd.to_datetime(['2026-01-02', '2026-01-03'])
+        mock_df = pd.DataFrame({'SPY': [450.0, 452.0]}, index=dates)
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
         overlay._prices_df = None
-        with patch('src.strategy.risk_parity_weight_overlay.get_prices', return_value=prices_data):
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices_df', return_value=mock_df):
             df = overlay._load_prices()
-        assert list(df.columns) == ['SPY']
+        assert 'SPY' in df.columns
         assert len(df) == 2
 
-    def test_malformed_json_raises(self, tmp_path):
+    def test_cached_df_returned(self, tmp_path):
+        dates = pd.to_datetime(['2026-01-02'])
+        cached_df = pd.DataFrame({'SPY': [450.0]}, index=dates)
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay._prices_df = None
-        with patch('src.strategy.risk_parity_weight_overlay.get_prices', side_effect=json.JSONDecodeError("test", "", 0)):
-            with pytest.raises(json.JSONDecodeError):
-                overlay._load_prices()
+        overlay._prices_df = cached_df
+        # Should return cached without calling get_prices_df
+        df = overlay._load_prices()
+        assert df is cached_df
 
 
 # ==============================================================================

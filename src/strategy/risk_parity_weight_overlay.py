@@ -32,7 +32,7 @@ from dataclasses import dataclass, asdict
 
 from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
-from src.data.price_cache import get_prices
+from src.data.price_cache import get_prices, get_prices_df
 
 
 __all__ = ['VOL_LOOKBACK', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'DEFAULT_BASE', 'RPWeightOverlay', 'RiskParityWeightOverlay', 'RPBacktester']
@@ -96,22 +96,7 @@ class RiskParityWeightOverlay:
         if self._prices_df is not None:
             return self._prices_df
 
-        data = get_prices()
-        
-        records = []
-        for symbol, entries in data.items():
-            for entry in entries:
-                records.append({
-                    'date': entry['d'],
-                    'ticker': symbol,
-                    'price': entry['p']
-                })
-        
-        df = pd.DataFrame(records)
-        df['date'] = pd.to_datetime(df['date'])
-        df = df.pivot(index='date', columns='ticker', values='price')
-        df = df.sort_index()
-        
+        df = get_prices_df()
         self._prices_df = df
         return df
     
