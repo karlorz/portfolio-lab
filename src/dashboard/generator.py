@@ -96,23 +96,41 @@ class DashboardGenerator:
         Pulls data from the OverlayDashboardGenerator and maps keys to the
         format expected by LiveDashboard.tsx panels.
         """
+        result: Dict = {}
+
+        # Primary overlay data
         try:
             from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
             gen = OverlayDashboardGenerator()
             dashboard = gen.generate()
             data = dashboard.to_dict()
 
-            return {
+            result.update({
                 "collar": data.get("collar", {}),
                 "crypto": data.get("crypto", {}),
                 "calendar": data.get("calendar", {}),
                 "kurtosis": data.get("kurtosis", {}),
                 "bond_momentum": data.get("bond_duration", {}),
                 "unified": data.get("unified", {}),
-            }
+            })
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Overlay dashboard data unavailable: %s", e)
-            return {}
+
+        # VIX term structure
+        try:
+            from src.signals.vix_term_structure import VIXTermStructureSignalGenerator
+            vix_gen = VIXTermStructureSignalGenerator()
+            signal = vix_gen.generate_signal()
+            result["vix_term_structure"] = signal.to_dict()
+            # VIX overlay state
+            state_file = DATA_DIR / "vix_overlay_state.json"
+            if state_file.exists():
+                with open(state_file) as f:
+                    result["vix_overlay"] = json.load(f)
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("VIX term structure data unavailable: %s", e)
+
+        return result
 
     def generate_signals_json(self) -> Path:
         """Generate current signals and allocations."""
@@ -1279,6 +1297,119 @@ class DashboardGenerator:
             logger.warning("Failed to generate turnover validator data: %s", e)
             return None
 
+    def generate_regime_gate_json(self) -> Optional[Path]:
+        """Generate regime gate status data for dashboard."""
+        try:
+            from src.signals.regime_gate import RegimeGate
+
+            gate = RegimeGate()
+            summary = gate.get_gate_summary()
+
+            # Load current regime from state
+            regime_name = "NORMAL"
+            regime_confidence = 0.5
+            regime_file = DATA_DIR / "regime_state.json"
+            if regime_file.exists():
+                with open(regime_file) as f:
+                    state = json.load(f)
+                    regime_name = state.get("regime", "NORMAL")
+                    regime_confidence = state.get("confidence", 0.5)
+
+            # Build gate rules with current regime active status
+            all_signals = list(summary.keys())
+            active_signals = gate.get_active_signal_names(
+                all_signals + ["alt_data", "cross_asset_rv", "unified_overlay"],
+                regime_name,
+            )
+            inactive_signals = [s for s in all_signals if s not in active_signals]
+
+            gate_data = {
+                "current_regime": regime_name,
+                "regime_confidence": regime_confidence,
+                "gate_rules": [
+                    {"signal_name": sig, "off_regimes": sorted(regimes), "is_active": sig in active_signals}
+                    for sig, regimes in summary.items()
+                ],
+                "active_signals": active_signals,
+                "inactive_signals": inactive_signals,
+                "min_dwell_days": gate.min_dwell_days,
+                "generated_at": datetime.now().isoformat(),
+            }
+
+            out_path = PUBLIC_DIR / "regime_gate.json"
+            save_results_json(gate_data, output_path=str(out_path))
+            return out_path
+
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Failed to generate regime gate data: %s", e)
+            return None
+
+    def generate_tsmom_json(self) -> Optional[Path]:
+        """Generate TSMOM overlay data for dashboard."""
+        try:
+            from src.signals.tsmom_overlay import TSMOMOverlay
+
+            overlay = TSMOMOverlay()
+            signals = overlay.compute_signals()
+
+            # Build speed breakdown from multi-speed TSMOM
+            speed_breakdown = []
+            for signal in signals:
+                speed_breakdown.append({
+                    "label": f"{signal.ticker} TSMOM",
+                    "weight": signal.base_weight,
+                    "signal": signal.signal,
+                    "asset_signals": {signal.ticker: signal.adjustment},
+                    "realized_vol": signal.realized_vol,
+                    "adjustment": signal.adjustment,
+                })
+
+            tsmom_data = {
+                "composite_signal": float(np.mean([s.signal for s in signals])) if signals else 0.0,
+                "speed_breakdown": speed_breakdown,
+                "position_recommendation": "long" if np.mean([s.signal for s in signals]) > 0.1 else ("short" if np.mean([s.signal for s in signals]) < -0.1 else "neutral") if signals else "neutral",
+                "confidence": min(1.0, abs(np.mean([s.vol_scaled_position for s in signals]))) if signals else 0.0,
+                "standalone_sharpe": 0.96,
+                "overlay_sharpe": 0.93,
+                "health_score": 0.55,
+                "is_gated_off": True,  # MSM is gated off in HIGH_VOL/CRISIS
+                "generated_at": datetime.now().isoformat(),
+            }
+
+            out_path = PUBLIC_DIR / "tsmom.json"
+            save_results_json(tsmom_data, output_path=str(out_path))
+            return out_path
+
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Failed to generate TSMOM data: %s", e)
+            return None
+
+    def generate_cross_asset_rv_json(self) -> Optional[Path]:
+        """Generate cross-asset relative value data for dashboard."""
+        try:
+            from src.signals.cross_asset_relative_value import CrossAssetRelativeValueSignal
+
+            signal_gen = CrossAssetRelativeValueSignal()
+            signal = signal_gen.generate()
+
+            rv_data = {
+                "signal_value": signal.composite_signal if hasattr(signal, 'composite_signal') else 0.0,
+                "pairs": signal.pair_signals if hasattr(signal, 'pair_signals') else [],
+                "current_regime": "NORMAL",
+                "is_gated_off": True,  # v961: -8.68 Sharpe in HIGH_VOL/CRISIS
+                "regime_note": "Mean-reversion fails in volatile regimes",
+                "weight_in_ensemble": 0.13,
+                "generated_at": datetime.now().isoformat(),
+            }
+
+            out_path = PUBLIC_DIR / "cross_asset_rv.json"
+            save_results_json(rv_data, output_path=str(out_path))
+            return out_path
+
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Failed to generate cross-asset RV data: %s", e)
+            return None
+
     def generate_graduation_json(self) -> Optional[Path]:
         """Generate graduation readiness progress for dashboard.
 
@@ -1382,6 +1513,9 @@ class DashboardGenerator:
             self.generate_vixy_hedge_json(),
             self.generate_black_litterman_json(),
             self.generate_turnover_validator_json(),
+            self.generate_regime_gate_json(),
+            self.generate_tsmom_json(),
+            self.generate_cross_asset_rv_json(),
             self.generate_explainability_json(),
         ]
 

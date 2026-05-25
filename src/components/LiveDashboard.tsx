@@ -47,6 +47,12 @@ import { BlackLittermanMapperPanel } from './BlackLittermanMapperPanel';
 import type { BlackLittermanMapperData } from './BlackLittermanMapperPanel';
 import { TurnoverValidatorPanel } from './TurnoverValidatorPanel';
 import type { TurnoverValidatorData } from './TurnoverValidatorPanel';
+import { RegimeGatePanel } from './RegimeGatePanel';
+import type { RegimeGateData } from './RegimeGatePanel';
+import { TSMOMPanel } from './TSMOMPanel';
+import type { TSMOMData } from './TSMOMPanel';
+import { CrossAssetRVPanel } from './CrossAssetRVPanel';
+import type { CrossAssetRVData } from './CrossAssetRVPanel';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -73,6 +79,9 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [vixyHedgeData, setVixyHedgeData] = useState<VixyHedgeSizingData | null>(null);
   const [blMapperData, setBLMapperData] = useState<BlackLittermanMapperData | null>(null);
   const [turnoverData, setTurnoverData] = useState<TurnoverValidatorData | null>(null);
+  const [regimeGateData, setRegimeGateData] = useState<RegimeGateData | null>(null);
+  const [tsmomData, setTsmomData] = useState<TSMOMData | null>(null);
+  const [crossAssetRVData, setCrossAssetRVData] = useState<CrossAssetRVData | null>(null);
 
   const fetchData = async () => {
     try {
@@ -140,6 +149,18 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         if (vixyRes.ok) setVixyHedgeData(await vixyRes.json());
         if (blRes.ok) setBLMapperData(await blRes.json());
         if (turnoverRes.ok) setTurnoverData(await turnoverRes.json());
+        if (blRes.ok) setBLMapperData(await blRes.json());
+        if (turnoverRes.ok) setTurnoverData(await turnoverRes.json());
+      } catch { /* panels render gracefully with null data */ }
+      try {
+        const [rgRes, tsmomRes, rvRes] = await Promise.all([
+          fetch('/data/regime_gate.json'),
+          fetch('/data/tsmom.json'),
+          fetch('/data/cross_asset_rv.json'),
+        ]);
+        if (rgRes.ok) setRegimeGateData(await rgRes.json());
+        if (tsmomRes.ok) setTsmomData(await tsmomRes.json());
+        if (rvRes.ok) setCrossAssetRVData(await rvRes.json());
       } catch { /* panels render gracefully with null data */ }
 
       setError(null);
@@ -610,6 +631,11 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
               <BlackLittermanMapperPanel data={blMapperData} />
               <TurnoverValidatorPanel data={turnoverData} />
+            </div>
+            <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <RegimeGatePanel data={regimeGateData} />
+              <TSMOMPanel data={tsmomData} />
+              <CrossAssetRVPanel data={crossAssetRVData} />
             </div>
             <div className="mt-4">
               <ModelValidationPanel
