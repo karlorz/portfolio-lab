@@ -185,20 +185,18 @@ class PortfolioRiskDecomposition:
 
 
 def _load_prices_from_pipeline() -> Dict[str, np.ndarray]:
-    """Load daily close prices from the existing data pipeline (prices.json).
+    """Load daily close prices from the existing data pipeline (TTL-cached).
 
     Returns:
         dict mapping symbol -> 1D numpy array of daily close prices (oldest first)
     """
-    from src.paths import PRICES_JSON
+    from src.data.price_cache import get_prices
 
-    prices_path = PRICES_JSON
-    if not prices_path.exists():
-        logger.warning("Prices file not found: %s", prices_path)
+    try:
+        raw = get_prices()
+    except FileNotFoundError:
+        logger.warning("Prices file not found")
         return {}
-
-    with open(prices_path) as f:
-        raw = json.load(f)
 
     result: Dict[str, np.ndarray] = {}
     for symbol, entries in raw.items():

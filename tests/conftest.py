@@ -137,8 +137,12 @@ def _clear_price_cache():
     """Invalidate TTL price cache between tests to prevent stale data."""
     from src.data.price_cache import invalidate_price_cache
     invalidate_price_cache()
+    # Also clear vpin_bvc bar cache
+    from src.signals.vpin_bvc import _BARS_CACHE
+    _BARS_CACHE.clear()
     yield
     invalidate_price_cache()
+    _BARS_CACHE.clear()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

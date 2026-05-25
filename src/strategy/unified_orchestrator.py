@@ -35,6 +35,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_connect
+from src.data.price_cache import get_prices
 from src.signals.calendar_seasonality import get_calendar_modifier
 from src.signals.bond_duration_signal import generate_bond_duration_signal
 from src.signals.collar_signal import generate_collar_signal
@@ -580,14 +581,9 @@ class UnifiedOrchestrator:
         duration_bias = max(-1.0, min(1.0, tlt_delta / 0.10))
 
         try:
-            # Load prices for covariance estimation
-            prices_path = DATA_DIR / "prices.json"
-            if not prices_path.exists():
-                return None
-
+            # Load prices for covariance estimation (TTL-cached)
             import pandas as pd
-            with open(prices_path) as f:
-                raw = json.load(f)
+            raw = get_prices()
             prices = {}
             for sym in ("SPY", "GLD", "TLT"):
                 key = sym.lower() if sym.lower() in raw else sym

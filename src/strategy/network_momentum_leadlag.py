@@ -50,6 +50,7 @@ from itertools import combinations
 
 from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
+from src.data.price_cache import get_prices
 
 
 __all__ = ['LOOKBACK_WINDOWS', 'DEFAULT_WINDOW', 'DTW_RADIUS', 'LEVY_LAGS', 'GRAPH_SPARSITY_ALPHA', 'GRAPH_SMOOTHNESS_BETA', 'MAX_DEVIATION', 'MIN_WEIGHT', 'ASSETS', 'DEFAULT_BASE_ALLOCATION', 'LeadLagMatrix', 'WindowMomentumSignal', 'EnsembleNetworkSignal', 'NetworkMomentumPortfolio', 'NetworkMomentumLeadLag', 'NetworkMomentumBacktester']
@@ -235,12 +236,11 @@ class NetworkMomentumLeadLag:
         self._prices_df: Optional[pd.DataFrame] = None
     
     def _load_prices(self) -> pd.DataFrame:
-        """Load price data from JSON."""
+        """Load price data from JSON (TTL-cached)."""
         if self._prices_df is not None:
             return self._prices_df
-        
-        with open(self.prices_path, 'r') as f:
-            data = json.load(f)
+
+        data = get_prices()
         
         records = []
         for symbol, entries in data.items():

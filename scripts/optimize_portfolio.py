@@ -37,10 +37,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def load_prices(path: Path, symbols: list[str] | None = None) -> pd.DataFrame:
-    """Load prices.json into a wide DataFrame (dates x symbols)."""
-    with open(path) as f:
-        raw = json.load(f)
+def load_prices(path_or_data: Path | dict, symbols: list[str] | None = None) -> pd.DataFrame:
+    """Load prices.json into a wide DataFrame (dates x symbols).
+
+    Args:
+        path_or_data: Either a Path to prices.json, or a pre-loaded dict
+            (e.g., from src.data.price_cache.get_prices()).
+        symbols: Optional symbol filter.
+    """
+    if isinstance(path_or_data, dict):
+        raw = path_or_data
+    else:
+        with open(path_or_data) as f:
+            raw = json.load(f)
 
     records = []
     for symbol, bars in raw.items():

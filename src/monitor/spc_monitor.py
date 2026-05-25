@@ -20,9 +20,11 @@ Usage:
     flags = monitor.check_flags()  # Returns list of flagged signals
 """
 
+import json
 import math
 import os
 from collections import deque
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import logging
@@ -202,3 +204,69 @@ class SPCMonitor:
             self._breach_counts.pop(signal_name, None)
             self._reference.pop(signal_name, None)
             self._limits.pop(signal_name, None)
+
+    # ── State persistence ──────────────────────────────────────────────
+
+    def save_state(self, path: Optional[Path] = None) -> None:
+        """Persist SPC state to a JSON file for cross-process durability.
+
+        Called after each record() cycle so the next process invocation
+        can reload the baseline instead of starting from scratch.
+
+        Args:
+            path: File path. Defaults to DATA_DIR / "spc_state.json".
+        """
+        if path is None:
+            from src.paths import DATA_DIR
+            path = DATA_DIR / "spc_state.json"
+
+        state = {
+            "windows": {name: list(vals) for name, vals in self._windows.items()},
+            "breach_counts": dict(self._breach_counts),
+            "reference": {
+                name: list(ref) if ref is not None else None
+                for name, ref in self._reference.items()
+            },
+            "limits": self._limits,
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(state))
+        except OSError as e:
+            logger.warning("SPC state save failed: %s", e)
+
+    def load_state(self, path: Optional[Path] = None) -> bool:
+        """Restore SPC state from a JSON file.
+
+        Should be called during __init__ or before first record().
+
+        Args:
+            path: File path. Defaults to DATA_DIR / "spc_state.json".
+
+        Returns:
+            True if state was loaded, False if no saved state exists.
+        """
+        if path is None:
+            from src.paths import DATA_DIR
+            path = DATA_DIR / "spc_state.json"
+
+        if not path.exists():
+            return False
+
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("SPC state load failed: %s", e)
+            return False
+
+        self._windows = {
+            name: deque(vals, maxlen=self.window_size)
+            for name, vals in data.get("windows", {}).items()
+        }
+        self._breach_counts = data.get("breach_counts", {})
+        self._reference = {
+            name: tuple(ref) if ref is not None else None
+            for name, ref in data.get("reference", {}).items()
+        }
+        self._limits = data.get("limits", {})
+        return True

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, sqlite_connect
+from src.data.price_cache import get_prices
 from src.backtest.metrics import save_results_json
 
 import numpy as np
@@ -126,18 +127,11 @@ class AdaptiveSizer:
     # ── Factor Loading ───────────────────────────────────────────────────────
 
     def _load_prices(self) -> Optional[Dict]:
-        """Load price data from JSON."""
-        prices_path = PRICES_JSON
-        if not prices_path.exists():
-            prices_path = self.data_dir / "prices.json"
-        if not prices_path.exists():
-            logger.warning("Prices file not found")
-            return None
+        """Load price data from JSON (TTL-cached)."""
         try:
-            with open(prices_path) as f:
-                self.prices = json.load(f)
+            self.prices = get_prices()
             return self.prices
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error("Failed to load prices: %s", e)
             return None
 

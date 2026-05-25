@@ -16,10 +16,12 @@ This provides a zero-cost approximation of order flow toxicity.
 import numpy as np
 import pandas as pd
 import logging
+import threading
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import sqlite3
+from cachetools import TTLCache
 from src.paths import sqlite_connect
 
 
@@ -492,14 +494,26 @@ class VPINSignalAdapter:
         }
 
 
+# TTL cache for OHLCV bar queries — avoids redundant SQLite hits per cron cycle
+_BARS_CACHE: TTLCache = TTLCache(maxsize=64, ttl=300)  # 5-min TTL, up to 64 entries
+_BARS_CACHE_LOCK = threading.Lock()
+
+
 def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
     """
     Load historical OHLCV bars. Tries market.db first, falls back to Yahoo Finance.
     Uses daily bars — sufficient for portfolio-level VPIN estimation.
+    Results are TTL-cached for 5 minutes to avoid redundant SQLite queries.
     """
+    cache_key = f"{symbol}:{days}"
+    with _BARS_CACHE_LOCK:
+        if cache_key in _BARS_CACHE:
+            return _BARS_CACHE[cache_key]
+
     # Try market.db first
     from src.paths import MARKET_DB
     db_path = MARKET_DB
+    result_df = None
     if db_path.exists():
         with sqlite_connect(str(db_path)) as conn:
             try:
@@ -517,47 +531,56 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
                             df[col] = df[col].fillna(df['close'])
                         df = df.dropna(subset=['close', 'volume'])
                         df['volume'] = df['volume'].fillna(0)
-                        return df[['open', 'high', 'low', 'close', 'volume']]
+                        result_df = df[['open', 'high', 'low', 'close', 'volume']]
             except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
                 logger.warning("Failed to fetch OHLCV for %s from DB: %s", symbol, e)
 
     # Fallback: fetch from Yahoo Finance v8 API
-    try:
-        import requests
-        from datetime import datetime as dt
+    if result_df is None:
+        try:
+            import requests
+            from datetime import datetime as dt
 
-        period2 = int(dt.now().timestamp())
-        period1 = int((dt.now() - timedelta(days=days + 30)).timestamp())
-        url = (
-            f"https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
-            f"?period1={period1}&period2={period2}&interval=1d"
-        )
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        resp = requests.get(url, headers=headers, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
+            period2 = int(dt.now().timestamp())
+            period1 = int((dt.now() - timedelta(days=days + 30)).timestamp())
+            url = (
+                f"https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
+                f"?period1={period1}&period2={period2}&interval=1d"
+            )
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
 
-        result = data['chart']['result'][0]
-        timestamps = result['timestamp']
-        quote = result['indicators']['quote'][0]
+            result = data['chart']['result'][0]
+            timestamps = result['timestamp']
+            quote = result['indicators']['quote'][0]
 
-        df = pd.DataFrame({
-            'open': quote.get('open', []),
-            'high': quote.get('high', []),
-            'low': quote.get('low', []),
-            'close': quote.get('close', []),
-            'volume': quote.get('volume', []),
-        }, index=pd.to_datetime(timestamps, unit='s'))
+            df = pd.DataFrame({
+                'open': quote.get('open', []),
+                'high': quote.get('high', []),
+                'low': quote.get('low', []),
+                'close': quote.get('close', []),
+                'volume': quote.get('volume', []),
+            }, index=pd.to_datetime(timestamps, unit='s'))
 
-        df = df.dropna(subset=['close'])
-        for col in ['open', 'high', 'low']:
-            df[col] = df[col].fillna(df['close'])
-        df['volume'] = df['volume'].fillna(0)
+            df = df.dropna(subset=['close'])
+            for col in ['open', 'high', 'low']:
+                df[col] = df[col].fillna(df['close'])
+            df['volume'] = df['volume'].fillna(0)
 
-        return df.tail(days)
-    except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
-        logger.warning("Failed to fetch OHLCV for %s from Yahoo Finance: %s", symbol, e)
+            result_df = df.tail(days)
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
+            logger.warning("Failed to fetch OHLCV for %s from Yahoo Finance: %s", symbol, e)
+            return pd.DataFrame()
+
+    if result_df is None:
         return pd.DataFrame()
+
+    # Cache the result
+    with _BARS_CACHE_LOCK:
+        _BARS_CACHE[cache_key] = result_df
+    return result_df
 
 
 def backtest_vpin(symbols: List[str], days: int = 30) -> Dict[str, Any]:

@@ -213,13 +213,13 @@ class AlpacaClient:
             "paper": self.paper,
         }
     
-    def submit_order(self, order: OrderRequest) -> Order:
-        """Submit a new order."""
+    def submit_order(self, order: OrderRequest) -> Optional[Order]:
+        """Submit a new order. Returns None on API/network failure."""
         client = self._get_client()
-        
+
         # Convert our OrderRequest to Alpaca format
         side_enum = OrderSide.BUY if order.side == OrderSide.BUY else OrderSide.SELL
-        
+
         if order.order_type == OrderType.MARKET:
             alpaca_order = MarketOrderRequest(
                 symbol=order.symbol,
@@ -237,17 +237,24 @@ class AlpacaClient:
                 time_in_force=getattr(TimeInForce, order.time_in_force.upper(), TimeInForce.DAY),
                 limit_price=order.limit_price
             )
-        
-        result = client.submit_order(alpaca_order)
-        return Order.from_alpaca(result)
-    
+
+        try:
+            result = client.submit_order(alpaca_order)
+            return Order.from_alpaca(result)
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
+            logger.warning("Error submitting order for %s: %s", order.symbol, e)
+            return None
+
     def get_orders(self, status: Optional[str] = None, limit: int = 100) -> List[Order]:
-        """Get list of orders."""
+        """Get list of orders. Returns empty list on API/network failure."""
         client = self._get_client()
-        
-        # Get orders from Alpaca
-        orders = client.get_orders(limit=limit)
-        return [Order.from_alpaca(o) for o in orders]
+
+        try:
+            orders = client.get_orders(limit=limit)
+            return [Order.from_alpaca(o) for o in orders]
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
+            logger.warning("Error fetching orders: %s", e)
+            return []
     
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an open order."""

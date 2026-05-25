@@ -39,6 +39,7 @@ from enum import Enum
 import logging
 
 from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect
+from src.data.price_cache import get_prices
 from src.utils import safe_get
 
 
@@ -467,14 +468,11 @@ class EnsembleVoter:
         return regime, confidence
     
     def _load_price_data(self) -> Optional[pd.DataFrame]:
-        """Load price data from JSON."""
-        prices_path = PRICES_JSON
-        
-        if not prices_path.exists():
+        """Load price data from JSON (TTL-cached)."""
+        try:
+            data = get_prices()
+        except (FileNotFoundError, json.JSONDecodeError):
             return None
-        
-        with open(prices_path) as f:
-            data = json.load(f)
         
         frames = []
         for symbol, pdata in data.items():

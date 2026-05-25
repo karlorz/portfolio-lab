@@ -1637,6 +1637,7 @@ class DashboardGenerator:
         # Initialize class-level SPC monitor (persists across runs)
         if DashboardGenerator._spc_monitor is None:
             DashboardGenerator._spc_monitor = SPCMonitor()
+            DashboardGenerator._spc_monitor.load_state()
 
         monitor = DashboardGenerator._spc_monitor
 
@@ -1664,6 +1665,9 @@ class DashboardGenerator:
         # Get status
         flags = monitor.check_flags()
         all_status = monitor.get_all_status()
+
+        # Persist state for next process invocation
+        monitor.save_state()
 
         return {
             "status": "ok",

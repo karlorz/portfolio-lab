@@ -1232,61 +1232,56 @@ class TestEdgeCases:
 
 
 class TestLoadPricesFromPipeline:
-    """Tests for _load_prices_from_pipeline with mocked file system."""
+    """Tests for _load_prices_from_pipeline with mocked get_prices."""
 
-    def test_load_from_public_data(self, tmp_path, monkeypatch):
-        """Load from public/data/prices.json."""
-        import src.monitor.risk_decomposition as rd_mod
-        import src.paths as paths_mod
+    def test_load_from_public_data(self, monkeypatch):
+        """Load from get_prices data."""
+        import src.data.price_cache as pc_mod
 
-        prices_file = tmp_path / "prices.json"
         data = {"SPY": [{"d": "2024-01-01", "p": 100.0}, {"d": "2024-01-02", "p": 101.0}]}
-        prices_file.write_text(json.dumps(data))
-        monkeypatch.setattr(paths_mod, "PRICES_JSON", prices_file)
-        result = rd_mod._load_prices_from_pipeline()
+        monkeypatch.setattr(pc_mod, "get_prices", lambda: data)
+        from src.monitor.risk_decomposition import _load_prices_from_pipeline
+        result = _load_prices_from_pipeline()
         assert "SPY" in result
         assert len(result["SPY"]) == 2
 
-    def test_load_from_data_fallback(self, tmp_path, monkeypatch):
-        """Fallback loads from PRICES_JSON path."""
-        import src.monitor.risk_decomposition as rd_mod
-        import src.paths as paths_mod
+    def test_load_from_data_fallback(self, monkeypatch):
+        """Fallback loads from get_prices data."""
+        import src.data.price_cache as pc_mod
 
-        prices_file = tmp_path / "prices.json"
         data = {"GLD": [{"d": "2024-01-01", "p": 180.0}]}
-        prices_file.write_text(json.dumps(data))
-        monkeypatch.setattr(paths_mod, "PRICES_JSON", prices_file)
-        result = rd_mod._load_prices_from_pipeline()
+        monkeypatch.setattr(pc_mod, "get_prices", lambda: data)
+        from src.monitor.risk_decomposition import _load_prices_from_pipeline
+        result = _load_prices_from_pipeline()
         assert "GLD" in result
 
-    def test_load_neither_exists(self, tmp_path, monkeypatch):
-        """When PRICES_JSON path doesn't exist, empty dict returned."""
-        import src.monitor.risk_decomposition as rd_mod
-        import src.paths as paths_mod
+    def test_load_neither_exists(self, monkeypatch):
+        """When get_prices raises FileNotFoundError, empty dict returned."""
+        import src.data.price_cache as pc_mod
 
-        monkeypatch.setattr(paths_mod, "PRICES_JSON", tmp_path / "nonexistent.json")
-        result = rd_mod._load_prices_from_pipeline()
+        def _raise_fnfe():
+            raise FileNotFoundError("no prices file")
+
+        monkeypatch.setattr(pc_mod, "get_prices", _raise_fnfe)
+        from src.monitor.risk_decomposition import _load_prices_from_pipeline
+        result = _load_prices_from_pipeline()
         assert result == {}
 
-    def test_load_empty_symbol_data(self, tmp_path, monkeypatch):
+    def test_load_empty_symbol_data(self, monkeypatch):
         """Symbol with empty entries list is skipped."""
-        import src.monitor.risk_decomposition as rd_mod
-        import src.paths as paths_mod
+        import src.data.price_cache as pc_mod
 
-        prices_file = tmp_path / "prices.json"
         data = {"SPY": [], "GLD": [{"d": "2024-01-01", "p": 180.0}]}
-        prices_file.write_text(json.dumps(data))
-        monkeypatch.setattr(paths_mod, "PRICES_JSON", prices_file)
-        result = rd_mod._load_prices_from_pipeline()
+        monkeypatch.setattr(pc_mod, "get_prices", lambda: data)
+        from src.monitor.risk_decomposition import _load_prices_from_pipeline
+        result = _load_prices_from_pipeline()
         assert "SPY" not in result
         assert "GLD" in result
 
-    def test_load_sorts_by_date(self, tmp_path, monkeypatch):
+    def test_load_sorts_by_date(self, monkeypatch):
         """Prices should be sorted chronologically (date order)."""
-        import src.monitor.risk_decomposition as rd_mod
-        import src.paths as paths_mod
+        import src.data.price_cache as pc_mod
 
-        prices_file = tmp_path / "prices.json"
         data = {
             "SPY": [
                 {"d": "2024-01-03", "p": 102.0},
@@ -1294,9 +1289,9 @@ class TestLoadPricesFromPipeline:
                 {"d": "2024-01-02", "p": 101.0},
             ]
         }
-        prices_file.write_text(json.dumps(data))
-        monkeypatch.setattr(paths_mod, "PRICES_JSON", prices_file)
-        result = rd_mod._load_prices_from_pipeline()
+        monkeypatch.setattr(pc_mod, "get_prices", lambda: data)
+        from src.monitor.risk_decomposition import _load_prices_from_pipeline
+        result = _load_prices_from_pipeline()
         assert np.allclose(result["SPY"], [100.0, 101.0, 102.0])
 
 

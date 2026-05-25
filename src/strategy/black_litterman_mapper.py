@@ -293,9 +293,9 @@ def compute_bl_weights(
     from pypfopt import risk_models
 
     if prices_df is None:
-        from src.paths import PRICES_JSON
+        from src.data.price_cache import get_prices
         from scripts.optimize_portfolio import load_prices
-        prices_df = load_prices(PRICES_JSON, symbols=DEFAULT_SYMBOLS)
+        prices_df = load_prices(get_prices(), symbols=DEFAULT_SYMBOLS)
 
     # Filter to default symbols if more are present
     available = [s for s in DEFAULT_SYMBOLS if s in prices_df.columns]

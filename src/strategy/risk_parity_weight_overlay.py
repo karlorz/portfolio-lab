@@ -32,6 +32,7 @@ from dataclasses import dataclass, asdict
 
 from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
+from src.data.price_cache import get_prices
 
 
 __all__ = ['VOL_LOOKBACK', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'DEFAULT_BASE', 'RPWeightOverlay', 'RiskParityWeightOverlay', 'RPBacktester']
@@ -94,9 +95,8 @@ class RiskParityWeightOverlay:
     def _load_prices(self) -> pd.DataFrame:
         if self._prices_df is not None:
             return self._prices_df
-        
-        with open(self.prices_path, 'r') as f:
-            data = json.load(f)
+
+        data = get_prices()
         
         records = []
         for symbol, entries in data.items():

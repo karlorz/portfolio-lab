@@ -716,64 +716,51 @@ class TestLoadPricesEdgeCases:
 
     def test_file_not_found_raises(self):
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay.prices_path = Path('/tmp/nonexistent_prices_xyz_000.json')
         overlay._prices_df = None
-        with pytest.raises((FileNotFoundError, json.JSONDecodeError)):
-            overlay._load_prices()
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices', side_effect=FileNotFoundError):
+            with pytest.raises(FileNotFoundError):
+                overlay._load_prices()
 
     def test_empty_json_object_raises(self, tmp_path):
-        prices_file = tmp_path / 'prices.json'
-        prices_file.write_text('{}')
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay.prices_path = prices_file
         overlay._prices_df = None
-        with pytest.raises(KeyError):
-            overlay._load_prices()
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices', return_value={}):
+            with pytest.raises(KeyError):
+                overlay._load_prices()
 
     def test_missing_d_key_raises_key_error(self, tmp_path):
         prices_data = {'SPY': [{'p': 450.0}]}
-        prices_file = tmp_path / 'prices.json'
-        with open(prices_file, 'w') as f:
-            json.dump(prices_data, f)
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay.prices_path = prices_file
         overlay._prices_df = None
-        with pytest.raises(KeyError):
-            overlay._load_prices()
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices', return_value=prices_data):
+            with pytest.raises(KeyError):
+                overlay._load_prices()
 
     def test_missing_p_key_raises_key_error(self, tmp_path):
         prices_data = {'SPY': [{'d': '2026-01-02'}]}
-        prices_file = tmp_path / 'prices.json'
-        with open(prices_file, 'w') as f:
-            json.dump(prices_data, f)
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay.prices_path = prices_file
         overlay._prices_df = None
-        with pytest.raises(KeyError):
-            overlay._load_prices()
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices', return_value=prices_data):
+            with pytest.raises(KeyError):
+                overlay._load_prices()
 
     def test_single_symbol_two_days(self, tmp_path):
         prices_data = {
             'SPY': [{'d': '2026-01-02', 'p': 450.0}, {'d': '2026-01-03', 'p': 452.0}],
         }
-        prices_file = tmp_path / 'prices.json'
-        with open(prices_file, 'w') as f:
-            json.dump(prices_data, f)
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay.prices_path = prices_file
         overlay._prices_df = None
-        df = overlay._load_prices()
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices', return_value=prices_data):
+            df = overlay._load_prices()
         assert list(df.columns) == ['SPY']
         assert len(df) == 2
 
     def test_malformed_json_raises(self, tmp_path):
-        prices_file = tmp_path / 'prices.json'
-        prices_file.write_text('{invalid json}')
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay.prices_path = prices_file
         overlay._prices_df = None
-        with pytest.raises(json.JSONDecodeError):
-            overlay._load_prices()
+        with patch('src.strategy.risk_parity_weight_overlay.get_prices', side_effect=json.JSONDecodeError("test", "", 0)):
+            with pytest.raises(json.JSONDecodeError):
+                overlay._load_prices()
 
 
 # ==============================================================================
