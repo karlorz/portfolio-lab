@@ -609,35 +609,35 @@ def run_check_and_exit():
     state = checklist._load_state()
     results = checklist.check(state)
     
-    print("=" * 60)
-    print("  v6.10 Graduation Checklist")
-    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 60)
-    print()
+    logger.info("=" * 60)
+    logger.info("  v6.10 Graduation Checklist")
+    logger.info(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
+    logger.info("")
     
     passed = 0
     for name, result in results.items():
         icon = "✅" if result.passed else "❌"
         if name == "manual_approval":
             icon = "🔒" if not result.passed else "✅"
-        print(f"  {icon} {name}")
-        print(f"     {result.description}")
-        print(f"     Value: {result.value} | Required: {result.required}")
-        print()
+        logger.info(f"  {icon} {name}")
+        logger.info(f"     {result.description}")
+        logger.info(f"     Value: {result.value} | Required: {result.required}")
+        logger.info("")
         if result.passed and name != "manual_approval":
             passed += 1
     
     auto_count = sum(1 for n in results if n != "manual_approval")
     score = round(passed / auto_count * 100, 1) if auto_count > 0 else 0
     
-    print(f"  Readiness: {passed}/{auto_count} auto-criteria = {score}%")
-    print(f"  Graduation Ready: {checklist.is_graduation_ready(results)}")
-    print(f"  Manual Approval: {'✅ APPROVED' if results['manual_approval'].passed else '🔒 PENDING'}")
-    print()
+    logger.info(f"  Readiness: {passed}/{auto_count} auto-criteria = {score}%")
+    logger.info(f"  Graduation Ready: {checklist.is_graduation_ready(results)}")
+    logger.info(f"  Manual Approval: {'✅ APPROVED' if results['manual_approval'].passed else '🔒 PENDING'}")
+    logger.info("")
     
     # Save report
     report_path = checklist.save_report(results)
-    print(f"  Report saved: {report_path}")
+    logger.info(f"  Report saved: {report_path}")
     
     return 0 if checklist.is_graduation_ready(results) else 1
 
@@ -649,11 +649,11 @@ def run_report_and_exit():
     results = checklist.check(state)
     report_path = checklist.save_report(results)
     
-    print(f"Detailed report written to: {report_path}")
+    logger.info(f"Detailed report written to: {report_path}")
     
     # Print the JSON
     with open(report_path) as f:
-        print(f.read())
+        logger.info(f.read())
     
     return 0
 
@@ -665,17 +665,17 @@ def run_progress_and_exit():
     results = checklist.check(state)
     summary = checklist.progress_summary(results)
     
-    print(f"📊 Graduation Readiness: {summary['readiness_pct']}%")
-    print(f"   Progress: {summary['overall_progress']} auto-criteria met")
-    print(f"   Ready to graduate: {'YES' if summary['is_ready'] else 'NO'}")
-    print(f"   Manual approval: {'✅' if results['manual_approval'].passed else '🔒 PENDING'}")
-    print()
+    logger.info(f"📊 Graduation Readiness: {summary['readiness_pct']}%")
+    logger.info(f"   Progress: {summary['overall_progress']} auto-criteria met")
+    logger.info(f"   Ready to graduate: {'YES' if summary['is_ready'] else 'NO'}")
+    logger.info(f"   Manual approval: {'✅' if results['manual_approval'].passed else '🔒 PENDING'}")
+    logger.info("")
     
     for name, result in results.items():
         icon = "✅" if result.passed else "❌"
         if name == "manual_approval":
             icon = "🔒" if not result.passed else "✅"
-        print(f"   {icon} {name}: {result.value} {'>=' if result.passed else '<'} {result.required}")
+        logger.info(f"   {icon} {name}: {result.value} {'>=' if result.passed else '<'} {result.required}")
     
     return 0
 

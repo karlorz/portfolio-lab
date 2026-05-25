@@ -4,6 +4,7 @@ Tests for Cross-Asset Relative Value Scanner (v5.71).
 """
 
 import json
+import logging
 import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -323,7 +324,7 @@ class TestDataClasses:
 # ---------------------------------------------------------------------------
 
 class TestPrint:
-    def test_print_scan_empty(self, capsys):
+    def test_print_scan_empty(self, caplog):
         signal = CrossAssetRVSignal(
             timestamp="2026-01-01",
             pairs={},
@@ -335,11 +336,11 @@ class TestPrint:
             duration_score=0.0,
             overall_conviction=0.0,
         )
-        print_scan(signal)
-        captured = capsys.readouterr()
-        assert "CROSS-ASSET RELATIVE VALUE SCAN" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.cross_asset_relative_value"):
+            print_scan(signal)
+        assert "CROSS-ASSET RELATIVE VALUE SCAN" in caplog.text
 
-    def test_print_scan_with_data(self, capsys):
+    def test_print_scan_with_data(self, caplog):
         reading = PairReading(
             pair_name="spy_qqq", symbol_a="SPY", symbol_b="QQQ",
             return_a_60d=5.0, return_b_60d=2.0, return_differential=3.0,
@@ -358,10 +359,10 @@ class TestPrint:
             duration_score=0.0,
             overall_conviction=0.8,
         )
-        print_scan(signal)
-        captured = capsys.readouterr()
-        assert "spy_qqq" in captured.out
-        assert "diverged_bull" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.cross_asset_relative_value"):
+            print_scan(signal)
+        assert "spy_qqq" in caplog.text
+        assert "diverged_bull" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +620,7 @@ class TestStatePersistenceExtended:
 class TestPrintExtended:
     """Extended print tests."""
 
-    def test_print_scan_shows_legend(self, capsys):
+    def test_print_scan_shows_legend(self, caplog):
         """Print should show the legend section."""
         signal = CrossAssetRVSignal(
             timestamp="2026-01-01",
@@ -632,12 +633,12 @@ class TestPrintExtended:
             duration_score=0.0,
             overall_conviction=0.0,
         )
-        print_scan(signal)
-        captured = capsys.readouterr()
-        assert "Legend" in captured.out
-        assert "Z-Score" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.cross_asset_relative_value"):
+            print_scan(signal)
+        assert "Legend" in caplog.text
+        assert "Z-Score" in caplog.text
 
-    def test_print_scan_converged_pair(self, capsys):
+    def test_print_scan_converged_pair(self, caplog):
         """Print should handle converged pairs."""
         reading = PairReading(
             pair_name="spy_efa", symbol_a="SPY", symbol_b="EFA",
@@ -657,9 +658,9 @@ class TestPrintExtended:
             duration_score=0.0,
             overall_conviction=0.0,
         )
-        print_scan(signal)
-        captured = capsys.readouterr()
-        assert "converged" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.cross_asset_relative_value"):
+            print_scan(signal)
+        assert "converged" in caplog.text
 
 
 class TestPairReadingExtended:

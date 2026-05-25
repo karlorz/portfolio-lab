@@ -6,6 +6,7 @@ state persistence, and ensemble-facing API.
 """
 
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime, timedelta
@@ -1305,17 +1306,17 @@ class TestBondGoldBoundaries:
 class TestOutputFunctions:
     """Tests for print_signal_report and CLI."""
 
-    def test_print_signal_report_output(self, detector_with_prices, capsys):
+    def test_print_signal_report_output(self, detector_with_prices, caplog):
         """print_signal_report produces expected output without errors."""
         signal = detector_with_prices.scan()
         assert signal is not None
-        print_signal_report(signal)
-        captured = capsys.readouterr()
-        assert "CROSS-ASSET REGIME ARBITRAGE SIGNAL" in captured.out
-        assert "SPY (Equity)" in captured.out
-        assert "TLT (Bonds)" in captured.out
-        assert "GLD (Gold)" in captured.out
-        assert "Divergence Pattern" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.cross_asset_regime_arb"):
+            print_signal_report(signal)
+        assert "CROSS-ASSET REGIME ARBITRAGE SIGNAL" in caplog.text
+        assert "SPY (Equity)" in caplog.text
+        assert "TLT (Bonds)" in caplog.text
+        assert "GLD (Gold)" in caplog.text
+        assert "Divergence Pattern" in caplog.text
 
     def test_get_signal_snapshot_returns_dict(self, detector_with_prices):
         """get_signal_snapshot returns valid snapshot dict."""

@@ -2,6 +2,7 @@
 """
 Tests for Adaptive Position Sizing (v5.74).
 """
+import logging
 import sys
 import json
 import numpy as np
@@ -499,23 +500,23 @@ class TestFullPipeline:
 class TestCLI:
     """Test CLI entry point."""
 
-    def test_adjust_command(self, normal_regime_state, monkeypatch, capsys):
+    def test_adjust_command(self, normal_regime_state, monkeypatch, caplog):
         """`adjust` command should print allocation table."""
         import sys
         monkeypatch.setattr(sys, "argv", ["adaptive_sizing.py", "adjust"])
-        
+
         # Point to temp data dir
         from src.strategy import adaptive_sizing as mod
         original_dir = mod.DATA_DIR
         mod.DATA_DIR = normal_regime_state
-        
+
         try:
-            mod.main()
-            captured = capsys.readouterr()
-            assert "ADAPTIVE POSITION SIZING" in captured.out
-            assert "SPY" in captured.out
-            assert "GLD" in captured.out
-            assert "TLT" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.strategy.adaptive_sizing"):
+                mod.main()
+            assert "ADAPTIVE POSITION SIZING" in caplog.text
+            assert "SPY" in caplog.text
+            assert "GLD" in caplog.text
+            assert "TLT" in caplog.text
         finally:
             mod.DATA_DIR = original_dir
 
@@ -1126,7 +1127,7 @@ class TestCLIExtended:
         finally:
             mod.DATA_DIR = original_dir
 
-    def test_no_args_defaults_to_adjust(self, temp_data_dir, monkeypatch, capsys):
+    def test_no_args_defaults_to_adjust(self, temp_data_dir, monkeypatch, caplog):
         """No args should default to adjust command."""
         import sys as _sys
         monkeypatch.setattr(_sys, "argv", ["adaptive_sizing.py"])
@@ -1135,9 +1136,9 @@ class TestCLIExtended:
         mod.DATA_DIR = temp_data_dir
         mod.STATE_PATH = temp_data_dir / "adaptive_sizing_state.json"
         try:
-            mod.main()
-            captured = capsys.readouterr()
-            assert "ADAPTIVE POSITION SIZING" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.strategy.adaptive_sizing"):
+                mod.main()
+            assert "ADAPTIVE POSITION SIZING" in caplog.text
         finally:
             mod.DATA_DIR = original_dir
 

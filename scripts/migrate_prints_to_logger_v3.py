@@ -8,23 +8,22 @@ import os
 import sys
 
 TARGET_FILES = [
-    'src/strategy/regime_sentiment.py',
-    'src/signals/stacking_feature_engine.py',
-    'src/data/alternative_data.py',
-    'src/backtest/combined_strategy.py',
-    'src/backtest/alt_data_walkforward_stress.py',
-    'src/backtest/car25.py',
-    'src/backtest/run_actual_ubt_validation.py',
-    'src/agents/risk_agent_hmm.py',
-    'src/llm/sentiment_client.py',
-    'src/backtest/alternative_data_backfill.py',
-    'src/signals/alternative_data_signal.py',
-    'src/strategy/convexity_harvest.py',
-    'src/strategy/factor_rotation.py',
-    'src/strategy/orchestrator_ensemble_bridge.py',
-    'src/regime/kurtosis_regime.py',
-    'src/backtest/dbc_weight_sweep.py',
-    'src/strategy/vol_parity_allocator.py',
+    # Phase 4: Top non-main() print offenders
+    'src/monitor/unified_dashboard.py',
+    'src/backtest/alternative_data_backtest.py',
+    'src/backtest/cross_asset_regime_arb_backtest.py',
+    'src/backtest/duration_yield_backtest.py',
+    'src/backtest/multi_speed_momentum_backtest.py',
+    'src/strategy/adaptive_sizing.py',
+    'src/backtest/vixy_hedge_backtest.py',
+    'src/backtest/unified_overlay_backtest.py',
+    'src/backtest/bond_duration_backtest.py',
+    'src/signals/vpin_bvc.py',
+    'src/monitor/performance_attribution.py',
+    'src/strategy/graduation_checklist.py',
+    'src/signals/cross_asset_relative_value.py',
+    'src/signals/cross_asset_regime_arb.py',
+    'src/backtest/ensemble_backtest.py',
 ]
 
 # Files where print() calls in main() are legit CLI output — skip those lines

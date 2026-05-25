@@ -5,6 +5,7 @@ classify_regime_from_spread, calculate_returns/Sharpe/max_drawdown/CAGR,
 run_backtest with synthetic data, save_results, print_results, and CLI.
 """
 import json
+import logging
 from dataclasses import asdict
 
 import pytest
@@ -758,7 +759,7 @@ class TestSaveResults:
 
 class TestPrintResults:
 
-    def test_prints_output(self, capsys):
+    def test_prints_output(self, caplog):
         r = BacktestResult(
             total_return=210.58, cagr=12.0, volatility=13.0, sharpe_ratio=0.85,
             max_drawdown=-23.0,
@@ -778,13 +779,13 @@ class TestPrintResults:
                 "timestamp": "2026-05-14",
             },
         )
-        print_results(r)
-        out = capsys.readouterr().out
-        assert "DURATION-YIELD" in out
-        assert "PERFORMANCE COMPARISON" in out
-        assert "CRISIS PERFORMANCE" in out
+        with caplog.at_level(logging.INFO, logger="src.backtest.duration_yield_backtest"):
+            print_results(r)
+        assert "DURATION-YIELD" in caplog.text
+        assert "PERFORMANCE COMPARISON" in caplog.text
+        assert "CRISIS PERFORMANCE" in caplog.text
 
-    def test_shows_sharpe_delta(self, capsys):
+    def test_shows_sharpe_delta(self, caplog):
         r = BacktestResult(
             total_return=210.58, cagr=12.0, volatility=13.0, sharpe_ratio=0.85,
             max_drawdown=-23.0,
@@ -803,9 +804,9 @@ class TestPrintResults:
                 "timestamp": "2026-05-14",
             },
         )
-        print_results(r)
-        out = capsys.readouterr().out
-        assert "+0.050" in out or "0.050" in out
+        with caplog.at_level(logging.INFO, logger="src.backtest.duration_yield_backtest"):
+            print_results(r)
+        assert "+0.050" in caplog.text or "0.050" in caplog.text
 
 
 # ---------------------------------------------------------------------------

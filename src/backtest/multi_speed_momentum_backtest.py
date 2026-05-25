@@ -451,59 +451,59 @@ class MultiSpeedMomentumBacktester:
     # ------------------------------------------------------------------
     def print_report(self, result: BacktestResult) -> None:
         """Print a formatted backtest report."""
-        print("\n" + "=" * 62)
-        print("  MULTI-SPEED MOMENTUM OVERLAY BACKTEST (v9.23)")
-        print("=" * 62)
-        print(f"  Period:           {self.config.start_date}  to  {self.config.end_date}")
-        print(f"  Initial Capital:  ${self.config.initial_capital:>10,.2f}")
-        print(f"  Baseline:         SPY {self.config.base_weights['SPY']*100:.0f} / "
+        logger.info("\n" + "=" * 62)
+        logger.info("  MULTI-SPEED MOMENTUM OVERLAY BACKTEST (v9.23)")
+        logger.info("=" * 62)
+        logger.info(f"  Period:           {self.config.start_date}  to  {self.config.end_date}")
+        logger.info(f"  Initial Capital:  ${self.config.initial_capital:>10,.2f}")
+        logger.info(f"  Baseline:         SPY {self.config.base_weights['SPY']*100:.0f} / "
               f"GLD {self.config.base_weights['GLD']*100:.0f} / "
               f"TLT {self.config.base_weights['TLT']*100:.0f}")
-        print(f"  Max shifts:       SPY {self.config.max_spy_shift*100:.0f}% / "
+        logger.info(f"  Max shifts:       SPY {self.config.max_spy_shift*100:.0f}% / "
               f"GLD {self.config.max_gld_shift*100:.0f}% / "
               f"TLT {self.config.max_tlt_shift*100:.0f}%")
-        print(f"  Transaction cost: {self.config.transaction_cost_bps:.0f} bps")
-        print()
+        logger.info(f"  Transaction cost: {self.config.transaction_cost_bps:.0f} bps")
+        logger.info("")
 
-        print("  PERFORMANCE METRICS")
-        print("  " + "-" * 58)
-        print(f"    Total Return        {result.total_return:>10.2f}%")
-        print(f"    CAGR                {result.cagr:>10.2f}%")
-        print(f"    Volatility          {result.volatility:>10.2f}%")
-        print(f"    Sharpe Ratio        {result.sharpe_ratio:>10.3f}")
-        print(f"    Max Drawdown        {result.max_drawdown:>10.2f}%")
-        print()
+        logger.info("  PERFORMANCE METRICS")
+        logger.info("  " + "-" * 58)
+        logger.info(f"    Total Return        {result.total_return:>10.2f}%")
+        logger.info(f"    CAGR                {result.cagr:>10.2f}%")
+        logger.info(f"    Volatility          {result.volatility:>10.2f}%")
+        logger.info(f"    Sharpe Ratio        {result.sharpe_ratio:>10.3f}")
+        logger.info(f"    Max Drawdown        {result.max_drawdown:>10.2f}%")
+        logger.info("")
 
-        print("  OVERLAY IMPACT")
-        print("  " + "-" * 58)
-        print(f"    Baseline Sharpe      {result.baseline_sharpe:>8.3f}")
-        print(f"    Overlay Sharpe       {result.sharpe_ratio:>8.3f}")
+        logger.info("  OVERLAY IMPACT")
+        logger.info("  " + "-" * 58)
+        logger.info(f"    Baseline Sharpe      {result.baseline_sharpe:>8.3f}")
+        logger.info(f"    Overlay Sharpe       {result.sharpe_ratio:>8.3f}")
         imp = result.sharpe_improvement
         mark = "+" if imp >= 0.02 else "~" if imp >= 0.0 else "-"
-        print(f"    Improvement          {imp:>+8.3f}    [{mark}]")
-        print(f"    Active rebalances    {result.extras['overlay_active_rebalances']:>8}")
-        print()
+        logger.info(f"    Improvement          {imp:>+8.3f}    [{mark}]")
+        logger.info(f"    Active rebalances    {result.extras['overlay_active_rebalances']:>8}")
+        logger.info("")
 
-        print("  CRISIS PERFORMANCE (Overlay)")
-        print("  " + "-" * 58)
+        logger.info("  CRISIS PERFORMANCE (Overlay)")
+        logger.info("  " + "-" * 58)
         crisis = result.crisis_returns or {}
         for label, key in [("2008 GFC", "2008"), ("2020 COVID", "2020"), ("2022 Rate Hikes", "2022")]:
             val = crisis.get(key)
             if val is not None:
-                print(f"    {label:20s}  {val:>+10.2f}%")
+                logger.info(f"    {label:20s}  {val:>+10.2f}%")
             else:
-                print(f"    {label:20s}  {'N/A':>10s}")
-        print()
+                logger.info(f"    {label:20s}  {'N/A':>10s}")
+        logger.info("")
 
-        print("  TRADE STATISTICS")
-        print("  " + "-" * 58)
-        print(f"    Total Rebalances     {result.total_rebalances:>8}")
-        print(f"    Avg Turnover         {result.avg_turnover*100:>8.2f}%")
-        print(f"    Transaction Costs    ${result.total_transaction_costs:>8,.2f}")
-        print()
+        logger.info("  TRADE STATISTICS")
+        logger.info("  " + "-" * 58)
+        logger.info(f"    Total Rebalances     {result.total_rebalances:>8}")
+        logger.info(f"    Avg Turnover         {result.avg_turnover*100:>8.2f}%")
+        logger.info(f"    Transaction Costs    ${result.total_transaction_costs:>8,.2f}")
+        logger.info("")
 
-        print("  SUCCESS CRITERIA")
-        print("  " + "-" * 58)
+        logger.info("  SUCCESS CRITERIA")
+        logger.info("  " + "-" * 58)
         checks = [
             ("Sharpe > 0.79 (baseline)", result.sharpe_ratio >= 0.79),
             ("Sharpe improvement >= +0.02", imp >= 0.02),
@@ -511,8 +511,8 @@ class MultiSpeedMomentumBacktester:
         ]
         for desc, passed in checks:
             icon = "PASS" if passed else "FAIL"
-            print(f"    [{icon}] {desc}")
-        print("=" * 62 + "\n")
+            logger.info(f"    [{icon}] {desc}")
+        logger.info("=" * 62 + "\n")
 
     def save_results(self, result: BacktestResult, output_path: Optional[str] = None) -> None:
         """Save backtest results to JSON."""

@@ -8,6 +8,7 @@ and CLI invocation.
 """
 
 import json
+import logging
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -696,8 +697,9 @@ class TestEdgeCases:
         finally:
             Path(output_path).unlink()
 
-    def test_print_report_does_not_crash(self, capsys):
+    def test_print_report_does_not_crash(self, caplog):
         """print_report should produce output without errors."""
+        caplog.set_level(logging.INFO)
         data = TestRunBacktest._make_synthetic_data(TestRunBacktest(), n_days=200)
         bt = AlternativeDataBacktester(
             BacktestConfig(start_date="2020-01-01", end_date="2020-06-01")
@@ -705,10 +707,9 @@ class TestEdgeCases:
         bt.data = data
         result = bt.run_backtest()
         bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "ALTERNATIVE DATA" in captured.out
-        assert "Sharpe" in captured.out
-        assert "REGIME DISTRIBUTION" in captured.out
+        assert "ALTERNATIVE DATA" in caplog.text
+        assert "Sharpe" in caplog.text
+        assert "REGIME DISTRIBUTION" in caplog.text
 
     def test_load_data_missing_file_logs_error(self, caplog, monkeypatch):
         """load_data should return False when prices.json is missing."""
@@ -1152,8 +1153,9 @@ class TestHelpersEdgeCases:
             "2020-01-04", None
         )
 
-    def test_print_report_empty_result(self, capsys):
+    def test_print_report_empty_result(self, caplog):
         """print_report with all-zero result should not crash."""
+        caplog.set_level(logging.INFO)
         result = BacktestResult(
             total_return=0.0,
             cagr=0.0,
@@ -1176,12 +1178,12 @@ class TestHelpersEdgeCases:
         )
         bt = AlternativeDataBacktester()
         bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "ALTERNATIVE DATA" in captured.out
-        assert "SUCCESS CRITERIA" in captured.out
+        assert "ALTERNATIVE DATA" in caplog.text
+        assert "SUCCESS CRITERIA" in caplog.text
 
-    def test_print_report_mismatch_verdict(self, capsys):
+    def test_print_report_mismatch_verdict(self, caplog):
         """print_report shows MISMATCH when signal sign differs from regime return."""
+        caplog.set_level(logging.INFO)
         result = BacktestResult(
             total_return=-5.0,
             cagr=-2.0,
@@ -1220,8 +1222,7 @@ class TestHelpersEdgeCases:
         )
         bt = AlternativeDataBacktester()
         bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "MISMATCH" in captured.out  # bull signal=+0.4 but bull return=-5.0
+        assert "MISMATCH" in caplog.text  # bull signal=+0.4 but bull return=-5.0
 
     def test_transaction_cost_deduction(self):
         """Transaction costs are deducted from overlay capital (cost > 0 when turnover > 0)."""
@@ -2104,8 +2105,9 @@ class TestSaveResultsEdgeCases:
 class TestPrintReportEdgeCases:
     """Edge cases for print_report method."""
 
-    def test_print_report_success_failure_mix(self, capsys):
+    def test_print_report_success_failure_mix(self, caplog):
         """print_report with mixed PASS/FAIL success criteria."""
+        caplog.set_level(logging.INFO)
         result = BacktestResult(
             total_return=-30.0,
             cagr=-10.0,
@@ -2140,13 +2142,13 @@ class TestPrintReportEdgeCases:
         )
         bt = AlternativeDataBacktester()
         bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "FAIL" in captured.out
-        assert "PASS" in captured.out
-        assert "SUCCESS CRITERIA" in captured.out
+        assert "FAIL" in caplog.text
+        assert "PASS" in caplog.text
+        assert "SUCCESS CRITERIA" in caplog.text
 
-    def test_print_report_all_regime_zero(self, capsys):
+    def test_print_report_all_regime_zero(self, caplog):
         """print_report with all-zero regime distribution avoids division by zero."""
+        caplog.set_level(logging.INFO)
         result = BacktestResult(
             total_return=5.0,
             cagr=2.0,
@@ -2169,11 +2171,11 @@ class TestPrintReportEdgeCases:
         )
         bt = AlternativeDataBacktester()
         bt.print_report(result)  # Should not crash
-        captured = capsys.readouterr()
-        assert "REGIME DISTRIBUTION" in captured.out
+        assert "REGIME DISTRIBUTION" in caplog.text
 
-    def test_print_report_crisis_none_handled(self, capsys):
+    def test_print_report_crisis_none_handled(self, caplog):
         """print_report with crisis_returns=None does not crash."""
+        caplog.set_level(logging.INFO)
         result = BacktestResult(
             total_return=5.0,
             cagr=2.0,
@@ -2196,11 +2198,11 @@ class TestPrintReportEdgeCases:
         )
         bt = AlternativeDataBacktester()
         bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "CRISIS PERFORMANCE" in captured.out
+        assert "CRISIS PERFORMANCE" in caplog.text
 
-    def test_print_report_negative_total_return(self, capsys):
+    def test_print_report_negative_total_return(self, caplog):
         """print_report with negative total return shows correct values."""
+        caplog.set_level(logging.INFO)
         result = BacktestResult(
             total_return=-15.0,
             cagr=-5.0,
@@ -2223,9 +2225,8 @@ class TestPrintReportEdgeCases:
         )
         bt = AlternativeDataBacktester()
         bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "NEGATIVE" in captured.out
-        assert "-15.00%" in captured.out
+        assert "NEGATIVE" in caplog.text
+        assert "-15.00%" in caplog.text
 
 
 # ── Signal Generator Mock Integration ────────────────────────────────────────

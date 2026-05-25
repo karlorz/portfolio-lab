@@ -607,66 +607,66 @@ class CrossAssetRegimeArbBacktester:
 
     def print_report(self, result: BacktestResult) -> None:
         """Print formatted backtest report."""
-        print("\n" + "=" * 60)
-        print("CROSS-ASSET REGIME ARBITRAGE BACKTEST RESULTS")
-        print("=" * 60)
-        print(f"Period:            {self.config.start_date} to {self.config.end_date}")
-        print(f"Initial Capital:   ${self.config.initial_capital:,.2f}")
-        print(f"Signal Module:     {'Live' if HAS_SIGNAL_MODULE else 'Simulated'}")
-        print()
+        logger.info("\n" + "=" * 60)
+        logger.info("CROSS-ASSET REGIME ARBITRAGE BACKTEST RESULTS")
+        logger.info("=" * 60)
+        logger.info(f"Period:            {self.config.start_date} to {self.config.end_date}")
+        logger.info(f"Initial Capital:   ${self.config.initial_capital:,.2f}")
+        logger.info(f"Signal Module:     {'Live' if HAS_SIGNAL_MODULE else 'Simulated'}")
+        logger.info("")
 
-        print("PERFORMANCE METRICS")
-        print("-" * 60)
-        print(f"Total Return:      {result.total_return:>8.2f}%")
-        print(f"CAGR:              {result.cagr:>8.2f}%")
-        print(f"Volatility:        {result.volatility:>8.2f}%")
-        print(f"Sharpe Ratio:      {result.sharpe_ratio:>8.3f}")
-        print(f"Max Drawdown:      {result.max_drawdown:>8.2f}%")
-        print()
+        logger.info("PERFORMANCE METRICS")
+        logger.info("-" * 60)
+        logger.info(f"Total Return:      {result.total_return:>8.2f}%")
+        logger.info(f"CAGR:              {result.cagr:>8.2f}%")
+        logger.info(f"Volatility:        {result.volatility:>8.2f}%")
+        logger.info(f"Sharpe Ratio:      {result.sharpe_ratio:>8.3f}")
+        logger.info(f"Max Drawdown:      {result.max_drawdown:>8.2f}%")
+        logger.info("")
 
-        print("OVERLAY IMPACT")
-        print("-" * 60)
-        print(f"Baseline Sharpe:   {result.baseline_sharpe:>8.3f}")
-        print(f"Overlay Sharpe:    {result.sharpe_ratio:>8.3f}")
-        print(
+        logger.info("OVERLAY IMPACT")
+        logger.info("-" * 60)
+        logger.info(f"Baseline Sharpe:   {result.baseline_sharpe:>8.3f}")
+        logger.info(f"Overlay Sharpe:    {result.sharpe_ratio:>8.3f}")
+        logger.info(
             f"Improvement:       {result.sharpe_improvement:>+8.3f}  "
             f"{'PASS' if result.sharpe_improvement >= 0.01 else 'NO IMPROVEMENT'}"
         )
-        print(
+        logger.info(
             f"Active Months:     {result.extras['overlay_active_months']:>8} "
             f"({result.extras['signal_frequency'] * 100:.1f}% of months)"
         )
-        print()
+        logger.info("")
 
-        print("CRISIS PERFORMANCE")
-        print("-" * 60)
+        logger.info("CRISIS PERFORMANCE")
+        logger.info("-" * 60)
         crisis = result.crisis_returns or {}
         if crisis.get("2008") is not None:
-            print(f"2008 GFC:          {crisis['2008']:>8.2f}%")
+            logger.info(f"2008 GFC:          {crisis['2008']:>8.2f}%")
         if crisis.get("2020") is not None:
-            print(f"2020 COVID:        {crisis['2020']:>8.2f}%")
+            logger.info(f"2020 COVID:        {crisis['2020']:>8.2f}%")
         if crisis.get("2022") is not None:
-            print(f"2022 Rate Hikes:   {crisis['2022']:>8.2f}%")
-        print()
+            logger.info(f"2022 Rate Hikes:   {crisis['2022']:>8.2f}%")
+        logger.info("")
 
-        print("TRADE STATISTICS")
-        print("-" * 60)
-        print(f"Total Rebalances:  {result.total_rebalances:>8}")
-        print(f"Transaction Costs: ${result.total_transaction_costs:>8.2f}")
-        print()
+        logger.info("TRADE STATISTICS")
+        logger.info("-" * 60)
+        logger.info(f"Total Rebalances:  {result.total_rebalances:>8}")
+        logger.info(f"Transaction Costs: ${result.total_transaction_costs:>8.2f}")
+        logger.info("")
 
-        print("DIVERGENCE BREAKDOWN")
-        print("-" * 60)
+        logger.info("DIVERGENCE BREAKDOWN")
+        logger.info("-" * 60)
         total_div = sum(result.extras["divergence_breakdown"].values()) or 1
         for pattern, count in sorted(
             result.extras["divergence_breakdown"].items(), key=lambda x: -x[1]
         ):
             pct = count / total_div * 100
-            print(f"{pattern:<25s} {count:>5d} ({pct:>5.1f}%)")
-        print()
+            logger.info(f"{pattern:<25s} {count:>5d} ({pct:>5.1f}%)")
+        logger.info("")
 
-        print("SUCCESS CRITERIA")
-        print("-" * 60)
+        logger.info("SUCCESS CRITERIA")
+        logger.info("-" * 60)
         checks = [
             (
                 "Sharpe > Baseline (positive improvement)",
@@ -676,8 +676,8 @@ class CrossAssetRegimeArbBacktester:
             ("Signal active > 20% of months", result.extras["signal_frequency"] > 0.20),
         ]
         for desc, passed in checks:
-            print(f"{'PASS' if passed else 'FAIL'}  {desc}")
-        print("=" * 60)
+            logger.info(f"{'PASS' if passed else 'FAIL'}  {desc}")
+        logger.info("=" * 60)
 
     def save_results(
         self, result: BacktestResult, output_path: Optional[str] = None

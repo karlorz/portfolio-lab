@@ -9,6 +9,7 @@ Covers:
 """
 
 import json
+import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -556,11 +557,11 @@ class TestGenerateStatusText:
 
 
 class TestPrintSummary:
-    def test_does_not_raise(self, capsys):
+    def test_does_not_raise(self, caplog):
         dashboard = generate_unified_dashboard()
-        print_summary(dashboard)  # Should not raise
-        captured = capsys.readouterr()
-        assert "PORTFOLIO-LAB UNIFIED DASHBOARD" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+            print_summary(dashboard)  # Should not raise
+        assert "PORTFOLIO-LAB UNIFIED DASHBOARD" in caplog.text
 
 
 class TestCLI:
@@ -1232,26 +1233,26 @@ class TestGenerateStatusTextEdgeCases:
 class TestPrintSummaryEdgeCases:
     """Edge cases for print_summary: all unavailable sections, edge display values."""
 
-    def test_all_sections_unavailable(self, tmp_path, capsys):
+    def test_all_sections_unavailable(self, tmp_path, caplog):
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             dashboard = generate_unified_dashboard()
-            print_summary(dashboard)
-            captured = capsys.readouterr()
-            assert "HEALTH: not available" in captured.out
-            assert "PORTFOLIO: not available" in captured.out
-            assert "RISK: not available" in captured.out
-            assert "REGIME: not available" in captured.out
-            assert "TCA: not available" in captured.out
-            assert "ATTRIBUTION: not available" in captured.out
-            assert "CRON: not available" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+                print_summary(dashboard)
+            assert "HEALTH: not available" in caplog.text
+            assert "PORTFOLIO: not available" in caplog.text
+            assert "RISK: not available" in caplog.text
+            assert "REGIME: not available" in caplog.text
+            assert "TCA: not available" in caplog.text
+            assert "ATTRIBUTION: not available" in caplog.text
+            assert "CRON: not available" in caplog.text
 
-    def test_dashboard_version_displayed(self, capsys):
+    def test_dashboard_version_displayed(self, caplog):
         dashboard = generate_unified_dashboard()
-        print_summary(dashboard)
-        captured = capsys.readouterr()
-        assert "v6.08" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+            print_summary(dashboard)
+        assert "v6.08" in caplog.text
 
-    def test_risk_with_deep_drawdown(self, tmp_path, capsys):
+    def test_risk_with_deep_drawdown(self, tmp_path, caplog):
         risk = tmp_path / "risk_metrics.json"
         risk.write_text(json.dumps({
             "var_95_daily": -3.0,
@@ -1264,34 +1265,34 @@ class TestPrintSummaryEdgeCases:
         }))
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             dashboard = generate_unified_dashboard()
-            print_summary(dashboard)
-            captured = capsys.readouterr()
-            assert "🚨" in captured.out  # drawdown badge for < -20
-            assert "SEVERE" in captured.out
-            assert "-25.00%" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+                print_summary(dashboard)
+            assert "🚨" in caplog.text  # drawdown badge for < -20
+            assert "SEVERE" in caplog.text
+            assert "-25.00%" in caplog.text
 
-    def test_overlays_vixy_dict_in_print(self, tmp_path, capsys):
+    def test_overlays_vixy_dict_in_print(self, tmp_path, caplog):
         vixy = tmp_path / "vixy_hedge_state.json"
         vixy.write_text(json.dumps({"current_allocation": {"SPY": 0.5, "GLD": 0.5}, "last_signal_date": "2026-01-01", "regime": "contango"}))
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             dashboard = generate_unified_dashboard()
-            print_summary(dashboard)
-            captured = capsys.readouterr()
+            with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+                print_summary(dashboard)
             # Dict allocation branch: prints SPY=50.00% GLD=50.00%
-            assert "SPY=50.00%" in captured.out
-            assert "GLD=50.00%" in captured.out
+            assert "SPY=50.00%" in caplog.text
+            assert "GLD=50.00%" in caplog.text
 
-    def test_overlays_vixy_scalar_in_print(self, tmp_path, capsys):
+    def test_overlays_vixy_scalar_in_print(self, tmp_path, caplog):
         vixy = tmp_path / "vixy_hedge_state.json"
         vixy.write_text(json.dumps({"current_allocation": 0.15, "last_signal_date": "2026-01-01", "regime": "contango"}))
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             dashboard = generate_unified_dashboard()
-            print_summary(dashboard)
-            captured = capsys.readouterr()
+            with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+                print_summary(dashboard)
             # Scalar allocation branch: prints alloc=15.00%
-            assert "alloc=15.00%" in captured.out
+            assert "alloc=15.00%" in caplog.text
 
-    def test_cron_section_with_mixed_jobs(self, tmp_path, capsys):
+    def test_cron_section_with_mixed_jobs(self, tmp_path, caplog):
         cs = tmp_path / "cron_status.json"
         cs.write_text(json.dumps({
             "jobs": [
@@ -1302,10 +1303,10 @@ class TestPrintSummaryEdgeCases:
         }))
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             dashboard = generate_unified_dashboard()
-            print_summary(dashboard)
-            captured = capsys.readouterr()
-            assert "1/3 ok" in captured.out
-            assert "1 errors" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+                print_summary(dashboard)
+            assert "1/3 ok" in caplog.text
+            assert "1 errors" in caplog.text
 
 
 # ─────────────────────────────────────────────
@@ -1316,13 +1317,13 @@ class TestPrintSummaryEdgeCases:
 class TestCLIEdgeCases:
     """Edge cases for the main() CLI entry point."""
 
-    def test_no_flag_calls_print_summary(self, tmp_path, capsys):
+    def test_no_flag_calls_print_summary(self, tmp_path, caplog):
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             test_args = ["unified_dashboard.py"]
             with patch.object(sys, "argv", test_args):
-                main()
-            captured = capsys.readouterr()
-            assert "UNIFIED DASHBOARD" in captured.out
+                with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+                    main()
+            assert "UNIFIED DASHBOARD" in caplog.text
 
     def test_json_flag_output(self, tmp_path, capsys):
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):

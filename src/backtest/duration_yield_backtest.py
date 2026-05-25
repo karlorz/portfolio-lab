@@ -488,47 +488,47 @@ def run_backtest(
 def print_results(result: BacktestResult):
     """Print backtest results in formatted table."""
     e = result.extras
-    print("\n" + "="*70)
-    print("DURATION-YIELD CURVE REGIME BACKTEST RESULTS")
-    print("="*70)
-    print(f"Period: {e['start_date']} to {e['end_date']}")
-    print(f"Total Days: {e['total_days']:,}")
-    print()
+    logger.info("\n" + "="*70)
+    logger.info("DURATION-YIELD CURVE REGIME BACKTEST RESULTS")
+    logger.info("="*70)
+    logger.info(f"Period: {e['start_date']} to {e['end_date']}")
+    logger.info(f"Total Days: {e['total_days']:,}")
+    logger.info("")
 
-    print("-"*70)
-    print("PERFORMANCE COMPARISON")
-    print("-"*70)
-    print(f"{'Metric':<25} {'Static':<15} {'Dynamic':<15} {'Delta':<15}")
-    print("-"*70)
-    print(f"{'CAGR':<25} {e['static_cagr']*100:>14.2f}% {e['dynamic_cagr']*100:>14.2f}% {e['cagr_delta']*100:>+14.2f}%")
-    print(f"{'Volatility':<25} {e['static_volatility']*100:>14.2f}% {e['dynamic_volatility']*100:>14.2f}% {(e['dynamic_volatility']-e['static_volatility'])*100:>+14.2f}%")
-    print(f"{'Sharpe Ratio':<25} {e['static_sharpe']:>14.3f} {e['dynamic_sharpe']:>14.3f} {e['sharpe_delta']:>+14.3f}")
-    print(f"{'Max Drawdown':<25} {e['static_max_dd']*100:>14.2f}% {e['dynamic_max_dd']*100:>14.2f}% {e['max_dd_delta']*100:>+14.2f}%")
-    print()
+    logger.info("-"*70)
+    logger.info("PERFORMANCE COMPARISON")
+    logger.info("-"*70)
+    logger.info(f"{'Metric':<25} {'Static':<15} {'Dynamic':<15} {'Delta':<15}")
+    logger.info("-"*70)
+    logger.info(f"{'CAGR':<25} {e['static_cagr']*100:>14.2f}% {e['dynamic_cagr']*100:>14.2f}% {e['cagr_delta']*100:>+14.2f}%")
+    logger.info(f"{'Volatility':<25} {e['static_volatility']*100:>14.2f}% {e['dynamic_volatility']*100:>14.2f}% {(e['dynamic_volatility']-e['static_volatility'])*100:>+14.2f}%")
+    logger.info(f"{'Sharpe Ratio':<25} {e['static_sharpe']:>14.3f} {e['dynamic_sharpe']:>14.3f} {e['sharpe_delta']:>+14.3f}")
+    logger.info(f"{'Max Drawdown':<25} {e['static_max_dd']*100:>14.2f}% {e['dynamic_max_dd']*100:>14.2f}% {e['max_dd_delta']*100:>+14.2f}%")
+    logger.info("")
 
-    print("-"*70)
-    print("CRISIS PERFORMANCE")
-    print("-"*70)
-    print(f"{'Crisis':<25} {'Static':<15} {'Dynamic':<15} {'Delta':<15}")
-    print("-"*70)
-    print(f"{'2008 Financial Crisis':<25} {e['crisis_2008_static']*100:>14.2f}% {e['crisis_2008_dynamic']*100:>14.2f}% {(e['crisis_2008_dynamic']-e['crisis_2008_static'])*100:>+14.2f}%")
-    print(f"{'2020 COVID':<25} {e['crisis_2020_static']*100:>14.2f}% {e['crisis_2020_dynamic']*100:>14.2f}% {(e['crisis_2020_dynamic']-e['crisis_2020_static'])*100:>+14.2f}%")
-    print(f"{'2022 Rate Hikes':<25} {e['crisis_2022_static']*100:>14.2f}% {e['crisis_2022_dynamic']*100:>14.2f}% {(e['crisis_2022_dynamic']-e['crisis_2022_static'])*100:>+14.2f}%")
-    print()
+    logger.info("-"*70)
+    logger.info("CRISIS PERFORMANCE")
+    logger.info("-"*70)
+    logger.info(f"{'Crisis':<25} {'Static':<15} {'Dynamic':<15} {'Delta':<15}")
+    logger.info("-"*70)
+    logger.info(f"{'2008 Financial Crisis':<25} {e['crisis_2008_static']*100:>14.2f}% {e['crisis_2008_dynamic']*100:>14.2f}% {(e['crisis_2008_dynamic']-e['crisis_2008_static'])*100:>+14.2f}%")
+    logger.info(f"{'2020 COVID':<25} {e['crisis_2020_static']*100:>14.2f}% {e['crisis_2020_dynamic']*100:>14.2f}% {(e['crisis_2020_dynamic']-e['crisis_2020_static'])*100:>+14.2f}%")
+    logger.info(f"{'2022 Rate Hikes':<25} {e['crisis_2022_static']*100:>14.2f}% {e['crisis_2022_dynamic']*100:>14.2f}% {(e['crisis_2022_dynamic']-e['crisis_2022_static'])*100:>+14.2f}%")
+    logger.info("")
 
-    print("-"*70)
-    print("REGIME STATISTICS")
-    print("-"*70)
+    logger.info("-"*70)
+    logger.info("REGIME STATISTICS")
+    logger.info("-"*70)
     for regime, days in e["regime_days"].items():
         pct = days / e["total_days"] * 100
-        print(f"{regime.capitalize():<25} {days:>10,} days ({pct:>5.1f}%)")
-    print(f"{'Total Regime Transitions':<25} {e['regime_transitions']:>14}")
-    print(f"{'Rebalancing Costs':<25} ${e['rebalancing_costs']*100000:>13.2f}")
-    print()
+        logger.info(f"{regime.capitalize():<25} {days:>10,} days ({pct:>5.1f}%)")
+    logger.info(f"{'Total Regime Transitions':<25} {e['regime_transitions']:>14}")
+    logger.info(f"{'Rebalancing Costs':<25} ${e['rebalancing_costs']*100000:>13.2f}")
+    logger.info("")
 
-    print("-"*70)
-    print("SUCCESS CRITERIA VALIDATION")
-    print("-"*70)
+    logger.info("-"*70)
+    logger.info("SUCCESS CRITERIA VALIDATION")
+    logger.info("-"*70)
 
     # Check criteria
     ex = result.extras
@@ -536,12 +536,12 @@ def print_results(result: BacktestResult):
     max_dd_ok = ex["max_dd_delta"] > -0.02
     crisis_2008_ok = ex["crisis_2008_dynamic"] <= ex["crisis_2008_static"] + 0.02
 
-    print(f"{'Sharpe +0.015 target':<40} {'✓ PASS' if sharpe_target_met else '✗ FAIL':<15} (got {ex['sharpe_delta']:+.3f})")
-    print(f"{'Max DD <2% degradation':<40} {'✓ PASS' if max_dd_ok else '✗ FAIL':<15} (got {ex['max_dd_delta']*100:+.2f}%)")
-    print(f"{'2008 crisis benefit':<40} {'✓ PASS' if crisis_2008_ok else '✗ FAIL':<15} (dynamic {ex['crisis_2008_dynamic']*100:.1f}% vs static {ex['crisis_2008_static']*100:.1f}%)")
-    print()
+    logger.info(f"{'Sharpe +0.015 target':<40} {'✓ PASS' if sharpe_target_met else '✗ FAIL':<15} (got {ex['sharpe_delta']:+.3f})")
+    logger.info(f"{'Max DD <2% degradation':<40} {'✓ PASS' if max_dd_ok else '✗ FAIL':<15} (got {ex['max_dd_delta']*100:+.2f}%)")
+    logger.info(f"{'2008 crisis benefit':<40} {'✓ PASS' if crisis_2008_ok else '✗ FAIL':<15} (dynamic {ex['crisis_2008_dynamic']*100:.1f}% vs static {ex['crisis_2008_static']*100:.1f}%)")
+    logger.info("")
 
-    print("="*70)
+    logger.info("="*70)
 
 
 def save_results(result: BacktestResult):

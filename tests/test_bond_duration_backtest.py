@@ -8,6 +8,7 @@ print/save output, and edge cases.
 """
 
 import json
+import logging
 import tempfile
 from pathlib import Path
 
@@ -468,15 +469,15 @@ class TestWalkForwardBondDurationBacktester:
         assert result.cagr is not None
         assert result.total_rebalances >= 0
 
-    def test_print_results_does_not_crash(self, capsys):
+    def test_print_results_does_not_crash(self, caplog):
         """print_results should produce output without errors."""
         bt = WalkForwardBondDurationBacktester()
         bt.load_data()
         result = bt.run()
-        bt.print_results(result)
-        captured = capsys.readouterr()
-        assert "Bond Duration Rotation" in captured.out
-        assert "Sharpe" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.bond_duration_backtest"):
+            bt.print_results(result)
+        assert "Bond Duration Rotation" in caplog.text
+        assert "Sharpe" in caplog.text
 
     def test_save_results_creates_json_file(self):
         """save_results should create a valid JSON file."""
@@ -1347,44 +1348,44 @@ class TestNanInfEdgeCases:
 class TestCliMainEntry:
     """Test the CLI entry point (main()) and __main__ guard."""
 
-    def test_main_default_run(self, capsys):
+    def test_main_default_run(self, caplog):
         """main() should run the backtest and print results by default."""
         from src.backtest.bond_duration_backtest import main
         import sys
         old_argv = sys.argv
         try:
             sys.argv = ["bond_duration_backtest.py"]
-            main()
-            captured = capsys.readouterr()
-            assert "Bond Duration Rotation" in captured.out
-            assert "Sharpe Ratio" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.backtest.bond_duration_backtest"):
+                main()
+            assert "Bond Duration Rotation" in caplog.text
+            assert "Sharpe Ratio" in caplog.text
         finally:
             sys.argv = old_argv
 
-    def test_main_with_start_end_flags(self, capsys):
+    def test_main_with_start_end_flags(self, caplog):
         """main() should accept --start and --end flags."""
         from src.backtest.bond_duration_backtest import main
         import sys
         old_argv = sys.argv
         try:
             sys.argv = ["bond_duration_backtest.py", "--start", "2015-01-01", "--end", "2016-01-01"]
-            main()
-            captured = capsys.readouterr()
-            assert "2015-01-01" in captured.out
-            assert "2016-01-01" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.backtest.bond_duration_backtest"):
+                main()
+            assert "2015-01-01" in caplog.text
+            assert "2016-01-01" in caplog.text
         finally:
             sys.argv = old_argv
 
-    def test_main_with_capital_flag(self, capsys):
+    def test_main_with_capital_flag(self, caplog):
         """main() should accept --capital flag."""
         from src.backtest.bond_duration_backtest import main
         import sys
         old_argv = sys.argv
         try:
             sys.argv = ["bond_duration_backtest.py", "--capital", "50000"]
-            main()
-            captured = capsys.readouterr()
-            assert "$50,000" in captured.out or "50000" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.backtest.bond_duration_backtest"):
+                main()
+            assert "$50,000" in caplog.text or "50000" in caplog.text
         finally:
             sys.argv = old_argv
 
@@ -1425,16 +1426,16 @@ class TestCliMainEntry:
             sys.argv = old_argv
             os.chdir(old_cwd)
 
-    def test_main_run_mode_explicit(self, capsys):
+    def test_main_run_mode_explicit(self, caplog):
         """main() with explicit 'run' argument should work."""
         from src.backtest.bond_duration_backtest import main
         import sys
         old_argv = sys.argv
         try:
             sys.argv = ["bond_duration_backtest.py", "run"]
-            main()
-            captured = capsys.readouterr()
-            assert "Bond Duration Rotation" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.backtest.bond_duration_backtest"):
+                main()
+            assert "Bond Duration Rotation" in caplog.text
         finally:
             sys.argv = old_argv
 
@@ -1786,7 +1787,7 @@ class TestAdditionalBoundaryConditions:
         c1.base_weights["SPY"] = 0.99
         assert c2.base_weights["SPY"] == 0.46  # Should be unchanged
 
-    def test_print_results_empty_crisis(self, capsys):
+    def test_print_results_empty_crisis(self, caplog):
         """print_results should handle missing crisis and regime data."""
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
@@ -1803,9 +1804,9 @@ class TestAdditionalBoundaryConditions:
             },
         )
         bt = WalkForwardBondDurationBacktester()
-        bt.print_results(result)
-        captured = capsys.readouterr()
-        assert "Crisis Returns" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.bond_duration_backtest"):
+            bt.print_results(result)
+        assert "Crisis Returns" in caplog.text
 
     def test_cli_logging_startup(self, caplog):
         """CLI main() should log when starting."""

@@ -7,6 +7,7 @@ synthetic data loading, print/save output.
 """
 
 import json
+import logging
 import tempfile
 from pathlib import Path
 
@@ -445,15 +446,15 @@ class TestWalkForwardVIXYBacktester:
         assert result.cagr is not None
         assert result.total_rebalances >= 0
 
-    def test_print_results_does_not_crash(self, capsys):
+    def test_print_results_does_not_crash(self, caplog):
         """print_results should produce output without errors."""
+        caplog.set_level(logging.INFO)
         bt = WalkForwardVIXYBacktester()
         bt.load_data()
         result = bt.run()
         bt.print_results(result)
-        captured = capsys.readouterr()
-        assert "VIXY Hedge Sizing" in captured.out
-        assert "Sharpe" in captured.out
+        assert "VIXY Hedge Sizing" in caplog.text
+        assert "Sharpe" in caplog.text
 
     def test_save_results_creates_json_file(self):
         """save_results should create a valid JSON file."""

@@ -4,7 +4,7 @@ Tests for CAR25 Performance Metric module.
 CAR25 = Compound Annual Rate of Return at the 25th percentile
 after position-sizing via safe-f (max drawdown-constrained).
 """
-
+import logging
 import pytest
 import numpy as np
 from unittest.mock import patch, MagicMock, mock_open
@@ -1302,39 +1302,38 @@ class TestPrintCAR25Result:
         return CAR25FullResult(portfolio='SPY/GLD/TLT 46/38/16', safe_f=safe_f_res,
                                 car25=car, correlation=corr, config=config, input_days=500)
 
-    def test_print_human_readable(self):
+    def test_print_human_readable(self, caplog):
         """Human-readable output should print portfolio name."""
         result = self._make_full_result()
-        captured = io.StringIO()
-        with patch('sys.stdout', captured):
+        with caplog.at_level(logging.INFO, logger="src.backtest.car25"):
             print_car25_result(result, json_output=False)
-        output = captured.getvalue()
+        output = caplog.text
         assert 'CAR25 Analysis: SPY/GLD/TLT 46/38/16' in output
         assert 'Safe-f' in output
         assert 'CAR25' in output
         assert 'Correlation' in output
         assert result.portfolio in output
 
-    def test_print_human_readable_values(self):
+    def test_print_human_readable_values(self, caplog):
         """Human-readable output should contain key values."""
         result = self._make_full_result()
-        captured = io.StringIO()
-        with patch('sys.stdout', captured):
+        with caplog.at_level(logging.INFO, logger="src.backtest.car25"):
             print_car25_result(result, json_output=False)
-        output = captured.getvalue()
+        output = caplog.text
         assert '1.2345' in output  # safe_f
         assert '19.87%' in output  # drawdown95
         assert '6.45%' in output  # car25
         assert '8.32%' in output  # car50
         assert '0.4567' in output  # correlation
 
-    def test_print_json_output(self):
+    def test_print_json_output(self, caplog):
         """JSON output should produce valid JSON."""
         result = self._make_full_result()
-        captured = io.StringIO()
-        with patch('sys.stdout', captured):
+        with caplog.at_level(logging.INFO, logger="src.backtest.car25"):
             print_car25_result(result, json_output=True)
-        output = captured.getvalue()
+        # caplog.text includes the logger prefix; extract the JSON message
+        assert len(caplog.records) >= 1
+        output = caplog.records[0].message
         parsed = json.loads(output)
         assert parsed['portfolio'] == 'SPY/GLD/TLT 46/38/16'
         assert parsed['safe_f']['safe_f'] == 1.2345
@@ -1342,25 +1341,25 @@ class TestPrintCAR25Result:
         assert parsed['correlation']['classification'] == 'moderate'
         assert parsed['input_days'] == 500
 
-    def test_print_json_contains_all_sections(self):
+    def test_print_json_contains_all_sections(self, caplog):
         """JSON should contain safe_f, car25, and correlation sections."""
         result = self._make_full_result()
-        captured = io.StringIO()
-        with patch('sys.stdout', captured):
+        with caplog.at_level(logging.INFO, logger="src.backtest.car25"):
             print_car25_result(result, json_output=True)
-        parsed = json.loads(captured.getvalue())
+        assert len(caplog.records) >= 1
+        parsed = json.loads(caplog.records[0].message)
         assert 'safe_f' in parsed
         assert 'car25' in parsed
         assert 'correlation' in parsed
 
-    def test_print_json_roundtrip(self):
+    def test_print_json_roundtrip(self, caplog):
         """JSON output should round-trip via json.loads."""
         result = self._make_full_result()
-        captured = io.StringIO()
-        with patch('sys.stdout', captured):
+        with caplog.at_level(logging.INFO, logger="src.backtest.car25"):
             print_car25_result(result, json_output=True)
         # Should not raise
-        json.loads(captured.getvalue())
+        assert len(caplog.records) >= 1
+        json.loads(caplog.records[0].message)
 
 
 # ===================================================================

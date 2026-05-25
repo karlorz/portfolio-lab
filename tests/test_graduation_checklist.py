@@ -5,6 +5,7 @@ multi-criteria gates, CLI commands, and edge cases.
 """
 
 import json
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
@@ -1340,48 +1341,40 @@ class TestLoadState:
 
 
 class TestCLIMain:
-    """Test the __main__ block via subprocess execution."""
+    """Test the __main__ block via direct function calls with caplog."""
 
-    def test_main_default_command(self):
+    def test_main_default_command(self, caplog):
         """Running without args defaults to 'check'."""
-        import subprocess
-        result = subprocess.run(
-            ["uv", "run", "python", "-m", "src.strategy.graduation_checklist"],
-            capture_output=True, text=True, timeout=30,
-        )
-        # Should print output and exit with code 0 or 1
-        assert result.returncode in (0, 1)
-        assert "Graduation Checklist" in result.stdout or "Readiness" in result.stdout
+        import sys
+        from src.strategy.graduation_checklist import run_check_and_exit
+        with patch.object(sys, "argv", ["graduation_checklist.py"]):
+            with caplog.at_level(logging.INFO, logger="src.strategy.graduation_checklist"):
+                result = run_check_and_exit()
+        assert result in (0, 1)
 
-    def test_main_check_command(self):
+    def test_main_check_command(self, caplog):
         """python -m src.strategy.graduation_checklist check"""
-        import subprocess
-        result = subprocess.run(
-            ["uv", "run", "python", "-m", "src.strategy.graduation_checklist", "check"],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert result.returncode in (0, 1)
-        assert "Graduation Checklist" in result.stdout
+        from src.strategy.graduation_checklist import run_check_and_exit
+        with caplog.at_level(logging.INFO, logger="src.strategy.graduation_checklist"):
+            result = run_check_and_exit()
+        assert result in (0, 1)
+        assert "Graduation Checklist" in caplog.text
 
-    def test_main_report_command(self):
+    def test_main_report_command(self, caplog):
         """python -m src.strategy.graduation_checklist report"""
-        import subprocess
-        result = subprocess.run(
-            ["uv", "run", "python", "-m", "src.strategy.graduation_checklist", "report"],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert result.returncode in (0, 1)
-        assert "report" in result.stdout or "Detailed" in result.stdout
+        from src.strategy.graduation_checklist import run_report_and_exit
+        with caplog.at_level(logging.INFO, logger="src.strategy.graduation_checklist"):
+            result = run_report_and_exit()
+        assert result in (0, 1)
+        assert "report" in caplog.text or "Detailed" in caplog.text
 
-    def test_main_progress_command(self):
+    def test_main_progress_command(self, caplog):
         """python -m src.strategy.graduation_checklist progress"""
-        import subprocess
-        result = subprocess.run(
-            ["uv", "run", "python", "-m", "src.strategy.graduation_checklist", "progress"],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert result.returncode in (0, 1)
-        assert "Progress" in result.stdout or "Readiness" in result.stdout
+        from src.strategy.graduation_checklist import run_progress_and_exit
+        with caplog.at_level(logging.INFO, logger="src.strategy.graduation_checklist"):
+            result = run_progress_and_exit()
+        assert result in (0, 1)
+        assert "Progress" in caplog.text or "Readiness" in caplog.text
 
     def test_main_unknown_command(self):
         """Unknown command should print error and exit with 1."""

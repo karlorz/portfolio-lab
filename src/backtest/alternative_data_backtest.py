@@ -618,57 +618,57 @@ class AlternativeDataBacktester:
             1,
         )
 
-        print("\n" + "=" * 64)
-        print(
+        logger.info("\n" + "=" * 64)
+        logger.info(
             "  ALTERNATIVE DATA SIGNAL BACKTEST  "
         )
-        print("  Validating hardcoded regime->signal mappings")
-        print("=" * 64)
-        print(
+        logger.info("  Validating hardcoded regime->signal mappings")
+        logger.info("=" * 64)
+        logger.info(
             f"  Period:         {self.config.start_date} to "
             f"{self.config.end_date}"
         )
-        print(
+        logger.info(
             f"  Data days:      {total_days} "
             f"({total_months} months)"
         )
-        print(
+        logger.info(
             f"  Initial cap:    "
             f"${self.config.initial_capital:,.0f}"
         )
-        print(f"  Baseline:       46/38/16 (SPY/GLD/TLT)")
-        print()
+        logger.info(f"  Baseline:       46/38/16 (SPY/GLD/TLT)")
+        logger.info("")
 
         # -- Performance metrics --
-        print("  PERFORMANCE METRICS")
-        print("  " + "-" * 60)
-        print(
+        logger.info("  PERFORMANCE METRICS")
+        logger.info("  " + "-" * 60)
+        logger.info(
             f"  Total Return:       "
             f"{result.total_return:>9.2f}%"
         )
-        print(f"  CAGR:               {result.cagr:>9.2f}%")
-        print(
+        logger.info(f"  CAGR:               {result.cagr:>9.2f}%")
+        logger.info(
             f"  Volatility:         "
             f"{result.volatility:>9.2f}%"
         )
-        print(
+        logger.info(
             f"  Sharpe Ratio:       "
             f"{result.sharpe_ratio:>9.3f}"
         )
-        print(
+        logger.info(
             f"  Max Drawdown:       "
             f"{result.max_drawdown:>9.2f}%"
         )
-        print()
+        logger.info("")
 
         # -- Overlay impact --
-        print("  OVERLAY IMPACT")
-        print("  " + "-" * 60)
-        print(
+        logger.info("  OVERLAY IMPACT")
+        logger.info("  " + "-" * 60)
+        logger.info(
             f"  Baseline Sharpe:    "
             f"{result.baseline_sharpe:>9.3f}"
         )
-        print(
+        logger.info(
             f"  Overlay Sharpe:     "
             f"{result.sharpe_ratio:>9.3f}"
         )
@@ -676,20 +676,20 @@ class AlternativeDataBacktester:
         imp_label = (
             "POSITIVE" if improvement > 0 else "NEGATIVE"
         )
-        print(
+        logger.info(
             f"  Improvement:        "
             f"{improvement:>+9.3f}  ({imp_label})"
         )
-        print(
+        logger.info(
             f"  Active months:      "
             f"{result.extras['overlay_active_months']:>9} "
             f"({result.extras['overlay_active_pct']:.1f}%)"
         )
-        print()
+        logger.info("")
 
         # -- Crisis performance --
-        print("  CRISIS PERFORMANCE (annualised)")
-        print("  " + "-" * 60)
+        logger.info("  CRISIS PERFORMANCE (annualised)")
+        logger.info("  " + "-" * 60)
         crisis = result.crisis_returns or {}
         for label, key in [
             ("2008 GFC", "2008"),
@@ -698,46 +698,46 @@ class AlternativeDataBacktester:
         ]:
             val = crisis.get(key)
             if val is not None:
-                print(f"  {label:20s}  {val:>+9.2f}%")
-        print()
+                logger.info(f"  {label:20s}  {val:>+9.2f}%")
+        logger.info("")
 
         # -- Trade stats --
-        print("  TRADE STATISTICS")
-        print("  " + "-" * 60)
-        print(
+        logger.info("  TRADE STATISTICS")
+        logger.info("  " + "-" * 60)
+        logger.info(
             f"  Total rebalances:   "
             f"{result.total_rebalances:>9}"
         )
-        print(
+        logger.info(
             f"  Avg rebalance size: "
             f"{result.extras['avg_rebalance_size'] * 100:>9.2f}%"
         )
-        print(
+        logger.info(
             f"  Transaction costs:  "
             f"${result.total_transaction_costs:>9.2f}"
         )
-        print()
+        logger.info("")
 
         # -- Regime distribution --
         total_regime = sum(result.extras["regime_distribution"].values())
-        print("  REGIME DISTRIBUTION")
-        print("  " + "-" * 60)
+        logger.info("  REGIME DISTRIBUTION")
+        logger.info("  " + "-" * 60)
         for regime in ["bull", "neutral", "bear", "crisis"]:
             count = result.extras["regime_distribution"].get(regime, 0)
             pct = count / total_regime * 100 if total_regime else 0
             ann_ret = result.extras["regime_returns"].get(regime, 0.0)
             signal = self.REGIME_SIGNAL_MAP.get(regime, 0.0)
-            print(
+            logger.info(
                 f"  {regime:10s}  count={count:>5} "
                 f"({pct:>5.1f}%)  "
                 f"return={ann_ret:>+7.2f}%  "
                 f"signal={signal:>+.1f}"
             )
-        print()
+        logger.info("")
 
         # -- Regime->signal mapping table --
-        print("  REGIME -> SIGNAL MAPPING (ensemble_voter.py L581)")
-        print("  " + "-" * 60)
+        logger.info("  REGIME -> SIGNAL MAPPING (ensemble_voter.py L581)")
+        logger.info("  " + "-" * 60)
         for regime, signal in self.REGIME_SIGNAL_MAP.items():
             ann_ret = result.extras["regime_returns"].get(regime, 0.0)
             verdict = "OK" if (
@@ -745,16 +745,16 @@ class AlternativeDataBacktester:
                 or (signal < 0 and ann_ret < 0)
                 or (signal == 0 and abs(ann_ret) < 1.0)
             ) else "MISMATCH"
-            print(
+            logger.info(
                 f"  {regime:10s} -> signal {signal:>+4.1f}  "
                 f"  realised {ann_ret:>+7.2f}%  "
                 f"[{verdict}]"
             )
-        print()
+        logger.info("")
 
         # -- Success criteria --
-        print("  SUCCESS CRITERIA")
-        print("  " + "-" * 60)
+        logger.info("  SUCCESS CRITERIA")
+        logger.info("  " + "-" * 60)
         checks = [
             (
                 "Sharpe >= baseline (signal adds alpha)",
@@ -771,8 +771,8 @@ class AlternativeDataBacktester:
         ]
         for desc, passed in checks:
             mark = "PASS" if passed else "FAIL"
-            print(f"  [{mark}] {desc}")
-        print("=" * 64)
+            logger.info(f"  [{mark}] {desc}")
+        logger.info("=" * 64)
 
 
 def main() -> int:

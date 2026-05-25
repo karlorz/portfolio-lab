@@ -594,33 +594,33 @@ class CrossAssetRegimeArbDetector:
 
 def print_signal_report(signal: CrossAssetRegimeArbSignal):
     """Pretty-print the signal."""
-    print("=" * 60)
-    print("  CROSS-ASSET REGIME ARBITRAGE SIGNAL")
-    print("=" * 60)
-    print(f"  Timestamp:     {signal.timestamp}")
-    print(f"  Active:        {signal.active}")
-    print(f"  Signal Value:  {signal.signal_value:+.3f}")
-    print(f"  Conviction:    {signal.overall_conviction:.2f}")
-    print()
-    print("  --- Per-Asset Regimes ---")
+    logger.info("=" * 60)
+    logger.info("  CROSS-ASSET REGIME ARBITRAGE SIGNAL")
+    logger.info("=" * 60)
+    logger.info(f"  Timestamp:     {signal.timestamp}")
+    logger.info(f"  Active:        {signal.active}")
+    logger.info(f"  Signal Value:  {signal.signal_value:+.3f}")
+    logger.info(f"  Conviction:    {signal.overall_conviction:.2f}")
+    logger.info("")
+    logger.info("  --- Per-Asset Regimes ---")
     eq = signal.equity
-    print(f"  SPY (Equity):  {eq.asset_regime.value:<10}  "
+    logger.info(f"  SPY (Equity):  {eq.asset_regime.value:<10}  "
           f"mom={eq.momentum_60d:+.2%}  vol={eq.volatility_20d:.1%}  conf={eq.confidence:.2f}")
     bd = signal.bonds
-    print(f"  TLT (Bonds):   {bd.regime.value:<10}  "
+    logger.info(f"  TLT (Bonds):   {bd.regime.value:<10}  "
           f"mom={bd.momentum_60d:+.2%}  conf={bd.confidence:.2f}")
     gd = signal.gold
-    print(f"  GLD (Gold):    {gd.regime.value:<10}  "
+    logger.info(f"  GLD (Gold):    {gd.regime.value:<10}  "
           f"mom={gd.momentum_60d:+.2%}  conf={gd.confidence:.2f}")
-    print()
-    print("  --- Divergence Pattern ---")
+    logger.info("")
+    logger.info("  --- Divergence Pattern ---")
     dv = signal.divergence
-    print(f"  Pattern:       {dv.pattern.value}")
-    print(f"  Persistence:   {dv.persistence_days} days")
-    print(f"  Signal Value:  {dv.signal_value:+.3f}")
-    print(f"  Confidence:    {dv.confidence:.2f}")
-    print(f"  Explanation:   {dv.explanation}")
-    print("=" * 60)
+    logger.info(f"  Pattern:       {dv.pattern.value}")
+    logger.info(f"  Persistence:   {dv.persistence_days} days")
+    logger.info(f"  Signal Value:  {dv.signal_value:+.3f}")
+    logger.info(f"  Confidence:    {dv.confidence:.2f}")
+    logger.info(f"  Explanation:   {dv.explanation}")
+    logger.info("=" * 60)
 
 
 def main():

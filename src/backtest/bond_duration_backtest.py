@@ -631,42 +631,42 @@ class WalkForwardBondDurationBacktester:
 
     def print_results(self, result: BacktestResult) -> None:
         """Print formatted backtest results to stdout."""
-        print("\n" + "=" * 70)
-        print("  Bond Duration Rotation — Walk-Forward Backtest Results")
-        print("=" * 70)
+        logger.info("\n" + "=" * 70)
+        logger.info("  Bond Duration Rotation — Walk-Forward Backtest Results")
+        logger.info("=" * 70)
 
-        print(f"\n  Period: {self.config.start_date} to {self.config.end_date}")
-        print(f"  Capital: ${self.config.initial_capital:,.0f}")
-        print(f"  Baseline: SPY {self.config.base_weights['SPY']*100:.0f}% / "
+        logger.info(f"\n  Period: {self.config.start_date} to {self.config.end_date}")
+        logger.info(f"  Capital: ${self.config.initial_capital:,.0f}")
+        logger.info(f"  Baseline: SPY {self.config.base_weights['SPY']*100:.0f}% / "
               f"GLD {self.config.base_weights['GLD']*100:.0f}% / "
               f"Bonds {self.config.base_weights['TLT']*100:.0f}%")
 
         e = result.extras
 
-        print(f"\n  {'Metric':<30} {'Baseline':>10} {'Rotated':>10} {'Delta':>10}")
-        print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")
-        print(f"  {'Total Return':<30} {e['baseline_total_return']:>9.2f}% {result.total_return:>9.2f}% "
+        logger.info(f"\n  {'Metric':<30} {'Baseline':>10} {'Rotated':>10} {'Delta':>10}")
+        logger.info(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")
+        logger.info(f"  {'Total Return':<30} {e['baseline_total_return']:>9.2f}% {result.total_return:>9.2f}% "
               f"{result.total_return - e['baseline_total_return']:>+9.2f}%")
-        print(f"  {'CAGR':<30} {e['baseline_cagr']:>9.2f}% {result.cagr:>9.2f}% "
+        logger.info(f"  {'CAGR':<30} {e['baseline_cagr']:>9.2f}% {result.cagr:>9.2f}% "
               f"{e['cagr_impact']:>+9.2f}%")
-        print(f"  {'Volatility':<30} {e['baseline_volatility']:>9.2f}% {result.volatility:>9.2f}% "
+        logger.info(f"  {'Volatility':<30} {e['baseline_volatility']:>9.2f}% {result.volatility:>9.2f}% "
               f"{result.volatility - e['baseline_volatility']:>+9.2f}%")
-        print(f"  {'Sharpe Ratio':<30} {result.baseline_sharpe:>10.4f} {result.sharpe_ratio:>10.4f} "
+        logger.info(f"  {'Sharpe Ratio':<30} {result.baseline_sharpe:>10.4f} {result.sharpe_ratio:>10.4f} "
               f"{result.sharpe_improvement:>+10.4f}")
-        print(f"  {'Max Drawdown':<30} {e['baseline_max_drawdown']:>9.2f}% {result.max_drawdown:>9.2f}% "
+        logger.info(f"  {'Max Drawdown':<30} {e['baseline_max_drawdown']:>9.2f}% {result.max_drawdown:>9.2f}% "
               f"{result.max_drawdown - e['baseline_max_drawdown']:>+9.2f}%")
 
-        print(f"\n  -- Rotation Activity --")
-        print(f"  Rotation active days:  {e['rotation_active_days']} ({e['rotation_active_pct']:.1f}%)")
-        print(f"  Avg effective duration: {e['avg_effective_duration']:.1f} yr")
-        print(f"  Avg sleeve weights:    TLT {e['avg_tlt_weight']:.1%} / "
+        logger.info(f"\n  -- Rotation Activity --")
+        logger.info(f"  Rotation active days:  {e['rotation_active_days']} ({e['rotation_active_pct']:.1f}%)")
+        logger.info(f"  Avg effective duration: {e['avg_effective_duration']:.1f} yr")
+        logger.info(f"  Avg sleeve weights:    TLT {e['avg_tlt_weight']:.1%} / "
               f"IEF {e['avg_ief_weight']:.1%} / SHY {e['avg_shy_weight']:.1%}")
-        print(f"  Rebalances:            {result.total_rebalances}")
-        print(f"  Transaction costs:     ${result.total_transaction_costs:.2f}")
+        logger.info(f"  Rebalances:            {result.total_rebalances}")
+        logger.info(f"  Transaction costs:     ${result.total_transaction_costs:.2f}")
 
-        print(f"\n  -- Crisis Returns (%) --")
-        print(f"  {'Year':<10} {'Baseline':>10} {'Rotated':>10}")
-        print(f"  {'-'*10} {'-'*10} {'-'*10}")
+        logger.info(f"\n  -- Crisis Returns (%) --")
+        logger.info(f"  {'Year':<10} {'Baseline':>10} {'Rotated':>10}")
+        logger.info(f"  {'-'*10} {'-'*10} {'-'*10}")
         crisis_baseline = e.get("crisis_returns_baseline", {})
         crisis_rotated = e.get("crisis_returns_rotated", {})
         all_crisis_years = sorted(
@@ -675,22 +675,22 @@ class WalkForwardBondDurationBacktester:
         for year in all_crisis_years:
             b = crisis_baseline.get(year, 0.0)
             r = crisis_rotated.get(year, 0.0)
-            print(f"  {year:<10} {b:>10.2f} {r:>10.2f}")
+            logger.info(f"  {year:<10} {b:>10.2f} {r:>10.2f}")
 
-        print(f"\n  -- Regime Breakdown --")
-        print(f"  {'Regime':<12} {'% Time':>8} {'Avg Dur':>8} {'TLT':>8} {'IEF':>8} {'SHY':>8}")
-        print(f"  {'-'*12} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
+        logger.info(f"\n  -- Regime Breakdown --")
+        logger.info(f"  {'Regime':<12} {'% Time':>8} {'Avg Dur':>8} {'TLT':>8} {'IEF':>8} {'SHY':>8}")
+        logger.info(f"  {'-'*12} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
         regime_breakdown = e.get("regime_breakdown", {})
         for reg_name in ["rising", "neutral", "falling"]:
             stats = regime_breakdown.get(reg_name)
             if stats:
-                print(f"  {reg_name:<12} {stats['pct_of_time']:>7.1f}% "
+                logger.info(f"  {reg_name:<12} {stats['pct_of_time']:>7.1f}% "
                       f"{stats['avg_effective_duration']:>7.1f} "
                       f"{stats['avg_tlt_sleeve']:>7.1%} "
                       f"{stats['avg_ief_sleeve']:>7.1%} "
                       f"{stats['avg_shy_sleeve']:>7.1%}")
 
-        print("\n" + "=" * 70)
+        logger.info("\n" + "=" * 70)
 
     def save_results(self, result: BacktestResult, output_path: Optional[str] = None) -> None:
         """Save backtest results to a JSON file."""

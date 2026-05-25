@@ -440,22 +440,22 @@ class AdaptiveSizer:
         if decision is None:
             decision = self.compute_allocation()
         
-        print("=" * 70)
-        print("  ADAPTIVE POSITION SIZING v5.74")
-        print("=" * 70)
-        print(f"  Timestamp:   {decision.timestamp[:19]}")
-        print()
-        print("  Factors:")
-        print(f"    Regime:          {decision.factors.regime.upper()} (conf={decision.factors.regime_confidence:.0%})")
-        print(f"    SPY 20d Vol:     {decision.factors.spy_vol_20d:.1%}")
-        print(f"    SPY 20d Mom:     {decision.factors.spy_mom_20d:.2%}")
-        print(f"    SPY 60d DD:      {decision.factors.spy_drawdown_60d:.2%}")
-        print(f"    Ensemble Signal: {decision.factors.ensemble_signal:+.3f} (agreement={decision.factors.ensemble_agreement:.0%})")
-        print(f"    Circuit Breaker: {decision.factors.circuit_breaker_severity}")
-        print()
-        print("  Allocation:")
-        print(f"    {'Asset':6s} {'Base':>8s} {'Adj':>8s} {'Regime':>8s} {'Vol':>8s} {'Signal':>8s} {'DD':>8s}")
-        print(f"    {'-'*6} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
+        logger.info("=" * 70)
+        logger.info("  ADAPTIVE POSITION SIZING v5.74")
+        logger.info("=" * 70)
+        logger.info(f"  Timestamp:   {decision.timestamp[:19]}")
+        logger.info("")
+        logger.info("  Factors:")
+        logger.info(f"    Regime:          {decision.factors.regime.upper()} (conf={decision.factors.regime_confidence:.0%})")
+        logger.info(f"    SPY 20d Vol:     {decision.factors.spy_vol_20d:.1%}")
+        logger.info(f"    SPY 20d Mom:     {decision.factors.spy_mom_20d:.2%}")
+        logger.info(f"    SPY 60d DD:      {decision.factors.spy_drawdown_60d:.2%}")
+        logger.info(f"    Ensemble Signal: {decision.factors.ensemble_signal:+.3f} (agreement={decision.factors.ensemble_agreement:.0%})")
+        logger.info(f"    Circuit Breaker: {decision.factors.circuit_breaker_severity}")
+        logger.info("")
+        logger.info("  Allocation:")
+        logger.info(f"    {'Asset':6s} {'Base':>8s} {'Adj':>8s} {'Regime':>8s} {'Vol':>8s} {'Signal':>8s} {'DD':>8s}")
+        logger.info(f"    {'-'*6} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
         for asset in ["SPY", "GLD", "TLT"]:
             base = decision.base_allocation.get(asset, 0)
             adj = decision.adjusted_allocation.get(asset, 0)
@@ -463,20 +463,20 @@ class AdaptiveSizer:
             va = decision.volatility_adjustment.get(asset, 0)
             sa = decision.signal_adjustment.get(asset, 0)
             da = decision.drawdown_adjustment.get(asset, 0)
-            print(f"    {asset:6s} {base:>7.1%} {adj:>7.1%} {ra:>+7.2%} {va:>+7.2%} {sa:>+7.2%} {da:>+7.2%}")
-        print()
-        print("  Net Adjustments:")
+            logger.info(f"    {asset:6s} {base:>7.1%} {adj:>7.1%} {ra:>+7.2%} {va:>+7.2%} {sa:>+7.2%} {da:>+7.2%}")
+        logger.info("")
+        logger.info("  Net Adjustments:")
         for asset, adj in decision.adjustments.items():
-            print(f"    {asset:6s}: {adj:+.2%}")
-        print()
-        print("  Signal Interpretation:")
+            logger.info(f"    {asset:6s}: {adj:+.2%}")
+        logger.info("")
+        logger.info("  Signal Interpretation:")
         signal = decision.factors.ensemble_signal
         if signal > 0.3:
-            print("    Bullish — tilt toward equities")
+            logger.info("    Bullish — tilt toward equities")
         elif signal < -0.3:
-            print("    Bearish — tilt toward safe havens")
+            logger.info("    Bearish — tilt toward safe havens")
         else:
-            print("    Neutral — near base allocation")
+            logger.info("    Neutral — near base allocation")
 
 
 # ── CLI Entry Point ──────────────────────────────────────────────────────────

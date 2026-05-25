@@ -603,52 +603,52 @@ def cli():
     args = parser.parse_args()
     
     if args.backtest:
-        print(f"Running VPIN backtest for {args.symbols} over {args.days} days...")
+        logger.info(f"Running VPIN backtest for {args.symbols} over {args.days} days...")
         results = backtest_vpin(args.symbols, args.days)
         
-        print("\n=== VPIN Statistics ===")
+        logger.info("\n=== VPIN Statistics ===")
         for symbol, stats in results['statistics'].items():
-            print(f"\n{symbol}:")
-            print(f"  Mean VPIN: {stats['mean']:.4f}")
-            print(f"  Std VPIN: {stats['std']:.4f}")
-            print(f"  Range: [{stats['min']:.4f}, {stats['max']:.4f}]")
-            print(f"  Buckets: {stats['buckets_completed']}")
+            logger.info(f"\n{symbol}:")
+            logger.info(f"  Mean VPIN: {stats['mean']:.4f}")
+            logger.info(f"  Std VPIN: {stats['std']:.4f}")
+            logger.info(f"  Range: [{stats['min']:.4f}, {stats['max']:.4f}]")
+            logger.info(f"  Buckets: {stats['buckets_completed']}")
     
     elif args.status:
         engine = VPINEngine(symbols=args.symbols)
         adapter = VPINSignalAdapter(engine)
         optimizer = RebalanceOptimizer(engine)
         
-        print("\n=== VPIN Status ===")
-        print(f"Timestamp: {datetime.now().isoformat()}")
-        print(f"Symbols: {', '.join(args.symbols)}")
+        logger.info("\n=== VPIN Status ===")
+        logger.info(f"Timestamp: {datetime.now().isoformat()}")
+        logger.info(f"Symbols: {', '.join(args.symbols)}")
         
-        print("\n--- Ensemble Signal ---")
+        logger.info("\n--- Ensemble Signal ---")
         for symbol in args.symbols:
             signal = adapter.to_ensemble_signal(symbol)
-            print(f"\n{symbol}:")
-            print(f"  Regime: {signal['regime']}")
-            print(f"  Probability: {signal['probability']:.2f}")
-            print(f"  Confidence: {signal['confidence']:.2f}")
+            logger.info(f"\n{symbol}:")
+            logger.info(f"  Regime: {signal['regime']}")
+            logger.info(f"  Probability: {signal['probability']:.2f}")
+            logger.info(f"  Confidence: {signal['confidence']:.2f}")
             raw = signal['raw_data']
             if 'vpin' in raw:
-                print(f"  VPIN: {raw['vpin']:.4f}")
-                print(f"  Percentile: {raw['vpin_percentile']:.2%}")
+                logger.info(f"  VPIN: {raw['vpin']:.4f}")
+                logger.info(f"  Percentile: {raw['vpin_percentile']:.2%}")
         
-        print("\n--- Rebalance Timing ---")
+        logger.info("\n--- Rebalance Timing ---")
         execute, reason, savings = optimizer.should_execute_now('SPY')
-        print(f"Execute now: {execute}")
-        print(f"Reason: {reason}")
-        print(f"Expected savings: {savings:.1f} bps")
+        logger.info(f"Execute now: {execute}")
+        logger.info(f"Reason: {reason}")
+        logger.info(f"Expected savings: {savings:.1f} bps")
         
-        print("\n--- Execution Quality Report ---")
+        logger.info("\n--- Execution Quality Report ---")
         report = optimizer.get_execution_quality_report()
         for symbol, data in report['symbols'].items():
-            print(f"\n{symbol}:")
-            print(f"  VPIN: {data['vpin']:.4f}")
-            print(f"  Regime: {data['regime']}")
-            print(f"  Recommendation: {data['recommendation']}")
-            print(f"  Expected cost: {data['expected_cost_bps']:.1f} bps")
+            logger.info(f"\n{symbol}:")
+            logger.info(f"  VPIN: {data['vpin']:.4f}")
+            logger.info(f"  Regime: {data['regime']}")
+            logger.info(f"  Recommendation: {data['recommendation']}")
+            logger.info(f"  Expected cost: {data['expected_cost_bps']:.1f} bps")
     
     else:
         parser.print_help()

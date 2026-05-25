@@ -7,6 +7,7 @@ run_backtest, print/save output, CLI main, and edge cases.
 """
 
 import json
+import logging
 import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -520,8 +521,9 @@ class TestMultiSpeedMomentumBacktester:
 
     # ── Print / Save ──
 
-    def test_print_report_does_not_crash(self, capsys):
+    def test_print_report_does_not_crash(self, caplog):
         """print_report should produce output without errors."""
+        caplog.set_level(logging.INFO)
         result = BacktestResult(
             total_return=10.5, cagr=8.2, volatility=12.3, sharpe_ratio=0.85,
             max_drawdown=-15.4, baseline_sharpe=0.79,
@@ -532,13 +534,13 @@ class TestMultiSpeedMomentumBacktester:
         )
         bt = MultiSpeedMomentumBacktester()
         bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "MULTI-SPEED MOMENTUM" in captured.out
-        assert "Sharpe" in captured.out
-        assert "SUCCESS CRITERIA" in captured.out
+        assert "MULTI-SPEED MOMENTUM" in caplog.text
+        assert "Sharpe" in caplog.text
+        assert "SUCCESS CRITERIA" in caplog.text
 
-    def test_print_report_with_none_crisis(self, capsys):
+    def test_print_report_with_none_crisis(self, caplog):
         """print_report handles None crisis returns gracefully."""
+        caplog.set_level(logging.INFO)
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
             max_drawdown=-10.0, baseline_sharpe=0.45,
@@ -548,8 +550,7 @@ class TestMultiSpeedMomentumBacktester:
         )
         bt = MultiSpeedMomentumBacktester()
         bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "N/A" in captured.out
+        assert "N/A" in caplog.text
 
     def test_save_results_creates_json_file(self):
         """save_results should create a valid JSON file."""

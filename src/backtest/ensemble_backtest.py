@@ -434,27 +434,27 @@ class EnsembleBacktestEngine:
         passed = result.sharpe_ratio >= target_sharpe
         e = result.extras
 
-        print(f"\n{'='*60}")
-        print(f"ENSEMBLE BACKTEST VALIDATION (Target Sharpe: {target_sharpe:.2f})")
-        print(f"{'='*60}")
-        print(f"Sharpe Ratio:      {result.sharpe_ratio:.2f} {'✓' if passed else '✗'}")
-        print(f"CAGR:              {result.cagr*100:.2f}%")
-        print(f"Volatility:        {result.volatility*100:.2f}%")
-        print(f"Max Drawdown:      {result.max_drawdown*100:.1f}%")
-        print(f"Sortino:           {e['sortino_ratio']:.2f}")
-        print(f"Calmar:            {e['calmar_ratio']:.2f}")
-        print(f"\nCrisis Alpha:")
-        print(f"  2008 GFC:        {e['crisis_alpha_2008']*100:+.1f}%")
-        print(f"  2020 COVID:      {e['crisis_alpha_2020']*100:+.1f}%")
-        print(f"  2022 Bear:       {e['crisis_alpha_2022']*100:+.1f}%")
-        print(f"\nSource Contributions:")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"ENSEMBLE BACKTEST VALIDATION (Target Sharpe: {target_sharpe:.2f})")
+        logger.info(f"{'='*60}")
+        logger.info(f"Sharpe Ratio:      {result.sharpe_ratio:.2f} {'✓' if passed else '✗'}")
+        logger.info(f"CAGR:              {result.cagr*100:.2f}%")
+        logger.info(f"Volatility:        {result.volatility*100:.2f}%")
+        logger.info(f"Max Drawdown:      {result.max_drawdown*100:.1f}%")
+        logger.info(f"Sortino:           {e['sortino_ratio']:.2f}")
+        logger.info(f"Calmar:            {e['calmar_ratio']:.2f}")
+        logger.info(f"\nCrisis Alpha:")
+        logger.info(f"  2008 GFC:        {e['crisis_alpha_2008']*100:+.1f}%")
+        logger.info(f"  2020 COVID:      {e['crisis_alpha_2020']*100:+.1f}%")
+        logger.info(f"  2022 Bear:       {e['crisis_alpha_2022']*100:+.1f}%")
+        logger.info(f"\nSource Contributions:")
         for src, stats in sorted(e['source_contributions'].items(),
                                  key=lambda x: x[1].get("hits", 0), reverse=True)[:5]:
-            print(f"  {src:20s}: {stats['hits']:4d} hits, conf={stats['avg_confidence']:.2f}")
-        print(f"\nRegime Distribution:")
+            logger.info(f"  {src:20s}: {stats['hits']:4d} hits, conf={stats['avg_confidence']:.2f}")
+        logger.info(f"\nRegime Distribution:")
         for regime, pct in sorted(e['regime_distribution'].items(), key=lambda x: -x[1]):
-            print(f"  {regime:12s}: {pct*100:.1f}%")
-        print(f"{'='*60}")
+            logger.info(f"  {regime:12s}: {pct*100:.1f}%")
+        logger.info(f"{'='*60}")
 
         return passed
 

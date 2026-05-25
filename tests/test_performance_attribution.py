@@ -4,6 +4,7 @@ Tests for Performance Attribution System (v5.70).
 """
 
 import json
+import logging
 import sqlite3
 import numpy as np
 from datetime import datetime, timedelta
@@ -424,7 +425,7 @@ class TestPerformanceAttribution:
 # ---------------------------------------------------------------------------
 
 class TestPrintReport:
-    def test_print_report_empty(self, capsys):
+    def test_print_report_empty(self, caplog):
         report = AttributionReport(
             timestamp="2026-01-01T00:00:00",
             start_date="2025-10-01",
@@ -441,11 +442,11 @@ class TestPrintReport:
             top_performers=[],
         )
         # Should not crash
-        print_report(report)
-        captured = capsys.readouterr()
-        assert "PERFORMANCE ATTRIBUTION REPORT" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "PERFORMANCE ATTRIBUTION REPORT" in caplog.text
 
-    def test_print_report_with_data(self, capsys):
+    def test_print_report_with_data(self, caplog):
         src = SourceAttribution(
             source="vp_macd", display_name="VP-MACD", category="momentum",
             total_readings=50, active_days=45, hit_rate=0.62, win_rate=0.58,
@@ -467,10 +468,10 @@ class TestPrintReport:
             degradation_signals=[],
             top_performers=["vp_macd"],
         )
-        print_report(report)
-        captured = capsys.readouterr()
-        assert "VP-MACD" in captured.out
-        assert "TOP PERFORMERS" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "VP-MACD" in caplog.text
+        assert "TOP PERFORMERS" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -947,7 +948,7 @@ class TestAttributionReportExtended:
 class TestPrintReportExtended:
     """Additional print_report edge cases."""
 
-    def test_print_report_with_degradation(self, capsys):
+    def test_print_report_with_degradation(self, caplog):
         """Print report with degradation signals."""
         src = SourceAttribution(
             source="bad_sig", display_name="Bad Signal", category="trend",
@@ -963,12 +964,12 @@ class TestPrintReportExtended:
             avg_active_sources_per_day=1.0, total_sources_tracked=1,
             degradation_signals=["bad_sig"], top_performers=[],
         )
-        print_report(report)
-        captured = capsys.readouterr()
-        assert "DEGRADATION" in captured.out
-        assert "Bad Signal" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "DEGRADATION" in caplog.text
+        assert "Bad Signal" in caplog.text
 
-    def test_print_report_best_and_worst(self, capsys):
+    def test_print_report_best_and_worst(self, caplog):
         """Print report with both best and worst sources."""
         best = SourceAttribution(
             source="good", display_name="Good Source", category="trend",
@@ -991,12 +992,12 @@ class TestPrintReportExtended:
             avg_active_sources_per_day=2.0, total_sources_tracked=2,
             degradation_signals=["bad"], top_performers=["good"],
         )
-        print_report(report)
-        captured = capsys.readouterr()
-        assert "Best source" in captured.out
-        assert "Worst source" in captured.out
-        assert "Good Source" in captured.out
-        assert "Bad Source" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "Best source" in caplog.text
+        assert "Worst source" in caplog.text
+        assert "Good Source" in caplog.text
+        assert "Bad Source" in caplog.text
 
 
 class TestGetPaperTradingReturnsExtended:
@@ -1233,7 +1234,7 @@ class TestPerformanceAttributionExtended:
 class TestPrintReport:
     """Test print_report function."""
 
-    def test_print_empty_report(self, capsys):
+    def test_print_empty_report(self, caplog):
         report = AttributionReport(
             timestamp="2026-05-24", start_date="2026-03-01", end_date="2026-05-24",
             analysis_days=90, sources={},
@@ -1242,9 +1243,9 @@ class TestPrintReport:
             avg_active_sources_per_day=0.0, total_sources_tracked=0,
             degradation_signals=[], top_performers=[],
         )
-        print_report(report)
-        captured = capsys.readouterr()
-        assert "ATTRIBUTION" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "ATTRIBUTION" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -1890,7 +1891,7 @@ class TestGenerateReportNew:
 class TestPrintReportNew:
     """Additional print_report edge cases."""
 
-    def test_print_no_best_worst_with_valid_sources(self, capsys):
+    def test_print_no_best_worst_with_valid_sources(self, caplog):
         """Print report with valid sources but None best/worst should work."""
         src = SourceAttribution(
             source="valid", display_name="Valid Source", category="trend",
@@ -1907,13 +1908,13 @@ class TestPrintReportNew:
             avg_active_sources_per_day=1.0, total_sources_tracked=1,
             degradation_signals=[], top_performers=[],
         )
-        print_report(report)
-        captured = capsys.readouterr()
-        assert "Valid Source" in captured.out
-        assert "Best source:" not in captured.out
-        assert "Worst source:" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "Valid Source" in caplog.text
+        assert "Best source:" not in caplog.text
+        assert "Worst source:" not in caplog.text
 
-    def test_print_negative_sharpe_formatting(self, capsys):
+    def test_print_negative_sharpe_formatting(self, caplog):
         """Negative sharpe values should format correctly."""
         src = SourceAttribution(
             source="loser", display_name="Losing Signal", category="trend",
@@ -1930,10 +1931,10 @@ class TestPrintReportNew:
             avg_active_sources_per_day=1.0, total_sources_tracked=1,
             degradation_signals=["loser"], top_performers=[],
         )
-        print_report(report)
-        captured = capsys.readouterr()
-        assert "DEGRADATION" in captured.out
-        assert "Losing Signal" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "DEGRADATION" in caplog.text
+        assert "Losing Signal" in caplog.text
 
 
 # ---------------------------------------------------------------------------

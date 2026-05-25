@@ -411,40 +411,40 @@ class UnifiedOverlayBacktester:
 
     def print_results(self, result: BacktestResult):
         """Print formatted backtest results."""
-        print("\n" + "=" * 70)
-        print("UNIFIED OVERLAY BACKTEST RESULTS (2006-2026)")
-        print("=" * 70)
-        print(f"\n  Overlay Portfolio:")
-        print(f"    CAGR:              {result.cagr:.2f}%")
-        print(f"    Volatility:        {result.volatility:.2f}%")
-        print(f"    Sharpe:            {result.sharpe_ratio:.3f}")
-        print(f"    Max Drawdown:      {result.max_drawdown:.2f}%")
-        print(f"\n  Baseline (46/38/16):")
-        print(f"    Sharpe:            {result.baseline_sharpe:.3f}")
-        print(f"\n  Delta:")
-        print(f"    Sharpe improvement: {result.sharpe_improvement:+.3f}")
+        logger.info("\n" + "=" * 70)
+        logger.info("UNIFIED OVERLAY BACKTEST RESULTS (2006-2026)")
+        logger.info("=" * 70)
+        logger.info(f"\n  Overlay Portfolio:")
+        logger.info(f"    CAGR:              {result.cagr:.2f}%")
+        logger.info(f"    Volatility:        {result.volatility:.2f}%")
+        logger.info(f"    Sharpe:            {result.sharpe_ratio:.3f}")
+        logger.info(f"    Max Drawdown:      {result.max_drawdown:.2f}%")
+        logger.info(f"\n  Baseline (46/38/16):")
+        logger.info(f"    Sharpe:            {result.baseline_sharpe:.3f}")
+        logger.info(f"\n  Delta:")
+        logger.info(f"    Sharpe improvement: {result.sharpe_improvement:+.3f}")
         verdict = "POSITIVE" if result.sharpe_improvement > 0 else "NEGATIVE"
-        print(f"    Verdict:            {verdict}")
-        print(f"\n  Overlay Activity:")
+        logger.info(f"    Verdict:            {verdict}")
+        logger.info(f"\n  Overlay Activity:")
         e = result.extras
-        print(f"    Days active:       {e['overlay_active_days']}/{len(self.data)} ({e['overlay_active_pct']:.1f}%)")
-        print(f"    Collar days:       {e['collar_active_days']}")
-        print(f"    VIXY hedge days:   {e['vixy_active_days']}")
-        print(f"    Crypto days:       {e['crypto_active_days']}")
-        print(f"    Bond duration days:{e['bond_duration_active_days']}")
-        print(f"\n  Trade Stats:")
-        print(f"    Rebalances:        {result.total_rebalances}")
-        print(f"    Transaction costs: ${result.total_transaction_costs:.2f}")
+        logger.info(f"    Days active:       {e['overlay_active_days']}/{len(self.data)} ({e['overlay_active_pct']:.1f}%)")
+        logger.info(f"    Collar days:       {e['collar_active_days']}")
+        logger.info(f"    VIXY hedge days:   {e['vixy_active_days']}")
+        logger.info(f"    Crypto days:       {e['crypto_active_days']}")
+        logger.info(f"    Bond duration days:{e['bond_duration_active_days']}")
+        logger.info(f"\n  Trade Stats:")
+        logger.info(f"    Rebalances:        {result.total_rebalances}")
+        logger.info(f"    Transaction costs: ${result.total_transaction_costs:.2f}")
         crisis = result.crisis_returns or {}
         if any(v is not None for v in crisis.values()):
-            print(f"\n  Crisis Performance:")
+            logger.info(f"\n  Crisis Performance:")
             if crisis.get("2008") is not None:
-                print(f"    2008 return:       {crisis['2008']:.2f}%")
+                logger.info(f"    2008 return:       {crisis['2008']:.2f}%")
             if crisis.get("2020") is not None:
-                print(f"    2020 return:       {crisis['2020']:.2f}%")
+                logger.info(f"    2020 return:       {crisis['2020']:.2f}%")
             if crisis.get("2022") is not None:
-                print(f"    2022 return:       {crisis['2022']:.2f}%")
-        print("\n" + "=" * 70)
+                logger.info(f"    2022 return:       {crisis['2022']:.2f}%")
+        logger.info("\n" + "=" * 70)
 
     def save_results(self, result: BacktestResult, path: Optional[str] = None):
         """Save results to JSON file."""

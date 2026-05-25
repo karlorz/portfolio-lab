@@ -410,75 +410,75 @@ def _status_badge(ok: bool) -> str:
 def print_summary(dashboard: Dict[str, Any]) -> None:
     """Print a human-readable summary of the unified dashboard."""
     gen = dashboard.get("generated_at_local", "unknown")
-    print(f"{'=' * 60}")
+    logger.info(f"{'=' * 60}")
     ver = dashboard.get("dashboard_version", "?").lstrip("v")
-    print(f"  PORTFOLIO-LAB UNIFIED DASHBOARD  v{ver}")
-    print(f"{'=' * 60}")
-    print(f"  Generated: {gen}")
-    print()
+    logger.info(f"  PORTFOLIO-LAB UNIFIED DASHBOARD  v{ver}")
+    logger.info(f"{'=' * 60}")
+    logger.info(f"  Generated: {gen}")
+    logger.info("")
 
     # ── Health ──
     health = dashboard.get("health", {})
     if health.get("available"):
         status = health.get("status", "unknown")
         badge = "✅" if status == "healthy" else "⚠️"
-        print(f"  {badge} HEALTH: {status.upper()}")
-        print(f"     Checks: {health.get('checks_passed')}/{health.get('checks_total')} passed")
+        logger.info(f"  {badge} HEALTH: {status.upper()}")
+        logger.info(f"     Checks: {health.get('checks_passed')}/{health.get('checks_total')} passed")
         for comp_name, comp in health.get("components", {}).items():
-            print(f"       {_status_badge(comp.get('ok', False))} {comp_name}: {comp.get('status', '?')}")
+            logger.info(f"       {_status_badge(comp.get('ok', False))} {comp_name}: {comp.get('status', '?')}")
         alerts = health.get("alerts", [])
         if alerts:
-            print(f"     Alerts ({len(alerts)}):")
+            logger.info(f"     Alerts ({len(alerts)}):")
             for a in alerts:
-                print(f"       ⚠ {a}")
+                logger.info(f"       ⚠ {a}")
     else:
-        print("  ❌ HEALTH: not available")
+        logger.info("  ❌ HEALTH: not available")
 
-    print()
+    logger.info("")
 
     # ── Portfolio ──
     portfolio = dashboard.get("portfolio", {})
     if portfolio.get("available"):
-        print(f"  💼 PORTFOLIO ({portfolio.get('mode', 'paper').upper()})")
-        print(f"     Total: ${_fmt(portfolio.get('total_value'))}")
-        print(f"     Cash: ${_fmt(portfolio.get('cash'))} ({_fmt(portfolio.get('cash_pct'))}%)")
-        print(f"     History: {portfolio.get('history_count', 0)} snapshots")
+        logger.info(f"  💼 PORTFOLIO ({portfolio.get('mode', 'paper').upper()})")
+        logger.info(f"     Total: ${_fmt(portfolio.get('total_value'))}")
+        logger.info(f"     Cash: ${_fmt(portfolio.get('cash'))} ({_fmt(portfolio.get('cash_pct'))}%)")
+        logger.info(f"     History: {portfolio.get('history_count', 0)} snapshots")
         for pos in portfolio.get("positions", []):
             sym = pos.get("symbol", "?")
             val = pos.get("value", 0)
             wt = pos.get("weight", 0)
-            print(f"       {sym:<6} ${val:>8,.0f}  ({wt:.1f}%)")
+            logger.info(f"       {sym:<6} ${val:>8,.0f}  ({wt:.1f}%)")
     else:
-        print("  ❌ PORTFOLIO: not available")
+        logger.info("  ❌ PORTFOLIO: not available")
 
-    print()
+    logger.info("")
 
     # ── Risk ──
     risk = dashboard.get("risk", {})
     if risk.get("available"):
         dd = risk.get("current_drawdown", 0)
         dd_badge = "✅" if dd is not None and abs(dd) < 10 else "⚠️" if dd is not None and abs(dd) < 20 else "🚨"
-        print(f"  {dd_badge} RISK METRICS")
-        print(f"     VaR (95%): {_fmt(risk.get('var_95_daily'))}%")
-        print(f"     CVaR (95%): {_fmt(risk.get('cvar_95_daily'))}%")
-        print(f"     CVaR Ratio: {_fmt(risk.get('cvar_ratio'))}")
-        print(f"     Tail: {risk.get('tail_severity', '?').upper()}")
-        print(f"     Max DD: {_fmt(risk.get('max_drawdown'))}%")
-        print(f"     Current DD: {_fmt(risk.get('current_drawdown'))}%")
-        print(f"     Vol (ann): {_fmt(risk.get('volatility_annual'))}%")
+        logger.info(f"  {dd_badge} RISK METRICS")
+        logger.info(f"     VaR (95%): {_fmt(risk.get('var_95_daily'))}%")
+        logger.info(f"     CVaR (95%): {_fmt(risk.get('cvar_95_daily'))}%")
+        logger.info(f"     CVaR Ratio: {_fmt(risk.get('cvar_ratio'))}")
+        logger.info(f"     Tail: {risk.get('tail_severity', '?').upper()}")
+        logger.info(f"     Max DD: {_fmt(risk.get('max_drawdown'))}%")
+        logger.info(f"     Current DD: {_fmt(risk.get('current_drawdown'))}%")
+        logger.info(f"     Vol (ann): {_fmt(risk.get('volatility_annual'))}%")
         garch = "active" if risk.get("garch_active") else "inactive"
-        print(f"     GARCH: {garch}")
+        logger.info(f"     GARCH: {garch}")
     else:
-        print("  ❌ RISK: not available")
+        logger.info("  ❌ RISK: not available")
 
-    print()
+    logger.info("")
 
     # ── Overlays ──
     overlays = dashboard.get("overlays", {})
     meta = overlays.pop("_meta", {"active_count": 0, "total_count": 0})
     active_o = meta.get("active_count", 0)
     total_o = meta.get("total_count", 0)
-    print(f"  🎯 OVERLAYS ({active_o}/{total_o} active)")
+    logger.info(f"  🎯 OVERLAYS ({active_o}/{total_o} active)")
     for name, data in sorted(overlays.items()):
         active = data.get("active", False)
         badge = "✅" if active else "⏹"
@@ -490,9 +490,9 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
                 detail = f" SPY={_fmt_pct(alloc.get('SPY', 0) * 100)} GLD={_fmt_pct(alloc.get('GLD', 0) * 100)}"
             else:
                 detail = f" alloc={_fmt_pct(alloc * 100)}"
-        print(f"       {badge} {name:<20} {status_text}{detail}")
+        logger.info(f"       {badge} {name:<20} {status_text}{detail}")
 
-    print()
+    logger.info("")
 
     # ── Regime ──
     regime = dashboard.get("regime", {})
@@ -502,17 +502,17 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
         if clf:
             reg = clf.get("current_regime", "?")
             conf = clf.get("confidence")
-            print(f"  🌡 REGIME CLASSIFIER: {reg.upper()} (conf={_fmt(conf)})")
+            logger.info(f"  🌡 REGIME CLASSIFIER: {reg.upper()} (conf={_fmt(conf)})")
         if opt:
-            print(f"     Optimizer: method={opt.get('method')}, solver={opt.get('solver_status')}")
-            print(f"     Expected Sharpe: {_fmt(opt.get('expected_sharpe'))}")
+            logger.info(f"     Optimizer: method={opt.get('method')}, solver={opt.get('solver_status')}")
+            logger.info(f"     Expected Sharpe: {_fmt(opt.get('expected_sharpe'))}")
         rb = regime.get("risk_budget", {})
         if rb:
-            print(f"     Risk Budget: {rb.get('regime')}, vol {_fmt(rb.get('portfolio_vol_after', 0) * 100, '%')}")
+            logger.info(f"     Risk Budget: {rb.get('regime')}, vol {_fmt(rb.get('portfolio_vol_after', 0) * 100, '%')}")
     else:
-        print("  ❌ REGIME: not available")
+        logger.info("  ❌ REGIME: not available")
 
-    print()
+    logger.info("")
 
     # ── TCA ──
     tca = dashboard.get("tca", {})
@@ -520,26 +520,26 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
         sc = tca.get("scorecard", {})
         fb = tca.get("feedback", {})
         if sc:
-            print(f"  📊 TCA SCORECARD")
-            print(f"     Orders: {sc.get('total_orders')}, Notional: ${_fmt(sc.get('total_notional'))}")
-            print(f"     Avg Slippage: {_fmt(sc.get('avg_slippage_bps'))} bps")
-            print(f"     Avg Quality: {_fmt(sc.get('avg_quality_score'))}/100")
+            logger.info(f"  📊 TCA SCORECARD")
+            logger.info(f"     Orders: {sc.get('total_orders')}, Notional: ${_fmt(sc.get('total_notional'))}")
+            logger.info(f"     Avg Slippage: {_fmt(sc.get('avg_slippage_bps'))} bps")
+            logger.info(f"     Avg Quality: {_fmt(sc.get('avg_quality_score'))}/100")
         if fb:
-            print(f"     Feedback: urgency={_fmt(fb.get('urgency_global_offset'))}, min_trade={fb.get('min_trade_global_multiplier')}x")
-            print(f"     Quality: {_fmt(fb.get('overall_quality'))}/100 ({fb.get('quality_label', '?')})")
+            logger.info(f"     Feedback: urgency={_fmt(fb.get('urgency_global_offset'))}, min_trade={fb.get('min_trade_global_multiplier')}x")
+            logger.info(f"     Quality: {_fmt(fb.get('overall_quality'))}/100 ({fb.get('quality_label', '?')})")
     else:
-        print("  ❌ TCA: not available")
+        logger.info("  ❌ TCA: not available")
 
-    print()
+    logger.info("")
 
     # ── Attribution ──
     attr = dashboard.get("attribution", {})
     if attr.get("available"):
-        print(f"  📈 PERFORMANCE ATTRIBUTION ({attr.get('analysis_days', '?')} days)")
+        logger.info(f"  📈 PERFORMANCE ATTRIBUTION ({attr.get('analysis_days', '?')} days)")
         for src in attr.get("sources", [])[:6]:  # Top 6 sources
             hr = src.get("hit_rate")
             ret = src.get("total_return_bps")
-            print(
+            logger.info(
                 f"       {src.get('name', '?'):<25}"
                 f" hit={_fmt(hr * 100, '%') if hr else 'N/A':>6}"
                 f" ret={_fmt(ret):>8} bps"
@@ -547,39 +547,39 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
             )
         remaining = max(0, len(attr.get("sources", [])) - 6)
         if remaining > 0:
-            print(f"       ... and {remaining} more sources")
+            logger.info(f"       ... and {remaining} more sources")
     else:
-        print("  ❌ ATTRIBUTION: not available")
+        logger.info("  ❌ ATTRIBUTION: not available")
 
-    print()
+    logger.info("")
 
     # ── Adaptive Weights ──
     aw = dashboard.get("adaptive_weights", {})
     if aw.get("available"):
-        print(f"  🔄 ADAPTIVE ENSEMBLE WEIGHTS (v6.09)")
-        print(f"     Regime: {aw.get('regime', '?')} | Sources: {aw.get('num_sources')} | History: {aw.get('history_count')} adj")
+        logger.info(f"  🔄 ADAPTIVE ENSEMBLE WEIGHTS (v6.09)")
+        logger.info(f"     Regime: {aw.get('regime', '?')} | Sources: {aw.get('num_sources')} | History: {aw.get('history_count')} adj")
         for c in aw.get("top_changes", [])[:5]:
             arrow = "⬆" if c["change"] > 0 else "⬇"
-            print(f"       {arrow} {c['source']:<25} {c['base_weight']:.4f} → {c['adjusted_weight']:.4f} (×{c['multiplier']})")
+            logger.info(f"       {arrow} {c['source']:<25} {c['base_weight']:.4f} → {c['adjusted_weight']:.4f} (×{c['multiplier']})")
     else:
-        print(f"  🔄 ADAPTIVE WEIGHTS: not available (run attribution first)")
+        logger.info(f"  🔄 ADAPTIVE WEIGHTS: not available (run attribution first)")
 
-    print()
+    logger.info("")
 
     # ── Cron ──
     cron = dashboard.get("cron", {})
     if cron.get("available"):
         badge = "✅" if cron.get("errors", 0) == 0 else "⚠️"
-        print(f"  {badge} CRON JOBS: {cron.get('ok')}/{cron.get('total')} ok, {cron.get('errors')} errors")
+        logger.info(f"  {badge} CRON JOBS: {cron.get('ok')}/{cron.get('total')} ok, {cron.get('errors')} errors")
         for job in cron.get("jobs", []):
             dur = job.get("duration_seconds", 0)
             status = job.get("status", "?")
             badge = "✅" if status == "ok" else "⏳" if status == "pending" else "❌"
-            print(f"       {badge} {job.get('name', '?'):<30} {status:<8} {_fmt(dur, 's')}")
+            logger.info(f"       {badge} {job.get('name', '?'):<30} {status:<8} {_fmt(dur, 's')}")
     else:
-        print("  ❌ CRON: not available")
+        logger.info("  ❌ CRON: not available")
 
-    print(f"{'=' * 60}")
+    logger.info(f"{'=' * 60}")
 
 
 def generate_status_text() -> str:

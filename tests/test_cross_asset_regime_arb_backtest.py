@@ -8,6 +8,7 @@ run_backtest, print/save output, CLI main, and edge cases.
 """
 
 import json
+import logging
 import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -607,7 +608,7 @@ class TestCrossAssetRegimeArbBacktester:
 
     # ── Print / Save ──
 
-    def test_print_report_does_not_crash(self, capsys):
+    def test_print_report_does_not_crash(self, caplog):
         """print_report should produce output without errors."""
         result = BacktestResult(
             total_return=10.5, cagr=8.2, volatility=12.3, sharpe_ratio=0.85,
@@ -621,12 +622,12 @@ class TestCrossAssetRegimeArbBacktester:
             },
         )
         bt = CrossAssetRegimeArbBacktester()
-        bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "CROSS-ASSET REGIME ARBITRAGE" in captured.out
-        assert "Sharpe" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.cross_asset_regime_arb_backtest"):
+            bt.print_report(result)
+        assert "CROSS-ASSET REGIME ARBITRAGE" in caplog.text
+        assert "Sharpe" in caplog.text
 
-    def test_print_report_no_crisis_data(self, capsys):
+    def test_print_report_no_crisis_data(self, caplog):
         """print_report handles None crisis returns gracefully."""
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
@@ -638,9 +639,9 @@ class TestCrossAssetRegimeArbBacktester:
             },
         )
         bt = CrossAssetRegimeArbBacktester()
-        bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "CROSS-ASSET REGIME ARBITRAGE" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.cross_asset_regime_arb_backtest"):
+            bt.print_report(result)
+        assert "CROSS-ASSET REGIME ARBITRAGE" in caplog.text
 
     def test_save_results_creates_json_file(self):
         """save_results should create a valid JSON file."""
@@ -1456,7 +1457,7 @@ class TestHasSignalModule:
         assert bt.detector is not None
         assert hasattr(bt.detector, "scan")
 
-    def test_print_report_shows_live_signal_module(self, capsys):
+    def test_print_report_shows_live_signal_module(self, caplog):
         """print_report shows 'Live' when signal module is active."""
         result = BacktestResult(
             total_return=5.0, cagr=3.0, volatility=10.0, sharpe_ratio=0.5,
@@ -1470,9 +1471,9 @@ class TestHasSignalModule:
             },
         )
         bt = CrossAssetRegimeArbBacktester()
-        bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "Live" in captured.out or "Simulated" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.cross_asset_regime_arb_backtest"):
+            bt.print_report(result)
+        assert "Live" in caplog.text or "Simulated" in caplog.text
 
 
 # ── Equity Curve Sampling Tests ──────────────────────────────────────────

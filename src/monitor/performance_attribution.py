@@ -532,13 +532,13 @@ class PerformanceAttribution:
 
 def print_report(report: AttributionReport):
     """Pretty-print attribution report to console."""
-    print("\n" + "=" * 72)
-    print("  PERFORMANCE ATTRIBUTION REPORT")
-    print("=" * 72)
-    print(f"  Period: {report.start_date} → {report.end_date} ({report.analysis_days} days)")
-    print(f"  Generated: {report.timestamp}")
-    print(f"  Sources tracked: {report.total_sources_tracked}")
-    print()
+    logger.info("\n" + "=" * 72)
+    logger.info("  PERFORMANCE ATTRIBUTION REPORT")
+    logger.info("=" * 72)
+    logger.info(f"  Period: {report.start_date} → {report.end_date} ({report.analysis_days} days)")
+    logger.info(f"  Generated: {report.timestamp}")
+    logger.info(f"  Sources tracked: {report.total_sources_tracked}")
+    logger.info("")
 
     # Sort sources by sharpe contribution
     sorted_sources = sorted(
@@ -547,10 +547,10 @@ def print_report(report: AttributionReport):
         reverse=True,
     )
 
-    print(f"  {'Source':30} {'HitRate':>9} {'WinRate':>9} {'AvgRet':>9} {'Sharpe':>9} {'Corr':>7} {'Active':>7}")
-    print("  " + "-" * 80)
+    logger.info(f"  {'Source':30} {'HitRate':>9} {'WinRate':>9} {'AvgRet':>9} {'Sharpe':>9} {'Corr':>7} {'Active':>7}")
+    logger.info("  " + "-" * 80)
     for s in sorted_sources:
-        print(
+        logger.info(
             f"  {s.display_name:30}"
             f" {s.hit_rate:>8.1%}"
             f" {s.win_rate:>8.1%}"
@@ -559,36 +559,36 @@ def print_report(report: AttributionReport):
             f" {s.avg_correlation:>6.2f}"
             f" {s.active_days:>6d}"
         )
-    print()
+    logger.info("")
 
     if report.degradation_signals:
-        print(f"  ⚠ DEGRADATION SIGNALS (negative/weak contribution):")
+        logger.info(f"  ⚠ DEGRADATION SIGNALS (negative/weak contribution):")
         for sig in report.degradation_signals:
             src = report.sources.get(sig)
             if src:
-                print(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
-        print()
+                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
+        logger.info("")
 
     if report.top_performers:
-        print(f"  ★ TOP PERFORMERS:")
+        logger.info(f"  ★ TOP PERFORMERS:")
         for sig in report.top_performers:
             src = report.sources.get(sig)
             if src:
-                print(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
-        print()
+                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
+        logger.info("")
 
     if report.best_source and report.best_source in report.sources:
         best = report.sources[report.best_source]
-        print(f"  Best source:  {best.display_name} (Sharpe {best.sharpe_contribution:+.2f})")
+        logger.info(f"  Best source:  {best.display_name} (Sharpe {best.sharpe_contribution:+.2f})")
 
     if report.worst_source and report.worst_source in report.sources:
         worst = report.sources[report.worst_source]
-        print(f"  Worst source: {worst.display_name} (Sharpe {worst.sharpe_contribution:+.2f})")
+        logger.info(f"  Worst source: {worst.display_name} (Sharpe {worst.sharpe_contribution:+.2f})")
 
-    print(f"\n  Average hit rate: {report.avg_hit_rate:.1%}")
-    print(f"  Average signal correlation: {report.avg_correlation:.2f}")
-    print("=" * 72)
-    print()
+    logger.info(f"\n  Average hit rate: {report.avg_hit_rate:.1%}")
+    logger.info(f"  Average signal correlation: {report.avg_correlation:.2f}")
+    logger.info("=" * 72)
+    logger.info("")
 
 
 def patch_save_vote():

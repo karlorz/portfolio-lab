@@ -1,4 +1,6 @@
 """Tests for VPIN BVC microstructure signal v2.65."""
+import logging
+
 import pytest
 import numpy as np
 from datetime import datetime, timedelta
@@ -2401,41 +2403,41 @@ class TestCliMain:
         captured = capsys.readouterr()
         assert 'usage' in captured.out.lower() or 'usage' in captured.err.lower()
 
-    def test_cli_backtest_output(self, capsys):
+    def test_cli_backtest_output(self, caplog):
         """cli() with --backtest prints VPIN statistics."""
         from src.signals.vpin_bvc import cli
         import sys
         from unittest.mock import patch
         with patch.object(sys, 'argv', ['vpin_bvc.py', '--backtest',
                                         '--symbols', 'SPY', '--days', '1']):
-            cli()
-        captured = capsys.readouterr()
-        assert 'VPIN' in captured.out or 'VPIN' in captured.err
+            with caplog.at_level(logging.INFO, logger="src.signals.vpin_bvc"):
+                cli()
+        assert 'VPIN' in caplog.text
 
-    def test_cli_status_output(self, capsys):
+    def test_cli_status_output(self, caplog):
         """cli() with --status prints various status sections."""
         from src.signals.vpin_bvc import cli
         import sys
         from unittest.mock import patch
         with patch.object(sys, 'argv', ['vpin_bvc.py', '--status',
                                         '--symbols', 'SPY']):
-            cli()
-        captured = capsys.readouterr()
-        assert 'VPIN Status' in captured.out
-        assert 'Ensemble Signal' in captured.out
-        assert 'Rebalance Timing' in captured.out
-        assert 'Execution Quality Report' in captured.out
+            with caplog.at_level(logging.INFO, logger="src.signals.vpin_bvc"):
+                cli()
+        assert 'VPIN Status' in caplog.text
+        assert 'Ensemble Signal' in caplog.text
+        assert 'Rebalance Timing' in caplog.text
+        assert 'Execution Quality Report' in caplog.text
 
-    def test_cli_backtest_custom_symbols(self, capsys):
+    def test_cli_backtest_custom_symbols(self, caplog):
         """cli() with custom symbols in backtest mode."""
         from src.signals.vpin_bvc import cli
         import sys
         from unittest.mock import patch
         with patch.object(sys, 'argv', ['vpin_bvc.py', '--backtest',
                                         '--symbols', 'SPY', 'QQQ', '--days', '1']):
-            cli()
-        captured = capsys.readouterr()
-        assert 'VPIN' in captured.out or 'VPIN' in captured.err
+            with caplog.at_level(logging.INFO, logger="src.signals.vpin_bvc"):
+                cli()
+        assert 'VPIN' in caplog.text
 
     def test_main_guard_calls_cli(self):
         """The __main__ guard calls cli()."""
@@ -2447,7 +2449,7 @@ class TestCliMain:
             with pytest.raises(SystemExit):
                 cli()
 
-    def test_cli_days_default(self, capsys):
+    def test_cli_days_default(self, caplog):
         """cli() --backtest uses default days=30."""
         # We can't directly inspect the default, but we can check the argparse works
         from src.signals.vpin_bvc import cli
@@ -2455,10 +2457,10 @@ class TestCliMain:
         import argparse
         from unittest.mock import patch
         with patch.object(sys, 'argv', ['vpin_bvc.py', '--backtest']):
-            cli()
-        captured = capsys.readouterr()
+            with caplog.at_level(logging.INFO, logger="src.signals.vpin_bvc"):
+                cli()
         # Should not crash with default args
-        assert captured is not None
+        assert caplog is not None
 
 
 # ---------------------------------------------------------------------------

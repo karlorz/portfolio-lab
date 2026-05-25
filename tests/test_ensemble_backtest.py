@@ -4,6 +4,7 @@ Tests for ensemble backtest engine — data class, returns calculation,
 max drawdown, crisis alpha, allocation deltas, and target validation.
 """
 import json
+import logging
 import sqlite3
 import numpy as np
 
@@ -1840,26 +1841,26 @@ class TestValidateTargetEdgeCases:
         with pytest.raises(KeyError):
             engine.validate_target(result, target_sharpe=0.90)
 
-    def test_validate_target_output_format(self, tmp_path, capsys):
+    def test_validate_target_output_format(self, tmp_path, caplog):
         """validate_target should print formatted output."""
         engine = _make_engine(tmp_path)
         result = _make_result()
         result.sharpe_ratio = 0.95
-        engine.validate_target(result, target_sharpe=0.95)
-        captured = capsys.readouterr()
-        assert "ENSEMBLE BACKTEST VALIDATION" in captured.out
-        assert "Sharpe Ratio:" in captured.out
-        assert "CAGR:" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.ensemble_backtest"):
+            engine.validate_target(result, target_sharpe=0.95)
+        assert "ENSEMBLE BACKTEST VALIDATION" in caplog.text
+        assert "Sharpe Ratio:" in caplog.text
+        assert "CAGR:" in caplog.text
 
-    def test_validate_target_output_shows_crisis_alpha(self, tmp_path, capsys):
+    def test_validate_target_output_shows_crisis_alpha(self, tmp_path, caplog):
         """validate_target output should include crisis alpha sections."""
         engine = _make_engine(tmp_path)
         result = _make_result()
         result.sharpe_ratio = 0.95
-        engine.validate_target(result, target_sharpe=0.95)
-        captured = capsys.readouterr()
-        assert "Crisis Alpha" in captured.out
-        assert "2008 GFC" in captured.out or "2008" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.ensemble_backtest"):
+            engine.validate_target(result, target_sharpe=0.95)
+        assert "Crisis Alpha" in caplog.text
+        assert "2008 GFC" in caplog.text or "2008" in caplog.text
 
 
 # ---------------------------------------------------------------------------

@@ -472,24 +472,24 @@ class CrossAssetRVScanner:
 
 def print_scan(signal: CrossAssetRVSignal):
     """Pretty-print scan results."""
-    print("\n" + "=" * 72)
-    print("  CROSS-ASSET RELATIVE VALUE SCAN")
-    print("=" * 72)
-    print(f"  Timestamp: {signal.timestamp}")
-    print(f"  Pairs: {signal.num_diverged}/{signal.total_pairs} diverged")
-    print(f"  Avg Z-Score: {signal.avg_z_score:+.2f}")
-    print(f"  Max Divergence: {signal.max_divergence:.2f}")
-    print(f"  Risk-On Score: {signal.risk_on_score:+.2f}")
-    print(f"  Duration Score: {signal.duration_score:+.2f}")
-    print(f"  Conviction: {signal.overall_conviction:.1%}")
-    print()
+    logger.info("\n" + "=" * 72)
+    logger.info("  CROSS-ASSET RELATIVE VALUE SCAN")
+    logger.info("=" * 72)
+    logger.info(f"  Timestamp: {signal.timestamp}")
+    logger.info(f"  Pairs: {signal.num_diverged}/{signal.total_pairs} diverged")
+    logger.info(f"  Avg Z-Score: {signal.avg_z_score:+.2f}")
+    logger.info(f"  Max Divergence: {signal.max_divergence:.2f}")
+    logger.info(f"  Risk-On Score: {signal.risk_on_score:+.2f}")
+    logger.info(f"  Duration Score: {signal.duration_score:+.2f}")
+    logger.info(f"  Conviction: {signal.overall_conviction:.1%}")
+    logger.info("")
 
     if signal.pairs:
-        print(f"  {'Pair':18} {'Z-Score':>9} {'Ret A':>7} {'Ret B':>7} {'Signal':>9} {'Regime':16} {'Active':>6}")
-        print("  " + "-" * 72)
+        logger.info(f"  {'Pair':18} {'Z-Score':>9} {'Ret A':>7} {'Ret B':>7} {'Signal':>9} {'Regime':16} {'Active':>6}")
+        logger.info("  " + "-" * 72)
         for name, reading in signal.pairs.items():
             active = "✅" if reading.active else " "
-            print(
+            logger.info(
                 f"  {name:18}"
                 f" {reading.z_score:>+8.2f}"
                 f" {reading.return_a_60d:>+6.1f}%"
@@ -499,13 +499,13 @@ def print_scan(signal: CrossAssetRVSignal):
                 f" {active:>6}"
             )
 
-    print()
-    print("  Legend:")
-    print("    Z-Score > +2.0: A overvalued vs B → signal negative (short A, long B)")
-    print("    Z-Score < -2.0: A undervalued vs B → signal positive (long A, short B)")
-    print("    Z-Score < 0.5:  Converged → no signal")
-    print("=" * 72)
-    print()
+    logger.info("")
+    logger.info("  Legend:")
+    logger.info("    Z-Score > +2.0: A overvalued vs B → signal negative (short A, long B)")
+    logger.info("    Z-Score < -2.0: A undervalued vs B → signal positive (long A, short B)")
+    logger.info("    Z-Score < 0.5:  Converged → no signal")
+    logger.info("=" * 72)
+    logger.info("")
 
 
 def main():

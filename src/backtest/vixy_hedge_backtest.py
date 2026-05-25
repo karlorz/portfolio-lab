@@ -571,39 +571,39 @@ class WalkForwardVIXYBacktester:
 
     def print_results(self, result: BacktestResult) -> None:
         """Print formatted backtest results to stdout."""
-        print("\n" + "=" * 70)
-        print("  VIXY Hedge Sizing — Walk-Forward Backtest Results")
-        print("=" * 70)
+        logger.info("\n" + "=" * 70)
+        logger.info("  VIXY Hedge Sizing — Walk-Forward Backtest Results")
+        logger.info("=" * 70)
 
-        print(f"\n  Period: {self.config.start_date} to {self.config.end_date}")
-        print(f"  Capital: ${self.config.initial_capital:,.0f}")
-        print(f"  Baseline: SPY {self.config.base_weights['SPY']*100:.0f}% / "
+        logger.info(f"\n  Period: {self.config.start_date} to {self.config.end_date}")
+        logger.info(f"  Capital: ${self.config.initial_capital:,.0f}")
+        logger.info(f"  Baseline: SPY {self.config.base_weights['SPY']*100:.0f}% / "
               f"GLD {self.config.base_weights['GLD']*100:.0f}% / "
               f"TLT {self.config.base_weights['TLT']*100:.0f}%")
 
-        print(f"\n  {'Metric':<30} {'Baseline':>10} {'Hedged':>10} {'Delta':>10}")
-        print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")
-        print(f"  {'Total Return':<30} {result.extras['baseline_total_return']:>9.2f}% {result.total_return:>9.2f}% "
+        logger.info(f"\n  {'Metric':<30} {'Baseline':>10} {'Hedged':>10} {'Delta':>10}")
+        logger.info(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")
+        logger.info(f"  {'Total Return':<30} {result.extras['baseline_total_return']:>9.2f}% {result.total_return:>9.2f}% "
               f"{result.total_return - result.extras['baseline_total_return']:>+9.2f}%")
-        print(f"  {'CAGR':<30} {result.extras['baseline_cagr']:>9.2f}% {result.cagr:>9.2f}% "
+        logger.info(f"  {'CAGR':<30} {result.extras['baseline_cagr']:>9.2f}% {result.cagr:>9.2f}% "
               f"{result.extras['cagr_impact']:>+9.2f}%")
-        print(f"  {'Volatility':<30} {result.extras['baseline_volatility']:>9.2f}% {result.volatility:>9.2f}% "
+        logger.info(f"  {'Volatility':<30} {result.extras['baseline_volatility']:>9.2f}% {result.volatility:>9.2f}% "
               f"{result.volatility - result.extras['baseline_volatility']:>+9.2f}%")
-        print(f"  {'Sharpe Ratio':<30} {result.extras['baseline_sharpe']:>10.4f} {result.sharpe_ratio:>10.4f} "
+        logger.info(f"  {'Sharpe Ratio':<30} {result.extras['baseline_sharpe']:>10.4f} {result.sharpe_ratio:>10.4f} "
               f"{result.sharpe_improvement:>+10.4f}")
-        print(f"  {'Max Drawdown':<30} {result.extras['baseline_max_drawdown']:>9.2f}% {result.max_drawdown:>9.2f}% "
+        logger.info(f"  {'Max Drawdown':<30} {result.extras['baseline_max_drawdown']:>9.2f}% {result.max_drawdown:>9.2f}% "
               f"{result.max_drawdown - result.extras['baseline_max_drawdown']:>+9.2f}%")
 
-        print(f"\n  ── Hedge Activity ──")
-        print(f"  Hedge active days:  {result.extras['hedge_active_days']} ({result.extras['hedge_active_pct']:.1f}%)")
-        print(f"  Avg hedge:          {result.extras['avg_hedge_pct']:.2f}%")
-        print(f"  Max hedge:          {result.extras['max_hedge_pct']:.2f}%")
-        print(f"  Rebalances:         {result.total_rebalances}")
-        print(f"  Transaction costs:  ${result.total_transaction_costs:.2f}")
+        logger.info(f"\n  ── Hedge Activity ──")
+        logger.info(f"  Hedge active days:  {result.extras['hedge_active_days']} ({result.extras['hedge_active_pct']:.1f}%)")
+        logger.info(f"  Avg hedge:          {result.extras['avg_hedge_pct']:.2f}%")
+        logger.info(f"  Max hedge:          {result.extras['max_hedge_pct']:.2f}%")
+        logger.info(f"  Rebalances:         {result.total_rebalances}")
+        logger.info(f"  Transaction costs:  ${result.total_transaction_costs:.2f}")
 
-        print(f"\n  ── Crisis Returns (%) ──")
-        print(f"  {'Year':<10} {'Baseline':>10} {'Hedged':>10}")
-        print(f"  {'-'*10} {'-'*10} {'-'*10}")
+        logger.info(f"\n  ── Crisis Returns (%) ──")
+        logger.info(f"  {'Year':<10} {'Baseline':>10} {'Hedged':>10}")
+        logger.info(f"  {'-'*10} {'-'*10} {'-'*10}")
         crisis_baseline = result.extras.get('crisis_returns_baseline', {})
         crisis_hedged = result.extras.get('crisis_returns_hedged', {})
         all_crisis_years = sorted(
@@ -612,16 +612,16 @@ class WalkForwardVIXYBacktester:
         for year in all_crisis_years:
             b = crisis_baseline.get(year, 0.0)
             h = crisis_hedged.get(year, 0.0)
-            print(f"  {year:<10} {b:>10.2f} {h:>10.2f}")
+            logger.info(f"  {year:<10} {b:>10.2f} {h:>10.2f}")
 
-        print(f"\n  ── Regime Breakdown ──")
-        print(f"  {'Regime':<15} {'% Time':>8} {'Avg Hedge':>10} {'Max Hedge':>10}")
-        print(f"  {'-'*15} {'-'*8} {'-'*10} {'-'*10}")
+        logger.info(f"\n  ── Regime Breakdown ──")
+        logger.info(f"  {'Regime':<15} {'% Time':>8} {'Avg Hedge':>10} {'Max Hedge':>10}")
+        logger.info(f"  {'-'*15} {'-'*8} {'-'*10} {'-'*10}")
         for reg_name, stats in sorted(result.extras.get('regime_breakdown', {}).items()):
-            print(f"  {reg_name:<15} {stats['pct_of_time']:>7.1f}% "
+            logger.info(f"  {reg_name:<15} {stats['pct_of_time']:>7.1f}% "
                   f"{stats['avg_hedge_pct']:>9.2f}% {stats['max_hedge_pct']:>9.2f}%")
 
-        print("\n" + "=" * 70)
+        logger.info("\n" + "=" * 70)
 
     def save_results(self, result: BacktestResult, output_path: Optional[str] = None) -> None:
         """Save backtest results to a JSON file."""
