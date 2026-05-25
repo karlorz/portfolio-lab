@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, sqlite_connect
+from src.backtest.metrics import save_results_json
 
 import numpy as np
 
@@ -428,7 +429,7 @@ class AdaptiveSizer:
             "ensemble_agreement": decision.factors.ensemble_agreement,
         }
         try:
-            self.state_path.write_text(json.dumps(state, indent=2, default=str))
+            save_results_json(state, output_path=str(self.state_path))
         except (OSError, TypeError) as e:
             logger.warning("Failed to save sizing state: %s", e)
 
