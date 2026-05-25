@@ -7,8 +7,9 @@ Creates static dashboard from SQLite data for Vite/React app consumption.
 import json
 import sqlite3
 import logging
+import os
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
@@ -574,6 +575,16 @@ class DashboardGenerator:
             "entropy": entropy_data,
             "bond_momentum": overlay_data.get("bond_momentum", {}),
         }
+
+        # Signal staleness detection (production readiness)
+        output["staleness"] = self._check_signal_staleness(output)
+
+        # Fire external alerts on staleness state transitions
+        try:
+            from src.monitor.alerting import check_staleness_and_alert
+            check_staleness_and_alert(output["staleness"])
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Alerting not available: %s", e)
         
         out_path = PUBLIC_DIR / "signals.json"
         save_results_json(output, output_path=str(out_path))
@@ -1411,6 +1422,88 @@ class DashboardGenerator:
             logger.warning("Failed to generate regime gate data: %s", e)
             return None
 
+    def _is_msm_gated(self) -> bool:
+        """Check if MSM should be gated off based on current regime.
+
+        MSM has zero ensemble weight in HIGH_VOL/CRISIS regimes (health 0.55,
+        net-negative -0.012 Sharpe). Returns True when gated off.
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 1")
+            row = cursor.fetchone()
+            regime = row[0] if row else "normal"
+            return regime.lower() in {"high_vol", "crisis"}
+        except Exception:
+            return True  # Gate off when regime unknown
+
+    # Signal staleness detection (production readiness)
+    SIGNAL_STALENESS_TTL_HOURS = int(os.environ.get("SIGNAL_STALENESS_TTL_HOURS", "4"))
+
+    def _check_signal_staleness(self, signal_data: Dict) -> Dict:
+        """Check staleness of each signal source in signals.json output.
+
+        Compares each signal's `generated_at` / `timestamp` field against a TTL
+        (default 4 hours). Stale signals should be removed from ensemble weight
+        numerator/denominator (not zeroed — zeroing distorts relative weights).
+
+        Returns:
+            Dict with keys:
+            - stale_signals: list of signal names that are stale
+            - signal_timestamps: dict of signal_name -> last_known_timestamp
+            - healthy_count: number of fresh signals
+            - total_count: total number of signals checked
+        """
+        ttl_seconds = self.SIGNAL_STALENESS_TTL_HOURS * 3600
+        now = datetime.now(timezone.utc)
+        stale_signals = []
+        signal_timestamps = {}
+
+        # Known signal keys in signals.json that have timestamps
+        timestamped_signals = {
+            "ensemble_voting": ("generated_at", None),
+            "alternative_data": ("timestamp", None),
+            "behavioral_sentiment": ("timestamp", None),
+            "garch_cvar": ("timestamp", None),
+            "smart_rebalance": ("generated_at", None),
+        }
+
+        for signal_key, (ts_field, _) in timestamped_signals.items():
+            signal_block = signal_data.get(signal_key)
+            if signal_block is None:
+                stale_signals.append(signal_key)
+                signal_timestamps[signal_key] = None
+                continue
+
+            ts_str = signal_block.get(ts_field) if isinstance(signal_block, dict) else None
+            signal_timestamps[signal_key] = ts_str
+
+            if ts_str is None:
+                stale_signals.append(signal_key)
+                continue
+
+            try:
+                # Parse ISO timestamp — handle both Z and +00:00 suffixes
+                ts_str_clean = ts_str.replace("Z", "+00:00")
+                ts = datetime.fromisoformat(ts_str_clean)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                age_seconds = (now - ts).total_seconds()
+                if age_seconds > ttl_seconds:
+                    stale_signals.append(signal_key)
+            except (ValueError, TypeError):
+                stale_signals.append(signal_key)
+
+        healthy_count = len(timestamped_signals) - len(stale_signals)
+        return {
+            "stale_signals": stale_signals,
+            "signal_timestamps": signal_timestamps,
+            "healthy_count": healthy_count,
+            "total_count": len(timestamped_signals),
+            "ttl_hours": self.SIGNAL_STALENESS_TTL_HOURS,
+            "checked_at": now.isoformat(),
+        }
+
     def generate_tsmom_json(self) -> Optional[Path]:
         """Generate TSMOM overlay data for dashboard."""
         try:
@@ -1444,7 +1537,7 @@ class DashboardGenerator:
                 "standalone_sharpe": 0.96,
                 "overlay_sharpe": 0.93,
                 "health_score": 0.55,
-                "is_gated_off": True,  # MSM is gated off in HIGH_VOL/CRISIS
+                "is_gated_off": self._is_msm_gated(),
                 "generated_at": datetime.now().isoformat(),
             }
 

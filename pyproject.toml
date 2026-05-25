@@ -53,6 +53,7 @@ ml = [
 no-build-isolation-package = []
 
 [tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 markers = [
     "heavy: tests requiring heavy ML libraries (torch, xgboost) — require PORTFOLIO_LAB_ENABLE_ML=1",
     "db: tests that require SQLite database access",
