@@ -26,6 +26,11 @@
 |- **Regime overrides deduplication**: REGIME_OVERRIDES moved to src/paths.py (single source of truth), imported by evaluator.py and generator.py
 |- **Evaluator config externalization**: PAPER_CONFIG and graduation criteria (MIN_SHARPE, MAX_DD, etc.) now read from env vars with hardcoded fallbacks (PAPER_INITIAL_CAPITAL, GRADUATION_MIN_SHARPE, etc.)
 |- **React error boundaries**: PanelErrorBoundary wraps each dashboard tab panel — single-panel crashes don't kill the entire dashboard
+|- **DashboardGenerator context manager**: `__enter__`/`__exit__` + `close()` + `try/finally` in `run()` prevents SQLite connection leaks on exceptions
+|- **Evaluator print→logging**: check_graduation_criteria, kill switch, and trigger creation use logger instead of print() for production observability
+|- **WIKI_DIR/WORK_DIR env vars**: configurable via environment variables with fallback defaults in src/paths.py
+|- **MSM transient error resilience**: _is_msm_gated caches last-known regime and defers to it on SQLite failures instead of gating off
+|- **Dead import cleanup**: removed unused `import sqlite3` from 7 source files
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
