@@ -872,3 +872,59 @@ class TestV961GateRules:
     def test_unified_overlay_on_in_recovery(self):
         gate = RegimeGate()
         assert gate.is_active("unified_overlay", "RECOVERY")
+
+
+class TestConfidenceGating:
+    """Tests for confidence-threshold gating (gate_with_confidence)."""
+
+    def test_high_confidence_applies_gating(self):
+        gate = RegimeGate(confidence_threshold=0.7)
+        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.85)
+        assert "multi_speed_momentum" not in active  # OFF in HIGH_VOL
+
+    def test_low_confidence_all_signals_stay_on(self):
+        gate = RegimeGate(confidence_threshold=0.7)
+        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.5)
+        # Below threshold: all gate_rules signals are returned (all ON)
+        assert "multi_speed_momentum" in active
+
+    def test_confidence_at_threshold_applies_gating(self):
+        gate = RegimeGate(confidence_threshold=0.7)
+        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.7)
+        assert "multi_speed_momentum" not in active
+
+    def test_confidence_combined_with_hysteresis(self):
+        gate = RegimeGate(min_dwell_days=10, confidence_threshold=0.7)
+        # High confidence but within hysteresis window
+        active = gate.gate_with_confidence(
+            "CRISIS", confidence=0.9, prev_regime="NORMAL", days_in_regime=5
+        )
+        # Hysteresis: use NORMAL gating
+        assert "multi_speed_momentum" in active
+
+    def test_confidence_combined_with_hysteresis_past_dwell(self):
+        gate = RegimeGate(min_dwell_days=10, confidence_threshold=0.7)
+        active = gate.gate_with_confidence(
+            "CRISIS", confidence=0.9, prev_regime="NORMAL", days_in_regime=15
+        )
+        # Past dwell + high confidence: use CRISIS gating
+        assert "multi_speed_momentum" not in active
+
+    def test_default_confidence_threshold(self):
+        assert RegimeGate.DEFAULT_CONFIDENCE_THRESHOLD == 0.7
+
+    def test_custom_confidence_threshold(self):
+        gate = RegimeGate(confidence_threshold=0.5)
+        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.55)
+        assert "multi_speed_momentum" not in active  # Above 0.5 threshold
+
+    def test_zero_confidence_threshold_always_gates(self):
+        gate = RegimeGate(confidence_threshold=0.0)
+        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.01)
+        assert "multi_speed_momentum" not in active
+
+    def test_one_confidence_threshold_never_gates(self):
+        gate = RegimeGate(confidence_threshold=1.0)
+        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.99)
+        # Below 1.0 threshold: all signals ON
+        assert "multi_speed_momentum" in active

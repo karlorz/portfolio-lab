@@ -30,6 +30,7 @@ class RegimeGate:
         gate = RegimeGate()
         active = gate.gate("HIGH_VOL")  # returns list of active signal names
         gate.gate_with_hysteresis("CRISIS", "HIGH_VOL", days_in_regime=5)
+        gate.gate_with_confidence("HIGH_VOL", confidence=0.65)
     """
 
     # Gating rules: signal_name -> set of regimes where signal is OFF
@@ -54,13 +55,18 @@ class RegimeGate:
     # Minimum days in a regime before allowing gate changes (hysteresis)
     DEFAULT_MIN_DWELL_DAYS = 20
 
+    # Minimum regime confidence to apply gating (below this, all signals stay ON)
+    DEFAULT_CONFIDENCE_THRESHOLD = 0.7
+
     def __init__(
         self,
         gate_rules: Optional[Dict[str, Set[str]]] = None,
         min_dwell_days: int = DEFAULT_MIN_DWELL_DAYS,
+        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     ):
         self.gate_rules = gate_rules or {k: set(v) for k, v in self.GATE_RULES.items()}
         self.min_dwell_days = min_dwell_days
+        self.confidence_threshold = confidence_threshold
 
     def is_active(self, signal_name: str, regime_name: str) -> bool:
         """Check if a signal is active in a given regime."""
@@ -103,6 +109,37 @@ class RegimeGate:
             # Hysteresis: use previous regime's gating
             return self.gate(prev_regime)
         return self.gate(current_regime)
+
+    def gate_with_confidence(
+        self,
+        regime_name: str,
+        confidence: float,
+        prev_regime: Optional[str] = None,
+        days_in_regime: int = 999,
+    ) -> List[str]:
+        """Gate signals combining both hysteresis and confidence thresholding.
+
+        When regime confidence is below the threshold, all signals remain ON
+        (gating is deferred to avoid premature switching on uncertain regime
+        classification). When confidence is sufficient, normal gating applies
+        with hysteresis protection.
+
+        This prevents rapid ON/OFF oscillation when the regime classifier
+        is uncertain or when regime transitions are transient.
+
+        Args:
+            regime_name: Current detected regime
+            confidence: Regime classification confidence (0.0-1.0)
+            prev_regime: Previous regime (None if first observation)
+            days_in_regime: Days since regime transition
+
+        Returns:
+            List of gated signal names that are active
+        """
+        if confidence < self.confidence_threshold:
+            # Low confidence: don't apply gating, all signals stay ON
+            return list(self.gate_rules.keys())
+        return self.gate_with_hysteresis(regime_name, prev_regime, days_in_regime)
 
     def filter_weights(self, weights: Dict, regime_name: str) -> Dict:
         """Zero out weights for gated-off signals in a regime.

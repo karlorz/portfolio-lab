@@ -24,12 +24,25 @@ __all__ = [
     "DB_PATH",
 ]
 
+# Map ensemble signal source names to staleness check keys
+_ENSEMBLE_STALENESS_MAP = {
+    "multi_speed_momentum": "ensemble_voting",
+    "cross_asset_rv": "ensemble_voting",
+    "international_momentum": "ensemble_voting",
+    "alternative_data": "alternative_data",
+    "cross_asset_regime_arb": "ensemble_voting",
+    "unified_overlay": "ensemble_voting",
+}
+
 logger = logging.getLogger(__name__)
 
 PUBLIC_DIR = PUBLIC_DATA_DIR
 DB_PATH = MARKET_DB
 
 class DashboardGenerator:
+    # SPC monitor instance (class-level to persist across runs)
+    _spc_monitor = None
+
     def __init__(self):
         PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite_connect(DB_PATH)
@@ -576,8 +589,19 @@ class DashboardGenerator:
             "bond_momentum": overlay_data.get("bond_momentum", {}),
         }
 
+        # Rebalance health data
+        try:
+            from src.monitor.rebalance_health import generate as gen_rebalance_health
+            output["rebalance_health"] = gen_rebalance_health()
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+            logger.warning("Rebalance health not available: %s", e)
+            output["rebalance_health"] = {"generated": None, "error": str(e)}
+
         # Signal staleness detection (production readiness)
         output["staleness"] = self._check_signal_staleness(output)
+
+        # Apply staleness-weighted decay to ensemble weights
+        output = self._apply_staleness_decay(output)
 
         # Fire external alerts on staleness state transitions
         try:
@@ -585,6 +609,9 @@ class DashboardGenerator:
             check_staleness_and_alert(output["staleness"])
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Alerting not available: %s", e)
+
+        # SPC signal quality monitoring
+        output["spc"] = self._run_spc_monitor(output)
         
         out_path = PUBLIC_DIR / "signals.json"
         save_results_json(output, output_path=str(out_path))
@@ -1434,11 +1461,13 @@ class DashboardGenerator:
             row = cursor.fetchone()
             regime = row[0] if row else "normal"
             return regime.lower() in {"high_vol", "crisis"}
-        except Exception:
+        except Exception as e:
+            logger.warning("_is_msm_gated: regime query failed (%s) — gating MSM off", e)
             return True  # Gate off when regime unknown
 
     # Signal staleness detection (production readiness)
     SIGNAL_STALENESS_TTL_HOURS = int(os.environ.get("SIGNAL_STALENESS_TTL_HOURS", "4"))
+    STALENESS_DECAY_TAU_HOURS = float(os.environ.get("STALENESS_DECAY_TAU_HOURS", "2.0"))
 
     def _check_signal_staleness(self, signal_data: Dict) -> Dict:
         """Check staleness of each signal source in signals.json output.
@@ -1447,17 +1476,28 @@ class DashboardGenerator:
         (default 4 hours). Stale signals should be removed from ensemble weight
         numerator/denominator (not zeroed — zeroing distorts relative weights).
 
+        Also computes per-signal staleness decay factors for ensemble weight
+        adjustment. Decay uses exponential: weight *= exp(-age_hours / tau)
+        where tau defaults to 2h (STALENESS_DECAY_TAU_HOURS env var).
+
         Returns:
             Dict with keys:
             - stale_signals: list of signal names that are stale
             - signal_timestamps: dict of signal_name -> last_known_timestamp
+            - signal_age_hours: dict of signal_name -> age in hours (None if missing)
+            - staleness_decay: dict of signal_name -> decay factor (0.0-1.0)
             - healthy_count: number of fresh signals
             - total_count: total number of signals checked
         """
+        import math as _math
+
         ttl_seconds = self.SIGNAL_STALENESS_TTL_HOURS * 3600
+        tau_hours = self.STALENESS_DECAY_TAU_HOURS
         now = datetime.now(timezone.utc)
         stale_signals = []
         signal_timestamps = {}
+        signal_age_hours = {}
+        staleness_decay = {}
 
         # Known signal keys in signals.json that have timestamps
         timestamped_signals = {
@@ -1473,6 +1513,8 @@ class DashboardGenerator:
             if signal_block is None:
                 stale_signals.append(signal_key)
                 signal_timestamps[signal_key] = None
+                signal_age_hours[signal_key] = None
+                staleness_decay[signal_key] = 0.0
                 continue
 
             ts_str = signal_block.get(ts_field) if isinstance(signal_block, dict) else None
@@ -1480,6 +1522,8 @@ class DashboardGenerator:
 
             if ts_str is None:
                 stale_signals.append(signal_key)
+                signal_age_hours[signal_key] = None
+                staleness_decay[signal_key] = 0.0
                 continue
 
             try:
@@ -1489,19 +1533,124 @@ class DashboardGenerator:
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 age_seconds = (now - ts).total_seconds()
+                age_hours = age_seconds / 3600.0
+                signal_age_hours[signal_key] = round(age_hours, 2)
+
+                # Exponential decay: fresh signals get 1.0, stale signals approach 0.0
+                decay = _math.exp(-age_hours / tau_hours) if tau_hours > 0 else 1.0
+                staleness_decay[signal_key] = round(decay, 4)
+
                 if age_seconds > ttl_seconds:
                     stale_signals.append(signal_key)
             except (ValueError, TypeError):
                 stale_signals.append(signal_key)
+                signal_age_hours[signal_key] = None
+                staleness_decay[signal_key] = 0.0
 
         healthy_count = len(timestamped_signals) - len(stale_signals)
         return {
             "stale_signals": stale_signals,
             "signal_timestamps": signal_timestamps,
+            "signal_age_hours": signal_age_hours,
+            "staleness_decay": staleness_decay,
+            "decay_tau_hours": tau_hours,
             "healthy_count": healthy_count,
             "total_count": len(timestamped_signals),
             "ttl_hours": self.SIGNAL_STALENESS_TTL_HOURS,
             "checked_at": now.isoformat(),
+        }
+
+    def _apply_staleness_decay(self, output: Dict) -> Dict:
+        """Apply staleness-weighted decay to ensemble voting weights.
+
+        When signals are stale, their ensemble weights degrade proportionally
+        using exponential decay. This ensures the dashboard and downstream
+        consumers reflect signal freshness in allocation decisions.
+
+        Decay formula: adjusted_weight = raw_weight * exp(-age_hours / tau)
+        where tau = STALENESS_DECAY_TAU_HOURS (default 2h).
+        """
+        staleness = output.get("staleness", {})
+        decay_factors = staleness.get("staleness_decay", {})
+        if not decay_factors:
+            return output
+
+        # Apply decay to ensemble_voting source_breakdown weights
+        ensemble = output.get("ensemble_voting")
+        if isinstance(ensemble, dict) and "source_breakdown" in ensemble:
+            for src in ensemble["source_breakdown"]:
+                source_name = src.get("source", "")
+                # Map ensemble source names to staleness signal keys
+                staleness_key = _ENSEMBLE_STALENESS_MAP.get(source_name)
+                if staleness_key and staleness_key in decay_factors:
+                    decay = decay_factors[staleness_key]
+                    original_weight = src.get("weight", 0.0)
+                    src["weight_original"] = original_weight
+                    src["weight"] = round(original_weight * decay, 4)
+                    src["staleness_decay"] = decay
+
+            # Recompute weighted_consensus with decayed weights
+            total_weight = sum(s.get("weight", 0.0) for s in ensemble["source_breakdown"])
+            if total_weight > 0:
+                weighted_sum = sum(
+                    s.get("value", 0.0) * s.get("weight", 0.0)
+                    for s in ensemble["source_breakdown"]
+                )
+                ensemble["weighted_consensus"] = round(weighted_sum / total_weight, 4)
+                ensemble["total_weight_after_decay"] = round(total_weight, 4)
+
+        return output
+
+    def _run_spc_monitor(self, output: Dict) -> Dict:
+        """Run SPC monitoring on signal values.
+
+        Tracks rolling statistics of signal values and flags signals whose
+        distribution has shifted (3-sigma breach for 3+ consecutive periods).
+        """
+        try:
+            from src.monitor.spc_monitor import SPCMonitor
+        except (ImportError, AttributeError) as e:
+            logger.warning("SPC monitor not available: %s", e)
+            return {"status": "unavailable", "error": str(e)}
+
+        # Initialize class-level SPC monitor (persists across runs)
+        if DashboardGenerator._spc_monitor is None:
+            DashboardGenerator._spc_monitor = SPCMonitor()
+
+        monitor = DashboardGenerator._spc_monitor
+
+        # Record current signal values for SPC tracking
+        ensemble = output.get("ensemble_voting")
+        if isinstance(ensemble, dict) and "source_breakdown" in ensemble:
+            for src in ensemble["source_breakdown"]:
+                source_name = src.get("source", "")
+                value = src.get("value")
+                if source_name and value is not None:
+                    try:
+                        monitor.record(source_name, float(value))
+                    except (ValueError, TypeError):
+                        pass
+
+        # Also track key aggregate metrics
+        if isinstance(ensemble, dict):
+            consensus = ensemble.get("weighted_consensus")
+            if consensus is not None:
+                try:
+                    monitor.record("_ensemble_consensus", float(consensus))
+                except (ValueError, TypeError):
+                    pass
+
+        # Get status
+        flags = monitor.check_flags()
+        all_status = monitor.get_all_status()
+
+        return {
+            "status": "ok",
+            "flagged_signals": flags,
+            "signal_status": all_status,
+            "window_size": monitor.window_size,
+            "sigma_threshold": monitor.sigma_threshold,
+            "consecutive_breach_limit": monitor.consecutive_breach_limit,
         }
 
     def generate_tsmom_json(self) -> Optional[Path]:
