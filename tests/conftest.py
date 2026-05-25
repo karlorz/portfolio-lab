@@ -41,6 +41,7 @@ import pytest
 # here are NEVER opened.
 
 _HEAVY_TEST_FILES = [
+    "test_black_litterman_mapper.py",
     "test_execution_agent.py",
     "test_marl_trainer.py",
     "test_risk_agent_hmm.py",

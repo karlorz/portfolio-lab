@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **12639 safe** (12425 Python + 214 TypeScript, 27 skipped, 4 pre-existing sentiment_client failures)
+| - Test count: **12523 safe** (12309 Python + 214 TypeScript, 27 skipped, 4 pre-existing sentiment_client retry failures, 42 BL mapper tests gated behind pypfopt)
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
 |- **Overlay data pipeline**: overlay_dashboard data merged into signals.json — 9 panels now render with real data
