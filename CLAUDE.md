@@ -7,6 +7,8 @@
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
 | - Test count: **12356 safe** (0 failures, 27 skipped, 12456 collected)
+|- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
+|- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
