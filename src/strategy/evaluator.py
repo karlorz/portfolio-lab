@@ -435,13 +435,12 @@ def main():
         # In paper mode, just log and hold
         # In live mode, this would liquidate
         # Write kill_switch.json (read by order_router and dashboard)
-        with open(DATA_DIR / "kill_switch.json", 'w') as f:
-            save_results_json({
-                "enabled": True,
-                "reason": kill_reason,
-                "mode": mode,
-                "timestamp": datetime.now().isoformat(),
-            }, output_path=str(DATA_DIR / "kill_switch.json"))
+        save_results_json({
+            "enabled": True,
+            "reason": kill_reason,
+            "mode": mode,
+            "timestamp": datetime.now().isoformat(),
+        }, output_path=str(DATA_DIR / "kill_switch.json"))
         return
 
     # Clear stale kill switch if risk limits are no longer breached

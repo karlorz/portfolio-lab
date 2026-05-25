@@ -1222,8 +1222,7 @@ class DashboardGenerator:
             "files": [str(p.name) for p in paths if p],
             "generated_at": datetime.now().isoformat()
         }
-        with open(PUBLIC_DIR / "index.json", 'w') as f:
-            save_results_json(index, output_path=str(PUBLIC_DIR / "index.json"))
+        save_results_json(index, output_path=str(PUBLIC_DIR / "index.json"))
 
         self.conn.close()
         logger.info("Dashboard generation complete")

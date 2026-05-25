@@ -417,9 +417,8 @@ class TestVIXSignalGenerator:
         # +10% for history (if enough)
         assert signal.confidence >= 50.0
     
-    @patch('builtins.open')
-    @patch('json.dump')
-    def test_save_signal(self, mock_json_dump, mock_open):
+    @patch('src.signals.vix_term_structure.save_results_json')
+    def test_save_signal(self, mock_save):
         """Test signal saving to file."""
         generator = VIXTermStructureSignalGenerator()
         signal = VIXTermStructureSignal(
@@ -443,10 +442,10 @@ class TestVIXSignalGenerator:
             is_valid=True,
             reason='Test'
         )
-        
+
         generator.save_signal(signal)
-        
-        mock_json_dump.assert_called_once()
+
+        mock_save.assert_called_once()
     
     @patch('src.signals.vix_term_structure.VIXTermStructureSignalGenerator.load_vix_data')
     def test_signal_history_generation(self, mock_load_data, mock_vix_data):

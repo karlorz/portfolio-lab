@@ -31,6 +31,9 @@ import { StackingEnsemblePanel } from './StackingEnsemblePanel';
 import { ChatPanel } from './ChatPanel';
 import { EnsembleVotingPanel } from './EnsembleVotingPanel';
 import { AlternativeDataPanel } from './AlternativeDataPanel';
+import { ConvexityHarvestPanel } from './ConvexityHarvestPanel';
+import { LLMSentimentPanel } from './LLMSentimentPanel';
+import { SectorRotationPanel } from './SectorRotationPanel';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -553,6 +556,13 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
               <FactorRotationPanel data={(signals as any)?.factor_rotation ?? null} />
               <StackingEnsemblePanel data={(signals as any)?.stacking_ensemble ?? null} />
+            </div>
+            <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <ConvexityHarvestPanel data={(signals as any)?.convexity_harvest ?? null} />
+              <LLMSentimentPanel data={(signals as any)?.llm_sentiment ?? null} />
+            </div>
+            <div className="mt-4">
+              <SectorRotationPanel data={(signals as any)?.sector_rotation ?? null} />
             </div>
             <div className="mt-4">
               <ModelValidationPanel
