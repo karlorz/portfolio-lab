@@ -1388,11 +1388,12 @@ class TestRunEdgeCases:
     def test_run_closes_connection(self, tmp_path):
         """Connection is closed after run()."""
         gen, _ = _make_generator(tmp_path)
+        conn = gen.conn
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 gen.run()
-        # Should not raise - connection already closed
-        gen.conn.close()
+        # Connection should be None after close()
+        assert gen.conn is None
 
     def test_run_creates_index_json(self, tmp_path):
         """run() creates index.json with files list."""
@@ -1405,7 +1406,7 @@ class TestRunEdgeCases:
         assert "files" in index
         assert len(index["files"]) >= 6  # At least 6 dashboard files
         assert "generated_at" in index
-        gen.conn.close()
+        # Connection is closed by run()
 
     def test_generated_at_populated_in_all_files(self, tmp_path):
         """All non-index JSON files have generated_at field."""
@@ -1430,7 +1431,7 @@ class TestRunEdgeCases:
             with open(signals_path) as f:
                 signals_data = json.load(f)
             assert "generated_at" in signals_data
-        gen.conn.close()
+        # Connection already closed by run()
 
 
 # ---------------------------------------------------------------------------
@@ -2531,7 +2532,7 @@ class TestRunOverlay:
             signals = json.load(f)
         assert "regime" in signals
         assert "generated_at" in signals
-        gen.conn.close()
+        # Connection already closed by run()
 
 
 # ---------------------------------------------------------------------------

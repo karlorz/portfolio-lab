@@ -12,7 +12,6 @@ Usage:
 import json
 import logging
 import math
-import sqlite3
 from dataclasses import asdict
 from datetime import datetime
 from typing import Dict, List, Tuple

@@ -10,7 +10,6 @@ Usage:
 """
 
 import json
-import sqlite3
 from src.paths import sqlite_connect
 import logging
 import numpy as np

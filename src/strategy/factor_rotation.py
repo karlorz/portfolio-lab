@@ -19,7 +19,6 @@ Strategy Logic:
 
 import json
 import logging
-import sqlite3
 from src.paths import sqlite_connect
 import numpy as np
 import pandas as pd

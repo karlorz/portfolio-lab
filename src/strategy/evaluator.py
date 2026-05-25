@@ -465,7 +465,7 @@ def main():
     # Check kill switches
     kill_reason = portfolio.check_risk_limits(prices)
     if kill_reason:
-        print(f"KILL SWITCH TRIGGERED: {kill_reason}")
+        logger.critical("KILL SWITCH TRIGGERED: %s", kill_reason)
         # In paper mode, just log and hold
         # In live mode, this would liquidate
         # Write kill_switch.json (read by order_router and dashboard)
@@ -564,8 +564,8 @@ def check_graduation_criteria(portfolio: Portfolio):
     
     # Need at least MIN_DAYS trading days after dedup
     if len(daily_history) < MIN_DAYS:
-        print(f"GRADUATION DEFERRED: Only {len(daily_history)} unique trading days "
-              f"(need {MIN_DAYS}), skipping intra-day snapshots")
+        logger.info("GRADUATION DEFERRED: Only %d unique trading days (need %d), "
+                     "skipping intra-day snapshots", len(daily_history), MIN_DAYS)
         return
     
     recent = daily_history[-MIN_DAYS:]
@@ -592,9 +592,8 @@ def check_graduation_criteria(portfolio: Portfolio):
     
     # Sanity validation: reject unrealistic metrics before writing trigger
     if sharpe > MAX_REALISTIC_SHARPE:
-        print(f"WARNING: Sharpe {sharpe:.2f} exceeds realistic maximum "
-              f"{MAX_REALISTIC_SHARPE}. This is likely caused by intra-day "
-              f"snapshot contamination. Skipping promotion.")
+        logger.warning("Sharpe %.2f exceeds realistic maximum %.1f — likely intra-day "
+                        "snapshot contamination. Skipping promotion.", sharpe, MAX_REALISTIC_SHARPE)
         return
     
     # Check criteria
@@ -611,8 +610,8 @@ def check_graduation_criteria(portfolio: Portfolio):
         dsr = 0.0  # If DSR can't be computed, fail closed
 
     if sharpe > MIN_SHARPE and max_dd < MAX_DD and win_rate > MIN_WIN_RATE and dsr >= MIN_DSR:
-        print(f"GRADUATION CANDIDATE: Sharpe={sharpe:.2f}, DD={max_dd:.2%}, "
-              f"WinRate={win_rate:.2%}, DSR={dsr:.2f}")
+        logger.info("GRADUATION CANDIDATE: Sharpe=%.2f, DD=%.2f%%, "
+                     "WinRate=%.2f%%, DSR=%.2f", sharpe, max_dd * 100, win_rate * 100, dsr)
 
         # Create promotion trigger
         trigger = {
@@ -631,7 +630,7 @@ def check_graduation_criteria(portfolio: Portfolio):
         trigger_path = DATA_DIR / ".promote_to_live"
         save_results_json(trigger, output_path=str(trigger_path))
         
-        print(f"Created promotion trigger: {trigger_path}")
+        logger.info("Created promotion trigger: %s", trigger_path)
 
 if __name__ == "__main__":
     main()

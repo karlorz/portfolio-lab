@@ -48,6 +48,22 @@ class DashboardGenerator:
         PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite_connect(DB_PATH)
         self.conn.row_factory = sqlite3.Row
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    def close(self):
+        """Close the SQLite connection if open."""
+        if self.conn is not None:
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            self.conn = None
     
     def generate_performance_json(self) -> Path:
         """Generate performance history for dashboard charts."""
@@ -1445,21 +1461,30 @@ class DashboardGenerator:
             logger.warning("Failed to generate regime gate data: %s", e)
             return None
 
+    # Cache last-known regime for _is_msm_gated resilience
+    _last_regime: str = "normal"
+
     def _is_msm_gated(self) -> bool:
         """Check if MSM should be gated off based on current regime.
 
         MSM has zero ensemble weight in HIGH_VOL/CRISIS regimes (health 0.55,
         net-negative -0.012 Sharpe). Returns True when gated off.
+
+        On transient query failures, uses the last-known regime instead of
+        immediately gating MSM off — a single SQLite hiccup should not
+        disable a strategy.
         """
         try:
             cursor = self.conn.cursor()
             cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 1")
             row = cursor.fetchone()
             regime = row[0] if row else "normal"
+            DashboardGenerator._last_regime = regime
             return regime.lower() in {"high_vol", "crisis"}
         except Exception as e:
-            logger.warning("_is_msm_gated: regime query failed (%s) — gating MSM off", e)
-            return True  # Gate off when regime unknown
+            logger.warning("_is_msm_gated: regime query failed (%s) — using last-known regime '%s'",
+                           e, DashboardGenerator._last_regime)
+            return DashboardGenerator._last_regime.lower() in {"high_vol", "crisis"}
 
     # Signal staleness detection (production readiness)
     SIGNAL_STALENESS_TTL_HOURS = int(os.environ.get("SIGNAL_STALENESS_TTL_HOURS", "4"))
@@ -1852,44 +1877,46 @@ class DashboardGenerator:
         """Generate all dashboard files."""
         logger.info("Generating dashboard data...")
 
-        paths = [
-            self.generate_performance_json(),
-            self.generate_signals_json(),
-            self.generate_stats_json(),
-            self.generate_alerts_json(),
-            self.generate_health_json(),
-            self.generate_analytics_json(),
-            self.generate_graduation_json(),
-            self.generate_adaptive_sizing_json(),
-            self.generate_vixy_hedge_json(),
-            self.generate_black_litterman_json(),
-            self.generate_turnover_validator_json(),
-            self.generate_regime_gate_json(),
-            self.generate_tsmom_json(),
-            self.generate_cross_asset_rv_json(),
-            self.generate_explainability_json(),
-            self.generate_risk_decomposition_json(),
-        ]
+        try:
+            paths = [
+                self.generate_performance_json(),
+                self.generate_signals_json(),
+                self.generate_stats_json(),
+                self.generate_alerts_json(),
+                self.generate_health_json(),
+                self.generate_analytics_json(),
+                self.generate_graduation_json(),
+                self.generate_adaptive_sizing_json(),
+                self.generate_vixy_hedge_json(),
+                self.generate_black_litterman_json(),
+                self.generate_turnover_validator_json(),
+                self.generate_regime_gate_json(),
+                self.generate_tsmom_json(),
+                self.generate_cross_asset_rv_json(),
+                self.generate_explainability_json(),
+                self.generate_risk_decomposition_json(),
+            ]
 
-        # Overlay dashboard (separate path — may fail gracefully)
-        overlay_path = self.generate_overlay_json()
-        if overlay_path:
-            paths.append(overlay_path)
+            # Overlay dashboard (separate path — may fail gracefully)
+            overlay_path = self.generate_overlay_json()
+            if overlay_path:
+                paths.append(overlay_path)
 
-        for p in paths:
-            if p:
-                logger.info("Generated: %s", p)
+            for p in paths:
+                if p:
+                    logger.info("Generated: %s", p)
 
-        # Create index
-        index = {
-            "files": [str(p.name) for p in paths if p],
-            "generated_at": datetime.now().isoformat()
-        }
-        save_results_json(index, output_path=str(PUBLIC_DIR / "index.json"))
+            # Create index
+            index = {
+                "files": [str(p.name) for p in paths if p],
+                "generated_at": datetime.now().isoformat()
+            }
+            save_results_json(index, output_path=str(PUBLIC_DIR / "index.json"))
+        finally:
+            self.close()
 
-        self.conn.close()
         logger.info("Dashboard generation complete")
 
 if __name__ == "__main__":
-    gen = DashboardGenerator()
-    gen.run()
+    with DashboardGenerator() as gen:
+        gen.run()

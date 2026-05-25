@@ -4,6 +4,7 @@ Tests for evaluator.py — constants, Position/Portfolio classes, order generati
 order execution, risk limits, performance calculation, and graduation criteria.
 """
 import json
+import logging
 import numpy as np
 
 import pytest
@@ -402,14 +403,14 @@ class TestCalculatePerformance:
 
 class TestGraduationCriteria:
 
-    def test_too_few_days(self, tmp_path, capsys):
+    def test_too_few_days(self, tmp_path, caplog):
         p = _make_portfolio(tmp_path)
         p.history = [{"total_value": 100000, "daily_return": 0.001}] * 30
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION" not in caplog.text
 
-    def test_good_performance(self, tmp_path, capsys):
+    def test_good_performance(self, tmp_path, caplog):
         p = _make_portfolio(tmp_path)
         # 63 days of positive returns — deterministic, realistic Sharpe
         rng = np.random.RandomState(12345)
@@ -425,11 +426,11 @@ class TestGraduationCriteria:
                 "total_value": round(val, 2),
                 "daily_return": ret,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION CANDIDATE" in captured.out, f"Output: '{captured.out.strip()}'"
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION CANDIDATE" in caplog.text, f"Log: '{caplog.text.strip()}'"
 
-    def test_poor_performance_no_graduation(self, tmp_path, capsys):
+    def test_poor_performance_no_graduation(self, tmp_path, caplog):
         p = _make_portfolio(tmp_path)
         # 63 days of mixed returns with high vol
         np.random.seed(42)
@@ -443,11 +444,11 @@ class TestGraduationCriteria:
                 "total_value": val,
                 "daily_return": ret,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION CANDIDATE" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION CANDIDATE" not in caplog.text
 
-    def test_intra_day_data_does_not_trigger(self, tmp_path, capsys):
+    def test_intra_day_data_does_not_trigger(self, tmp_path, caplog):
         """Intra-day snapshots with zero daily_return should not contaminate graduation."""
         p = _make_portfolio(tmp_path)
         # Simulate 63 unique days, each with 24 intra-day snapshots (daily_return=0)
@@ -469,14 +470,14 @@ class TestGraduationCriteria:
                 "total_value": val,
                 "daily_return": ret,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
         # After dedup to 63 trading days:
         # Check results aren't obviously broken
-        assert "WARNING" not in captured.out
-        assert "GRADUATION DEFERRED" not in captured.out
+        assert "exceeds realistic maximum" not in caplog.text
+        assert "GRADUATION DEFERRED" not in caplog.text
 
-    def test_near_zero_std_vol_floor(self, tmp_path, capsys):
+    def test_near_zero_std_vol_floor(self, tmp_path, caplog):
         """Volatility floor prevents division-by-zero, but Sharpe cap still catches."""
         p = _make_portfolio(tmp_path)
         # 63 entries with nearly identical returns (std ≈ 0)
@@ -487,14 +488,13 @@ class TestGraduationCriteria:
                 "total_value": 100000 + i * 10,
                 "daily_return": 0.0001,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
+        with caplog.at_level(logging.WARNING, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
         # Vol floor prevents NaN/Inf, but Sharpe = 0.0001/0.0001*sqrt(252) = 15.87
-        # This still exceeds MAX_REALISTIC_SHARPE (3.0), so warning is printed
-        assert "WARNING" in captured.out
-        assert "exceeds realistic maximum" in captured.out
+        # This still exceeds MAX_REALISTIC_SHARPE (3.0), so warning is logged
+        assert "exceeds realistic maximum" in caplog.text
 
-    def test_unrealistic_sharpe_rejected(self, tmp_path, capsys):
+    def test_unrealistic_sharpe_rejected(self, tmp_path, caplog):
         """Sharpe > 3.0 should be rejected with warning."""
         p = _make_portfolio(tmp_path)
         # Create exactly identical returns (zero std)
@@ -505,11 +505,10 @@ class TestGraduationCriteria:
                 "total_value": 100000,
                 "daily_return": 0.0001,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "WARNING" in captured.out
-        assert "exceeds realistic maximum" in captured.out
-        assert "GRADUATION CANDIDATE" not in captured.out
+        with caplog.at_level(logging.WARNING, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "exceeds realistic maximum" in caplog.text
+        assert "GRADUATION CANDIDATE" not in caplog.text
 
     def test_dsr_in_graduation_metrics(self, tmp_path, capsys):
         """Graduation trigger should include DSR in metrics."""
@@ -584,7 +583,7 @@ class TestDeduplicateToDaily:
         assert len(result) == 1
         assert result[0]["daily_return"] == 0.2
 
-    def test_deferred_when_too_few_trading_days(self, tmp_path, capsys):
+    def test_deferred_when_too_few_trading_days(self, tmp_path, caplog):
         """63 snapshots but only 3 unique days → should defer with message."""
         p = _make_portfolio(tmp_path)
         val = 100000
@@ -603,10 +602,10 @@ class TestDeduplicateToDaily:
                 "total_value": val,
                 "daily_return": 0.01,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION DEFERRED" in captured.out
-        assert "unique trading days" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION DEFERRED" in caplog.text
+        assert "unique trading days" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -1107,7 +1106,7 @@ class TestCalculatePerformanceExtended:
 class TestGraduationCriteriaBoundaries:
 
     @patch("src.backtest.metrics.compute_deflated_sharpe_ratio", return_value=0.0)
-    def test_dsr_zero_blocks_graduation(self, mock_dsr, tmp_path, capsys):
+    def test_dsr_zero_blocks_graduation(self, mock_dsr, tmp_path, caplog):
         """DSR = 0.0 should block graduation even with good performance."""
         p = _make_portfolio(tmp_path)
         rng = np.random.RandomState(12345)
@@ -1121,12 +1120,12 @@ class TestGraduationCriteriaBoundaries:
                 "total_value": round(val, 2),
                 "daily_return": ret,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION CANDIDATE" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION CANDIDATE" not in caplog.text
 
     @patch("src.backtest.metrics.compute_deflated_sharpe_ratio", return_value=0.95)
-    def test_dsr_above_minimum_allows_graduation(self, mock_dsr, tmp_path, capsys):
+    def test_dsr_above_minimum_allows_graduation(self, mock_dsr, tmp_path, caplog):
         """DSR above MIN_DSR should allow graduation when other conditions met."""
         p = _make_portfolio(tmp_path)
         rng = np.random.RandomState(12345)
@@ -1140,12 +1139,12 @@ class TestGraduationCriteriaBoundaries:
                 "total_value": round(val, 2),
                 "daily_return": ret,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION CANDIDATE" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION CANDIDATE" in caplog.text
 
     @patch("src.backtest.metrics.compute_deflated_sharpe_ratio", return_value=0.49)
-    def test_dsr_below_minimum_blocks_graduation(self, mock_dsr, tmp_path, capsys):
+    def test_dsr_below_minimum_blocks_graduation(self, mock_dsr, tmp_path, caplog):
         """DSR < 0.50 should block graduation."""
         p = _make_portfolio(tmp_path)
         rng = np.random.RandomState(12345)
@@ -1159,11 +1158,11 @@ class TestGraduationCriteriaBoundaries:
                 "total_value": round(val, 2),
                 "daily_return": ret,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION CANDIDATE" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION CANDIDATE" not in caplog.text
 
-    def test_max_dd_excessive_blocks_graduation(self, tmp_path, capsys):
+    def test_max_dd_excessive_blocks_graduation(self, tmp_path, caplog):
         """Excessive drawdown should block graduation even with positive returns."""
         p = _make_portfolio(tmp_path)
         p.history = []
@@ -1180,11 +1179,11 @@ class TestGraduationCriteriaBoundaries:
                 "daily_return": ret if i > 0 else 0.001,
             })
             val += 500  # Recover slightly each day
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION CANDIDATE" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION CANDIDATE" not in caplog.text
 
-    def test_low_win_rate_blocks_graduation(self, tmp_path, capsys):
+    def test_low_win_rate_blocks_graduation(self, tmp_path, caplog):
         """Win rate below 45% should block graduation."""
         p = _make_portfolio(tmp_path)
         p.history = []
@@ -1198,19 +1197,19 @@ class TestGraduationCriteriaBoundaries:
                 "total_value": round(val, 2),
                 "daily_return": ret,
             })
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert "GRADUATION CANDIDATE" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert "GRADUATION CANDIDATE" not in caplog.text
 
-    def test_fewer_than_min_days_no_output(self, tmp_path, capsys):
+    def test_fewer_than_min_days_no_output(self, tmp_path, caplog):
         """With fewer than MIN_DAYS (63) history entries, no output at all."""
         p = _make_portfolio(tmp_path)
         p.history = [{"total_value": 100000, "daily_return": 0.001}] * 62
-        check_graduation_criteria(p)
-        captured = capsys.readouterr()
-        assert captured.out.strip() == ""
+        with caplog.at_level(logging.INFO, logger="src.strategy.evaluator"):
+            check_graduation_criteria(p)
+        assert caplog.text.strip() == ""
 
-    def test_promotion_trigger_has_requires_approval(self, tmp_path, capsys):
+    def test_promotion_trigger_has_requires_approval(self, tmp_path, caplog):
         """When graduated, trigger file should include requires_approval: True."""
         p = _make_portfolio(tmp_path)
         rng = np.random.RandomState(12345)

@@ -14,7 +14,6 @@ Usage:
 """
 
 import json
-import sqlite3
 import logging
 import numpy as np
 import argparse

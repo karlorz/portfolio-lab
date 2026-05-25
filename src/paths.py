@@ -41,10 +41,10 @@ LOCK_DIR = Path(os.environ.get("LOCK_DIR", os.path.join(tempfile.gettempdir(), "
 LLM_COSTS_DIR = DATA_DIR / "llm_costs"
 ATTRIBUTION_DIR = DATA_DIR / "attribution"
 
-# External directories (user home-based)
+# External directories (user home-based, configurable via env vars)
 HOME = Path.home()
-WIKI_DIR = HOME / "wiki"
-WORK_DIR = HOME / "projects" / "portfolio-lab" / "work"
+WIKI_DIR = Path(os.environ.get("WIKI_DIR", str(HOME / "wiki")))
+WORK_DIR = Path(os.environ.get("WORK_DIR", str(HOME / "projects" / "portfolio-lab" / "work")))
 
 # ── Champion allocation ──────────────────────────────────────────────
 # Grid-search winner: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026)

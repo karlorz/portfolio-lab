@@ -43,7 +43,6 @@ import argparse
 from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
-import sqlite3
 from src.paths import sqlite_connect
 from datetime import datetime
 
