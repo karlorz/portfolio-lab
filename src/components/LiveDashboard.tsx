@@ -37,6 +37,12 @@ import { SectorRotationPanel } from './SectorRotationPanel';
 import { VolatilityParityPanel } from './VolatilityParityPanel';
 import { MLSignalsPanel } from './MLSignalsPanel';
 import { FactorRotationDashboardPanel } from './FactorRotationDashboardPanel';
+import { GraduationChecklistPanel } from './GraduationChecklistPanel';
+import type { GraduationChecklistData } from './GraduationChecklistPanel';
+import { AdaptiveSizingPanel } from './AdaptiveSizingPanel';
+import type { AdaptiveSizingData } from './AdaptiveSizingPanel';
+import { VixyHedgeSizingPanel } from './VixyHedgeSizingPanel';
+import type { VixyHedgeSizingData } from './VixyHedgeSizingPanel';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -58,6 +64,9 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [expandedHealth, setExpandedHealth] = useState(false);
+  const [graduationData, setGraduationData] = useState<GraduationChecklistData | null>(null);
+  const [adaptiveSizingData, setAdaptiveSizingData] = useState<AdaptiveSizingData | null>(null);
+  const [vixyHedgeData, setVixyHedgeData] = useState<VixyHedgeSizingData | null>(null);
 
   const fetchData = async () => {
     try {
@@ -110,6 +119,18 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         const ex = await exRes.json();
         setExplainability(ex);
       }
+
+      // Fetch new panel data (non-blocking)
+      try {
+        const [gradRes, sizingRes, vixyRes] = await Promise.all([
+          fetch('/data/graduation.json'),
+          fetch('/data/adaptive_sizing.json'),
+          fetch('/data/vixy_hedge.json'),
+        ]);
+        if (gradRes.ok) setGraduationData(await gradRes.json());
+        if (sizingRes.ok) setAdaptiveSizingData(await sizingRes.json());
+        if (vixyRes.ok) setVixyHedgeData(await vixyRes.json());
+      } catch { /* panels render gracefully with null data */ }
 
       setError(null);
     } catch (err) {
@@ -570,6 +591,11 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
               <MLSignalsPanel data={(signals as any)?.ml_signals ?? null} />
               <FactorRotationDashboardPanel data={(signals as any)?.factor_rotation_dashboard ?? null} />
+            </div>
+            <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <GraduationChecklistPanel data={graduationData} />
+              <AdaptiveSizingPanel data={adaptiveSizingData} />
+              <VixyHedgeSizingPanel data={vixyHedgeData} />
             </div>
             <div className="mt-4">
               <ModelValidationPanel

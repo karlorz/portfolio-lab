@@ -1,5 +1,5 @@
 import React from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
 import type { BacktestResult, PerformanceMetrics } from '../backtest/engine';
 
 interface DrawdownProps {
@@ -33,6 +33,7 @@ export const DrawdownChart: React.FC<DrawdownProps> = ({ results }) => {
             formatter={(value: number) => [`${(value as number).toFixed(1)}%`, 'Drawdown']}
           />
           <Legend />
+          <Brush dataKey="date" height={30} stroke="#ef4444" tickFormatter={(date) => new Date(date as string).getFullYear().toString()} />
           {results.map(({ name, color }) => (
             <Area
               key={name}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
 import type { BacktestResult, PerformanceMetrics } from '../backtest/engine';
 
 interface EquityCurveProps {
@@ -34,6 +34,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({ results }) => {
             labelStyle={{ color: '#e2e8f0' }}
           />
           <Legend />
+          <Brush dataKey="date" height={30} stroke="#3b82f6" tickFormatter={(date) => new Date(date as string).getFullYear().toString()} />
           {results.map(({ name, color }) => (
             <Line
               key={name}

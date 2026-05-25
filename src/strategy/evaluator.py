@@ -446,7 +446,7 @@ def main():
     # Clear stale kill switch if risk limits are no longer breached
     kill_file = DATA_DIR / "kill_switch.json"
     if kill_file.exists():
-        kill_file.unlink()
+        kill_file.unlink(missing_ok=True)
         logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
 
     # Determine target allocation
