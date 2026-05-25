@@ -33,6 +33,8 @@ PAPER_CONFIG = {
     "max_position_pct": 0.5,  # Max 50% in any single asset (SPY 46% target + drift)
     "max_drawdown_pct": 0.15,  # Kill switch at 15% DD
     "rebalance_threshold": 0.10,  # 10% drift triggers rebalance
+    "periodic_rebalance_days": 30,  # Force rebalance if drift > 2% and 30+ days since last
+    "periodic_rebalance_drift": 0.02,  # Lower drift threshold for periodic rebalance
     "volatility_target": 0.12,  # 12% annual vol target
 }
 
@@ -131,22 +133,60 @@ class Portfolio:
             p.symbol: (p.shares * prices.get(p.symbol, p.current_price)) / total
             for p in self.positions.values()
         }
+
+    def _days_since_last_rebalance(self) -> int:
+        """Count days since the last rebalance order was executed.
+
+        Scans order log for the most recent rebalance entry.
+        Returns 999 if no rebalance found (forces periodic check).
+        """
+        try:
+            if not ORDERS_LOG.exists():
+                return 999
+            last_rebalance_date = None
+            with open(ORDERS_LOG) as f:
+                for line in f:
+                    entry = json.loads(line.strip())
+                    if "rebalance" in entry.get("reason", ""):
+                        ts = entry.get("timestamp", "")
+                        if ts:
+                            last_rebalance_date = ts[:10]
+            if last_rebalance_date is None:
+                return 999
+            from datetime import date
+            last = date.fromisoformat(last_rebalance_date)
+            return (date.today() - last).days
+        except (OSError, ValueError, KeyError, TypeError):
+            return 999
     
     def calculate_orders(self, target_weights: Dict[str, float], prices: Dict[str, float]) -> List[Dict]:
         """Generate orders to move from current to target allocation."""
         total = self.total_value(prices)
         current_weights = self.current_weights(prices)
         orders = []
-        
+
+        # Check if periodic rebalance is warranted
+        days_since_rebalance = self._days_since_last_rebalance()
+        periodic_due = (
+            days_since_rebalance >= PAPER_CONFIG["periodic_rebalance_days"]
+            and days_since_rebalance > 0
+        )
+        periodic_drift = PAPER_CONFIG["periodic_rebalance_drift"]
+
         for symbol, target_w in target_weights.items():
             if symbol not in prices or prices[symbol] <= 0:
                 continue
-            
+
             current_w = current_weights.get(symbol, 0)
             drift = abs(target_w - current_w)
-            
-            # Only rebalance if drift exceeds threshold
-            if drift > PAPER_CONFIG["rebalance_threshold"]:
+
+            # Rebalance if drift exceeds threshold, or periodic rebalance is due
+            should_rebalance = (
+                drift > PAPER_CONFIG["rebalance_threshold"]
+                or (periodic_due and drift > periodic_drift)
+            )
+
+            if should_rebalance:
                 target_value = total * target_w
                 current_value = self.positions[symbol].value if symbol in self.positions else 0
                 delta_value = target_value - current_value

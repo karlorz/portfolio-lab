@@ -81,6 +81,18 @@ class GraduationChecklist:
             "value": 0.50,
             "description": "Deflated Sharpe Ratio >= 0.50 (validates against multiple-testing bias)",
         },
+        "regime_coverage": {
+            "value": 2,
+            "description": "Paper trading must span at least 2 distinct volatility regimes",
+        },
+        "signal_diversity": {
+            "value": 4,
+            "description": "At least 4 of 6 active signals must have contributed to rebalance decisions",
+        },
+        "sharpe_ci_lower": {
+            "value": 0.30,
+            "description": "Lower bound of 75% CI for Sharpe >= 0.30 (prevents false-positive graduation)",
+        },
         "manual_approval": {
             "value": False,
             "description": "Human-in-the-loop approval (MANDATORY — always False by default)",
@@ -131,6 +143,15 @@ class GraduationChecklist:
 
         # 8. DSR validation (multiple-testing correction)
         results["min_dsr"] = self._check_dsr(state)
+
+        # 10. Regime coverage (must span multiple regimes)
+        results["regime_coverage"] = self._check_regime_coverage(state)
+
+        # 11. Signal diversity (multiple signals must contribute)
+        results["signal_diversity"] = self._check_signal_diversity(state)
+
+        # 12. Sharpe CI lower bound
+        results["sharpe_ci_lower"] = self._check_sharpe_ci(state)
 
         # 9. Manual approval (always False by default)
         results["manual_approval"] = self._check_manual_approval(state)
@@ -600,6 +621,176 @@ class GraduationChecklist:
             value=round(dsr, 4),
             required=required,
             description=self.criteria["min_dsr"]["description"],
+        )
+
+    def _check_regime_coverage(self, state: Dict) -> CheckResult:
+        """Check that paper trading has spanned multiple volatility regimes.
+
+        A portfolio that only traded during a calm bull market hasn't been
+        stress-tested. We require at least 2 distinct regimes to have been
+        observed during the paper trading period.
+        """
+        required = self.criteria["regime_coverage"]["value"]
+
+        # Count distinct regimes from regime state history
+        regime_file = DATA_DIR / "regime_state.json"
+        regimes_seen = set()
+
+        if regime_file.exists():
+            try:
+                with open(regime_file) as f:
+                    data = json.load(f)
+                current = data.get("regime", "")
+                if current:
+                    regimes_seen.add(current)
+            except (OSError, ValueError, KeyError):
+                pass
+
+        # Also check portfolio history for regime snapshots
+        portfolio = state.get("portfolio", {})
+        history = portfolio.get("history", [])
+        for entry in history:
+            regime = entry.get("regime", "")
+            if regime:
+                regimes_seen.add(regime)
+
+        # Check regime log if available
+        regime_log = DATA_DIR / "regime_log.json"
+        if regime_log.exists():
+            try:
+                with open(regime_log) as f:
+                    for line in f:
+                        entry = json.loads(line.strip())
+                        regime = entry.get("regime", "")
+                        if regime:
+                            regimes_seen.add(regime)
+            except (OSError, ValueError):
+                pass
+
+        n_regimes = len(regimes_seen)
+
+        return CheckResult(
+            name="regime_coverage",
+            passed=n_regimes >= required,
+            value=n_regimes,
+            required=required,
+            description=self.criteria["regime_coverage"]["description"],
+        )
+
+    def _check_signal_diversity(self, state: Dict) -> CheckResult:
+        """Check that multiple ensemble signals have contributed to decisions.
+
+        If only 1-2 signals drive all rebalance decisions, the portfolio
+        hasn't validated the full ensemble. We require at least 4 of 6
+        active signals to have non-zero weight in rebalance decisions.
+        """
+        required = self.criteria["signal_diversity"]["value"]
+
+        # Check ensemble voter state for active signals
+        signals_contributing = set()
+        ensemble_file = DATA_DIR / "ensemble_state.json"
+        if ensemble_file.exists():
+            try:
+                with open(ensemble_file) as f:
+                    data = json.load(f)
+                weights = data.get("weights", {})
+                for signal, weight in weights.items():
+                    if weight > 0.01:  # Non-trivial weight
+                        signals_contributing.add(signal)
+            except (OSError, ValueError, KeyError):
+                pass
+
+        # Also check order log for signal attribution
+        orders_file = DATA_DIR / "orders.jsonl"
+        if orders_file.exists():
+            try:
+                with open(orders_file) as f:
+                    for line in f:
+                        entry = json.loads(line.strip())
+                        signal = entry.get("signal_source", "")
+                        if signal:
+                            signals_contributing.add(signal)
+            except (OSError, ValueError):
+                pass
+
+        n_signals = len(signals_contributing)
+
+        return CheckResult(
+            name="signal_diversity",
+            passed=n_signals >= required,
+            value=n_signals,
+            required=required,
+            description=self.criteria["signal_diversity"]["description"],
+        )
+
+    def _check_sharpe_ci(self, state: Dict) -> CheckResult:
+        """Check that the lower bound of the 75% CI for Sharpe is above threshold.
+
+        With few observations (e.g., 63 days), the Sharpe point estimate has
+        wide confidence intervals. Using the lower bound prevents false-positive
+        graduation when the point estimate is high but imprecise.
+
+        CI formula: Sharpe ± z * SE, where SE ≈ sqrt((1 + 0.5*Sharpe²) / N)
+        For 75% CI, z = 1.15.
+        """
+        required = self.criteria["sharpe_ci_lower"]["value"]
+
+        # Get Sharpe from the same source as _check_sharpe
+        summary = state.get("paper_trading_summary", {})
+        if summary.get("sharpe", 0) > 0:
+            sharpe = summary["sharpe"]
+            n_days = summary.get("days_tracked", 0)
+            if sharpe > 3.0:
+                sharpe = 0.0
+        else:
+            portfolio = state.get("portfolio", {})
+            history = portfolio.get("history", [])
+            daily = {}
+            for entry in history:
+                ts = entry.get("timestamp", "")
+                date_key = ts[:10] if len(ts) >= 10 else ts
+                daily[date_key] = entry
+            sorted_daily = [daily[d] for d in sorted(daily.keys())]
+            recent = sorted_daily[-63:] if len(sorted_daily) >= 3 else sorted_daily
+
+            if len(recent) < 3:
+                return CheckResult(
+                    name="sharpe_ci_lower",
+                    passed=False,
+                    value=0.0,
+                    required=required,
+                    description=self.criteria["sharpe_ci_lower"]["description"],
+                )
+
+            returns = [h.get("daily_return", 0) for h in recent]
+            daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
+            sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
+            n_days = len(recent)
+            if sharpe > 3.0:
+                sharpe = 0.0
+
+        if n_days < 5:
+            return CheckResult(
+                name="sharpe_ci_lower",
+                passed=False,
+                value=0.0,
+                required=required,
+                description=self.criteria["sharpe_ci_lower"]["description"],
+            )
+
+        # Compute 75% CI lower bound
+        # SE(Sharpe) ≈ sqrt((1 + 0.5*Sharpe²) / N)  (Lo, 2002)
+        n_annual = n_days  # Daily observations
+        se_sharpe = np.sqrt((1 + 0.5 * sharpe ** 2) / n_annual) if n_annual > 0 else 1.0
+        z_75 = 1.15  # 75% CI z-score
+        ci_lower = sharpe - z_75 * se_sharpe
+
+        return CheckResult(
+            name="sharpe_ci_lower",
+            passed=ci_lower >= required,
+            value=round(ci_lower, 4),
+            required=required,
+            description=self.criteria["sharpe_ci_lower"]["description"],
         )
 
 
