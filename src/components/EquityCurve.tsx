@@ -1,20 +1,25 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
 import type { BacktestResult, PerformanceMetrics } from '../backtest/engine';
+import { autoDownsample } from '../utils/lttb';
 
 interface EquityCurveProps {
   results: Array<{ name: string; result: BacktestResult; metrics: PerformanceMetrics; color: string }>;
 }
 
 export const EquityCurve: React.FC<EquityCurveProps> = ({ results }) => {
-  // Transform data for recharts
-  const data = results[0]?.result.dates.map((date, i) => {
-    const point: Record<string, number | string> = { date };
-    results.forEach(({ name, result }) => {
-      point[name] = result.portfolioValues[i] / result.portfolioValues[0];
-    });
-    return point;
-  }) || [];
+  // Transform and downsample data for recharts
+  const data = useMemo(() => {
+    const raw = results[0]?.result.dates.map((date, i) => {
+      const point: Record<string, number | string> = { date };
+      results.forEach(({ name, result }) => {
+        point[name] = result.portfolioValues[i] / result.portfolioValues[0];
+      });
+      return point;
+    }) || [];
+    // Downsample if >1000 points (LTTB preserves visual shape)
+    return autoDownsample(raw, 600, 'date', results[0]?.name || 'value', 1000);
+  }, [results]);
 
   return (
     <div className="chart-container">

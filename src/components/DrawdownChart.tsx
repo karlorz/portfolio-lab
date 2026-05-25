@@ -1,19 +1,23 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
 import type { BacktestResult, PerformanceMetrics } from '../backtest/engine';
+import { autoDownsample } from '../utils/lttb';
 
 interface DrawdownProps {
   results: Array<{ name: string; result: BacktestResult; metrics: PerformanceMetrics; color: string }>;
 }
 
 export const DrawdownChart: React.FC<DrawdownProps> = ({ results }) => {
-  const data = results[0]?.result.dates.map((date, i) => {
-    const point: Record<string, number | string> = { date };
-    results.forEach(({ name, result }) => {
-      point[name] = result.drawdowns[i] * 100;
-    });
-    return point;
-  }) || [];
+  const data = useMemo(() => {
+    const raw = results[0]?.result.dates.map((date, i) => {
+      const point: Record<string, number | string> = { date };
+      results.forEach(({ name, result }) => {
+        point[name] = result.drawdowns[i] * 100;
+      });
+      return point;
+    }) || [];
+    return autoDownsample(raw, 600, 'date', results[0]?.name || 'value', 1000);
+  }, [results]);
 
   return (
     <div className="chart-container">

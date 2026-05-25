@@ -1239,32 +1239,52 @@ class DashboardGenerator:
             return None
 
     def generate_black_litterman_json(self) -> Optional[Path]:
-        """Generate Black-Litterman mapper data for dashboard."""
+        """Generate Black-Litterman mapper data for dashboard.
+
+        Uses live ensemble voter signal data to generate real BL views
+        with Idzorek confidence from signal health scores.
+        """
         try:
-            from src.strategy.black_litterman_mapper import map_biases_to_views, run_black_litterman
+            from src.strategy.ensemble_voter import EnsembleVoter
+            from src.strategy.black_litterman_mapper import run_black_litterman
+
+            # Get live BL views from ensemble voter
+            voter = EnsembleVoter()
+            bl_input = voter.get_bl_views()
+
+            views = bl_input["views"]
+            result = run_black_litterman(views)
 
             # Use base allocation as prior
             prior = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
 
-            # Run with neutral biases (no active signal override)
-            views = map_biases_to_views(equity_bias=0.0, duration_bias=0.0)
-            result = run_black_litterman(views)
+            # Build views list for panel consumption
+            view_list = []
+            if hasattr(views, 'absolute_views') and views.absolute_views:
+                abs_views = views.absolute_views if isinstance(views.absolute_views, dict) else dict(zip(views.symbols, views.absolute_views))
+                for i, sym in enumerate(views.symbols):
+                    ret = abs_views.get(sym, 0.0)
+                    conf = views.view_confidences[i] if i < len(views.view_confidences) else 0.5
+                    view_list.append({
+                        "signal_name": "ensemble_consensus",
+                        "asset": sym,
+                        "direction": "bullish" if ret > 0 else ("bearish" if ret < 0 else "neutral"),
+                        "confidence": round(conf, 3),
+                        "expected_return_delta": round(ret, 6),
+                    })
 
             bl_data = {
                 "prior_weights": prior,
                 "posterior_weights": result.bl_weights,
-                "views": [
-                    {
-                        "signal_name": "base_allocation",
-                        "asset": sym,
-                        "direction": "bullish" if ret > 0 else ("bearish" if ret < 0 else "neutral"),
-                        "confidence": conf,
-                        "expected_return_delta": ret,
-                    }
-                    for sym, ret, conf in zip(views.symbols, views.absolute_views.values() if isinstance(views.absolute_views, dict) else views.absolute_views, views.view_confidences)
-                ] if views.absolute_views else [],
+                "views": view_list,
                 "tau": result.tau,
                 "view_confidence_method": "idzorek",
+                "health_scores": bl_input.get("health_scores_used", {}),
+                "biases": {
+                    "equity": round(bl_input.get("equity_bias", 0.0), 3),
+                    "duration": round(bl_input.get("duration_bias", 0.0), 3),
+                    "gold": round(bl_input.get("gold_bias", 0.0), 3),
+                },
                 "generated_at": datetime.now().isoformat(),
             }
 
