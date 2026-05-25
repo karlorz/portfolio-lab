@@ -521,7 +521,7 @@ class EnsembleVoter:
         readings = {}
 
         # Collect from each signal source
-        self._collect_msm_signal(readings, date)
+        self._collect_msm_signal(readings, active_sources, regime, date)
         self._collect_cross_asset_rv_signal(readings)
         self._collect_intl_momentum_signal(readings, active_sources, regime)
         self._collect_alt_data_signal(readings, active_sources, regime)
@@ -538,8 +538,10 @@ class EnsembleVoter:
             return True
         return False
 
-    def _collect_msm_signal(self, readings: Dict, date: Optional[str]) -> None:
+    def _collect_msm_signal(self, readings: Dict, active_sources, regime: Optional[Regime], date: Optional[str]) -> None:
         """Collect multi-speed momentum signal."""
+        if self._should_skip(SignalSource.MULTI_SPEED_MOM, active_sources, regime):
+            return
         try:
             from src.signals.multi_speed_momentum import MultiSpeedMomentum
             msm = MultiSpeedMomentum()

@@ -3061,7 +3061,7 @@ class TestCollectSignalsEdgeCases:
         """_collect_msm_signal should not crash."""
         voter = _make_voter(tmp_path)
         readings = {}
-        voter._collect_msm_signal(readings, date=None)
+        voter._collect_msm_signal(readings, active_sources=None, regime=None, date=None)
         assert isinstance(readings, dict)
 
     def test_collect_signals_in_collect_cross_asset_rv(self, tmp_path):

@@ -145,8 +145,6 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         if (vixyRes.ok) setVixyHedgeData(await vixyRes.json());
         if (blRes.ok) setBLMapperData(await blRes.json());
         if (turnoverRes.ok) setTurnoverData(await turnoverRes.json());
-        if (blRes.ok) setBLMapperData(await blRes.json());
-        if (turnoverRes.ok) setTurnoverData(await turnoverRes.json());
       } catch { /* panels render gracefully with null data */ }
       try {
         const [rgRes, tsmomRes, rvRes] = await Promise.all([

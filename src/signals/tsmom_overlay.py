@@ -435,6 +435,43 @@ class TSMOMOverlay:
         }
 
 
+    def get_signal_snapshot(self):
+        """Return SignalSnapshot for the typed pipeline."""
+        from src.signals.signal_snapshot import SignalSnapshot
+        from datetime import datetime
+
+        tickers = ["SPY", "GLD", "TLT"]
+        signals = []
+        for ticker in tickers:
+            sig = self.compute_signal(ticker)
+            if sig is not None:
+                signals.append(sig)
+
+        if signals:
+            avg_value = sum(s.signal for s in signals) / len(signals)
+            avg_conf = min(1.0, abs(sum(s.vol_scaled_position for s in signals) / len(signals)))
+            return SignalSnapshot(
+                source="tsmom_overlay",
+                timestamp=signals[0].timestamp,
+                value=float(avg_value),
+                confidence=avg_conf,
+                asset_signals={s.ticker: s.adjustment for s in signals},
+                regime_fit="all",
+                is_active=any(s.signal != 0 for s in signals),
+                explanation=f"TSMOM: {len(signals)} assets, avg signal={avg_value:.2f}",
+            )
+
+        return SignalSnapshot(
+            source="tsmom_overlay",
+            timestamp=str(datetime.now()),
+            value=0.0,
+            confidence=0.0,
+            regime_fit="all",
+            is_active=False,
+            explanation="TSMOM overlay: no signal data available",
+        )
+
+
 class TSMOMBacktester:
     """
     Backtesting engine for TSMOM overlay strategy.

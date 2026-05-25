@@ -1457,13 +1457,21 @@ class DashboardGenerator:
             scanner = CrossAssetRVScanner()
             signal = scanner.scan_all()
 
+            # Determine gating from current regime (v961: RV fails in HIGH_VOL/CRISIS)
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 1")
+            row = cursor.fetchone()
+            regime = row[0] if row else "normal"
+            gated_regimes = {"high_vol", "crisis"}
+            is_gated = regime.lower() in gated_regimes
+
             rv_data = {
                 "signal_value": signal.composite_signal if hasattr(signal, 'composite_signal') else 0.0,
-                "pairs": signal.pair_signals if hasattr(signal, 'pair_signals') else [],
-                "current_regime": "NORMAL",
-                "is_gated_off": True,  # v961: -8.68 Sharpe in HIGH_VOL/CRISIS
-                "regime_note": "Mean-reversion fails in volatile regimes",
-                "weight_in_ensemble": 0.13,
+                "pairs": [p.to_dict() for p in signal.pair_signals] if hasattr(signal, 'pair_signals') and signal.pair_signals else [],
+                "current_regime": regime,
+                "is_gated_off": is_gated,
+                "regime_note": "Mean-reversion fails in volatile regimes" if is_gated else "Active — mean-reversion favorable",
+                "weight_in_ensemble": 0.0 if is_gated else 0.13,
                 "generated_at": datetime.now().isoformat(),
             }
 

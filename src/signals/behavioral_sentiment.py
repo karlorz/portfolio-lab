@@ -303,6 +303,23 @@ class BehavioralSentimentSignal:
             timestamp=snapshot.timestamp,
         )
 
+    def get_signal_snapshot(self):
+        """Return SignalSnapshot for the typed pipeline."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        signal = self.get_signal()
+        if signal is not None:
+            return signal.to_signal_snapshot()
+        return SignalSnapshot(
+            source="behavioral_sentiment",
+            timestamp=str(datetime.now()),
+            value=0.0,
+            confidence=0.0,
+            regime_fit="all",
+            is_active=False,
+            explanation="Behavioral sentiment: no signal data available",
+        )
+
     def trigger_pause(self, hours: int = 72, reason: str = ""):
         """Manually trigger a circuit breaker pause"""
         self._pause_until = datetime.now() + timedelta(hours=hours)
