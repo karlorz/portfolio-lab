@@ -167,7 +167,7 @@ try:
         })
     
     print(json.dumps(results))
-except Exception as e:
+except (ImportError, OSError, RuntimeError, ValueError, KeyError) as e:
     print(json.dumps({'error': str(e)}), file=sys.stderr)
     sys.exit(1)
 `;

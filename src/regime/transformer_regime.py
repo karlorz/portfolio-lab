@@ -257,7 +257,7 @@ class TransformerRegimeDetector:
                 self._model.eval()
                 logger.info("Loaded trained model from %s", self.MODEL_PATH)
                 return
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError, KeyError) as e:
                 logger.warning("Failed to load model: %s, retraining...", e)
 
         logger.info("Training new transformer regime model...")

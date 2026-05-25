@@ -236,7 +236,7 @@ class Portfolio:
 
         # GARCH-CVaR tail risk check
         daily_returns = self._get_daily_returns()
-        if len(daily_returns) >= 21:  # ~1 month of daily data minimum
+        if len(daily_returns) >= 10:  # Minimum for EWMA fallback in GARCH-CVaR
             try:
                 from src.monitor.garch_cvar import calculate_garch_cvar
                 recent_returns = daily_returns[-min(252, len(daily_returns)):]

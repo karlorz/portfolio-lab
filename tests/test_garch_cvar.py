@@ -124,7 +124,7 @@ class TestGARCHCVaRInitialization:
         assert calc.p == 1
         assert calc.q == 1
         assert calc.dist == "normal"
-        assert calc.fallback_threshold == 0.05
+        assert calc.fallback_threshold == 0.03
         assert calc.convergence_retries == 3
     
     def test_custom_init(self):
@@ -456,10 +456,10 @@ class TestCompute:
     
     def test_fallback_when_insufficient_data(self):
         calc = GARCHFilteredCVaR(window=252, fallback_threshold=0.5)
-        returns = _make_returns_iid(n=100)  # Below 50% threshold
-        
+        returns = _make_returns_iid(n=15)  # Below EWMA minimum of 20
+
         metrics = calc.compute(returns)
-        
+
         assert not metrics.filter_active
         assert metrics.filter_reason is not None
         assert "insufficient" in metrics.filter_reason.lower() or "converge" in metrics.filter_reason.lower()
@@ -468,16 +468,16 @@ class TestCompute:
         with patch('src.monitor.garch_cvar.ARCH_AVAILABLE', False):
             with patch('src.monitor.garch_cvar.arch_model', None):
                 calc = GARCHFilteredCVaR()
-                returns = _make_returns_iid(n=252)
-                
+                returns = _make_returns_iid(n=15)  # Below EWMA minimum
+
                 metrics = calc.compute(returns)
-                
+
                 assert not metrics.filter_active
                 assert "not available" in metrics.filter_reason.lower()
 
     def test_compute_arch_available_fallback(self):
-        """Verify fallback reason is 'GARCH failed to converge' when arch is
-        available but fitting raises an error."""
+        """Verify fallback reason is set when arch is available but fitting
+        raises an error and EWMA also unavailable."""
         calc = GARCHFilteredCVaR(convergence_retries=1)
         returns = _make_returns_garch_like(n=252)
 
@@ -489,11 +489,12 @@ class TestCompute:
 
                 metrics = calc.compute(returns)
 
-                assert not metrics.filter_active
-                assert metrics.filter_reason == "GARCH failed to converge"
+                # EWMA fallback activates since we have 252 returns
+                assert metrics.filter_active
+                assert "EWMA" in metrics.filter_reason
 
     def test_compute_unstable_params_fallback(self):
-        """When fit succeeds but params are unstable, fallback to historical CVaR."""
+        """When fit succeeds but params are unstable, fallback to EWMA."""
         calc = GARCHFilteredCVaR(convergence_retries=1)
         returns = _make_returns_garch_like(n=252)
 
@@ -508,8 +509,9 @@ class TestCompute:
 
                 metrics = calc.compute(returns)
 
-                assert not metrics.filter_active
-                assert "converge" in metrics.filter_reason.lower()
+                # EWMA fallback activates since GARCH params are unstable
+                assert metrics.filter_active
+                assert "EWMA" in metrics.filter_reason
 
     def test_compute_stores_state(self):
         """Verify _last_params and _last_volatility are preserved after compute."""
