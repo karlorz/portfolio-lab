@@ -22,6 +22,10 @@
 |- **Regime confidence gating**: RegimeGate.gate_with_confidence() — defers gating when regime confidence < 0.7, combines with hysteresis
 |- **SPC signal quality monitoring**: src/monitor/spc_monitor.py — Shewhart control charts flag 3-sigma distribution shifts for 3+ consecutive periods
 |- **Rebalance health in signals.json**: DashboardGenerator.run() now includes rebalance_health section from src/monitor/rebalance_health
+|- **JSONL tail reading**: generator.py uses `collections.deque(f, maxlen=N)` instead of full-file reads for orders.jsonl, features.jsonl, performance.jsonl, position_sync.jsonl, broker_orders.jsonl, grid_search_results.jsonl
+|- **Regime overrides deduplication**: REGIME_OVERRIDES moved to src/paths.py (single source of truth), imported by evaluator.py and generator.py
+|- **Evaluator config externalization**: PAPER_CONFIG and graduation criteria (MIN_SHARPE, MAX_DD, etc.) now read from env vars with hardcoded fallbacks (PAPER_INITIAL_CAPITAL, GRADUATION_MIN_SHARPE, etc.)
+|- **React error boundaries**: PanelErrorBoundary wraps each dashboard tab panel — single-panel crashes don't kill the entire dashboard
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha

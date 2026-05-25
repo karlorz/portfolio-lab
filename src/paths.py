@@ -51,6 +51,16 @@ WORK_DIR = HOME / "projects" / "portfolio-lab" / "work"
 # Single source of truth — import this instead of repeating the dict.
 BASE_ALLOCATION: Dict[str, float] = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
 
+# ── Regime overrides ────────────────────────────────────────────────
+# Core strategy regime-based allocation overrides.
+# Single source of truth — import from evaluator.py and generator.py.
+REGIME_OVERRIDES: Dict[str, Optional[Dict[str, float]]] = {
+    "crisis": {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30},  # Risk-off
+    "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},  # Defensive
+    "low_vol": {"SPY": 0.55, "GLD": 0.30, "TLT": 0.15},  # Risk-on
+    "normal": None,  # Use BASE_ALLOCATION (46/38/16)
+}
+
 
 def sqlite_connect(db_path: Union[str, Path], **kwargs) -> sqlite3.Connection:
     """Open a SQLite connection with WAL journal mode enabled.

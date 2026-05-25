@@ -8,13 +8,14 @@ import json
 import sqlite3
 import logging
 import os
+from collections import deque
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
 
-from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect
+from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
 from src.utils import safe_get
 from src.backtest.metrics import save_results_json
 
@@ -76,12 +77,12 @@ class DashboardGenerator:
         
         regimes = [{"d": row[0], "r": row[1], "v": row[2]} for row in cursor.fetchall()]
         
-        # Get paper portfolio performance (from JSONL log)
+        # Get paper portfolio performance (from JSONL log — tail read only)
         perf_log = DATA_DIR / "performance.jsonl"
         paper_perf = []
         if perf_log.exists():
             with open(perf_log) as f:
-                for line in f:
+                for line in deque(f, maxlen=500):
                     try:
                         entry = json.loads(line)
                         paper_perf.append({
@@ -227,20 +228,14 @@ class DashboardGenerator:
         
         # Target allocation based on regime
         base_alloc = BASE_ALLOCATION
-        regime_overrides = {
-            "crisis": {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30},
-            "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},
-            "low_vol": {"SPY": 0.55, "GLD": 0.30, "TLT": 0.15}
-        }
-        target_alloc = regime_overrides.get(current_regime, base_alloc)
+        target_alloc = REGIME_OVERRIDES.get(current_regime) or base_alloc
         
-        # Pending orders
+        # Pending orders (tail read only)
         orders = []
         orders_log = DATA_DIR / "orders.jsonl"
         if orders_log.exists():
             with open(orders_log) as f:
-                lines = f.readlines()[-5:]  # Last 5 orders
-                for line in lines:
+                for line in deque(f, maxlen=5):
                     try:
                         order = json.loads(line)
                         orders.append({
@@ -629,13 +624,14 @@ class DashboardGenerator:
             "kill_switch": False,
         }
 
-        # Check position sync log
+        # Check position sync log (tail read only)
         sync_log = DATA_DIR / "position_sync.jsonl"
         if sync_log.exists():
             try:
-                lines = sync_log.read_text().strip().split("\n")
-                if lines:
-                    last = json.loads(lines[-1])
+                with open(sync_log) as f:
+                    tail = deque(f, maxlen=1)
+                if tail:
+                    last = json.loads(tail[0])
                     broker["connected"] = True
                     broker["last_sync"] = last.get("timestamp")
                     broker["positions"] = last.get("broker_positions", [])
@@ -643,16 +639,16 @@ class DashboardGenerator:
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load position sync log: %s", e)
 
-        # Check broker orders log
+        # Check broker orders log (tail read only)
         orders_log = DATA_DIR / "broker_orders.jsonl"
         if orders_log.exists():
             try:
-                lines = orders_log.read_text().strip().split("\n")
-                recent = []
-                for line in lines[-10:]:
-                    if line.strip():
-                        recent.append(json.loads(line))
-                broker["recent_orders"] = list(reversed(recent))
+                with open(orders_log) as f:
+                    recent = []
+                    for line in deque(f, maxlen=10):
+                        if line.strip():
+                            recent.append(json.loads(line))
+                    broker["recent_orders"] = list(reversed(recent))
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load broker orders log: %s", e)
 
@@ -770,10 +766,10 @@ class DashboardGenerator:
         features_file = DATA_DIR / "features.jsonl"
         if features_file.exists():
             try:
-                # Get latest features for each symbol
+                # Get latest features for each symbol (tail read — last 500 lines)
                 latest_features = {}
                 with open(features_file, 'r') as f:
-                    for line in f:
+                    for line in deque(f, maxlen=500):
                         try:
                             feat = json.loads(line)
                             sym = feat.get("symbol")
@@ -781,7 +777,7 @@ class DashboardGenerator:
                             if sym and (sym not in latest_features or ts > latest_features[sym].get("timestamp", "")):
                                 latest_features[sym] = feat
                         except json.JSONDecodeError:
-                            logger.exception("Failed to parse feature line in ensemble_voter_signals.jsonl")
+                            logger.exception("Failed to parse feature line in features.jsonl")
                             continue
 
                 if latest_features:
@@ -830,21 +826,21 @@ class DashboardGenerator:
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
                 signals["error"] = str(e)
 
-        # Check for grid search results
+        # Check for grid search results (tail read only)
         grid_file = DATA_DIR / "grid_search_results.jsonl"
         if grid_file.exists():
             try:
                 with open(grid_file, 'r') as f:
-                    lines = f.readlines()
-                    if lines:
-                        latest = json.loads(lines[-1])
-                        signals["grid_search"] = {
-                            "available": True,
-                            "timestamp": latest.get("timestamp"),
-                            "top_allocation": latest.get("allocations"),
-                            "sharpe": latest.get("sharpe"),
-                            "volatility": latest.get("volatility"),
-                        }
+                    tail = deque(f, maxlen=1)
+                if tail:
+                    latest = json.loads(tail[0])
+                    signals["grid_search"] = {
+                        "available": True,
+                        "timestamp": latest.get("timestamp"),
+                        "top_allocation": latest.get("allocations"),
+                        "sharpe": latest.get("sharpe"),
+                        "volatility": latest.get("volatility"),
+                    }
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load grid search results: %s", e)
 
@@ -946,9 +942,9 @@ class DashboardGenerator:
         spy_comparison = None
         if perf_log.exists():
             with open(perf_log) as f:
-                lines = f.readlines()
-                if len(lines) >= 20:
-                    recent = [json.loads(l) for l in lines[-63:]]  # Last 63 entries
+                tail_lines = deque(f, maxlen=63)
+                if len(tail_lines) >= 20:
+                    recent = [json.loads(l) for l in tail_lines]
                     returns = [r.get("daily_return", 0) for r in recent if r.get("daily_return")]
                     values = [r.get("total_value", 0) for r in recent]
                     

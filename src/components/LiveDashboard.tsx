@@ -53,6 +53,7 @@ import { TSMOMPanel } from './TSMOMPanel';
 import type { TSMOMData } from './TSMOMPanel';
 import { CrossAssetRVPanel } from './CrossAssetRVPanel';
 import type { CrossAssetRVData } from './CrossAssetRVPanel';
+import { PanelErrorBoundary } from './PanelErrorBoundary';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -263,6 +264,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
       <div className="tab-content">
         {/* Overview Tab */}
         {activeTab === 'overview' && (
+        <PanelErrorBoundary name="Overview">
           <div className="tab-panel overview-panel">
             {/* Critical Alerts */}
             {criticalAlerts.length > 0 && (
@@ -428,28 +430,34 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               </div>
             </div>
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* Health Tab */}
         {activeTab === 'health' && (
+        <PanelErrorBoundary name="Health">
           <div className="tab-panel health-panel-container">
-            <HealthPanel 
+            <HealthPanel
               health={health}
               expanded={expandedHealth}
               onToggleExpand={() => setExpandedHealth(!expandedHealth)}
             />
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* History Tab */}
         {activeTab === 'history' && (
+        <PanelErrorBoundary name="History">
           <div className="tab-panel history-panel">
             <RegimeTimeline history={dashboard?.regimes || []} />
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* Performance Tab */}
         {activeTab === 'performance' && (
+        <PanelErrorBoundary name="Performance">
           <div className="tab-panel performance-panel">
             {/* SPY Comparison Chart */}
             <SPYComparisonChart stats={stats} performance={performance} />
@@ -508,10 +516,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               </div>
             )}
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* Rebalance Tab */}
         {activeTab === 'rebalance' && (
+        <PanelErrorBoundary name="Rebalance">
           <div className="tab-panel rebalance-panel-container">
             <BrokerPanel data={signals?.broker} />
             <SmartRebalancePanel data={signals?.smart_rebalance} />
@@ -529,10 +539,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               }}
             />
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
+        <PanelErrorBoundary name="Analytics">
           <div className="tab-panel analytics-panel">
             {analytics?.status === 'success' ? (
               <>
@@ -640,10 +652,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* 0DTE Options Tab */}
         {activeTab === 'options' && (
+        <PanelErrorBoundary name="0DTE Options">
           <div className="tab-panel options-panel">
             <ZeroDTEPanel
               positions={signals?.zero_dte?.positions || []}
@@ -659,20 +673,24 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* Closing Auction Tab */}
         {activeTab === 'auction' && (
+        <PanelErrorBoundary name="Closing Auction">
           <div className="tab-panel auction-panel">
             <ClosingAuctionPanel
               signals={signals?.closing_auction?.signals || []}
               isMarketOpen={signals?.closing_auction?.market_open || false}
             />
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* Risk Tab (GARCH-CVaR + Entropy + VIX Term Structure + Bond Momentum) */}
         {activeTab === 'risk' && (
+        <PanelErrorBoundary name="Risk">
           <div className="tab-panel risk-panel">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <GarchCvarPanel data={signals?.garch_cvar as GarchCvarData | null | undefined} />
@@ -698,13 +716,16 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               <VolatilityParityPanel data={(signals as any)?.volatility_parity ?? null} />
             </div>
           </div>
+        </PanelErrorBoundary>
         )}
 
         {/* Chat Tab */}
         {activeTab === 'chat' && (
+        <PanelErrorBoundary name="Chat">
           <div className="tab-panel chat-panel-container">
             <ChatPanel />
           </div>
+        </PanelErrorBoundary>
         )}
       </div>
     </div>

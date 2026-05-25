@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
 import numpy as np
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB
+from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, REGIME_OVERRIDES
 from src.backtest.metrics import save_results_json
 
 
@@ -27,24 +27,18 @@ DB_PATH = MARKET_DB
 ORDERS_LOG = DATA_DIR / "orders.jsonl"
 PERFORMANCE_LOG = DATA_DIR / "performance.jsonl"
 
-# Paper trading config (default)
+# Paper trading config (defaults — override via env vars)
 PAPER_CONFIG = {
-    "initial_capital": 100000,
-    "max_position_pct": 0.5,  # Max 50% in any single asset (SPY 46% target + drift)
-    "max_drawdown_pct": 0.15,  # Kill switch at 15% DD
-    "rebalance_threshold": 0.10,  # 10% drift triggers rebalance
-    "periodic_rebalance_days": 30,  # Force rebalance if drift > 2% and 30+ days since last
-    "periodic_rebalance_drift": 0.02,  # Lower drift threshold for periodic rebalance
-    "volatility_target": 0.12,  # 12% annual vol target
+    "initial_capital": int(os.environ.get("PAPER_INITIAL_CAPITAL", "100000")),
+    "max_position_pct": float(os.environ.get("PAPER_MAX_POSITION_PCT", "0.5")),
+    "max_drawdown_pct": float(os.environ.get("PAPER_MAX_DRAWDOWN_PCT", "0.15")),
+    "rebalance_threshold": float(os.environ.get("PAPER_REBALANCE_THRESHOLD", "0.10")),
+    "periodic_rebalance_days": int(os.environ.get("PAPER_PERIODIC_REBALANCE_DAYS", "30")),
+    "periodic_rebalance_drift": float(os.environ.get("PAPER_PERIODIC_REBALANCE_DRIFT", "0.02")),
+    "volatility_target": float(os.environ.get("PAPER_VOLATILITY_TARGET", "0.12")),
 }
 
-# Core strategy: SPY/GLD/TLT 46/38/16 with regime overrides
-REGIME_OVERRIDES = {
-    "crisis": {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30},  # Risk-off
-    "vol_spike": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},  # Defensive
-    "low_vol": {"SPY": 0.55, "GLD": 0.30, "TLT": 0.15},  # Risk-on
-    "normal": None,  # Use BASE_ALLOCATION (46/38/16)
-}
+
 
 class Position(NamedTuple):
     symbol: str
@@ -555,11 +549,12 @@ def check_graduation_criteria(portfolio: Portfolio):
     includes sanity validation to prevent false positives from near-zero
     standard deviation in intra-day return data.
     """
-    MIN_DAYS = 63  # ~3 months
-    MIN_SHARPE = 0.5
-    MAX_DD = 0.15
-    MIN_WIN_RATE = 0.45
-    MAX_REALISTIC_SHARPE = 3.0  # Any Sharpe > 3.0 is unrealistic
+    MIN_DAYS = int(os.environ.get("GRADUATION_MIN_DAYS", "63"))
+    MIN_SHARPE = float(os.environ.get("GRADUATION_MIN_SHARPE", "0.5"))
+    MAX_DD = float(os.environ.get("GRADUATION_MAX_DD", "0.15"))
+    MIN_WIN_RATE = float(os.environ.get("GRADUATION_MIN_WIN_RATE", "0.45"))
+    MAX_REALISTIC_SHARPE = float(os.environ.get("GRADUATION_MAX_REALISTIC_SHARPE", "3.0"))
+    MIN_DSR = float(os.environ.get("GRADUATION_MIN_DSR", "0.50"))
     
     if len(portfolio.history) < MIN_DAYS:
         return
@@ -606,7 +601,7 @@ def check_graduation_criteria(portfolio: Portfolio):
     # DSR validation: confirm Sharpe survives multiple-testing correction
     # With 94 grid-search configs, DSR > 0.95 means the Sharpe is statistically
     # significant, not just the best of many trials
-    MIN_DSR = 0.50  # Minimum DSR for graduation confidence
+    # (MIN_DSR is now externalized via GRADUATION_MIN_DSR env var, set above)
     try:
         from src.backtest.metrics import compute_deflated_sharpe_ratio
         dsr = compute_deflated_sharpe_ratio(
