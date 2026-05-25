@@ -15,14 +15,27 @@ import pytest
 from unittest.mock import patch, MagicMock, PropertyMock
 from datetime import datetime
 
-# Mock external dependencies before importing
-sys.modules['data.vix_futures'] = MagicMock()
-sys.modules['strategy.convexity_harvest'] = MagicMock()
+# Mock external dependencies before importing — with cleanup
+_ORIG_MODULES = {}
+for _key in ('data.vix_futures', 'strategy.convexity_harvest'):
+    _ORIG_MODULES[_key] = sys.modules.get(_key)
+    sys.modules[_key] = MagicMock()
 
 from src.strategy.vol_parity_allocator import (
     VolParityAllocation,
     VolatilityParityAllocator,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_sys_modules():
+    """Restore sys.modules after test module completes."""
+    yield
+    for _key, _orig in _ORIG_MODULES.items():
+        if _orig is None:
+            sys.modules.pop(_key, None)
+        else:
+            sys.modules[_key] = _orig
 
 
 # ==============================================================================

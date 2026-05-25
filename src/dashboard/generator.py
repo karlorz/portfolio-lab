@@ -10,7 +10,7 @@ import logging
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect
@@ -540,7 +540,7 @@ class DashboardGenerator:
         overlay_data = self._get_overlay_data()
 
         output = {
-            "timestamp": datetime.now().isoformat(),
+            "generated_at": datetime.now().isoformat(),
             "regime": regime_data,
             "target_allocations": target_alloc,
             "current_positions": positions,
@@ -876,17 +876,24 @@ class DashboardGenerator:
     def generate_stats_json(self) -> Path:
         """Generate performance statistics."""
         cursor = self.conn.cursor()
-        
-        # Calculate 30-day returns for each asset
+
+        # Single batched query for all symbols instead of N+1 per-symbol queries
+        symbols = ['SPY', 'GLD', 'TLT', 'QQQ', 'VIX']
+        placeholders = ','.join('?' for _ in symbols)
+        cursor.execute(f"""
+            SELECT symbol, close FROM prices
+            WHERE symbol IN ({placeholders}) AND date >= date('now', '-30 days')
+            ORDER BY symbol, date
+        """, symbols)
+
+        # Group rows by symbol
+        symbol_prices: Dict[str, List[float]] = {}
+        for sym, close in cursor.fetchall():
+            symbol_prices.setdefault(sym, []).append(close)
+
         stats = {}
-        for symbol in ['SPY', 'GLD', 'TLT', 'QQQ', 'VIX']:
-            cursor.execute("""
-                SELECT close FROM prices 
-                WHERE symbol = ? AND date >= date('now', '-30 days')
-                ORDER BY date
-            """, (symbol,))
-            
-            prices = [row[0] for row in cursor.fetchall()]
+        for symbol in symbols:
+            prices = symbol_prices.get(symbol, [])
             if len(prices) >= 2:
                 returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
                 stats[symbol] = {

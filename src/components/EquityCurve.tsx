@@ -25,7 +25,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({ results }) => {
     <div className="chart-container">
       <h3>Equity Curve (Normalized to 1.0)</h3>
       <ResponsiveContainer width="100%" height={400}>
-        <LineChart data={data}>
+        <LineChart data={data} isAnimationActive={false}>
           <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
           <XAxis 
             dataKey="date" 

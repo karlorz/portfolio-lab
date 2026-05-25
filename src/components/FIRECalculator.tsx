@@ -317,7 +317,7 @@ export const FIRECalculator: React.FC<FIRECalculatorProps> = ({ results }) => {
         Higher = more money left after 20 years of withdrawals
       </p>
       <ResponsiveContainer width="100%" height={350}>
-        <BarChart data={rateComparisonData} margin={{ top: 10, right: 30, left: 20, bottom: 5 }}>
+        <BarChart data={rateComparisonData} margin={{ top: 10, right: 30, left: 20, bottom: 5 }} isAnimationActive={false}>
           <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
           <XAxis dataKey="rate" stroke="#94a3b8" />
           <YAxis stroke="#94a3b8" tickFormatter={(v) => `${v.toFixed(0)}%`} />

@@ -13,10 +13,21 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock, Mock
 from decimal import Decimal
 
-# Mock aiohttp before importing module
+# Mock aiohttp before importing module — with cleanup
+_orig_aiohttp = sys.modules.get("aiohttp")
 _mock_aiohttp = MagicMock()
 _mock_aiohttp.ClientSession = MagicMock
 sys.modules["aiohttp"] = _mock_aiohttp
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_aiohttp():
+    """Restore sys.modules after test module completes."""
+    yield
+    if _orig_aiohttp is None:
+        sys.modules.pop("aiohttp", None)
+    else:
+        sys.modules["aiohttp"] = _orig_aiohttp
 
 import logging
 from typing import Optional

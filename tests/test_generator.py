@@ -1129,7 +1129,7 @@ class TestSignalsJSONEdgeCases:
                     path = gen.generate_signals_json()
         with open(path) as f:
             data = json.load(f)
-        required_keys = {"timestamp", "regime", "target_allocations", "current_positions",
+        required_keys = {"generated_at", "regime", "target_allocations", "current_positions",
                          "cash", "total_value", "latest_prices", "ml_signals",
                          "yield_curve", "broker"}
         assert required_keys.issubset(set(data.keys()))
@@ -1424,12 +1424,12 @@ class TestRunEdgeCases:
                 with open(fpath) as f:
                     data = json.load(f)
                 assert "generated_at" in data, f"{name} missing generated_at"
-        # signals.json uses "timestamp" instead of "generated_at"
+        # signals.json uses "generated_at" consistent with other JSON outputs
         signals_path = tmp_path / "signals.json"
         if signals_path.exists():
             with open(signals_path) as f:
                 signals_data = json.load(f)
-            assert "timestamp" in signals_data
+            assert "generated_at" in signals_data
         gen.conn.close()
 
 
@@ -1694,7 +1694,7 @@ class TestSignalsJSONAdditionalEdgeCases:
         with open(path) as f:
             data = json.load(f)
         all_keys = {
-            "timestamp", "regime", "target_allocations", "current_positions",
+            "generated_at", "regime", "target_allocations", "current_positions",
             "cash", "total_value", "latest_prices", "recent_orders", "ml_signals",
             "factor_rotation", "yield_curve", "duration_allocation",
             "convexity_harvest", "volatility_parity", "llm_sentiment",
@@ -2530,7 +2530,7 @@ class TestRunOverlay:
         with open(tmp_path / "signals.json") as f:
             signals = json.load(f)
         assert "regime" in signals
-        assert "timestamp" in signals
+        assert "generated_at" in signals
         gen.conn.close()
 
 
@@ -2707,7 +2707,7 @@ class TestOutputFieldTypes:
             data = json.load(f)
 
         # Top-level scalar fields
-        assert isinstance(data["timestamp"], str), "timestamp should be str"
+        assert isinstance(data["generated_at"], str), "generated_at should be str"
         assert isinstance(data["cash"], (int, float)), "cash should be numeric"
         assert isinstance(data["total_value"], (int, float)), "total_value should be numeric"
 

@@ -522,7 +522,7 @@ class EnsembleVoter:
 
         # Collect from each signal source
         self._collect_msm_signal(readings, active_sources, regime, date)
-        self._collect_cross_asset_rv_signal(readings)
+        self._collect_cross_asset_rv_signal(readings, active_sources, regime)
         self._collect_intl_momentum_signal(readings, active_sources, regime)
         self._collect_alt_data_signal(readings, active_sources, regime)
         self._collect_regime_arb_signal(readings, active_sources, regime)
@@ -553,8 +553,12 @@ class EnsembleVoter:
         except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Multi-speed momentum unavailable: %s", e)
 
-    def _collect_cross_asset_rv_signal(self, readings: Dict) -> None:
+    def _collect_cross_asset_rv_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
         """Collect cross-asset relative value signal."""
+        if self._should_skip(SignalSource.CROSS_ASSET_RV, active_sources, regime):
+            return
         try:
             from src.signals.cross_asset_relative_value import CrossAssetRVScanner
             rv_scanner = CrossAssetRVScanner()

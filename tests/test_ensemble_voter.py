@@ -3068,7 +3068,7 @@ class TestCollectSignalsEdgeCases:
         """_collect_cross_asset_rv_signal should not crash."""
         voter = _make_voter(tmp_path)
         readings = {}
-        voter._collect_cross_asset_rv_signal(readings)
+        voter._collect_cross_asset_rv_signal(readings, active_sources=None, regime=None)
         assert isinstance(readings, dict)
 
 
