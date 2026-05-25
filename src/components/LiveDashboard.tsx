@@ -85,12 +85,11 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
   const fetchData = async () => {
     try {
-      const [signalsRes, perfRes, alertsRes, statsRes, dashboardRes, healthRes, analyticsRes, rhRes, exRes] = await Promise.all([
+      const [signalsRes, dashboardRes, alertsRes, statsRes, healthRes, analyticsRes, rhRes, exRes] = await Promise.all([
         fetch('/data/signals.json'),
         fetch('/data/dashboard.json'),
         fetch('/data/alerts.json'),
         fetch('/data/stats.json'),
-        fetch('/data/dashboard.json'),
         fetch('/data/health.json'),
         fetch('/data/analytics.json'),
         fetch('/data/rebalance_health.json'),
@@ -102,9 +101,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         setSignals(s);
         setLastUpdate(new Date(s.generated_at).toLocaleTimeString());
       }
-      if (perfRes.ok) {
-        const p = await perfRes.json();
-        setPerformance(p.paper_portfolio || []);
+      if (dashboardRes.ok) {
+        const d = await dashboardRes.json();
+        setPerformance(d.paper_portfolio || []);
+        setDashboard(d);
       }
       if (alertsRes.ok) {
         const a = await alertsRes.json();
@@ -113,10 +113,6 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
       if (statsRes.ok) {
         const st = await statsRes.json();
         setStats(st);
-      }
-      if (dashboardRes.ok) {
-        const d = await dashboardRes.json();
-        setDashboard(d);
       }
       if (healthRes.ok) {
         const h = await healthRes.json();
