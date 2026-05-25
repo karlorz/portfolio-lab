@@ -39,7 +39,7 @@ _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
     import torch
 
-from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION, sqlite_connect
+from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION, MARKET_DB, sqlite_connect
 
 from src.agents.agent_graph import AgentGraph
 from src.agents.marl_trainer import MARLTrainer, MarketEnvironment
@@ -165,7 +165,7 @@ class AIController:
         self.current_allocation = create_default_portfolio()
         self.last_action: Optional[Dict] = None
         self.action_history: List[Dict] = []
-        self.db_path = DATA_DIR / "market.db"
+        self.db_path = MARKET_DB
 
     def _fetch_price_history(self, symbol: str, days: int = 60) -> np.ndarray:
         """Fetch recent close prices from market.db. Falls back to ones if unavailable."""

@@ -20,7 +20,7 @@ import math
 import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from src.paths import BASE_ALLOCATION, DATA_DIR, sqlite_connect
+from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, sqlite_connect
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np

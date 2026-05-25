@@ -56,7 +56,7 @@ else:
     import sys as _sys
     _sys.modules.setdefault("xgboost", _stub_xgb)
 
-from src.paths import PROJECT_ROOT, sqlite_connect
+from src.paths import PROJECT_ROOT, MARKET_DB, sqlite_connect
 
 from src.signals.stacking_feature_engine import StackingFeatureEngine, SignalSource, Signal, RegimeContext, HistoricalAccuracy
 from src.backtest.metrics import save_results_json
@@ -85,7 +85,7 @@ class TrainingConfig:
     feature_count: int = 59
     
     # Data sources
-    db_path: str = "data/market.db"
+    db_path: str = str(MARKET_DB)
     model_dir: str = "models"
     
     # Target configuration

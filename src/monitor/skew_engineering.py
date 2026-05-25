@@ -31,7 +31,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, MARKET_DB
 from src.backtest.metrics import save_results_json
 
 
@@ -124,7 +124,7 @@ class SkewEngine:
 
     def __init__(self, symbol: str = "SPY"):
         self.symbol = symbol
-        self.db_path = DATA_DIR / "market.db"
+        self.db_path = MARKET_DB
 
     def _get_prices(self, days: int = 260) -> np.ndarray:
         """Fetch daily returns from market.db."""

@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, sqlite_connect
+from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, sqlite_connect, MARKET_DB
 from src.backtest.metrics import save_results_json
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 DATA_DIR = _DATA_DIR
 WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
 RAW_DIR = _DATA_DIR.parent / "raw" / "market"
-DB_PATH = DATA_DIR / "market.db"
+DB_PATH = MARKET_DB
 
 class WikiSync:
     def __init__(self):

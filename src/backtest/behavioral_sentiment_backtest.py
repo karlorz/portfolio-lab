@@ -33,7 +33,7 @@ from typing import Optional, Dict, List, Tuple
 import numpy as np
 
 from src.backtest.metrics import BacktestResult, save_results_json
-from src.paths import DATA_DIR, sqlite_connect
+from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 
 
 __all__ = ['BASELINE_SPY', 'BASELINE_GLD', 'BASELINE_TLT', 'MAX_SHIFT', 'TSMOM_EXPECTED_SHARPE', 'BehavioralSentimentBacktest']
@@ -52,7 +52,7 @@ MAX_SHIFT = 0.05  # ±5%
 TSMOM_EXPECTED_SHARPE = 0.96
 
 # Paths
-DEFAULT_CACHE_DB = DATA_DIR / "market.db"
+DEFAULT_CACHE_DB = MARKET_DB
 
 
 class BehavioralSentimentBacktest:

@@ -50,12 +50,12 @@ MIN_HOLDING_DAYS = 5
 # Monte Carlo trials
 MC_TRIALS = 200
 
-from src.paths import DATA_DIR, sqlite_connect
+from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 
 
 __all__ = ['BASELINE_ACCURACY', 'STACKING_ACCURACY', 'BASELINE_SPY', 'BASELINE_GLD', 'BASELINE_TLT', 'MAX_EQUITY_SHIFT', 'SIGNAL_FREQUENCY', 'MIN_HOLDING_DAYS', 'MC_TRIALS', 'StackingBacktestResult', 'StackingEnsembleBacktest']
 
-DEFAULT_CACHE_DB = DATA_DIR / "market.db"
+DEFAULT_CACHE_DB = MARKET_DB
 
 
 @dataclass

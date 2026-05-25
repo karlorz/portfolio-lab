@@ -18,7 +18,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from src.backtest.metrics import BacktestResult, save_results_json
-from src.paths import BASE_ALLOCATION, DATA_DIR, sqlite_connect
+from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, sqlite_connect
 from src.utils import safe_get
 
 
