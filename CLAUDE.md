@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13049 safe** (12723 Python + 313 TypeScript + 18 signal backtest integration, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **13054 safe** (12723 Python + 313 TypeScript + 18 signal backtest integration, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -60,7 +60,7 @@
 |- **Centralized logging**: src/utils/log_config.py with configure_logging() using dictConfig — replaces 47 scattered logging.basicConfig() calls; LOG_LEVEL env var override
 |- **TTL computation cache**: src/utils/computation_cache.py — cachetools.TTLCache for realized volatility, correlation matrix, rolling returns (COMPUTATION_CACHE_TTL_SECONDS env var, default 300s); thread-safe with per-cache locks
 |- **TypeScript noImplicitAny**: enabled in tsconfig.json, 75 strict mode errors fixed — Zod v4 z.record() 2-arg, Recharts isAnimationActive typing, 17 panel data interface exports, proper type assertions after Zod validation
-|- **Production print→logging**: cvar_metrics, vixy_hedge_sizing, unified_orchestrator, ensemble_voter, adaptive_sizing, graduation_checklist migrated from print() to logger.info/warning/error
+|- **Production print→logging**: all production-path modules migrated (signals/16, strategy/14, monitor/10, broker/5, data/3, rebalancing/2, dashboard/1, chat/1, analytics/1, research/1) — 694 prints replaced; 321 remain in backtest scripts (245) + ML-gated modules (67) + stragglers (9)
 |- **TypeScript strictNullChecks**: enabled in tsconfig.json, 4 nullable expression errors fixed (App.tsx priceData, DurationOverlayPanel YieldCurveData, fetcher.ts adjClose)
 |- **Ruff T201 lint rule**: flake8-print detection configured in pyproject.toml — surfaces print() count for awareness, per-file-ignores for scripts/agents/ml/tests
 |- **Computation cache wired**: multi_speed_momentum, ensemble_voter, and risk_parity_weight_overlay use get_realized_volatility() from computation_cache — shared TTL cache hits within cron cycle
