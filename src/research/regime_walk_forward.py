@@ -285,12 +285,16 @@ def run_walk_forward_validation(
         )
         window_results.append(window_result)
 
-        # Compute ARI between consecutive windows
-        if prev_test_labels is not None and len(prev_test_labels) == len(test_labels):
-            ari = compute_ari(list(prev_test_labels), list(test_labels))
+        # Compute ARI between train-based classification and full-series classification
+        # for the SAME in-sample dates. This measures label stability: if a date
+        # is labeled CRISIS with 504 days of data, is it still CRISIS with all data?
+        common_idx = train_regimes.index.intersection(full_regimes.index)
+        if len(common_idx) > 20:
+            ari = compute_ari(
+                list(train_regimes.loc[common_idx]),
+                list(full_regimes.loc[common_idx]),
+            )
             ari_scores.append(ari)
-
-        prev_test_labels = test_labels
 
     # Regime persistence: average days per regime episode
     regime_changes = full_regimes != full_regimes.shift(1)

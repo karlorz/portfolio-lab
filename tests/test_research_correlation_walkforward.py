@@ -280,7 +280,8 @@ class TestWalkForwardIntegration:
                 save=False,
             )
             assert result.n_windows > 0
-            # ARI can be slightly negative with random data
-            assert -0.2 <= result.overall_regime_stability <= 1.0
+            # Rule-based classifier with fixed thresholds should be perfectly stable
+            # (ARI=1.0) since labels don't change with more data
+            assert result.overall_regime_stability >= 0.5
             assert isinstance(result.regime_persistence, dict)
             assert isinstance(result.economic_coherence, dict)
