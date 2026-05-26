@@ -36,6 +36,7 @@ dependencies = [
     "cvxpy>=1.8",
     "cachetools>=5.0",
     "pybreaker>=1.0",
+    "fredapi>=0.5.2",
 ]
 
 [dependency-groups]
@@ -64,3 +65,17 @@ markers = [
 ]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["T201"]  # flake8-print: detect print() calls
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["T201"]   # CLI scripts — print() is expected
+"**/__main__.py" = ["T201"]  # CLI entry points
+"src/agents/**" = ["T201"]   # ML-gated — off-limits
+"src/ml/**" = ["T201"]       # ML-gated — off-limits
+"tests/**" = ["T201"]        # Test output — print() is expected
