@@ -160,6 +160,22 @@ class RampSignal(BaseModel):
     can_advance: bool = False
 
 
+class GoldTltCorrelationSignal(BaseModel):
+    """Validates the ``gold_tlt_correlation`` section of signals.json."""
+
+    model_config = ConfigDict(extra="allow")
+
+    current_correlation: float = 0.0
+    current_regime: str = "neutral"
+    correlation_trend: str = "stable"
+    mean_correlation: float = 0.0
+    min_correlation: float = 0.0
+    max_correlation: float = 0.0
+    structural_breaks_count: int = 0
+    regimes_count: int = 0
+    implications: str = ""
+
+
 SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "ensemble_voting": EnsembleVotingSignal,
     "garch_cvar": GarchCvarSignal,
@@ -171,6 +187,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "ic_decay": IcDecaySignal,
     "signal_wfe": SignalWfeSignal,
     "ramp": RampSignal,
+    "gold_tlt_correlation": GoldTltCorrelationSignal,
 }
 
 # Signals for which schemas are defined — used when integrating into

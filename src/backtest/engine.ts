@@ -532,6 +532,11 @@ export const PORTFOLIOS: PortfolioConfig[] = [
     rebalanceFrequency: 'annual',
   },
   {
+    name: 'SPY/GLD/TLT 44/36/20 ★',
+    allocation: { 'SPY': 0.44, 'GLD': 0.36, 'TLT': 0.20 },
+    rebalanceFrequency: 'annual',
+  },
+  {
     name: 'SPY/EFA/GLD/TLT 36/10/38/16',
     allocation: { 'SPY': 0.36, 'EFA': 0.10, 'GLD': 0.38, 'TLT': 0.16 },
     rebalanceFrequency: 'annual',

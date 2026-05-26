@@ -704,6 +704,25 @@ class DashboardGenerator:
             _log_signal_error("signal_wfe", e)
             output["signal_wfe"] = {"error": str(e)}
 
+        # Gold-TLT correlation regime monitor
+        try:
+            from src.research.gold_tlt_correlation import run_analysis
+            analysis = run_analysis(window=252, save=False)
+            output["gold_tlt_correlation"] = {
+                "current_correlation": analysis.current_correlation,
+                "current_regime": analysis.current_regime,
+                "correlation_trend": analysis.correlation_trend,
+                "mean_correlation": analysis.mean_correlation,
+                "min_correlation": analysis.min_correlation,
+                "max_correlation": analysis.max_correlation,
+                "structural_breaks_count": len(analysis.structural_breaks),
+                "regimes_count": len(analysis.regimes),
+                "implications": analysis.implications,
+            }
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("gold_tlt_correlation", e)
+            output["gold_tlt_correlation"] = {"error": str(e)}
+
         # Paper→Live ramp status
         try:
             from src.broker.alpaca import LiveTransitionManager

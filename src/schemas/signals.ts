@@ -453,6 +453,17 @@ export const SignalsDataSchema = z.object({
     can_advance: z.boolean(),
     alpaca_status: z.record(z.string(), z.unknown()),
   })),
+  gold_tlt_correlation: z.optional(z.object({
+    current_correlation: z.number(),
+    current_regime: z.string(),
+    correlation_trend: z.string(),
+    mean_correlation: z.number(),
+    min_correlation: z.number(),
+    max_correlation: z.number(),
+    structural_breaks_count: z.number(),
+    regimes_count: z.number(),
+    implications: z.string(),
+  })),
 }).passthrough();
 
 // ---------------------------------------------------------------------------

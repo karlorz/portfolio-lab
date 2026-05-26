@@ -336,6 +336,25 @@ class TestSchemaValidationPipeline:
         assert "ensemble_voting" in result
         assert "unknown_signal" in result
 
+    def test_gold_tlt_correlation_validates(self):
+        """Gold-TLT correlation output should pass Pydantic validation."""
+        from src.monitor.signal_schemas import validate_signal
+
+        data = {
+            "current_correlation": 0.10,
+            "current_regime": "neutral",
+            "correlation_trend": "stable",
+            "mean_correlation": 0.20,
+            "min_correlation": -0.15,
+            "max_correlation": 0.60,
+            "structural_breaks_count": 2,
+            "regimes_count": 5,
+            "implications": "Diversification benefit reduced.",
+        }
+        result = validate_signal("gold_tlt_correlation", data)
+        assert result["current_correlation"] == 0.10
+        assert result["current_regime"] == "neutral"
+
 
 # ─────────────────────────────────────────────────────────────
 #  5. Cross-signal consistency checks
