@@ -54,6 +54,7 @@ import type { TSMOMData } from './TSMOMPanel';
 import { CrossAssetRVPanel } from './CrossAssetRVPanel';
 import type { CrossAssetRVData } from './CrossAssetRVPanel';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
+import { validateSignalsData } from '../schemas/signals';
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -98,9 +99,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
       ]);
 
       if (signalsRes.ok) {
-        const s = await signalsRes.json();
-        setSignals(s);
-        setLastUpdate(new Date(s.generated_at).toLocaleTimeString());
+        const raw = await signalsRes.json();
+        const validated = validateSignalsData(raw);
+        if (validated) {
+          setSignals(validated);
+          setLastUpdate(new Date(validated.timestamp).toLocaleTimeString());
+        }
       }
       if (dashboardRes.ok) {
         const d = await dashboardRes.json();

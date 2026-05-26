@@ -18,6 +18,7 @@ import numpy as np
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
 from src.utils import safe_get
 from src.backtest.metrics import save_results_json
+from src.monitor.signal_schemas import validate_signal
 
 __all__ = [
     "DashboardGenerator",
@@ -566,7 +567,7 @@ class DashboardGenerator:
 
         output = {
             "generated_at": datetime.now().isoformat(),
-            "regime": regime_data,
+            "regime": validate_signal("regime", regime_data),
             "target_allocations": target_alloc,
             "current_positions": positions,
             "cash": round(cash, 2),
@@ -575,12 +576,12 @@ class DashboardGenerator:
             "recent_orders": list(reversed(orders)),
             "ml_signals": self._generate_ml_signals(),
             "factor_rotation": factor_rotation_signal,
-            "yield_curve": yield_curve_data.get("yield_curve"),
+            "yield_curve": validate_signal("yield_curve", yield_curve_data.get("yield_curve")),
             "duration_allocation": yield_curve_data.get("duration_allocation"),
             "convexity_harvest": convexity_signal,
             "volatility_parity": vol_parity_signal,
             "llm_sentiment": sentiment_signal,
-            "ensemble_voting": ensemble_signal,
+            "ensemble_voting": validate_signal("ensemble_voting", ensemble_signal),
             "sector_rotation": sector_momentum_signal,
             "alternative_data": alternative_data_signal,
             "behavioral_sentiment": behavioral_sentiment_data,
@@ -593,9 +594,9 @@ class DashboardGenerator:
             "closing_auction": overlay_data.get("closing_auction", {}),
             "stacking_ensemble": stacking_ensemble_dashboard,
             "factor_rotation_dashboard": factor_rotation_dashboard,
-            "smart_rebalance": smart_rebalance_data,
+            "smart_rebalance": validate_signal("smart_rebalance", smart_rebalance_data),
             "broker": broker_data,
-            "garch_cvar": garch_cvar_data,
+            "garch_cvar": validate_signal("garch_cvar", garch_cvar_data),
             "entropy": entropy_data,
             "bond_momentum": overlay_data.get("bond_momentum", {}),
         }

@@ -1,6 +1,12 @@
 """
 Alpaca broker API client for paper and live trading.
 Supports fractional shares, paper trading without KYC, and WebSocket streaming.
+
+Circuit breaker integration (``src.broker.circuit_breaker``):
+    - ``submit_order`` is decorated with ``@broker_breaker`` -- when the
+      circuit is open the call is short-circuited and returns ``None``.
+    - ``get_positions`` uses ``broker_breaker.call()`` -- when open it
+      returns an empty list.
 """
 import logging
 import os
@@ -12,9 +18,16 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
+from src.broker.circuit_breaker import (
+    BrokerError,
+    CircuitBreakerError,
+    PYBREAKER_AVAILABLE,
+    broker_breaker,
+    get_circuit_state,
+)
 
 
-__all__ = ['OrderRequest', 'Order', 'Position', 'AlpacaClient', 'PaperTradingManager', 'check_alpaca_status']
+__all__ = ['OrderRequest', 'Order', 'Position', 'AlpacaClient', 'PaperTradingManager', 'check_alpaca_status', 'get_circuit_state']
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +226,10 @@ class AlpacaClient:
             "paper": self.paper,
         }
     
+    @broker_breaker
     def submit_order(self, order: OrderRequest) -> Optional[Order]:
-        """Submit a new order. Returns None on API/network failure."""
+        """Submit a new order. Returns None on API/network failure or when
+        the circuit breaker is open."""
         client = self._get_client()
 
         # Convert our OrderRequest to Alpaca format
@@ -243,7 +258,7 @@ class AlpacaClient:
             return Order.from_alpaca(result)
         except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             logger.warning("Error submitting order for %s: %s", order.symbol, e)
-            return None
+            raise BrokerError(str(e)) from e
 
     def get_orders(self, status: Optional[str] = None, limit: int = 100) -> List[Order]:
         """Get list of orders. Returns empty list on API/network failure."""
@@ -277,10 +292,25 @@ class AlpacaClient:
             return 0
 
     def get_positions(self) -> List[Position]:
-        """Get current positions."""
+        """Get current positions.
+
+        Returns [] on API/network failure or when the circuit breaker is
+        open.
+        """
+        try:
+            return broker_breaker.call(self._get_positions_impl)
+        except (CircuitBreakerError, BrokerError):
+            return []
+
+    def _get_positions_impl(self) -> List[Position]:
+        """Inner implementation of get_positions (no circuit breaker)."""
         client = self._get_client()
-        positions = client.get_all_positions()
-        return [Position.from_alpaca(p) for p in positions]
+        try:
+            positions = client.get_all_positions()
+            return [Position.from_alpaca(p) for p in positions]
+        except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
+            logger.warning("Error fetching positions: %s", e)
+            raise BrokerError(str(e)) from e
     
     def get_position(self, symbol: str) -> Optional[Position]:
         """Get specific position."""

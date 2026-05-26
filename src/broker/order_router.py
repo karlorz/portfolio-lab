@@ -287,6 +287,13 @@ class OrderRouter:
                 for attempt in range(max_retries):
                     try:
                         result = self.client.submit_order(order_req)
+                        if result is None:
+                            # Circuit breaker open or broker error — treat as failure
+                            order_dict["status"] = "failed"
+                            order_dict["error"] = "broker_unavailable"
+                            order_dict["attempts"] = attempt + 1
+                            failed.append(order_dict)
+                            break
                         order_dict["status"] = "submitted"
                         order_dict["order_id"] = result.id
                         order_dict["broker_status"] = result.status

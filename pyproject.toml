@@ -35,6 +35,7 @@ dependencies = [
     "arch>=7.0",
     "cvxpy>=1.8",
     "cachetools>=5.0",
+    "pybreaker>=1.0",
 ]
 
 [dependency-groups]

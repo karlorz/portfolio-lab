@@ -13,14 +13,16 @@
     "agent-infer": "python3 -m src.agents.ai_controller"
   },
   "dependencies": {
+    "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "recharts": "^2.12.0",
-    "lucide-react": "^0.344.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/react": "^18.2.56",
     "@types/react-dom": "^18.2.19",
+    "@vitejs/plugin-react": "4",
     "typescript": "^5.2.2",
     "vite": "^5.1.4"
   }
