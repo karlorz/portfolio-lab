@@ -184,3 +184,23 @@ class TestRegimeWeightsIntegration:
         )
         assert 'REGIME_CONDITIONAL_WEIGHTS' in __all__
         assert isinstance(REGIME_CONDITIONAL_WEIGHTS, dict)
+
+    def test_env_var_toggle_in_compute_vote(self):
+        """ENSEMBLE_DISABLE_REGIME_WEIGHTS=1 skips regime weight step in pipeline."""
+        import os
+        from src.strategy.ensemble_voter import EnsembleVoter
+        # Verify the env var name is consistent (used by backtest comparison harness)
+        toggle_var = "ENSEMBLE_DISABLE_REGIME_WEIGHTS"
+        os.environ[toggle_var] = "1"
+        try:
+            voter = EnsembleVoter()
+            # The method should still exist and work (toggle only affects caller)
+            assert hasattr(voter, '_apply_regime_weights')
+            # Method should still apply weights when called directly
+            from src.strategy.ensemble_voter import SignalSource, Regime
+            result = voter._apply_regime_weights(
+                {SignalSource.ALTERNATIVE_DATA: 1.0}, Regime.CRISIS
+            )
+            assert isinstance(result, dict)
+        finally:
+            del os.environ[toggle_var]

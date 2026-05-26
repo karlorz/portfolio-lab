@@ -1012,7 +1012,8 @@ class EnsembleVoter:
         weights = self._apply_adaptive_weights(weights, regime)
         weights = self._apply_health_weights(weights)
         weights = self._apply_correlation_penalty(weights)
-        weights = self._apply_regime_weights(weights, regime)
+        if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "").lower() not in ("1", "true"):
+            weights = self._apply_regime_weights(weights, regime)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
         weights = self._apply_turnover_validation(weights, readings, regime)
