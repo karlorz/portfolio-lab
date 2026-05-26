@@ -16,9 +16,35 @@ import numpy as np
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, REGIME_OVERRIDES
 from src.backtest.metrics import save_results_json
+from enum import Enum
 
 
-__all__ = ['ORDERS_LOG', 'PERFORMANCE_LOG', 'PAPER_CONFIG', 'REGIME_OVERRIDES', 'Position', 'Portfolio', 'get_current_regime', 'get_latest_vix', 'get_latest_prices', 'calculate_performance', 'check_graduation_criteria']
+__all__ = ['ORDERS_LOG', 'PERFORMANCE_LOG', 'PAPER_CONFIG', 'REGIME_OVERRIDES', 'Position', 'Portfolio', 'get_current_regime', 'get_latest_vix', 'get_latest_prices', 'calculate_performance', 'check_graduation_criteria', 'KillSwitchLevel']
+
+
+class KillSwitchLevel(Enum):
+    """Graduated kill switch severity levels.
+
+    Level 1: WARNING — reduce position sizes by 25%
+    Level 2: RESTRICT — reduce position sizes by 50%
+    Level 3: HALT — block all new orders, allow only reduce-only
+    Level 4: LIQUIDATE — emergency liquidation of all positions
+    """
+    NONE = "none"
+    WARNING = "warning"        # Level 1
+    RESTRICT = "restrict"      # Level 2
+    HALT = "halt"              # Level 3
+    LIQUIDATE = "liquidate"    # Level 4
+
+
+# Drawdown thresholds for graduated kill switch (env-var configurable)
+KILL_SWITCH_THRESHOLDS = {
+    "warning_drawdown_pct": float(os.environ.get("KILL_WARNING_DRAWDOWN_PCT", "0.10")),
+    "restrict_drawdown_pct": float(os.environ.get("KILL_RESTRICT_DRAWDOWN_PCT", "0.15")),
+    "halt_drawdown_pct": float(os.environ.get("KILL_HALT_DRAWDOWN_PCT", "0.20")),
+    "liquidate_drawdown_pct": float(os.environ.get("KILL_LIQUIDATE_DRAWDOWN_PCT", "0.25")),
+    "extreme_tail_cvar_ratio": float(os.environ.get("KILL_EXTREME_CVAR_RATIO", "3.0")),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -259,14 +285,31 @@ class Portfolio:
         return executed
     
     def check_risk_limits(self, prices: Dict[str, float]) -> Optional[str]:
-        """Check if risk limits breached. Returns kill reason or None."""
+        """Check if risk limits breached. Returns kill reason or None.
+
+        Uses graduated kill switch levels (KillSwitchLevel):
+        - WARNING (10% DD): reduce position sizes by 25%
+        - RESTRICT (15% DD): reduce position sizes by 50%
+        - HALT (20% DD): block all new orders, reduce-only mode
+        - LIQUIDATE (25% DD or extreme tail risk): emergency liquidation
+        """
         total = self.total_value(prices)
+        current_drawdown = 0.0
 
         # Drawdown check (need equity curve)
         if len(self.history) > 20:
             peak = max(h["total_value"] for h in self.history[-252:])  # 1 year lookback
-            if total < peak * (1 - PAPER_CONFIG["max_drawdown_pct"]):
-                return f"max_drawdown_{(peak - total) / peak:.2%}"
+            current_drawdown = (peak - total) / peak if peak > 0 else 0.0
+
+            # Graduated kill switch by drawdown severity
+            if current_drawdown >= KILL_SWITCH_THRESHOLDS["liquidate_drawdown_pct"]:
+                return f"max_drawdown_{current_drawdown:.2%}"
+            if current_drawdown >= KILL_SWITCH_THRESHOLDS["halt_drawdown_pct"]:
+                return f"max_drawdown_{current_drawdown:.2%}"
+            if current_drawdown >= KILL_SWITCH_THRESHOLDS["restrict_drawdown_pct"]:
+                return f"max_drawdown_{current_drawdown:.2%}"
+            if current_drawdown >= KILL_SWITCH_THRESHOLDS["warning_drawdown_pct"]:
+                return f"max_drawdown_{current_drawdown:.2%}"
 
         # GARCH-CVaR tail risk check
         daily_returns = self._get_daily_returns()
@@ -274,10 +317,7 @@ class Portfolio:
             try:
                 from src.monitor.garch_cvar import calculate_garch_cvar
                 recent_returns = daily_returns[-min(252, len(daily_returns)):]
-                current_dd = 0.0
-                if len(self.history) > 20:
-                    peak = max(h["total_value"] for h in self.history[-252:])
-                    current_dd = min(0.0, (total - peak) / peak) if peak > 0 else 0.0
+                current_dd = min(0.0, -current_drawdown) if current_drawdown > 0 else 0.0
                 metrics = calculate_garch_cvar(
                     returns=recent_returns,
                     current_drawdown=current_dd,
@@ -286,7 +326,7 @@ class Portfolio:
                 # Write GARCH health report for dashboard consumption
                 self._write_garch_health_report(metrics)
                 # Trigger kill if CVaR exceeds 3× VaR (extreme tail risk)
-                if metrics.cvar_ratio > 3.0 and metrics.filter_active:
+                if metrics.cvar_ratio > KILL_SWITCH_THRESHOLDS["extreme_tail_cvar_ratio"] and metrics.filter_active:
                     return f"extreme_tail_risk_cvar_ratio_{metrics.cvar_ratio:.1f}"
             except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, ImportError, OSError) as e:
                 logger.warning("GARCH-CVaR computation failed, skipping tail risk check: %s", e)
@@ -443,6 +483,67 @@ def calculate_performance(portfolio: Portfolio, prices: Dict[str, float]) -> Dic
         "mode": portfolio.mode
     }
 
+
+def classify_kill_level(reason: str) -> KillSwitchLevel:
+    """Determine the graduated kill switch level from the breach reason.
+
+    Levels are based on drawdown severity and risk type:
+    - WARNING: drawdown 10-15% or moderate concentration breach
+    - RESTRICT: drawdown 15-20%
+    - HALT: drawdown 20-25% or max_drawdown breach
+    - LIQUIDATE: drawdown >25% or extreme tail risk (CVaR ratio >3)
+    """
+    if not reason:
+        return KillSwitchLevel.NONE
+
+    # Extreme tail risk → LIQUIDATE
+    if "extreme_tail_risk" in reason:
+        return KillSwitchLevel.LIQUIDATE
+
+    # Parse drawdown percentage from reason string
+    if "max_drawdown_" in reason:
+        try:
+            dd_str = reason.split("max_drawdown_")[1].rstrip("%")
+            raw_val = float(dd_str)
+            # Convert to 0-1 fraction: formats like "-12.0%" or "12.0%"
+            dd_pct = raw_val / 100 if abs(raw_val) > 1 else raw_val
+            dd_abs = abs(dd_pct)
+
+            if dd_abs >= KILL_SWITCH_THRESHOLDS["liquidate_drawdown_pct"]:
+                return KillSwitchLevel.LIQUIDATE
+            elif dd_abs >= KILL_SWITCH_THRESHOLDS["halt_drawdown_pct"]:
+                return KillSwitchLevel.HALT
+            elif dd_abs >= KILL_SWITCH_THRESHOLDS["restrict_drawdown_pct"]:
+                return KillSwitchLevel.RESTRICT
+            elif dd_abs >= KILL_SWITCH_THRESHOLDS["warning_drawdown_pct"]:
+                return KillSwitchLevel.WARNING
+        except (ValueError, IndexError):
+            pass
+        # Default for unparseable drawdown → HALT (fail-closed)
+        return KillSwitchLevel.HALT
+
+    # Position concentration → WARNING (less severe than drawdown)
+    if "max_position_" in reason:
+        return KillSwitchLevel.WARNING
+
+    # Unknown breach → HALT (fail-closed)
+    return KillSwitchLevel.HALT
+
+
+def _kill_level_reduction(level: KillSwitchLevel) -> float:
+    """Position size reduction fraction for each kill switch level.
+
+    Returns 0.0 (no reduction) to 1.0 (full liquidation).
+    """
+    return {
+        KillSwitchLevel.NONE: 0.0,
+        KillSwitchLevel.WARNING: 0.25,
+        KillSwitchLevel.RESTRICT: 0.50,
+        KillSwitchLevel.HALT: 1.0,
+        KillSwitchLevel.LIQUIDATE: 1.0,
+    }.get(level, 1.0)
+
+
 def main():
     """Main evaluation loop."""
     print(f"[{datetime.now()}] Strategy Evaluator Starting")
@@ -465,15 +566,16 @@ def main():
     # Check kill switches
     kill_reason = portfolio.check_risk_limits(prices)
     if kill_reason:
-        logger.critical("KILL SWITCH TRIGGERED: %s", kill_reason)
-        # In paper mode, just log and hold
-        # In live mode, this would liquidate
-        # Write kill_switch.json (read by order_router and dashboard)
+        kill_level = classify_kill_level(kill_reason)
+        logger.critical("KILL SWITCH TRIGGERED: level=%s reason=%s", kill_level.value, kill_reason)
+        # Write kill_switch.json with graduated level (read by order_router and dashboard)
         save_results_json({
             "enabled": True,
+            "level": kill_level.value,
             "reason": kill_reason,
             "mode": mode,
             "timestamp": datetime.now().isoformat(),
+            "position_reduction": _kill_level_reduction(kill_level),
         }, output_path=str(DATA_DIR / "kill_switch.json"))
         return
 

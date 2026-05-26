@@ -113,6 +113,22 @@ class SignalSnapshotSchema(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class FredMacroSignal(BaseModel):
+    """Validates the ``fred_macro`` section of signals.json."""
+
+    model_config = ConfigDict(extra="allow")
+
+    regime: str = "UNKNOWN"
+    confidence: float = 0.0
+    recession_probability: float = 0.0
+    inflation_pressure: float = 0.0
+    monetary_stance: str = "unknown"
+    manufacturing_health: float = 50.0
+    credit_conditions: str = "unknown"
+    indicators: Dict[str, float] = Field(default_factory=dict)
+    timestamp: str = ""
+
+
 # ─────────────────────────────────────────────────────────────
 #  Signal model registry
 # ─────────────────────────────────────────────────────────────
@@ -124,6 +140,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "regime": RegimeSignal,
     "yield_curve": YieldCurveSignal,
     "signal_snapshot": SignalSnapshotSchema,
+    "fred_macro": FredMacroSignal,
 }
 
 # Signals for which schemas are defined — used when integrating into

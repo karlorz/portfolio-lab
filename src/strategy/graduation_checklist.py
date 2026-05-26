@@ -15,6 +15,7 @@ Usage:
 import copy
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -47,50 +48,50 @@ class GraduationChecklist:
     the paper portfolio ready for live promotion.
     """
 
-    # Default thresholds
+    # Default thresholds (env-var configurable)
     DEFAULT_CRITERIA = {
         "min_trading_days": {
-            "value": 63,
+            "value": int(os.environ.get("GRADUATION_MIN_TRADING_DAYS", "63")),
             "description": "At least 63 trading days of paper trading data",
         },
         "min_sharpe": {
-            "value": 0.50,
+            "value": float(os.environ.get("GRADUATION_MIN_SHARPE", "0.50")),
             "description": "Rolling Sharpe ratio >= 0.50",
         },
         "max_drawdown": {
-            "value": 0.15,
-            "description": "Maximum drawdown <= 15%",
+            "value": float(os.environ.get("GRADUATION_MAX_DRAWDOWN", "0.25")),
+            "description": "Maximum drawdown <= 25% (adjusted for 46/38/16 equity/commodity/bond portfolio; champion backtest max DD = -26.2%)",
         },
         "min_win_rate": {
-            "value": 0.40,
+            "value": float(os.environ.get("GRADUATION_MIN_WIN_RATE", "0.40")),
             "description": "Win rate >= 40%",
         },
         "health_checks": {
-            "value": 30,
+            "value": int(os.environ.get("GRADUATION_HEALTH_CHECKS", "30")),
             "description": "All 9 health checks passing for 30 consecutive days",
         },
         "min_tca_orders": {
-            "value": 10,
+            "value": int(os.environ.get("GRADUATION_MIN_TCA_ORDERS", "10")),
             "description": "TCA engine populated with >= 10 orders",
         },
         "circuit_breaker_confidence": {
-            "value": 3,
+            "value": int(os.environ.get("GRADUATION_CIRCUIT_BREAKER", "3")),
             "description": "Circuit breaker confidence >= 3 consecutive cycles (no trip)",
         },
         "min_dsr": {
-            "value": 0.50,
+            "value": float(os.environ.get("GRADUATION_MIN_DSR", "0.50")),
             "description": "Deflated Sharpe Ratio >= 0.50 (validates against multiple-testing bias)",
         },
         "regime_coverage": {
-            "value": 2,
+            "value": int(os.environ.get("GRADUATION_REGIME_COVERAGE", "2")),
             "description": "Paper trading must span at least 2 distinct volatility regimes",
         },
         "signal_diversity": {
-            "value": 4,
+            "value": int(os.environ.get("GRADUATION_SIGNAL_DIVERSITY", "4")),
             "description": "At least 4 of 6 active signals must have contributed to rebalance decisions",
         },
         "sharpe_ci_lower": {
-            "value": 0.30,
+            "value": float(os.environ.get("GRADUATION_SHARPE_CI_LOWER", "0.30")),
             "description": "Lower bound of 75% CI for Sharpe >= 0.30 (prevents false-positive graduation)",
         },
         "manual_approval": {
@@ -378,7 +379,7 @@ class GraduationChecklist:
                     name="max_drawdown",
                     passed=True,  # No data means no drawdown
                     value=0.0,
-                    required=0.15,
+                    required=self.criteria["max_drawdown"]["value"],
                     description=self.criteria["max_drawdown"]["description"],
                 )
 

@@ -603,3 +603,98 @@ class TestEdgeCases:
         assert len(cached) == 2
         # NaN should have been serialized to None then read back as NaN
         assert pd.isna(cached.iloc[-1])
+
+
+class TestFredMacroDashboardIntegration:
+    """Test FRED-MD signal appears in dashboard output."""
+
+    def test_fred_macro_in_signals_json(self, tmp_path, monkeypatch):
+        """DashboardGenerator should include fred_macro section."""
+        monkeypatch.setattr("src.dashboard.generator.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.dashboard.generator.PUBLIC_DIR", tmp_path)
+        monkeypatch.setattr("src.dashboard.generator.DB_PATH", str(tmp_path / "market.db"))
+        monkeypatch.setattr("src.paths.DATA_DIR", tmp_path)
+
+        (tmp_path / "prices.json").write_text("{}")
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+
+        import sqlite3
+        db_path = tmp_path / "market.db"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS prices (
+                    symbol TEXT, date TEXT, close REAL,
+                    PRIMARY KEY (symbol, date)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS regime_log (
+                    regime TEXT, detected_at TEXT
+                )
+            """)
+
+        from src.dashboard.generator import DashboardGenerator
+
+        with patch("src.data.fred_data.get_fred_signal") as mock_fred:
+            mock_fred.return_value = FredSignal(
+                timestamp="2026-05-26T00:00:00Z",
+                regime="NORMAL",
+                confidence=0.6,
+                indicators={"recession_probability": 5.0, "inflation_yoy": 2.5},
+                recession_probability=5.0,
+                inflation_pressure=2.5,
+                monetary_stance="neutral",
+                manufacturing_health=52.0,
+                credit_conditions="normal",
+            )
+
+            with DashboardGenerator() as gen:
+                gen.generate_signals_json()
+
+        signals_file = tmp_path / "signals.json"
+        assert signals_file.exists()
+        data = json.loads(signals_file.read_text())
+        assert "fred_macro" in data
+        assert data["fred_macro"]["regime"] == "NORMAL"
+        assert data["fred_macro"]["confidence"] == 0.6
+        assert data["fred_macro"]["recession_probability"] == 5.0
+
+    def test_fred_macro_graceful_fallback(self, tmp_path, monkeypatch):
+        """Dashboard should handle FRED-MD unavailability gracefully."""
+        monkeypatch.setattr("src.dashboard.generator.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.dashboard.generator.PUBLIC_DIR", tmp_path)
+        monkeypatch.setattr("src.dashboard.generator.DB_PATH", str(tmp_path / "market.db"))
+        monkeypatch.setattr("src.paths.DATA_DIR", tmp_path)
+
+        (tmp_path / "prices.json").write_text("{}")
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+
+        import sqlite3
+        db_path = tmp_path / "market.db"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS prices (
+                    symbol TEXT, date TEXT, close REAL,
+                    PRIMARY KEY (symbol, date)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS regime_log (
+                    regime TEXT, detected_at TEXT
+                )
+            """)
+
+        from src.dashboard.generator import DashboardGenerator
+
+        with patch("src.data.fred_data.get_fred_signal", side_effect=ImportError("no fredapi")):
+            with DashboardGenerator() as gen:
+                gen.generate_signals_json()
+
+        signals_file = tmp_path / "signals.json"
+        assert signals_file.exists()
+        data = json.loads(signals_file.read_text())
+        assert "fred_macro" in data
+        assert data["fred_macro"]["regime"] == "UNKNOWN"
+        assert data["fred_macro"]["confidence"] == 0.0

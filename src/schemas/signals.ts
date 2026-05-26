@@ -602,6 +602,21 @@ export const RebalanceHealthSchema = z.object({
 }).passthrough();
 
 // ---------------------------------------------------------------------------
+// FredMacroSchema — FRED-MD macro regime signal
+// ---------------------------------------------------------------------------
+export const FredMacroSchema = z.object({
+  regime: z.string(),
+  confidence: z.number(),
+  recession_probability: z.number(),
+  inflation_pressure: z.number(),
+  monetary_stance: z.string(),
+  manufacturing_health: z.number(),
+  credit_conditions: z.string(),
+  indicators: z.record(z.string(), z.number()),
+  timestamp: z.string(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
 // GraduationDataSchema — /data/graduation.json
 // ---------------------------------------------------------------------------
 export const GraduationDataSchema = z.object({

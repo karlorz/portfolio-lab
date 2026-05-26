@@ -113,6 +113,18 @@ export interface SignalsData {
   spc_flags?: Record<string, unknown>;
   // Staleness info
   staleness?: Record<string, unknown>;
+  // FRED-MD macro regime signal
+  fred_macro?: {
+    regime: string;
+    confidence: number;
+    recession_probability: number;
+    inflation_pressure: number;
+    monetary_stance: string;
+    manufacturing_health: number;
+    credit_conditions: string;
+    indicators: Record<string, number>;
+    timestamp: string;
+  };
 }
 
 export interface Position {

@@ -1535,3 +1535,120 @@ class TestKillSwitchTrigger:
                     kill_switch_check=True,
                 )
             assert result["status"] == "blocked"
+
+
+class TestKillSwitchGraduatedLevels:
+    """Test graduated kill switch: 4-level response (warning/restrict/halt/liquidate)."""
+
+    def test_classify_warning_level(self):
+        """10-15% drawdown → WARNING level, 25% position reduction."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel, _kill_level_reduction
+        level = classify_kill_level("max_drawdown_-12.0%")
+        assert level == KillSwitchLevel.WARNING
+        assert _kill_level_reduction(level) == 0.25
+
+    def test_classify_restrict_level(self):
+        """15-20% drawdown → RESTRICT level, 50% position reduction."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel, _kill_level_reduction
+        level = classify_kill_level("max_drawdown_-18.0%")
+        assert level == KillSwitchLevel.RESTRICT
+        assert _kill_level_reduction(level) == 0.50
+
+    def test_classify_halt_level(self):
+        """20-25% drawdown → HALT level, 100% position reduction."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel, _kill_level_reduction
+        level = classify_kill_level("max_drawdown_-22.0%")
+        assert level == KillSwitchLevel.HALT
+        assert _kill_level_reduction(level) == 1.0
+
+    def test_classify_liquidate_level(self):
+        """25%+ drawdown → LIQUIDATE level, full liquidation."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel, _kill_level_reduction
+        level = classify_kill_level("max_drawdown_-30.0%")
+        assert level == KillSwitchLevel.LIQUIDATE
+        assert _kill_level_reduction(level) == 1.0
+
+    def test_classify_extreme_tail_risk(self):
+        """Extreme tail risk (CVaR ratio >3) → LIQUIDATE level."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("extreme_tail_risk_cvar_ratio_4.5")
+        assert level == KillSwitchLevel.LIQUIDATE
+
+    def test_classify_position_concentration(self):
+        """Position concentration breach → WARNING level."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_position_SPY_55.0%")
+        assert level == KillSwitchLevel.WARNING
+
+    def test_classify_none_reason(self):
+        """Empty reason → NONE level."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("")
+        assert level == KillSwitchLevel.NONE
+
+    def test_classify_unknown_breach_halt(self):
+        """Unknown breach reason → HALT (fail-closed)."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("unknown_risk_breach")
+        assert level == KillSwitchLevel.HALT
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_kill_switch_json_includes_level(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, capsys,
+    ):
+        """kill_switch.json should include 'level' and 'position_reduction' fields."""
+        from src.strategy.evaluator import main
+
+        with (
+            patch('src.strategy.evaluator.DATA_DIR', tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch('src.strategy.evaluator.Portfolio') as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = "max_drawdown_-18.0%"
+            mock_portfolio.total_value.return_value = 82000
+            MockPortfolio.return_value = mock_portfolio
+            main()
+
+        kill_file = tmp_path / "kill_switch.json"
+        assert kill_file.exists()
+        with open(kill_file) as f:
+            data = json.load(f)
+        assert data["enabled"] is True
+        assert data["level"] == "restrict"
+        assert data["position_reduction"] == 0.5
+        assert "reason" in data
+        assert "timestamp" in data
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_kill_switch_liquidate_includes_full_reduction(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, capsys,
+    ):
+        """LIQUIDATE level kill_switch.json should have position_reduction=1.0."""
+        from src.strategy.evaluator import main
+
+        with (
+            patch('src.strategy.evaluator.DATA_DIR', tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch('src.strategy.evaluator.Portfolio') as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = "max_drawdown_-30.0%"
+            mock_portfolio.total_value.return_value = 70000
+            MockPortfolio.return_value = mock_portfolio
+            main()
+
+        kill_file = tmp_path / "kill_switch.json"
+        assert kill_file.exists()
+        with open(kill_file) as f:
+            data = json.load(f)
+        assert data["level"] == "liquidate"
+        assert data["position_reduction"] == 1.0

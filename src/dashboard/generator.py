@@ -622,6 +622,29 @@ class DashboardGenerator:
         # Apply staleness-weighted decay to ensemble weights
         output = self._apply_staleness_decay(output)
 
+        # FRED-MD macro regime signal
+        try:
+            from src.data.fred_data import get_fred_signal
+            fred_signal = get_fred_signal()
+            output["fred_macro"] = validate_signal("fred_macro", {
+                "regime": fred_signal.regime,
+                "confidence": fred_signal.confidence,
+                "recession_probability": fred_signal.recession_probability,
+                "inflation_pressure": fred_signal.inflation_pressure,
+                "monetary_stance": fred_signal.monetary_stance,
+                "manufacturing_health": fred_signal.manufacturing_health,
+                "credit_conditions": fred_signal.credit_conditions,
+                "indicators": fred_signal.indicators,
+                "timestamp": fred_signal.timestamp,
+            })
+        except (ImportError, ValueError, OSError, RuntimeError) as e:
+            logger.warning("FRED-MD macro signal not available: %s", e)
+            output["fred_macro"] = {
+                "regime": "UNKNOWN",
+                "confidence": 0.0,
+                "error": str(e),
+            }
+
         # Health check report
         try:
             from src.monitor.health_check import run_health_check
@@ -1908,6 +1931,23 @@ class DashboardGenerator:
     def run(self):
         """Generate all dashboard files."""
         logger.info("Generating dashboard data...")
+
+        # Freeze manifest for config drift detection
+        try:
+            from src.monitor.freeze_manifest import create_manifest, save_manifest, load_manifest, diff_manifests
+            current = create_manifest()
+            baseline = load_manifest()
+            if baseline:
+                drift = diff_manifests(baseline, current)
+                if drift["drifted"]:
+                    logger.warning("Config drift detected: git_changed=%s config_drift=%d files_added=%d files_modified=%d",
+                                   drift["git_changed"],
+                                   len(drift["config_drift"]),
+                                   len(drift["file_changes"]["added"]),
+                                   len(drift["file_changes"]["modified"]))
+            save_manifest(current)
+        except Exception as e:
+            logger.warning("Freeze manifest failed: %s", e)
 
         try:
             paths = [

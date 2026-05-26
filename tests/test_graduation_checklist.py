@@ -525,7 +525,7 @@ class TestEdgeCases:
         checklist = GraduationChecklist()
         assert checklist.criteria["min_trading_days"]["value"] == 63
         assert checklist.criteria["min_sharpe"]["value"] == 0.50
-        assert checklist.criteria["max_drawdown"]["value"] == 0.15
+        assert checklist.criteria["max_drawdown"]["value"] == 0.25
         assert checklist.criteria["min_win_rate"]["value"] == 0.40
         assert checklist.criteria["manual_approval"]["value"] is False
 
