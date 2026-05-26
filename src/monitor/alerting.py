@@ -42,6 +42,7 @@ class AlertChannel(str, Enum):
     EVALUATOR_ERROR = "evaluator_error"
     PORTFOLIO_DRIFT = "portfolio_drift"
     CRON_FAILURE = "cron_failure"
+    IC_DECAY = "ic_decay"
 
 
 # Track last alert time per (channel, level) to enforce dedup interval
@@ -186,4 +187,61 @@ def check_drift_and_alert(drift_pct: float, symbol: str = "") -> None:
             AlertLevel.HALT,
             f"CRITICAL portfolio drift exceeding 10%{label}: {drift_pct:.1f}%",
             details={"drift_pct": drift_pct, "symbol": symbol},
+        )
+
+
+def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
+    """Check IC decay report and fire alerts for degrading signals.
+
+    Args:
+        ic_decay_data: Output from compute_ic_decay_report(), mapping
+            signal_name -> {"status": "healthy"|"warning"|"critical"|...,
+                           "ic_rolling": float, "ic_trend": str, ...}
+    """
+    if not ic_decay_data or "error" in ic_decay_data:
+        return
+
+    warning_signals = []
+    critical_signals = []
+    healthy_count = 0
+
+    for signal_name, data in ic_decay_data.items():
+        status = data.get("status", "unknown")
+        if status == "critical":
+            critical_signals.append(signal_name)
+        elif status == "warning":
+            warning_signals.append(signal_name)
+        elif status == "healthy":
+            healthy_count += 1
+
+    total = len(ic_decay_data)
+    if total == 0:
+        return
+
+    if not warning_signals and not critical_signals:
+        send_alert(
+            AlertChannel.IC_DECAY,
+            AlertLevel.PASS,
+            f"All {total} signals have healthy IC",
+        )
+    elif critical_signals:
+        send_alert(
+            AlertChannel.IC_DECAY,
+            AlertLevel.HALT,
+            f"{len(critical_signals)} signal(s) with CRITICAL IC decay: {', '.join(critical_signals)}",
+            details={
+                "critical_signals": critical_signals,
+                "warning_signals": warning_signals,
+                "healthy_count": healthy_count,
+            },
+        )
+    elif warning_signals:
+        send_alert(
+            AlertChannel.IC_DECAY,
+            AlertLevel.WARN,
+            f"{len(warning_signals)} signal(s) with IC decay warning: {', '.join(warning_signals)}",
+            details={
+                "warning_signals": warning_signals,
+                "healthy_count": healthy_count,
+            },
         )

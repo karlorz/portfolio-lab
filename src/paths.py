@@ -69,6 +69,13 @@ MAX_DEVIATION: float = float(os.environ.get("MAX_DEVIATION", "0.10")) # ±10% ma
 MIN_WEIGHT: float = float(os.environ.get("MIN_WEIGHT", "0.05"))       # Minimum 5% per asset
 REBALANCE_FREQ: int = int(os.environ.get("REBALANCE_FREQ", "21"))     # Monthly rebalancing
 
+# ── VIX regime thresholds ─────────────────────────────────────────────
+# Used by evaluator.py get_current_regime() and generator.py.
+# Single source of truth — import from here instead of hardcoding.
+VIX_CRISIS_THRESHOLD: float = float(os.environ.get("VIX_CRISIS_THRESHOLD", "25.0"))
+VIX_VOL_SPIKE_THRESHOLD: float = float(os.environ.get("VIX_VOL_SPIKE_THRESHOLD", "20.0"))
+VIX_LOW_VOL_THRESHOLD: float = float(os.environ.get("VIX_LOW_VOL_THRESHOLD", "15.0"))
+
 
 def sqlite_connect(db_path: Union[str, Path], **kwargs) -> sqlite3.Connection:
     """Open a SQLite connection with WAL journal mode enabled.

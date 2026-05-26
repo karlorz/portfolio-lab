@@ -9,6 +9,7 @@ import json
 import logging
 import sqlite3
 from src.paths import sqlite_connect
+from src.utils import classify_vix_regime
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
@@ -403,43 +404,22 @@ class Portfolio:
 def get_current_regime(conn: sqlite3.Connection) -> str:
     """Get latest detected regime using VIX thresholds and trend analysis."""
     cursor = conn.cursor()
-    
+
     # Try to get VIX level
     cursor.execute("""
-        SELECT close FROM prices 
-        WHERE symbol = '^VIX' 
+        SELECT close FROM prices
+        WHERE symbol = '^VIX'
         ORDER BY date DESC LIMIT 1
     """)
     vix_row = cursor.fetchone()
     vix_level = vix_row[0] if vix_row else None
-    
-    # Try to get trend signal from regime_log (existing trend-based detection)
+
+    # Try to get trend signal from regime_log
     cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 1")
     trend_row = cursor.fetchone()
     trend_regime = trend_row[0] if trend_row else "normal"
-    
-    # VIX-based regime detection
-    # >25: crisis, >20: vol_spike, <15: low_vol
-    if vix_level is not None:
-        if vix_level > 25:
-            vix_regime = "crisis"
-        elif vix_level > 20:
-            vix_regime = "vol_spike"
-        elif vix_level < 15:
-            vix_regime = "low_vol"
-        else:
-            vix_regime = "normal"
-        
-        # Composite: VIX overrides trend in extreme cases
-        # If VIX says crisis or vol_spike, trust it (market fear is immediate)
-        # If VIX says low_vol, confirm with trend (avoid false calm)
-        if vix_regime in ["crisis", "vol_spike"]:
-            return vix_regime
-        elif vix_regime == "low_vol" and trend_regime != "crisis":
-            return "low_vol"
-    
-    # Fallback to trend-based or default
-    return trend_regime if trend_row else "normal"
+
+    return classify_vix_regime(vix_level, trend_regime)
 
 def get_latest_vix(conn: sqlite3.Connection) -> Optional[float]:
     """Get latest VIX level for display."""

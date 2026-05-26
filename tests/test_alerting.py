@@ -13,6 +13,7 @@ from src.monitor.alerting import (
     send_alert,
     check_staleness_and_alert,
     check_drift_and_alert,
+    check_ic_decay_and_alert,
     _last_alert_time,
     ALERT_MIN_INTERVAL_SECONDS,
 )
@@ -31,6 +32,7 @@ class TestAlertChannel:
         assert AlertChannel.EVALUATOR_ERROR == "evaluator_error"
         assert AlertChannel.PORTFOLIO_DRIFT == "portfolio_drift"
         assert AlertChannel.CRON_FAILURE == "cron_failure"
+        assert AlertChannel.IC_DECAY == "ic_decay"
 
 
 class TestSendAlert:
@@ -182,3 +184,65 @@ class TestCheckDriftAndAlert:
         check_drift_and_alert(-6.0)
         mock_send.assert_called_once()
         assert mock_send.call_args[0][1] == AlertLevel.WARN
+
+
+class TestCheckIcDecayAndAlert:
+    @patch("src.monitor.alerting.send_alert")
+    def test_all_healthy_sends_pass(self, mock_send):
+        ic_decay = {
+            "alternative_data": {"status": "healthy", "ic_rolling": 0.15, "ic_trend": "stable"},
+            "cross_asset_rv": {"status": "healthy", "ic_rolling": 0.12, "ic_trend": "stable"},
+        }
+        check_ic_decay_and_alert(ic_decay)
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][0] == AlertChannel.IC_DECAY
+        assert mock_send.call_args[0][1] == AlertLevel.PASS
+
+    @patch("src.monitor.alerting.send_alert")
+    def test_warning_signal_sends_warn(self, mock_send):
+        ic_decay = {
+            "alternative_data": {"status": "warning", "ic_rolling": 0.07, "ic_trend": "decaying"},
+            "cross_asset_rv": {"status": "healthy", "ic_rolling": 0.12, "ic_trend": "stable"},
+        }
+        check_ic_decay_and_alert(ic_decay)
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][0] == AlertChannel.IC_DECAY
+        assert mock_send.call_args[0][1] == AlertLevel.WARN
+        assert "alternative_data" in mock_send.call_args[0][2]
+
+    @patch("src.monitor.alerting.send_alert")
+    def test_critical_signal_sends_halt(self, mock_send):
+        ic_decay = {
+            "alternative_data": {"status": "critical", "ic_rolling": 0.02, "ic_trend": "decaying"},
+            "cross_asset_rv": {"status": "warning", "ic_rolling": 0.07, "ic_trend": "decaying"},
+        }
+        check_ic_decay_and_alert(ic_decay)
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][0] == AlertChannel.IC_DECAY
+        assert mock_send.call_args[0][1] == AlertLevel.HALT
+        assert "alternative_data" in mock_send.call_args[0][2]
+
+    @patch("src.monitor.alerting.send_alert")
+    def test_empty_data_no_alert(self, mock_send):
+        check_ic_decay_and_alert({})
+        mock_send.assert_not_called()
+
+    @patch("src.monitor.alerting.send_alert")
+    def test_error_key_no_alert(self, mock_send):
+        check_ic_decay_and_alert({"error": "monitor unavailable"})
+        mock_send.assert_not_called()
+
+    @patch("src.monitor.alerting.send_alert")
+    def test_mixed_warning_and_critical_sends_halt(self, mock_send):
+        """When both warning and critical signals exist, alert is HALT."""
+        ic_decay = {
+            "multi_speed_mom": {"status": "critical", "ic_rolling": 0.01, "ic_trend": "decaying"},
+            "alternative_data": {"status": "warning", "ic_rolling": 0.08, "ic_trend": "decaying"},
+            "cross_asset_rv": {"status": "healthy", "ic_rolling": 0.15, "ic_trend": "stable"},
+        }
+        check_ic_decay_and_alert(ic_decay)
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][1] == AlertLevel.HALT
+        # Details should include both critical and warning signals
+        details = mock_send.call_args[1].get("details") or mock_send.call_args[0][3] if len(mock_send.call_args[0]) > 3 else None
+        # The function passes details as keyword arg

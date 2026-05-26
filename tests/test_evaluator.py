@@ -1352,6 +1352,46 @@ class TestCurrentRegime:
         cursor.fetchone.side_effect = [None, None]
         assert get_current_regime(conn) == "normal"
 
+    def test_vix_exactly_25_boundary(self):
+        """VIX exactly 25.0 falls into vol_spike (not crisis, since 25 > 25 is False)."""
+        conn = MagicMock()
+        cursor = MagicMock()
+        conn.cursor.return_value = cursor
+        cursor.fetchone.side_effect = [(25.0,), ("normal",)]
+        assert get_current_regime(conn) == "vol_spike"
+
+    def test_vix_exactly_20_boundary(self):
+        """VIX exactly 20.0 falls into normal (not vol_spike, since 20 > 20 is False)."""
+        conn = MagicMock()
+        cursor = MagicMock()
+        conn.cursor.return_value = cursor
+        cursor.fetchone.side_effect = [(20.0,), ("normal",)]
+        assert get_current_regime(conn) == "normal"
+
+    def test_vix_exactly_15_boundary(self):
+        """VIX exactly 15.0 falls into normal (not low_vol, since 15 < 15 is False)."""
+        conn = MagicMock()
+        cursor = MagicMock()
+        conn.cursor.return_value = cursor
+        cursor.fetchone.side_effect = [(15.0,), ("normal",)]
+        assert get_current_regime(conn) == "normal"
+
+    def test_vix_just_above_crisis_threshold(self):
+        """VIX=25.01 is crisis."""
+        conn = MagicMock()
+        cursor = MagicMock()
+        conn.cursor.return_value = cursor
+        cursor.fetchone.side_effect = [(25.01,), ("normal",)]
+        assert get_current_regime(conn) == "crisis"
+
+    def test_vix_just_below_low_vol_threshold(self):
+        """VIX=14.99 is low_vol."""
+        conn = MagicMock()
+        cursor = MagicMock()
+        conn.cursor.return_value = cursor
+        cursor.fetchone.side_effect = [(14.99,), ("normal",)]
+        assert get_current_regime(conn) == "low_vol"
+
 
 # ---------------------------------------------------------------------------
 # get_latest_vix (requires mocked SQLite connection)

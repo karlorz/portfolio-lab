@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
-from src.utils import safe_get
+from src.utils import safe_get, classify_vix_regime
 from src.backtest.metrics import save_results_json
 from src.monitor.signal_schemas import validate_all_signals, validate_signal
 
@@ -37,6 +37,35 @@ _ENSEMBLE_STALENESS_MAP = {
 }
 
 logger = logging.getLogger(__name__)
+
+# Common exception types caught when signal generators fail.
+# ValueError/TypeError indicate likely bugs — callers should log these at
+# error level. ImportError/AttributeError indicate missing deps — warning.
+SIGNAL_EXCEPTIONS = (
+    ImportError, AttributeError, KeyError,
+    ValueError, TypeError, RuntimeError, OSError,
+)
+
+# Lighter exception tuple for monitoring/utility modules that don't
+# touch external data structures (no AttributeError/KeyError risk).
+MONITOR_EXCEPTIONS = (ImportError, ValueError, OSError, RuntimeError)
+
+# Exceptions that indicate likely bugs rather than missing dependencies.
+_BUG_EXCEPTIONS = (ValueError, TypeError)
+
+
+def _log_signal_error(signal_name: str, exc: Exception) -> None:
+    """Log a signal exception at the appropriate level.
+
+    ValueError/TypeError are likely code bugs → logger.error.
+    ImportError/AttributeError/KeyError are missing deps → logger.warning.
+    RuntimeError/OSError are environmental → logger.warning.
+    """
+    if isinstance(exc, _BUG_EXCEPTIONS):
+        logger.error("Signal %s failed with likely bug: %s", signal_name, exc)
+    else:
+        logger.warning("Signal %s not available: %s", signal_name, exc)
+
 
 PUBLIC_DIR = PUBLIC_DATA_DIR
 DB_PATH = MARKET_DB
@@ -145,8 +174,8 @@ class DashboardGenerator:
                 "bond_momentum": data.get("bond_duration", {}),
                 "unified": data.get("unified", {}),
             })
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Overlay dashboard data unavailable: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("overlay_dashboard", e)
 
         # VIX term structure
         try:
@@ -159,8 +188,8 @@ class DashboardGenerator:
             if state_file.exists():
                 with open(state_file) as f:
                     result["vix_overlay"] = json.load(f)
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("VIX term structure data unavailable: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("vix_term_structure", e)
 
         return result
 
@@ -185,29 +214,10 @@ class DashboardGenerator:
         trend_row = cursor.fetchone()
         trend_regime = trend_row[0] if trend_row else "normal"
         trend_detected = trend_row[1] if trend_row else None
-        
-        # VIX-based regime detection
-        # >25: crisis, >20: vol_spike, <15: low_vol
-        if vix_level is not None:
-            if vix_level > 25:
-                vix_regime = "crisis"
-            elif vix_level > 20:
-                vix_regime = "vol_spike"
-            elif vix_level < 15:
-                vix_regime = "low_vol"
-            else:
-                vix_regime = "normal"
-            
-            # Composite: VIX overrides trend in extreme cases
-            if vix_regime in ["crisis", "vol_spike"]:
-                current_regime = vix_regime
-            elif vix_regime == "low_vol" and trend_regime != "crisis":
-                current_regime = "low_vol"
-            else:
-                current_regime = trend_regime
-        else:
-            current_regime = trend_regime
-        
+
+        # VIX-based regime detection (shared logic with evaluator.py)
+        current_regime = classify_vix_regime(vix_level, trend_regime)
+
         regime_data = {
             "regime": current_regime,
             "vix": vix_level,
@@ -278,8 +288,8 @@ class DashboardGenerator:
                     "signal_strength": factor_rotation_result.get("signal_strength", 0.0),
                     "recommendation": factor_rotation_result.get("recommendation", {}),
                 }
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Factor rotation not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("factor_rotation", e)
 
         # Add yield curve data from yields.json
         yield_curve_data = self._get_yield_curve_data()
@@ -300,8 +310,8 @@ class DashboardGenerator:
             vol_parity_data = vol_allocator.get_current_allocation()
             if vol_parity_data:
                 vol_parity_signal = vol_parity_data.get('allocation')
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Convexity harvest / vol parity not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("convexity_harvest", e)
 
         # Add LLM sentiment signals (v2.30 Phase 5)
         sentiment_signal = None
@@ -322,8 +332,8 @@ class DashboardGenerator:
                 macro_texts=[],
             )
             sentiment_signal = sentiment_signal.to_dict()
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("LLM sentiment not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("llm_sentiment", e)
 
         # Add ensemble voting signals (v2.20 Phase 3)
         ensemble_signal = None
@@ -355,16 +365,15 @@ class DashboardGenerator:
                     "num_sources": ensemble_result.num_sources,
                     "source_breakdown": source_breakdown,
                 }
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Ensemble voting not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("ensemble_voting", e)
 
         # Add sector rotation momentum signals (v2.40 Phase 5)
         sector_momentum_signal = None
         try:
             sector_momentum_signal = self._generate_sector_momentum_signals(vix_level=vix_level)
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            # Sector momentum not available yet
-            logger.warning("Sector momentum not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("sector_momentum", e)
 
         # Add smart rebalancing status (v2.90)
         smart_rebalance_data = None
@@ -509,8 +518,8 @@ class DashboardGenerator:
                     "Real-time SKEW/PCR data needed for behavioral alpha."
                 ),
             }
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Behavioral sentiment not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("behavioral_sentiment", e)
 
         # Stacking ensemble dashboard data (v3.10)
         stacking_ensemble_dashboard = None
@@ -539,8 +548,8 @@ class DashboardGenerator:
                     "Signal frequency and shift magnitude are binding constraints."
                 ),
             }
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Stacking ensemble not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("stacking_ensemble", e)
 
         # Factor rotation dashboard data (v3.00) — reuses factor_rotation_result from above
         factor_rotation_dashboard = None
@@ -559,8 +568,8 @@ class DashboardGenerator:
                         "Defensive tool — best in high-vol regimes (Sharpe 1.474)."
                     ),
                 }
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Factor rotation dashboard not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("factor_rotation_dashboard", e)
 
         # Merge overlay dashboard data (collar, crypto, calendar, kurtosis, etc.)
         overlay_data = self._get_overlay_data()
@@ -605,8 +614,8 @@ class DashboardGenerator:
         try:
             from src.monitor.rebalance_health import generate as gen_rebalance_health
             output["rebalance_health"] = gen_rebalance_health()
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Rebalance health not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("rebalance_health", e)
             output["rebalance_health"] = {"generated": None, "error": str(e)}
 
         # Circuit breaker state (broker API resilience)
@@ -637,8 +646,8 @@ class DashboardGenerator:
                 "indicators": fred_signal.indicators,
                 "timestamp": fred_signal.timestamp,
             })
-        except (ImportError, ValueError, OSError, RuntimeError) as e:
-            logger.warning("FRED-MD macro signal not available: %s", e)
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("fred_macro", e)
             output["fred_macro"] = {
                 "regime": "UNKNOWN",
                 "confidence": 0.0,
@@ -656,8 +665,8 @@ class DashboardGenerator:
         try:
             from src.monitor.alerting import check_staleness_and_alert
             check_staleness_and_alert(output["staleness"])
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Alerting not available: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("alerting", e)
 
         # SPC signal quality monitoring
         output["spc"] = self._run_spc_monitor(output)
@@ -666,16 +675,23 @@ class DashboardGenerator:
         try:
             from src.monitor.ic_decay_monitor import compute_ic_decay_report
             output["ic_decay"] = compute_ic_decay_report()
-        except (ImportError, ValueError, OSError, RuntimeError) as e:
-            logger.warning("IC decay monitor not available: %s", e)
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("ic_decay_monitor", e)
             output["ic_decay"] = {"error": str(e)}
+
+        # IC decay alerting — fire alerts for signals with degrading IC
+        try:
+            from src.monitor.alerting import check_ic_decay_and_alert
+            check_ic_decay_and_alert(output.get("ic_decay", {}))
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("ic_decay_alerting", e)
 
         # Per-signal walk-forward validation
         try:
             from src.monitor.signal_walk_forward import compute_signal_wfe_report
             output["signal_wfe"] = compute_signal_wfe_report()
-        except (ImportError, ValueError, OSError, RuntimeError) as e:
-            logger.warning("Signal WFE report not available: %s", e)
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("signal_wfe", e)
             output["signal_wfe"] = {"error": str(e)}
 
         out_path = PUBLIC_DIR / "signals.json"
@@ -1247,7 +1263,8 @@ class DashboardGenerator:
                 "alerts": signal_health_report.get("alerts", []),
                 "overall_health": signal_health_report.get("overall_health", "unknown")
             }
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("signal_health", e)
             health_data["signal_health"] = {
                 "error": f"Failed to get signal health: {str(e)}",
                 "status": "unavailable"
@@ -1280,8 +1297,8 @@ class DashboardGenerator:
             signals = generate_sector_signals(historical_path, vix=vix)
             return signals
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate sector momentum signals: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("sector_momentum", e)
             return None
     
     def generate_analytics_json(self) -> Path:
@@ -1315,8 +1332,8 @@ class DashboardGenerator:
             dashboard = gen.generate()
             gen.save(dashboard)
             return gen.OUTPUT_PATH
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Overlay dashboard generation failed: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("overlay_dashboard_generate", e)
             return None
 
     def generate_adaptive_sizing_json(self) -> Optional[Path]:
@@ -1343,8 +1360,8 @@ class DashboardGenerator:
             save_results_json(sizing_data, output_path=str(out_path))
             return out_path
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate adaptive sizing data: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("adaptive_sizing", e)
             return None
 
     def generate_vixy_hedge_json(self) -> Optional[Path]:
@@ -1364,8 +1381,8 @@ class DashboardGenerator:
             save_results_json(hedge_data, output_path=str(out_path))
             return out_path
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate VIXY hedge data: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("vixy_hedge", e)
             return None
 
     def generate_black_litterman_json(self) -> Optional[Path]:
@@ -1462,8 +1479,8 @@ class DashboardGenerator:
             save_results_json(bl_data, output_path=str(out_path))
             return out_path
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate Black-Litterman data: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("black_litterman", e)
             return None
 
     def generate_turnover_validator_json(self) -> Optional[Path]:
@@ -1483,8 +1500,8 @@ class DashboardGenerator:
             save_results_json(turnover_data, output_path=str(out_path))
             return out_path
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate turnover validator data: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("turnover_validator", e)
             return None
 
     def generate_regime_gate_json(self) -> Optional[Path]:
@@ -1530,8 +1547,8 @@ class DashboardGenerator:
             save_results_json(gate_data, output_path=str(out_path))
             return out_path
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate regime gate data: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("regime_gate", e)
             return None
 
     # Cache last-known regime for _is_msm_gated resilience
@@ -1805,8 +1822,8 @@ class DashboardGenerator:
             save_results_json(tsmom_data, output_path=str(out_path))
             return out_path
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate TSMOM data: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("tsmom", e)
             return None
 
     def generate_cross_asset_rv_json(self) -> Optional[Path]:
@@ -1839,8 +1856,8 @@ class DashboardGenerator:
             save_results_json(rv_data, output_path=str(out_path))
             return out_path
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate cross-asset RV data: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("cross_asset_rv", e)
             return None
 
     def generate_graduation_json(self) -> Optional[Path]:
@@ -1897,8 +1914,8 @@ class DashboardGenerator:
 
             return out_path
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
-            logger.warning("Failed to generate graduation data: %s", e)
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("graduation", e)
             return None
 
     def generate_explainability_json(self) -> Optional[Path]:

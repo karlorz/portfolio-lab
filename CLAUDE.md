@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13018 safe** (12698 Python + 313 TypeScript + 18 signal backtest integration, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **13018 safe** (12712 Python + 313 TypeScript + 18 signal backtest integration, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -15,7 +15,8 @@
 |- **Periodic rebalancing**: forces rebalance if drift >2% and 30+ days since last trade
 |- **LTTB downsampling**: src/utils/lttb.ts — auto-downsample charts from 5371 to 600 points preserving visual shape
 |- **Signal staleness detection**: DashboardGenerator checks signal timestamps against 4h TTL (SIGNAL_STALENESS_TTL_HOURS), reports stale signals in signals.json
-|- **External alerting**: src/monitor/alerting.py — webhook-based PASS→WARN→HALT state-transition alerting (ALERT_WEBHOOK_URL env var), staleness + drift checks
+|- **External alerting**: src/monitor/alerting.py — webhook-based PASS→WARN→HALT state-transition alerting (ALERT_WEBHOOK_URL env var), staleness + drift + IC decay checks
+|- **IC decay alerting**: check_ic_decay_and_alert() wired into DashboardGenerator — fires WARN for degrading signals, HALT for critical IC decay; IC_DECAY AlertChannel added
 |- **pytest importlib mode**: --import-mode=importlib via addopts in pyproject.toml — eliminates sys.modules pollution class of bugs
 |- **Dynamic MSM gating**: TSMOM is_gated_off now uses regime-based check instead of hardcoded True
 |- **Staleness-weighted ensemble voting**: exponential decay (STALENESS_DECAY_TAU_HOURS=2h) degrades stale signal weights, recomputes weighted_consensus
@@ -28,6 +29,7 @@
 |- **React error boundaries**: PanelErrorBoundary wraps each dashboard tab panel — single-panel crashes don't kill the entire dashboard
 |- **DashboardGenerator context manager**: `__enter__`/`__exit__` + `close()` + `try/finally` in `run()` prevents SQLite connection leaks on exceptions
 |- **Evaluator print→logging**: evaluator.py main() migrated from print() to logger.info() for cron pipeline observability; check_graduation_criteria, kill switch, and trigger creation already use logger
+|- **Signal exception handling**: generator.py — SIGNAL_EXCEPTIONS constant replaces 20+ copy-pasted exception tuples; _log_signal_error() classifies ValueError/TypeError as likely bugs (logger.error) vs ImportError/AttributeError as missing deps (logger.warning)
 |- **Performance daily_return fix**: calculate_performance() now computes daily_return relative to previous day's close (not previous intraday snapshot) — eliminates the daily_return=0 bug that inflated days_tracked and produced unrealistic Sharpe (6.48→actual)
 |- **Intraday deduplication**: generator.py and wiki_sync.py deduplicate performance.jsonl to one entry per calendar date before computing metrics — days_tracked counts unique trading dates not raw JSONL lines
 |- **WikiSync print→logging**: 5 print() calls migrated to logger.info() for production observability
@@ -35,6 +37,7 @@
 |- **TTL price cache**: src/data/price_cache.py — cachetools.TTLCache(maxsize=1, ttl=30s) eliminates redundant prices.json reads across 18 modules (PRICE_CACHE_TTL_SECONDS env var), ~10MB peak memory savings per cron cycle
 |- **get_prices_df()**: cached pivoted DataFrame accessor with symbol subset parameter — used by 11 modules (risk_parity, network_momentum, multi_speed_momentum, ensemble_voter, tsmom_overlay, risk_decomposition, unified_orchestrator, black_litterman_mapper, cross_asset_regime_arb, cross_asset_relative_value, adaptive_sizing), eliminates ~30 lines duplicated pivot code per module
 |- **Shared strategy constants**: VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ consolidated in src/paths.py (env-var configurable) — imported by tsmom_overlay.py and multi_speed_momentum.py
+|- **VIX regime thresholds**: VIX_CRISIS_THRESHOLD (25), VIX_VOL_SPIKE_THRESHOLD (20), VIX_LOW_VOL_THRESHOLD (15) in src/paths.py (env-var configurable) — shared classify_vix_regime() in src/utils/__init__.py eliminates duplication between evaluator.py and generator.py
 |- **Broker error handling**: alpaca.py submit_order() returns None on failure, get_orders() returns [] on failure
 |- **Circuit breaker (pybreaker)**: src/broker/circuit_breaker.py — 3-state (closed/open/half-open) wrapping alpaca.py submit_order() and get_positions(), fail_max=3, reset_timeout=60, state-change logging, BROKER_CIRCUIT_FAIL_MAX/RESET_TIMEOUT env vars, get_circuit_state() for dashboard integration
 |- **Pydantic signal validation**: src/monitor/signal_schemas.py — Pydantic v2 models for regime, yield_curve, ensemble_voting, garch_cvar, smart_rebalance; validate_signal() at generator.py output boundaries; graceful degradation (returns original data on ValidationError)
