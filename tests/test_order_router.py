@@ -12,6 +12,15 @@ from datetime import datetime
 from unittest.mock import patch, MagicMock
 
 from src.broker.order_router import OrderRouter, Signal, OrderPlan
+from src.broker.circuit_breaker import broker_breaker
+
+
+@pytest.fixture(autouse=True)
+def _reset_circuit_breaker():
+    """Reset the circuit breaker singleton between tests to prevent state leakage."""
+    broker_breaker.reset()
+    yield
+    broker_breaker.reset()
 
 
 class TestCalculateOrders:

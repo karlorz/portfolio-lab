@@ -16,6 +16,18 @@ from src.broker.alpaca import (
     AlpacaClient, PaperTradingManager, check_alpaca_status,
     ALPACA_AVAILABLE,
 )
+from src.broker.circuit_breaker import broker_breaker
+
+
+# ---------------------------------------------------------------------------
+# Fixture: reset circuit breaker before each test so accumulated failures
+# in one test do not trip the breaker for subsequent tests.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _reset_broker_breaker() -> None:
+    """Reset the global circuit breaker singleton before every test case."""
+    broker_breaker.reset()
 
 
 # ---------------------------------------------------------------------------

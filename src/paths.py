@@ -83,6 +83,10 @@ def sqlite_connect(db_path: Union[str, Path], **kwargs) -> sqlite3.Connection:
         with sqlite_connect(MARKET_DB) as conn:
             conn.execute("SELECT ...")
 
+    Note: ``Connection.__exit__`` commits/rollbacks but does NOT close the
+    connection.  For guaranteed close, use ``with closing(sqlite_connect(...))``
+    or call ``conn.close()`` explicitly.
+
     Args:
         db_path: Path to the SQLite database file.
         **kwargs: Additional keyword arguments forwarded to sqlite3.connect().

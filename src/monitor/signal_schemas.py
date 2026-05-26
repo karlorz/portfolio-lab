@@ -161,6 +161,26 @@ def validate_signal(signal_name: str, data: dict) -> dict:
         return data  # Graceful degradation
 
 
+def validate_all_signals(data: dict) -> dict:
+    """Validate all known signal fields in the complete signals dict.
+
+    Uses :func:`validate_signal` for each known signal name found in *data*.
+    Unknown keys are passed through unchanged.
+
+    Args:
+        data: The top-level signals dict (e.g. a ``signals.json`` payload).
+
+    Returns:
+        A new dict with known signal sections validated (defaults filled in),
+        unknown keys preserved.
+    """
+    validated = dict(data)
+    for signal_name in list(SIGNAL_MODELS.keys()):
+        if signal_name in validated and isinstance(validated[signal_name], dict):
+            validated[signal_name] = validate_signal(signal_name, validated[signal_name])
+    return validated
+
+
 # ─────────────────────────────────────────────────────────────
 #  Top-level SignalsData (gradual adoption wrapper)
 # ─────────────────────────────────────────────────────────────

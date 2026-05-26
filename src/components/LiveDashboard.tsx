@@ -54,7 +54,21 @@ import type { TSMOMData } from './TSMOMPanel';
 import { CrossAssetRVPanel } from './CrossAssetRVPanel';
 import type { CrossAssetRVData } from './CrossAssetRVPanel';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
-import { validateSignalsData } from '../schemas/signals';
+import {
+  validateSignalsData,
+  validateFetchData,
+  DashboardDataSchema,
+  AlertsDataSchema,
+  StatsDataSchema,
+  HealthDataSchema,
+  AnalyticsDataSchema,
+  RebalanceHealthSchema,
+  GraduationDataSchema,
+} from '../schemas/signals';
+import { z } from 'zod';
+
+// Catch-all schema for panel endpoints without dedicated schemas
+const PassthroughSchema = z.object({}).passthrough();
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -107,33 +121,44 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         }
       }
       if (dashboardRes.ok) {
-        const d = await dashboardRes.json();
-        setPerformance(d.paper_portfolio || []);
-        setDashboard(d);
+        const raw = await dashboardRes.json();
+        const validated = validateFetchData(raw, DashboardDataSchema, 'dashboard');
+        if (validated) {
+          setPerformance(validated.paper_portfolio || []);
+          setDashboard(validated);
+        }
       }
       if (alertsRes.ok) {
-        const a = await alertsRes.json();
-        setAlerts(a.alerts || []);
+        const raw = await alertsRes.json();
+        const validated = validateFetchData(raw, AlertsDataSchema, 'alerts');
+        if (validated) {
+          setAlerts(validated.alerts || []);
+        }
       }
       if (statsRes.ok) {
-        const st = await statsRes.json();
-        setStats(st);
+        const raw = await statsRes.json();
+        const validated = validateFetchData(raw, StatsDataSchema, 'stats');
+        if (validated) setStats(validated);
       }
       if (healthRes.ok) {
-        const h = await healthRes.json();
-        setHealth(h);
+        const raw = await healthRes.json();
+        const validated = validateFetchData(raw, HealthDataSchema, 'health');
+        if (validated) setHealth(validated);
       }
       if (analyticsRes.ok) {
-        const an = await analyticsRes.json();
-        setAnalytics(an);
+        const raw = await analyticsRes.json();
+        const validated = validateFetchData(raw, AnalyticsDataSchema, 'analytics');
+        if (validated) setAnalytics(validated);
       }
       if (rhRes.ok) {
-        const rh = await rhRes.json();
-        setRebalanceHealth(rh);
+        const raw = await rhRes.json();
+        const validated = validateFetchData(raw, RebalanceHealthSchema, 'rebalance_health');
+        if (validated) setRebalanceHealth(validated as RebalanceHealthData);
       }
       if (exRes.ok) {
-        const ex = await exRes.json();
-        setExplainability(ex);
+        const raw = await exRes.json();
+        const validated = validateFetchData(raw, PassthroughSchema, 'explainability');
+        if (validated) setExplainability(validated as ExplainabilityData);
       }
 
       // Fetch new panel data (non-blocking)
@@ -145,11 +170,31 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           fetch('/data/black_litterman.json'),
           fetch('/data/turnover_validator.json'),
         ]);
-        if (gradRes.ok) setGraduationData(await gradRes.json());
-        if (sizingRes.ok) setAdaptiveSizingData(await sizingRes.json());
-        if (vixyRes.ok) setVixyHedgeData(await vixyRes.json());
-        if (blRes.ok) setBLMapperData(await blRes.json());
-        if (turnoverRes.ok) setTurnoverData(await turnoverRes.json());
+        if (gradRes.ok) {
+          const raw = await gradRes.json();
+          const validated = validateFetchData(raw, GraduationDataSchema, 'graduation');
+          if (validated) setGraduationData(validated as GraduationChecklistData);
+        }
+        if (sizingRes.ok) {
+          const raw = await sizingRes.json();
+          const validated = validateFetchData(raw, PassthroughSchema, 'adaptive_sizing');
+          if (validated) setAdaptiveSizingData(validated as AdaptiveSizingData);
+        }
+        if (vixyRes.ok) {
+          const raw = await vixyRes.json();
+          const validated = validateFetchData(raw, PassthroughSchema, 'vixy_hedge');
+          if (validated) setVixyHedgeData(validated as VixyHedgeSizingData);
+        }
+        if (blRes.ok) {
+          const raw = await blRes.json();
+          const validated = validateFetchData(raw, PassthroughSchema, 'black_litterman');
+          if (validated) setBLMapperData(validated as BlackLittermanMapperData);
+        }
+        if (turnoverRes.ok) {
+          const raw = await turnoverRes.json();
+          const validated = validateFetchData(raw, PassthroughSchema, 'turnover_validator');
+          if (validated) setTurnoverData(validated as TurnoverValidatorData);
+        }
       } catch { /* panels render gracefully with null data */ }
       try {
         const [rgRes, tsmomRes, rvRes] = await Promise.all([
@@ -157,9 +202,21 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           fetch('/data/tsmom.json'),
           fetch('/data/cross_asset_rv.json'),
         ]);
-        if (rgRes.ok) setRegimeGateData(await rgRes.json());
-        if (tsmomRes.ok) setTsmomData(await tsmomRes.json());
-        if (rvRes.ok) setCrossAssetRVData(await rvRes.json());
+        if (rgRes.ok) {
+          const raw = await rgRes.json();
+          const validated = validateFetchData(raw, PassthroughSchema, 'regime_gate');
+          if (validated) setRegimeGateData(validated as RegimeGateData);
+        }
+        if (tsmomRes.ok) {
+          const raw = await tsmomRes.json();
+          const validated = validateFetchData(raw, PassthroughSchema, 'tsmom');
+          if (validated) setTsmomData(validated as TSMOMData);
+        }
+        if (rvRes.ok) {
+          const raw = await rvRes.json();
+          const validated = validateFetchData(raw, PassthroughSchema, 'cross_asset_rv');
+          if (validated) setCrossAssetRVData(validated as CrossAssetRVData);
+        }
       } catch { /* panels render gracefully with null data */ }
 
       setError(null);

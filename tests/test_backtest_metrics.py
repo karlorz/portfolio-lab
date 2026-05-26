@@ -344,6 +344,44 @@ class TestSaveResultsJson:
         # Should not crash, just return
         save_results_json({'key': 'val'}, output_path=None, default_dir=None)
 
+    def test_validator_passes_data_through(self, tmp_path):
+        """Validator callback should transform data before serialization."""
+        path = tmp_path / "validated.json"
+
+        def add_defaults(d):
+            d["validated"] = True
+            d["sharpe"] = d.get("sharpe", 0.0)
+            return d
+
+        save_results_json({"cagr": 8.5}, output_path=str(path), validator=add_defaults)
+        with open(path) as f:
+            loaded = json.load(f)
+        assert loaded["cagr"] == 8.5
+        assert loaded["sharpe"] == 0.0
+        assert loaded["validated"] is True
+
+    def test_validator_None_skips_validation(self, tmp_path):
+        """Default validator=None must behave identically to no validator."""
+        path = tmp_path / "no_validator.json"
+        data = {"cagr": 8.5}
+        save_results_json(data, output_path=str(path), validator=None)
+        with open(path) as f:
+            loaded = json.load(f)
+        assert loaded == {"cagr": 8.5}
+
+    def test_validator_raises_logs_warning_and_uses_original(self, tmp_path):
+        """When validator raises, a warning is logged and original data is saved."""
+        path = tmp_path / "raise_validator.json"
+        data = {"cagr": 8.5}
+
+        def broken(d):
+            raise ValueError("something broke")
+
+        save_results_json(data, output_path=str(path), validator=broken)
+        with open(path) as f:
+            loaded = json.load(f)
+        assert loaded == {"cagr": 8.5}
+
 
 # ---------------------------------------------------------------------------
 # compute_deflated_sharpe_ratio

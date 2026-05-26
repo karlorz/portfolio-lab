@@ -399,13 +399,255 @@ export const SignalsDataSchema = z.object({
   kurtosis_regime: z.optional(z.record(z.unknown())),
   volatility_parity: z.optional(z.record(z.unknown())),
   rebalance_health: z.optional(z.record(z.unknown())),
+  broker_circuit_breaker: z.optional(z.object({
+    state: z.enum(['closed', 'open', 'half-open']),
+    fail_count: z.number(),
+    reset_timeout: z.number(),
+  })),
   risk_decomposition: z.optional(z.record(z.unknown())),
   spc_flags: z.optional(z.record(z.unknown())),
   staleness: z.optional(z.record(z.unknown())),
 }).passthrough();
 
 // ---------------------------------------------------------------------------
-// Validation function with graceful degradation
+// DashboardDataSchema — /data/dashboard.json
+// ---------------------------------------------------------------------------
+const RegimeEntrySchema = z.object({
+  d: z.string(),
+  r: z.string(),
+  v: z.nullable(z.number()),
+});
+
+const PerformanceEntrySchema = z.object({
+  t: z.string(),
+  v: z.number(),
+  r: z.number(),
+});
+
+export const DashboardDataSchema = z.object({
+  prices: z.record(z.array(z.object({
+    d: z.string(),
+    p: z.number(),
+  }))),
+  regimes: z.array(RegimeEntrySchema),
+  paper_portfolio: z.array(PerformanceEntrySchema),
+  generated_at: z.string(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// AlertsDataSchema — /data/alerts.json
+// ---------------------------------------------------------------------------
+export const AlertsDataSchema = z.object({
+  alerts: z.array(z.object({
+    level: z.enum(['success', 'warning', 'error', 'info']),
+    type: z.string(),
+    title: z.string(),
+    message: z.string(),
+    timestamp: z.optional(z.string()),
+    requires_action: z.boolean(),
+  })),
+  count: z.number(),
+  generated_at: z.string(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// StatsDataSchema — /data/stats.json
+// ---------------------------------------------------------------------------
+const PaperPortfolioStatsSchema = z.object({
+  sharpe: z.number(),
+  total_return: z.number(),
+  max_value: z.number(),
+  min_value: z.number(),
+  days_tracked: z.number(),
+});
+
+const SPYComparisonSchema = z.object({
+  portfolio_value: z.number(),
+  spy_value: z.number(),
+  relative_return: z.number(),
+  correlation_30d: z.number(),
+  beta: z.number(),
+  outperformance: z.number(),
+});
+
+export const StatsDataSchema = z.object({
+  asset_stats: z.record(z.object({
+    '30d_return': z.number(),
+    volatility: z.number(),
+    current: z.number(),
+  })),
+  paper_portfolio: z.nullable(PaperPortfolioStatsSchema),
+  spy_comparison: z.nullable(SPYComparisonSchema),
+  generated_at: z.string(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// HealthDataSchema — /data/health.json
+// ---------------------------------------------------------------------------
+const CronJobStatusSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  schedule: z.string(),
+  last_run: z.nullable(z.string()),
+  next_run: z.nullable(z.string()),
+  status: z.enum(['ok', 'error', 'unknown']),
+  state: z.enum(['scheduled', 'paused', 'running']),
+});
+
+const DataFreshnessSchema = z.object({
+  last_update: z.string(),
+  days_stale: z.number(),
+  status: z.enum(['fresh', 'stale', 'critical']),
+});
+
+export const HealthDataSchema = z.object({
+  cron_jobs: z.array(CronJobStatusSchema),
+  data_freshness: z.record(DataFreshnessSchema),
+  system_status: z.enum(['healthy', 'warning', 'critical', 'degraded']),
+  generated_at: z.string(),
+  error: z.optional(z.string()),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// AnalyticsDataSchema — /data/analytics.json
+// ---------------------------------------------------------------------------
+const DrawdownPointSchema = z.object({
+  date: z.string(),
+  value: z.number(),
+  peak: z.number(),
+  drawdown: z.number(),
+  days_since_peak: z.number(),
+  is_recovery: z.boolean(),
+});
+
+const MaxDrawdownDataSchema = z.object({
+  max_drawdown: z.number(),
+  max_drawdown_date: z.string(),
+  recovery_date: z.nullable(z.string()),
+  underwater_days: z.number(),
+  peak_value: z.number(),
+  trough_value: z.number(),
+});
+
+const RollingMetricPointSchema = z.object({
+  date: z.string(),
+  sharpe: z.number(),
+  volatility: z.number(),
+  mean_return: z.number(),
+  window_days: z.number(),
+});
+
+const PortfolioBenchmarkDataSchema = z.object({
+  start_date: z.string(),
+  end_date: z.string(),
+  start_value: z.number(),
+  end_value: z.number(),
+  total_return: z.number(),
+  cagr: z.nullable(z.number()),
+  volatility: z.number(),
+  max_drawdown: z.number(),
+  sharpe: z.nullable(z.number()),
+});
+
+const CrisisPeriodDataSchema = z.object({
+  name: z.string(),
+  period: z.string(),
+  description: z.string(),
+  spy_return: z.number(),
+  portfolio_return: z.nullable(z.number()),
+});
+
+export const AnalyticsDataSchema = z.object({
+  status: z.enum(['success', 'no_data', 'error']),
+  message: z.optional(z.string()),
+  generated_at: z.string(),
+  data_points: z.number(),
+  date_range: z.object({
+    start: z.nullable(z.string()),
+    end: z.nullable(z.string()),
+  }),
+  drawdown: z.object({
+    series: z.array(DrawdownPointSchema),
+    max_drawdown: MaxDrawdownDataSchema,
+  }),
+  rolling_metrics: z.object({
+    sharpe_63d: z.array(RollingMetricPointSchema),
+    sharpe_126d: z.array(RollingMetricPointSchema),
+    sharpe_252d: z.array(RollingMetricPointSchema),
+  }),
+  benchmark_comparison: z.object({
+    portfolio: PortfolioBenchmarkDataSchema,
+  }),
+  crisis_periods: z.array(CrisisPeriodDataSchema),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// RebalanceHealthSchema — /data/rebalance_health.json
+// ---------------------------------------------------------------------------
+export const RebalanceHealthSchema = z.object({
+  current_turnover_pct: z.number(),
+  max_daily_turnover: z.number(),
+  max_monthly_turnover: z.number(),
+  max_annual_turnover: z.number(),
+  daily_budget_used: z.number(),
+  monthly_budget_used: z.number(),
+  annual_budget_used: z.number(),
+  recent_rebalances: z.array(z.object({
+    date: z.string(),
+    turnover_pct: z.number(),
+    cost_bps: z.number(),
+    trigger: z.string(),
+  })),
+  cost_drag_bps: z.number(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// GraduationDataSchema — /data/graduation.json
+// ---------------------------------------------------------------------------
+export const GraduationDataSchema = z.object({
+  criteria: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    passed: z.boolean(),
+    value: z.string(),
+    threshold: z.string(),
+  })),
+  paper_trading: z.object({
+    start_date: z.string(),
+    initial_capital: z.number(),
+    current_value: z.number(),
+    days_elapsed: z.number(),
+    days_required: z.number(),
+  }),
+  readiness_pct: z.number(),
+  eligible: z.boolean(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// Generic validation helper with graceful degradation
+// ---------------------------------------------------------------------------
+export function validateFetchData<T>(
+  raw: unknown,
+  schema: z.ZodType<T>,
+  _endpoint: string,
+): T | null {
+  const result = schema.safeParse(raw);
+  if (result.success) {
+    return result.data as T;
+  }
+  // Log validation errors in dev mode
+  if (import.meta.env.DEV) {
+    console.warn(`[${_endpoint}] Validation failed:`, result.error.issues);
+  }
+  // Fallback: try to use raw data as-is if it looks like an object (but not an array)
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    return raw as T;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// validateSignalsData — specific validator for signals.json (retained)
 // ---------------------------------------------------------------------------
 export function validateSignalsData(raw: unknown): SignalsData | null {
   const result = SignalsDataSchema.safeParse(raw);

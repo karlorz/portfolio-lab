@@ -16,6 +16,14 @@ import {
   VIXOverlaySchema,
   SignalsDataSchema,
   validateSignalsData,
+  DashboardDataSchema,
+  AlertsDataSchema,
+  StatsDataSchema,
+  HealthDataSchema,
+  AnalyticsDataSchema,
+  RebalanceHealthSchema,
+  GraduationDataSchema,
+  validateFetchData,
 } from '../../src/schemas/signals';
 import { z } from 'zod';
 
@@ -698,5 +706,407 @@ describe('validateSignalsData', () => {
     // But if we give something that fails AND lacks timestamp, it's null
     const result2 = validateSignalsData({ cash: 'not-a-number' });
     expect(result2).toBeNull();
+  });
+});
+
+// ===========================================================================
+// DashboardDataSchema
+// ===========================================================================
+
+describe('DashboardDataSchema', () => {
+  const validDashboard = () => ({
+    prices: {
+      SPY: [{ d: '2026-05-26', p: 550 }],
+      GLD: [{ d: '2026-05-26', p: 195 }],
+    },
+    regimes: [{ d: '2026-05-26', r: 'normal', v: 15.2 }],
+    paper_portfolio: [{ t: '2026-05-26', v: 110000, r: 0.001 }],
+    generated_at: '2026-05-26T12:00:00Z',
+  });
+
+  it('accepts valid dashboard data', () => {
+    const result = DashboardDataSchema.safeParse(validDashboard());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts extra fields via passthrough', () => {
+    const data = { ...validDashboard(), extra_field: 'hello' };
+    const result = DashboardDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects missing generated_at', () => {
+    const { generated_at, ...rest } = validDashboard();
+    const result = DashboardDataSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing paper_portfolio', () => {
+    const { paper_portfolio, ...rest } = validDashboard();
+    const result = DashboardDataSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+});
+
+// ===========================================================================
+// AlertsDataSchema
+// ===========================================================================
+
+describe('AlertsDataSchema', () => {
+  const validAlerts = () => ({
+    alerts: [{
+      level: 'warning' as const,
+      type: 'drift',
+      title: 'Drift Alert',
+      message: 'SPY drift exceeds threshold',
+      timestamp: '2026-05-26T12:00:00Z',
+      requires_action: false,
+    }],
+    count: 1,
+    generated_at: '2026-05-26T12:00:00Z',
+  });
+
+  it('accepts valid alerts data', () => {
+    const result = AlertsDataSchema.safeParse(validAlerts());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts empty alerts array', () => {
+    const result = AlertsDataSchema.safeParse({ alerts: [], count: 0, generated_at: '2026-05-26T12:00:00Z' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid alert level', () => {
+    const data = validAlerts();
+    data.alerts[0].level = 'critical' as any;
+    const result = AlertsDataSchema.safeParse(data);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing generated_at', () => {
+    const { generated_at, ...rest } = validAlerts();
+    const result = AlertsDataSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+});
+
+// ===========================================================================
+// StatsDataSchema
+// ===========================================================================
+
+describe('StatsDataSchema', () => {
+  const validStats = () => ({
+    asset_stats: {
+      SPY: { '30d_return': 2.5, volatility: 15.2, current: 550 },
+    },
+    paper_portfolio: {
+      sharpe: 0.79,
+      total_return: 0.15,
+      max_value: 120000,
+      min_value: 90000,
+      days_tracked: 500,
+    },
+    spy_comparison: {
+      portfolio_value: 110000,
+      spy_value: 105000,
+      relative_return: 0.05,
+      correlation_30d: 0.85,
+      beta: 0.75,
+      outperformance: 0.03,
+    },
+    generated_at: '2026-05-26T12:00:00Z',
+  });
+
+  it('accepts valid stats data', () => {
+    const result = StatsDataSchema.safeParse(validStats());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts null paper_portfolio', () => {
+    const data = { ...validStats(), paper_portfolio: null };
+    const result = StatsDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts null spy_comparison', () => {
+    const data = { ...validStats(), spy_comparison: null };
+    const result = StatsDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects missing asset_stats', () => {
+    const { asset_stats, ...rest } = validStats();
+    const result = StatsDataSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it('passes through extra fields', () => {
+    const data = { ...validStats(), extra_key: 'value' };
+    const result = StatsDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ===========================================================================
+// HealthDataSchema
+// ===========================================================================
+
+describe('HealthDataSchema', () => {
+  const validHealth = () => ({
+    cron_jobs: [{
+      id: 'job-1',
+      name: 'Fetch Prices',
+      schedule: '0 9 * * 1-5',
+      last_run: '2026-05-26T09:00:00Z',
+      next_run: '2026-05-27T09:00:00Z',
+      status: 'ok' as const,
+      state: 'scheduled' as const,
+    }],
+    data_freshness: {
+      prices: { last_update: '2026-05-26T09:00:00Z', days_stale: 0, status: 'fresh' as const },
+    },
+    system_status: 'healthy' as const,
+    generated_at: '2026-05-26T12:00:00Z',
+  });
+
+  it('accepts valid health data', () => {
+    const result = HealthDataSchema.safeParse(validHealth());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts error field', () => {
+    const data = { ...validHealth(), error: 'something went wrong' };
+    const result = HealthDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid system_status', () => {
+    const data = { ...validHealth(), system_status: 'unknown' };
+    const result = HealthDataSchema.safeParse(data);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects null last_run', () => {
+    const data = { ...validHealth(), cron_jobs: [{ ...validHealth().cron_jobs[0], last_run: null }] };
+    const result = HealthDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects missing cron_jobs', () => {
+    const { cron_jobs, ...rest } = validHealth();
+    const result = HealthDataSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+});
+
+// ===========================================================================
+// AnalyticsDataSchema
+// ===========================================================================
+
+describe('AnalyticsDataSchema', () => {
+  const validAnalytics = () => ({
+    status: 'success' as const,
+    generated_at: '2026-05-26T12:00:00Z',
+    data_points: 500,
+    date_range: { start: '2025-01-01', end: '2026-05-26' },
+    drawdown: {
+      series: [{ date: '2026-03-15', value: 100000, peak: 120000, drawdown: -16.7, days_since_peak: 45, is_recovery: false }],
+      max_drawdown: { max_drawdown: -16.7, max_drawdown_date: '2026-03-15', recovery_date: null, underwater_days: 45, peak_value: 120000, trough_value: 100000 },
+    },
+    rolling_metrics: { sharpe_63d: [], sharpe_126d: [], sharpe_252d: [] },
+    benchmark_comparison: {
+      portfolio: { start_date: '2025-01-01', end_date: '2026-05-26', start_value: 100000, end_value: 110000, total_return: 0.10, cagr: 0.08, volatility: 0.12, max_drawdown: -16.7, sharpe: 0.79 },
+    },
+    crisis_periods: [{ name: '2022 Crash', period: '2022-01 to 2022-10', description: 'Rate hikes', spy_return: -0.20, portfolio_return: -0.12 }],
+  });
+
+  it('accepts valid analytics data', () => {
+    const result = AnalyticsDataSchema.safeParse(validAnalytics());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts status no_data', () => {
+    const data = { ...validAnalytics(), status: 'no_data' as const, message: 'Not enough data' };
+    const result = AnalyticsDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts recovery_date as string', () => {
+    const data = validAnalytics();
+    data.drawdown.max_drawdown.recovery_date = '2026-04-01';
+    const result = AnalyticsDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid status', () => {
+    const data = { ...validAnalytics(), status: 'invalid' };
+    const result = AnalyticsDataSchema.safeParse(data);
+    expect(result.success).toBe(false);
+  });
+
+  it('passes through extra fields', () => {
+    const data = { ...validAnalytics(), custom: true };
+    const result = AnalyticsDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ===========================================================================
+// RebalanceHealthSchema
+// ===========================================================================
+
+describe('RebalanceHealthSchema', () => {
+  const validRH = () => ({
+    current_turnover_pct: 0.5,
+    max_daily_turnover: 10,
+    max_monthly_turnover: 30,
+    max_annual_turnover: 100,
+    daily_budget_used: 0.05,
+    monthly_budget_used: 0.02,
+    annual_budget_used: 0.005,
+    recent_rebalances: [{ date: '2026-05-20', turnover_pct: 0.5, cost_bps: 12, trigger: 'drift' }],
+    cost_drag_bps: 45,
+  });
+
+  it('accepts valid rebalance health data', () => {
+    const result = RebalanceHealthSchema.safeParse(validRH());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts empty recent_rebalances', () => {
+    const data = { ...validRH(), recent_rebalances: [] };
+    const result = RebalanceHealthSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects missing current_turnover_pct', () => {
+    const { current_turnover_pct, ...rest } = validRH();
+    const result = RebalanceHealthSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it('passes through extra fields', () => {
+    const data = { ...validRH(), extra: 'value' };
+    const result = RebalanceHealthSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ===========================================================================
+// GraduationDataSchema
+// ===========================================================================
+
+describe('GraduationDataSchema', () => {
+  const validGrad = () => ({
+    criteria: [{ id: 'sharpe', label: 'Sharpe Ratio', passed: true, value: '0.79', threshold: '>= 0.50' }],
+    paper_trading: { start_date: '2026-01-01', initial_capital: 100000, current_value: 110000, days_elapsed: 145, days_required: 90 },
+    readiness_pct: 0.85,
+    eligible: false,
+  });
+
+  it('accepts valid graduation data', () => {
+    const result = GraduationDataSchema.safeParse(validGrad());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts multiple criteria', () => {
+    const data = {
+      ...validGrad(),
+      criteria: [
+        ...validGrad().criteria,
+        { id: 'drawdown', label: 'Max Drawdown', passed: true, value: '-16.7%', threshold: '>= -25%' },
+      ],
+    };
+    const result = GraduationDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects missing readiness_pct', () => {
+    const { readiness_pct, ...rest } = validGrad();
+    const result = GraduationDataSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects non-boolean eligible', () => {
+    const data = { ...validGrad(), eligible: 'yes' };
+    const result = GraduationDataSchema.safeParse(data);
+    expect(result.success).toBe(false);
+  });
+
+  it('passes through extra fields', () => {
+    const data = { ...validGrad(), meta: { version: 2 } };
+    const result = GraduationDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ===========================================================================
+// validateFetchData
+// ===========================================================================
+
+describe('validateFetchData', () => {
+  const TestSchema = z.object({
+    name: z.string(),
+    value: z.number(),
+  });
+
+  it('returns parsed data for valid input', () => {
+    const result = validateFetchData({ name: 'test', value: 42 }, TestSchema, 'test');
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe('test');
+    expect(result!.value).toBe(42);
+  });
+
+  it('returns null for non-object input (null)', () => {
+    const result = validateFetchData(null, TestSchema, 'test');
+    expect(result).toBeNull();
+  });
+
+  it('returns null for non-object input (string)', () => {
+    const result = validateFetchData('invalid', TestSchema, 'test');
+    expect(result).toBeNull();
+  });
+
+  it('fallback: returns raw data when partially valid (is an object)', () => {
+    const partial = { name: 'test', value: 'not-a-number' };
+    const result = validateFetchData(partial, TestSchema, 'test');
+    // Should fall back to raw data because it is an object
+    expect(result).not.toBeNull();
+    expect((result as Record<string, unknown>).name).toBe('test');
+    expect((result as Record<string, unknown>).value).toBe('not-a-number');
+  });
+
+  it('fallback: returns raw data for empty object', () => {
+    const result = validateFetchData({}, TestSchema, 'test');
+    expect(result).not.toBeNull();
+  });
+
+  it('fallback: preserves all fields', () => {
+    const raw = { name: 'test', extra_field: [1, 2, 3] };
+    const result = validateFetchData(raw, TestSchema, 'test');
+    expect(result).not.toBeNull();
+    expect((result as Record<string, unknown>).extra_field).toEqual([1, 2, 3]);
+  });
+
+  it('returns null for array input', () => {
+    const result = validateFetchData([1, 2, 3], TestSchema, 'test');
+    expect(result).toBeNull();
+  });
+
+  it('works with DashboardDataSchema', () => {
+    const raw = {
+      prices: {},
+      regimes: [],
+      paper_portfolio: [],
+      generated_at: '2026-05-26T12:00:00Z',
+    };
+    const result = validateFetchData(raw, DashboardDataSchema, 'dashboard');
+    expect(result).not.toBeNull();
+    expect(result!.generated_at).toBe('2026-05-26T12:00:00Z');
+  });
+
+  it('returns null for DashboardDataSchema with completely wrong type', () => {
+    const result = validateFetchData('totally wrong', DashboardDataSchema, 'dashboard');
+    expect(result).toBeNull();
   });
 });

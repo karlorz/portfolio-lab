@@ -10,7 +10,7 @@ import logging
 import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from src.paths import BASE_ALLOCATION
 
@@ -360,14 +360,23 @@ def compute_deflated_sharpe_ratio(
     return round(dsr, 4)
 
 
-def save_results_json(data: dict, output_path: str = None, default_dir: Path = None):
+def save_results_json(data: dict, output_path: str = None, default_dir: Path = None, validator: Callable[[dict], dict] = None):
     """Save results dict to JSON file.
 
     Args:
         data: Dict to serialize.
         output_path: Explicit output path (overrides default_dir).
         default_dir: Directory for auto-named output.
+        validator: Optional validation function. If provided, data is passed
+            through this function before serialization. Should return validated
+            data or the original data on validation failure.
     """
+    if validator is not None:
+        try:
+            data = validator(data)
+        except Exception as e:
+            logger.warning("Validation callback failed: %s", e)
+
     if output_path:
         path = Path(output_path)
     elif default_dir:

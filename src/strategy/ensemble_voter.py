@@ -27,6 +27,7 @@ Usage:
 """
 
 import json
+import os
 import random
 import sqlite3
 import numpy as np
@@ -130,48 +131,128 @@ class EnsembleVote:
 # Regime-dependent weights (6 active signals, renormalized per regime)
 # MSM disabled (net-negative -0.012 Sharpe), weight redistributed to ALT_DATA and INTL_MOM.
 # Weights sum=1.0 per regime.
-REGIME_WEIGHTS = {
-    Regime.LOW_VOL: {
-        SignalSource.MULTI_SPEED_MOM: 0.0000,
-        SignalSource.CROSS_ASSET_RV: 0.1500,
-        SignalSource.ALTERNATIVE_DATA: 0.3500,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.2800,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.0000,  # marginal in calm markets
-        SignalSource.UNIFIED_OVERLAY: 0.2200,
-    },
-    Regime.NORMAL: {
-        SignalSource.MULTI_SPEED_MOM: 0.0000,
-        SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.ALTERNATIVE_DATA: 0.3050,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.2450,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1900,
-    },
-    Regime.HIGH_VOL: {
-        SignalSource.MULTI_SPEED_MOM: 0.0000,
-        SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.2100,
-        SignalSource.ALTERNATIVE_DATA: 0.3300,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.2000,
-    },
-    Regime.CRISIS: {
-        SignalSource.MULTI_SPEED_MOM: 0.0000,
-        SignalSource.CROSS_ASSET_RV: 0.3650,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1700,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
-        SignalSource.ALTERNATIVE_DATA: 0.2000,
-        SignalSource.UNIFIED_OVERLAY: 0.2650,
-    },
-    Regime.RECOVERY: {
-        SignalSource.MULTI_SPEED_MOM: 0.0000,
-        SignalSource.ALTERNATIVE_DATA: 0.3050,
-        SignalSource.CROSS_ASSET_RV: 0.1300,
-        SignalSource.INTERNATIONAL_MOMENTUM: 0.2450,
-        SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-        SignalSource.UNIFIED_OVERLAY: 0.1900,
+#
+# Loaded from JSON file at module init. Override path via ENSEMBLE_WEIGHTS_FILE env var.
+# Falls back to hardcoded defaults if file is missing or invalid.
+
+
+def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
+    """Return the hardcoded default regime weights (fallback)."""
+    return {
+        Regime.LOW_VOL: {
+            SignalSource.MULTI_SPEED_MOM: 0.0000,
+            SignalSource.CROSS_ASSET_RV: 0.1500,
+            SignalSource.ALTERNATIVE_DATA: 0.3500,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.2800,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.0000,  # marginal in calm markets
+            SignalSource.UNIFIED_OVERLAY: 0.2200,
+        },
+        Regime.NORMAL: {
+            SignalSource.MULTI_SPEED_MOM: 0.0000,
+            SignalSource.CROSS_ASSET_RV: 0.1300,
+            SignalSource.ALTERNATIVE_DATA: 0.3050,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.2450,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
+            SignalSource.UNIFIED_OVERLAY: 0.1900,
+        },
+        Regime.HIGH_VOL: {
+            SignalSource.MULTI_SPEED_MOM: 0.0000,
+            SignalSource.CROSS_ASSET_RV: 0.1300,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.2100,
+            SignalSource.ALTERNATIVE_DATA: 0.3300,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
+            SignalSource.UNIFIED_OVERLAY: 0.2000,
+        },
+        Regime.CRISIS: {
+            SignalSource.MULTI_SPEED_MOM: 0.0000,
+            SignalSource.CROSS_ASSET_RV: 0.3650,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1700,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
+            SignalSource.ALTERNATIVE_DATA: 0.2000,
+            SignalSource.UNIFIED_OVERLAY: 0.2650,
+        },
+        Regime.RECOVERY: {
+            SignalSource.MULTI_SPEED_MOM: 0.0000,
+            SignalSource.ALTERNATIVE_DATA: 0.3050,
+            SignalSource.CROSS_ASSET_RV: 0.1300,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.2450,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
+            SignalSource.UNIFIED_OVERLAY: 0.1900,
+        }
     }
-}
+
+
+def _load_regime_weights() -> Dict[Regime, Dict[SignalSource, float]]:
+    """Load REGIME_WEIGHTS from JSON config file.
+
+    Supports ENSEMBLE_WEIGHTS_FILE env var override (same pattern as
+    PAPER_CONFIG in evaluator.py). Falls back to hardcoded defaults
+    if the file doesn't exist or contains invalid data.
+    """
+    weights_file = os.environ.get(
+        "ENSEMBLE_WEIGHTS_FILE",
+        str(DATA_DIR / "ensemble_weights.json")
+    )
+    weights_path = Path(weights_file)
+
+    if not weights_path.exists():
+        logger.info(
+            "Ensemble weights file not found at %s, using hardcoded defaults",
+            weights_path
+        )
+        return _build_hardcoded_weights()
+
+    try:
+        with open(weights_path) as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(
+            "Failed to load ensemble weights from %s: %s, using hardcoded defaults",
+            weights_path, e
+        )
+        return _build_hardcoded_weights()
+
+    regime_weights: Dict[Regime, Dict[SignalSource, float]] = {}
+    for regime_name, sources in raw.items():
+        try:
+            regime = Regime(regime_name)
+        except ValueError:
+            logger.warning(
+                "Unknown regime '%s' in %s, skipping", regime_name, weights_path
+            )
+            continue
+
+        regime_dict: Dict[SignalSource, float] = {}
+        for source_name, weight in sources.items():
+            try:
+                source = SignalSource(source_name)
+            except ValueError:
+                logger.warning(
+                    "Unknown signal source '%s' in %s, skipping",
+                    source_name, weights_path
+                )
+                continue
+            regime_dict[source] = weight
+
+        regime_weights[regime] = regime_dict
+
+    # Validate: all regimes should be present
+    missing = [r.value for r in Regime if r not in regime_weights]
+    if missing:
+        logger.warning(
+            "Missing regimes in %s: %s, falling back to hardcoded defaults",
+            weights_path, missing
+        )
+        return _build_hardcoded_weights()
+
+    logger.info(
+        "Loaded ensemble weights from %s (%d regimes)",
+        weights_path, len(regime_weights)
+    )
+    return regime_weights
+
+
+REGIME_WEIGHTS = _load_regime_weights()
 
 
 # ── Epsilon-Greedy Contextual Bandit for Dynamic Signal Weighting ──

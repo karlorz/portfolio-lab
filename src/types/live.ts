@@ -101,6 +101,12 @@ export interface SignalsData {
   volatility_parity?: Record<string, unknown>;
   // Rebalance health
   rebalance_health?: Record<string, unknown>;
+  // Circuit breaker state
+  broker_circuit_breaker?: {
+    state: 'closed' | 'open' | 'half-open';
+    fail_count: number;
+    reset_timeout: number;
+  };
   // Risk decomposition
   risk_decomposition?: Record<string, unknown>;
   // SPC monitoring

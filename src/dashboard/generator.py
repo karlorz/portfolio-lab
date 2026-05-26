@@ -18,7 +18,7 @@ import numpy as np
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
 from src.utils import safe_get
 from src.backtest.metrics import save_results_json
-from src.monitor.signal_schemas import validate_signal
+from src.monitor.signal_schemas import validate_all_signals, validate_signal
 
 __all__ = [
     "DashboardGenerator",
@@ -609,6 +609,13 @@ class DashboardGenerator:
             logger.warning("Rebalance health not available: %s", e)
             output["rebalance_health"] = {"generated": None, "error": str(e)}
 
+        # Circuit breaker state (broker API resilience)
+        try:
+            from src.broker.circuit_breaker import get_circuit_state
+            output["broker_circuit_breaker"] = get_circuit_state()
+        except ImportError:
+            pass  # circuit_breaker module not available
+
         # Signal staleness detection (production readiness)
         output["staleness"] = self._check_signal_staleness(output)
 
@@ -626,8 +633,8 @@ class DashboardGenerator:
         output["spc"] = self._run_spc_monitor(output)
         
         out_path = PUBLIC_DIR / "signals.json"
-        save_results_json(output, output_path=str(out_path))
-        
+        save_results_json(output, output_path=str(out_path), validator=validate_all_signals)
+
         return out_path
 
     def _load_broker_data(self) -> Dict:

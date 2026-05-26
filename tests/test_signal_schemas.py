@@ -15,6 +15,7 @@ from src.monitor.signal_schemas import (
     SignalsData,
     SmartRebalanceSignal,
     YieldCurveSignal,
+    validate_all_signals,
     validate_signal,
 )
 
@@ -446,3 +447,51 @@ class TestSignalsData:
         # Regime should be a flat dict with defaults filled
         assert result["regime"]["regime"] == "low_vol"
         assert result["regime"]["detected"] is None
+
+
+# ─────────────────────────────────────────────────────────────
+#  validate_all_signals() function
+# ─────────────────────────────────────────────────────────────
+
+
+class TestValidateAllSignals:
+    """Tests for ``validate_all_signals`` — validates every known signal section."""
+
+    def test_validates_known_sections(self):
+        data = {
+            "regime": {"regime": "crisis", "vix": 28.0},
+            "ensemble_voting": {"regime": "crisis", "weighted_consensus": -0.3},
+            "garch_cvar": {"cvar_95": -0.02, "garch_active": True},
+            "some_unknown_key": {"anything": "goes"},
+        }
+        result = validate_all_signals(data)
+        # Known sections get defaults filled
+        assert result["regime"]["regime"] == "crisis"
+        assert result["regime"]["detected"] is None  # default filled
+        assert result["ensemble_voting"]["weighted_consensus"] == -0.3
+        assert result["ensemble_voting"]["num_sources"] == 0  # default filled
+        assert result["garch_cvar"]["cvar_95"] == -0.02
+        assert result["garch_cvar"]["cvar_ratio"] == 1.0  # default filled
+        # Unknown keys pass through unchanged
+        assert result["some_unknown_key"] == {"anything": "goes"}
+
+    def test_unknown_signal_name_not_in_data_is_noop(self):
+        data = {"some_key": {"value": 1}}
+        result = validate_all_signals(data)
+        assert result == data
+
+    def test_non_dict_signal_values_are_passed_through(self):
+        data = {"regime": "not-a-dict"}
+        result = validate_all_signals(data)
+        assert result["regime"] == "not-a-dict"
+
+    def test_empty_dict_returns_empty(self):
+        result = validate_all_signals({})
+        assert result == {}
+
+    def test_original_data_not_mutated(self):
+        data = {"regime": {"regime": "normal"}}
+        original_copy = dict(data)
+        result = validate_all_signals(data)
+        # Original should remain unchanged
+        assert data == original_copy
