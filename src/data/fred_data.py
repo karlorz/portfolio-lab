@@ -107,6 +107,7 @@ REGIME_THRESHOLDS: Dict[str, Dict[str, float]] = {
 FRED_AVAILABLE = False
 try:
     from fredapi import Fred as _Fred
+    from src.utils.rate_limiter import rate_limited, retry_on_api_error
     FRED_AVAILABLE = True
 except ImportError:
     _Fred = None  # type: ignore
