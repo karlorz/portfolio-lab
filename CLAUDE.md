@@ -17,6 +17,7 @@
 |- **Signal staleness detection**: DashboardGenerator checks signal timestamps against 4h TTL (SIGNAL_STALENESS_TTL_HOURS), reports stale signals in signals.json
 |- **External alerting**: src/monitor/alerting.py — webhook-based PASS→WARN→HALT state-transition alerting (ALERT_WEBHOOK_URL env var), staleness + drift + IC decay checks
 |- **IC decay alerting**: check_ic_decay_and_alert() wired into DashboardGenerator — fires WARN for degrading signals, HALT for critical IC decay; IC_DECAY AlertChannel added
+|- **Portfolio drift alerting**: check_drift_and_alert() wired into DashboardGenerator — fires PASS/WARN/HALT based on max_drift_pct from position_sync; PORTFOLIO_DRIFT AlertChannel now has a call site
 |- **pytest importlib mode**: --import-mode=importlib via addopts in pyproject.toml — eliminates sys.modules pollution class of bugs
 |- **Dynamic MSM gating**: TSMOM is_gated_off now uses regime-based check instead of hardcoded True
 |- **Staleness-weighted ensemble voting**: exponential decay (STALENESS_DECAY_TAU_HOURS=2h) degrades stale signal weights, recomputes weighted_consensus
@@ -30,6 +31,7 @@
 |- **DashboardGenerator context manager**: `__enter__`/`__exit__` + `close()` + `try/finally` in `run()` prevents SQLite connection leaks on exceptions
 |- **Evaluator print→logging**: evaluator.py main() migrated from print() to logger.info() for cron pipeline observability; check_graduation_criteria, kill switch, and trigger creation already use logger
 |- **Signal exception handling**: generator.py — SIGNAL_EXCEPTIONS constant replaces 20+ copy-pasted exception tuples; _log_signal_error() classifies ValueError/TypeError as likely bugs (logger.error) vs ImportError/AttributeError as missing deps (logger.warning)
+|- **Monitor module print→logger**: cvar_metrics, risk_decomposition, health_check, rebalance_health, performance_attribution all migrated from print() to logger.info/warning for production observability
 |- **Performance daily_return fix**: calculate_performance() now computes daily_return relative to previous day's close (not previous intraday snapshot) — eliminates the daily_return=0 bug that inflated days_tracked and produced unrealistic Sharpe (6.48→actual)
 |- **Intraday deduplication**: generator.py and wiki_sync.py deduplicate performance.jsonl to one entry per calendar date before computing metrics — days_tracked counts unique trading dates not raw JSONL lines
 |- **WikiSync print→logging**: 5 print() calls migrated to logger.info() for production observability
