@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **12870 safe** (12557 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **12901 safe** (12588 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -59,6 +59,10 @@
 |- **tenacity retry**: retry_on_api_error() decorator with exponential backoff for ConnectionError/TimeoutError/OSError, configurable max_retries and backoff
 |- **RateLimiter token-bucket**: thread-safe per-API rate limiting (Yahoo=60 RPM, FRED=30 RPM defaults), API_RATE_LIMIT_RPM env var, @rate_limited decorator
 |- **Health check module**: src/monitor/health_check.py — structured JSON report (data freshness, cron status, circuit breaker state), system_status derivation (ok/warning/degraded), writes health.json, wired into DashboardGenerator
+|- **FRED-MD macro regime signal**: src/data/fred_data.py compute_regime_signal() wired into dashboard as fred_macro section — FredSignal dataclass with regime/confidence/recession_probability/inflation_pressure/monetary_stance/manufacturing_health/credit_conditions; Pydantic FredMacroSignal + Zod FredMacroSchema validation; graceful fallback when fredapi not installed
+|- **Graduated kill switch**: 4-level severity (WARNING 10% DD reduce 25%, RESTRICT 15% reduce 50%, HALT 20% block all new, LIQUIDATE 25%+ emergency); classify_kill_level() parses drawdown % and tail risk; kill_switch.json includes level + position_reduction fields; KILL_*_DRAWDOWN_PCT env vars configurable
+|- **Graduation criteria env-var configurable**: GRADUATION_MIN_SHARPE, GRADUATION_MAX_DRAWDOWN (default 25% adjusted from 15% for 46/38/16 portfolio), GRADUATION_MIN_TRADING_DAYS, GRADUATION_MIN_DSR, etc.
+|- **Freeze manifest**: src/monitor/freeze_manifest.py — config drift detection via git state + env vars + file hashes; diff_manifests() detects added/removed/modified files and config changes; wired into DashboardGenerator.run() startup
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
