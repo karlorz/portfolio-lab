@@ -91,17 +91,17 @@ def db_with_regimes(wiki_sync):
         )
     """)
     rows = [
-        ("2026-05-15", "normal", 14.5, 0, 0.45),
-        ("2026-05-16", "normal", 15.2, 0, 0.42),
-        ("2026-05-17", "vol_spike", 24.1, 1, -0.12),
-        ("2026-05-18", "crisis", 35.8, 1, -0.45),
-        ("2026-05-19", "low_vol", 12.3, 0, 0.55),
+        ("normal", 14.5, 0, 0.45),
+        ("normal", 15.2, 0, 0.42),
+        ("vol_spike", 24.1, 1, -0.12),
+        ("crisis", 35.8, 1, -0.45),
+        ("low_vol", 12.3, 0, 0.55),
     ]
-    for i, (d, r, v, cs, ts) in enumerate(rows, 1):
+    for i, (r, v, cs, ts) in enumerate(rows, 1):
         wiki_sync.conn.execute(
             "INSERT INTO regime_log (id, date, regime, vix_level, correlation_spike, "
-            "trend_strength, detected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (i, d, r, v, cs, ts, f"{d}T12:00:00"),
+            "trend_strength, detected_at) VALUES (?, date('now', ?), ?, ?, ?, ?, datetime('now', ?))",
+            (i, f'-{5 - i} days', r, v, cs, ts, f'-{5 - i} days'),
         )
     wiki_sync.conn.commit()
     return wiki_sync
