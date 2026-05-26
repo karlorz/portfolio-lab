@@ -776,22 +776,22 @@ def main():
     
     if args.command == 'compute':
         multi_speed = MultiSpeedMomentum()
-        
+
         base_alloc = DEFAULT_BASE_ALLOCATION.copy()
         signal = multi_speed.compute_speed_signal(
             args.ticker,
             args.tier,
             base_alloc.get(args.ticker, 0.0)
         )
-        
+
         if signal:
             result = signal.to_dict()
-            print(json.dumps(result, indent=2))
+            logger.info(json.dumps(result, indent=2))
             if args.output:
                 save_results_json(result, output_path=args.output)
         else:
-            print(json.dumps({'error': f'Could not compute signal for {args.ticker}'}))
-    
+            logger.error("Could not compute signal for %s", args.ticker)
+
     elif args.command == 'backtest':
         base_alloc = _parse_portfolio_arg(args.portfolio)
 
@@ -802,7 +802,7 @@ def main():
             rebalance_freq=args.freq
         )
         result = backtester.run_backtest()
-        print(json.dumps(result, indent=2, default=str))
+        logger.info(json.dumps(result, indent=2, default=str))
         if args.output:
             save_results_json(result, output_path=args.output)
 
@@ -811,36 +811,34 @@ def main():
 
         multi_speed = MultiSpeedMomentum()
         result = multi_speed.get_current_recommendation(base_alloc)
-        
+
         output = result.to_dict()
-        print(json.dumps(output, indent=2))
-        
+        logger.info(json.dumps(output, indent=2))
+
         if args.save_db:
             multi_speed.save_to_db(result)
-            print(f"\nSaved to database: {DB_PATH}")
-        
+            logger.info("\nSaved to database: %s", DB_PATH)
+
         if args.output:
             save_results_json(output, output_path=args.output)
-    
+
     elif args.command == 'status':
-        print("Multi-Speed Momentum Ensemble v2.56 - Status")
-        print("=" * 50)
+        logger.info("Multi-Speed Momentum Ensemble v2.56 - Status")
+        logger.info("=" * 50)
         for tier, config in SPEED_TIERS.items():
-            print(f"\n{tier.upper()} TIER:")
-            print(f"  Lookback: {config['lookback_days']} days")
-            print(f"  Skip: {config['skip_days']} days")
-            print(f"  Vol window: {config['vol_window']} days")
-            print(f"  {config['description']}")
-        print("\nEnsemble: Equal risk-weight across tiers")
-        print(f"Max deviation: {MAX_DEVIATION * 100}%")
-        print(f"Min weight: {MIN_WEIGHT * 100}%")
-        print(f"Target volatility: {VOL_TARGET * 100}%")
-        print(f"\nData source: {PRICES_PATH}")
-        print(f"Prices exist: {PRICES_PATH.exists()}")
-    
+            logger.info("\n%s TIER:", tier.upper())
+            logger.info("  Lookback: %d days", config['lookback_days'])
+            logger.info("  Skip: %d days", config['skip_days'])
+            logger.info("  Vol window: %d days", config['vol_window'])
+            logger.info("  %s", config['description'])
+        logger.info("\nEnsemble: Equal risk-weight across tiers")
+        logger.info("Max deviation: %.0f%%", MAX_DEVIATION * 100)
+        logger.info("Min weight: %.0f%%", MIN_WEIGHT * 100)
+        logger.info("Target volatility: %.0f%%", VOL_TARGET * 100)
+        logger.info("\nData source: %s", PRICES_PATH)
+        logger.info("Prices exist: %s", PRICES_PATH.exists())
+
     else:
         parser.print_help()
-
-
 if __name__ == '__main__':
     main()

@@ -23,6 +23,8 @@ import logging
 import pandas as pd
 import numpy as np
 
+from src.paths import RISK_FREE_RATE
+
 from src.backtest.metrics import (
     BacktestResult,
     save_results_json,
@@ -225,7 +227,7 @@ def calculate_returns(prices: pd.Series) -> pd.Series:
     return prices.pct_change().fillna(0)
 
 
-def calculate_sharpe(returns: pd.Series, risk_free_rate: float = 0.02) -> float:
+def calculate_sharpe(returns: pd.Series, risk_free_rate: float = RISK_FREE_RATE / 100) -> float:
     """Calculate annualized Sharpe ratio."""
     if len(returns) < 30:
         return 0.0

@@ -500,37 +500,33 @@ def main():
     if args.command == "scan":
         signal = scanner.scan_all()
         if args.json:
-            print(json.dumps(signal.to_dict(), indent=2, default=str))
+            logger.info(json.dumps(signal.to_dict(), indent=2, default=str))
         else:
             print_scan(signal)
 
     elif args.command == "pairs":
-        print("\nAvailable Cross-Asset Pairs:")
-        print("-" * 60)
+        logger.info("\nAvailable Cross-Asset Pairs:")
+        logger.info("-" * 60)
         for name, (a, b, desc) in CROSS_ASSET_PAIRS.items():
-            print(f"  {name:15} {a:5} vs {b:5}  — {desc}")
-        print(f"\n  Entry threshold: |z-score| > {ZSCORE_ENTRY}")
-        print(f"  Exit threshold:  |z-score| < {ZSCORE_EXIT}")
-        print(f"  Lookback:        {LOOKBACK} days")
-        print()
+            logger.info("  %s %5s vs %5s  \u2014 %s", name, a, b, desc)
+        logger.info("\n  Entry threshold: |z-score| > %s", ZSCORE_ENTRY)
+        logger.info("  Exit threshold:  |z-score| < %s", ZSCORE_EXIT)
+        logger.info("  Lookback:        %d days", LOOKBACK)
 
     elif args.command == "signal":
         ensemble_sig = scanner.get_ensemble_signal()
         if args.json:
-            print(json.dumps(ensemble_sig, indent=2, default=str))
+            logger.info(json.dumps(ensemble_sig, indent=2, default=str))
         else:
             print_scan(scanner.scan_all())
-            print(f"  Ensemble signal: {ensemble_sig['signal_value']:+.4f}")
-            print(f"  Confidence:       {ensemble_sig['confidence']:.1%}")
-            print(f"  Asset biases:")
+            logger.info("  Ensemble signal: %+.4f", ensemble_sig['signal_value'])
+            logger.info("  Confidence:       %.1f%%", ensemble_sig['confidence'] * 100)
+            logger.info("  Asset biases:")
             for asset, bias in ensemble_sig.get("asset_signals", {}).items():
-                print(f"    {asset}: {bias:+.4f}")
-            print()
+                logger.info("    %s: %+.4f", asset, bias)
 
     else:
         parser.print_help()
-
-
 if __name__ == "__main__":
     from src.utils.log_config import configure_logging
     configure_logging()

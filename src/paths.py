@@ -76,6 +76,12 @@ VIX_CRISIS_THRESHOLD: float = float(os.environ.get("VIX_CRISIS_THRESHOLD", "25.0
 VIX_VOL_SPIKE_THRESHOLD: float = float(os.environ.get("VIX_VOL_SPIKE_THRESHOLD", "20.0"))
 VIX_LOW_VOL_THRESHOLD: float = float(os.environ.get("VIX_LOW_VOL_THRESHOLD", "15.0"))
 
+# ── Risk-Free Rate ─────────────────────────────────────────────────────
+# Single source of truth for Sharpe ratio computation.
+# Default is 4.5% (current ~1yr Treasury yield as of May 2026).
+# Override via RISK_FREE_RATE env var (e.g., "5.0" for 5%).
+RISK_FREE_RATE: float = float(os.environ.get("RISK_FREE_RATE", "4.5"))
+
 
 def sqlite_connect(db_path: Union[str, Path], **kwargs) -> sqlite3.Connection:
     """Open a SQLite connection with WAL journal mode enabled.

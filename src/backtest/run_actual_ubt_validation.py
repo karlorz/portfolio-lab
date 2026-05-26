@@ -11,7 +11,7 @@ from datetime import datetime
 from math import sqrt, pow
 import numpy as np
 
-from src.paths import HISTORICAL_JSON, DATA_DIR
+from src.paths import HISTORICAL_JSON, DATA_DIR, RISK_FREE_RATE
 from src.backtest.metrics import save_results_json
 
 
@@ -95,8 +95,8 @@ def calculate_metrics(returns, dates, scenario, base_returns=None, expected_mult
         if dd < max_dd:
             max_dd = dd
     
-    # Sharpe (assuming 4% risk-free)
-    sharpe = (cagr - 0.04) / annualized_vol if annualized_vol > 0 else 0
+    # Sharpe (using centralized risk-free rate)
+    sharpe = (cagr - RISK_FREE_RATE / 100) / annualized_vol if annualized_vol > 0 else 0
     calmar = cagr / abs(max_dd) if max_dd != 0 else cagr
     
     # Tracking error

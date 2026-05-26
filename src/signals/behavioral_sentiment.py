@@ -441,42 +441,42 @@ if __name__ == "__main__":
 
     if args.signal or (not args.status and not args.backfill and not args.pause and not args.clear):
         sig = signal_gen.get_signal()
-        print("\n=== Behavioral Sentiment Signal ===")
-        print(f"Timestamp: {sig.timestamp}")
-        print(f"Signal Type: {sig.signal_type}")
-        print(f"Confidence: {sig.confidence:.2%}")
-        print(f"Equity Shift: {sig.equity_shift_pct:+.1f}%")
-        print(f"Z-Score: {sig.z_score:+.2f}")
-        print(f"Composite: {sig.composite_score:+.2f}")
-        print(f"VIX: {sig.vix:.1f}")
-        print(f"Regime Suppressed: {sig.regime_suppressed}")
-        print(f"Holding Period: {sig.holding_period_days}d")
-        print(f"Rationale: {sig.rationale}")
+        logger.info("\n=== Behavioral Sentiment Signal ===")
+        logger.info("Timestamp: %s", sig.timestamp)
+        logger.info("Signal Type: %s", sig.signal_type)
+        logger.info("Confidence: %.2f%%", sig.confidence * 100)
+        logger.info("Equity Shift: %+.1f%%", sig.equity_shift_pct)
+        logger.info("Z-Score: %+.2f", sig.z_score)
+        logger.info("Composite: %+.2f", sig.composite_score)
+        logger.info("VIX: %.1f", sig.vix)
+        logger.info("Regime Suppressed: %s", sig.regime_suppressed)
+        logger.info("Holding Period: %dd", sig.holding_period_days)
+        logger.info("Rationale: %s", sig.rationale)
 
     if args.status:
         status = signal_gen.get_status()
-        print("\n=== Signal Generator Status ===")
+        logger.info("\n=== Signal Generator Status ===")
         for k, v in status.items():
-            print(f"  {k}: {v}")
+            logger.info("  %s: %s", k, v)
 
     if args.backfill:
         results = signal_gen.historical_backfill(args.start, args.end)
-        print(f"\n=== Historical Backfill: {len(results)} days ===")
+        logger.info("\n=== Historical Backfill: %d days ===", len(results))
         # Summarize
         buy_days = sum(1 for r in results if "buy" in r["signal_type"])
         sell_days = sum(1 for r in results if "sell" in r["signal_type"])
         neutral_days = sum(1 for r in results if r["signal_type"] == "neutral")
-        print(f"  Buy signals: {buy_days}")
-        print(f"  Sell signals: {sell_days}")
-        print(f"  Neutral: {neutral_days}")
+        logger.info("  Buy signals: %d", buy_days)
+        logger.info("  Sell signals: %d", sell_days)
+        logger.info("  Neutral: %d", neutral_days)
         if results:
-            print(f"  Sample (first): {results[0]}")
-            print(f"  Sample (last): {results[-1]}")
+            logger.info("  Sample (first): %s", results[0])
+            logger.info("  Sample (last): %s", results[-1])
 
     if args.pause:
         signal_gen.trigger_pause(args.pause, "Manual CLI trigger")
-        print(f"Paused for {args.pause}h")
+        logger.info("Paused for %dh", args.pause)
 
     if args.clear:
         signal_gen.clear_pause()
-        print("Pause cleared")
+        logger.info("Pause cleared")

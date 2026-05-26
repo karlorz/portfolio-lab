@@ -38,6 +38,8 @@ CLI:
 """
 
 import json
+import logging
+
 import sqlite3
 import argparse
 import sys
@@ -54,6 +56,10 @@ from src.paths import DATA_DIR
 # Existing module imports
 from src.data.alternative_data import AlternativeDataClient
 
+
+logger = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['BASE_WEIGHTS', 'REGIME_WEIGHTS', 'MIN_SIGNAL_SOURCES', 'SIGNAL_MIN', 'SIGNAL_MAX', 'MAX_DELTA_PCT', 'SignalSourceResult', 'CompositeSignal', 'AllocationDelta', 'PortfolioRecommendation', 'init_database', 'SignalSource', 'TechnicalSignal', 'MacroSignal', 'AlternativeDataSignalAdapter', 'LLMSentimentSignalAdapter', 'SignalIntegrator']
 
@@ -1244,69 +1250,70 @@ def main():
     
     if args.command == "composite":
         if not args.ticker:
-            print("Error: --ticker required")
+            logger.error("--ticker required")
             sys.exit(1)
-        
+
         signal = integrator.get_composite_signal(args.ticker)
-        
+
         if args.json:
-            print(json.dumps(signal.to_dict(), indent=2))
+            logger.info(json.dumps(signal.to_dict(), indent=2))
         else:
-            print(f"\n📊 Composite Signal for {signal.ticker}")
-            print(f"   Score: {signal.composite_score:+.3f}")
-            print(f"   Confidence: {signal.composite_confidence:.1%}")
-            print(f"   Regime: {signal.detected_regime}")
-            print(f"   Agreement: {signal.signal_agreement}")
-            print(f"   Primary Drivers: {', '.join(signal.primary_drivers)}")
+            logger.info("\nComposite Signal for %s", signal.ticker)
+            logger.info("   Score: %+.3f", signal.composite_score)
+            logger.info("   Confidence: %.1f%%", signal.composite_confidence * 100)
+            logger.info("   Regime: %s", signal.detected_regime)
+            logger.info("   Agreement: %s", signal.signal_agreement)
+            logger.info("   Primary Drivers: %s", ', '.join(signal.primary_drivers))
             if signal.expected_accuracy:
-                print(f"   Expected Accuracy: {signal.expected_accuracy:.1%}")
-    
+                logger.info("   Expected Accuracy: %.1f%%", signal.expected_accuracy * 100)
+
     elif args.command == "portfolio":
         if not args.portfolio:
-            print("Error: --portfolio required (e.g., 46/38/16)")
+            logger.error("--portfolio required (e.g., 46/38/16)")
             sys.exit(1)
-        
+
         # Parse allocation
         weights = [float(w) / 100 for w in args.portfolio.split("/")]
         tickers = ["SPY", "GLD", "TLT"]  # Default mapping
-        
+
         if len(weights) == 2:
             tickers = ["SPY", "GLD"]
         elif len(weights) == 3:
             tickers = ["SPY", "GLD", "TLT"]
         elif len(weights) == 4:
             tickers = ["SPY", "EFA", "GLD", "TLT"]
-        
+
         current_alloc = {tickers[i]: weights[i] for i in range(len(weights))}
-        
+
         recommendation = integrator.get_allocation_deltas(current_alloc)
-        
+
         if args.json:
-            print(json.dumps(recommendation.to_dict(), indent=2))
+            logger.info(json.dumps(recommendation.to_dict(), indent=2))
         else:
-            print(f"\n📈 Portfolio Recommendation ({recommendation.timestamp})")
-            print(f"   Sentiment: {recommendation.composite_sentiment.upper()}")
-            print(f"   Confidence: {recommendation.confidence:.1%}")
-            print(f"   Regime: {recommendation.regime}")
-            print(f"\n   Allocation Changes:")
+            logger.info("\nPortfolio Recommendation (%s)", recommendation.timestamp)
+            logger.info("   Sentiment: %s", recommendation.composite_sentiment.upper())
+            logger.info("   Confidence: %.1f%%", recommendation.confidence * 100)
+            logger.info("   Regime: %s", recommendation.regime)
+            logger.info("\n   Allocation Changes:")
             for delta in recommendation.deltas:
-                direction = "📈" if delta.delta > 0 else "📉" if delta.delta < 0 else "➡️"
-                print(f"   {direction} {delta.ticker}: {delta.current_weight:.1%} → {delta.recommended_weight:.1%} ({delta.delta:+.1%})")
-    
+                direction = "UP" if delta.delta > 0 else "DOWN" if delta.delta < 0 else "FLAT"
+                logger.info("   %s %s: %.1f%% -> %.1f%% (%+.1f%%)",
+                            direction, delta.ticker,
+                            delta.current_weight * 100, delta.recommended_weight * 100,
+                            delta.delta * 100)
+
     elif args.command == "history":
         if not args.ticker:
-            print("Error: --ticker required")
+            logger.error("--ticker required")
             sys.exit(1)
-        
+
         history = integrator.get_signal_history(args.ticker, args.days)
-        
+
         if args.json:
-            print(json.dumps([h.to_dict() for h in history], indent=2))
+            logger.info(json.dumps([h.to_dict() for h in history], indent=2))
         else:
-            print(f"\n📜 Signal History for {args.ticker} (last {args.days} days)")
+            logger.info("\nSignal History for %s (last %d days)", args.ticker, args.days)
             for signal in history[:10]:
-                print(f"   {signal.timestamp[:10]}: {signal.composite_score:+.3f} ({signal.detected_regime})")
-
-
+                logger.info("   %s: %+.3f (%s)", signal.timestamp[:10], signal.composite_score, signal.detected_regime)
 if __name__ == "__main__":
     main()

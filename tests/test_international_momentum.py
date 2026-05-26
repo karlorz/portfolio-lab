@@ -8,6 +8,8 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import logging
+
 
 from src.signals.international_momentum import (
     SignalType,
@@ -1262,25 +1264,24 @@ class TestInternationalMomentumCli(unittest.TestCase):
         self.assertIn('International Momentum Signal Generator', output)
         self.assertIn('--generate', output)
 
-    def test_cli_current_empty(self):
+    def test_cli_current_empty(self, caplog):
         """--current with no signal should exit with code 1 and print error to stderr."""
-        import io
+        caplog.set_level(logging.ERROR)
         import sys
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
         mock_gen.get_current_signal.return_value = None
         test_args = ['prog', '--current']
         with patch('sys.argv', test_args):
-            with patch('sys.stderr', new_callable=io.StringIO) as mock_stderr:
-                with patch(
-                    'src.signals.international_momentum.InternationalMomentumGenerator',
-                    return_value=mock_gen,
-                ):
-                    with self.assertRaises(SystemExit) as ctx:
-                        main()
+            with patch(
+                'src.signals.international_momentum.InternationalMomentumGenerator',
+                return_value=mock_gen,
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
         self.assertEqual(ctx.exception.code, 1)
-        self.assertIn('No signal found', mock_stderr.getvalue())
+        self.assertIn('No signal found', caplog.text)
 
-    def test_cli_current_with_signal(self):
+    def test_cli_current_with_signal(self, caplog):
         """--current with a stored signal should print JSON to stdout."""
         import io
         import sys
@@ -1298,51 +1299,46 @@ class TestInternationalMomentumCli(unittest.TestCase):
         mock_gen.get_current_signal.return_value = signal
         test_args = ['prog', '--current']
         with patch('sys.argv', test_args):
-            with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
-                with patch(
-                    'src.signals.international_momentum.InternationalMomentumGenerator',
-                    return_value=mock_gen,
-                ):
-                    main()
-        output = mock_stdout.getvalue()
-        self.assertIn('efa_lead', output)
-        self.assertIn('signal_type', output)
+            with patch(
+                'src.signals.international_momentum.InternationalMomentumGenerator',
+                return_value=mock_gen,
+            ):
+                main()
+        self.assertIn('efa_lead', caplog.text)
+        self.assertIn('signal_type', caplog.text)
 
-    def test_cli_stats(self):
+    def test_cli_stats(self, caplog):
         """--stats should print JSON statistics to stdout."""
-        import io
+        caplog.set_level(logging.INFO)
         import sys
         stats = {'total_signals': 3, 'activation_rate': 0.67}
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
         mock_gen.get_signal_statistics.return_value = stats
         test_args = ['prog', '--stats']
         with patch('sys.argv', test_args):
-            with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
-                with patch(
-                    'src.signals.international_momentum.InternationalMomentumGenerator',
-                    return_value=mock_gen,
-                ):
-                    main()
-        output = mock_stdout.getvalue()
-        self.assertIn('"total_signals"', output)
-        self.assertIn('"activation_rate"', output)
+            with patch(
+                'src.signals.international_momentum.InternationalMomentumGenerator',
+                return_value=mock_gen,
+            ):
+                main()
+        self.assertIn('"total_signals"', caplog.text)
+        self.assertIn('"activation_rate"', caplog.text)
 
-    def test_cli_generate_no_file(self):
+    def test_cli_generate_no_file(self, caplog):
         """--generate with non-existent file should exit with code 1."""
-        import io
+        caplog.set_level(logging.ERROR)
         import sys
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
         test_args = ['prog', '--generate', '--data-file', '/nonexistent/path/data.json']
         with patch('sys.argv', test_args):
-            with patch('sys.stderr', new_callable=io.StringIO) as mock_stderr:
-                with patch(
-                    'src.signals.international_momentum.InternationalMomentumGenerator',
-                    return_value=mock_gen,
-                ):
-                    with self.assertRaises(SystemExit) as ctx:
-                        main()
+            with patch(
+                'src.signals.international_momentum.InternationalMomentumGenerator',
+                return_value=mock_gen,
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
         self.assertEqual(ctx.exception.code, 1)
-        self.assertIn('Data file not found', mock_stderr.getvalue())
+        self.assertIn('Data file not found', caplog.text)
 
 
 class TestInternationalMomentumGeneratorRiskBoundaries(unittest.TestCase):

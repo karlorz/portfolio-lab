@@ -591,27 +591,27 @@ def main():
     if args.command == 'fetch':
         overlay = FedPolicyOverlay()
         data = overlay.fetch_data(force_refresh=args.force)
-        print(f"\nFetched {len(data)} series:")
+        logger.info("\nFetched %d series:", len(data))
         for series_id, df in data.items():
             latest = df.iloc[-1]['date'].strftime('%Y-%m-%d') if not df.empty else "N/A"
-            print(f"  {series_id}: {len(df)} obs, latest={latest}")
-    
+            logger.info("  %s: %d obs, latest=%s", series_id, len(df), latest)
+
     elif args.command == 'regime':
         overlay = FedPolicyOverlay()
         if args.refresh:
             overlay.fetch_data(force_refresh=True)
-        
+
         regime = overlay.detect_regime()
         if regime:
-            print(json.dumps(regime.to_dict(), indent=2, default=str))
+            logger.info(json.dumps(regime.to_dict(), indent=2, default=str))
         else:
-            print("Error: Could not detect regime")
-    
+            logger.error("Could not detect regime")
+
     elif args.command == 'allocate':
         overlay = FedPolicyOverlay()
         if args.refresh:
             overlay.fetch_data(force_refresh=True)
-        
+
         # Parse allocation
         parts = args.portfolio.split('/')
         base_alloc = {
@@ -619,37 +619,35 @@ def main():
             'GLD': float(parts[1]) / 100,
             'TLT': float(parts[2]) / 100,
         }
-        
+
         result = overlay.get_allocation_recommendation(base_alloc)
-        print(json.dumps(result, indent=2, default=str))
-    
+        logger.info(json.dumps(result, indent=2, default=str))
+
     elif args.command == 'backtest':
-        print("Backtest functionality: TBD")
-        print("Historical FRED data needed for full backtest")
-        print("Use 'fetch' to download data first")
-    
+        logger.info("Backtest functionality: TBD")
+        logger.info("Historical FRED data needed for full backtest")
+        logger.info("Use 'fetch' to download data first")
+
     elif args.command == 'status':
         overlay = FedPolicyOverlay()
         data = overlay.fetch_data()
-        
-        print("Fed Policy Overlay v2.54 - Status")
-        print("=" * 40)
-        print(f"Cache: {FRED_CACHE}")
-        print(f"Cache exists: {FRED_CACHE.exists()}")
-        
+
+        logger.info("Fed Policy Overlay v2.54 - Status")
+        logger.info("=" * 40)
+        logger.info("Cache: %s", FRED_CACHE)
+        logger.info("Cache exists: %s", FRED_CACHE.exists())
+
         if FRED_CACHE.exists():
             cache_age = datetime.now() - datetime.fromtimestamp(FRED_CACHE.stat().st_mtime)
-            print(f"Cache age: {cache_age}")
-        
-        print(f"\nData series available:")
+            logger.info("Cache age: %s", cache_age)
+
+        logger.info("\nData series available:")
         for series_id, df in data.items():
             if not df.empty:
                 latest = df.iloc[-1]
-                print(f"  {series_id}: {latest['date'].strftime('%Y-%m-%d')} = {latest['value']:.2f}")
-    
+                logger.info("  %s: %s = %.2f", series_id, latest['date'].strftime('%Y-%m-%d'), latest['value'])
+
     else:
         parser.print_help()
-
-
 if __name__ == '__main__':
     main()

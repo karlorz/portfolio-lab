@@ -29,7 +29,7 @@ from typing import Dict, Optional
 from enum import Enum
 
 from src.backtest.metrics import save_results_json
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, RISK_FREE_RATE
 
 
 
@@ -113,7 +113,7 @@ class ETHStakingModel:
 
     def __init__(self):
         self._state = self._load_state()
-        self._risk_free_rate = 0.043  # Approximate 10yr yield
+        self._risk_free_rate = RISK_FREE_RATE / 100  # Centralized risk-free rate
         self._cpi_rate = 0.030        # Approximate CPI
 
     def _load_state(self) -> Dict:

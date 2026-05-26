@@ -19,7 +19,7 @@ Strategy Logic:
 
 import json
 import logging
-from src.paths import sqlite_connect
+from src.paths import sqlite_connect, RISK_FREE_RATE
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -852,7 +852,7 @@ class FactorRotationBacktest:
         # Daily returns for Sharpe
         daily_returns = np.diff(values) / values[:-1]
         vol = float(np.std(daily_returns) * np.sqrt(252))
-        sharpe = (cagr - 0.04) / vol if vol > 0 else 0
+        sharpe = (cagr - RISK_FREE_RATE / 100) / vol if vol > 0 else 0
 
         # Max drawdown
         peak = np.maximum.accumulate(values)

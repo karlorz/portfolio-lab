@@ -952,49 +952,49 @@ if __name__ == "__main__":
     
     if args.backfill:
         count = backfill_predictions()
-        print(f"Backfilled {count} predictions")
+        logger.info("Backfilled %d predictions", count)
     
     elif args.calculate:
         if args.source:
             score = tracker.calculate_health_score(args.source)
             if score:
                 tracker.save_health_scores({args.source: score})
-                print(json.dumps(score.to_dict(), indent=2))
+                logger.info(json.dumps(score.to_dict(), indent=2))
             else:
-                print(f"No data available for {args.source}")
+                logger.info("No data available for %s", args.source)
         else:
             scores = tracker.calculate_all_health_scores()
             tracker.save_health_scores(scores)
-            print(f"Calculated health for {len(scores)} sources")
+            logger.info("Calculated health for %d sources", len(scores))
             for s, score in scores.items():
-                print(f"  {s}: {score.health_score:.3f} ({score.status})")
+                logger.info("  %s: %.3f (%s)", s, score.health_score, score.status)
     
     elif args.alerts:
         alerts = tracker.detect_decay_alerts()
         if alerts:
-            print(f"Found {len(alerts)} decay alerts:")
+            logger.info("Found %d decay alerts:", len(alerts))
             for alert in alerts:
-                print(f"  ⚠️ {alert.message}")
+                logger.info("  WARNING: %s", alert.message)
         else:
-            print("No decay alerts - all signals healthy")
-    
+            logger.info("No decay alerts - all signals healthy")
     else:
         # Default to status
         report = tracker.get_health_report()
-        print("\n=== Signal Health Report ===")
-        print(f"Generated: {report['timestamp']}")
-        print(f"\nSummary: {report['summary']['healthy']} healthy, "
-              f"{report['summary']['degraded']} degraded, "
-              f"{report['summary']['unhealthy']} unhealthy")
-        print(f"\nOverall Status: {report['overall_health'].upper()}")
+        logger.info("\n=== Signal Health Report ===")
+        logger.info("Generated: %s", report['timestamp'])
+        logger.info("\nSummary: %d healthy, %d degraded, %d unhealthy",
+                    report['summary']['healthy'], report['summary']['degraded'],
+                    report['summary']['unhealthy'])
+        logger.info("\nOverall Status: %s", report['overall_health'].upper())
         
-        print("\nHealth Scores:")
+        logger.info("\nHealth Scores:")
         for source, score in report['scores'].items():
-            status_icon = "🟢" if score['status'] == 'healthy' else ("🟡" if score['status'] == 'degraded' else "🔴")
-            print(f"  {status_icon} {source:12s} {score['health_score']:.3f} "
-                  f"(30d: {score['accuracy_30d']:.1%}, 90d: {score['accuracy_90d']:.1%})")
-        
+            status_text = "HEALTHY" if score['status'] == 'healthy' else (
+                "DEGRADED" if score['status'] == 'degraded' else "UNHEALTHY")
+            logger.info("  %s %-12s %.3f (30d: %.1f%%, 90d: %.1f%%)",
+                        status_text, source, score['health_score'],
+                        score['accuracy_30d'] * 100, score['accuracy_90d'] * 100)
         if report['alerts']:
-            print("\n⚠️ Decay Alerts:")
+            logger.info("\nDecay Alerts:")
             for alert in report['alerts']:
-                print(f"  {alert['severity'].upper()}: {alert['message']}")
+                logger.info("  %s: %s", alert['severity'].upper(), alert['message'])

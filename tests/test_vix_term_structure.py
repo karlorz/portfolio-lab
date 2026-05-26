@@ -6,6 +6,7 @@ Target: 40+ tests for comprehensive coverage.
 import dataclasses
 import inspect
 import json
+import logging
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1466,8 +1467,9 @@ class TestCLIEntryPoint:
 
     @patch.object(VIXTermStructureSignalGenerator, "generate_signal")
     @patch.object(VIXTermStructureSignalGenerator, "save_signal")
-    def test_main_output_contains_key_fields(self, mock_save, mock_gen, capsys):
+    def test_main_output_contains_key_fields(self, mock_save, mock_gen, caplog):
         """Test main() prints expected fields to stdout."""
+        caplog.set_level(logging.INFO)
         mock_signal = MagicMock(spec=VIXTermStructureSignal)
         mock_signal.timestamp = "2026-05-15T12:00:00"
         mock_signal.signal_state = "risk_off"
@@ -1491,21 +1493,21 @@ class TestCLIEntryPoint:
         mock_gen.return_value = mock_signal
 
         main()
-        captured = capsys.readouterr()
 
-        assert "VIX TERM STRUCTURE SIGNAL GENERATOR" in captured.out
-        assert "Signal State: risk_off" in captured.out
-        assert "Signal Value: -0.750" in captured.out
-        assert "VIX Spot: 35.00" in captured.out
-        assert "Regime: backwardation" in captured.out
-        assert "Confidence: 90%" in captured.out
-        assert "Valid: True" in captured.out
-        assert "Reason: Backwardation detected" in captured.out
+        assert "VIX TERM STRUCTURE SIGNAL GENERATOR" in caplog.text
+        assert "Signal State: risk_off" in caplog.text
+        assert "Signal Value: -0.750" in caplog.text
+        assert "VIX Spot: 35.00" in caplog.text
+        assert "Regime: backwardation" in caplog.text
+        assert "Confidence: 90%" in caplog.text
+        assert "Valid: True" in caplog.text
+        assert "Reason: Backwardation detected" in caplog.text
 
     @patch.object(VIXTermStructureSignalGenerator, "generate_signal")
     @patch.object(VIXTermStructureSignalGenerator, "save_signal")
-    def test_main_output_with_invalid_signal(self, mock_save, mock_gen, capsys):
+    def test_main_output_with_invalid_signal(self, mock_save, mock_gen, caplog):
         """Test main() output when signal is invalid."""
+        caplog.set_level(logging.INFO)
         mock_signal = MagicMock(spec=VIXTermStructureSignal)
         mock_signal.timestamp = "2026-05-15T12:00:00"
         mock_signal.signal_state = "neutral"
@@ -1529,9 +1531,8 @@ class TestCLIEntryPoint:
         mock_gen.return_value = mock_signal
 
         main()
-        captured = capsys.readouterr()
-        assert "Valid: False" in captured.out
-        assert "No VIX data available" in captured.out
+        assert "Valid: False" in caplog.text
+        assert "No VIX data available" in caplog.text
 
     def test_cli_guard_present(self):
         """Test that __name__ == '__main__' guard exists in source."""

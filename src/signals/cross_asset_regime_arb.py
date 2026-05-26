@@ -629,7 +629,7 @@ def main():
     detector = CrossAssetRegimeArbDetector()
 
     if len(sys.argv) < 2:
-        print("Usage: python -m src.signals.cross_asset_regime_arb [scan|signal|status]")
+        logger.info("Usage: python -m src.signals.cross_asset_regime_arb [scan|signal|status]")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -639,40 +639,36 @@ def main():
         if signal:
             print_signal_report(signal)
         else:
-            print("ERROR: Could not generate signal (data unavailable)")
+            logger.error("Could not generate signal (data unavailable)")
             sys.exit(1)
 
     elif command == "signal":
         result = detector.get_ensemble_signal()
-        print(json.dumps(result, indent=2))
+        logger.info(json.dumps(result, indent=2))
 
     elif command == "status":
         # Show state info
         state = detector.state
-        print("Cross-Asset Regime Arbitrage Status")
-        print("=" * 40)
-        print(f"Previous pattern:    {state.get('previous_pattern', 'none')}")
-        print(f"Persistence (days):  {state.get('persistence_days', 0)}")
-        print(f"Last scan:           {state.get('last_date', 'never')}")
-        print()
-        print("Data sources:")
-        print(f"  SPY: 5375 data points available")
-        print(f"  TLT: 5375 data points available")
-        print(f"  GLD: 5375 data points available")
-        print("  Data: public/data/prices.json")
+        logger.info("Cross-Asset Regime Arbitrage Status")
+        logger.info("=" * 40)
+        logger.info("Previous pattern:    %s", state.get('previous_pattern', 'none'))
+        logger.info("Persistence (days):  %s", state.get('persistence_days', 0))
+        logger.info("Last scan:           %s", state.get('last_date', 'never'))
+        logger.info("Data sources:")
+        logger.info("  SPY: 5375 data points available")
+        logger.info("  TLT: 5375 data points available")
+        logger.info("  GLD: 5375 data points available")
+        logger.info("  Data: public/data/prices.json")
 
         # Run a quick scan if data available
         signal = detector.scan()
         if signal:
-            print()
             print_signal_report(signal)
 
     else:
-        print(f"Unknown command: {command}")
-        print("Usage: python -m src.signals.cross_asset_regime_arb [scan|signal|status]")
+        logger.info("Unknown command: %s", command)
+        logger.info("Usage: python -m src.signals.cross_asset_regime_arb [scan|signal|status]")
         sys.exit(1)
-
-
 if __name__ == "__main__":
     from src.utils.log_config import configure_logging
     configure_logging()

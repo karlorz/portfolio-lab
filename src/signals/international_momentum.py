@@ -483,31 +483,31 @@ def main():
                 data = json.load(f)
             
             signal = generator.generate_signal(data)
-            print(json.dumps(signal.to_dict(), indent=2))
+            logger.info(json.dumps(signal.to_dict(), indent=2))
         except FileNotFoundError:
-            print(f"Error: Data file not found: {args.data_file}", file=sys.stderr)
-            print("Run data fetcher first: bun run fetch-data", file=sys.stderr)
+            logger.error("Data file not found: %s", args.data_file)
+            logger.error("Run data fetcher first: bun run fetch-data")
             sys.exit(1)
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
-            print(f"Error generating signal: {e}", file=sys.stderr)
+            logger.error("Error generating signal: %s", e)
             sys.exit(1)
-    
+
     elif args.history:
         history = generator.get_signal_history(args.history)
-        print(json.dumps(history, indent=2, default=str))
-    
+        logger.info(json.dumps(history, indent=2, default=str))
+
     elif args.stats:
         stats = generator.get_signal_statistics()
-        print(json.dumps(stats, indent=2))
-    
+        logger.info(json.dumps(stats, indent=2))
+
     elif args.current:
         signal = generator.get_current_signal()
         if signal:
-            print(json.dumps(signal.to_dict(), indent=2))
+            logger.info(json.dumps(signal.to_dict(), indent=2))
         else:
-            print('{"error": "No signal found. Generate a signal first."}', file=sys.stderr)
+            logger.error('{"error": "No signal found. Generate a signal first."}')
             sys.exit(1)
-    
+
     else:
         parser.print_help()
 

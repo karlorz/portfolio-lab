@@ -1498,29 +1498,26 @@ class TestAllConstants:
 class TestCLIMain:
     """Test the CLI main() entry point with mocked arguments."""
 
-    def test_status_prints_system_info(self):
+    def test_status_prints_system_info(self, caplog):
         """`status` subcommand should print system info without error."""
-        import io
+        caplog.set_level(logging.INFO)
         from src.signals.multi_speed_momentum import main
         with patch('sys.argv', ['multi_speed_momentum', 'status']):
-            with patch('sys.stdout', new_callable=io.StringIO) as stdout:
-                main()
-                output = stdout.getvalue()
-            assert 'Multi-Speed Momentum' in output
-            assert 'FAST TIER' in output
-            assert 'MEDIUM TIER' in output
-            assert 'SLOW TIER' in output
-            assert 'Equal risk-weight' in output
+            main()
+        output = ' '.join(caplog.text)
+        assert 'Multi-Speed Momentum' in caplog.text
+        assert 'FAST TIER' in caplog.text
+        assert 'MEDIUM TIER' in caplog.text
+        assert 'SLOW TIER' in caplog.text
+        assert 'Equal risk-weight' in caplog.text
 
-    def test_status_shows_prices_path(self):
+    def test_status_shows_prices_path(self, caplog):
         """Status should mention the data source path."""
-        import io
+        caplog.set_level(logging.INFO)
         from src.signals.multi_speed_momentum import main
         with patch('sys.argv', ['multi_speed_momentum', 'status']):
-            with patch('sys.stdout', new_callable=io.StringIO) as stdout:
-                main()
-                output = stdout.getvalue()
-            assert 'Data source' in output
+            main()
+        assert 'Data source' in caplog.text
 
     def test_backtest_with_mocked_engine_writes_json(self, tmp_path):
         """Backtest with mocked backtester should produce JSON output."""
@@ -1709,9 +1706,9 @@ class TestCLIMain:
         saved = json.loads(output_file.read_text())
         assert saved['ticker'] == 'SPY'
 
-    def test_compute_no_signal_prints_error(self):
+    def test_compute_no_signal_prints_error(self, caplog):
         """Compute command when signal is None should print error JSON."""
-        import io
+        caplog.set_level(logging.INFO)
         with patch('src.signals.multi_speed_momentum.MultiSpeedMomentum') as mock_eng_cls:
             mock_eng = MagicMock()
             mock_eng.compute_speed_signal.return_value = None
@@ -1720,11 +1717,9 @@ class TestCLIMain:
             with patch('sys.argv', [
                 'multi_speed_momentum', 'compute', '--ticker', 'SPY', '--tier', 'fast',
             ]):
-                with patch('sys.stdout', new_callable=io.StringIO) as stdout:
-                    from src.signals.multi_speed_momentum import main
-                    main()
-                output = stdout.getvalue()
-                assert 'error' in output.lower()
+                from src.signals.multi_speed_momentum import main
+                main()
+            assert 'Could not compute signal for SPY' in caplog.text
 
     def test_invalid_portfolio_raises_value_error(self):
         """Backtest with invalid portfolio format should raise ValueError."""

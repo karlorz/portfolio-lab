@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from src.paths import RISK_FREE_RATE
+
 
 __all__ = ['BLViews', 'BLResult', 'map_biases_to_views', 'run_black_litterman', 'compute_bl_weights', 'tau_sensitivity']
 
@@ -159,7 +161,7 @@ def map_biases_to_views(
 def run_black_litterman(
     cov_matrix: np.ndarray,
     views: BLViews,
-    risk_free_rate: float = 0.02,
+    risk_free_rate: float = RISK_FREE_RATE / 100,
     market_caps: Optional[Dict[str, float]] = None,
     pi: Optional[np.ndarray] = None,
 ) -> BLResult:
@@ -171,7 +173,7 @@ def run_black_litterman(
     Args:
         cov_matrix: NxN covariance matrix of asset returns.
         views: BLViews from map_biases_to_views().
-        risk_free_rate: Annual risk-free rate (default 0.02).
+        risk_free_rate: Annual risk-free rate (default centralized).
         market_caps: Market cap dict (required if prior="market").
         pi: Custom prior returns array (overrides views.prior).
 
@@ -269,7 +271,7 @@ def compute_bl_weights(
     health_scores: Optional[Dict[str, float]] = None,
     tau: float = DEFAULT_TAU,
     prior: str = "equal",
-    risk_free_rate: float = 0.02,
+    risk_free_rate: float = RISK_FREE_RATE / 100,
 ) -> BLResult:
     """Convenience function: prices → BL-optimized weights in one call.
 
@@ -338,7 +340,7 @@ def tau_sensitivity(
     cov_matrix: np.ndarray,
     views: BLViews,
     tau_values: Optional[List[float]] = None,
-    risk_free_rate: float = 0.02,
+    risk_free_rate: float = RISK_FREE_RATE / 100,
     market_caps: Optional[Dict[str, float]] = None,
     pi: Optional[np.ndarray] = None,
 ) -> Dict[float, BLResult]:

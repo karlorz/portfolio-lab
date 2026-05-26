@@ -16,7 +16,10 @@ Usage:
     # For integrator integration, use class methods
 """
 
+import logging
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from src.signals.integrator import SignalSourceResult
 from src.signals.multi_speed_momentum import MultiSpeedMomentum, SPEED_TIERS, DEFAULT_BASE_ALLOCATION
@@ -376,33 +379,33 @@ def get_all_strategy_signals(
 
 if __name__ == "__main__":
     # Quick test
-    print("Testing Multi-Strategy Adapters")
-    print("=" * 50)
-    
+    logger.info("Testing Multi-Strategy Adapters")
+    logger.info("=" * 50)
+
     tickers = ["SPY", "GLD", "TLT"]
-    
+
     # Test multi-speed
-    print("\n1. Multi-Speed Momentum (v2.56):")
+    logger.info("\n1. Multi-Speed Momentum (v2.56):")
     ms = MultiSpeedSignalAdapter()
     for ticker in tickers:
         sig = ms.generate_signal(ticker)
         if sig:
-            print(f"  {ticker}: signal={sig.signal:+.2f}, conf={sig.confidence:.2f}")
-    
+            logger.info("  %s: signal=%+.2f, conf=%.2f", ticker, sig.signal, sig.confidence)
+
     # Test risk parity
-    print("\n2. Risk Parity (v2.57):")
+    logger.info("\n2. Risk Parity (v2.57):")
     rp = RiskParitySignalAdapter()
     for ticker in tickers:
         sig = rp.generate_signal(ticker)
         if sig:
-            print(f"  {ticker}: signal={sig.signal:+.2f}, conf={sig.confidence:.2f}")
-    
+            logger.info("  %s: signal=%+.2f, conf=%.2f", ticker, sig.signal, sig.confidence)
+
     # Test network momentum
-    print("\n3. Network Momentum (v2.58):")
+    logger.info("\n3. Network Momentum (v2.58):")
     nm = NetworkMomentumSignalAdapter()
     for ticker in tickers:
         sig = nm.generate_signal(ticker)
         if sig:
-            print(f"  {ticker}: signal={sig.signal:+.2f}, conf={sig.confidence:.2f}")
-    
-    print("\nAll adapters operational.")
+            logger.info("  %s: signal=%+.2f, conf=%.2f", ticker, sig.signal, sig.confidence)
+
+    logger.info("\nAll adapters operational.")

@@ -646,30 +646,30 @@ def main():
     generator = CalendarSeasonalitySignalGenerator()
     signal = generator.generate_signal()
 
-    print("=" * 60)
-    print("CALENDAR SEASONALITY SIGNAL v3.50")
-    print("=" * 60)
-    print(f"Date: {signal.assessment_date} ({signal.day_of_week})")
-    print(f"Trading Day: {signal.is_trading_day}")
-    print()
-    print("Active Windows:", signal.active_windows or ["none"])
-    print(f"Urgency Modifier: {signal.urgency_modifier:.2f}")
-    print(f"Recommendation: {signal.recommendation}")
-    print(f"Effect: {signal.effect}")
-    print()
-    print("Individual Modifiers:")
-    print(f"  TOM:          {signal.tom_modifier:.2f}")
-    print(f"  Holiday:      {signal.holiday_modifier:.2f}")
-    print(f"  Quarter-End:  {signal.quarter_end_modifier:.2f}")
-    print(f"  Monday:       {signal.monday_modifier:.2f}")
-    print(f"  Pre-FOMC:     {signal.fomc_modifier:.2f}")
-    print(f"  December:     {signal.december_modifier:.2f}")
-    print(f"  OPEX:         {signal.opex_modifier:.2f}")
-    print()
-    print(f"Next Window: {signal.next_window} ({signal.next_window_date}, "
-          f"{signal.days_to_next_window}d away)")
-    print(f"Confidence: {signal.confidence:.0f}%")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("CALENDAR SEASONALITY SIGNAL v3.50")
+    logger.info("=" * 60)
+    logger.info("Date: %s (%s)", signal.assessment_date, signal.day_of_week)
+    logger.info("Trading Day: %s", signal.is_trading_day)
+    logger.info("")
+    logger.info("Active Windows: %s", signal.active_windows or ["none"])
+    logger.info("Urgency Modifier: %.2f", signal.urgency_modifier)
+    logger.info("Recommendation: %s", signal.recommendation)
+    logger.info("Effect: %s", signal.effect)
+    logger.info("")
+    logger.info("Individual Modifiers:")
+    logger.info("  TOM:          %.2f", signal.tom_modifier)
+    logger.info("  Holiday:      %.2f", signal.holiday_modifier)
+    logger.info("  Quarter-End:  %.2f", signal.quarter_end_modifier)
+    logger.info("  Monday:       %.2f", signal.monday_modifier)
+    logger.info("  Pre-FOMC:     %.2f", signal.fomc_modifier)
+    logger.info("  December:     %.2f", signal.december_modifier)
+    logger.info("  OPEX:         %.2f", signal.opex_modifier)
+    logger.info("")
+    logger.info("Next Window: %s (%s, %dd away)",
+                signal.next_window, signal.next_window_date, signal.days_to_next_window)
+    logger.info("Confidence: %.0f%%", signal.confidence)
+    logger.info("=" * 60)
 
     if "--save" in sys.argv:
         generator.save_signal(signal)
@@ -686,8 +686,8 @@ def main():
         else:
             year, month = date.today().year, date.today().month
 
-        print(f"\nCalendar View: {year}-{month:02d}")
-        print("-" * 60)
+        logger.info("\nCalendar View: %d-%02d", year, month)
+        logger.info("-" * 60)
 
         cal = NYSECalendar(year=year)
         detector = CalendarSeasonalityDetector(year=year)
@@ -703,8 +703,8 @@ def main():
             mod = detector.get_urgency_modifier(d)
             windows = [w.value for w in detector._detect_windows(d)]
             bar = "█" * int((1 - mod) * 10)
-            print(f"  {d.isoformat()} ({d.strftime('%a')}) "
-                  f"mod={mod:.2f} {bar} {windows or 'normal'}")
+            logger.info("  %s (%s) mod=%.2f %s %s",
+                        d.isoformat(), d.strftime("%a"), mod, bar, windows or "normal")
 
 
 if __name__ == "__main__":

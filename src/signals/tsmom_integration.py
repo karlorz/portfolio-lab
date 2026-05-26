@@ -19,10 +19,13 @@ Usage:
     signals = adapter.get_portfolio_signals(["SPY", "GLD", "TLT"])
 """
 
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from src.signals.tsmom_overlay import TSMOMOverlay, TSMOMSignal, DEFAULT_BASE_ALLOCATION
 from src.signals.integrator import SignalSourceResult
@@ -219,7 +222,7 @@ if __name__ == "__main__":
     if args.ticker:
         signal = adapter.get_signal(args.ticker)
         if signal:
-            print(json.dumps({
+            logger.info(json.dumps({
                 "ticker": args.ticker,
                 "source_type": signal.source_type,
                 "source_name": signal.source_name,
@@ -230,11 +233,11 @@ if __name__ == "__main__":
                 "metadata": signal.metadata
             }, indent=2))
         else:
-            print(json.dumps({"error": f"No signal for {args.ticker}"}))
-    
+            logger.error("No signal for %s", args.ticker)
+
     elif args.portfolio:
         signals = adapter.get_portfolio_signals(["SPY", "GLD", "TLT"])
-        print(json.dumps({
+        logger.info(json.dumps({
             ticker: {
                 "signal": s.signal,
                 "confidence": s.confidence,
@@ -243,10 +246,12 @@ if __name__ == "__main__":
             }
             for ticker, s in signals.items()
         }, indent=2))
-    
+
     elif args.deltas:
         deltas = adapter.get_allocation_deltas(["SPY", "GLD", "TLT"])
-        print(json.dumps(deltas, indent=2))
-    
+        logger.info(json.dumps(deltas, indent=2))
+
     else:
+        parser.print_help()
+
         parser.print_help()

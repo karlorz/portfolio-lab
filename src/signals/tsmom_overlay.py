@@ -719,12 +719,12 @@ def main():
         signal = overlay.compute_signal(args.ticker)
         if signal:
             result = signal.to_dict()
-            print(json.dumps(result, indent=2))
+            logger.info(json.dumps(result, indent=2))
             if args.output:
                 save_results_json(result, output_path=args.output)
         else:
-            print(json.dumps({"error": f"Could not compute signal for {args.ticker}"}))
-    
+            logger.error("Could not compute signal for %s", args.ticker)
+
     elif args.command == 'backtest':
         # Parse allocation
         parts = args.portfolio.split('/')
@@ -734,17 +734,17 @@ def main():
             'TLT': float(parts[2]) / 100 if float(parts[2]) > 1 else float(parts[2]),
         }
         base_alloc['CASH'] = 0.0
-        
+
         backtester = TSMOMBacktester(
             base_allocation=base_alloc,
             start_date=args.start,
             end_date=args.end
         )
         result = backtester.run_backtest(rebalance_freq=args.freq)
-        print(json.dumps(result, indent=2))
+        logger.info(json.dumps(result, indent=2))
         if args.output:
             save_results_json(result, output_path=args.output)
-    
+
     elif args.command == 'live':
         parts = args.portfolio.split('/')
         base_alloc = {
@@ -753,30 +753,27 @@ def main():
             'TLT': float(parts[2]) / 100 if float(parts[2]) > 1 else float(parts[2]),
         }
         base_alloc['CASH'] = 0.0
-        
+
         overlay = TSMOMOverlay()
         result = overlay.get_current_recommendation(base_alloc)
-        print(json.dumps(result, indent=2))
+        logger.info(json.dumps(result, indent=2))
         if args.output:
             save_results_json(result, output_path=args.output)
-    
+
     elif args.command == 'status':
-        print("TSMOM Overlay v2.52 - Status")
-        print("=" * 40)
-        print(f"Lookback: {LOOKBACK_DAYS} days (12 months)")
-        print(f"Skip: {SKIP_DAYS} days (1 month)")
-        print(f"Volatility window: {VOL_WINDOW} days")
-        print(f"Max deviation: {MAX_DEVIATION * 100}%")
-        print(f"Min weight: {MIN_WEIGHT * 100}%")
-        print(f"Target volatility: {VOL_TARGET * 100}%")
-        print()
-        print(f"Data source: {DATA_DIR}")
-        print(f"Prices path: {PRICES_PATH}")
-        print(f"Prices exist: {PRICES_PATH.exists()}")
-    
+        logger.info("TSMOM Overlay v2.52 - Status")
+        logger.info("=" * 40)
+        logger.info("Lookback: %d days (12 months)", LOOKBACK_DAYS)
+        logger.info("Skip: %d days (1 month)", SKIP_DAYS)
+        logger.info("Volatility window: %d days", VOL_WINDOW)
+        logger.info("Max deviation: %.0f%%", MAX_DEVIATION * 100)
+        logger.info("Min weight: %.0f%%", MIN_WEIGHT * 100)
+        logger.info("Target volatility: %.0f%%", VOL_TARGET * 100)
+        logger.info("Data source: %s", DATA_DIR)
+        logger.info("Prices path: %s", PRICES_PATH)
+        logger.info("Prices exist: %s", PRICES_PATH.exists())
+
     else:
         parser.print_help()
-
-
 if __name__ == '__main__':
     main()
