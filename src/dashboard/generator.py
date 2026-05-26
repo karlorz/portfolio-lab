@@ -622,6 +622,13 @@ class DashboardGenerator:
         # Apply staleness-weighted decay to ensemble weights
         output = self._apply_staleness_decay(output)
 
+        # Health check report
+        try:
+            from src.monitor.health_check import run_health_check
+            output["health"] = run_health_check()
+        except Exception as e:
+            output["health"] = {"status": "error", "error": str(e)}
+
         # Fire external alerts on staleness state transitions
         try:
             from src.monitor.alerting import check_staleness_and_alert
