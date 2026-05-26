@@ -12,6 +12,9 @@
 |- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
 |- **GLD-TLT correlation regime analysis**: rolling 252-day correlation — current 0.10 (neutral), mean 0.20, range [-0.15, 0.60]; predominantly positive since 2013 (two major correlated regimes: 2013-2021 corr=0.34, 2021-2025 corr=0.31); diversification benefit eroding but not gone
 |- **Regime walk-forward validation**: 10 expanding windows, ARI=1.0 (STABLE — rule-based classifier labels consistent across expanding windows), economic coherence 3/3 (GFC, COVID, RateHike all correctly detected); regime persistence: NORMAL 7.6d, CRISIS 9.9d, LOW_VOL 10.0d, HIGH_VOL 7.1d, RECOVERY 1.4d
+|- **Correlation-adaptive TLT/IEF allocation**: NEUTRAL (Sharpe delta -0.0008) — GLD-TLT has been correlated 99.98% of days since 2006, so dynamic IEF switching never activates. Simpler is better: just keep TLT 20%.
+|- **Volatility targeting overlay**: 9% target vol + 1.5x max leverage lifts Sharpe +0.04 (0.95→0.99) and reduces Max DD from -27% to -20%. 11% target is NEGATIVE (-0.05 Sharpe). Leverage mean 1.19x at 9% target.
+|- **44/36/20 challenger validation**: Sharpe 0.95 vs champion 0.94, Max DD -25.9% vs -27.6% (improved +1.7%). Validated as challenger — slightly lower CAGR (-0.3%) for better risk profile.
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
 |- **Overlay data pipeline**: overlay_dashboard data merged into signals.json — 9 panels now render with real data
 |- **Graduation checklist v2**: 12 criteria (added regime_coverage, signal_diversity, sharpe_ci_lower)
