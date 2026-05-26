@@ -1109,16 +1109,17 @@ class TestCalculatePerformanceDailyReturn:
     """
 
     def test_daily_return_uses_previous_day_close(self, tmp_path):
-        """daily_return should be relative to yesterday's close, not last intraday snapshot."""
+        """daily_return should be relative to previous day's close, not today's intraday snapshot."""
         p = _make_portfolio(tmp_path, cash=102000)
         p.positions = {}
         p.history = [
-            {"timestamp": "2026-05-25T16:00:00", "total_value": 100000, "cash": 0, "daily_return": 0.01, "positions_count": 3, "mode": "paper"},
-            {"timestamp": "2026-05-26T10:00:00", "total_value": 100500, "cash": 0, "daily_return": 0, "positions_count": 3, "mode": "paper"},
+            {"timestamp": "2026-05-26T09:30:00", "total_value": 99500, "cash": 0, "daily_return": -0.005, "positions_count": 3, "mode": "paper"},
+            {"timestamp": "2026-05-26T16:00:00", "total_value": 100000, "cash": 0, "daily_return": 0.005, "positions_count": 3, "mode": "paper"},
+            {"timestamp": "2026-05-27T10:00:00", "total_value": 100500, "cash": 0, "daily_return": 0, "positions_count": 3, "mode": "paper"},
         ]
         perf = calculate_performance(p, {})
         # daily_return should be (102000 - 100000) / 100000 = 0.02
-        # NOT (102000 - 100500) / 100500 = ~0.0149
+        # using yesterday's 16:00 close (100000), NOT today's intraday snapshot (100500)
         expected = (102000 - 100000) / 100000
         assert perf["daily_return"] == pytest.approx(expected, abs=0.001)
 
