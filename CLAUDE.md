@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13169 safe** (12838 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **12880 safe** (12567 Python + 313 TypeScript, 27 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
@@ -21,6 +21,7 @@
 |- **IC decay wired**: ICMonitor.stage_predictions() + resolve_staged() two-phase lifecycle — DashboardGenerator._record_ic_data() resolves previous-run predictions with SPY forward returns, stages current biases (ensemble equity/gold/duration/consensus, alternative_data, behavioral_sentiment, factor_rotation, fred_macro) for next run; 7 new staged-prediction tests
 - **Signal correlation matrix**: compute_signal_correlation_matrix() in ensemble_voter.py — pairwise Spearman correlation of IC predictions detects redundant signals (threshold 0.7), applies penalty 1/(1+mean_abs_corr) to ensemble weights; _apply_correlation_penalty() wired into compute_vote() weight pipeline after health weights; 14 new tests
 |- **Regime-conditional ensemble weights**: REGIME_CONDITIONAL_WEIGHTS dict maps 5 regimes to per-signal weight multipliers; _apply_regime_weights() applies regime-appropriate signal emphasis (CRISIS boosts alt_data +30%, LOW_VOL boosts intl_mom +20%, etc.), caps [0.3, 1.5], gates <5% to zero, renormalizes sum=1.0; wired into compute_vote() after correlation penalty; 16 new tests
+|- **Two-stage regime staleness check**: two_stage_regime added to _check_signal_staleness() timestamped_signals dict — monitors two-stage k-means regime signal freshness against 4h TTL alongside 18 other signals
 |- **Two-stage k-means wired to dashboard**: TwoStageKMeansRegime integrated into DashboardGenerator as `two_stage_regime` section — Pydantic `TwoStageRegimeSignal` + TypeScript `SignalsData.two_stage_regime` types; graceful fallback when FRED API key unavailable; `_generate_two_stage_regime()` fits on FRED-MD data via FredMdFetcher.get_all_series()
 |- **Numpy-only two-stage k-means regime classifier**: src/regime/fred_md_two_stage_kmeans.py — Oliveira et al. 2025 (arXiv 2503.11499) implemented in pure numpy (no sklearn). Layer 1: L2 k-means (k=2) for crisis/outlier detection. Layer 2: Cosine k-means (k=5) for directional normal regimes. PCA via numpy SVD (95% variance). Soft probability assignments via logarithmic scaling. 6 regimes mapped to 5 portfolio-lab regimes. 21 tests.
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns

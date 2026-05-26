@@ -1838,6 +1838,7 @@ class DashboardGenerator:
             "bond_momentum": ("generated_at", None),
             "risk_decomposition": ("generated_at", None),
             "rebalance_health": ("generated_at", None),
+            "two_stage_regime": ("timestamp", None),
         }
 
         for signal_key, (ts_field, _) in timestamped_signals.items():
