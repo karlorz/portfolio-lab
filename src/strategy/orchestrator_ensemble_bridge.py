@@ -27,7 +27,6 @@ from .ensemble_voter import SignalSource, SignalReading
 
 __all__ = ['UnifiedSignalReading', 'OrchestratorEnsembleBridge', 'get_unified_ensemble_signal', 'get_unified_ensemble_reading']
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -244,7 +243,8 @@ def get_unified_ensemble_reading() -> SignalReading:
 
 def main():
     import sys
-    logging.basicConfig(level=logging.INFO, force=True)
+    from src.utils.log_config import configure_logging
+    configure_logging()
     bridge = OrchestratorEnsembleBridge()
     signal = bridge.generate_signal()
 

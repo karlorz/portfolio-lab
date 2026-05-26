@@ -540,7 +540,8 @@ class AlternativeDataSignalGenerator:
 
 def main():
     import argparse
-    logging.basicConfig(level=logging.INFO, force=True)
+    from src.utils.log_config import configure_logging
+    configure_logging()
 
     parser = argparse.ArgumentParser(
         description="Alternative Data Signal Generator (v9.00)"

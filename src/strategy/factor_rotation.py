@@ -883,7 +883,8 @@ class FactorRotationBacktest:
 # CLI Interface
 def main():
     import sys
-    logging.basicConfig(level=logging.INFO, force=True)
+    from src.utils.log_config import configure_logging
+    configure_logging()
 
     engine = FactorMomentumEngine()
     

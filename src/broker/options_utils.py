@@ -500,7 +500,8 @@ class OptionsChainCache:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    from src.utils.log_config import configure_logging
+    configure_logging()
     import asyncio
     
     async def test():

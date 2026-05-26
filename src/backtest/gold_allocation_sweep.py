@@ -348,7 +348,8 @@ def run_gold_sweep(output: Optional[str] = None) -> GoldSweepResult:
 
 if __name__ == "__main__":
     import argparse
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    from src.utils.log_config import configure_logging
+    configure_logging()
 
     parser = argparse.ArgumentParser(description="Gold Allocation Sweep")
     parser.add_argument("command", choices=["run"], help="Command to run")

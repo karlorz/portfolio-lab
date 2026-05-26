@@ -326,7 +326,8 @@ class ConvexityHarvestStrategy:
 
 def main():
     """CLI entry point for convexity harvest strategy"""
-    logging.basicConfig(level=logging.INFO, force=True)
+    from src.utils.log_config import configure_logging
+    configure_logging()
     strategy = ConvexityHarvestStrategy()
     
     if len(sys.argv) > 1 and sys.argv[1] == '--backtest':

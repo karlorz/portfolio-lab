@@ -311,7 +311,8 @@ def detect_kurtosis_regime(returns: Optional[List[float]] = None) -> KurtosisReg
 
 def main():
     import sys
-    logging.basicConfig(level=logging.INFO, force=True)
+    from src.utils.log_config import configure_logging
+    configure_logging()
     gen = KurtosisRegimeSignalGenerator()
 
     # Generate test returns: normal + some fat-tail periods

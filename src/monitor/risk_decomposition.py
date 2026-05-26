@@ -751,7 +751,8 @@ def main():
 
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+    from src.utils.log_config import configure_logging
+    configure_logging()
 
     try:
         if args.command == "decompose":
