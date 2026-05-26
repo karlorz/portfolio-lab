@@ -2280,8 +2280,11 @@ class TestStatsJSONPaperPerformance:
                 path = gen.generate_stats_json()
         with open(path) as f:
             data = json.load(f)
-        # Zero returns are filtered by "if r.get('daily_return')" check
-        assert data["paper_portfolio"] == {}
+        # Zero returns are valid daily returns — Sharpe should be 0 (no excess return)
+        paper = data["paper_portfolio"]
+        assert paper["sharpe"] == 0
+        assert paper["days_tracked"] == 25
+        assert paper["total_return"] == 0.0
         gen.conn.close()
 
     def test_paper_metrics_all_fields_populated(self, tmp_path):
@@ -2311,6 +2314,36 @@ class TestStatsJSONPaperPerformance:
         assert "min_value" in paper
         assert "days_tracked" in paper
         assert isinstance(paper["sharpe"], (int, float))
+        gen.conn.close()
+
+    def test_paper_metrics_deduplicates_intraday_entries(self, tmp_path):
+        """Intraday entries for the same date must not inflate days_tracked.
+
+        Regression test: performance.jsonl may contain multiple entries per
+        day (cron runs, manual syncs).  days_tracked must count unique
+        calendar dates, not raw JSONL lines.
+        """
+        gen, _ = _make_generator(tmp_path)
+        perf_log = tmp_path / "performance.jsonl"
+        lines = []
+        # 3 dates × 10 intraday entries each = 30 raw lines, but only 3 unique days
+        for day in range(1, 4):
+            for hour in range(10):
+                ret = 0.001 if hour == 0 else 0.0  # Only first entry per day has return
+                lines.append(json.dumps({
+                    "timestamp": f"2026-01-{day:02d}T{hour:02d}:00:00",
+                    "total_value": 100000.0 + day * 100,
+                    "daily_return": ret,
+                }))
+        perf_log.write_text("\n".join(lines) + "\n")
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_stats_json()
+        with open(path) as f:
+            data = json.load(f)
+        paper = data["paper_portfolio"]
+        # Must be 3 unique dates, not 30 raw lines
+        assert paper["days_tracked"] == 3
         gen.conn.close()
 
 

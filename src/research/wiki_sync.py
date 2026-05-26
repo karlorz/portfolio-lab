@@ -190,12 +190,25 @@ Based on recent regime patterns:
         if len(entries) < 10:
             return None
 
-        # Calculate metrics
-        recent = entries[-63:]  # Last 63 entries
-        values = [e.get("total_value", 0) for e in recent if e.get("total_value")]
-        returns = [e.get("daily_return", 0) for e in recent if e.get("daily_return") is not None]
+        # Deduplicate to daily: keep last entry per calendar date.
+        # performance.jsonl contains intraday entries; raw count overstates
+        # trading days and inflates Sharpe (many zero-return intraday rows).
+        daily_map: dict[str, dict] = {}
+        for idx, entry in enumerate(entries):
+            ts = entry.get("timestamp", "")
+            date_key = ts[:10] if len(ts) >= 10 else ""
+            if not date_key:
+                # Fallback: entries without timestamps are treated as
+                # separate days (preserves legacy test behavior)
+                date_key = f"__no_ts_{idx}__"
+            daily_map[date_key] = entry
+        daily_entries = [daily_map[d] for d in sorted(daily_map)]
 
-        if not values or len(values) < 10:
+        # Calculate metrics from deduplicated daily entries
+        values = [e.get("total_value", 0) for e in daily_entries if e.get("total_value")]
+        returns = [e.get("daily_return", 0) for e in daily_entries if e.get("daily_return") is not None]
+
+        if not values or len(values) < 5:
             return None
 
         total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else 0
@@ -423,7 +436,7 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
     
     def run(self):
         """Run full wiki sync."""
-        print(f"[{datetime.now()}] Wiki Sync Starting")
+        logger.info("Wiki Sync Starting")
 
         wiki_pages = []   # Pages written to wiki vault
         app_data = []     # Data written to app-level DATA_DIR
@@ -440,15 +453,15 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
         # Only update knowledge.md when wiki vault pages change
         if wiki_pages:
             knowledge = self.update_knowledge_md()
-            print(f"Updated {knowledge.name}")
+            logger.info("Updated %s", knowledge.name)
 
         for p in wiki_pages:
-            print(f"  Synced (wiki): {p}")
+            logger.info("  Synced (wiki): %s", p)
         for p in app_data:
-            print(f"  Synced (app): {p}")
+            logger.info("  Synced (app): %s", p)
 
         self.close()
-        print(f"[{datetime.now()}] Wiki Sync Complete ({len(wiki_pages)} wiki, {len(app_data)} app)")
+        logger.info("Wiki Sync Complete (%d wiki, %d app)", len(wiki_pages), len(app_data))
 
 if __name__ == "__main__":
     sync = WikiSync()

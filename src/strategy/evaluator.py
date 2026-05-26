@@ -466,14 +466,27 @@ def get_latest_prices(conn: sqlite3.Connection) -> Dict[str, float]:
 def calculate_performance(portfolio: Portfolio, prices: Dict[str, float]) -> Dict:
     """Calculate current performance metrics."""
     total = portfolio.total_value(prices)
-    
-    # Calculate daily return
+
+    # Calculate daily return relative to previous day's close.
+    # Comparing against the last history entry (which may be intraday)
+    # produces daily_return=0 for most snapshots. Instead, find the
+    # most recent entry from a different calendar date.
+    daily_return = 0.0
     if portfolio.history:
-        last_total = portfolio.history[-1]["total_value"]
-        daily_return = (total - last_total) / last_total if last_total > 0 else 0
-    else:
-        daily_return = 0
-    
+        today = datetime.now().strftime("%Y-%m-%d")
+        prev_day_total = None
+        for entry in reversed(portfolio.history):
+            ts = entry.get("timestamp", "")
+            entry_date = ts[:10] if len(ts) >= 10 else ""
+            if entry_date and entry_date != today:
+                prev_day_total = entry.get("total_value")
+                break
+        # Fallback: if no previous-day entry, use last entry (first day)
+        if prev_day_total is None:
+            prev_day_total = portfolio.history[-1].get("total_value", 0)
+        if prev_day_total and prev_day_total > 0:
+            daily_return = (total - prev_day_total) / prev_day_total
+
     return {
         "timestamp": datetime.now().isoformat(),
         "total_value": total,

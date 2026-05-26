@@ -1012,19 +1012,38 @@ class DashboardGenerator:
         spy_comparison = None
         if perf_log.exists():
             with open(perf_log) as f:
-                tail_lines = deque(f, maxlen=63)
+                tail_lines = deque(f, maxlen=500)
                 if len(tail_lines) >= 20:
-                    recent = [json.loads(l) for l in tail_lines]
-                    returns = [r.get("daily_return", 0) for r in recent if r.get("daily_return")]
-                    values = [r.get("total_value", 0) for r in recent]
-                    
-                    if returns and values:
+                    raw_entries = [json.loads(l) for l in tail_lines]
+
+                    # Deduplicate to daily: keep last entry per calendar date
+                    # (performance.jsonl contains intraday entries; raw count
+                    # overstates trading days and inflates Sharpe)
+                    daily_map: dict[str, dict] = {}
+                    for idx, entry in enumerate(raw_entries):
+                        ts = entry.get("timestamp", "")
+                        date_key = ts[:10] if len(ts) >= 10 else ""
+                        if not date_key:
+                            # Fallback: entries without timestamps are
+                            # treated as separate days
+                            date_key = f"__no_ts_{idx}__"
+                        daily_map[date_key] = entry
+                    daily_entries = [daily_map[d] for d in sorted(daily_map)]
+
+                    daily_returns = [
+                        e.get("daily_return", 0)
+                        for e in daily_entries
+                        if e.get("daily_return") is not None
+                    ]
+                    daily_values = [e.get("total_value", 0) for e in daily_entries]
+
+                    if daily_returns and daily_values:
                         paper_metrics = {
-                            "sharpe": round(np.mean(returns) / np.std(returns) * np.sqrt(252), 2) if np.std(returns) > 0 else 0,
-                            "total_return": round((values[-1] - values[0]) / values[0] * 100, 2),
-                            "max_value": round(max(values), 2),
-                            "min_value": round(min(values), 2),
-                            "days_tracked": len(values)
+                            "sharpe": round(np.mean(daily_returns) / np.std(daily_returns) * np.sqrt(252), 2) if np.std(daily_returns) > 0 else 0,
+                            "total_return": round((daily_values[-1] - daily_values[0]) / daily_values[0] * 100, 2),
+                            "max_value": round(max(daily_values), 2),
+                            "min_value": round(min(daily_values), 2),
+                            "days_tracked": len(daily_values)
                         }
                         
                         # Calculate SPY comparison if we have enough data
@@ -1035,19 +1054,19 @@ class DashboardGenerator:
                             ORDER BY date
                         """)
                         spy_rows = cursor.fetchall()
-                        if len(spy_rows) >= 20 and len(values) >= 20:
-                            spy_prices = [r[1] for r in spy_rows[-len(values):]]
-                            spy_returns = [(spy_prices[i] - spy_prices[i-1]) / spy_prices[i-1] 
+                        if len(spy_rows) >= 20 and len(daily_values) >= 20:
+                            spy_prices = [r[1] for r in spy_rows[-len(daily_values):]]
+                            spy_returns = [(spy_prices[i] - spy_prices[i-1]) / spy_prices[i-1]
                                           for i in range(1, len(spy_prices))]
-                            
+
                             # Calculate metrics
                             spy_total_return = (spy_prices[-1] - spy_prices[0]) / spy_prices[0]
-                            portfolio_total_return = (values[-1] - values[0]) / values[0]
-                            
+                            portfolio_total_return = (daily_values[-1] - daily_values[0]) / daily_values[0]
+
                             # Correlation and Beta (30-day rolling)
-                            min_len = min(len(returns), len(spy_returns))
+                            min_len = min(len(daily_returns), len(spy_returns))
                             if min_len >= 20:
-                                returns_arr = np.array(returns[-20:])
+                                returns_arr = np.array(daily_returns[-20:])
                                 spy_returns_arr = np.array(spy_returns[-20:])
                                 
                                 # Check for variance before calculating correlation
@@ -1066,8 +1085,8 @@ class DashboardGenerator:
                                 beta = 1.0
                             
                             spy_comparison = {
-                                "portfolio_value": round(values[-1], 2),
-                                "spy_value": round(values[0] * (1 + spy_total_return), 2),
+                                "portfolio_value": round(daily_values[-1], 2),
+                                "spy_value": round(daily_values[0] * (1 + spy_total_return), 2),
                                 "relative_return": round((portfolio_total_return - spy_total_return) * 100, 2),
                                 "correlation_30d": round(float(corr), 2),
                                 "beta": round(float(beta), 2),

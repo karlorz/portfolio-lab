@@ -120,7 +120,11 @@ def perf_log(wiki_sync):
     for i in range(100):
         daily_ret = 0.001 * (1 if i % 2 == 0 else -0.5)
         val *= (1 + daily_ret)
-        entries.append({"total_value": round(val, 2), "daily_return": daily_ret})
+        entries.append({
+            "timestamp": f"2026-01-{(i % 28) + 1:02d}T10:00:00",
+            "total_value": round(val, 2),
+            "daily_return": daily_ret,
+        })
     path.write_text("\n".join(json.dumps(e) for e in entries))
     return path
 
@@ -1200,6 +1204,32 @@ class TestSyncPerformanceSummaryEdgeCases:
         data = json.loads(result.read_text())
         assert data["daily_returns_distribution"]["win_rate"] == 0.0
 
+    def test_intraday_deduplication(self, wiki_sync):
+        """Intraday entries for same date must not inflate days_tracked.
+
+        Regression test: performance.jsonl may contain multiple entries per
+        day (cron runs, manual syncs).  days_tracked must count unique
+        calendar dates, not raw JSONL lines.
+        """
+        import src.research.wiki_sync as ws
+        path = ws.DATA_DIR / "performance.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines = []
+        # 5 dates × 5 intraday entries = 25 raw lines, but only 5 unique days
+        for day in range(1, 6):
+            for hour in range(5):
+                ret = 0.001 if hour == 0 else 0.0
+                lines.append(json.dumps({
+                    "timestamp": f"2026-01-{day:02d}T{hour:02d}:00:00",
+                    "total_value": 100000.0 + day * 100,
+                    "daily_return": ret,
+                }))
+        path.write_text("\n".join(lines))
+        result = wiki_sync.sync_performance_summary()
+        assert result is not None
+        data = json.loads(result.read_text())
+        assert data["performance"]["days_tracked"] == 5
+
 
 # ---------------------------------------------------------------------------
 # sync_order_history — edge cases
@@ -1547,10 +1577,10 @@ class TestGraduationStatusEdgeCases:
 # ---------------------------------------------------------------------------
 
 class TestRunCLI:
-    """run() print output and __main__ guard."""
+    """run() logger output and __main__ guard."""
 
-    def test_run_produces_print_output(self, wiki_sync, capsys):
-        """run() prints start and complete messages."""
+    def test_run_produces_log_output(self, wiki_sync, caplog):
+        """run() logs start and complete messages."""
         wiki_sync.conn.execute("""
             CREATE TABLE IF NOT EXISTS regime_log (
                 id INTEGER PRIMARY KEY, date TEXT, regime TEXT,
@@ -1559,13 +1589,13 @@ class TestRunCLI:
             )
         """)
         wiki_sync.conn.commit()
-        wiki_sync.run()
-        captured = capsys.readouterr()
-        assert "Wiki Sync Starting" in captured.out
-        assert "Wiki Sync Complete" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.research.wiki_sync"):
+            wiki_sync.run()
+        assert "Wiki Sync Starting" in caplog.text
+        assert "Wiki Sync Complete" in caplog.text
 
-    def test_run_no_data_capsys(self, wiki_sync, capsys):
-        """run() with no data prints 0 wiki and 0 app."""
+    def test_run_no_data_logging(self, wiki_sync, caplog):
+        """run() with no data logs 0 wiki and 0 app."""
         wiki_sync.conn.execute("""
             CREATE TABLE IF NOT EXISTS regime_log (
                 id INTEGER PRIMARY KEY, date TEXT, regime TEXT,
@@ -1574,9 +1604,9 @@ class TestRunCLI:
             )
         """)
         wiki_sync.conn.commit()
-        wiki_sync.run()
-        captured = capsys.readouterr()
-        assert "0 wiki" in captured.out and "0 app" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.research.wiki_sync"):
+            wiki_sync.run()
+        assert "0 wiki" in caplog.text and "0 app" in caplog.text
 
     def test_main_guard_calls_run(self, monkeypatch, tmp_path):
         """__main__ guard instantiates WikiSync and calls run()."""
@@ -1596,8 +1626,8 @@ class TestRunCLI:
             sync.run()
             mock_run.assert_called_once()
 
-    def test_run_capsys_with_partial_data(self, wiki_sync, perf_log, capsys):
-        """run() with only perf data prints correct messages."""
+    def test_run_logging_with_partial_data(self, wiki_sync, perf_log, caplog):
+        """run() with only perf data logs correct messages."""
         wiki_sync.conn.execute("""
             CREATE TABLE IF NOT EXISTS regime_log (
                 id INTEGER PRIMARY KEY, date TEXT, regime TEXT,
@@ -1606,19 +1636,18 @@ class TestRunCLI:
             )
         """)
         wiki_sync.conn.commit()
-        wiki_sync.run()
-        captured = capsys.readouterr()
-        assert "Wiki Sync Starting" in captured.out
-        assert "Wiki Sync Complete" in captured.out
-        assert "Performance" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.research.wiki_sync"):
+            wiki_sync.run()
+        assert "Wiki Sync Starting" in caplog.text
+        assert "Wiki Sync Complete" in caplog.text
 
-    def test_run_capsys_with_all_data(self, wiki_sync, db_with_regimes, perf_log, orders_log, capsys):
-        """run() with all data prints all page names."""
-        wiki_sync.run()
-        captured = capsys.readouterr()
-        assert "Regime:" in captured.out
-        assert "Performance:" in captured.out
-        assert "Orders:" in captured.out
+    def test_run_logging_with_all_data(self, wiki_sync, db_with_regimes, perf_log, orders_log, caplog):
+        """run() with all data logs all page names."""
+        with caplog.at_level(logging.INFO, logger="src.research.wiki_sync"):
+            wiki_sync.run()
+        assert "Regime:" in caplog.text
+        assert "Performance:" in caplog.text
+        assert "Orders:" in caplog.text
 
 
 # ---------------------------------------------------------------------------

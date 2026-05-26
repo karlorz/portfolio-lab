@@ -1463,3 +1463,49 @@ class TestPublicMethodsCoverage:
             "manual_approval": CheckResult("manual_approval", True, 1, 1, ""),
         }
         assert checklist.is_graduation_ready(results) is True
+
+
+# ---------------------------------------------------------------------------
+# Regression: intraday deduplication
+# ---------------------------------------------------------------------------
+
+
+class TestTradingDaysDeduplication:
+    """Regression tests for the intraday-entry bug.
+
+    performance.jsonl may contain multiple entries per calendar date
+    (cron runs, manual syncs).  The graduation checklist must count
+    unique trading dates, not raw JSONL lines.
+    """
+
+    def test_intraday_entries_not_counted_as_separate_days(self, tmp_path):
+        """Multiple intraday entries for same date count as 1 day."""
+        history = []
+        for day in range(1, 6):
+            for hour in range(5):
+                history.append({
+                    "timestamp": f"2026-01-{day:02d}T{hour:02d}:00:00",
+                    "total_value": 100000 + day * 100,
+                    "daily_return": 0.001 if hour == 0 else 0.0,
+                })
+        state = {"portfolio": {"history": history}}
+        checklist = GraduationChecklist()
+        result = checklist._check_trading_days(state)
+        # 5 unique dates, not 25 raw entries
+        assert result.value == 5
+
+    def test_paper_trading_summary_overrides_history(self, tmp_path):
+        """When paper_trading_summary has days_tracked, it's preferred."""
+        state = {
+            "paper_trading_summary": {
+                "days_tracked": 5,
+                "sharpe": 0.5,
+                "max_drawdown": 0.01,
+                "win_rate": 0.5,
+            },
+            "portfolio": {"history": _make_daily_history(63)},
+        }
+        checklist = GraduationChecklist()
+        result = checklist._check_trading_days(state)
+        # Summary days_tracked takes precedence
+        assert result.value == 5

@@ -1099,6 +1099,50 @@ class TestCalculatePerformanceExtended:
         assert perf["mode"] == "live"
 
 
+class TestCalculatePerformanceDailyReturn:
+    """Tests for the daily_return = vs-previous-day-close fix.
+
+    calculate_performance() must compute daily_return relative to the
+    last entry from a DIFFERENT calendar date, not the most recent
+    intraday snapshot (which gives daily_return=0 when prices haven't
+    changed within the day).
+    """
+
+    def test_daily_return_uses_previous_day_close(self, tmp_path):
+        """daily_return should be relative to yesterday's close, not last intraday snapshot."""
+        p = _make_portfolio(tmp_path, cash=102000)
+        p.positions = {}
+        p.history = [
+            {"timestamp": "2026-05-25T16:00:00", "total_value": 100000, "cash": 0, "daily_return": 0.01, "positions_count": 3, "mode": "paper"},
+            {"timestamp": "2026-05-26T10:00:00", "total_value": 100500, "cash": 0, "daily_return": 0, "positions_count": 3, "mode": "paper"},
+        ]
+        perf = calculate_performance(p, {})
+        # daily_return should be (102000 - 100000) / 100000 = 0.02
+        # NOT (102000 - 100500) / 100500 = ~0.0149
+        expected = (102000 - 100000) / 100000
+        assert perf["daily_return"] == pytest.approx(expected, abs=0.001)
+
+    def test_daily_return_first_day_fallback(self, tmp_path):
+        """On the first day, daily_return falls back to last history entry."""
+        p = _make_portfolio(tmp_path, cash=102000)
+        p.positions = {}
+        p.history = [
+            {"timestamp": "2026-05-26T10:00:00", "total_value": 100500, "cash": 0, "daily_return": 0, "positions_count": 3, "mode": "paper"},
+        ]
+        perf = calculate_performance(p, {})
+        # No previous day → falls back to last entry
+        expected = (102000 - 100500) / 100500
+        assert perf["daily_return"] == pytest.approx(expected, abs=0.001)
+
+    def test_daily_return_no_history(self, tmp_path):
+        """With no history, daily_return should be 0."""
+        p = _make_portfolio(tmp_path, cash=100000)
+        p.positions = {}
+        p.history = []
+        perf = calculate_performance(p, {})
+        assert perf["daily_return"] == 0.0
+
+
 # ---------------------------------------------------------------------------
 # check_graduation_criteria — boundary conditions
 # ---------------------------------------------------------------------------

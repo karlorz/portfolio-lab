@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13011 safe** (12688 Python + 313 TypeScript + 18 signal backtest integration, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **13018 safe** (12695 Python + 313 TypeScript + 18 signal backtest integration, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -28,6 +28,9 @@
 |- **React error boundaries**: PanelErrorBoundary wraps each dashboard tab panel — single-panel crashes don't kill the entire dashboard
 |- **DashboardGenerator context manager**: `__enter__`/`__exit__` + `close()` + `try/finally` in `run()` prevents SQLite connection leaks on exceptions
 |- **Evaluator print→logging**: check_graduation_criteria, kill switch, and trigger creation use logger instead of print() for production observability
+|- **Performance daily_return fix**: calculate_performance() now computes daily_return relative to previous day's close (not previous intraday snapshot) — eliminates the daily_return=0 bug that inflated days_tracked and produced unrealistic Sharpe (6.48→actual)
+|- **Intraday deduplication**: generator.py and wiki_sync.py deduplicate performance.jsonl to one entry per calendar date before computing metrics — days_tracked counts unique trading dates not raw JSONL lines
+|- **WikiSync print→logging**: 5 print() calls migrated to logger.info() for production observability
 |- **WIKI_DIR/WORK_DIR env vars**: configurable via environment variables with fallback defaults in src/paths.py
 |- **TTL price cache**: src/data/price_cache.py — cachetools.TTLCache(maxsize=1, ttl=30s) eliminates redundant prices.json reads across 18 modules (PRICE_CACHE_TTL_SECONDS env var), ~10MB peak memory savings per cron cycle
 |- **get_prices_df()**: cached pivoted DataFrame accessor with symbol subset parameter — used by 11 modules (risk_parity, network_momentum, multi_speed_momentum, ensemble_voter, tsmom_overlay, risk_decomposition, unified_orchestrator, black_litterman_mapper, cross_asset_regime_arb, cross_asset_relative_value, adaptive_sizing), eliminates ~30 lines duplicated pivot code per module
