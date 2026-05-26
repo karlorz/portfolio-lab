@@ -80,6 +80,8 @@
 |- **Daily P&L capture**: scripts/capture_daily_pnl.py — idempotent daily snapshot from portfolio state, writes daily_pnl.jsonl + daily_pnl_latest.json; wired into Makefile + cron_compat + crontab
 |- **Path migration complete**: All src/ files import from src/paths.py (DATA_DIR, PROJECT_ROOT, etc.); only src/paths.py itself uses Path(__file__) for root detection
 |- **Thompson Sampling BanditWeighter**: Gaussian-Gamma conjugate priors with posterior sampling, softmax weight normalization; 8 test cases in TestThompsonSamplingBandit; epsilon-greedy fallback for cold start
+|- **Utility-based ensemble reweighting**: _apply_utility_reweighting() uses Sharpe contribution + hit rate from attribution data; conservative ±30% weight cap; 70/30 Sharpe/hit-rate blend; 7 test cases in TestUtilityReweighting
+|- **Epsilon-greedy exploration noise**: _apply_exploration_noise() with Dirichlet sampling (5% probability, alpha=10 concentration); ENSEMBLE_EXPLORATION_EPSILON/ALPHA env var configurable
 |- **Signal backtest integration tests**: tests/test_signal_backtest_integration.py — 18 end-to-end tests covering snapshot→reading→vote pipeline, regime gating, IC decay + SPC quality monitoring, Pydantic schema validation, cross-signal consistency
 |- **Ensemble voter decomposition Phase 14**: compute_vote() already well-decomposed (~50 lines); extracted _extract_signal_values (static), _apply_basis_pursuit, _apply_regret_weighting, _compute_asset_biases (static), _determine_action (static) from _apply_turnover_validation and _compute_consensus
 |- **Evaluator logger format fix**: logger.info("$%,.2f", val) → logger.info("$%.2f", val) — Python % formatting doesn't support , thousands separator; fixed 6 kill_switch test failures in full suite
