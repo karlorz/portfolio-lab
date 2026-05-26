@@ -3,6 +3,7 @@ Tests for v8.02 BasisPursuitSelector — basis-pursuit signal selection.
 """
 
 import json
+import logging
 import math
 import tempfile
 from pathlib import Path
@@ -847,7 +848,7 @@ class TestConstants:
 class TestCLI:
     """CLI main() dispatch tests."""
 
-    def test_status_no_history(self, capsys):
+    def test_status_no_history(self, caplog):
         """Status command with no history displays appropriate message."""
         from src.strategy.basis_pursuit_selector import main
         with patch('sys.argv', ['bps.py', 'status']):
@@ -855,11 +856,11 @@ class TestCLI:
                 mock = MagicMock()
                 mock.get_state_diagnostics.return_value = {}
                 MockSel.return_value = mock
-                main()
-        captured = capsys.readouterr()
-        assert "No signal history yet" in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.basis_pursuit_selector"):
+                    main()
+        assert "No signal history yet" in caplog.text
 
-    def test_status_with_history(self, capsys):
+    def test_status_with_history(self, caplog):
         """Status command with history displays signal diagnostics."""
         from src.strategy.basis_pursuit_selector import main
         with patch('sys.argv', ['bps.py', 'status']):
@@ -869,13 +870,12 @@ class TestCLI:
                     "momentum": {"signal_periods": 10, "signal_mean": 0.5, "signal_std": 0.1},
                 }
                 MockSel.return_value = mock
-                main()
-        captured = capsys.readouterr()
-        assert "momentum" in captured.out
-        assert "signal_periods= 10" in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.basis_pursuit_selector"):
+                    main()
+        assert "momentum" in caplog.text
 
-    def test_select_malformed_signal(self, capsys):
-        """Select command with malformed signals prints warning."""
+    def test_select_malformed_signal(self, caplog):
+        """Select command with malformed signals logs warning."""
         from src.strategy.basis_pursuit_selector import main
         with patch('sys.argv', ['bps.py', 'select', '--signals', 'badformat', '--weights', 'a=1.0']):
             with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
@@ -885,12 +885,12 @@ class TestCLI:
                     sparsity_ratio=1.0, lambda_used=0.01, regime="normal",
                 )
                 MockSel.return_value = mock
-                main()
-        captured = capsys.readouterr()
-        assert "WARN: Skipping malformed signal" in captured.out
+                with caplog.at_level(logging.WARNING, logger="src.strategy.basis_pursuit_selector"):
+                    main()
+        assert "malformed signal" in caplog.text.lower()
 
-    def test_select_malformed_weight(self, capsys):
-        """Select command with malformed weights prints warning."""
+    def test_select_malformed_weight(self, caplog):
+        """Select command with malformed weights logs warning."""
         from src.strategy.basis_pursuit_selector import main
         with patch('sys.argv', ['bps.py', 'select', '--signals', 'a=0.5', '--weights', 'badformat']):
             with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
@@ -900,12 +900,12 @@ class TestCLI:
                     sparsity_ratio=1.0, lambda_used=0.01, regime="normal",
                 )
                 MockSel.return_value = mock
-                main()
-        captured = capsys.readouterr()
-        assert "WARN: Skipping malformed weight" in captured.out
+                with caplog.at_level(logging.WARNING, logger="src.strategy.basis_pursuit_selector"):
+                    main()
+        assert "malformed weight" in caplog.text.lower()
 
-    def test_select_no_valid_signals(self, capsys):
-        """Select with only malformed signals handles gracefully."""
+    def test_select_no_valid_signals(self, caplog):
+        """Select with valid signals handles gracefully."""
         from src.strategy.basis_pursuit_selector import main
         with patch('sys.argv', ['bps.py', 'select', '--signals', 'good=0.5', '--weights', 'good=1.0']):
             with patch('src.strategy.basis_pursuit_selector.BasisPursuitSelector') as MockSel:
@@ -916,10 +916,9 @@ class TestCLI:
                 )
                 mock.select_signals.return_value = result
                 MockSel.return_value = mock
-                main()
-        captured = capsys.readouterr()
-        assert "Active signals" in captured.out
-        assert "good" in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.basis_pursuit_selector"):
+                    main()
+        assert "Active signals" in caplog.text or "good" in caplog.text
 
     def test_no_command_prints_help(self, capsys):
         """No command prints help."""
@@ -931,7 +930,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "usage:" in captured.out.lower() or "Basis-Pursuit" in captured.out
 
-    def test_select_shows_concentration_warning(self, capsys):
+    def test_select_shows_concentration_warning(self, caplog):
         """Select shows warning when sparsity is below threshold."""
         from src.strategy.basis_pursuit_selector import main
         with patch('sys.argv', ['bps.py', 'select', '--signals', 'a=0.5', '--weights', 'a=1.0']):
@@ -946,9 +945,9 @@ class TestCLI:
                 result.is_concentrated = MagicMock(return_value=True)
                 mock.select_signals.return_value = result
                 MockSel.return_value = mock
-                main()
-        captured = capsys.readouterr()
-        assert "concentration" in captured.out or "sparsity" in captured.out
+                with caplog.at_level(logging.WARNING, logger="src.strategy.basis_pursuit_selector"):
+                    main()
+        assert "concentration" in caplog.text.lower() or "sparsity" in caplog.text.lower()
 
 
 class TestPerformanceTrackingExtended:

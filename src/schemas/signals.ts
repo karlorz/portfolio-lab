@@ -443,6 +443,16 @@ export const SignalsDataSchema = z.object({
   staleness: z.optional(z.record(z.string(), z.unknown())),
   ic_decay: z.optional(IcDecaySchema),
   signal_wfe: z.optional(SignalWFESchema),
+  ramp: z.optional(z.object({
+    phase: z.string(),
+    allocation_pct: z.number(),
+    days_at_phase: z.number(),
+    min_days_required: z.number(),
+    max_drawdown_pct: z.number(),
+    max_drawdown_allowed: z.number(),
+    can_advance: z.boolean(),
+    alpaca_status: z.record(z.string(), z.unknown()),
+  })),
 }).passthrough();
 
 // ---------------------------------------------------------------------------

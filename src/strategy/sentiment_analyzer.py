@@ -372,9 +372,7 @@ class SentimentAnalyzerPipeline:
 
 def demo():
     """Demo the sentiment analyzer with sample data."""
-    print("=" * 60)
-    print("Portfolio-Lab v2.30: Sentiment Analyzer Demo")
-    print("=" * 60)
+    logger.info("Portfolio-Lab v2.30: Sentiment Analyzer Demo")
     
     pipeline = SentimentAnalyzerPipeline()
     
@@ -393,36 +391,34 @@ def demo():
         "Fed Chair Powell's speech emphasized data-dependent approach to policy",
     ]
     
-    print("\nAnalyzing sample texts...")
+    logger.info("Analyzing sample texts...")
     sentiment = pipeline.get_current_sentiment(
         news_texts=sample_news,
         earnings_texts=sample_earnings,
         macro_texts=sample_macro,
     )
     
-    print(f"\n{'─' * 60}")
-    print("Aggregated Sentiment Results:")
-    print(f"{'─' * 60}")
-    print(f"Timestamp: {sentiment.timestamp}")
-    print(f"News Sentiment: {sentiment.news_sentiment:+.4f}")
-    print(f"Earnings Sentiment: {sentiment.earnings_sentiment:+.4f}")
-    print(f"Macro Sentiment: {sentiment.macro_sentiment:+.4f}")
-    print(f"{'─' * 60}")
-    print(f"Composite Score: {sentiment.composite_score:+.4f}")
-    print(f"Confidence: {sentiment.confidence:.2%}")
-    print(f"Smoothed Score: {sentiment.smoothed_score:+.4f}")
-    print(f"Momentum: {sentiment.sentiment_momentum:+.4f}")
-    print(f"{'─' * 60}")
-    print(f"Regime Signal: {sentiment.regime_signal.upper()}")
-    print(f"Data Quality: {sentiment.data_quality}")
-    print(f"Sources Used: {sentiment.sources_used}")
+    logger.info("Aggregated Sentiment Results:")
+    logger.info("Timestamp: %s", sentiment.timestamp)
+    logger.info("News Sentiment: %+.4f", sentiment.news_sentiment)
+    logger.info("Earnings Sentiment: %+.4f", sentiment.earnings_sentiment)
+    logger.info("Macro Sentiment: %+.4f", sentiment.macro_sentiment)
+    logger.info("Composite Score: %+.4f", sentiment.composite_score)
+    logger.info("Confidence: %.2f%%", sentiment.confidence * 100)
+    logger.info("Smoothed Score: %+.4f", sentiment.smoothed_score)
+    logger.info("Momentum: %+.4f", sentiment.sentiment_momentum)
+    logger.info("Regime Signal: %s", sentiment.regime_signal.upper())
+    logger.info("Data Quality: %s", sentiment.data_quality)
+    logger.info("Sources Used: %d", sentiment.sources_used)
     
     # Save results
     filepath = pipeline.save_sentiment(sentiment, "demo_sentiment.json")
-    print(f"\n✓ Saved to: {filepath}")
+    logger.info("Saved to: %s", filepath)
     
     return sentiment
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+    configure_logging()
     demo()

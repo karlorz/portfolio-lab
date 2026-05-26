@@ -1051,7 +1051,7 @@ class TestCLIExtended:
         output = captured.out + captured.err
         assert "usage:" in output.lower() or "Regret-Weighted" in output
 
-    def test_main_status_empty_history(self, capsys, tmp_state_path):
+    def test_main_status_empty_history(self, caplog, tmp_state_path):
         from src.strategy.regret_weighted_selector import main
         import sys
         old_argv = sys.argv.copy()
@@ -1066,13 +1066,13 @@ class TestCLIExtended:
                 instance.rolling_window = 60
                 instance.regret_lambda = 0.3
                 mock_cls.return_value = instance
-                main()
-            captured = capsys.readouterr()
-            assert "No signal history" in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.regret_weighted_selector"):
+                    main()
+            assert "No signal history" in caplog.text
         finally:
             sys.argv = old_argv
 
-    def test_main_status_with_history(self, capsys, tmp_state_path):
+    def test_main_status_with_history(self, caplog, tmp_state_path):
         from src.strategy.regret_weighted_selector import main
         import sys
         old_argv = sys.argv.copy()
@@ -1090,15 +1090,15 @@ class TestCLIExtended:
                 instance.rolling_window = 60
                 instance.regret_lambda = 0.3
                 mock_cls.return_value = instance
-                main()
-            captured = capsys.readouterr()
-            assert "sig_a" in captured.out
-            assert "sig_b" in captured.out
-            assert "periods" in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.regret_weighted_selector"):
+                    main()
+            assert "sig_a" in caplog.text
+            assert "sig_b" in caplog.text
+            assert "periods" in caplog.text
         finally:
             sys.argv = old_argv
 
-    def test_main_adjust_valid_args(self, capsys, tmp_state_path):
+    def test_main_adjust_valid_args(self, caplog, tmp_state_path):
         from src.strategy.regret_weighted_selector import main
         import sys
         old_argv = sys.argv.copy()
@@ -1131,13 +1131,13 @@ class TestCLIExtended:
                     avg_regret=0.2,
                 )
                 mock_cls.return_value = instance
-                main()
-            captured = capsys.readouterr()
-            assert "Regret-Weighted Adjustment" in captured.out or "Adjusted weights" in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.regret_weighted_selector"):
+                    main()
+            assert "Regret-Weighted Adjustment" in caplog.text or "Adjusted weights" in caplog.text
         finally:
             sys.argv = old_argv
 
-    def test_main_adjust_malformed_signal_warns(self, capsys, tmp_state_path):
+    def test_main_adjust_malformed_signal_warns(self, caplog, tmp_state_path):
         from src.strategy.regret_weighted_selector import main
         import sys
         old_argv = sys.argv.copy()
@@ -1162,9 +1162,9 @@ class TestCLIExtended:
                     avg_regret=0.0,
                 )
                 mock_cls.return_value = instance
-                main()
-            captured = capsys.readouterr()
-            assert "WARN" in captured.out or "Skipping" in captured.out
+                with caplog.at_level(logging.WARNING, logger="src.strategy.regret_weighted_selector"):
+                    main()
+            assert "Skipping malformed signal" in caplog.text
         finally:
             sys.argv = old_argv
 
@@ -1185,7 +1185,7 @@ class TestCLIExtended:
         captured = capsys.readouterr()
         assert any(w in (captured.out + captured.err).lower() for w in ("usage:", "argument", "required", "error"))
 
-    def test_main_adjust_crisis_regime(self, capsys, tmp_state_path):
+    def test_main_adjust_crisis_regime(self, caplog, tmp_state_path):
         """Adjust with --regime crisis uses crisis multiplier."""
         from src.strategy.regret_weighted_selector import main
         import sys
@@ -1215,9 +1215,9 @@ class TestCLIExtended:
                     avg_regret=0.8,
                 )
                 mock_cls.return_value = instance
-                main()
-            captured = capsys.readouterr()
-            assert "crisis" in captured.out.lower() or "crisis" in captured.err.lower()
+                with caplog.at_level(logging.INFO, logger="src.strategy.regret_weighted_selector"):
+                    main()
+            assert "crisis" in caplog.text.lower()
         finally:
             sys.argv = old_argv
 

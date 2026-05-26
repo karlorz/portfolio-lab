@@ -356,7 +356,7 @@ class FeaturePipeline:
             
             return pd.DataFrame(data)
         except ImportError:
-            print("pandas not installed, returning list of dicts")
+            logger.warning("pandas not installed, returning list of dicts")
             return [vars(f) for f in features_list]
 
 
@@ -441,34 +441,34 @@ def main():
             if features:
                 print(json.dumps(vars(features), indent=2, default=str))
             else:
-                print(f"No features generated for {symbol}")
-                
+                logger.info("No features generated for %s", symbol)
+
         elif cmd == "batch":
             symbols = sys.argv[2:] if len(sys.argv) > 2 else ["SPY", "GLD", "TLT", "IEF"]
             for symbol in symbols:
                 features = pipeline.generate_features(symbol)
                 if features:
                     store.save_features(features)
-                    print(f"Saved features for {symbol}")
+                    logger.info("Saved features for %s", symbol)
                 else:
-                    print(f"Failed to generate features for {symbol}")
-                    
+                    logger.info("Failed to generate features for %s", symbol)
+
         elif cmd == "historical":
             symbols = sys.argv[2:] if len(sys.argv) > 2 else ["SPY", "GLD", "TLT"]
             all_features = pipeline.generate_all_features(symbols, lookback_days=252)
-            
+
             total = sum(len(f) for f in all_features.values())
-            print(f"Generated {total} feature vectors across {len(symbols)} symbols")
-            
+            logger.info("Generated %d feature vectors across %d symbols", total, len(symbols))
+
             # Save to file
             for symbol, feats in all_features.items():
                 for f in feats:
                     store.save_features(f)
-            print(f"Saved to {store.features_file}")
-            
+            logger.info("Saved to %s", store.features_file)
+
         else:
-            print(f"Unknown command: {cmd}")
-            print("Commands: generate [SYMBOL], batch [SYMBOLS...], historical [SYMBOLS...]")
+            logger.info("Unknown command: %s", cmd)
+            logger.info("Commands: generate [SYMBOL], batch [SYMBOLS...], historical [SYMBOLS...]")
     else:
         # Default: generate for SPY
         features = pipeline.generate_features("SPY")

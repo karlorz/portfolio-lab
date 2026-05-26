@@ -381,69 +381,62 @@ def main():
 
     if args.mode == "status":
         eth = model.get_live_yield()
-        print("=" * 65)
-        print("v7.02 CRYPTO STAKING YIELD MODEL")
-        print("=" * 65)
-        print(f"ETH Staking Yield:    {eth.annual_yield:.2%}")
-        print(f"Staking Ratio:        {eth.staking_ratio:.1%}")
-        print(f"Real Yield (ex-CPI):  {eth.real_yield:.2%}")
-        print(f"Excess over RFR:      {eth.excess_over_rfr:.2%}")
-        print(f"Attractive:           {eth.is_attractive}")
-        print(f"Source:               {eth.source.value}")
-        print(f"Confidence:           {eth.confidence:.0%}")
-        print()
-        print("BTC:")
-        print("  Staking Yield: 0.00% (no native staking)")
+        logger.info("Crypto staking yield model")
+        logger.info("ETH Staking Yield:    %.2f%%", eth.annual_yield * 100)
+        logger.info("Staking Ratio:        %.1f%%", eth.staking_ratio * 100)
+        logger.info("Real Yield (ex-CPI):  %.2f%%", eth.real_yield * 100)
+        logger.info("Excess over RFR:      %.2f%%", eth.excess_over_rfr * 100)
+        logger.info("Attractive:           %s", eth.is_attractive)
+        logger.info("Source:               %s", eth.source.value)
+        logger.info("Confidence:           %.0f%%", eth.confidence * 100)
+        logger.info("BTC Staking Yield: 0.00%% (no native staking)")
 
     elif args.mode == "estimate":
         ratio = args.ratio if args.ratio else None
         eth = model.estimate_yield(staking_ratio=ratio)
-        print(f"ETH Staking Yield (ratio={eth.staking_ratio:.1%}): {eth.annual_yield:.2%}")
-        print(f"  Real Yield: {eth.real_yield:.2%}")
-        print(f"  Excess over RFR ({model._risk_free_rate:.1%}): {eth.excess_over_rfr:.2%}")
-        print(f"  Attractive: {eth.is_attractive}")
+        logger.info("ETH Staking Yield (ratio=%.1f%%): %.2f%%", eth.staking_ratio * 100, eth.annual_yield * 100)
+        logger.info("  Real Yield: %.2f%%", eth.real_yield * 100)
+        logger.info("  Excess over RFR (%.1f%%): %.2f%%", model._risk_free_rate * 100, eth.excess_over_rfr * 100)
+        logger.info("  Attractive: %s", eth.is_attractive)
 
         # Parameter scan
-        print("\nSensitivity (staking ratio × yield):")
+        logger.info("Sensitivity (staking ratio x yield):")
         for ratio_test in [0.20, 0.25, 0.28, 0.30, 0.35, 0.40]:
             r = model.estimate_yield(staking_ratio=ratio_test)
-            print(f"  Ratio {ratio_test:.0%} → Yield {r.annual_yield:.2%}  "
-                  f"(real: {r.real_yield:.2%}, attractive: {r.is_attractive})")
+            logger.info(
+                "  Ratio %.0f%% -> Yield %.2f%% (real: %.2f%%, attractive: %s)",
+                ratio_test * 100, r.annual_yield * 100, r.real_yield * 100, r.is_attractive,
+            )
 
     elif args.mode == "carry":
         carry = model.compute_crypto_carry(
             btc_weight=args.btc_w,
             eth_weight=args.eth_w,
         )
-        print("=" * 65)
-        print("CRYPTO CARRY CONTRIBUTION")
-        print("=" * 65)
-        print(f"ETH Staking Yield:    {carry['eth_staking_yield_pct']:.2f}%")
-        print(f"ETH Staking Ratio:    {carry['eth_staking_ratio_pct']:.1f}%")
-        print(f"ETH Carry:            {carry['eth_carry_bps']:.2f} bps")
-        print(f"BTC Carry:            {carry['btc_carry_bps']:.2f} bps")
-        print(f"Total Carry:          {carry['total_carry_bps']:.2f} bps")
-        print(f"Is Attractive:        {carry['is_attractive']}")
-        print()
-        print(f"Note: {carry['note']}")
+        logger.info("Crypto carry contribution")
+        logger.info("ETH Staking Yield:    %.2f%%", carry['eth_staking_yield_pct'])
+        logger.info("ETH Staking Ratio:    %.1f%%", carry['eth_staking_ratio_pct'])
+        logger.info("ETH Carry:            %.2f bps", carry['eth_carry_bps'])
+        logger.info("BTC Carry:            %.2f bps", carry['btc_carry_bps'])
+        logger.info("Total Carry:          %.2f bps", carry['total_carry_bps'])
+        logger.info("Is Attractive:        %s", carry['is_attractive'])
+        logger.info("Note: %s", carry['note'])
 
     elif args.mode == "influence":
         inf = model.compute_allocation_influence(
             current_btc_weight=args.btc_w,
             current_eth_weight=args.eth_w,
         )
-        print("=" * 65)
-        print("STAKING YIELD ALLOCATION INFLUENCE")
-        print("=" * 65)
-        print(f"ETH Preference:        {inf.eth_preference:+.2f}")
-        print(f"Target ETH/BTC Ratio:  {inf.eth_btc_ratio:.1%} ETH")
-        print(f"Adjusted BTC Weight:   {inf.btc_weight:.2%}")
-        print(f"Adjusted ETH Weight:   {inf.eth_weight:.2%}")
-        print(f"Yield Contribution:    {inf.yield_contribution_bps:.1f} bps")
-        print()
-        print(f"Recommendation:")
-        print(f"  {inf.recommendation}")
+        logger.info("Staking yield allocation influence")
+        logger.info("ETH Preference:        %+.2f", inf.eth_preference)
+        logger.info("Target ETH/BTC Ratio:  %.1f%% ETH", inf.eth_btc_ratio * 100)
+        logger.info("Adjusted BTC Weight:   %.2f%%", inf.btc_weight * 100)
+        logger.info("Adjusted ETH Weight:   %.2f%%", inf.eth_weight * 100)
+        logger.info("Yield Contribution:    %.1f bps", inf.yield_contribution_bps)
+        logger.info("Recommendation: %s", inf.recommendation)
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+    configure_logging()
     main()

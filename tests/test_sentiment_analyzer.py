@@ -4,6 +4,7 @@ Mocks LLM client to avoid API dependency.
 """
 import pytest
 import json
+import logging
 import sys
 import os
 import importlib
@@ -607,13 +608,12 @@ class TestRegimeClassificationExtended:
 class TestDemo:
     """Test demo() function."""
 
-    def test_demo_runs_without_error(self, capsys):
+    def test_demo_runs_without_error(self, caplog):
         """demo() should run without raising."""
         from src.strategy.sentiment_analyzer import demo
-        demo()
-        captured = capsys.readouterr()
-        # Demo produces some output
-        assert len(captured.out) > 0
+        with caplog.at_level(logging.INFO, logger="src.strategy.sentiment_analyzer"):
+            demo()
+        assert len(caplog.text) > 0
 
     def test_load_sentiment_history_missing_timestamp_key(self, tmp_path):
         """KeyError when JSON lacks 'timestamp' should be caught, not crash."""
@@ -1196,16 +1196,16 @@ class TestDemoFunctionExtended:
         assert result is not None
         assert isinstance(result, AggregatedSentiment)
 
-    def test_demo_outputs_key_sections(self, capsys):
+    def test_demo_outputs_key_sections(self, caplog):
         """demo() prints all expected output sections."""
-        demo()
-        captured = capsys.readouterr()
-        assert "Sentiment Analyzer Demo" in captured.out
-        assert "Aggregated Sentiment Results" in captured.out
-        assert "Composite Score" in captured.out
-        assert "Regime Signal" in captured.out
-        assert "Data Quality" in captured.out
-        assert "Sources Used" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.sentiment_analyzer"):
+            demo()
+        assert "Sentiment Analyzer Demo" in caplog.text
+        assert "Aggregated Sentiment Results" in caplog.text
+        assert "Composite Score" in caplog.text
+        assert "Regime Signal" in caplog.text
+        assert "Data Quality" in caplog.text
+        assert "Sources Used" in caplog.text
 
     def test_demo_returns_correct_type(self):
         """demo() returns an AggregatedSentiment with valid regime."""
@@ -1213,14 +1213,14 @@ class TestDemoFunctionExtended:
         assert isinstance(result, AggregatedSentiment)
         assert result.regime_signal in ("risk_on", "risk_off", "neutral", "extreme_risk_off")
 
-    def test_demo_outputs_numeric_values(self, capsys):
+    def test_demo_outputs_numeric_values(self, caplog):
         """demo() prints numeric sentiment values."""
-        demo()
-        captured = capsys.readouterr()
-        assert "News Sentiment" in captured.out
-        assert "Earnings Sentiment" in captured.out
-        assert "Macro Sentiment" in captured.out
-        assert "Momentum" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.strategy.sentiment_analyzer"):
+            demo()
+        assert "News Sentiment" in caplog.text
+        assert "Earnings Sentiment" in caplog.text
+        assert "Macro Sentiment" in caplog.text
+        assert "Momentum" in caplog.text
 
 
 class TestSentimentAggregatorInitExtended:

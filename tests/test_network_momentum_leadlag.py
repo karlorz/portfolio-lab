@@ -5,6 +5,7 @@ DTW distance, Lévy area signatures, graph learning, lead-lag matrix,
 window signals, ensemble signals, portfolio recommendation, and backtest.
 """
 import json
+import logging
 import math
 
 import pytest
@@ -1681,16 +1682,15 @@ class TestAllExports:
 class TestCLI:
     """Test CLI entry points via capsys and argparse interaction."""
 
-    def test_status_command_output(self, capsys):
+    def test_status_command_output(self, caplog):
         from src.strategy.network_momentum_leadlag import main
-        with patch('sys.argv', ['script', 'status']):
-            try:
-                main()
-            except (SystemExit, FileNotFoundError, json.JSONDecodeError):
-                pass  # Expected if no data file exists
-        captured = capsys.readouterr()
-        # Status should print at least the header
-        assert 'Network Momentum Lead-Lag' in captured.out or 'Network Momentum Lead-Lag' in captured.err
+        with caplog.at_level(logging.INFO, logger="src.strategy.network_momentum_leadlag"):
+            with patch('sys.argv', ['script', 'status']):
+                try:
+                    main()
+                except (SystemExit, FileNotFoundError, json.JSONDecodeError):
+                    pass  # Expected if no data file exists
+        assert 'Network Momentum Lead-Lag' in caplog.text
 
     def test_no_command_shows_help(self, capsys):
         """No argument should trigger argparse error or print help."""

@@ -379,7 +379,7 @@ def main():
             max_deviation=args.max_dev
         )
         result = backtester.run_backtest()
-        print(json.dumps(result, indent=2, default=str))
+        logger.info(json.dumps(result, indent=2, default=str))
         if args.output:
             save_results_json(result, output_path=args.output)
     
@@ -387,25 +387,26 @@ def main():
         overlay = RiskParityWeightOverlay(max_deviation=args.max_dev)
         allocation = overlay.calculate_rp_overlay(DEFAULT_BASE)
         if allocation:
-            print(json.dumps(allocation.to_dict(), indent=2))
+            logger.info(json.dumps(allocation.to_dict(), indent=2))
         else:
-            print(json.dumps({'error': 'Could not calculate allocation'}))
+            logger.error("Could not calculate allocation")
     
     elif args.command == 'status':
-        print("Risk Parity Weight Overlay v2.57b - Status")
-        print("=" * 50)
-        print(f"Max deviation from base: {MAX_DEVIATION:.0%}")
-        print(f"Vol lookback: {VOL_LOOKBACK} days")
-        print(f"Rebalance frequency: {REBALANCE_FREQ} days")
-        print()
-        print("Base allocation (46/38/16):")
+        logger.info("Risk Parity Weight Overlay v2.57b - Status")
+        logger.info("=" * 50)
+        logger.info("Max deviation from base: %.0f%%", MAX_DEVIATION * 100)
+        logger.info("Vol lookback: %d days", VOL_LOOKBACK)
+        logger.info("Rebalance frequency: %d days", REBALANCE_FREQ)
+        logger.info("Base allocation (46/38/16):")
         for k, v in DEFAULT_BASE.items():
             if k != 'CASH':
-                print(f"  {k}: {v:.0%}")
+                logger.info("  %s: %.0f%%", k, v * 100)
     
     else:
         parser.print_help()
 
 
 if __name__ == '__main__':
+    from src.utils.log_config import configure_logging
+    configure_logging()
     main()

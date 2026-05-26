@@ -232,7 +232,8 @@ def main():
         sys.exit(1)
 
     question = " ".join(sys.argv[1:])
-    print(f"Q: {question}\n")
+    logger.info("Q: %s", question)
+    logger.info("")
 
     answer = answer_query(question)
     print(answer)

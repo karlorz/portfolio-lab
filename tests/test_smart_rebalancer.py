@@ -10,6 +10,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 import inspect
+import logging
 
 from src.rebalancing.smart_rebalancer import (
     RebalanceDecision,
@@ -1339,48 +1340,48 @@ class TestGetStatusEdgeCases:
 class TestCliMainGuard:
     """Cover demo() and the __name__ == '__main__' guard."""
 
-    def test_demo_runs_without_error(self, capsys):
+    def test_demo_runs_without_error(self, caplog):
         """demo() should execute all 5 scenarios and print output."""
+        caplog.set_level(logging.INFO, logger='src.rebalancing.smart_rebalancer')
         from src.rebalancing.smart_rebalancer import demo
         # demo() depends on datetime.now(), so we control critical calls
         with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
             mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             demo()
-        captured = capsys.readouterr()
-        assert 'Scenario 1' in captured.out
-        assert 'Scenario 2' in captured.out
-        assert 'Scenario 3' in captured.out
-        assert 'Scenario 4' in captured.out
-        assert 'Scenario 5' in captured.out
-        assert 'Controller Status' in captured.out
+        assert 'Scenario 1' in caplog.text
+        assert 'Scenario 2' in caplog.text
+        assert 'Scenario 3' in caplog.text
+        assert 'Scenario 4' in caplog.text
+        assert 'Scenario 5' in caplog.text
+        assert 'Controller Status' in caplog.text
 
-    def test_demo_scenario_1_skip_low_drift(self, capsys):
+    def test_demo_scenario_1_skip_low_drift(self, caplog):
+        caplog.set_level(logging.INFO, logger='src.rebalancing.smart_rebalancer')
         from src.rebalancing.smart_rebalancer import demo
         with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
             mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             demo()
-        captured = capsys.readouterr()
-        assert 'skip_low_drift' in captured.out
+        assert 'skip_low_drift' in caplog.text
 
-    def test_demo_scenario_2_execute(self, capsys):
+    def test_demo_scenario_2_execute(self, caplog):
+        caplog.set_level(logging.INFO, logger='src.rebalancing.smart_rebalancer')
         from src.rebalancing.smart_rebalancer import demo
         with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
             mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             demo()
-        captured = capsys.readouterr()
-        assert 'Cost:' in captured.out
+        assert 'Cost:' in caplog.text
 
-    def test_demo_prints_urgency(self, capsys):
+    def test_demo_prints_urgency(self, caplog):
+        caplog.set_level(logging.INFO, logger='src.rebalancing.smart_rebalancer')
         from src.rebalancing.smart_rebalancer import demo
         with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
             mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             demo()
-        captured = capsys.readouterr()
-        assert 'Urgency:' in captured.out
+        assert 'Urgency:' in caplog.text
 
     def test_main_guard_string(self):
         """The module-level __name__ check should reference 'demo()'."""
@@ -1705,14 +1706,14 @@ class TestErrorResistance:
         cost = ctrl.estimate_cost_bps(vpin=-1.0, in_optimal_window=True)
         assert cost > 0
 
-    def test_demo_prints_all_scenarios_more(self, capsys):
+    def test_demo_prints_all_scenarios_more(self, caplog):
         """Collect all scenario outputs for completeness."""
+        caplog.set_level(logging.INFO, logger='src.rebalancing.smart_rebalancer')
         from src.rebalancing.smart_rebalancer import demo
         with patch('src.rebalancing.smart_rebalancer.datetime') as mock_dt:
             mock_dt.now.return_value = datetime(2026, 5, 13, 12, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             demo()
-        captured = capsys.readouterr()
-        lines = captured.out.strip().split('\n')
+        lines = caplog.text.strip().split('\n')
         # Should have more than 5 lines of output (5 scenarios + status + blanks)
         assert len(lines) > 6

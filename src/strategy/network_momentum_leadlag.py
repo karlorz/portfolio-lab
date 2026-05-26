@@ -889,35 +889,30 @@ def main():
     args = parser.parse_args()
     
     if args.command == 'status':
-        print("Network Momentum Lead-Lag v2.58 - Status")
-        print("=" * 50)
-        print("Source: Li & Ferreira (2025), arXiv:2501.07135")
-        print()
-        print("Lookback windows (ensemble):", LOOKBACK_WINDOWS)
-        print(f"Default window: {DEFAULT_WINDOW} days")
-        print()
-        print("Lead-lag detection:")
-        print(f"  - DTW with Sakoe-Chiba radius: {DTW_RADIUS}")
-        print(f"  - L\u00e9vy area lags: {LEVY_LAGS}")
-        print()
-        print("Graph learning:")
-        print(f"  - Sparsity alpha: {GRAPH_SPARSITY_ALPHA}")
-        print(f"  - Smoothness beta: {GRAPH_SMOOTHNESS_BETA}")
-        print()
-        print(f"Max deviation: {MAX_DEVIATION:.0%}")
-        print(f"Rebalance frequency: 21 days")
-        print()
-        print(f"Data source: {PRICES_PATH}")
-        print(f"Prices exist: {PRICES_PATH.exists()}")
+        logger.info("Network Momentum Lead-Lag v2.58 - Status")
+        logger.info("=" * 50)
+        logger.info("Source: Li & Ferreira (2025), arXiv:2501.07135")
+        logger.info("Lookback windows (ensemble): %s", LOOKBACK_WINDOWS)
+        logger.info("Default window: %d days", DEFAULT_WINDOW)
+        logger.info("Lead-lag detection:")
+        logger.info("  - DTW with Sakoe-Chiba radius: %d", DTW_RADIUS)
+        logger.info("  - Levy area lags: %s", LEVY_LAGS)
+        logger.info("Graph learning:")
+        logger.info("  - Sparsity alpha: %s", GRAPH_SPARSITY_ALPHA)
+        logger.info("  - Smoothness beta: %s", GRAPH_SMOOTHNESS_BETA)
+        logger.info("Max deviation: %.0f%%", MAX_DEVIATION * 100)
+        logger.info("Rebalance frequency: 21 days")
+        logger.info("Data source: %s", PRICES_PATH)
+        logger.info("Prices exist: %s", PRICES_PATH.exists())
     
     elif args.command == 'compute':
         network_momentum = NetworkMomentumLeadLag()
         leadlag_matrix = network_momentum.compute_leadlag_matrix(args.window)
         
         if leadlag_matrix:
-            print(json.dumps(leadlag_matrix.to_dict(), indent=2))
+            logger.info(json.dumps(leadlag_matrix.to_dict(), indent=2))
         else:
-            print(json.dumps({'error': 'Could not compute lead-lag matrix'}))
+            logger.error("Could not compute lead-lag matrix")
     
     elif args.command == 'backtest':
         backtester = NetworkMomentumBacktester(
@@ -926,7 +921,7 @@ def main():
             end_date=args.end
         )
         result = backtester.run_backtest()
-        print(json.dumps(result, indent=2, default=str))
+        logger.info(json.dumps(result, indent=2, default=str))
         if args.output:
             save_results_json(result, output_path=args.output)
 
@@ -935,9 +930,9 @@ def main():
         recommendation = network_momentum.get_current_recommendation(DEFAULT_BASE_ALLOCATION)
         
         if recommendation:
-            print(json.dumps(recommendation.to_dict(), indent=2))
+            logger.info(json.dumps(recommendation.to_dict(), indent=2))
         else:
-            print(json.dumps({'error': 'Could not compute recommendation'}))
+            logger.error("Could not compute recommendation")
         
         if args.output:
             save_results_json(recommendation.to_dict() if recommendation else {}, output_path=args.output)
@@ -947,4 +942,6 @@ def main():
 
 
 if __name__ == '__main__':
+    from src.utils.log_config import configure_logging
+    configure_logging()
     main()

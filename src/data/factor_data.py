@@ -423,24 +423,24 @@ def main():
                 cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
                 counts[table] = cursor.fetchone()[0]
             
-            print("\nFactor Data Status:")
-            print("-" * 40)
+            logger.info("Factor Data Status:")
+            logger.info("-" * 40)
             for table, count in counts.items():
-                print(f"  {table}: {count} records")
-            
+                logger.info("  %s: %d records", table, count)
+
             # Show date range
             cursor = conn.execute("""
                 SELECT MIN(date), MAX(date) FROM factor_prices
             """)
             min_date, max_date = cursor.fetchone()
             if min_date:
-                print(f"\n  Date range: {min_date} to {max_date}")
-        
+                logger.info("  Date range: %s to %s", min_date, max_date)
+
         # Show metadata
         with open(manager.metadata_path, "r") as f:
             meta = json.load(f)
-        print(f"\n  Last updated: {meta.get('last_updated', 'Never')}")
-        print(f"  Version: {meta.get('version', 'Unknown')}")
+        logger.info("  Last updated: %s", meta.get('last_updated', 'Never'))
+        logger.info("  Version: %s", meta.get('version', 'Unknown'))
         
     elif args.command == "fetch":
         if args.symbol:
@@ -457,11 +457,11 @@ def main():
                 
     elif args.command == "rank":
         rankings = manager.get_factor_rankings()
-        print("\nFactor Rankings (6-month momentum):")
-        print("-" * 40)
+        logger.info("Factor Rankings (6-month momentum):")
+        logger.info("-" * 40)
         for i, (symbol, ret) in enumerate(rankings, 1):
             ret_pct = ret * 100
-            print(f"  {i}. {symbol}: {ret_pct:+.2f}%")
+            logger.info("  %d. %s: %+.2f%%", i, symbol, ret_pct)
 
 
 if __name__ == "__main__":

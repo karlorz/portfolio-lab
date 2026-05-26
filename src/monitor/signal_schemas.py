@@ -149,6 +149,17 @@ class SignalWfeSignal(BaseModel):
     signals: Dict[str, Any] = Field(default_factory=dict)
 
 
+class RampSignal(BaseModel):
+    """Validates the ``ramp`` section of signals.json."""
+
+    model_config = ConfigDict(extra="allow")
+
+    phase: str = "paper"
+    allocation_pct: float = 0.0
+    days_at_phase: int = 0
+    can_advance: bool = False
+
+
 SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "ensemble_voting": EnsembleVotingSignal,
     "garch_cvar": GarchCvarSignal,
@@ -159,6 +170,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "fred_macro": FredMacroSignal,
     "ic_decay": IcDecaySignal,
     "signal_wfe": SignalWfeSignal,
+    "ramp": RampSignal,
 }
 
 # Signals for which schemas are defined — used when integrating into

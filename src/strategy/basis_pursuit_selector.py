@@ -592,23 +592,25 @@ def main():
 
     if args.command == "status":
         diag = selector.get_state_diagnostics()
-        print(f"=== Basis Pursuit Selector Status ===")
-        print(f"Tracked signals: {len(diag)}")
-        print(f"")
+        logger.info("Basis Pursuit Selector Status: %d tracked signals", len(diag))
         if diag:
             for source, info in sorted(diag.items()):
-                print(f"  {source:30s}: signal_periods={info.get('signal_periods', 0):3d}, "
-                      f"signal_mean={info.get('signal_mean', 0):+.3f}, "
-                      f"signal_std={info.get('signal_std', 0):.3f}")
+                logger.info(
+                    "  %-30s: signal_periods=%3d, signal_mean=%+.3f, signal_std=%.3f",
+                    source,
+                    info.get("signal_periods", 0),
+                    info.get("signal_mean", 0),
+                    info.get("signal_std", 0),
+                )
         else:
-            print("  No signal history yet. Run 'select' to populate.")
+            logger.info("  No signal history yet. Run 'select' to populate.")
 
     elif args.command == "select":
         # Parse signals
         signal_values = {}
         for s in args.signals:
             if "=" not in s:
-                print(f"WARN: Skipping malformed signal: {s}")
+                logger.warning("Skipping malformed signal: %s", s)
                 continue
             parts = s.split("=", 1)
             signal_values[parts[0]] = float(parts[1])
@@ -617,40 +619,39 @@ def main():
         base_weights = {}
         for w in args.weights:
             if "=" not in w:
-                print(f"WARN: Skipping malformed weight: {w}")
+                logger.warning("Skipping malformed weight: %s", w)
                 continue
             parts = w.split("=", 1)
             base_weights[parts[0]] = float(parts[1])
 
         if not base_weights:
-            print("ERROR: No weights provided")
+            logger.error("No weights provided")
             return
 
         result = selector.select_signals(signal_values, base_weights, args.regime)
 
-        print(f"=== Basis Pursuit Selection Result ===")
-        print(f"Regime: {result.regime} | Lambda: {result.lambda_used}")
-        print(f"Sparsity: {result.sparsity_ratio:.2f} ({result.num_active}/{result.total_signals})")
-        print(f"")
-        print("Active signals:")
+        logger.info("Basis Pursuit Selection Result (regime=%s, lambda=%s)", result.regime, result.lambda_used)
+        logger.info("Sparsity: %.2f (%d/%d)", result.sparsity_ratio, result.num_active, result.total_signals)
+        logger.info("Active signals:")
         for signal, weight in sorted(result.active_signals.items(), key=lambda x: x[1], reverse=True):
-            print(f"  + {signal:30s}: {weight:.4f}")
+            logger.info("  + %-30s: %.4f", signal, weight)
         if result.pruned_signals:
-            print(f"")
-            print("Pruned signals:")
+            logger.info("Pruned signals:")
             for signal, weight in sorted(result.pruned_signals.items(), key=lambda x: x[1], reverse=True):
                 reason = result.prune_reasons.get(signal)
                 if reason and reason.reason == "redundant":
                     extra = f" (redundant with {reason.paired_with})"
                 else:
                     extra = " (near-zero)"
-                print(f"  - {signal:30s}: {weight:.4f}{extra}")
+                logger.info("  - %-30s: %.4f%s", signal, weight, extra)
         if result.is_concentrated():
-            print(f"\n⚠  WARNING: Signal concentration (sparsity < {SPARSITY_ALERT_THRESHOLD})")
+            logger.warning("Signal concentration (sparsity < %s)", SPARSITY_ALERT_THRESHOLD)
 
     else:
         parser.print_help()
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+    configure_logging()
     main()

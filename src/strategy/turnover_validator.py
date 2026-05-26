@@ -374,30 +374,33 @@ def main():
 
     if args.command == "status":
         diag = validator.get_state_diagnostics()
-        print(f"=== Turnover Validator Status ===")
-        print(f"Tracked signals: {len(diag)}")
-        print(f"")
+        logger.info("Turnover Validator Status: %d tracked signals", len(diag))
         if diag:
             for source, info in sorted(diag.items(), key=lambda x: x[1]["turnover_penalty"], reverse=True):
-                print(f"  {source:25s}: periods={info['periods']:3d}, "
-                      f"mean={info['mean']:+.3f}, std={info['std']:.3f}, "
-                      f"flip_rate={info['sign_flip_rate']:.2f}, "
-                      f"penalty={info['turnover_penalty']:.2f}, "
-                      f"stability={info['stability_score']:.2f}, "
-                      f"marginal={info['marginal_score']:+.4f}")
+                logger.info(
+                    "  %-25s: periods=%3d, mean=%+.3f, std=%.3f, flip_rate=%.2f, penalty=%.2f, stability=%.2f, marginal=%+.4f",
+                    source,
+                    info['periods'],
+                    info['mean'],
+                    info['std'],
+                    info['sign_flip_rate'],
+                    info['turnover_penalty'],
+                    info['stability_score'],
+                    info['marginal_score'],
+                )
         else:
-            print("  No signal history yet. Run with signal values to populate.")
+            logger.info("  No signal history yet. Run with signal values to populate.")
 
     elif args.command == "adjust":
         if not args.signals:
-            print("ERROR: --signals required")
+            logger.error("--signals required")
             return
 
         # Parse signals
         signal_values = {}
         for s in args.signals:
             if "=" not in s:
-                print(f"WARN: Skipping malformed signal: {s}")
+                logger.warning("Skipping malformed signal: %s", s)
                 continue
             parts = s.split("=", 1)
             signal_values[parts[0]] = float(parts[1])
@@ -417,26 +420,26 @@ def main():
                     base_weights[src] = 1.0 / n
 
         if not base_weights:
-            print("ERROR: No weights to adjust")
+            logger.error("No weights to adjust")
             return
 
         adjusted = validator.get_adjusted_weights(base_weights, signal_values)
         metrics = validator.update_and_validate(signal_values)
 
-        print(f"=== Turnover-Adjusted Weights ===")
-        print(f"")
+        logger.info("Turnover-Adjusted Weights:")
         for src in sorted(adjusted.keys()):
             base = base_weights.get(src, 0)
             adj = adjusted.get(src, 0)
             m = metrics.get(src)
             penalty = m.turnover_penalty if m else 0
-            stability = m.stability_score if m else "N/A"
-            print(f"  {src:25s}: {base:.4f} → {adj:.4f}  "
-                  f"(penalty={penalty:.2f}, stability={stability})")
+            stability = m.stability_score if m else 0
+            logger.info("  %-25s: %.4f -> %.4f  (penalty=%.2f, stability=%s)", src, base, adj, penalty, stability)
 
     else:
         parser.print_help()
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+    configure_logging()
     main()

@@ -493,43 +493,43 @@ def main():
     if args.fetch or (not args.history and not args.ticker):
         snapshot = fetcher.fetch_sentiment(force_refresh=args.force)
         
-        print("\n=== Reddit Sentiment Snapshot ===")
-        print(f"Timestamp: {snapshot.timestamp}")
-        print(f"Data Fresh: {snapshot.data_fresh}")
-        print(f"\nAggregate Sentiment: {snapshot.aggregate_sentiment:+.3f} (-1.0 bearish to +1.0 bullish)")
-        print(f"Mention Velocity (1h): {snapshot.mention_velocity_1h} posts/hour")
-        print(f"Mention Velocity (24h): {snapshot.mention_velocity_24h} posts/day")
-        print(f"Engagement Score: {snapshot.engagement_score:.1f}/100")
-        print(f"Virality Flag: {'🔥 VIRAL' if snapshot.virality_flag else 'Normal'}")
-        
-        print("\n--- Per-Ticker Metrics ---")
+        logger.info("=== Reddit Sentiment Snapshot ===")
+        logger.info("Timestamp: %s", snapshot.timestamp)
+        logger.info("Data Fresh: %s", snapshot.data_fresh)
+        logger.info("Aggregate Sentiment: %+.3f (-1.0 bearish to +1.0 bullish)", snapshot.aggregate_sentiment)
+        logger.info("Mention Velocity (1h): %s posts/hour", snapshot.mention_velocity_1h)
+        logger.info("Mention Velocity (24h): %s posts/day", snapshot.mention_velocity_24h)
+        logger.info("Engagement Score: %.1f/100", snapshot.engagement_score)
+        logger.info("Virality Flag: %s", 'VIRAL' if snapshot.virality_flag else 'Normal')
+
+        logger.info("--- Per-Ticker Metrics ---")
         for ticker, metrics in snapshot.ticker_metrics.items():
             if metrics.mention_count_24h > 0:
-                print(f"\n{ticker}:")
-                print(f"  Mentions (1h/24h): {metrics.mention_count_1h}/{metrics.mention_count_24h}")
-                print(f"  Sentiment: {metrics.sentiment_score:+.3f}")
-                print(f"  Upvote Ratio: {metrics.upvote_ratio:.2%}")
-                print(f"  Comment Velocity: {metrics.comment_velocity:.1f}/hour")
-                print(f"  Awards: {metrics.award_count}")
+                logger.info("%s:", ticker)
+                logger.info("  Mentions (1h/24h): %s/%s", metrics.mention_count_1h, metrics.mention_count_24h)
+                logger.info("  Sentiment: %+.3f", metrics.sentiment_score)
+                logger.info("  Upvote Ratio: %.2f%%", metrics.upvote_ratio * 100)
+                logger.info("  Comment Velocity: %.1f/hour", metrics.comment_velocity)
+                logger.info("  Awards: %s", metrics.award_count)
     
     if args.history:
         history = fetcher.get_history(days=args.history)
-        print(f"\n=== {args.history}-Day History ({len(history)} snapshots) ===")
-        
+        logger.info("=== %s-Day History (%s snapshots) ===", args.history, len(history))
+
         for entry in history[:10]:  # Show last 10
-            print(f"\n{entry['timestamp'][:19]}:")
-            print(f"  Sentiment: {entry['aggregate_sentiment']:+.3f}")
-            print(f"  Mentions (24h): {entry['mention_velocity_24h']}")
-            print(f"  Virality: {'Yes' if entry['virality_flag'] else 'No'}")
+            logger.info("%s:", entry['timestamp'][:19])
+            logger.info("  Sentiment: %+.3f", entry['aggregate_sentiment'])
+            logger.info("  Mentions (24h): %s", entry['mention_velocity_24h'])
+            logger.info("  Virality: %s", 'Yes' if entry['virality_flag'] else 'No')
     
     if args.ticker:
         ticker_history = fetcher.get_ticker_history(args.ticker, days=args.history or 7)
-        print(f"\n=== {args.ticker} Mention History ({len(ticker_history)} posts) ===")
-        
+        logger.info("=== %s Mention History (%s posts) ===", args.ticker, len(ticker_history))
+
         for post in ticker_history[:10]:
-            print(f"\n{post['fetched_at'][:19]} | r/{post['subreddit']}")
-            print(f"  Title: {post['post_title'][:80]}...")
-            print(f"  Sentiment: {post['sentiment_score']:+.3f} | Upvotes: {post['upvotes']}")
+            logger.info("%s | r/%s", post['fetched_at'][:19], post['subreddit'])
+            logger.info("  Title: %s...", post['post_title'][:80])
+            logger.info("  Sentiment: %+.3f | Upvotes: %s", post['sentiment_score'], post['upvotes'])
 
 
 if __name__ == '__main__':

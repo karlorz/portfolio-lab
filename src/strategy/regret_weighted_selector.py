@@ -568,25 +568,26 @@ def main():
 
     if args.command == "status":
         diag = selector.get_state_diagnostics()
-        print(f"=== Regret-Weighted Selector Status ===")
-        print(f"Tracked signals: {len(diag)}")
-        print(f"Rolling window: {selector.rolling_window}")
-        print(f"Regret lambda: {selector.regret_lambda}")
-        print(f"")
+        logger.info("Regret-Weighted Selector Status: %d tracked signals (window=%d, lambda=%s)",
+                     len(diag), selector.rolling_window, selector.regret_lambda)
         if diag:
             for source, info in sorted(diag.items()):
-                print(f"  {source:30s}: periods={info.get('signal_periods', 0):3d}, "
-                      f"mean={info.get('signal_mean', 0):+.3f}, "
-                      f"std={info.get('signal_std', 0):.3f}")
+                logger.info(
+                    "  %-30s: periods=%3d, mean=%+.3f, std=%.3f",
+                    source,
+                    info.get("signal_periods", 0),
+                    info.get("signal_mean", 0),
+                    info.get("signal_std", 0),
+                )
         else:
-            print("  No signal history yet. Run 'adjust' to populate.")
+            logger.info("  No signal history yet. Run 'adjust' to populate.")
 
     elif args.command == "adjust":
         # Parse signals
         signal_values = {}
         for s in args.signals:
             if "=" not in s:
-                print(f"WARN: Skipping malformed signal: {s}")
+                logger.warning("Skipping malformed signal: %s", s)
                 continue
             parts = s.split("=", 1)
             signal_values[parts[0]] = float(parts[1])
@@ -595,37 +596,36 @@ def main():
         current_weights = {}
         for w in args.weights:
             if "=" not in w:
-                print(f"WARN: Skipping malformed weight: {w}")
+                logger.warning("Skipping malformed weight: %s", w)
                 continue
             parts = w.split("=", 1)
             current_weights[parts[0]] = float(parts[1])
 
         if not current_weights:
-            print("ERROR: No weights provided")
+            logger.error("No weights provided")
             return
 
         result = selector.adjust_weights(
             signal_values, args.decision, current_weights, args.regime
         )
 
-        print(f"=== Regret-Weighted Adjustment Result ===")
-        print(f"Regime: {args.regime} | Lambda: {result.lambda_used}")
-        print(f"Signals: {result.num_signals} | Avg regret: {result.avg_regret:.3f}")
-        print(f"")
-        print("Adjusted weights:")
+        logger.info("Regret-Weighted Adjustment Result (regime=%s, lambda=%s)", args.regime, result.lambda_used)
+        logger.info("Signals: %d | Avg regret: %.3f", result.num_signals, result.avg_regret)
+        logger.info("Adjusted weights:")
         for signal, weight in sorted(result.adjusted_weights.items(), key=lambda x: x[1], reverse=True):
             metrics = result.regret_metrics.get(signal)
             penalty = metrics.regret_penalty if metrics else 0.0
             regret = metrics.regret_normalized if metrics else 0.0
-            print(f"  {signal:30s}: {weight:.4f}  "
-                  f"(regret={regret:.2f}, penalty={penalty:.2f})")
+            logger.info("  %-30s: %.4f  (regret=%.2f, penalty=%.2f)", signal, weight, regret, penalty)
         if result.signals_with_high_regret:
-            print(f"\nHigh-regret signals (> {REGRET_HIGH_THRESHOLD}): "
-                  f"{', '.join(result.signals_with_high_regret)}")
+            logger.info("High-regret signals (> %s): %s",
+                         REGRET_HIGH_THRESHOLD, ', '.join(result.signals_with_high_regret))
 
     else:
         parser.print_help()
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+    configure_logging()
     main()

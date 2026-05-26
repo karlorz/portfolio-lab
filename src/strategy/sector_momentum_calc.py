@@ -291,7 +291,10 @@ def generate_sector_signals(historical_path: Path, vix: float = 0, regime: str =
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+    configure_logging()
+
     # Test
     path = HISTORICAL_JSON
     signals = generate_sector_signals(path, vix=18.5)
-    print(json.dumps(signals, indent=2))
+    logger.info(json.dumps(signals, indent=2))

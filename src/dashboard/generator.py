@@ -704,6 +704,15 @@ class DashboardGenerator:
             _log_signal_error("signal_wfe", e)
             output["signal_wfe"] = {"error": str(e)}
 
+        # Paper→Live ramp status
+        try:
+            from src.broker.alpaca import LiveTransitionManager
+            ramp_mgr = LiveTransitionManager()
+            output["ramp"] = ramp_mgr.get_status()
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("ramp_status", e)
+            output["ramp"] = {"error": str(e)}
+
         out_path = PUBLIC_DIR / "signals.json"
         save_results_json(output, output_path=str(out_path), validator=validate_all_signals)
 

@@ -416,24 +416,23 @@ def main():
             series = calc.calculate_drawdown_series()
             stats = calc.calculate_max_drawdown(series)
             print(json.dumps(stats, indent=2))
-            
+
         elif cmd == "rolling":
             metrics = calc.calculate_all_rolling_metrics()
             for window, data in metrics.items():
                 if data:
                     latest = data[-1]
-                    print(f"{window}: Sharpe={latest['sharpe']}, Vol={latest['volatility']}%")
-                    
+                    logger.info("%s: Sharpe=%s, Vol=%s%%", window, latest['sharpe'], latest['volatility'])
+
         elif cmd == "report":
             report = calc.generate_analytics_report()
             print(json.dumps(report, indent=2, default=str))
-            
+
         else:
-            print(f"Unknown command: {cmd}")
-            print("Commands: drawdown, rolling, report")
+            logger.info("Unknown command: %s", cmd)
+            logger.info("Commands: drawdown, rolling, report")
     else:
         # Default: full report
-        report = calc.generate_analytics_report()
         print(json.dumps(report, indent=2, default=str))
 
 

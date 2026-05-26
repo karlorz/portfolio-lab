@@ -281,13 +281,14 @@ class TestLoadPrices:
 
 class TestCLI:
 
-    def test_status_command(self, capsys):
+    def test_status_command(self, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         from src.strategy.risk_parity_weight_overlay import main
         with patch("sys.argv", ["rp_overlay.py", "status"]):
             main()
-        captured = capsys.readouterr()
-        assert "Risk Parity" in captured.out
-        assert "46%" in captured.out or "46" in captured.out
+        assert "Risk Parity" in caplog.text
+        assert "46%" in caplog.text or "46" in caplog.text
 
     def test_no_command_prints_help(self, capsys):
         from src.strategy.risk_parity_weight_overlay import main
@@ -1108,25 +1109,27 @@ class TestRPBacktesterRun:
 class TestCLIExtended:
     """Extended tests for CLI entry points."""
 
-    def test_backtest_command_default(self, capsys):
+    def test_backtest_command_default(self, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         mock_result = {'strategy': 'test_strategy', 'cagr': 0.08}
         with patch('sys.argv', ['rp_overlay.py', 'backtest']):
             with patch('src.strategy.risk_parity_weight_overlay.RPBacktester') as MockBT:
                 MockBT.return_value.run_backtest.return_value = mock_result
                 from src.strategy.risk_parity_weight_overlay import main
                 main()
-        captured = capsys.readouterr()
-        assert 'test_strategy' in captured.out
+        assert 'test_strategy' in caplog.text
 
-    def test_backtest_with_custom_max_dev(self, capsys):
+    def test_backtest_with_custom_max_dev(self, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         mock_result = {'strategy': 'custom_dev', 'cagr': 0.08}
         with patch('sys.argv', ['rp_overlay.py', 'backtest', '--max-dev', '0.20']):
             with patch('src.strategy.risk_parity_weight_overlay.RPBacktester') as MockBT:
                 MockBT.return_value.run_backtest.return_value = mock_result
                 from src.strategy.risk_parity_weight_overlay import main
                 main()
-        captured = capsys.readouterr()
-        assert 'custom_dev' in captured.out
+        assert 'custom_dev' in caplog.text
 
     def test_backtest_output_file(self, capsys, tmp_path):
         output_file = tmp_path / 'result.json'
@@ -1141,7 +1144,9 @@ class TestCLIExtended:
             data = json.load(f)
         assert data['strategy'] == 'file_output_test'
 
-    def test_live_command_prints_allocation(self, capsys):
+    def test_live_command_prints_allocation(self, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         mock_allocation = MagicMock()
         mock_allocation.to_dict.return_value = {'target_weights': {'SPY': 0.5}}
         with patch('sys.argv', ['rp_overlay.py', 'live']):
@@ -1149,17 +1154,17 @@ class TestCLIExtended:
                 MockRP.return_value.calculate_rp_overlay.return_value = mock_allocation
                 from src.strategy.risk_parity_weight_overlay import main
                 main()
-        captured = capsys.readouterr()
-        assert 'target_weights' in captured.out
+        assert 'target_weights' in caplog.text
 
-    def test_live_command_failure_prints_error(self, capsys):
+    def test_live_command_failure_prints_error(self, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         with patch('sys.argv', ['rp_overlay.py', 'live']):
             with patch('src.strategy.risk_parity_weight_overlay.RiskParityWeightOverlay') as MockRP:
                 MockRP.return_value.calculate_rp_overlay.return_value = None
                 from src.strategy.risk_parity_weight_overlay import main
                 main()
-        captured = capsys.readouterr()
-        assert 'error' in captured.out
+        assert 'error' in caplog.text or 'Could not calculate' in caplog.text
 
     def test_unknown_command_exits_with_usage(self, capsys):
         with patch('sys.argv', ['rp_overlay.py', 'bogus_command_xyz']):
@@ -1170,18 +1175,19 @@ class TestCLIExtended:
         assert 'usage' in captured.err.lower()
         assert 'invalid choice' in captured.err.lower()
 
-    def test_status_displays_all_constants(self, capsys):
+    def test_status_displays_all_constants(self, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
         with patch('sys.argv', ['rp_overlay.py', 'status']):
             from src.strategy.risk_parity_weight_overlay import main
             main()
-        captured = capsys.readouterr()
-        assert 'Max deviation' in captured.out
-        assert 'Vol lookback' in captured.out
-        assert 'Rebalance frequency' in captured.out
-        assert 'Base allocation' in captured.out
-        assert 'SPY' in captured.out
-        assert 'GLD' in captured.out
-        assert 'TLT' in captured.out
+        assert 'Max deviation' in caplog.text
+        assert 'Vol lookback' in caplog.text
+        assert 'Rebalance frequency' in caplog.text
+        assert 'Base allocation' in caplog.text
+        assert 'SPY' in caplog.text
+        assert 'GLD' in caplog.text
+        assert 'TLT' in caplog.text
 
 
 # ==============================================================================

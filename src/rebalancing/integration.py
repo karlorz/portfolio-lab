@@ -210,11 +210,11 @@ if __name__ == '__main__':
             target_allocations=dict(BASE_ALLOCATION),
             total_value=100000,
         )
-        print(f"Decision: {result.decision}")
-        print(f"Should execute: {result.should_execute}")
-        print(f"Urgency: {result.urgency}")
-        print(f"Max drift: {result.max_drift:.1%}")
-        print(f"Estimated cost: {result.estimated_cost_bps:.1f} bps")
-        print(f"Reason: {result.reason}")
+        logger.info("Decision: %s", result.decision)
+        logger.info("Should execute: %s", result.should_execute)
+        logger.info("Urgency: %s", result.urgency)
+        logger.info("Max drift: %.1f%%", result.max_drift * 100)
+        logger.info("Estimated cost: %.1f bps", result.estimated_cost_bps)
+        logger.info("Reason: %s", result.reason)
     else:
-        print("Usage: python -m src.rebalancing.integration [status|check]")
+        logger.info("Usage: python -m src.rebalancing.integration [status|check]")

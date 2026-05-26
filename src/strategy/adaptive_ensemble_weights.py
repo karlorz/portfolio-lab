@@ -443,28 +443,30 @@ def main():
     if args.command == "update":
         attribution = _load_latest_attribution()
         if not attribution:
-            print("❌ No attribution data available. Run performance_attribution report --save first.")
+            logger.error("No attribution data available. Run performance_attribution report --save first.")
             sys.exit(1)
 
         adapted = adaptive.update_weights(attribution, regime=args.regime)
 
-        print(f"\n{'=' * 60}")
-        print(f"  ADAPTIVE ENSEMBLE WEIGHTS  (v6.09)")
-        print(f"{'=' * 60}")
-        print(f"  Regime: {args.regime}")
-        print(f"  Attribution: {attribution.get('timestamp', '?')}")
-        print(f"  Sources adjusted: {len(adapted)}")
-        print()
+        logger.info(
+            "Adaptive ensemble weights (regime=%s, attribution=%s, sources=%d)",
+            args.regime, attribution.get("timestamp", "?"), len(adapted),
+        )
 
         # Show top sources by weight
         sorted_sources = sorted(adapted.items(), key=lambda x: x[1], reverse=True)
-        print(f"  {'Source':30s} {'Base':>8s} {'Adj':>8s} {'Mult':>6s}")
-        print(f"  {'-' * 54}")
+        logger.info(
+            "  %-30s %8s %8s %6s",
+            "Source", "Base", "Adj", "Mult",
+        )
+        logger.info("  " + "-" * 54)
         for source_name, adj_weight in sorted_sources[:20]:
             base = base_weights.get(source_name, 0)
             mult = adaptive.multipliers.get(source_name, 1.0)
-            print(f"  {source_name:30s} {base:>8.4f} {adj_weight:>8.4f} {mult:>5.2f}x")
-        print()
+            logger.info(
+                "  %-30s %8.4f %8.4f %5.2fx",
+                source_name, base, adj_weight, mult,
+            )
 
         # Biggest changes
         changes = []
@@ -473,50 +475,46 @@ def main():
             changes.append((source_name, adj_weight - base, base, adj_weight))
         changes.sort(key=lambda x: abs(x[1]), reverse=True)
 
-        print(f"  Biggest Weight Changes:")
+        logger.info("  Biggest weight changes:")
         for source_name, diff, base, adj in changes[:5]:
-            arrow = "↑" if diff > 0 else "↓"
-            print(f"    {arrow} {source_name:25s} {base:.4f} → {adj:.4f} ({diff:+.4f})")
+            arrow = "up" if diff > 0 else "down"
+            logger.info(
+                "    %s %-25s %.4f -> %.4f (%+.4f)",
+                arrow, source_name, base, adj, diff,
+            )
 
-        print(f"\n  State saved to: {STATE_FILE}")
+        logger.info("  State saved to: %s", STATE_FILE)
 
     elif args.command == "show":
         loaded = adaptive._load_state()
         if not loaded:
-            print("No adaptive weights state found. Run 'update' first.")
+            logger.warning("No adaptive weights state found. Run 'update' first.")
             sys.exit(1)
 
-        print(f"\n{'=' * 60}")
-        print(f"  ADAPTIVE ENSEMBLE WEIGHTS  (v6.09)")
-        print(f"{'=' * 60}")
-        print(f"  Last updated: {adaptive.state_file}")
-        print(f"  Regime: {adaptive.current_regime}")
-        print()
+        logger.info("Adaptive ensemble weights (last updated: %s, regime=%s)", adaptive.state_file, adaptive.current_regime)
 
         sorted_sources = sorted(
             adaptive.adjusted_weights.items(),
             key=lambda x: x[1],
             reverse=True,
         )
-        print(f"  {'Source':30s} {'Adj Weight':>10s} {'Mult':>6s}")
-        print(f"  {'-' * 48}")
+        logger.info("  %-30s %10s %6s", "Source", "Adj Weight", "Mult")
+        logger.info("  " + "-" * 48)
         for source_name, adj_weight in sorted_sources[:args.top]:
             mult = adaptive.multipliers.get(source_name, 1.0)
-            print(f"  {source_name:30s} {adj_weight:>10.4f} {mult:>5.2f}x")
+            logger.info("  %-30s %10.4f %5.2fx", source_name, adj_weight, mult)
 
-        print(f"\n  Baseline vs Adjusted:")
+        logger.info("  Baseline vs Adjusted:")
         for source_name, adj_weight in sorted_sources:
             base = adaptive.base_weights.get(source_name, 0)
             diff = adj_weight - base
             if abs(diff) > 0.001:
-                arrow = "↑" if diff > 0 else "↓"
-                print(f"    {arrow} {source_name:25s} {base:.4f} → {adj_weight:.4f}")
+                arrow = "up" if diff > 0 else "down"
+                logger.info("    %s %-25s %.4f -> %.4f", arrow, source_name, base, adj_weight)
 
     elif args.command == "reset":
         adapted = adaptive.reset_to_baseline()
-        print("✅ Reset adaptive weights to baseline")
-        print(f"   {len(adapted)} sources at base weights")
-        print(f"   State saved to: {STATE_FILE}")
+        logger.info("Reset adaptive weights to baseline (%d sources, state saved to %s)", len(adapted), STATE_FILE)
 
     else:
         parser.print_help()

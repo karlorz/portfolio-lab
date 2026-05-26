@@ -13,6 +13,7 @@ Target: 40%+ cost reduction vs calendar rebalancing.
 """
 
 import json
+import logging
 import yaml
 from src.paths import BASE_ALLOCATION
 from dataclasses import dataclass, field
@@ -104,6 +105,7 @@ class CostBudgetTracker:
 
 from src.costs.etf_cost_table import ETF_COST_BPS, DEFAULT_COST_BPS as _DEFAULT_COST_BPS
 
+logger = logging.getLogger(__name__)
 
 
 __all__ = ['RebalanceDecision', 'UrgencyLevel', 'PortfolioSnapshot', 'MarketConditions', 'RebalanceDecisionResult', 'CostBudgetTracker', 'SmartRebalancingController', 'create_sample_portfolio']
@@ -501,7 +503,7 @@ def demo():
     portfolio = create_sample_portfolio()
     market = MarketConditions(vpin=0.30)
     result = controller.should_rebalance(portfolio, market)
-    print(f"Scenario 1 (no drift): {result.decision.value} — {result.reason}")
+    logger.info("Scenario 1 (no drift): %s — %s", result.decision.value, result.reason)
 
     # Scenario 2: 12% drift, low VPIN, in window — execute
     portfolio.holdings['SPY'] = 52000
@@ -509,28 +511,28 @@ def demo():
     portfolio.holdings['TLT'] = 15000
     now = datetime(2026, 5, 13, 12, 0)  # Noon ET
     result = controller.should_rebalance(portfolio, market, now=now)
-    print(f"Scenario 2 (12% drift, noon): {result.decision.value} — {result.reason}")
-    print(f"  Urgency: {result.urgency.value}, Cost: {result.estimated_cost_bps:.1f} bps")
+    logger.info("Scenario 2 (12%% drift, noon): %s — %s", result.decision.value, result.reason)
+    logger.info("  Urgency: %s, Cost: %.1f bps", result.urgency.value, result.estimated_cost_bps)
 
     # Scenario 3: 12% drift, high VPIN — defer
     market_high_vpin = MarketConditions(vpin=0.60)
     result = controller.should_rebalance(portfolio, market_high_vpin, now=now)
-    print(f"Scenario 3 (12% drift, VPIN=0.60): {result.decision.value} — {result.reason}")
+    logger.info("Scenario 3 (12%% drift, VPIN=0.60): %s — %s", result.decision.value, result.reason)
 
     # Scenario 4: 12% drift, outside optimal window — defer
     morning = datetime(2026, 5, 13, 9, 30)  # Market open
     result = controller.should_rebalance(portfolio, market, now=morning)
-    print(f"Scenario 4 (12% drift, 9:30am): {result.decision.value} — {result.reason}")
+    logger.info("Scenario 4 (12%% drift, 9:30am): %s — %s", result.decision.value, result.reason)
 
     # Scenario 5: 26% drift — emergency override
     portfolio.holdings['SPY'] = 60000
     portfolio.holdings['GLD'] = 28000
     portfolio.holdings['TLT'] = 12000
     result = controller.should_rebalance(portfolio, market_high_vpin, now=morning)
-    print(f"Scenario 5 (26% drift, high VPIN, morning): {result.decision.value} — {result.reason}")
+    logger.info("Scenario 5 (26%% drift, high VPIN, morning): %s — %s", result.decision.value, result.reason)
 
     # Print status
-    print(f"\nController Status: {json.dumps(controller.get_status(), indent=2)}")
+    logger.info("\nController Status: %s", json.dumps(controller.get_status(), indent=2))
 
 
 if __name__ == '__main__':

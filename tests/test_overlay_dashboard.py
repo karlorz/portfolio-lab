@@ -3,6 +3,7 @@ Tests for Overlay Dashboard Data Generator (v4.91)
 """
 
 import json
+import logging
 import pytest
 from datetime import datetime
 from pathlib import Path
@@ -609,7 +610,8 @@ class TestOverlayDashboardConstants:
 class TestOverlayDashboardCLI:
     """Test CLI entry point with capsys."""
 
-    def test_main_prints_header(self, capsys):
+    def test_main_prints_header(self, caplog):
+        caplog.set_level(logging.INFO, logger='src.dashboard.overlay_dashboard')
         with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
             mock_gen.return_value = OverlayDashboardData(
                 timestamp="2026-01-01", generated_at="2026-01-01",
@@ -624,12 +626,12 @@ class TestOverlayDashboardCLI:
                 from src.dashboard.overlay_dashboard import main
                 main()
 
-        captured = capsys.readouterr()
-        assert "OVERLAY DASHBOARD v4.91" in captured.out
-        assert "Active: 4/7" in captured.out
-        assert "MODERATE" in captured.out
+        assert "OVERLAY DASHBOARD v4.91" in caplog.text
+        assert "Active: 4/7" in caplog.text
+        assert "MODERATE" in caplog.text
 
-    def test_main_prints_no_alerts_when_empty(self, capsys):
+    def test_main_prints_no_alerts_when_empty(self, caplog):
+        caplog.set_level(logging.INFO, logger='src.dashboard.overlay_dashboard')
         with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
             mock_gen.return_value = OverlayDashboardData(
                 timestamp="2026-01-01", generated_at="2026-01-01",
@@ -643,11 +645,12 @@ class TestOverlayDashboardCLI:
                 from src.dashboard.overlay_dashboard import main
                 main()
 
-        captured = capsys.readouterr()
-        assert "No alerts" in captured.out
-        assert "all systems normal" in captured.out
+        captured = caplog.text
+        assert "No alerts" in captured
+        assert "all systems normal" in captured
 
-    def test_main_prints_alerts_when_present(self, capsys):
+    def test_main_prints_alerts_when_present(self, caplog):
+        caplog.set_level(logging.INFO, logger='src.dashboard.overlay_dashboard')
         with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
             mock_gen.return_value = OverlayDashboardData(
                 timestamp="2026-01-01", generated_at="2026-01-01",
@@ -663,11 +666,12 @@ class TestOverlayDashboardCLI:
                 from src.dashboard.overlay_dashboard import main
                 main()
 
-        captured = capsys.readouterr()
-        assert "VIX elevated" in captured.out
-        assert "BTC vol extreme" in captured.out
+        captured = caplog.text
+        assert "VIX elevated" in captured
+        assert "BTC vol extreme" in captured
 
-    def test_main_save_flag_triggers_save(self, capsys):
+    def test_main_save_flag_triggers_save(self, caplog):
+        caplog.set_level(logging.INFO, logger='src.dashboard.overlay_dashboard')
         mock_save = MagicMock()
         with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
             mock_gen.return_value = OverlayDashboardData(
@@ -684,11 +688,11 @@ class TestOverlayDashboardCLI:
                     from src.dashboard.overlay_dashboard import main
                     main()
 
-        captured = capsys.readouterr()
+        captured = caplog.text
         mock_save.assert_called_once()
-        assert "Saved to" in captured.out
+        assert "Saved to" in captured
 
-    def test_main_no_save_flag_no_save(self, capsys):
+    def test_main_no_save_flag_no_save(self):
         mock_save = MagicMock()
         with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
             mock_gen.return_value = OverlayDashboardData(
@@ -706,7 +710,8 @@ class TestOverlayDashboardCLI:
 
         mock_save.assert_not_called()
 
-    def test_main_shows_active_and_inactive_overlays(self, capsys):
+    def test_main_shows_active_and_inactive_overlays(self, caplog):
+        caplog.set_level(logging.INFO, logger='src.dashboard.overlay_dashboard')
         with patch.object(OverlayDashboardGenerator, "generate") as mock_gen:
             collar = {"active": True, "status_text": "Collar: protective"}
             crypto = {"active": False, "error": "Crypto signal unavailable"}
@@ -723,10 +728,10 @@ class TestOverlayDashboardCLI:
                 from src.dashboard.overlay_dashboard import main
                 main()
 
-        captured = capsys.readouterr()
-        assert "Collar: protective" in captured.out
-        assert "Crypto signal unavailable" in captured.out
-        assert "MR: disabled" in captured.out
+        captured = caplog.text
+        assert "Collar: protective" in captured
+        assert "Crypto signal unavailable" in captured
+        assert "MR: disabled" in captured
 
 
 class TestOverlayDashboardDataclassValidation:

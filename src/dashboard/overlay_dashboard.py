@@ -318,13 +318,13 @@ def main():
     gen = OverlayDashboardGenerator()
     dashboard = gen.generate()
 
-    print("=" * 60)
-    print("OVERLAY DASHBOARD v4.91")
-    print("=" * 60)
-    print(f"Generated: {dashboard.generated_at}")
-    print(f"Active: {dashboard.active_overlays}/{dashboard.total_overlays}")
-    print(f"Risk Level: {dashboard.portfolio_risk.upper()}")
-    print()
+    logger.info("=" * 60)
+    logger.info("OVERLAY DASHBOARD v4.91")
+    logger.info("=" * 60)
+    logger.info("Generated: %s", dashboard.generated_at)
+    logger.info("Active: %s/%s", dashboard.active_overlays, dashboard.total_overlays)
+    logger.info("Risk Level: %s", dashboard.portfolio_risk.upper())
+    logger.info("")
 
     for name, data in [
         ("Collar", dashboard.collar),
@@ -336,21 +336,21 @@ def main():
         ("Unified", dashboard.unified),
     ]:
         status_text = data.get("status_text", data.get("error", "N/A"))
-        flag = "✓" if data.get("active") else "✗"
-        print(f"  {flag} {name:<18} {status_text}")
+        flag = "[active]" if data.get("active") else "[inactive]"
+        logger.info("  %s %-18s %s", flag, name, status_text)
 
-    print()
+    logger.info("")
     if dashboard.alerts:
-        print("Alerts:")
+        logger.info("Alerts:")
         for alert in dashboard.alerts:
-            print(f"  ⚠ {alert}")
+            logger.info("  [alert] %s", alert)
     else:
-        print("No alerts — all systems normal")
-    print("=" * 60)
+        logger.info("No alerts — all systems normal")
+    logger.info("=" * 60)
 
     if "--save" in sys.argv:
         gen.save(dashboard)
-        print(f"Saved to {gen.OUTPUT_PATH}")
+        logger.info("Saved to %s", gen.OUTPUT_PATH)
 
 
 if __name__ == "__main__":
