@@ -559,12 +559,12 @@ def _kill_level_reduction(level: KillSwitchLevel) -> float:
 
 def main():
     """Main evaluation loop."""
-    print(f"[{datetime.now()}] Strategy Evaluator Starting")
-    
+    logger.info("Strategy Evaluator Starting")
+
     # Determine mode from environment
     mode = os.environ.get("ALPHALAB_MODE", "paper")
     state_file = DATA_DIR / f"portfolio_{mode}.json"
-    
+
     with sqlite_connect(DB_PATH) as conn:
         portfolio = Portfolio(state_file, mode)
 
@@ -573,8 +573,11 @@ def main():
         regime = get_current_regime(conn)
         vix = get_latest_vix(conn)
 
-    print(f"Mode: {mode}, Regime: {regime}, VIX: {vix:.2f}" if vix else f"Mode: {mode}, Regime: {regime}")
-    print(f"Portfolio value: ${portfolio.total_value(prices):,.2f}")
+    if vix:
+        logger.info("Mode: %s, Regime: %s, VIX: %.2f", mode, regime, vix)
+    else:
+        logger.info("Mode: %s, Regime: %s", mode, regime)
+    logger.info("Portfolio value: $%,.2f", portfolio.total_value(prices))
 
     # Check kill switches
     kill_reason = portfolio.check_risk_limits(prices)
@@ -600,27 +603,27 @@ def main():
 
     # Determine target allocation
     target_alloc = REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION
-    print(f"Target allocation: {target_alloc}")
-    
+    logger.info("Target allocation: %s", target_alloc)
+
     # Generate orders
     orders = portfolio.calculate_orders(target_alloc, prices)
-    
+
     if orders:
-        print(f"Generated {len(orders)} orders:")
+        logger.info("Generated %d orders:", len(orders))
         for o in orders:
-            print(f"  {o['side'].upper()} {o['shares']:.2f} {o['symbol']} @ ${o['estimated_price']:.2f}")
-        
+            logger.info("  %s %.2f %s @ $%.2f", o['side'].upper(), o['shares'], o['symbol'], o['estimated_price'])
+
         # Execute (paper trading with slippage)
         executed = portfolio.execute_orders(orders, prices)
-        
+
         # Log orders
         with open(ORDERS_LOG, 'a') as f:
             for e in executed:
                 f.write(json.dumps(e) + '\n')
-        
-        print(f"Executed {len(executed)} orders")
+
+        logger.info("Executed %d orders", len(executed))
     else:
-        print("No rebalancing needed")
+        logger.info("No rebalancing needed")
     
     # Update and save state
     perf = calculate_performance(portfolio, prices)
@@ -635,7 +638,7 @@ def main():
     if mode == "paper":
         check_graduation_criteria(portfolio)
     
-    print(f"[{datetime.now()}] Evaluation complete")
+    logger.info("Evaluation complete")
 
 def _deduplicate_to_daily(history: List[Dict]) -> List[Dict]:
     """Filter history to keep only the last entry per trading day.

@@ -27,7 +27,7 @@
 |- **Evaluator config externalization**: PAPER_CONFIG and graduation criteria (MIN_SHARPE, MAX_DD, etc.) now read from env vars with hardcoded fallbacks (PAPER_INITIAL_CAPITAL, GRADUATION_MIN_SHARPE, etc.)
 |- **React error boundaries**: PanelErrorBoundary wraps each dashboard tab panel — single-panel crashes don't kill the entire dashboard
 |- **DashboardGenerator context manager**: `__enter__`/`__exit__` + `close()` + `try/finally` in `run()` prevents SQLite connection leaks on exceptions
-|- **Evaluator print→logging**: check_graduation_criteria, kill switch, and trigger creation use logger instead of print() for production observability
+|- **Evaluator print→logging**: evaluator.py main() migrated from print() to logger.info() for cron pipeline observability; check_graduation_criteria, kill switch, and trigger creation already use logger
 |- **Performance daily_return fix**: calculate_performance() now computes daily_return relative to previous day's close (not previous intraday snapshot) — eliminates the daily_return=0 bug that inflated days_tracked and produced unrealistic Sharpe (6.48→actual)
 |- **Intraday deduplication**: generator.py and wiki_sync.py deduplicate performance.jsonl to one entry per calendar date before computing metrics — days_tracked counts unique trading dates not raw JSONL lines
 |- **WikiSync print→logging**: 5 print() calls migrated to logger.info() for production observability
