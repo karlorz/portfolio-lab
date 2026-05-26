@@ -134,15 +134,32 @@ def _reset_sklearn_safe_flag():
 
 @pytest.fixture(autouse=True)
 def _clear_price_cache():
-    """Invalidate TTL price cache between tests to prevent stale data."""
-    from src.data.price_cache import invalidate_price_cache
-    invalidate_price_cache()
-    # Also clear vpin_bvc bar cache
+    """Replace TTL price caches with fresh instances between tests.
+
+    Uses instance replacement rather than pop/clear because some tests
+    replace the module-level _PRICE_CACHE / _DF_CACHE attributes directly
+    (e.g., test_price_cache.py swaps them for short-TTL instances). When
+    those tests restore the "old" cache in a finally block, they may
+    resurrect a cache that was populated with mock data from an earlier
+    test. Fresh instances guarantee zero cross-test contamination.
+    """
+    from cachetools import TTLCache
+    import src.data.price_cache as pc_mod
+
+    # Replace with fresh empty caches
+    pc_mod._PRICE_CACHE = TTLCache(maxsize=1, ttl=pc_mod._PRICE_CACHE_TTL)
+    pc_mod._DF_CACHE = TTLCache(maxsize=4, ttl=pc_mod._PRICE_CACHE_TTL)
+
+    # Clear vpin_bvc bar cache
     from src.signals.vpin_bvc import _BARS_CACHE
     _BARS_CACHE.clear()
+
     yield
-    invalidate_price_cache()
+
+    # Teardown: clear the vpin cache again
     _BARS_CACHE.clear()
+    # Note: do NOT restore the old caches — that would resurrect stale data
+    # from before this fixture ran. Each test gets a clean slate.
 
 
 # ═══════════════════════════════════════════════════════════════════════════

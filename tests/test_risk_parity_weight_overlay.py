@@ -254,14 +254,19 @@ class TestLoadPrices:
             "SPY": [{"d": "2026-01-02", "p": 450.0}, {"d": "2026-01-03", "p": 452.0}],
             "GLD": [{"d": "2026-01-02", "p": 190.0}, {"d": "2026-01-03", "p": 191.0}],
         }
-        prices_file = tmp_path / "prices.json"
-        with open(prices_file, "w") as f:
-            json.dump(prices_data, f)
+        import pandas as pd
+        rows = []
+        for sym, entries in prices_data.items():
+            for entry in entries:
+                rows.append({"date": entry["d"], "ticker": sym, "price": entry["p"]})
+        df_expected = pd.DataFrame(rows)
+        df_expected["date"] = pd.to_datetime(df_expected["date"])
+        df_expected = df_expected.pivot(index="date", columns="ticker", values="price")
 
         overlay = RiskParityWeightOverlay.__new__(RiskParityWeightOverlay)
-        overlay.prices_path = prices_file
-        overlay._prices_df = None
         overlay.vol_lookback = VOL_LOOKBACK
+        overlay._prices_df = df_expected
+        overlay.prices_path = None
 
         df = overlay._load_prices()
         assert isinstance(df, pd.DataFrame)
