@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **12596 safe** (12296 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **12870 safe** (12557 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -52,7 +52,13 @@
 |- **Production print→logging**: cvar_metrics.display_metrics() and vixy_hedge_sizing._run_backtest() migrated from print() to logger.info/warning/error
 |- **TypeScript strictNullChecks**: enabled in tsconfig.json, 4 nullable expression errors fixed (App.tsx priceData, DurationOverlayPanel YieldCurveData, fetcher.ts adjClose)
 |- **Ruff T201 lint rule**: flake8-print detection configured in pyproject.toml — surfaces print() count for awareness, per-file-ignores for scripts/agents/ml/tests
-|- **Computation cache wired**: multi_speed_momentum and ensemble_voter use get_realized_volatility() from computation_cache — shared TTL cache hits within cron cycle
+|- **Computation cache wired**: multi_speed_momentum, ensemble_voter, and risk_parity_weight_overlay use get_realized_volatility() from computation_cache — shared TTL cache hits within cron cycle
+|- **TypeScript strict:true**: full strict mode enabled (noImplicitAny + strictNullChecks + strictFunctionTypes + strictBindCallApply + noImplicitThis + alwaysStrict + strictPropertyInitialization) — zero tsc errors
+|- **python-json-logger v4.1.0**: structured JSON logging via JsonFormatter, field renaming (asctime→timestamp, levelname→level, name→logger), static fields (service=portfolio-lab), JSON_LOGS env var, graceful fallback when not installed
+|- **CorrelationIDFilter**: logging.Filter injects CRON_RUN_ID env var into every log record for cron pipeline tracing
+|- **tenacity retry**: retry_on_api_error() decorator with exponential backoff for ConnectionError/TimeoutError/OSError, configurable max_retries and backoff
+|- **RateLimiter token-bucket**: thread-safe per-API rate limiting (Yahoo=60 RPM, FRED=30 RPM defaults), API_RATE_LIMIT_RPM env var, @rate_limited decorator
+|- **Health check module**: src/monitor/health_check.py — structured JSON report (data freshness, cron status, circuit breaker state), system_status derivation (ok/warning/degraded), writes health.json, wired into DashboardGenerator
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
