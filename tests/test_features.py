@@ -11,6 +11,7 @@ Tests cover:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -993,87 +994,81 @@ class TestMainCLI:
                     calls_text = " ".join(str(c) for c in mp.call_args_list)
                     assert "SPY" in calls_text
 
-    def test_generate_no_features_message(self, tmp_path: pytest.TempPathFactory) -> None:  # type: ignore[misc]
+    def test_generate_no_features_message(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """Insufficient data prints a 'No features generated' message."""
         db = tmp_path / "cli_none.db"
         _create_prices_table(str(db), "SPY", [100.0 + i for i in range(30)])
         pipeline, store = self._pipelines_and_store(str(db), str(tmp_path / "st4"))
-        with patch.object(sys, "argv", ["features.py", "generate", "SPY"]):
-            with patch("src.research.features.FeaturePipeline", return_value=pipeline):
-                with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "generate", "SPY"]):
+                with patch("src.research.features.FeaturePipeline", return_value=pipeline):
                     cli_main()
-                    calls_text = " ".join(str(c) for c in mp.call_args_list)
-                    assert "No features" in calls_text
+            assert "No features" in caplog.text
 
-    def test_batch_saves_features(self, tmp_path: pytest.TempPathFactory) -> None:  # type: ignore[misc]
+    def test_batch_saves_features(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """'batch SPY GLD' saves features for each symbol."""
         db = tmp_path / "cli_batch.db"
         _populate_full_db(str(db), n_days=100)
         store_dir = tmp_path / "batch_store"
         pipeline, store = self._pipelines_and_store(str(db), str(store_dir))
-        with patch.object(sys, "argv", ["features.py", "batch", "SPY", "GLD"]):
-            with patch("src.research.features.FeaturePipeline", return_value=pipeline):
-                with patch("src.research.features.FeatureStore", return_value=store):
-                    with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "batch", "SPY", "GLD"]):
+                with patch("src.research.features.FeaturePipeline", return_value=pipeline):
+                    with patch("src.research.features.FeatureStore", return_value=store):
                         cli_main()
-                        calls_text = " ".join(str(c) for c in mp.call_args_list)
-                        assert "Saved features" in calls_text
-                        # Both symbols should appear in the output
-                        assert "SPY" in calls_text
-                        assert "GLD" in calls_text
+            assert "Saved features" in caplog.text
+            # Both symbols should appear in the output
+            assert "SPY" in caplog.text
+            assert "GLD" in caplog.text
 
-    def test_batch_default_symbols(self, tmp_path: pytest.TempPathFactory) -> None:  # type: ignore[misc]
+    def test_batch_default_symbols(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """'batch' (no symbols) defaults to SPY, GLD, TLT, IEF."""
         db = tmp_path / "cli_batch_def.db"
         _populate_full_db(str(db), n_days=100)
         store_dir = tmp_path / "batch_store_def"
         pipeline, store = self._pipelines_and_store(str(db), str(store_dir))
-        with patch.object(sys, "argv", ["features.py", "batch"]):
-            with patch("src.research.features.FeaturePipeline", return_value=pipeline):
-                with patch("src.research.features.FeatureStore", return_value=store):
-                    with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "batch"]):
+                with patch("src.research.features.FeaturePipeline", return_value=pipeline):
+                    with patch("src.research.features.FeatureStore", return_value=store):
                         cli_main()
-                        calls_text = " ".join(str(c) for c in mp.call_args_list)
-                        # Should mention all four default symbols
-                        for sym in ("SPY", "GLD", "TLT", "IEF"):
-                            assert sym in calls_text
+            # Should mention all four default symbols
+            for sym in ("SPY", "GLD", "TLT", "IEF"):
+                assert sym in caplog.text
 
-    def test_historical_generates_and_saves(self, tmp_path: pytest.TempPathFactory) -> None:  # type: ignore[misc]
+    def test_historical_generates_and_saves(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """'historical SPY' generates all features and saves them."""
         db = tmp_path / "cli_hist.db"
         _populate_full_db(str(db), n_days=100)
         store_dir = tmp_path / "hist_store"
         pipeline, store = self._pipelines_and_store(str(db), str(store_dir))
-        with patch.object(sys, "argv", ["features.py", "historical", "SPY"]):
-            with patch("src.research.features.FeaturePipeline", return_value=pipeline):
-                with patch("src.research.features.FeatureStore", return_value=store):
-                    with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "historical", "SPY"]):
+                with patch("src.research.features.FeaturePipeline", return_value=pipeline):
+                    with patch("src.research.features.FeatureStore", return_value=store):
                         cli_main()
-                        calls_text = " ".join(str(c) for c in mp.call_args_list)
-                        assert "Generated" in calls_text
+            assert "Generated" in caplog.text
 
-    def test_historical_default_symbols(self, tmp_path: pytest.TempPathFactory) -> None:  # type: ignore[misc]
+    def test_historical_default_symbols(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """'historical' (no symbols) defaults to SPY, GLD, TLT."""
         db = tmp_path / "cli_hist_def.db"
         _populate_full_db(str(db), n_days=100)
         store_dir = tmp_path / "hist_store_def"
         pipeline, store = self._pipelines_and_store(str(db), str(store_dir))
-        with patch.object(sys, "argv", ["features.py", "historical"]):
-            with patch("src.research.features.FeaturePipeline", return_value=pipeline):
-                with patch("src.research.features.FeatureStore", return_value=store):
-                    with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "historical"]):
+                with patch("src.research.features.FeaturePipeline", return_value=pipeline):
+                    with patch("src.research.features.FeatureStore", return_value=store):
                         cli_main()
-                        calls_text = " ".join(str(c) for c in mp.call_args_list)
-                        assert "3 symbols" in calls_text
-                        assert "Generated" in calls_text
+            assert "3 symbols" in caplog.text
+            assert "Generated" in caplog.text
 
-    def test_unknown_command(self) -> None:
+    def test_unknown_command(self, caplog) -> None:
         """An unrecognised command prints an error message."""
-        with patch.object(sys, "argv", ["features.py", "fly_to_the_moon"]):
-            with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "fly_to_the_moon"]):
                 cli_main()
-                calls_text = " ".join(str(c) for c in mp.call_args_list)
-                assert "Unknown command" in calls_text
+            assert "Unknown command" in caplog.text
 
 
 # ===================================================================

@@ -5,6 +5,7 @@ Tests for Reddit Sentiment Fetcher v2.70 Phase 4
 
 import pytest
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2033,173 +2034,173 @@ class TestConstantsExtended:
 
 
 class TestCLIMain:
-    """Test CLI main() entry point using capsys"""
+    """Test CLI main() entry point using caplog"""
 
-    def test_cli_main_fetch_default(self, capsys):
+    def test_cli_main_fetch_default(self, caplog):
         """Test main() with no arguments defaults to fetch"""
         from src.data.reddit_sentiment_fetcher import main
 
-        with patch(
-            "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.fetch_sentiment"
-        ) as mock_fetch:
+        with caplog.at_level(logging.INFO, logger="src.data.reddit_sentiment_fetcher"):
             with patch(
-                "argparse.ArgumentParser.parse_args",
-                return_value=MagicMock(
-                    fetch=False, history=None, ticker=None, force=False
-                ),
-            ):
-                mock_snapshot = MagicMock()
-                mock_snapshot.timestamp = "2026-05-14T10:00:00+00:00"
-                mock_snapshot.data_fresh = True
-                mock_snapshot.aggregate_sentiment = 0.25
-                mock_snapshot.mention_velocity_1h = 42.0
-                mock_snapshot.mention_velocity_24h = 500.0
-                mock_snapshot.engagement_score = 35.5
-                mock_snapshot.virality_flag = False
-                mock_snapshot.ticker_metrics = {}
-                mock_fetch.return_value = mock_snapshot
+                "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.fetch_sentiment"
+            ) as mock_fetch:
+                with patch(
+                    "argparse.ArgumentParser.parse_args",
+                    return_value=MagicMock(
+                        fetch=False, history=None, ticker=None, force=False
+                    ),
+                ):
+                    mock_snapshot = MagicMock()
+                    mock_snapshot.timestamp = "2026-05-14T10:00:00+00:00"
+                    mock_snapshot.data_fresh = True
+                    mock_snapshot.aggregate_sentiment = 0.25
+                    mock_snapshot.mention_velocity_1h = 42.0
+                    mock_snapshot.mention_velocity_24h = 500.0
+                    mock_snapshot.engagement_score = 35.5
+                    mock_snapshot.virality_flag = False
+                    mock_snapshot.ticker_metrics = {}
+                    mock_fetch.return_value = mock_snapshot
 
-                main()
+                    main()
 
-        captured = capsys.readouterr()
-        assert "Reddit Sentiment Snapshot" in captured.out
-        assert "2026-05-14T10:00:00" in captured.out
-        assert "+0.250" in captured.out or "0.250" in captured.out
+        assert "Reddit Sentiment Snapshot" in caplog.text
+        assert "2026-05-14T10:00:00" in caplog.text
+        assert "+0.250" in caplog.text or "0.250" in caplog.text
 
-    def test_cli_main_fetch_flag(self, capsys):
+    def test_cli_main_fetch_flag(self, caplog):
         """Test main() with --fetch flag"""
         from src.data.reddit_sentiment_fetcher import main
 
-        with patch(
-            "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.fetch_sentiment"
-        ) as mock_fetch:
+        with caplog.at_level(logging.INFO, logger="src.data.reddit_sentiment_fetcher"):
             with patch(
-                "argparse.ArgumentParser.parse_args",
-                return_value=MagicMock(
-                    fetch=True, history=None, ticker=None, force=False
-                ),
-            ):
-                mock_snapshot = MagicMock()
-                mock_snapshot.timestamp = "2026-05-14T10:00:00+00:00"
-                mock_snapshot.data_fresh = False
-                mock_snapshot.aggregate_sentiment = 0.0
-                mock_snapshot.mention_velocity_1h = 0.0
-                mock_snapshot.mention_velocity_24h = 0.0
-                mock_snapshot.engagement_score = 0.0
-                mock_snapshot.virality_flag = False
-                mock_snapshot.ticker_metrics = {}
-                mock_fetch.return_value = mock_snapshot
+                "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.fetch_sentiment"
+            ) as mock_fetch:
+                with patch(
+                    "argparse.ArgumentParser.parse_args",
+                    return_value=MagicMock(
+                        fetch=True, history=None, ticker=None, force=False
+                    ),
+                ):
+                    mock_snapshot = MagicMock()
+                    mock_snapshot.timestamp = "2026-05-14T10:00:00+00:00"
+                    mock_snapshot.data_fresh = False
+                    mock_snapshot.aggregate_sentiment = 0.0
+                    mock_snapshot.mention_velocity_1h = 0.0
+                    mock_snapshot.mention_velocity_24h = 0.0
+                    mock_snapshot.engagement_score = 0.0
+                    mock_snapshot.virality_flag = False
+                    mock_snapshot.ticker_metrics = {}
+                    mock_fetch.return_value = mock_snapshot
 
-                main()
+                    main()
 
-        captured = capsys.readouterr()
-        assert "Reddit Sentiment Snapshot" in captured.out
+        assert "Reddit Sentiment Snapshot" in caplog.text
 
-    def test_cli_main_force_flag(self, capsys):
+    def test_cli_main_force_flag(self, caplog):
         """Test main() with --force flag passes force_refresh=True"""
         from src.data.reddit_sentiment_fetcher import main
 
-        with patch(
-            "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.fetch_sentiment"
-        ) as mock_fetch:
+        with caplog.at_level(logging.INFO, logger="src.data.reddit_sentiment_fetcher"):
             with patch(
-                "argparse.ArgumentParser.parse_args",
-                return_value=MagicMock(
-                    fetch=True, history=None, ticker=None, force=True
-                ),
-            ):
-                mock_snapshot = MagicMock()
-                mock_snapshot.timestamp = "2026-05-14T10:00:00+00:00"
-                mock_snapshot.data_fresh = True
-                mock_snapshot.aggregate_sentiment = 0.5
-                mock_snapshot.mention_velocity_1h = 10.0
-                mock_snapshot.mention_velocity_24h = 100.0
-                mock_snapshot.engagement_score = 50.0
-                mock_snapshot.virality_flag = True
-                mock_snapshot.ticker_metrics = {}
-                mock_fetch.return_value = mock_snapshot
+                "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.fetch_sentiment"
+            ) as mock_fetch:
+                with patch(
+                    "argparse.ArgumentParser.parse_args",
+                    return_value=MagicMock(
+                        fetch=True, history=None, ticker=None, force=True
+                    ),
+                ):
+                    mock_snapshot = MagicMock()
+                    mock_snapshot.timestamp = "2026-05-14T10:00:00+00:00"
+                    mock_snapshot.data_fresh = True
+                    mock_snapshot.aggregate_sentiment = 0.5
+                    mock_snapshot.mention_velocity_1h = 10.0
+                    mock_snapshot.mention_velocity_24h = 100.0
+                    mock_snapshot.engagement_score = 50.0
+                    mock_snapshot.virality_flag = True
+                    mock_snapshot.ticker_metrics = {}
+                    mock_fetch.return_value = mock_snapshot
 
-                main()
+                    main()
 
-        captured = capsys.readouterr()
-        assert "VIRAL" in captured.out
+        assert "VIRAL" in caplog.text
 
-    def test_cli_main_history_flag(self, capsys):
+    def test_cli_main_history_flag(self, caplog):
         """Test main() with --history N flag"""
         from src.data.reddit_sentiment_fetcher import main
 
-        with patch(
-            "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.get_history"
-        ) as mock_history:
+        with caplog.at_level(logging.INFO, logger="src.data.reddit_sentiment_fetcher"):
             with patch(
-                "argparse.ArgumentParser.parse_args",
-                return_value=MagicMock(
-                    fetch=False, history=7, ticker=None, force=False
-                ),
-            ):
-                mock_history.return_value = [
-                    {
-                        "timestamp": "2026-05-14T10:00:00",
-                        "aggregate_sentiment": 0.25,
-                        "mention_velocity_24h": 500,
-                        "virality_flag": False,
-                    }
-                ]
-                main()
+                "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.get_history"
+            ) as mock_history:
+                with patch(
+                    "argparse.ArgumentParser.parse_args",
+                    return_value=MagicMock(
+                        fetch=False, history=7, ticker=None, force=False
+                    ),
+                ):
+                    mock_history.return_value = [
+                        {
+                            "timestamp": "2026-05-14T10:00:00",
+                            "aggregate_sentiment": 0.25,
+                            "mention_velocity_24h": 500,
+                            "virality_flag": False,
+                        }
+                    ]
+                    main()
 
-        captured = capsys.readouterr()
-        assert "7-Day History" in captured.out
-        assert "0.250" in captured.out or "+0.250" in captured.out
+        assert "7-Day History" in caplog.text
+        assert "0.250" in caplog.text or "+0.250" in caplog.text
 
-    def test_cli_main_ticker_flag(self, capsys):
+    def test_cli_main_ticker_flag(self, caplog):
         """Test main() with --ticker flag"""
         from src.data.reddit_sentiment_fetcher import main
 
-        with patch(
-            "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.get_ticker_history"
-        ) as mock_ticker_hist:
+        with caplog.at_level(logging.INFO, logger="src.data.reddit_sentiment_fetcher"):
             with patch(
-                "argparse.ArgumentParser.parse_args",
-                return_value=MagicMock(
-                    fetch=False, history=None, ticker="SPY", force=False
-                ),
-            ):
-                mock_ticker_hist.return_value = [
-                    {
-                        "fetched_at": "2026-05-14T10:00:00",
-                        "subreddit": "wallstreetbets",
-                        "post_title": "SPY to the moon!",
-                        "sentiment_score": 0.8,
-                        "upvotes": 100,
-                    }
-                ]
-                main()
+                "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.get_ticker_history"
+            ) as mock_ticker_hist:
+                with patch(
+                    "argparse.ArgumentParser.parse_args",
+                    return_value=MagicMock(
+                        fetch=False, history=None, ticker="SPY", force=False
+                    ),
+                ):
+                    mock_ticker_hist.return_value = [
+                        {
+                            "fetched_at": "2026-05-14T10:00:00",
+                            "subreddit": "wallstreetbets",
+                            "post_title": "SPY to the moon!",
+                            "sentiment_score": 0.8,
+                            "upvotes": 100,
+                        }
+                    ]
+                    main()
 
-        captured = capsys.readouterr()
-        assert "SPY Mention History" in captured.out
-        assert "wallstreetbets" in captured.out
+        assert "SPY Mention History" in caplog.text
+        assert "wallstreetbets" in caplog.text
 
-    def test_cli_main_ticker_with_history(self, capsys):
+    def test_cli_main_ticker_with_history(self, caplog):
         """Test main() with --ticker and --history combined"""
         from src.data.reddit_sentiment_fetcher import main
 
-        with patch(
-            "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.get_ticker_history"
-        ) as mock_ticker_hist:
+        with caplog.at_level(logging.INFO, logger="src.data.reddit_sentiment_fetcher"):
             with patch(
-                "argparse.ArgumentParser.parse_args",
-                return_value=MagicMock(
-                    fetch=False, history=14, ticker="GLD", force=False
-                ),
-            ):
-                mock_ticker_hist.return_value = []
-                main()
+                "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.get_ticker_history"
+            ) as mock_ticker_hist:
+                with patch(
+                    "argparse.ArgumentParser.parse_args",
+                    return_value=MagicMock(
+                        fetch=False, history=14, ticker="GLD", force=False
+                    ),
+                ):
+                    mock_ticker_hist.return_value = []
+                    main()
 
-        captured = capsys.readouterr()
-        assert "GLD Mention History" in captured.out
-        assert "0 posts" in captured.out or "0)" in captured.out
+        assert "GLD Mention History" in caplog.text
+        assert "0 posts" in caplog.text or "0)" in caplog.text
 
-    def test_cli_main_fetch_with_ticker_metrics(self, capsys):
+    def test_cli_main_fetch_with_ticker_metrics(self, caplog):
         """Test main() prints per-ticker metrics when ticker has mentions"""
         from src.data.reddit_sentiment_fetcher import main
 
@@ -2215,33 +2216,33 @@ class TestCLIMain:
             )
         }
 
-        with patch(
-            "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.fetch_sentiment"
-        ) as mock_fetch:
+        with caplog.at_level(logging.INFO, logger="src.data.reddit_sentiment_fetcher"):
             with patch(
-                "argparse.ArgumentParser.parse_args",
-                return_value=MagicMock(
-                    fetch=True, history=None, ticker=None, force=False
-                ),
-            ):
-                mock_snapshot = MagicMock()
-                mock_snapshot.timestamp = "2026-05-14T10:00:00+00:00"
-                mock_snapshot.data_fresh = True
-                mock_snapshot.aggregate_sentiment = 0.5
-                mock_snapshot.mention_velocity_1h = 10.0
-                mock_snapshot.mention_velocity_24h = 100.0
-                mock_snapshot.engagement_score = 50.0
-                mock_snapshot.virality_flag = False
-                mock_snapshot.ticker_metrics = ticker_metrics
-                mock_fetch.return_value = mock_snapshot
+                "src.data.reddit_sentiment_fetcher.RedditSentimentFetcher.fetch_sentiment"
+            ) as mock_fetch:
+                with patch(
+                    "argparse.ArgumentParser.parse_args",
+                    return_value=MagicMock(
+                        fetch=True, history=None, ticker=None, force=False
+                    ),
+                ):
+                    mock_snapshot = MagicMock()
+                    mock_snapshot.timestamp = "2026-05-14T10:00:00+00:00"
+                    mock_snapshot.data_fresh = True
+                    mock_snapshot.aggregate_sentiment = 0.5
+                    mock_snapshot.mention_velocity_1h = 10.0
+                    mock_snapshot.mention_velocity_24h = 100.0
+                    mock_snapshot.engagement_score = 50.0
+                    mock_snapshot.virality_flag = False
+                    mock_snapshot.ticker_metrics = ticker_metrics
+                    mock_fetch.return_value = mock_snapshot
 
-                main()
+                    main()
 
-        captured = capsys.readouterr()
-        assert "Per-Ticker Metrics" in captured.out
-        assert "SPY" in captured.out
-        assert "10/100" in captured.out or "10/100" in captured.out
-        assert "+0.500" in captured.out or "0.500" in captured.out
+        assert "Per-Ticker Metrics" in caplog.text
+        assert "SPY" in caplog.text
+        assert "10/100" in caplog.text or "10/100" in caplog.text
+        assert "+0.500" in caplog.text or "0.500" in caplog.text
 
 
 class TestPublicAPICompleteness:

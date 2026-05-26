@@ -6,6 +6,7 @@ generation, main() CLI handler, and __all__ exports.
 """
 import json
 import io
+import logging
 import sys
 
 import pytest
@@ -902,7 +903,7 @@ class TestMainCLI:
             output = out.getvalue()
             assert "max_drawdown" in output
 
-    def test_rolling_command(self, tmp_path):
+    def test_rolling_command(self, tmp_path, caplog):
         """``rolling`` subcommand prints latest rolling Sharpe."""
         calc = AnalyticsCalculator(data_dir=str(tmp_path))
         data = _make_perf_data(n_days=300)
@@ -911,13 +912,11 @@ class TestMainCLI:
             for entry in data:
                 fh.write(json.dumps(entry) + "\n")
 
-        with patch.object(sys, "argv", ["calculator.py", "rolling"]):
-            out = io.StringIO()
-            with patch.object(sys, "stdout", out):
+        with caplog.at_level(logging.INFO, logger="src.analytics.calculator"):
+            with patch.object(sys, "argv", ["calculator.py", "rolling"]):
                 from src.analytics.calculator import main
                 main()
-            output = out.getvalue()
-            assert "Sharpe" in output
+            assert "Sharpe" in caplog.text
 
     def test_report_command(self, tmp_path):
         """``report`` subcommand prints full JSON report."""
@@ -936,16 +935,14 @@ class TestMainCLI:
             output = out.getvalue()
             assert '"status": "success"' in output
 
-    def test_unknown_command(self, tmp_path):
+    def test_unknown_command(self, tmp_path, caplog):
         """Unknown subcommand should print usage message."""
-        with patch.object(sys, "argv", ["calculator.py", "unknown_cmd"]):
-            out = io.StringIO()
-            with patch.object(sys, "stdout", out):
+        with caplog.at_level(logging.INFO, logger="src.analytics.calculator"):
+            with patch.object(sys, "argv", ["calculator.py", "unknown_cmd"]):
                 from src.analytics.calculator import main
                 main()
-            output = out.getvalue()
-            assert "Unknown command" in output
-            assert "drawdown" in output
+            assert "Unknown command" in caplog.text
+            assert "drawdown" in caplog.text
 
     def test_no_data_drawdown(self, tmp_path):
         """``drawdown`` with no data prints JSON with default values."""

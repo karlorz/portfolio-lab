@@ -433,6 +433,7 @@ def main():
             logger.info("Commands: drawdown, rolling, report")
     else:
         # Default: full report
+        report = calc.generate_analytics_report()
         print(json.dumps(report, indent=2, default=str))
 
 

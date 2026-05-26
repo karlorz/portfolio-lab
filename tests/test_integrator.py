@@ -5,6 +5,7 @@ aggregation, allocation deltas, regime detection, signal agreement.
 """
 import dataclasses
 import json
+import logging
 import math
 import sqlite3
 
@@ -2077,9 +2078,14 @@ class TestAlternativeDataSignalAdapter:
 
     @pytest.fixture(autouse=True)
     def _inject_logger(self):
-        """Inject logger into module to prevent NameError from source bug."""
+        """Inject logger into module to prevent NameError from source bug,
+        then restore original logger after class to avoid breaking caplog
+        for subsequent tests."""
         import src.signals.integrator as _mod
+        original_logger = _mod.logger
         _mod.logger = MagicMock()
+        yield
+        _mod.logger = original_logger
 
     def test_confident_signal(self, tmp_path):
         """Composite with confidence >= 0.3 returns valid SignalSourceResult."""
@@ -3125,91 +3131,91 @@ class TestDetectRegimeMissingDataEdgeCases:
 class TestCLIInterface:
     """Test the CLI interface via main() function."""
 
-    def test_composite_requires_ticker(self, capsys):
+    def test_composite_requires_ticker(self, caplog):
         """composite command without --ticker prints error and exits."""
-        with pytest.raises(SystemExit) as exc:
-            from src.signals.integrator import main
-            import sys
-            sys.argv = ["integrator.py", "composite"]
-            main()
-        assert exc.value.code == 1
-        captured = capsys.readouterr()
-        assert "Error" in captured.out
-
-    def test_portfolio_requires_portfolio_arg(self, capsys):
-        """portfolio command without --portfolio prints error and exits."""
-        with pytest.raises(SystemExit) as exc:
-            from src.signals.integrator import main
-            import sys
-            sys.argv = ["integrator.py", "portfolio"]
-            main()
-        assert exc.value.code == 1
-        captured = capsys.readouterr()
-        assert "Error" in captured.out
-
-    def test_history_requires_ticker(self, capsys):
-        """history command without --ticker prints error and exits."""
-        with pytest.raises(SystemExit) as exc:
-            from src.signals.integrator import main
-            import sys
-            sys.argv = ["integrator.py", "history"]
-            main()
-        assert exc.value.code == 1
-        captured = capsys.readouterr()
-        assert "Error" in captured.out
-
-    def test_composite_json_output(self, capsys):
-        """composite command with --json outputs valid JSON."""
-        with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY", "--json"]):
-            with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
-                mock_get.return_value = CompositeSignal(
-                    ticker="SPY", timestamp="2026-05-24T12:00:00",
-                    composite_score=0.35, composite_confidence=0.72,
-                    detected_regime="neutral", primary_drivers=["tsmom"],
-                    signal_agreement="aligned_bullish",
-                )
+        with caplog.at_level(logging.ERROR, logger="src.signals.integrator"):
+            with pytest.raises(SystemExit) as exc:
                 from src.signals.integrator import main
+                import sys
+                sys.argv = ["integrator.py", "composite"]
                 main()
-        captured = capsys.readouterr()
-        parsed = json.loads(captured.out)
+        assert exc.value.code == 1
+        assert "--ticker required" in caplog.text
+
+    def test_portfolio_requires_portfolio_arg(self, caplog):
+        """portfolio command without --portfolio prints error and exits."""
+        with caplog.at_level(logging.ERROR, logger="src.signals.integrator"):
+            with pytest.raises(SystemExit) as exc:
+                from src.signals.integrator import main
+                import sys
+                sys.argv = ["integrator.py", "portfolio"]
+                main()
+        assert exc.value.code == 1
+        assert "--portfolio required" in caplog.text
+
+    def test_history_requires_ticker(self, caplog):
+        """history command without --ticker prints error and exits."""
+        with caplog.at_level(logging.ERROR, logger="src.signals.integrator"):
+            with pytest.raises(SystemExit) as exc:
+                from src.signals.integrator import main
+                import sys
+                sys.argv = ["integrator.py", "history"]
+                main()
+        assert exc.value.code == 1
+        assert "--ticker required" in caplog.text
+
+    def test_composite_json_output(self, caplog):
+        """composite command with --json outputs valid JSON."""
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY", "--json"]):
+                with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
+                    mock_get.return_value = CompositeSignal(
+                        ticker="SPY", timestamp="2026-05-24T12:00:00",
+                        composite_score=0.35, composite_confidence=0.72,
+                        detected_regime="neutral", primary_drivers=["tsmom"],
+                        signal_agreement="aligned_bullish",
+                    )
+                    from src.signals.integrator import main
+                    main()
+        parsed = json.loads(caplog.messages[0])
         assert parsed["ticker"] == "SPY"
         assert parsed["composite_score"] == 0.35
 
-    def test_composite_text_output(self, capsys):
+    def test_composite_text_output(self, caplog):
         """composite command without --json prints formatted text."""
-        with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY"]):
-            with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
-                mock_get.return_value = CompositeSignal(
-                    ticker="SPY", timestamp="2026-05-24T12:00:00",
-                    composite_score=0.35, composite_confidence=0.72,
-                    detected_regime="neutral", primary_drivers=["tsmom", "fed_policy"],
-                    signal_agreement="aligned_bullish", expected_accuracy=0.68,
-                )
-                from src.signals.integrator import main
-                main()
-        captured = capsys.readouterr()
-        assert "SPY" in captured.out
-        assert "0.35" in captured.out
-        assert "aligned_bullish" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY"]):
+                with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
+                    mock_get.return_value = CompositeSignal(
+                        ticker="SPY", timestamp="2026-05-24T12:00:00",
+                        composite_score=0.35, composite_confidence=0.72,
+                        detected_regime="neutral", primary_drivers=["tsmom", "fed_policy"],
+                        signal_agreement="aligned_bullish", expected_accuracy=0.68,
+                    )
+                    from src.signals.integrator import main
+                    main()
+        assert "SPY" in caplog.text
+        assert "0.35" in caplog.text
+        assert "aligned_bullish" in caplog.text
 
-    def test_composite_text_no_accuracy(self, capsys):
+    def test_composite_text_no_accuracy(self, caplog):
         """Text output works when expected_accuracy is None."""
-        with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY"]):
-            with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
-                mock_get.return_value = CompositeSignal(
-                    ticker="SPY", timestamp="2026-05-24T12:00:00",
-                    composite_score=0.35, composite_confidence=0.72,
-                    detected_regime="neutral", primary_drivers=["tsmom"],
-                    signal_agreement="aligned_bullish", expected_accuracy=None,
-                )
-                from src.signals.integrator import main
-                main()
-        captured = capsys.readouterr()
-        assert "SPY" in captured.out
-        assert "Expected Accuracy" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("sys.argv", ["integrator.py", "composite", "--ticker", "SPY"]):
+                with patch("src.signals.integrator.SignalIntegrator.get_composite_signal") as mock_get:
+                    mock_get.return_value = CompositeSignal(
+                        ticker="SPY", timestamp="2026-05-24T12:00:00",
+                        composite_score=0.35, composite_confidence=0.72,
+                        detected_regime="neutral", primary_drivers=["tsmom"],
+                        signal_agreement="aligned_bullish", expected_accuracy=None,
+                    )
+                    from src.signals.integrator import main
+                    main()
+        assert "SPY" in caplog.text
+        assert "Expected Accuracy" not in caplog.text
 
     @patch("src.signals.integrator.SignalIntegrator.get_allocation_deltas")
-    def test_portfolio_text_output(self, mock_get, capsys):
+    def test_portfolio_text_output(self, mock_get, caplog):
         """portfolio command with --portfolio prints formatted text."""
         mock_get.return_value = PortfolioRecommendation(
             timestamp="2026-05-24T12:00:00",
@@ -3229,16 +3235,16 @@ class TestCLIInterface:
             ],
             composite_sentiment="bullish", confidence=0.72, regime="neutral",
         )
-        with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "46/38/16"]):
-            from src.signals.integrator import main
-            main()
-        captured = capsys.readouterr()
-        assert "Portfolio Recommendation" in captured.out
-        assert "SPY" in captured.out
-        assert "GLD" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "46/38/16"]):
+                from src.signals.integrator import main
+                main()
+        assert "Portfolio Recommendation" in caplog.text
+        assert "SPY" in caplog.text
+        assert "GLD" in caplog.text
 
     @patch("src.signals.integrator.SignalIntegrator.get_allocation_deltas")
-    def test_portfolio_json_output(self, mock_get, capsys):
+    def test_portfolio_json_output(self, mock_get, caplog):
         """portfolio command with --json outputs valid JSON."""
         mock_get.return_value = PortfolioRecommendation(
             timestamp="2026-05-24T12:00:00",
@@ -3246,41 +3252,41 @@ class TestCLIInterface:
             recommended_allocation={"SPY": 0.48},
             deltas=[], composite_sentiment="bullish", confidence=0.72, regime="neutral",
         )
-        with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "46/38/16", "--json"]):
-            from src.signals.integrator import main
-            main()
-        captured = capsys.readouterr()
-        parsed = json.loads(captured.out)
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "46/38/16", "--json"]):
+                from src.signals.integrator import main
+                main()
+        parsed = json.loads(caplog.messages[0])
         assert parsed["composite_sentiment"] == "bullish"
 
-    def test_portfolio_with_two_weights(self, capsys):
+    def test_portfolio_with_two_weights(self, caplog):
         """portfolio with 2 weights -> SPY/GLD mapping."""
         mock_rec = MagicMock()
         mock_rec.to_dict.return_value = {"test": "ok"}
-        with patch("src.signals.integrator.SignalIntegrator") as MockIntegrator:
-            instance = MockIntegrator.return_value
-            instance.get_allocation_deltas.return_value = mock_rec
-            with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "50/50", "--json"]):
-                from src.signals.integrator import main
-                main()
-        captured = capsys.readouterr()
-        assert "ok" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("src.signals.integrator.SignalIntegrator") as MockIntegrator:
+                instance = MockIntegrator.return_value
+                instance.get_allocation_deltas.return_value = mock_rec
+                with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "50/50", "--json"]):
+                    from src.signals.integrator import main
+                    main()
+        assert "ok" in caplog.text
 
-    def test_portfolio_with_four_weights(self, capsys):
+    def test_portfolio_with_four_weights(self, caplog):
         """portfolio with 4 weights -> SPY/EFA/GLD/TLT mapping."""
         mock_rec = MagicMock()
         mock_rec.to_dict.return_value = {"test": "4_asset_ok"}
-        with patch("src.signals.integrator.SignalIntegrator") as MockIntegrator:
-            instance = MockIntegrator.return_value
-            instance.get_allocation_deltas.return_value = mock_rec
-            with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "25/25/25/25", "--json"]):
-                from src.signals.integrator import main
-                main()
-        captured = capsys.readouterr()
-        assert "4_asset_ok" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("src.signals.integrator.SignalIntegrator") as MockIntegrator:
+                instance = MockIntegrator.return_value
+                instance.get_allocation_deltas.return_value = mock_rec
+                with patch("sys.argv", ["integrator.py", "portfolio", "--portfolio", "25/25/25/25", "--json"]):
+                    from src.signals.integrator import main
+                    main()
+        assert "4_asset_ok" in caplog.text
 
     @patch("src.signals.integrator.SignalIntegrator.get_signal_history")
-    def test_history_json_output(self, mock_get, capsys):
+    def test_history_json_output(self, mock_get, caplog):
         """history command with --json outputs valid JSON."""
         mock_get.return_value = [
             CompositeSignal(
@@ -3290,16 +3296,16 @@ class TestCLIInterface:
                 signal_agreement="aligned_bullish",
             ),
         ]
-        with patch("sys.argv", ["integrator.py", "history", "--ticker", "SPY", "--json"]):
-            from src.signals.integrator import main
-            main()
-        captured = capsys.readouterr()
-        parsed = json.loads(captured.out)
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("sys.argv", ["integrator.py", "history", "--ticker", "SPY", "--json"]):
+                from src.signals.integrator import main
+                main()
+        parsed = json.loads(caplog.messages[0])
         assert isinstance(parsed, list)
         assert parsed[0]["ticker"] == "SPY"
 
     @patch("src.signals.integrator.SignalIntegrator.get_signal_history")
-    def test_history_text_output(self, mock_get, capsys):
+    def test_history_text_output(self, mock_get, caplog):
         """history command without --json prints formatted text."""
         mock_get.return_value = [
             CompositeSignal(
@@ -3309,12 +3315,12 @@ class TestCLIInterface:
                 signal_agreement="aligned_bullish",
             ),
         ]
-        with patch("sys.argv", ["integrator.py", "history", "--ticker", "SPY"]):
-            from src.signals.integrator import main
-            main()
-        captured = capsys.readouterr()
-        assert "Signal History" in captured.out
-        assert "SPY" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.signals.integrator"):
+            with patch("sys.argv", ["integrator.py", "history", "--ticker", "SPY"]):
+                from src.signals.integrator import main
+                main()
+        assert "Signal History" in caplog.text
+        assert "SPY" in caplog.text
 
     def test_main_guard(self):
         """__main__ guard calls main() when __name__ == '__main__'."""
@@ -3354,32 +3360,32 @@ class TestCLIInterface:
 class TestCLIErrorMessages:
     """Verify specific error messages from CLI."""
 
-    def test_composite_error_message(self, capsys):
+    def test_composite_error_message(self, caplog):
         """Error message says --ticker required."""
-        with pytest.raises(SystemExit):
-            with patch("sys.argv", ["integrator.py", "composite"]):
-                from src.signals.integrator import main
-                main()
-        captured = capsys.readouterr()
-        assert "--ticker required" in captured.out
+        with caplog.at_level(logging.ERROR, logger="src.signals.integrator"):
+            with pytest.raises(SystemExit):
+                with patch("sys.argv", ["integrator.py", "composite"]):
+                    from src.signals.integrator import main
+                    main()
+        assert "--ticker required" in caplog.text
 
-    def test_portfolio_error_message(self, capsys):
+    def test_portfolio_error_message(self, caplog):
         """Error message says --portfolio required."""
-        with pytest.raises(SystemExit):
-            with patch("sys.argv", ["integrator.py", "portfolio"]):
-                from src.signals.integrator import main
-                main()
-        captured = capsys.readouterr()
-        assert "--portfolio required" in captured.out
+        with caplog.at_level(logging.ERROR, logger="src.signals.integrator"):
+            with pytest.raises(SystemExit):
+                with patch("sys.argv", ["integrator.py", "portfolio"]):
+                    from src.signals.integrator import main
+                    main()
+        assert "--portfolio required" in caplog.text
 
-    def test_history_error_message(self, capsys):
+    def test_history_error_message(self, caplog):
         """Error message says --ticker required."""
-        with pytest.raises(SystemExit):
-            with patch("sys.argv", ["integrator.py", "history"]):
-                from src.signals.integrator import main
-                main()
-        captured = capsys.readouterr()
-        assert "--ticker required" in captured.out
+        with caplog.at_level(logging.ERROR, logger="src.signals.integrator"):
+            with pytest.raises(SystemExit):
+                with patch("sys.argv", ["integrator.py", "history"]):
+                    from src.signals.integrator import main
+                    main()
+        assert "--ticker required" in caplog.text
 
 
 # ============================================================================
@@ -3588,7 +3594,10 @@ class TestAlternativeDataSignalAdapterEdgeCases:
     @pytest.fixture(autouse=True)
     def _inject_logger(self):
         import src.signals.integrator as _mod
+        original_logger = _mod.logger
         _mod.logger = MagicMock()
+        yield
+        _mod.logger = original_logger
 
     def test_get_historical_accuracy_with_none_values(self, tmp_path):
         """Accuracy table with NULL accuracy_score values returns None."""

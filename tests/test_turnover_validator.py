@@ -858,17 +858,19 @@ class TestCLIMain:
         # Should call parser.print_help() which doesn't raise
         tv.main()
 
-    def test_main_status_empty(self, monkeypatch, capsys, isolated_data_dir):
-        """Status command with no history should print empty message."""
+    def test_main_status_empty(self, monkeypatch, caplog, isolated_data_dir):
+        """Status command with no history should log empty message."""
+        import logging
+        caplog.set_level(logging.INFO)
         import src.strategy.turnover_validator as tv
         monkeypatch.setattr("sys.argv", ["turnover_validator", "status"])
         tv.main()
-        captured = capsys.readouterr()
-        assert "No signal history yet" in captured.out
-        assert "Tracked signals: 0" in captured.out
+        assert "0 tracked signals" in caplog.text
 
-    def test_main_status_with_history(self, monkeypatch, capsys, isolated_data_dir):
+    def test_main_status_with_history(self, monkeypatch, caplog, isolated_data_dir):
         """Status command with populated history should show diagnostics."""
+        import logging
+        caplog.set_level(logging.INFO)
         import src.strategy.turnover_validator as tv
         # Pre-populate state by creating a validator that saves to the isolated dir
         state_path = isolated_data_dir / "turnover_validator_state.json"
@@ -877,20 +879,22 @@ class TestCLIMain:
             v.update_and_validate({"signal_a": 0.5})
         monkeypatch.setattr("sys.argv", ["turnover_validator", "status"])
         tv.main()
-        captured = capsys.readouterr()
-        assert "Tracked signals: 1" in captured.out
-        assert "signal_a" in captured.out
+        assert "1 tracked signals" in caplog.text
+        assert "signal_a" in caplog.text
 
-    def test_main_adjust_no_signals(self, monkeypatch, capsys, isolated_data_dir):
-        """Adjust command without --signals should print error."""
+    def test_main_adjust_no_signals(self, monkeypatch, caplog, isolated_data_dir):
+        """Adjust command without --signals should log error."""
+        import logging
+        caplog.set_level(logging.INFO)
         import src.strategy.turnover_validator as tv
         monkeypatch.setattr("sys.argv", ["turnover_validator", "adjust"])
         tv.main()
-        captured = capsys.readouterr()
-        assert "ERROR" in captured.out
+        assert "ERROR" in caplog.text or "--signals required" in caplog.text
 
-    def test_main_adjust_with_signals(self, monkeypatch, capsys, isolated_data_dir):
+    def test_main_adjust_with_signals(self, monkeypatch, caplog, isolated_data_dir):
         """Adjust command with signals should compute adjusted weights."""
+        import logging
+        caplog.set_level(logging.INFO)
         import src.strategy.turnover_validator as tv
         monkeypatch.setattr("sys.argv", [
             "turnover_validator", "adjust",
@@ -898,33 +902,33 @@ class TestCLIMain:
             "--weights", "mom=0.15", "val=0.10",
         ])
         tv.main()
-        captured = capsys.readouterr()
-        assert "Turnover-Adjusted Weights" in captured.out
-        assert "mom" in captured.out
-        assert "val" in captured.out
+        assert "Turnover-Adjusted Weights" in caplog.text
+        assert "mom" in caplog.text
+        assert "val" in caplog.text
 
-    def test_main_adjust_default_weights(self, monkeypatch, capsys, isolated_data_dir):
+    def test_main_adjust_default_weights(self, monkeypatch, caplog, isolated_data_dir):
         """Adjust command without --weights should use equal weights."""
+        import logging
+        caplog.set_level(logging.INFO)
         import src.strategy.turnover_validator as tv
         monkeypatch.setattr("sys.argv", [
             "turnover_validator", "adjust",
             "--signals", "a=0.5", "b=-0.3",
         ])
         tv.main()
-        captured = capsys.readouterr()
-        assert "0.5000" in captured.out  # equal weight 1/2
-        assert "0.5000" in captured.out
+        assert "0.5000" in caplog.text  # equal weight 1/2
 
-    def test_main_adjust_malformed_signals(self, monkeypatch, capsys, isolated_data_dir):
-        """Malformed signal entry should print WARN and skip."""
+    def test_main_adjust_malformed_signals(self, monkeypatch, caplog, isolated_data_dir):
+        """Malformed signal entry should log WARN and skip."""
+        import logging
+        caplog.set_level(logging.WARNING)
         import src.strategy.turnover_validator as tv
         monkeypatch.setattr("sys.argv", [
             "turnover_validator", "adjust",
             "--signals", "badformat_no_eq",
         ])
         tv.main()
-        captured = capsys.readouterr()
-        assert "WARN" in captured.out or "ERROR" in captured.out
+        assert "Skipping" in caplog.text
 
     def test_main_invalid_command(self, monkeypatch, capsys, isolated_data_dir):
         """Invalid subcommand should print help (argparse calls sys.exit)."""
