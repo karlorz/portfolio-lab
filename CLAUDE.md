@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13054 safe** (12723 Python + 313 TypeScript + 18 signal backtest integration, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **13054 safe** (12723 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -77,6 +77,9 @@
 |- **IC decay monitor**: src/monitor/ic_decay_monitor.py — per-signal Information Coefficient tracking via Spearman rank correlation; rolling IC, IC trend (stable/decaying/improving), status (healthy/warning/critical); save_state/load_state JSON persistence; wired into DashboardGenerator as ic_decay section
 |- **Per-signal walk-forward validation**: src/monitor/signal_walk_forward.py — SignalWalkForwardValidator with expanding-window IC validation; WFE (Walk-Forward Efficiency), mean IS/OOS IC, positive OOS ratio; status classification (validated/weak/unvalidated); wired into DashboardGenerator as signal_wfe section
 |- **Docker deployment**: Dockerfile (multi-stage: Bun frontend + Python runtime + uv cache mount + non-root user + dedicated entrypoint), docker-compose.yml (init:true + stop_grace_period + Caddyfile reverse_proxy), Caddyfile (SPA + API proxy), compose.dev.yaml (Compose Watch), scripts/docker-entrypoint.sh (exec cron -f for signal handling)
+|- **Daily P&L capture**: scripts/capture_daily_pnl.py — idempotent daily snapshot from portfolio state, writes daily_pnl.jsonl + daily_pnl_latest.json; wired into Makefile + cron_compat + crontab
+|- **Path migration complete**: All src/ files import from src/paths.py (DATA_DIR, PROJECT_ROOT, etc.); only src/paths.py itself uses Path(__file__) for root detection
+|- **Thompson Sampling BanditWeighter**: Gaussian-Gamma conjugate priors with posterior sampling, softmax weight normalization; 8 test cases in TestThompsonSamplingBandit; epsilon-greedy fallback for cold start
 |- **Signal backtest integration tests**: tests/test_signal_backtest_integration.py — 18 end-to-end tests covering snapshot→reading→vote pipeline, regime gating, IC decay + SPC quality monitoring, Pydantic schema validation, cross-signal consistency
 |- **Ensemble voter decomposition Phase 14**: compute_vote() already well-decomposed (~50 lines); extracted _extract_signal_values (static), _apply_basis_pursuit, _apply_regret_weighting, _compute_asset_biases (static), _determine_action (static) from _apply_turnover_validation and _compute_consensus
 |- **Evaluator logger format fix**: logger.info("$%,.2f", val) → logger.info("$%.2f", val) — Python % formatting doesn't support , thousands separator; fixed 6 kill_switch test failures in full suite
