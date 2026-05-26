@@ -1,6 +1,6 @@
 import React from 'react';
 
-interface LLMSentimentData {
+export interface LLMSentimentData {
   timestamp: string;
   technical_regime: string;
   technical_confidence: number;

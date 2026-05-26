@@ -1,6 +1,6 @@
 import React from 'react';
 
-interface CalendarData {
+export interface CalendarData {
   active: boolean;
   modifier: number;
   active_windows: string[];

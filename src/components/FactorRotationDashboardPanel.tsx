@@ -1,6 +1,6 @@
 import React from 'react';
 
-interface FactorRotationDashboardData {
+export interface FactorRotationDashboardData {
   active: boolean;
   selected_factors: string[];
   signal_strength: number;

@@ -1,6 +1,6 @@
 import React from 'react';
 
-interface ConvexityHarvestData {
+export interface ConvexityHarvestData {
   date: string;
   allocation_pct: number;
   position_type: string;

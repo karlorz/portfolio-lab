@@ -23,7 +23,7 @@ export const DrawdownChart: React.FC<DrawdownProps> = ({ results }) => {
     <div className="chart-container">
       <h3>Drawdown History (%)</h3>
       <ResponsiveContainer width="100%" height={300}>
-        <AreaChart data={data} isAnimationActive={false}>
+        <AreaChart data={data} {...{isAnimationActive: false}}>
           <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
           <XAxis 
             dataKey="date" 

@@ -1,6 +1,6 @@
 import React from 'react';
 
-interface CryptoData {
+export interface CryptoData {
   active: boolean;
   btc_weight: number;
   eth_weight: number;

@@ -355,7 +355,7 @@ export function calculateSectorAttribution(
       spyBenchmark: spyReturn,
       alpha,
       entryDate: pos.entryDate,
-      exitDate: null,
+      exitDate: null as string | null,
       daysHeld: pos.daysHeld,
     };
   });

@@ -16,7 +16,7 @@ interface PaperTradingSummary {
   days_required: number;
 }
 
-interface GraduationChecklistData {
+export interface GraduationChecklistData {
   criteria: GraduationCriterion[];
   paper_trading: PaperTradingSummary;
   readiness_pct: number;

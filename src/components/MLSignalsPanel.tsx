@@ -20,7 +20,7 @@ interface GridSearchData {
   configs_tested?: number | null;
 }
 
-interface MLSignalsData {
+export interface MLSignalsData {
   available: boolean;
   timestamp: string | null;
   predictions: Record<string, PredictionData>;

@@ -8,7 +8,7 @@ interface SourceVote {
   weight: number;
 }
 
-interface EnsembleVotingData {
+export interface EnsembleVotingData {
   regime: string;
   regime_confidence: number;
   weighted_consensus: number;

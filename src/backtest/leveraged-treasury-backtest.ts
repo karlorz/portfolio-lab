@@ -219,7 +219,7 @@ function runScenarioBacktest(
   
   for (let i = 0; i < tltDailyReturns.length; i++) {
     const tltReturn = tltDailyReturns[i];
-    const regime = regimes[i] || currentRegime;
+    const regime: DurationRegime = regimes[i] || currentRegime;
     
     // Track regime transitions
     if (regime !== currentRegime) {

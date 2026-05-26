@@ -1,6 +1,6 @@
 import React from 'react';
 
-interface CollarData {
+export interface CollarData {
   active: boolean;
   regime: string;
   call_strike: number;

@@ -1,6 +1,6 @@
 import React from 'react';
 
-interface StackingEnsembleData {
+export interface StackingEnsembleData {
   active: boolean;
   stacking_available: boolean;      // XGBoost model loaded
   prediction_direction: string;     // bullish, bearish, neutral

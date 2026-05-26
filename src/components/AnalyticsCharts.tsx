@@ -106,7 +106,7 @@ export const UnderwaterChart: React.FC<UnderwaterChartProps> = ({
       </div>
 
       <ResponsiveContainer width="100%" height={height}>
-        <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }} isAnimationActive={false}>
+        <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }} {...{isAnimationActive: false}}>
           <defs>
             <linearGradient id="colorDrawdown" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor={severityColor} stopOpacity={0.4} />
@@ -273,7 +273,7 @@ export const RollingMetricsChart: React.FC<RollingMetricsProps> = ({
       </div>
 
       <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }} isAnimationActive={false}>
+        <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }} {...{isAnimationActive: false}}>
           <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
           <XAxis
             dataKey="dateFormatted"

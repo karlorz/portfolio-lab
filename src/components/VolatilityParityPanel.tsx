@@ -25,7 +25,7 @@ interface VolParitySummary {
   vix_regime: string;
 }
 
-interface VolatilityParityData {
+export interface VolatilityParityData {
   allocation: VolParityAllocation;
   summary: VolParitySummary;
 }

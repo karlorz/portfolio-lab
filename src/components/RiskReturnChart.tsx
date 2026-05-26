@@ -27,7 +27,7 @@ export const RiskReturnChart: React.FC<RiskReturnProps> = ({ results }) => {
     <div className="chart-container">
       <h3>Risk-Return Scatter (Bubble = Max Drawdown)</h3>
       <ResponsiveContainer width="100%" height={400}>
-        <ScatterChart isAnimationActive={false}>
+        <ScatterChart {...{isAnimationActive: false}}>
           <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
           <XAxis 
             type="number" 

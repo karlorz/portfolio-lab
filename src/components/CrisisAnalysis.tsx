@@ -67,7 +67,7 @@ export const CrisisAnalysis: React.FC<CrisisAnalysisProps> = ({ results }) => {
         Positive values = portfolio gained value during crisis. Negative = lost value.
       </p>
       <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} isAnimationActive={false}>
+        <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} {...{isAnimationActive: false}}>
           <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
           <XAxis dataKey="period" stroke="#94a3b8" />
           <YAxis stroke="#94a3b8" tickFormatter={(v) => `${v.toFixed(0)}%`} />
@@ -91,7 +91,7 @@ export const CrisisAnalysis: React.FC<CrisisAnalysisProps> = ({ results }) => {
 
       <h3 style={{ marginTop: 30 }}>Max Drawdown During Crisis Periods</h3>
       <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} isAnimationActive={false}>
+        <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} {...{isAnimationActive: false}}>
           <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
           <XAxis dataKey="period" stroke="#94a3b8" />
           <YAxis stroke="#94a3b8" tickFormatter={(v) => `${v.toFixed(0)}%`} domain={['auto', 0]} />

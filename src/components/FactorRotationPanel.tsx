@@ -7,7 +7,7 @@ interface FactorAllocation {
   vlue_pct: number;
 }
 
-interface FactorRotationData {
+export interface FactorRotationData {
   active: boolean;
   regime: string;                  // bull, bear, neutral, high_vol, crisis
   quality_momentum_score: number;  // -1 to +1

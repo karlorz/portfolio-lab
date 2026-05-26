@@ -54,6 +54,21 @@ import type { TSMOMData } from './TSMOMPanel';
 import { CrossAssetRVPanel } from './CrossAssetRVPanel';
 import type { CrossAssetRVData } from './CrossAssetRVPanel';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
+import type { BehavioralSentimentData } from './BehavioralSentimentPanel';
+import type { CryptoData } from './CryptoAllocationPanel';
+import type { CalendarData } from './CalendarSeasonalityPanel';
+import type { EnsembleVotingData } from './EnsembleVotingPanel';
+import type { AlternativeData } from './AlternativeDataPanel';
+import type { FactorRotationData } from './FactorRotationPanel';
+import type { StackingEnsembleData } from './StackingEnsemblePanel';
+import type { ConvexityHarvestData } from './ConvexityHarvestPanel';
+import type { LLMSentimentData } from './LLMSentimentPanel';
+import type { SectorRotationData } from './SectorRotationPanel';
+import type { MLSignalsData } from './MLSignalsPanel';
+import type { FactorRotationDashboardData } from './FactorRotationDashboardPanel';
+import type { CollarData } from './CollarPanel';
+import type { KurtosisData } from './KurtosisRegimePanel';
+import type { VolatilityParityData } from './VolatilityParityPanel';
 import {
   validateSignalsData,
   validateFetchData,
@@ -125,7 +140,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         const validated = validateFetchData(raw, DashboardDataSchema, 'dashboard');
         if (validated) {
           setPerformance(validated.paper_portfolio || []);
-          setDashboard(validated);
+          setDashboard(validated as DashboardData);
         }
       }
       if (alertsRes.ok) {
@@ -138,27 +153,27 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
       if (statsRes.ok) {
         const raw = await statsRes.json();
         const validated = validateFetchData(raw, StatsDataSchema, 'stats');
-        if (validated) setStats(validated);
+        if (validated) setStats(validated as StatsData);
       }
       if (healthRes.ok) {
         const raw = await healthRes.json();
         const validated = validateFetchData(raw, HealthDataSchema, 'health');
-        if (validated) setHealth(validated);
+        if (validated) setHealth(validated as HealthData);
       }
       if (analyticsRes.ok) {
         const raw = await analyticsRes.json();
         const validated = validateFetchData(raw, AnalyticsDataSchema, 'analytics');
-        if (validated) setAnalytics(validated);
+        if (validated) setAnalytics(validated as AnalyticsData);
       }
       if (rhRes.ok) {
         const raw = await rhRes.json();
         const validated = validateFetchData(raw, RebalanceHealthSchema, 'rebalance_health');
-        if (validated) setRebalanceHealth(validated as RebalanceHealthData);
+        if (validated) setRebalanceHealth(validated as unknown as RebalanceHealthData);
       }
       if (exRes.ok) {
         const raw = await exRes.json();
         const validated = validateFetchData(raw, PassthroughSchema, 'explainability');
-        if (validated) setExplainability(validated as ExplainabilityData);
+        if (validated) setExplainability(validated as unknown as ExplainabilityData);
       }
 
       // Fetch new panel data (non-blocking)
@@ -173,27 +188,27 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         if (gradRes.ok) {
           const raw = await gradRes.json();
           const validated = validateFetchData(raw, GraduationDataSchema, 'graduation');
-          if (validated) setGraduationData(validated as GraduationChecklistData);
+          if (validated) setGraduationData(validated as unknown as GraduationChecklistData);
         }
         if (sizingRes.ok) {
           const raw = await sizingRes.json();
           const validated = validateFetchData(raw, PassthroughSchema, 'adaptive_sizing');
-          if (validated) setAdaptiveSizingData(validated as AdaptiveSizingData);
+          if (validated) setAdaptiveSizingData(validated as unknown as AdaptiveSizingData);
         }
         if (vixyRes.ok) {
           const raw = await vixyRes.json();
           const validated = validateFetchData(raw, PassthroughSchema, 'vixy_hedge');
-          if (validated) setVixyHedgeData(validated as VixyHedgeSizingData);
+          if (validated) setVixyHedgeData(validated as unknown as VixyHedgeSizingData);
         }
         if (blRes.ok) {
           const raw = await blRes.json();
           const validated = validateFetchData(raw, PassthroughSchema, 'black_litterman');
-          if (validated) setBLMapperData(validated as BlackLittermanMapperData);
+          if (validated) setBLMapperData(validated as unknown as BlackLittermanMapperData);
         }
         if (turnoverRes.ok) {
           const raw = await turnoverRes.json();
           const validated = validateFetchData(raw, PassthroughSchema, 'turnover_validator');
-          if (validated) setTurnoverData(validated as TurnoverValidatorData);
+          if (validated) setTurnoverData(validated as unknown as TurnoverValidatorData);
         }
       } catch { /* panels render gracefully with null data */ }
       try {
@@ -205,17 +220,17 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         if (rgRes.ok) {
           const raw = await rgRes.json();
           const validated = validateFetchData(raw, PassthroughSchema, 'regime_gate');
-          if (validated) setRegimeGateData(validated as RegimeGateData);
+          if (validated) setRegimeGateData(validated as unknown as RegimeGateData);
         }
         if (tsmomRes.ok) {
           const raw = await tsmomRes.json();
           const validated = validateFetchData(raw, PassthroughSchema, 'tsmom');
-          if (validated) setTsmomData(validated as TSMOMData);
+          if (validated) setTsmomData(validated as unknown as TSMOMData);
         }
         if (rvRes.ok) {
           const raw = await rvRes.json();
           const validated = validateFetchData(raw, PassthroughSchema, 'cross_asset_rv');
-          if (validated) setCrossAssetRVData(validated as CrossAssetRVData);
+          if (validated) setCrossAssetRVData(validated as unknown as CrossAssetRVData);
         }
       } catch { /* panels render gracefully with null data */ }
 
@@ -478,16 +493,16 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             {/* Signal Panels */}
             <div className="mt-4 signal-panels-row">
               <div className="flex-1 min-w-0">
-                <BehavioralSentimentPanel data={signals?.behavioral_sentiment ?? null} />
+                <BehavioralSentimentPanel data={(signals?.behavioral_sentiment ?? null) as unknown as BehavioralSentimentData | null} />
               </div>
               <div className="flex-1 min-w-0">
                 <CryptoAllocationPanel
-                  data={signals?.crypto_allocation ?? null}
+                  data={(signals?.crypto_allocation ?? null) as unknown as CryptoData | null}
                   portfolioValue={portfolioValue}
                 />
               </div>
               <div className="flex-1 min-w-0">
-                <CalendarSeasonalityPanel data={signals?.calendar_seasonality ?? null} />
+                <CalendarSeasonalityPanel data={(signals?.calendar_seasonality ?? null) as unknown as CalendarData | null} />
               </div>
             </div>
           </div>
@@ -672,23 +687,23 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
             {/* Model & Ensemble Panels */}
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <EnsembleVotingPanel data={signals?.ensemble_voting ?? null} />
-              <AlternativeDataPanel data={signals?.alternative_data ?? null} />
+              <EnsembleVotingPanel data={(signals?.ensemble_voting ?? null) as unknown as EnsembleVotingData | null} />
+              <AlternativeDataPanel data={(signals?.alternative_data ?? null) as unknown as AlternativeData | null} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <FactorRotationPanel data={signals?.factor_rotation ?? null} />
-              <StackingEnsemblePanel data={signals?.stacking_ensemble ?? null} />
+              <FactorRotationPanel data={(signals?.factor_rotation ?? null) as unknown as FactorRotationData | null} />
+              <StackingEnsemblePanel data={(signals?.stacking_ensemble ?? null) as unknown as StackingEnsembleData | null} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <ConvexityHarvestPanel data={signals?.convexity_harvest ?? null} />
-              <LLMSentimentPanel data={signals?.llm_sentiment ?? null} />
+              <ConvexityHarvestPanel data={(signals?.convexity_harvest ?? null) as unknown as ConvexityHarvestData | null} />
+              <LLMSentimentPanel data={(signals?.llm_sentiment ?? null) as unknown as LLMSentimentData | null} />
             </div>
             <div className="mt-4">
-              <SectorRotationPanel data={signals?.sector_rotation ?? null} />
+              <SectorRotationPanel data={(signals?.sector_rotation ?? null) as unknown as SectorRotationData | null} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <MLSignalsPanel data={signals?.ml_signals ?? null} />
-              <FactorRotationDashboardPanel data={signals?.factor_rotation_dashboard ?? null} />
+              <MLSignalsPanel data={(signals?.ml_signals ?? null) as unknown as MLSignalsData | null} />
+              <FactorRotationDashboardPanel data={(signals?.factor_rotation_dashboard ?? null) as unknown as FactorRotationDashboardData | null} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-3 gap-4">
               <GraduationChecklistPanel data={graduationData} />
@@ -729,7 +744,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             />
             <div className="mt-4">
               <CollarPanel
-                data={signals?.collar ?? null}
+                data={(signals?.collar ?? null) as unknown as CollarData | null}
                 spyPrice={signals?.latest_prices?.SPY}
               />
             </div>
@@ -771,10 +786,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
             <div className="mt-4">
-              <KurtosisRegimePanel data={signals?.kurtosis_regime ?? null} />
+              <KurtosisRegimePanel data={(signals?.kurtosis_regime ?? null) as unknown as KurtosisData | null} />
             </div>
             <div className="mt-4">
-              <VolatilityParityPanel data={signals?.volatility_parity ?? null} />
+              <VolatilityParityPanel data={(signals?.volatility_parity ?? null) as unknown as VolatilityParityData | null} />
             </div>
           </div>
         </PanelErrorBoundary>

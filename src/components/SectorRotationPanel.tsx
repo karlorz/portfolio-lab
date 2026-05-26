@@ -25,7 +25,7 @@ interface SectorAllocation {
   sectors: AllocationSector[];
 }
 
-interface SectorRotationData {
+export interface SectorRotationData {
   timestamp: string;
   status: string;
   vix?: number;

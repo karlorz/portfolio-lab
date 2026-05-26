@@ -60,10 +60,9 @@ function runMonteCarlo(
     for (let day = 0; day < totalDays; day++) {
       // Block bootstrap: pick random block
       if (day % blockSize === 0) {
-        // Pick a random starting point for this block
         var blockStart = Math.floor(Math.random() * (n - blockSize));
-      }
-      const idx = blockStart + (day % blockSize);
+      } // var blockStart persists via hoisting
+      const idx = blockStart! + (day % blockSize);
       const ret = dailyReturns[Math.min(idx, n - 1)];
       portfolio *= (1 + ret);
 
@@ -317,7 +316,7 @@ export const FIRECalculator: React.FC<FIRECalculatorProps> = ({ results }) => {
         Higher = more money left after 20 years of withdrawals
       </p>
       <ResponsiveContainer width="100%" height={350}>
-        <BarChart data={rateComparisonData} margin={{ top: 10, right: 30, left: 20, bottom: 5 }} isAnimationActive={false}>
+        <BarChart data={rateComparisonData} margin={{ top: 10, right: 30, left: 20, bottom: 5 }} {...{isAnimationActive: false}}>
           <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
           <XAxis dataKey="rate" stroke="#94a3b8" />
           <YAxis stroke="#94a3b8" tickFormatter={(v) => `${v.toFixed(0)}%`} />

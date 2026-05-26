@@ -1,6 +1,6 @@
 import React from 'react';
 
-interface KurtosisData {
+export interface KurtosisData {
   active: boolean;
   kurtosis_20d: number;
   kurtosis_60d: number;

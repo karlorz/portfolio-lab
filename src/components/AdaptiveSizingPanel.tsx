@@ -8,7 +8,7 @@ interface SignalSize {
   regime_adjusted: Record<string, number>;
 }
 
-interface AdaptiveSizingData {
+export interface AdaptiveSizingData {
   signals: SignalSize[];
   constraints: {
     max_per_signal: number;

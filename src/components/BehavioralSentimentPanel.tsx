@@ -19,7 +19,7 @@ interface SocialIntensity {
   sentiment_divergence: number;
 }
 
-interface BehavioralSentimentData {
+export interface BehavioralSentimentData {
   active: boolean;
   composite_score: number;        // -3 (extreme fear) to +3 (extreme greed)
   signal_type: string;            // contrarian_buy, contrarian_sell, moderate_buy, moderate_sell, neutral

@@ -75,7 +75,7 @@ export function RegimeTimeline({ history }: RegimeTimelineProps) {
 
       <div className="timeline-chart">
         <ResponsiveContainer width="100%" height={150}>
-          <AreaChart data={processed} isAnimationActive={false}>
+          <AreaChart data={processed} {...{isAnimationActive: false}}>
             <defs>
               {Object.entries(REGIME_COLORS).map(([regime, color]) => (
                 <linearGradient key={regime} id={`gradient-${regime}`} x1="0" y1="0" x2="0" y2="1">

@@ -108,7 +108,7 @@ export const SmartRebalanceSchema = z.object({
   max_drift: z.number(),
   estimated_cost_bps: z.number(),
   reason: z.string(),
-  drift_details: z.record(z.number()),
+  drift_details: z.record(z.string(), z.number()),
   vpin: z.number(),
   in_optimal_window: z.boolean(),
   ytd_cost_bps: z.number(),
@@ -306,14 +306,14 @@ export const VIXTermStructureSchema = z.object({
 // ---------------------------------------------------------------------------
 const VIXOverlayShiftSchema = z.object({
   date: z.string(),
-  shifts: z.record(z.number()),
+  shifts: z.record(z.string(), z.number()),
   signal_value: z.number(),
   regime: z.string(),
-  new_allocation: z.record(z.number()),
+  new_allocation: z.record(z.string(), z.number()),
 });
 
 export const VIXOverlaySchema = z.object({
-  allocation: z.record(z.number()),
+  allocation: z.record(z.string(), z.number()),
   last_shift_date: z.string(),
   shift_history: z.array(VIXOverlayShiftSchema),
   disabled_until: z.nullable(z.string()),
@@ -325,7 +325,7 @@ export const VIXOverlaySchema = z.object({
 const MLPredictionSchema = z.object({
   predicted_regime: z.string(),
   confidence: z.number(),
-  probabilities: z.record(z.number()),
+  probabilities: z.record(z.string(), z.number()),
   heuristic: z.boolean(),
 });
 
@@ -340,7 +340,7 @@ const MLFeatureSchema = z.object({
 const MLGridSearchSchema = z.object({
   available: z.boolean(),
   timestamp: z.nullable(z.string()),
-  top_allocation: z.nullable(z.record(z.number())),
+  top_allocation: z.nullable(z.record(z.string(), z.number())),
   sharpe: z.nullable(z.number()),
   volatility: z.nullable(z.number()),
 });
@@ -348,8 +348,8 @@ const MLGridSearchSchema = z.object({
 const MLSignalsSchema = z.object({
   available: z.boolean(),
   timestamp: z.nullable(z.string()),
-  predictions: z.record(MLPredictionSchema),
-  features: z.record(MLFeatureSchema),
+  predictions: z.record(z.string(), MLPredictionSchema),
+  features: z.record(z.string(), MLFeatureSchema),
   grid_search: MLGridSearchSchema,
 });
 
@@ -360,9 +360,9 @@ export const SignalsDataSchema = z.object({
   // Required fields
   timestamp: z.string(),
   regime: RegimeSchema,
-  latest_prices: z.record(z.number()),
+  latest_prices: z.record(z.string(), z.number()),
   current_positions: z.array(PositionSchema),
-  target_allocations: z.record(z.number()),
+  target_allocations: z.record(z.string(), z.number()),
   cash: z.number(),
   total_value: z.number(),
   recent_orders: z.array(RecentOrderSchema),
@@ -384,29 +384,29 @@ export const SignalsDataSchema = z.object({
   vix_overlay: z.optional(VIXOverlaySchema),
 
   // Untyped signal panels — use z.unknown() so any shape passes
-  behavioral_sentiment: z.optional(z.record(z.unknown())),
-  crypto_allocation: z.optional(z.record(z.unknown())),
-  calendar_seasonality: z.optional(z.record(z.unknown())),
-  ensemble_voting: z.optional(z.record(z.unknown())),
-  alternative_data: z.optional(z.record(z.unknown())),
-  factor_rotation: z.optional(z.record(z.unknown())),
-  stacking_ensemble: z.optional(z.record(z.unknown())),
-  convexity_harvest: z.optional(z.record(z.unknown())),
-  llm_sentiment: z.optional(z.record(z.unknown())),
-  sector_rotation: z.optional(z.record(z.unknown())),
-  factor_rotation_dashboard: z.optional(z.record(z.unknown())),
-  collar: z.optional(z.record(z.unknown())),
-  kurtosis_regime: z.optional(z.record(z.unknown())),
-  volatility_parity: z.optional(z.record(z.unknown())),
-  rebalance_health: z.optional(z.record(z.unknown())),
+  behavioral_sentiment: z.optional(z.record(z.string(), z.unknown())),
+  crypto_allocation: z.optional(z.record(z.string(), z.unknown())),
+  calendar_seasonality: z.optional(z.record(z.string(), z.unknown())),
+  ensemble_voting: z.optional(z.record(z.string(), z.unknown())),
+  alternative_data: z.optional(z.record(z.string(), z.unknown())),
+  factor_rotation: z.optional(z.record(z.string(), z.unknown())),
+  stacking_ensemble: z.optional(z.record(z.string(), z.unknown())),
+  convexity_harvest: z.optional(z.record(z.string(), z.unknown())),
+  llm_sentiment: z.optional(z.record(z.string(), z.unknown())),
+  sector_rotation: z.optional(z.record(z.string(), z.unknown())),
+  factor_rotation_dashboard: z.optional(z.record(z.string(), z.unknown())),
+  collar: z.optional(z.record(z.string(), z.unknown())),
+  kurtosis_regime: z.optional(z.record(z.string(), z.unknown())),
+  volatility_parity: z.optional(z.record(z.string(), z.unknown())),
+  rebalance_health: z.optional(z.record(z.string(), z.unknown())),
   broker_circuit_breaker: z.optional(z.object({
     state: z.enum(['closed', 'open', 'half-open']),
     fail_count: z.number(),
     reset_timeout: z.number(),
   })),
-  risk_decomposition: z.optional(z.record(z.unknown())),
-  spc_flags: z.optional(z.record(z.unknown())),
-  staleness: z.optional(z.record(z.unknown())),
+  risk_decomposition: z.optional(z.record(z.string(), z.unknown())),
+  spc_flags: z.optional(z.record(z.string(), z.unknown())),
+  staleness: z.optional(z.record(z.string(), z.unknown())),
 }).passthrough();
 
 // ---------------------------------------------------------------------------
@@ -425,7 +425,7 @@ const PerformanceEntrySchema = z.object({
 });
 
 export const DashboardDataSchema = z.object({
-  prices: z.record(z.array(z.object({
+  prices: z.record(z.string(), z.array(z.object({
     d: z.string(),
     p: z.number(),
   }))),
@@ -471,7 +471,7 @@ const SPYComparisonSchema = z.object({
 });
 
 export const StatsDataSchema = z.object({
-  asset_stats: z.record(z.object({
+  asset_stats: z.record(z.string(), z.object({
     '30d_return': z.number(),
     volatility: z.number(),
     current: z.number(),
@@ -502,7 +502,7 @@ const DataFreshnessSchema = z.object({
 
 export const HealthDataSchema = z.object({
   cron_jobs: z.array(CronJobStatusSchema),
-  data_freshness: z.record(DataFreshnessSchema),
+  data_freshness: z.record(z.string(), DataFreshnessSchema),
   system_status: z.enum(['healthy', 'warning', 'critical', 'degraded']),
   generated_at: z.string(),
   error: z.optional(z.string()),

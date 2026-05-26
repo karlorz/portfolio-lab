@@ -6,18 +6,20 @@ interface ComponentData {
   weight: number | null;
 }
 
+export interface AlternativeData {
+  regime?: string;
+  probability?: number;
+  confidence?: number;
+  timestamp?: string;
+  components?: Record<string, ComponentData>;
+  composite_score?: number | null;
+  z_score?: number | null;
+  sources_count?: number | null;
+  data_freshness_hours?: number | null;
+}
+
 interface AlternativeDataProps {
-  data: {
-    regime?: string;
-    probability?: number;
-    confidence?: number;
-    timestamp?: string;
-    components?: Record<string, ComponentData>;
-    composite_score?: number | null;
-    z_score?: number | null;
-    sources_count?: number | null;
-    data_freshness_hours?: number | null;
-  } | null;
+  data: AlternativeData | null;
 }
 
 const COMPONENT_LABELS: Record<string, string> = {
