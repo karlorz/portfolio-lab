@@ -42,6 +42,7 @@ import logging
 from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect
 from src.data.price_cache import get_prices, get_prices_df
 from src.utils import safe_get
+from src.utils.computation_cache import get_realized_volatility
 
 
 __all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'BanditWeighter', 'EnsembleVoter']
@@ -513,13 +514,17 @@ class EnsembleVoter:
         
         # Compute key indicators
         spy = price_data.get('SPY', price_data.iloc[:, 0])
-        returns = spy.pct_change().dropna()
-        
-        if len(returns) < 20:
+
+        if len(spy) < 21:
             return Regime.NORMAL, 0.5
-        
-        # 20-day realized vol (annualized)
-        vol_20d = returns.tail(20).std() * np.sqrt(252)
+
+        # 20-day realized vol (annualized, TTL-cached)
+        vol_20d = get_realized_volatility(spy, window=20)
+        if vol_20d is None:
+            return Regime.NORMAL, 0.5
+
+        # Returns for momentum and drawdown calculations
+        returns = spy.pct_change().dropna()
         
         # Drawdown
         cum_returns = (1 + returns).cumprod()

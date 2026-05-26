@@ -49,6 +49,7 @@ from datetime import datetime
 from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ
 from src.backtest.metrics import save_results_json
 from src.data.price_cache import get_prices, get_prices_df
+from src.utils.computation_cache import get_realized_volatility
 
 
 __all__ = ['SPEED_TIERS', 'VOL_TARGET', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'ASSET_TICKERS', 'DEFAULT_BASE_ALLOCATION', 'SpeedMomentumSignal', 'EnsembleSignal', 'MultiSpeedPortfolio', 'MultiSpeedMomentum', 'MultiSpeedBacktester']
@@ -279,10 +280,10 @@ class MultiSpeedMomentum:
         # Signal (sign of lookback return)
         signal = int(np.sign(lookback_return)) if lookback_return != 0 else 0
         
-        # Volatility scaling
-        recent_prices = prices.iloc[-vol_window:]
-        returns = recent_prices.pct_change().dropna()
-        realized_vol = returns.std() * np.sqrt(252) if len(returns) > 1 else 0.15
+        # Volatility scaling (TTL-cached)
+        realized_vol = get_realized_volatility(prices.iloc[-vol_window:], window=vol_window)
+        if realized_vol is None:
+            realized_vol = 0.15
         vol_scaled_position = signal / realized_vol if realized_vol > 0 else 0
         
         # Allocation adjustment
