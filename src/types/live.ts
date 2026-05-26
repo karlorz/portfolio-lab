@@ -125,6 +125,16 @@ export interface SignalsData {
     indicators: Record<string, number>;
     timestamp: string;
   };
+  // IC decay monitoring for signal quality tracking
+  ic_decay?: {
+    signals?: Record<string, {
+      ic_rolling: number | null;
+      ic_trend: 'stable' | 'decaying' | 'improving' | 'unknown';
+      observations: number;
+      status: 'healthy' | 'warning' | 'critical' | 'insufficient_data';
+    }>;
+    error?: string;
+  };
 }
 
 export interface Position {

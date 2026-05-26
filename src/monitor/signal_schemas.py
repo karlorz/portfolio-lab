@@ -133,6 +133,14 @@ class FredMacroSignal(BaseModel):
 #  Signal model registry
 # ─────────────────────────────────────────────────────────────
 
+class IcDecaySignal(BaseModel):
+    """Validates the ``ic_decay`` section of signals.json."""
+
+    model_config = ConfigDict(extra="allow")
+
+    signals: Dict[str, Any] = Field(default_factory=dict)
+
+
 SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "ensemble_voting": EnsembleVotingSignal,
     "garch_cvar": GarchCvarSignal,
@@ -141,6 +149,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "yield_curve": YieldCurveSignal,
     "signal_snapshot": SignalSnapshotSchema,
     "fred_macro": FredMacroSignal,
+    "ic_decay": IcDecaySignal,
 }
 
 # Signals for which schemas are defined — used when integrating into

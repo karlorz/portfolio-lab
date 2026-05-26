@@ -354,6 +354,21 @@ const MLSignalsSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// IcDecaySchema — IC decay monitoring for signal quality tracking
+// ---------------------------------------------------------------------------
+const IcDecaySignalEntrySchema = z.object({
+  ic_rolling: z.nullable(z.number()),
+  ic_trend: z.enum(['stable', 'decaying', 'improving', 'unknown']),
+  observations: z.number(),
+  status: z.enum(['healthy', 'warning', 'critical', 'insufficient_data']),
+});
+
+export const IcDecaySchema = z.object({
+  signals: z.record(z.string(), IcDecaySignalEntrySchema).optional(),
+  error: z.optional(z.string()),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
 // SignalsData — main schema
 // ---------------------------------------------------------------------------
 export const SignalsDataSchema = z.object({
@@ -407,6 +422,7 @@ export const SignalsDataSchema = z.object({
   risk_decomposition: z.optional(z.record(z.string(), z.unknown())),
   spc_flags: z.optional(z.record(z.string(), z.unknown())),
   staleness: z.optional(z.record(z.string(), z.unknown())),
+  ic_decay: z.optional(IcDecaySchema),
 }).passthrough();
 
 // ---------------------------------------------------------------------------

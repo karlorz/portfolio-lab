@@ -661,7 +661,15 @@ class DashboardGenerator:
 
         # SPC signal quality monitoring
         output["spc"] = self._run_spc_monitor(output)
-        
+
+        # IC decay monitoring (signal predictive quality tracking)
+        try:
+            from src.monitor.ic_decay_monitor import compute_ic_decay_report
+            output["ic_decay"] = compute_ic_decay_report()
+        except (ImportError, ValueError, OSError, RuntimeError) as e:
+            logger.warning("IC decay monitor not available: %s", e)
+            output["ic_decay"] = {"error": str(e)}
+
         out_path = PUBLIC_DIR / "signals.json"
         save_results_json(output, output_path=str(out_path), validator=validate_all_signals)
 
