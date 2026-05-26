@@ -50,6 +50,9 @@
 |- **TTL computation cache**: src/utils/computation_cache.py — cachetools.TTLCache for realized volatility, correlation matrix, rolling returns (COMPUTATION_CACHE_TTL_SECONDS env var, default 300s); thread-safe with per-cache locks
 |- **TypeScript noImplicitAny**: enabled in tsconfig.json, 75 strict mode errors fixed — Zod v4 z.record() 2-arg, Recharts isAnimationActive typing, 17 panel data interface exports, proper type assertions after Zod validation
 |- **Production print→logging**: cvar_metrics.display_metrics() and vixy_hedge_sizing._run_backtest() migrated from print() to logger.info/warning/error
+|- **TypeScript strictNullChecks**: enabled in tsconfig.json, 4 nullable expression errors fixed (App.tsx priceData, DurationOverlayPanel YieldCurveData, fetcher.ts adjClose)
+|- **Ruff T201 lint rule**: flake8-print detection configured in pyproject.toml — surfaces print() count for awareness, per-file-ignores for scripts/agents/ml/tests
+|- **Computation cache wired**: multi_speed_momentum and ensemble_voter use get_realized_volatility() from computation_cache — shared TTL cache hits within cron cycle
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
