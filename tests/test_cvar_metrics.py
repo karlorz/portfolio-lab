@@ -5,6 +5,7 @@ tail severity classification, volatility, and metric computation.
 """
 import sys
 import json
+import logging
 import numpy as np
 
 import pytest
@@ -977,62 +978,72 @@ class TestFetchPortfolioReturnsFewSymbols:
 # ---------------------------------------------------------------------------
 
 class TestDisplayMetricsOutput:
-    """Test display_metrics produces expected output format."""
+    """Test display_metrics produces expected output via logging."""
 
-    def test_output_contains_all_metric_labels(self, capsys):
+    @pytest.fixture(autouse=True)
+    def _capture_logs(self, caplog):
+        caplog.set_level(logging.INFO, logger="src.monitor.cvar_metrics")
+
+    def test_output_contains_all_metric_labels(self, caplog):
         """display_metrics includes all key metric labels."""
         metrics = _make_metrics()
         display_metrics(metrics)
-        captured = capsys.readouterr()
-        assert 'TAIL RISK METRICS' in captured.out
-        assert 'VaR 95%' in captured.out
-        assert 'CVaR 95%' in captured.out
-        assert 'Tail Severity' in captured.out
-        assert 'Max Drawdown' in captured.out
-        assert 'Current Drawdown' in captured.out
-        assert 'Volatility' in captured.out
-        assert 'Interpretation' in captured.out
+        log_output = caplog.text
+        assert 'TAIL RISK METRICS' in log_output
+        assert 'VaR 95%' in log_output
+        assert 'CVaR 95%' in log_output
+        assert 'Tail Severity' in log_output
+        assert 'Max Drawdown' in log_output
+        assert 'Current Drawdown' in log_output
+        assert 'Volatility' in log_output
+        assert 'Interpretation' in log_output
 
-    def test_output_shows_metric_values(self, capsys):
+    def test_output_shows_metric_values(self, caplog):
         """display_metrics shows correct numerical values."""
         metrics = _make_metrics(var_95=-2.50, cvar_95=-3.80,
                                 cvar_ratio=1.52, tail_severity="moderate",
                                 max_drawdown=-15.0, current_drawdown=-5.0,
                                 volatility_annual=15.0)
         display_metrics(metrics)
-        captured = capsys.readouterr()
-        assert '-2.50%' in captured.out
-        assert '-3.80%' in captured.out
-        assert '1.52x' in captured.out
-        assert 'moderate' in captured.out
-        assert '-15.00%' in captured.out
-        assert '-5.00%' in captured.out
-        assert '15.00%' in captured.out
+        log_output = caplog.text
+        assert '-2.50%' in log_output
+        assert '-3.80%' in log_output
+        assert '1.52x' in log_output
+        assert 'moderate' in log_output
+        assert '-15.00%' in log_output
+        assert '-5.00%' in log_output
+        assert '15.00%' in log_output
 
-    def test_output_severity_colors_normal(self, capsys):
+    def test_output_severity_colors_normal(self, caplog):
         """display_metrics uses green color for normal severity."""
+        caplog.set_level(logging.INFO, logger="src.monitor.cvar_metrics")
         metrics = _make_metrics(cvar_ratio=1.2, tail_severity="normal")
         display_metrics(metrics)
-        captured = capsys.readouterr()
-        # Normal severity should use green ANSI code
-        assert '\033[32m' in captured.out
-        assert '\033[0m' in captured.out
+        # Check raw LogRecord messages for ANSI codes
+        messages = [r.getMessage() for r in caplog.records]
+        combined = ''.join(messages)
+        assert '\033[32m' in combined
+        assert '\033[0m' in combined
 
-    def test_output_severity_colors_severe(self, capsys):
+    def test_output_severity_colors_severe(self, caplog):
         """display_metrics uses red color for severe severity."""
+        caplog.set_level(logging.INFO, logger="src.monitor.cvar_metrics")
         metrics = _make_metrics(cvar_ratio=2.0, tail_severity="severe")
         display_metrics(metrics)
-        captured = capsys.readouterr()
-        assert '\033[31m' in captured.out
-        assert '\033[0m' in captured.out
+        messages = [r.getMessage() for r in caplog.records]
+        combined = ''.join(messages)
+        assert '\033[31m' in combined
+        assert '\033[0m' in combined
 
-    def test_output_severity_colors_elevated(self, capsys):
+    def test_output_severity_colors_elevated(self, caplog):
         """display_metrics uses yellow for elevated severity."""
+        caplog.set_level(logging.INFO, logger="src.monitor.cvar_metrics")
         metrics = _make_metrics(cvar_ratio=1.6, tail_severity="elevated")
         display_metrics(metrics)
-        captured = capsys.readouterr()
-        assert '\033[33m' in captured.out
-        assert '\033[0m' in captured.out
+        messages = [r.getMessage() for r in caplog.records]
+        combined = ''.join(messages)
+        assert '\033[33m' in combined
+        assert '\033[0m' in combined
 
 
 # ---------------------------------------------------------------------------

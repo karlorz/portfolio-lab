@@ -224,7 +224,7 @@ def export_metrics(metrics: CVaRMetrics):
 
 
 def display_metrics(metrics: CVaRMetrics):
-    """Display CVaR metrics in dashboard format."""
+    """Log CVaR metrics in dashboard format."""
     severity_color = {
         "normal": "\033[32m",      # Green
         "moderate": "\033[33m",   # Yellow
@@ -232,28 +232,28 @@ def display_metrics(metrics: CVaRMetrics):
         "severe": "\033[31m"      # Red
     }
     reset = "\033[0m"
-    
+
     color = severity_color.get(metrics.tail_severity, "")
-    
-    print("""
+
+    logger.info("""
 ╔═══════════════════════════════════════════════════════════╗
 ║  TAIL RISK METRICS (v2.91 CVaR Integration)               ║
 ╠═══════════════════════════════════════════════════════════╣
 ║                                                           ║""")
-    print(f"║  VaR 95% (daily):       {metrics.var_95:>6.2f}%  (typical worst day)     ║")
-    print(f"║  CVaR 95% (daily):      {metrics.cvar_95:>6.2f}%  [avg tail loss]         ║")
-    print(f"║  Tail Severity:         {color}{metrics.cvar_ratio:>6.2f}x{reset}  ({metrics.tail_severity}){' ' * (15-len(metrics.tail_severity))}║")
-    print(f"║  Max Drawdown:          {metrics.max_drawdown:>6.2f}%  from ATH               ║")
-    print(f"║  Current Drawdown:      {metrics.current_drawdown:>6.2f}%                        ║")
-    print(f"║  Volatility (ann):      {metrics.volatility_annual:>6.2f}%                        ║")
-    print("""║                                                           ║
+    logger.info("║  VaR 95%% (daily):       %6.2f%%  (typical worst day)     ║", metrics.var_95)
+    logger.info("║  CVaR 95%% (daily):      %6.2f%%  [avg tail loss]         ║", metrics.cvar_95)
+    logger.info("║  Tail Severity:         %s%6.2fx%s  (%s)%s║", color, metrics.cvar_ratio, reset, metrics.tail_severity, ' ' * (15 - len(metrics.tail_severity)))
+    logger.info("║  Max Drawdown:          %6.2f%%  from ATH               ║", metrics.max_drawdown)
+    logger.info("║  Current Drawdown:      %6.2f%%                        ║", metrics.current_drawdown)
+    logger.info("║  Volatility (ann):      %6.2f%%                        ║", metrics.volatility_annual)
+    logger.info("""║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 
 Interpretation:
-  • CVaR 1.0-1.3x: Normal tail risk - standard diversification sufficient
-  • CVaR 1.3-1.5x: Moderate - consider reducing equity 5%
-  • CVaR 1.5-1.8x: Elevated - reduce equity 5-10%, add hedge
-  • CVaR >1.8x: Severe - reduce equity 10-15%, activate circuit breaker
+  - CVaR 1.0-1.3x: Normal tail risk - standard diversification sufficient
+  - CVaR 1.3-1.5x: Moderate - consider reducing equity 5%
+  - CVaR 1.5-1.8x: Elevated - reduce equity 5-10%, add hedge
+  - CVaR >1.8x: Severe - reduce equity 10-15%, activate circuit breaker
 """)
 
 

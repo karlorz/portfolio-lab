@@ -521,14 +521,14 @@ def main():
 
 def _run_backtest(sizer: VIXYHedgeSizer, start_date: str):
     """Simple historical backtest of VIXY hedge strategy."""
-    print(f"=== VIXY Hedge Backtest ({start_date} to present) ===")
+    logger.info("=== VIXY Hedge Backtest (%s to present) ===", start_date)
     try:
         from src.signals.vix_term_structure import VIXTermStructureGenerator
         gen = VIXTermStructureGenerator()
         history = gen.get_vix_history()
 
         if not history:
-            print("No VIX history available. Using simulated data.")
+            logger.warning("No VIX history available. Using simulated data.")
             # Simulate with realistic VIX distribution
             np.random.seed(42)
             dates = pd.date_range(start_date, datetime.now(), freq='D')
@@ -550,17 +550,17 @@ def _run_backtest(sizer: VIXYHedgeSizer, start_date: str):
         max_alloc = np.max(allocations)
         days_hedged = sum(1 for a in allocations if a > 0)
 
-        print(f"  Period:            {history[0][0].date()} to {history[-1][0].date()}")
-        print(f"  Trading days:      {len(allocations)}")
-        print(f"  Avg allocation:    {avg_alloc:.1f}%")
-        print(f"  Max allocation:    {max_alloc:.1f}%")
-        print(f"  Days hedged:       {days_hedged} ({100*days_hedged/len(allocations):.0f}%)")
-        print(f"  Avg annual cost:   {avg_cost:.1f} bps")
-        print(f"  Hedge efficiency:  {sizer.compute_hedge_efficiency(avg_alloc, 20):.2f}x")
+        logger.info("  Period:            %s to %s", history[0][0].date(), history[-1][0].date())
+        logger.info("  Trading days:      %d", len(allocations))
+        logger.info("  Avg allocation:    %.1f%%", avg_alloc)
+        logger.info("  Max allocation:    %.1f%%", max_alloc)
+        logger.info("  Days hedged:       %d (%d%%)", days_hedged, 100 * days_hedged // len(allocations))
+        logger.info("  Avg annual cost:   %.1f bps", avg_cost)
+        logger.info("  Hedge efficiency:  %.2fx", sizer.compute_hedge_efficiency(avg_alloc, 20))
     except ImportError:
-        print("Backtest requires pandas and VIX history. Run 'recommend' for single-point analysis.")
+        logger.warning("Backtest requires pandas and VIX history. Run 'recommend' for single-point analysis.")
     except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
-        print(f"Backtest error: {e}")
+        logger.error("Backtest error: %s", e)
 
 
 if __name__ == "__main__":
