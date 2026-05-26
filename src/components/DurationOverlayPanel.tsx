@@ -9,10 +9,10 @@ interface DurationAllocation {
 }
 
 interface YieldCurveData {
-  spread2s10s: number;
-  dgs2: number;
-  dgs10: number;
-  duration_regime: 'inverted' | 'flat' | 'steep' | 'normal';
+  spread2s10s: number | null;
+  dgs2: number | null;
+  dgs10: number | null;
+  duration_regime: 'inverted' | 'flat' | 'steep' | 'normal' | null;
   spread_history?: number[];
 }
 
@@ -96,25 +96,25 @@ const DurationOverlayPanel: React.FC<DurationOverlayProps> = ({
     <div className="duration-overlay-panel">
       <div className="panel-header">
         <h3>Duration Overlay</h3>
-        <span 
+        <span
           className="regime-badge"
-          style={{ backgroundColor: getRegimeColor(duration_regime) }}
+          style={{ backgroundColor: getRegimeColor(duration_regime ?? 'normal') }}
         >
-          {duration_regime.toUpperCase()}
+          {(duration_regime ?? 'normal').toUpperCase()}
         </span>
       </div>
 
       <div className="yield-curve-section">
         <div className="metric-row">
           <span className="metric-label">10Y - 2Y Spread:</span>
-          <span className={`metric-value ${spread2s10s < 0 ? 'negative' : 'positive'}`}>
-            {spread2s10s > 0 ? '+' : ''}{(spread2s10s / 100).toFixed(2)}%
+          <span className={`metric-value ${(spread2s10s ?? 0) < 0 ? 'negative' : 'positive'}`}>
+            {(spread2s10s ?? 0) > 0 ? '+' : ''}{((spread2s10s ?? 0) / 100).toFixed(2)}%
           </span>
         </div>
         <div className="sparkline-container">
           {renderSparkline()}
         </div>
-        <p className="regime-description">{getRegimeDescription(duration_regime)}</p>
+        <p className="regime-description">{getRegimeDescription(duration_regime ?? 'normal')}</p>
       </div>
 
       <div className="duration-breakdown">

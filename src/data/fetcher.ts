@@ -106,8 +106,8 @@ export async function fetchYahooV8(
   const prices: HistoricalPrice[] = [];
   for (let i = 0; i < timestamps.length; i++) {
     const close = quote.close?.[i];
-    const adj = adjclose[i] ?? close;
     if (close == null || isNaN(close)) continue;
+    const adj = adjclose[i] ?? close;
 
     const d = new Date(timestamps[i] * 1000);
     prices.push({

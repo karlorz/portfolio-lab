@@ -166,11 +166,11 @@ function App() {
 
               <RollingWindow
                 portfolios={PORTFOLIOS}
-                priceData={priceData}
+                priceData={priceData!}
                 colors={COLORS}
               />
 
-              <CorrelationMatrix priceData={priceData} />
+              <CorrelationMatrix priceData={priceData!} />
 
               <FIRECalculator results={filteredResults} />
             </Suspense>
