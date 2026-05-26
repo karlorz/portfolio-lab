@@ -37,6 +37,7 @@ dependencies = [
     "cachetools>=5.0",
     "pybreaker>=1.0",
     "fredapi>=0.5.2",
+    "python-json-logger>=4.1.0",
 ]
 
 [dependency-groups]
