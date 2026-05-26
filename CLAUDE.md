@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **12901 safe** (12588 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **13011 safe** (12688 Python + 313 TypeScript + 18 signal backtest integration, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -63,6 +63,10 @@
 |- **Graduated kill switch**: 4-level severity (WARNING 10% DD reduce 25%, RESTRICT 15% reduce 50%, HALT 20% block all new, LIQUIDATE 25%+ emergency); classify_kill_level() parses drawdown % and tail risk; kill_switch.json includes level + position_reduction fields; KILL_*_DRAWDOWN_PCT env vars configurable
 |- **Graduation criteria env-var configurable**: GRADUATION_MIN_SHARPE, GRADUATION_MAX_DRAWDOWN (default 25% adjusted from 15% for 46/38/16 portfolio), GRADUATION_MIN_TRADING_DAYS, GRADUATION_MIN_DSR, etc.
 |- **Freeze manifest**: src/monitor/freeze_manifest.py — config drift detection via git state + env vars + file hashes; diff_manifests() detects added/removed/modified files and config changes; wired into DashboardGenerator.run() startup
+|- **IC decay monitor**: src/monitor/ic_decay_monitor.py — per-signal Information Coefficient tracking via Spearman rank correlation; rolling IC, IC trend (stable/decaying/improving), status (healthy/warning/critical); save_state/load_state JSON persistence; wired into DashboardGenerator as ic_decay section
+|- **Per-signal walk-forward validation**: src/monitor/signal_walk_forward.py — SignalWalkForwardValidator with expanding-window IC validation; WFE (Walk-Forward Efficiency), mean IS/OOS IC, positive OOS ratio; status classification (validated/weak/unvalidated); wired into DashboardGenerator as signal_wfe section
+|- **Docker deployment**: Dockerfile (multi-stage: Bun frontend + Python runtime), docker-compose.yml (pipeline service with cron + Caddy dashboard), .dockerignore
+|- **Signal backtest integration tests**: tests/test_signal_backtest_integration.py — 18 end-to-end tests covering snapshot→reading→vote pipeline, regime gating, IC decay + SPC quality monitoring, Pydantic schema validation, cross-signal consistency
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha
@@ -124,7 +128,7 @@ Max per-signal cap: 50%
 - `src/strategy/` — overlays & strategy (unified_orchestrator, vixy_hedge_sizing, evaluator, ensemble_voter with BanditWeighter, factor_rotation, adaptive_ensemble_weights, turnover_validator, graduation_checklist, adaptive_sizing, risk_parity_weight_overlay, vol_parity_allocator, black_litterman_mapper)
 - `src/backtest/` — backtest engines. **Use `src/backtest/metrics.py`** for BacktestResult/BacktestMetrics/compute_metrics()/compute_deflated_sharpe_ratio() (canonical shared dataclass + computation, eliminates copy-paste)
 - `src/broker/` — broker integration (order_router, position_sync, collar_options_bridge, options_utils)
-- `src/monitor/` — monitoring (garch_cvar, cvar_metrics, risk_decomposition [wired to dashboard], performance_attribution, unified_dashboard, daily_brief, rebalance_health)
+- `src/monitor/` — monitoring (garch_cvar, cvar_metrics, risk_decomposition [wired to dashboard], performance_attribution, unified_dashboard, daily_brief, rebalance_health, ic_decay_monitor, signal_walk_forward, freeze_manifest)
 - `src/agents/` — MARL system (ML-gated, see below)
 - `src/data/` — data fetchers (Yahoo Finance, behavioral sentiment, international)
 - `src/costs/` — transaction cost models (etf_cost_table with per-ETF costs and regime multipliers)

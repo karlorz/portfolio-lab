@@ -369,6 +369,25 @@ export const IcDecaySchema = z.object({
 }).passthrough();
 
 // ---------------------------------------------------------------------------
+// SignalWFESchema — Per-signal walk-forward validation
+// ---------------------------------------------------------------------------
+const SignalWFEEntrySchema = z.object({
+  signal_name: z.string(),
+  wfe: z.number(),
+  mean_is_ic: z.number(),
+  mean_oos_ic: z.number(),
+  std_oos_ic: z.number(),
+  n_windows: z.number(),
+  positive_oos_ratio: z.number(),
+  status: z.enum(['validated', 'weak', 'unvalidated', 'insufficient_data']),
+});
+
+export const SignalWFESchema = z.object({
+  signals: z.record(z.string(), SignalWFEEntrySchema).optional(),
+  error: z.optional(z.string()),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
 // SignalsData — main schema
 // ---------------------------------------------------------------------------
 export const SignalsDataSchema = z.object({
@@ -423,6 +442,7 @@ export const SignalsDataSchema = z.object({
   spc_flags: z.optional(z.record(z.string(), z.unknown())),
   staleness: z.optional(z.record(z.string(), z.unknown())),
   ic_decay: z.optional(IcDecaySchema),
+  signal_wfe: z.optional(SignalWFESchema),
 }).passthrough();
 
 // ---------------------------------------------------------------------------

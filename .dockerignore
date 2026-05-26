@@ -1,0 +1,43 @@
+# Build artifacts
+dist/
+.venv/
+node_modules/
+.next/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Data (mounted as volumes, not baked into image)
+data/*.db
+data/*.json
+data/*.jsonl
+data/signals/
+data/cache/
+data/backtest_results/
+data/factors/
+data/attribution/
+data/llm_costs/
+data/logs/
+
+# IDE and OS
+.git/
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Wiki and research (not needed in container)
+wiki/
+research/
+
+# Claude Code
+.claude/
+
+# Docker
+docker-compose.override.yml

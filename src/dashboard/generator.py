@@ -670,6 +670,14 @@ class DashboardGenerator:
             logger.warning("IC decay monitor not available: %s", e)
             output["ic_decay"] = {"error": str(e)}
 
+        # Per-signal walk-forward validation
+        try:
+            from src.monitor.signal_walk_forward import compute_signal_wfe_report
+            output["signal_wfe"] = compute_signal_wfe_report()
+        except (ImportError, ValueError, OSError, RuntimeError) as e:
+            logger.warning("Signal WFE report not available: %s", e)
+            output["signal_wfe"] = {"error": str(e)}
+
         out_path = PUBLIC_DIR / "signals.json"
         save_results_json(output, output_path=str(out_path), validator=validate_all_signals)
 

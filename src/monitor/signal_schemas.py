@@ -141,6 +141,14 @@ class IcDecaySignal(BaseModel):
     signals: Dict[str, Any] = Field(default_factory=dict)
 
 
+class SignalWfeSignal(BaseModel):
+    """Validates the ``signal_wfe`` section of signals.json."""
+
+    model_config = ConfigDict(extra="allow")
+
+    signals: Dict[str, Any] = Field(default_factory=dict)
+
+
 SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "ensemble_voting": EnsembleVotingSignal,
     "garch_cvar": GarchCvarSignal,
@@ -150,6 +158,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "signal_snapshot": SignalSnapshotSchema,
     "fred_macro": FredMacroSignal,
     "ic_decay": IcDecaySignal,
+    "signal_wfe": SignalWfeSignal,
 }
 
 # Signals for which schemas are defined — used when integrating into

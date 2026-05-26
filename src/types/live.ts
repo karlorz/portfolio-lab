@@ -135,6 +135,20 @@ export interface SignalsData {
     }>;
     error?: string;
   };
+  // Per-signal walk-forward validation
+  signal_wfe?: {
+    signals?: Record<string, {
+      signal_name: string;
+      wfe: number;
+      mean_is_ic: number;
+      mean_oos_ic: number;
+      std_oos_ic: number;
+      n_windows: number;
+      positive_oos_ratio: number;
+      status: 'validated' | 'weak' | 'unvalidated' | 'insufficient_data';
+    }>;
+    error?: string;
+  };
 }
 
 export interface Position {
