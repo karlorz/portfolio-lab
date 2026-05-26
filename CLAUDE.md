@@ -9,6 +9,9 @@
 | - Test count: **13054 safe** (12723 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
+|- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
+|- **GLD-TLT correlation regime analysis**: rolling 252-day correlation — current 0.10 (neutral), mean 0.20, range [-0.15, 0.60]; predominantly positive since 2013 (two major correlated regimes: 2013-2021 corr=0.34, 2021-2025 corr=0.31); diversification benefit eroding but not gone
+|- **Regime walk-forward validation**: 10 expanding windows, ARI=0.07 (labels unstable between windows), but economic coherence 3/3 (GFC, COVID, RateHike all correctly detected); regime persistence: NORMAL 7.6d, CRISIS 9.9d, LOW_VOL 10.0d, HIGH_VOL 7.1d, RECOVERY 1.4d
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
 |- **Overlay data pipeline**: overlay_dashboard data merged into signals.json — 9 panels now render with real data
 |- **Graduation checklist v2**: 12 criteria (added regime_coverage, signal_diversity, sharpe_ci_lower)
@@ -152,7 +155,7 @@ Max per-signal cap: 50%
 - `src/data/` — data fetchers (Yahoo Finance, behavioral sentiment, international)
 - `src/costs/` — transaction cost models (etf_cost_table with per-ETF costs and regime multipliers)
 - `src/rebalancing/` — smart rebalancing (SmartRebalancingController with regime-adaptive drift thresholds)
-- `src/research/` — research tools (agent, features, wiki_sync)
+- `src/research/` — research tools (agent, features, wiki_sync, gold_tlt_correlation, regime_walk_forward)
 
 ### AI Agents (src/agents/ v2.51, ML-gated)
 - `ai_controller.py` — main entry (infer/train/status)
