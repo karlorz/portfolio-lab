@@ -415,7 +415,7 @@ def main():
         if cmd == "drawdown":
             series = calc.calculate_drawdown_series()
             stats = calc.calculate_max_drawdown(series)
-            print(json.dumps(stats, indent=2))
+            logger.info(json.dumps(stats, indent=2))
 
         elif cmd == "rolling":
             metrics = calc.calculate_all_rolling_metrics()
@@ -426,7 +426,7 @@ def main():
 
         elif cmd == "report":
             report = calc.generate_analytics_report()
-            print(json.dumps(report, indent=2, default=str))
+            logger.info(json.dumps(report, indent=2, default=str))
 
         else:
             logger.info("Unknown command: %s", cmd)
@@ -434,7 +434,7 @@ def main():
     else:
         # Default: full report
         report = calc.generate_analytics_report()
-        print(json.dumps(report, indent=2, default=str))
+        logger.info(json.dumps(report, indent=2, default=str))
 
 
 if __name__ == "__main__":

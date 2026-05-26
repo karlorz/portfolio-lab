@@ -7,6 +7,7 @@ compute_deflated_sharpe_ratio edge cases (zero, negative, N=1, zero variance),
 module-level constants, and CLI main() detection.
 """
 import json
+import logging
 import math
 import os
 import sys
@@ -905,50 +906,50 @@ class TestComputeCrisisReturns:
 class TestPrintMetricsReport:
     """Tests for print_metrics_report."""
 
-    def test_basic_output(self, capsys):
+    def test_basic_output(self, caplog):
         m = BacktestMetrics(
             total_return=10.5, cagr=8.2, volatility=12.1,
             sharpe_ratio=0.68, max_drawdown=-15.3,
         )
-        print_metrics_report(m, title="Test Report")
-        captured = capsys.readouterr()
-        assert "Test Report" in captured.out
-        assert "10.50%" in captured.out
-        assert "8.20%" in captured.out
-        assert "12.10%" in captured.out
-        assert "0.6800" in captured.out
-        assert "-15.30%" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.metrics"):
+            print_metrics_report(m, title="Test Report")
+        assert "Test Report" in caplog.text
+        assert "10.50%" in caplog.text
+        assert "8.20%" in caplog.text
+        assert "12.10%" in caplog.text
+        assert "0.6800" in caplog.text
+        assert "-15.30%" in caplog.text
 
-    def test_with_rebalances(self, capsys):
+    def test_with_rebalances(self, caplog):
         m = BacktestMetrics(
             total_return=15.0, cagr=9.5, volatility=11.0,
             sharpe_ratio=0.86, max_drawdown=-18.0,
             total_rebalances=24, total_transaction_costs=120.0,
         )
-        print_metrics_report(m)
-        captured = capsys.readouterr()
-        assert "Rebalances: 24" in captured.out
-        assert "Transaction Costs: 120.00" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.metrics"):
+            print_metrics_report(m)
+        assert "Rebalances: 24" in caplog.text
+        assert "120.00" in caplog.text
 
-    def test_zero_rebalances_suppresses_lines(self, capsys):
+    def test_zero_rebalances_suppresses_lines(self, caplog):
         m = BacktestMetrics(
             total_return=10.0, cagr=8.0, volatility=12.0,
             sharpe_ratio=0.67, max_drawdown=-15.0,
             total_rebalances=0, total_transaction_costs=0.0,
         )
-        print_metrics_report(m)
-        captured = capsys.readouterr()
-        assert "Rebalances" not in captured.out
-        assert "Transaction Costs" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.metrics"):
+            print_metrics_report(m)
+        assert "Rebalances" not in caplog.text
+        assert "Transaction Costs" not in caplog.text
 
-    def test_default_title(self, capsys):
+    def test_default_title(self, caplog):
         m = BacktestMetrics(
             total_return=5.0, cagr=4.0, volatility=10.0,
             sharpe_ratio=0.40, max_drawdown=-10.0,
         )
-        print_metrics_report(m)
-        captured = capsys.readouterr()
-        assert "Backtest Results" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.metrics"):
+            print_metrics_report(m)
+        assert "Backtest Results" in caplog.text
 
 
 # ═══════════════════════════════════════════════════════════════════════════

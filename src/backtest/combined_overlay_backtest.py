@@ -439,44 +439,44 @@ def main():
     result = bt.run_backtest()
     e = result.extras
 
-    print("=" * 60)
-    print("COMBINED OVERLAY BACKTEST v4.90")
-    print("=" * 60)
-    print(f"Period: {e['start_date']} \u2192 {e['end_date']}")
-    print(f"Trading Days: {e['trading_days']}")
-    print()
-    print(f"{'Metric':<20} {'Baseline':>10} {'Combined':>10} {'Delta':>10}")
-    print("-" * 50)
-    print(f"{'CAGR':<20} {e['baseline_cagr']:>9.2f}% {e['combined_cagr']:>9.2f}% {e['cagr_delta']:>+9.2f}%")
-    print(f"{'Volatility':<20} {e['baseline_vol']:>9.2f}% {e['combined_vol']:>9.2f}%")
-    print(f"{'Sharpe':<20} {e['baseline_sharpe']:>10.3f} {result.sharpe_ratio:>10.3f} {e['sharpe_delta']:>+10.3f}")
-    print(f"{'Max Drawdown':<20} {e['baseline_max_dd']:>9.2f}% {e['combined_max_dd']:>9.2f}% {e['dd_improvement']:>+9.2f}pp")
-    print()
-    print("Crisis Returns:")
+    logger.info("=" * 60)
+    logger.info("COMBINED OVERLAY BACKTEST v4.90")
+    logger.info("=" * 60)
+    logger.info(f"Period: {e['start_date']} \u2192 {e['end_date']}")
+    logger.info(f"Trading Days: {e['trading_days']}")
+    logger.info()
+    logger.info(f"{'Metric':<20} {'Baseline':>10} {'Combined':>10} {'Delta':>10}")
+    logger.info("-" * 50)
+    logger.info(f"{'CAGR':<20} {e['baseline_cagr']:>9.2f}% {e['combined_cagr']:>9.2f}% {e['cagr_delta']:>+9.2f}%")
+    logger.info(f"{'Volatility':<20} {e['baseline_vol']:>9.2f}% {e['combined_vol']:>9.2f}%")
+    logger.info(f"{'Sharpe':<20} {e['baseline_sharpe']:>10.3f} {result.sharpe_ratio:>10.3f} {e['sharpe_delta']:>+10.3f}")
+    logger.info(f"{'Max Drawdown':<20} {e['baseline_max_dd']:>9.2f}% {e['combined_max_dd']:>9.2f}% {e['dd_improvement']:>+9.2f}pp")
+    logger.info()
+    logger.info("Crisis Returns:")
     crisis = result.crisis_returns or {}
-    print(f"  {'2008':<8} {crisis.get('2008_baseline', 0):>9.2f}% {crisis.get('2008_combined', 0):>9.2f}%")
-    print(f"  {'2020':<8} {crisis.get('2020_baseline', 0):>9.2f}% {crisis.get('2020_combined', 0):>9.2f}%")
-    print(f"  {'2022':<8} {crisis.get('2022_baseline', 0):>9.2f}% {crisis.get('2022_combined', 0):>9.2f}%")
-    print()
-    print("Overlay Activity:")
-    print(f"  Collar active: {e['collar_active_pct']:.0f}% of days")
-    print(f"  Crypto active: {e['crypto_active_pct']:.0f}% of days")
-    print(f"  Avg TLT weight: {e['bond_rotation_avg_tlt']:.0f}%")
-    print(f"  Avg overlays active: {e['avg_overlays_active']:.1f}/4")
-    print()
-    print("Targets:")
-    print(f"  Sharpe >= 0.90: {'YES' if e['meets_sharpe_target'] else 'NO'} "
+    logger.info(f"  {'2008':<8} {crisis.get('2008_baseline', 0):>9.2f}% {crisis.get('2008_combined', 0):>9.2f}%")
+    logger.info(f"  {'2020':<8} {crisis.get('2020_baseline', 0):>9.2f}% {crisis.get('2020_combined', 0):>9.2f}%")
+    logger.info(f"  {'2022':<8} {crisis.get('2022_baseline', 0):>9.2f}% {crisis.get('2022_combined', 0):>9.2f}%")
+    logger.info()
+    logger.info("Overlay Activity:")
+    logger.info(f"  Collar active: {e['collar_active_pct']:.0f}% of days")
+    logger.info(f"  Crypto active: {e['crypto_active_pct']:.0f}% of days")
+    logger.info(f"  Avg TLT weight: {e['bond_rotation_avg_tlt']:.0f}%")
+    logger.info(f"  Avg overlays active: {e['avg_overlays_active']:.1f}/4")
+    logger.info()
+    logger.info("Targets:")
+    logger.info(f"  Sharpe >= 0.90: {'YES' if e['meets_sharpe_target'] else 'NO'} "
           f"({result.sharpe_ratio:.3f})")
-    print(f"  Max DD >= -22%: {'YES' if e['meets_dd_target'] else 'NO'} "
+    logger.info(f"  Max DD >= -22%: {'YES' if e['meets_dd_target'] else 'NO'} "
           f"({e['combined_max_dd']:.1f}%)")
-    print("=" * 60)
+    logger.info("=" * 60)
 
     # Save if requested
     if "--save" in sys.argv:
         from dataclasses import asdict
         out_path = bt.data_dir / "backtest_results" / "combined_overlay.json"
         save_results_json(asdict(result), output_path=str(out_path))
-        print(f"\nSaved to {out_path}")
+        logger.info(f"\nSaved to {out_path}")
 
 
 if __name__ == "__main__":

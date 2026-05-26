@@ -658,8 +658,8 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'backtest':
-        print("Running Combined Strategy Backtest...")
-        print("This may take 2-3 minutes...")
+        logger.info("Running Combined Strategy Backtest...")
+        logger.info("This may take 2-3 minutes...")
 
         backtester = CombinedStrategyBacktester()
         result = backtester.run_backtest(
@@ -669,87 +669,87 @@ def main():
             verbose=args.verbose
         )
 
-        print("\n" + "=" * 60)
-        print("BACKTEST RESULTS")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("BACKTEST RESULTS")
+        logger.info("=" * 60)
         e = result.extras
-        print(f"Strategy: {e['strategy_name']}")
-        print(f"Period: {e['start_date']} to {e['end_date']}")
-        print(f"Trading Days: {e['trading_days']}")
-        print(f"Rebalances: {result.total_rebalances}")
-        print()
-        print("PERFORMANCE METRICS:")
-        print(f"  CAGR: {result.cagr:.2%}")
-        print(f"  Volatility: {result.volatility:.2%}")
-        print(f"  Sharpe Ratio: {result.sharpe_ratio:.4f}")
-        print(f"  Max Drawdown: {result.max_drawdown:.2%}")
-        print(f"  Calmar Ratio: {e['calmar_ratio']:.4f}")
-        print()
-        print("BASELINE COMPARISON (46/38/16 Buy & Hold):")
-        print(f"  Baseline CAGR: {e['baseline_cagr']:.2%}")
-        print(f"  Baseline Sharpe: {result.baseline_sharpe:.4f}")
-        print(f"  Excess Return: {e['excess_return']:.2%}")
-        print(f"  Information Ratio: {e['information_ratio']:.4f}")
-        print()
-        print("CRISIS PERFORMANCE:")
+        logger.info(f"Strategy: {e['strategy_name']}")
+        logger.info(f"Period: {e['start_date']} to {e['end_date']}")
+        logger.info(f"Trading Days: {e['trading_days']}")
+        logger.info(f"Rebalances: {result.total_rebalances}")
+        logger.info("")
+        logger.info("PERFORMANCE METRICS:")
+        logger.info(f"  CAGR: {result.cagr:.2%}")
+        logger.info(f"  Volatility: {result.volatility:.2%}")
+        logger.info(f"  Sharpe Ratio: {result.sharpe_ratio:.4f}")
+        logger.info(f"  Max Drawdown: {result.max_drawdown:.2%}")
+        logger.info(f"  Calmar Ratio: {e['calmar_ratio']:.4f}")
+        logger.info("")
+        logger.info("BASELINE COMPARISON (46/38/16 Buy & Hold):")
+        logger.info(f"  Baseline CAGR: {e['baseline_cagr']:.2%}")
+        logger.info(f"  Baseline Sharpe: {result.baseline_sharpe:.4f}")
+        logger.info(f"  Excess Return: {e['excess_return']:.2%}")
+        logger.info(f"  Information Ratio: {e['information_ratio']:.4f}")
+        logger.info("")
+        logger.info("CRISIS PERFORMANCE:")
         crisis = result.crisis_returns or {}
         if crisis.get("2008"):
-            print(f"  2008: {crisis['2008']:.2%}")
+            logger.info(f"  2008: {crisis['2008']:.2%}")
         if crisis.get("2020"):
-            print(f"  2020: {crisis['2020']:.2%}")
+            logger.info(f"  2020: {crisis['2020']:.2%}")
         if crisis.get("2022"):
-            print(f"  2022: {crisis['2022']:.2%}")
-        print("=" * 60)
+            logger.info(f"  2022: {crisis['2022']:.2%}")
+        logger.info("=" * 60)
 
         # Save results
         from dataclasses import asdict
         if args.output:
             save_results_json(asdict(result), output_path=args.output)
-            print(f"\nResults saved to {args.output}")
+            logger.info(f"\nResults saved to {args.output}")
 
         # Also save to results path
         save_results_json(asdict(result), output_path=str(RESULTS_PATH))
-        print(f"Results saved to {RESULTS_PATH}")
+        logger.info(f"Results saved to {RESULTS_PATH}")
 
     elif args.command == 'summary':
         if RESULTS_PATH.exists():
             with open(RESULTS_PATH) as f:
                 results = json.load(f)
 
-            print("=" * 60)
-            print("BACKTEST SUMMARY (Saved Results)")
-            print("=" * 60)
+            logger.info("=" * 60)
+            logger.info("BACKTEST SUMMARY (Saved Results)")
+            logger.info("=" * 60)
             for key, value in results.items():
                 if isinstance(value, float):
-                    print(f"{key}: {value:.4f}")
+                    logger.info(f"{key}: {value:.4f}")
                 else:
-                    print(f"{key}: {value}")
+                    logger.info(f"{key}: {value}")
         else:
-            print(f"No saved results found at {RESULTS_PATH}")
-            print("Run 'backtest' command first")
+            logger.info(f"No saved results found at {RESULTS_PATH}")
+            logger.info("Run 'backtest' command first")
 
     elif args.command == 'status':
         backtester = CombinedStrategyBacktester()
         loaded = backtester.load_prices()
 
-        print("Combined Strategy Backtest v2.55 - Status")
-        print("=" * 40)
-        print(f"Data loaded: {loaded}")
+        logger.info("Combined Strategy Backtest v2.55 - Status")
+        logger.info("=" * 40)
+        logger.info(f"Data loaded: {loaded}")
         if loaded:
-            print(f"Date range: {backtester.dates[0]} to {backtester.dates[-1]}")
-            print(f"Trading days: {len(backtester.dates)}")
-            print(f"Tickers: {backtester.tickers}")
-        print()
-        print("Parameters:")
-        print(f"  Transaction cost: {TRANSACTION_COST:.2%}")
-        print(f"  Rebalance frequency: {REBALANCE_FREQ} days")
-        print(f"  Min history: {MIN_HISTORY_DAYS} days")
-        print()
-        print("Modules:")
-        print(f"  TSMOM: ready")
+            logger.info(f"Date range: {backtester.dates[0]} to {backtester.dates[-1]}")
+            logger.info(f"Trading days: {len(backtester.dates)}")
+            logger.info(f"Tickers: {backtester.tickers}")
+        logger.info("")
+        logger.info("Parameters:")
+        logger.info(f"  Transaction cost: {TRANSACTION_COST:.2%}")
+        logger.info(f"  Rebalance frequency: {REBALANCE_FREQ} days")
+        logger.info(f"  Min history: {MIN_HISTORY_DAYS} days")
+        logger.info("")
+        logger.info("Modules:")
+        logger.info(f"  TSMOM: ready")
         hmm_status = backtester.hmm_manager.detector.is_fitted if backtester.hmm_manager else "unavailable"
-        print(f"  HMM: {hmm_status}")
-        print(f"  Fed Policy: heuristic-based for backtest")
+        logger.info(f"  HMM: {hmm_status}")
+        logger.info(f"  Fed Policy: heuristic-based for backtest")
 
     else:
         parser.print_help()

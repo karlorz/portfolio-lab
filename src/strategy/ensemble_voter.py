@@ -1012,6 +1012,61 @@ class EnsembleVoter:
             logger.warning("Could not apply health-adjusted weights: %s", e)
         return weights
 
+    @staticmethod
+    def _extract_signal_values(readings: Dict) -> Dict[str, float]:
+        """Build signal_values dict from current readings, skipping NaN."""
+        signal_values = {}
+        for source_enum in readings:
+            source_str = source_enum.value
+            reading = readings[source_enum]
+            if not np.isnan(reading.value):
+                signal_values[source_str] = reading.value
+        return signal_values
+
+    def _apply_basis_pursuit(
+        self, signal_values: Dict[str, float], base_weights_str: Dict[str, float], regime_value: str
+    ) -> Dict[str, float]:
+        """Apply basis-pursuit signal selection to prune redundant signals."""
+        try:
+            from src.strategy.basis_pursuit_selector import BasisPursuitSelector
+            bp_selector = BasisPursuitSelector()
+            bp_result = bp_selector.select_signals(
+                signal_values, base_weights_str, regime=regime_value
+            )
+            sparsity_msg = (
+                f" (sparsity={bp_result.sparsity_ratio:.2f}, "
+                f"{bp_result.num_pruned} pruned)"
+                if bp_result.num_pruned > 0
+                else ""
+            )
+            logger.debug("Basis-pursuit selection applied%s", sparsity_msg)
+            return bp_result.active_signals
+        except (ImportError, KeyError, ValueError, TypeError, AttributeError, ZeroDivisionError) as bp_e:
+            logger.warning("Could not apply basis-pursuit selection: %s", bp_e)
+            return base_weights_str
+
+    def _apply_regret_weighting(
+        self, signal_values: Dict[str, float], base_weights_str: Dict[str, float], regime_value: str
+    ) -> Dict[str, float]:
+        """Apply regret-weighted adjustment to penalize signals with high regret."""
+        try:
+            from src.strategy.regret_weighted_selector import RegretWeightedSelector
+            rw_selector = RegretWeightedSelector()
+            prev_decision = getattr(rw_selector.state, 'last_ensemble_decision', 0.0)
+            rw_result = rw_selector.adjust_weights(
+                signal_values, prev_decision, base_weights_str, regime=regime_value
+            )
+            if rw_result.signals_with_high_regret:
+                logger.info(
+                    "Regret-adjusted weights: penalized %s (avg_regret=%.3f)",
+                    ', '.join(rw_result.signals_with_high_regret),
+                    rw_result.avg_regret
+                )
+            return rw_result.adjusted_weights
+        except (ImportError, KeyError, ValueError, TypeError, AttributeError, OSError) as rw_e:
+            logger.warning("Could not apply regret-weighted adjustment: %s", rw_e)
+            return base_weights_str
+
     def _apply_turnover_validation(
         self, weights: Dict, readings: Dict, regime: Regime
     ) -> Dict:
@@ -1020,55 +1075,14 @@ class EnsembleVoter:
             from src.strategy.turnover_validator import TurnoverValidator
             turnover_validator = TurnoverValidator()
 
-            # Build signal_values dict from current readings
-            signal_values = {}
-            for source_enum in readings:
-                source_str = source_enum.value
-                reading = readings[source_enum]
-                if not np.isnan(reading.value):
-                    signal_values[source_str] = reading.value
-
+            signal_values = self._extract_signal_values(readings)
             if not signal_values:
                 return weights
 
-            # Build base weights dict from regime weights (string-keyed)
             base_weights_str = {source_enum.value: w for source_enum, w in weights.items()}
 
-            # --- v8.02: Basis-Pursuit Signal Selection ---
-            try:
-                from src.strategy.basis_pursuit_selector import BasisPursuitSelector
-                bp_selector = BasisPursuitSelector()
-                bp_result = bp_selector.select_signals(
-                    signal_values, base_weights_str, regime=regime.value
-                )
-                base_weights_str = bp_result.active_signals
-                sparsity_msg = (
-                    f" (sparsity={bp_result.sparsity_ratio:.2f}, "
-                    f"{bp_result.num_pruned} pruned)"
-                    if bp_result.num_pruned > 0
-                    else ""
-                )
-                logger.debug("Basis-pursuit selection applied%s", sparsity_msg)
-            except (ImportError, KeyError, ValueError, TypeError, AttributeError, ZeroDivisionError) as bp_e:
-                logger.warning("Could not apply basis-pursuit selection: %s", bp_e)
-
-            # --- v8.03: Regret-Weighted Adjustment ---
-            try:
-                from src.strategy.regret_weighted_selector import RegretWeightedSelector
-                rw_selector = RegretWeightedSelector()
-                prev_decision = getattr(rw_selector.state, 'last_ensemble_decision', 0.0)
-                rw_result = rw_selector.adjust_weights(
-                    signal_values, prev_decision, base_weights_str, regime=regime.value
-                )
-                base_weights_str = rw_result.adjusted_weights
-                if rw_result.signals_with_high_regret:
-                    logger.info(
-                        "Regret-adjusted weights: penalized %s (avg_regret=%.3f)",
-                        ', '.join(rw_result.signals_with_high_regret),
-                        rw_result.avg_regret
-                    )
-            except (ImportError, KeyError, ValueError, TypeError, AttributeError, OSError) as rw_e:
-                logger.warning("Could not apply regret-weighted adjustment: %s", rw_e)
+            base_weights_str = self._apply_basis_pursuit(signal_values, base_weights_str, regime.value)
+            base_weights_str = self._apply_regret_weighting(signal_values, base_weights_str, regime.value)
 
             # Apply turnover adjustment
             adjusted_str = turnover_validator.get_adjusted_weights(
@@ -1136,6 +1150,40 @@ class EnsembleVoter:
         action: str
         action_confidence: float
 
+    @staticmethod
+    def _compute_asset_biases(
+        weighted_signals: List[SignalReading], fallback_consensus: float
+    ) -> Dict[str, float]:
+        """Compute per-asset weighted bias from signal readings."""
+        assets = ['SPY', 'TLT', 'GLD']
+        asset_biases = {}
+        for asset in assets:
+            asset_signals = [
+                (r.asset_signals.get(asset, 0), r.weight)
+                for r in weighted_signals
+                if r.asset_signals and asset in r.asset_signals and not np.isnan(r.asset_signals.get(asset, np.nan))
+            ]
+            if asset_signals:
+                total_w = sum(w for _, w in asset_signals) or 1.0
+                asset_biases[asset] = sum(v * w for v, w in asset_signals) / total_w
+            else:
+                asset_biases[asset] = fallback_consensus
+        return asset_biases
+
+    @staticmethod
+    def _determine_action(
+        regime: Regime, regime_confidence: float, equity_bias: float, agreement: float
+    ) -> Tuple[str, float]:
+        """Determine portfolio action from regime, equity bias, and agreement."""
+        if regime == Regime.CRISIS:
+            return "risk_off", regime_confidence
+        elif equity_bias > 0.3 and agreement > 0.6:
+            return "increase_equity", agreement * abs(equity_bias)
+        elif equity_bias < -0.3 and agreement > 0.6:
+            return "decrease_equity", agreement * abs(equity_bias)
+        else:
+            return "neutral", 0.5
+
     def _compute_consensus(
         self,
         weighted_signals: List[SignalReading],
@@ -1166,39 +1214,16 @@ class EnsembleVoter:
         ) / total_weight
 
         # Asset-specific consensus
-        assets = ['SPY', 'TLT', 'GLD']
-        asset_biases = {}
-
-        for asset in assets:
-            asset_signals = [
-                (r.asset_signals.get(asset, 0), r.weight)
-                for r in weighted_signals
-                if r.asset_signals and asset in r.asset_signals and not np.isnan(r.asset_signals.get(asset, np.nan))
-            ]
-
-            if asset_signals:
-                total_w = sum(w for _, w in asset_signals) or 1.0
-                asset_biases[asset] = sum(v * w for v, w in asset_signals) / total_w
-            else:
-                asset_biases[asset] = weighted_consensus  # Fallback
+        asset_biases = self._compute_asset_biases(weighted_signals, weighted_consensus)
 
         # Determine action
         equity_bias = asset_biases.get('SPY', weighted_consensus)
         duration_bias = asset_biases.get('TLT', 0)
         gold_bias = asset_biases.get('GLD', 0)
 
-        if regime == Regime.CRISIS:
-            action = "risk_off"
-            action_confidence = regime_confidence
-        elif equity_bias > 0.3 and agreement > 0.6:
-            action = "increase_equity"
-            action_confidence = agreement * abs(equity_bias)
-        elif equity_bias < -0.3 and agreement > 0.6:
-            action = "decrease_equity"
-            action_confidence = agreement * abs(equity_bias)
-        else:
-            action = "neutral"
-            action_confidence = 0.5
+        action, action_confidence = self._determine_action(
+            regime, regime_confidence, equity_bias, agreement
+        )
 
         return self._ConsensusResult(
             weighted_consensus=weighted_consensus,

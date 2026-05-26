@@ -324,24 +324,24 @@ def run_gold_sweep(output: Optional[str] = None) -> GoldSweepResult:
         logger.info("Gold sweep results saved to %s", out_path)
 
     # Print summary
-    print(f"\n{'='*70}")
-    print(f"GOLD ALLOCATION SWEEP — {result.data_range} ({result.n_days} days)")
-    print(f"{'='*70}")
-    print(f"Baseline: SPY/GLD/TLT 46/38/16 — Sharpe {result.baseline_sharpe:.3f}")
-    print(f"{'='*70}")
+    logger.info(f"\n{'='*70}")
+    logger.info(f"GOLD ALLOCATION SWEEP — {result.data_range} ({result.n_days} days)")
+    logger.info(f"{'='*70}")
+    logger.info(f"Baseline: SPY/GLD/TLT 46/38/16 — Sharpe {result.baseline_sharpe:.3f}")
+    logger.info(f"{'='*70}")
 
     # Top 10 by Sharpe
-    print(f"\nTop 10 by Sharpe Ratio:")
-    print(f"{'SPY':>5} {'GLD':>5} {'TLT':>5} {'IEF':>5} | {'CAGR':>6} {'Vol':>6} {'Sharpe':>7} {'MaxDD':>7} {'Δ':>6} | {'2008':>7} {'2020':>7} {'2022':>7} | Label")
-    print("-" * 110)
+    logger.info(f"\nTop 10 by Sharpe Ratio:")
+    logger.info(f"{'SPY':>5} {'GLD':>5} {'TLT':>5} {'IEF':>5} | {'CAGR':>6} {'Vol':>6} {'Sharpe':>7} {'MaxDD':>7} {'Δ':>6} | {'2008':>7} {'2020':>7} {'2022':>7} | Label")
+    logger.info("-" * 110)
     for row in result.rows[:10]:
-        print(
+        logger.info(
             f"{row.spy_pct:5.0f} {row.gld_pct:5.0f} {row.tlt_pct:5.0f} {row.ief_pct:5.0f} | "
             f"{row.cagr:5.1f}% {row.vol:5.1f}% {row.sharpe:7.3f} {row.max_dd:6.1f}% {row.sharpe_delta:+5.3f} | "
             f"{row.year_2008:6.1f}% {row.year_2020:6.1f}% {row.year_2022:6.1f}% | {row.label}"
         )
 
-    print(f"\n{result.recommendation}")
+    logger.info(f"\n{result.recommendation}")
 
     return result
 

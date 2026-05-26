@@ -869,7 +869,7 @@ class TestCrisisPeriods:
 class TestMainCLI:
     """Tests for the ``main()`` CLI entry point using argv patching."""
 
-    def test_no_args_runs_report(self, tmp_path):
+    def test_no_args_runs_report(self, tmp_path, caplog):
         """No CLI args should run full report."""
         calc = AnalyticsCalculator(data_dir=str(tmp_path))
         data = _make_perf_data(n_days=50)
@@ -878,15 +878,13 @@ class TestMainCLI:
             for entry in data:
                 fh.write(json.dumps(entry) + "\n")
 
-        with patch.object(sys, "argv", ["calculator.py"]):
-            out = io.StringIO()
-            with patch.object(sys, "stdout", out):
+        with caplog.at_level(logging.INFO, logger="src.analytics.calculator"):
+            with patch.object(sys, "argv", ["calculator.py"]):
                 from src.analytics.calculator import main
                 main()
-            output = out.getvalue()
-            assert '"status": "success"' in output
+            assert '"status": "success"' in caplog.text
 
-    def test_drawdown_command(self, tmp_path):
+    def test_drawdown_command(self, tmp_path, caplog):
         """``drawdown`` subcommand prints max drawdown stats."""
         calc = AnalyticsCalculator(data_dir=str(tmp_path))
         data = _make_perf_data(n_days=50)
@@ -895,13 +893,11 @@ class TestMainCLI:
             for entry in data:
                 fh.write(json.dumps(entry) + "\n")
 
-        with patch.object(sys, "argv", ["calculator.py", "drawdown"]):
-            out = io.StringIO()
-            with patch.object(sys, "stdout", out):
+        with caplog.at_level(logging.INFO, logger="src.analytics.calculator"):
+            with patch.object(sys, "argv", ["calculator.py", "drawdown"]):
                 from src.analytics.calculator import main
                 main()
-            output = out.getvalue()
-            assert "max_drawdown" in output
+            assert "max_drawdown" in caplog.text
 
     def test_rolling_command(self, tmp_path, caplog):
         """``rolling`` subcommand prints latest rolling Sharpe."""
@@ -918,7 +914,7 @@ class TestMainCLI:
                 main()
             assert "Sharpe" in caplog.text
 
-    def test_report_command(self, tmp_path):
+    def test_report_command(self, tmp_path, caplog):
         """``report`` subcommand prints full JSON report."""
         calc = AnalyticsCalculator(data_dir=str(tmp_path))
         data = _make_perf_data(n_days=50)
@@ -927,13 +923,11 @@ class TestMainCLI:
             for entry in data:
                 fh.write(json.dumps(entry) + "\n")
 
-        with patch.object(sys, "argv", ["calculator.py", "report"]):
-            out = io.StringIO()
-            with patch.object(sys, "stdout", out):
+        with caplog.at_level(logging.INFO, logger="src.analytics.calculator"):
+            with patch.object(sys, "argv", ["calculator.py", "report"]):
                 from src.analytics.calculator import main
                 main()
-            output = out.getvalue()
-            assert '"status": "success"' in output
+            assert '"status": "success"' in caplog.text
 
     def test_unknown_command(self, tmp_path, caplog):
         """Unknown subcommand should print usage message."""
@@ -944,27 +938,23 @@ class TestMainCLI:
             assert "Unknown command" in caplog.text
             assert "drawdown" in caplog.text
 
-    def test_no_data_drawdown(self, tmp_path):
+    def test_no_data_drawdown(self, tmp_path, caplog):
         """``drawdown`` with no data prints JSON with default values."""
-        with patch.object(sys, "argv", ["calculator.py", "drawdown"]):
-            out = io.StringIO()
-            with patch.object(sys, "stdout", out):
+        with caplog.at_level(logging.INFO, logger="src.analytics.calculator"):
+            with patch.object(sys, "argv", ["calculator.py", "drawdown"]):
                 from src.analytics.calculator import main
                 main()
-            output = out.getvalue()
-            assert "max_drawdown" in output
+            assert "max_drawdown" in caplog.text
 
-    def test_no_data_report(self, tmp_path):
+    def test_no_data_report(self, tmp_path, caplog):
         """``report`` with no data prints no_data status."""
         import src.analytics.calculator as calc_mod
-        with patch.object(sys, "argv", ["calculator.py", "report"]):
-            with patch.object(calc_mod, "DATA_DIR", tmp_path):
-                out = io.StringIO()
-                with patch.object(sys, "stdout", out):
+        with caplog.at_level(logging.INFO, logger="src.analytics.calculator"):
+            with patch.object(sys, "argv", ["calculator.py", "report"]):
+                with patch.object(calc_mod, "DATA_DIR", tmp_path):
                     from src.analytics.calculator import main
                     main()
-                output = out.getvalue()
-                assert "no_data" in output
+                assert "no_data" in caplog.text
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

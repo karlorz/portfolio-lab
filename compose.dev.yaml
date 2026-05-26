@@ -1,0 +1,23 @@
+# Portfolio-Lab — Development Docker Compose overlay
+# Usage: docker compose -f docker-compose.yml -f compose.dev.yaml up
+
+services:
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - LOG_LEVEL=DEBUG
+      - JSON_LOGS=0
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /app/src
+          ignore:
+            - __pycache__/
+            - "*.pyc"
+        - action: rebuild
+          path: pyproject.toml
+        - action: rebuild
+          path: uv.lock

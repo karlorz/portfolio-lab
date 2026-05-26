@@ -3,7 +3,7 @@
 #
 #  Services:
 #    pipeline  — Cron-driven signal + dashboard pipeline
-#    dashboard — Static file server for the built SPA
+#    dashboard — Caddy reverse-proxy + static SPA + API proxy
 # ─────────────────────────────────────────────────────────────
 
 services:
@@ -14,6 +14,8 @@ services:
       dockerfile: Dockerfile
     container_name: portfolio-lab-pipeline
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     environment:
       - PORTFOLIO_LAB_ENABLE_ML=${PORTFOLIO_LAB_ENABLE_ML:-0}
       - CRON_BACKEND=crontab
@@ -23,33 +25,27 @@ services:
       - pipeline-data:/app/data
       - pipeline-public:/app/public/data
       - pipeline-logs:/app/data/logs
-    # Run cron daemon for scheduled pipeline execution
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - |
-        apt-get update && apt-get install -y --no-install-recommends cron &&
-        crontab /app/crontab &&
-        echo "Starting cron daemon for portfolio-lab pipeline..." &&
-        cron -f
     healthcheck:
-      test: ["CMD", "python", "-c", "from src.dashboard.generator import DashboardGenerator; print('ok')"]
+      test: ["CMD", "python", "-c", "import os, time; f='data/signals/signals.json'; assert os.path.exists(f) and time.time()-os.path.getmtime(f)<14400, 'stale data'"]
       interval: 5m
       timeout: 30s
       retries: 3
+      start_period: 60s
 
-  # ── Dashboard (static SPA served by Caddy) ────────────────
+  # ── Dashboard (Caddy SPA + API proxy) ─────────────────────
   dashboard:
     image: caddy:2-alpine
     container_name: portfolio-lab-dashboard
     restart: unless-stopped
+    init: true
     ports:
       - "${DASHBOARD_PORT:-8080}:80"
     volumes:
       - pipeline-public:/srv/data:ro
       - ./dist:/srv/app:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    command: caddy file-server --root /srv/app --listen :80
     depends_on:
       pipeline:
         condition: service_healthy

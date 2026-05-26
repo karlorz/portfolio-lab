@@ -272,17 +272,17 @@ def compute_crisis_returns(
 
 def print_metrics_report(metrics: BacktestMetrics, title: str = "Backtest Results"):
     """Print a formatted metrics report to stdout."""
-    print(f"\n{'='*60}")
-    print(f"{title}")
-    print(f"{'='*60}")
-    print(f"Total Return: {metrics.total_return:.2f}%")
-    print(f"CAGR: {metrics.cagr:.2f}%")
-    print(f"Volatility: {metrics.volatility:.2f}%")
-    print(f"Sharpe Ratio: {metrics.sharpe_ratio:.4f}")
-    print(f"Max Drawdown: {metrics.max_drawdown:.2f}%")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"{title}")
+    logger.info(f"{'='*60}")
+    logger.info(f"Total Return: {metrics.total_return:.2f}%")
+    logger.info(f"CAGR: {metrics.cagr:.2f}%")
+    logger.info(f"Volatility: {metrics.volatility:.2f}%")
+    logger.info(f"Sharpe Ratio: {metrics.sharpe_ratio:.4f}")
+    logger.info(f"Max Drawdown: {metrics.max_drawdown:.2f}%")
     if metrics.total_rebalances > 0:
-        print(f"Rebalances: {metrics.total_rebalances}")
-        print(f"Transaction Costs: {metrics.total_transaction_costs:.2f}")
+        logger.info(f"Rebalances: {metrics.total_rebalances}")
+        logger.info(f"Transaction Costs: {metrics.total_transaction_costs:.2f}")
 
 
 def compute_deflated_sharpe_ratio(

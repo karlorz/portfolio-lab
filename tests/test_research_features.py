@@ -9,6 +9,7 @@ to_dataframe), FeatureStore (save/load), and CLI main().
 import os
 import sys
 import json
+import logging
 import math
 import sqlite3
 
@@ -885,109 +886,100 @@ class TestFeatureStore:
 class TestMain:
     """Tests for the CLI entry point."""
 
-    def test_main_generate_default(self, tmp_path):
+    def test_main_generate_default(self, tmp_path, caplog):
         """CLI 'generate' with no symbol defaults to SPY."""
         db = tmp_path / "cli_default.db"
         _populate_full_db(db, n_days=100)
-        with patch.object(sys, "argv", ["features.py", "generate"]):
-            with patch(
-                "src.research.features.FeaturePipeline",
-                return_value=FeaturePipeline(db_path=str(db)),
-            ):
-                with patch("builtins.print") as mock_print:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "generate"]):
+                with patch(
+                    "src.research.features.FeaturePipeline",
+                    return_value=FeaturePipeline(db_path=str(db)),
+                ):
                     cli_main()
-                    # Should print the JSON features to stdout
-                    args = [a[0] for a in mock_print.call_args_list]
-                    assert any("SPY" in str(a) for a in args)
+                    assert "SPY" in caplog.text
 
-    def test_main_generate_custom_symbol(self, tmp_path):
+    def test_main_generate_custom_symbol(self, tmp_path, caplog):
         """CLI 'generate' accepts a custom symbol."""
         db = tmp_path / "cli_symbol.db"
         _populate_full_db(db, n_days=100)
-        with patch.object(sys, "argv", ["features.py", "generate", "GLD"]):
-            with patch(
-                "src.research.features.FeaturePipeline",
-                return_value=FeaturePipeline(db_path=str(db)),
-            ):
-                with patch("builtins.print") as mock_print:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "generate", "GLD"]):
+                with patch(
+                    "src.research.features.FeaturePipeline",
+                    return_value=FeaturePipeline(db_path=str(db)),
+                ):
                     cli_main()
-                    args = [str(a) for a in mock_print.call_args_list]
-                    assert any("GLD" in a for a in args)
+                    assert "GLD" in caplog.text
 
-    def test_main_generate_no_features(self, tmp_path):
+    def test_main_generate_no_features(self, tmp_path, caplog):
         """CLI shows 'No features generated' when data insufficient."""
         db = tmp_path / "cli_none.db"
         _build_simple_prices_db(db, "SPY", n_days=30)
-        with patch.object(sys, "argv", ["features.py", "generate", "SPY"]):
-            with patch(
-                "src.research.features.FeaturePipeline",
-                return_value=FeaturePipeline(db_path=str(db)),
-            ):
-                with patch("builtins.print") as mock_print:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "generate", "SPY"]):
+                with patch(
+                    "src.research.features.FeaturePipeline",
+                    return_value=FeaturePipeline(db_path=str(db)),
+                ):
                     cli_main()
-                    # Should print the "No features" message
-                    messages = [str(a[0]) for a in mock_print.call_args_list]
-                    assert any("No features" in m for m in messages)
+                    assert "No features" in caplog.text
 
-    def test_main_batch(self, tmp_path):
+    def test_main_batch(self, tmp_path, caplog):
         """CLI 'batch' saves features for each symbol."""
         db = tmp_path / "cli_batch.db"
         _populate_full_db(db, n_days=100)
         store_dir = tmp_path / "batch_store"
-        with patch.object(sys, "argv", ["features.py", "batch", "SPY", "GLD"]):
-            with patch(
-                "src.research.features.FeaturePipeline",
-                return_value=FeaturePipeline(db_path=str(db)),
-            ):
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "batch", "SPY", "GLD"]):
                 with patch(
-                    "src.research.features.FeatureStore",
-                    return_value=FeatureStore(data_dir=str(store_dir)),
+                    "src.research.features.FeaturePipeline",
+                    return_value=FeaturePipeline(db_path=str(db)),
                 ):
-                    with patch("builtins.print") as mock_print:
+                    with patch(
+                        "src.research.features.FeatureStore",
+                        return_value=FeatureStore(data_dir=str(store_dir)),
+                    ):
                         cli_main()
-                        messages = [str(a[0]) for a in mock_print.call_args_list]
-                        assert any("Saved features" in m for m in messages)
+                assert "Saved features" in caplog.text
 
-    def test_main_historical(self, tmp_path):
+    def test_main_historical(self, tmp_path, caplog):
         """CLI 'historical' generates and saves historical features."""
         db = tmp_path / "cli_hist.db"
         _populate_full_db(db, n_days=100)
         store_dir = tmp_path / "hist_store"
-        with patch.object(sys, "argv", ["features.py", "historical", "SPY"]):
-            with patch(
-                "src.research.features.FeaturePipeline",
-                return_value=FeaturePipeline(db_path=str(db)),
-            ):
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "historical", "SPY"]):
                 with patch(
-                    "src.research.features.FeatureStore",
-                    return_value=FeatureStore(data_dir=str(store_dir)),
+                    "src.research.features.FeaturePipeline",
+                    return_value=FeaturePipeline(db_path=str(db)),
                 ):
-                    with patch("builtins.print") as mock_print:
+                    with patch(
+                        "src.research.features.FeatureStore",
+                        return_value=FeatureStore(data_dir=str(store_dir)),
+                    ):
                         cli_main()
-                        messages = [str(a[0]) for a in mock_print.call_args_list]
-                        assert any("Generated" in m for m in messages)
+                assert "Generated" in caplog.text
 
-    def test_main_unknown_command(self):
+    def test_main_unknown_command(self, caplog):
         """CLI shows error for unknown command."""
-        with patch.object(sys, "argv", ["features.py", "unknown_cmd"]):
-            with patch("builtins.print") as mock_print:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "unknown_cmd"]):
                 cli_main()
-                messages = [str(a[0]) for a in mock_print.call_args_list]
-                assert any("Unknown command" in m for m in messages)
+                assert "Unknown command" in caplog.text
 
-    def test_main_no_args(self, tmp_path):
+    def test_main_no_args(self, tmp_path, caplog):
         """CLI with no args defaults to generating SPY features."""
         db = tmp_path / "cli_noargs.db"
         _populate_full_db(db, n_days=100)
-        with patch.object(sys, "argv", ["features.py"]):
-            with patch(
-                "src.research.features.FeaturePipeline",
-                return_value=FeaturePipeline(db_path=str(db)),
-            ):
-                with patch("builtins.print") as mock_print:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py"]):
+                with patch(
+                    "src.research.features.FeaturePipeline",
+                    return_value=FeaturePipeline(db_path=str(db)),
+                ):
                     cli_main()
-                    # Should print JSON or "No features"
-                    assert mock_print.called
+                    assert "SPY" in caplog.text
 
 
 # ===================================================================

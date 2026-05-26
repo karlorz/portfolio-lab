@@ -1045,70 +1045,79 @@ class TestLoadPricesEdgeCases:
 class TestMainCli:
     """CLI entry point coverage for detect/signal/save/symbol paths."""
 
-    def test_cli_detect_default(self, monkeypatch, capsys):
+    @staticmethod
+    def _get_json_output(caplog):
+        """Extract the JSON dict from the last JSON-formatted log record."""
+        for record in reversed(caplog.records):
+            msg = record.getMessage().strip()
+            if msg.startswith("{"):
+                return json.loads(msg)
+        raise AssertionError("No JSON output found in log records")
+
+    def test_cli_detect_default(self, monkeypatch, caplog):
+        caplog.set_level(logging.INFO)
         prices = _make_close_prices(100, seed=42)
         monkeypatch.setattr("src.regime.vol_volume_gap.load_prices", lambda symbol="SPY": prices)
         monkeypatch.setattr("sys.argv", ["vol_volume_gap.py"])
         main_cli()
-        captured = capsys.readouterr()
-        data = json.loads(captured.out)
+        data = self._get_json_output(caplog)
         assert data["status"] == "ok"
         assert data["symbol"] == "SPY"
 
-    def test_cli_detect_explicit(self, monkeypatch, capsys):
+    def test_cli_detect_explicit(self, monkeypatch, caplog):
+        caplog.set_level(logging.INFO)
         prices = _make_close_prices(100, seed=42)
         monkeypatch.setattr("src.regime.vol_volume_gap.load_prices", lambda symbol="SPY": prices)
         monkeypatch.setattr("sys.argv", ["vol_volume_gap.py", "detect"])
         main_cli()
-        captured = capsys.readouterr()
-        data = json.loads(captured.out)
+        data = self._get_json_output(caplog)
         assert data["status"] == "ok"
 
-    def test_cli_signal(self, monkeypatch, capsys):
+    def test_cli_signal(self, monkeypatch, caplog):
+        caplog.set_level(logging.INFO)
         prices = _make_close_prices(100, seed=42)
         monkeypatch.setattr("src.regime.vol_volume_gap.load_prices", lambda symbol="SPY": prices)
         monkeypatch.setattr("sys.argv", ["vol_volume_gap.py", "signal"])
         main_cli()
-        captured = capsys.readouterr()
-        data = json.loads(captured.out)
+        data = self._get_json_output(caplog)
         assert data["status"] == "ok"
         assert "execution_adjustment" in data
 
-    def test_cli_with_symbol(self, monkeypatch, capsys):
+    def test_cli_with_symbol(self, monkeypatch, caplog):
+        caplog.set_level(logging.INFO)
         prices = _make_close_prices(100, seed=42)
         monkeypatch.setattr("src.regime.vol_volume_gap.load_prices", lambda symbol="QQQ": prices)
         monkeypatch.setattr("sys.argv", ["vol_volume_gap.py", "detect", "--symbol", "QQQ"])
         main_cli()
-        captured = capsys.readouterr()
-        data = json.loads(captured.out)
+        data = self._get_json_output(caplog)
         assert data["status"] == "ok"
         assert data["symbol"] == "QQQ"
 
-    def test_cli_with_save_flag(self, monkeypatch, capsys, tmp_path):
+    def test_cli_with_save_flag(self, monkeypatch, caplog, tmp_path):
+        caplog.set_level(logging.INFO)
         prices = _make_close_prices(100, seed=42)
         monkeypatch.setattr("src.regime.vol_volume_gap.load_prices", lambda symbol="SPY": prices)
         monkeypatch.setattr("src.regime.vol_volume_gap.STATE_FILE", tmp_path / "test_state.json")
         monkeypatch.setattr("sys.argv", ["vol_volume_gap.py", "detect", "--save"])
         main_cli()
-        captured = capsys.readouterr()
-        data = json.loads(captured.out)
+        data = self._get_json_output(caplog)
         assert data["status"] == "ok"
         assert (tmp_path / "test_state.json").exists()
 
-    def test_cli_error_no_data(self, monkeypatch, capsys):
+    def test_cli_error_no_data(self, monkeypatch, caplog):
+        caplog.set_level(logging.INFO)
         monkeypatch.setattr("src.regime.vol_volume_gap.load_prices", lambda symbol="SPY": None)
         monkeypatch.setattr("sys.argv", ["vol_volume_gap.py", "detect"])
         main_cli()
-        captured = capsys.readouterr()
-        data = json.loads(captured.out)
+        data = self._get_json_output(caplog)
         assert data["status"] == "error"
 
-    def test_cli_signal_error_no_data(self, monkeypatch, capsys):
+    def test_cli_signal_error_no_data(self, monkeypatch, caplog):
+        caplog.set_level(logging.INFO)
         monkeypatch.setattr("src.regime.vol_volume_gap.load_prices", lambda symbol="SPY": None)
         monkeypatch.setattr("sys.argv", ["vol_volume_gap.py", "signal"])
         main_cli()
-        captured = capsys.readouterr()
-        data = json.loads(captured.out)
+        data = self._get_json_output(caplog)
         assert data["status"] == "error"
         assert "message" in data
 

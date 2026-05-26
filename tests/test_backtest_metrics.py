@@ -4,6 +4,7 @@ Tests for src/backtest/metrics.py — shared backtest metrics module.
 """
 import os
 import json
+import logging
 import tempfile
 
 import pytest
@@ -302,13 +303,13 @@ class TestComputeCrisisReturns:
 
 
 class TestPrintMetricsReport:
-    def test_prints_without_error(self, capsys):
+    def test_prints_without_error(self, caplog):
         m = BacktestMetrics(total_return=10.5, cagr=8.2, volatility=12.1,
                             sharpe_ratio=0.68, max_drawdown=-15.3)
-        print_metrics_report(m, title="Test Report")
-        captured = capsys.readouterr()
-        assert "Test Report" in captured.out
-        assert "8.2" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.metrics"):
+            print_metrics_report(m, title="Test Report")
+        assert "Test Report" in caplog.text
+        assert "8.2" in caplog.text
 
 
 class TestSaveResultsJson:
@@ -732,37 +733,37 @@ class TestComputeCrisisReturnsEdgeCases:
 class TestPrintMetricsReportEdgeCases:
     """Additional edge cases for print_metrics_report."""
 
-    def test_with_rebalances(self, capsys):
+    def test_with_rebalances(self, caplog):
         m = BacktestMetrics(
             total_return=15.0, cagr=9.5, volatility=11.0,
             sharpe_ratio=0.86, max_drawdown=-18.0,
             total_rebalances=24, total_transaction_costs=120.0,
         )
-        print_metrics_report(m)
-        captured = capsys.readouterr()
-        assert "Rebalances: 24" in captured.out
-        assert "Transaction Costs: 120.00" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.metrics"):
+            print_metrics_report(m)
+        assert "Rebalances: 24" in caplog.text
+        assert "120.00" in caplog.text
 
-    def test_zero_rebalances_no_output(self, capsys):
+    def test_zero_rebalances_no_output(self, caplog):
         """When total_rebalances is 0, rebalance lines should not appear."""
         m = BacktestMetrics(
             total_return=10.0, cagr=8.0, volatility=12.0,
             sharpe_ratio=0.67, max_drawdown=-15.0,
             total_rebalances=0, total_transaction_costs=0.0,
         )
-        print_metrics_report(m)
-        captured = capsys.readouterr()
-        assert "Rebalances" not in captured.out
-        assert "Transaction Costs" not in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.metrics"):
+            print_metrics_report(m)
+        assert "Rebalances" not in caplog.text
+        assert "Transaction Costs" not in caplog.text
 
-    def test_default_title(self, capsys):
+    def test_default_title(self, caplog):
         m = BacktestMetrics(
             total_return=5.0, cagr=4.0, volatility=10.0,
             sharpe_ratio=0.40, max_drawdown=-10.0,
         )
-        print_metrics_report(m)
-        captured = capsys.readouterr()
-        assert "Backtest Results" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.metrics"):
+            print_metrics_report(m)
+        assert "Backtest Results" in caplog.text
 
 
 # ---------------------------------------------------------------------------

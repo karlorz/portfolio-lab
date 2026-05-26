@@ -2133,21 +2133,21 @@ class TestMainCLI:
         assert '--start' in captured.out or '--start' in captured.err
         assert '--initial' in captured.out or '--initial' in captured.err
 
-    def test_main_status_command(self, capsys):
+    def test_main_status_command(self, caplog):
         """status command prints backtest status."""
         from src.backtest.combined_strategy import main as cli_main
         sys_argv_backup = sys.argv.copy()
         try:
             sys.argv = ['combined_strategy.py', 'status']
-            cli_main()
+            with caplog.at_level(logging.INFO, logger="src.backtest.combined_strategy"):
+                cli_main()
         except SystemExit:
             pass
         finally:
             sys.argv = sys_argv_backup
-        captured = capsys.readouterr()
-        assert 'Status' in captured.out
+        assert 'Status' in caplog.text
 
-    def test_main_summary_no_file(self, capsys):
+    def test_main_summary_no_file(self, caplog):
         """summary command without results file prints guidance."""
         from src.backtest.combined_strategy import RESULTS_PATH, main as cli_main
         sys_argv_backup = sys.argv.copy()
@@ -2159,42 +2159,44 @@ class TestMainCLI:
                 backup = RESULTS_PATH.with_suffix('.json.bak')
                 os.rename(str(RESULTS_PATH), str(backup))
                 try:
-                    cli_main()
+                    with caplog.at_level(logging.INFO, logger="src.backtest.combined_strategy"):
+                        cli_main()
                 finally:
                     os.rename(str(backup), str(RESULTS_PATH))
             else:
-                cli_main()
+                with caplog.at_level(logging.INFO, logger="src.backtest.combined_strategy"):
+                    cli_main()
         except SystemExit:
             pass
         finally:
             sys.argv = sys_argv_backup
-        captured = capsys.readouterr()
-        assert 'No saved results' in captured.out or 'SUMMARY' in captured.out
+        assert 'No saved results' in caplog.text or 'SUMMARY' in caplog.text
 
-    def test_main_status_print_parameters(self, capsys):
+    def test_main_status_print_parameters(self, caplog):
         """status command prints configured parameters."""
         from src.backtest.combined_strategy import main as cli_main
         sys_argv_backup = sys.argv.copy()
         try:
             sys.argv = ['combined_strategy.py', 'status']
-            cli_main()
+            with caplog.at_level(logging.INFO, logger="src.backtest.combined_strategy"):
+                cli_main()
         except SystemExit:
             pass
         finally:
             sys.argv = sys_argv_backup
-        captured = capsys.readouterr()
-        assert 'Transaction cost' in captured.out
-        assert 'Rebalance frequency' in captured.out
-        assert 'Min history' in captured.out
+        assert 'Transaction cost' in caplog.text
+        assert 'Rebalance frequency' in caplog.text
+        assert 'Min history' in caplog.text
 
-    def test_main_backtest_subcommand_parses_args(self, capsys):
+    def test_main_backtest_subcommand_parses_args(self, caplog):
         """backtest subcommand parses --start, --end, --initial, --verbose."""
         from src.backtest.combined_strategy import main as cli_main
         sys_argv_backup = sys.argv.copy()
         try:
             sys.argv = ['combined_strategy.py', 'backtest', '--start', '2026-01-01',
                         '--end', '2026-02-01', '--initial', '50000']
-            cli_main()
+            with caplog.at_level(logging.INFO, logger="src.backtest.combined_strategy"):
+                cli_main()
         except (SystemExit, ValueError):
             # May exit or raise depending on data availability
             pass
@@ -2203,9 +2205,8 @@ class TestMainCLI:
             pass
         finally:
             sys.argv = sys_argv_backup
-        captured = capsys.readouterr()
-        # The backtest command should at least print something
-        assert len(captured.out) > 0 or len(captured.err) > 0
+        # The backtest command should at least log something
+        assert len(caplog.records) > 0
 
 
 # ---------------------------------------------------------------------------

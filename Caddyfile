@@ -1,0 +1,29 @@
+# Portfolio-Lab Caddyfile
+# Serves the SPA dashboard with API proxy to Python backend
+
+:80 {
+	encode gzip
+
+	# API proxy — route /api/* to the Python pipeline service
+	handle /api/* {
+		reverse_proxy pipeline:8000
+	}
+
+	# Static SPA — serve frontend with client-side routing fallback
+	handle {
+		root * /srv/app
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Data files — serve signals.json and other data
+	handle /data/* {
+		root * /srv
+		file_server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

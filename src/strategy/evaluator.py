@@ -557,7 +557,7 @@ def main():
         logger.info("Mode: %s, Regime: %s, VIX: %.2f", mode, regime, vix)
     else:
         logger.info("Mode: %s, Regime: %s", mode, regime)
-    logger.info("Portfolio value: $%,.2f", portfolio.total_value(prices))
+    logger.info("Portfolio value: $%.2f", portfolio.total_value(prices))
 
     # Check kill switches
     kill_reason = portfolio.check_risk_limits(prices)

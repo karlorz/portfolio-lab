@@ -439,7 +439,7 @@ def main():
             symbol = sys.argv[2] if len(sys.argv) > 2 else "SPY"
             features = pipeline.generate_features(symbol)
             if features:
-                print(json.dumps(vars(features), indent=2, default=str))
+                logger.info(json.dumps(vars(features), indent=2, default=str))
             else:
                 logger.info("No features generated for %s", symbol)
 
@@ -473,7 +473,7 @@ def main():
         # Default: generate for SPY
         features = pipeline.generate_features("SPY")
         if features:
-            print(json.dumps(vars(features), indent=2, default=str))
+            logger.info(json.dumps(vars(features), indent=2, default=str))
 
 
 if __name__ == "__main__":

@@ -511,11 +511,11 @@ def main():
     total = sum(portfolio.values())
     portfolio = {k: v/total for k, v in portfolio.items()}
     
-    print(f"Portfolio-Lab v2.82: 8-Source Ensemble Backtest")
-    print(f"Portfolio: {portfolio}")
-    print(f"Period: {args.start} to {args.end}")
-    print(f"Rebalance: {args.rebalance}")
-    print(f"Initializing SignalIntegrator with 8 sources...")
+    logger.info(f"Portfolio-Lab v2.82: 8-Source Ensemble Backtest")
+    logger.info(f"Portfolio: {portfolio}")
+    logger.info(f"Period: {args.start} to {args.end}")
+    logger.info(f"Rebalance: {args.rebalance}")
+    logger.info(f"Initializing SignalIntegrator with 8 sources...")
     
     engine = EnsembleBacktestEngine()
     
@@ -531,13 +531,13 @@ def main():
         
         if args.output:
             save_results_json(asdict(result), output_path=args.output)
-            print(f"\nResults saved to: {args.output}")
+            logger.info(f"\nResults saved to: {args.output}")
     
     elif args.command == "benchmark":
         # Compare ensemble vs static allocation
-        print("\n" + "="*60)
-        print("ENSEMBLE VS STATIC BENCHMARK")
-        print("="*60)
+        logger.info("\n" + "="*60)
+        logger.info("ENSEMBLE VS STATIC BENCHMARK")
+        logger.info("="*60)
         
         ensemble_result = engine.run_backtest(
             portfolio=portfolio,
@@ -547,7 +547,7 @@ def main():
         )
         
         # Run static (no signal integration)
-        print("\nRunning static allocation comparison...")
+        logger.info("\nRunning static allocation comparison...")
         static_engine = EnsembleBacktestEngine()
         # Override signal generation to return neutral
         static_engine._generate_daily_signals
@@ -563,19 +563,19 @@ def main():
             rebalance_freq="yearly"  # Static rebalances only yearly for drift
         )
         
-        print(f"\nEnsemble (8-source):")
-        print(f"  Sharpe: {ensemble_result.sharpe_ratio:.2f}")
-        print(f"  CAGR:   {ensemble_result.cagr*100:.2f}%")
-        print(f"  MaxDD:  {ensemble_result.max_drawdown*100:.1f}%")
+        logger.info(f"\nEnsemble (8-source):")
+        logger.info(f"  Sharpe: {ensemble_result.sharpe_ratio:.2f}")
+        logger.info(f"  CAGR:   {ensemble_result.cagr*100:.2f}%")
+        logger.info(f"  MaxDD:  {ensemble_result.max_drawdown*100:.1f}%")
 
-        print(f"\nStatic (46/38/16):")
-        print(f"  Sharpe: {static_result.sharpe_ratio:.2f}")
-        print(f"  CAGR:   {static_result.cagr*100:.2f}%")
-        print(f"  MaxDD:  {static_result.max_drawdown*100:.1f}%")
+        logger.info(f"\nStatic (46/38/16):")
+        logger.info(f"  Sharpe: {static_result.sharpe_ratio:.2f}")
+        logger.info(f"  CAGR:   {static_result.cagr*100:.2f}%")
+        logger.info(f"  MaxDD:  {static_result.max_drawdown*100:.1f}%")
         
         improvement = ensemble_result.sharpe_ratio - static_result.sharpe_ratio
-        print(f"\nImprovement: {improvement:+.2f} Sharpe ({improvement/static_result.sharpe_ratio*100:+.1f}%)")
-        print("="*60)
+        logger.info(f"\nImprovement: {improvement:+.2f} Sharpe ({improvement/static_result.sharpe_ratio*100:+.1f}%)")
+        logger.info("="*60)
 
 
 if __name__ == "__main__":

@@ -519,36 +519,36 @@ if __name__ == "__main__":
 
     if args.mode == "summary" or args.summary:
         e = result.extras
-        print(f"\n=== Behavioral Sentiment Backtest Summary ===")
-        print(f"Period: {e['start_date']} → {e['end_date']} ({e['trading_days']} days)")
-        print(f"\nBaseline 46/38/16:")
-        print(f"  CAGR: {e['baseline_cagr']}%  Vol: {e['baseline_vol']}%  "
+        logger.info(f"\n=== Behavioral Sentiment Backtest Summary ===")
+        logger.info(f"Period: {e['start_date']} → {e['end_date']} ({e['trading_days']} days)")
+        logger.info(f"\nBaseline 46/38/16:")
+        logger.info(f"  CAGR: {e['baseline_cagr']}%  Vol: {e['baseline_vol']}%  "
               f"Sharpe: {result.baseline_sharpe}  MaxDD: {e['baseline_max_dd']}%")
-        print(f"  2022: {e['baseline_crisis_2022']}%")
-        print(f"\nBehavioral Overlay:")
-        print(f"  CAGR: {result.cagr}%  Vol: {result.volatility}%  "
+        logger.info(f"  2022: {e['baseline_crisis_2022']}%")
+        logger.info(f"\nBehavioral Overlay:")
+        logger.info(f"  CAGR: {result.cagr}%  Vol: {result.volatility}%  "
               f"Sharpe: {result.sharpe_ratio}  MaxDD: {result.max_drawdown}%")
-        print(f"  2022: {e['overlay_crisis_2022']}%")
-        print(f"\nDelta:")
-        print(f"  Sharpe: {result.sharpe_improvement:+.3f}  "
+        logger.info(f"  2022: {e['overlay_crisis_2022']}%")
+        logger.info(f"\nDelta:")
+        logger.info(f"  Sharpe: {result.sharpe_improvement:+.3f}  "
               f"MaxDD: {e['dd_improvement']:+.1f}pp  "
               f"CAGR: {e['cagr_delta']:+.1f}pp")
-        print(f"\nSignal Quality:")
-        print(f"  Active: {e['signal_days_pct']}% of days  "
+        logger.info(f"\nSignal Quality:")
+        logger.info(f"  Active: {e['signal_days_pct']}% of days  "
               f"Buy: {e['buy_signal_days']}  Sell: {e['sell_signal_days']}  "
               f"Neutral: {e['neutral_days']}")
-        print(f"  Avg equity shift: {e['avg_equity_shift']}%  "
+        logger.info(f"  Avg equity shift: {e['avg_equity_shift']}%  "
               f"False positive rate: {e['false_positive_rate']}%")
-        print(f"  Mean 20d signal return: {e['mean_signal_return_20d']}%")
-        print(f"\nRegime Sharpe (overlay):")
-        print(f"  VIX<15: {e['regime_vix_low_sharpe']}  "
+        logger.info(f"  Mean 20d signal return: {e['mean_signal_return_20d']}%")
+        logger.info(f"\nRegime Sharpe (overlay):")
+        logger.info(f"  VIX<15: {e['regime_vix_low_sharpe']}  "
               f"VIX 15-20: {e['regime_vix_normal_sharpe']}  "
               f"VIX 20-25: {e['regime_vix_elevated_sharpe']}")
-        print(f"  VIX 25-30: {e['regime_vix_high_sharpe']}  "
+        logger.info(f"  VIX 25-30: {e['regime_vix_high_sharpe']}  "
               f"VIX>30: {e['regime_vix_crisis_sharpe']}")
-        print(f"\nTarget: Sharpe delta >= +0.03 → "
+        logger.info(f"\nTarget: Sharpe delta >= +0.03 → "
               f"{'MET' if e['meets_sharpe_target'] else 'NOT MET'}")
 
     if args.output:
         save_results_json(asdict(result), output_path=args.output)
-        print(f"\nResults saved to {args.output}")
+        logger.info(f"\nResults saved to {args.output}")

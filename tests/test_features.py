@@ -956,43 +956,38 @@ class TestMainCLI:
             FeatureStore(data_dir=store_dir),
         )
 
-    def test_default_no_args(self, tmp_path: pytest.TempPathFactory) -> None:  # type: ignore[misc]
+    def test_default_no_args(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """No arguments generates SPY features and prints them."""
         db = tmp_path / "cli_default.db"
         _populate_full_db(str(db), n_days=100)
         pipeline, store = self._pipelines_and_store(str(db), str(tmp_path / "st1"))
-        with patch.object(sys, "argv", ["features.py"]):
-            with patch("src.research.features.FeaturePipeline", return_value=pipeline):
-                with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py"]):
+                with patch("src.research.features.FeaturePipeline", return_value=pipeline):
                     cli_main()
-                    assert mp.called
-                    # Should print JSON containing SPY
-                    calls_text = " ".join(str(c) for c in mp.call_args_list)
-                    assert "SPY" in calls_text
+                    assert "SPY" in caplog.text
 
-    def test_generate_with_symbol(self, tmp_path: pytest.TempPathFactory) -> None:  # type: ignore[misc]
+    def test_generate_with_symbol(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """'generate GLD' prints features for GLD."""
         db = tmp_path / "cli_gen.db"
         _populate_full_db(str(db), n_days=100)
         pipeline, store = self._pipelines_and_store(str(db), str(tmp_path / "st2"))
-        with patch.object(sys, "argv", ["features.py", "generate", "GLD"]):
-            with patch("src.research.features.FeaturePipeline", return_value=pipeline):
-                with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "generate", "GLD"]):
+                with patch("src.research.features.FeaturePipeline", return_value=pipeline):
                     cli_main()
-                    calls_text = " ".join(str(c) for c in mp.call_args_list)
-                    assert "GLD" in calls_text
+                    assert "GLD" in caplog.text
 
-    def test_generate_without_symbol_defaults_to_spy(self, tmp_path: pytest.TempPathFactory) -> None:  # type: ignore[misc]
+    def test_generate_without_symbol_defaults_to_spy(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """'generate' (no symbol) defaults to SPY."""
         db = tmp_path / "cli_gen_default.db"
         _populate_full_db(str(db), n_days=100)
         pipeline, store = self._pipelines_and_store(str(db), str(tmp_path / "st3"))
-        with patch.object(sys, "argv", ["features.py", "generate"]):
-            with patch("src.research.features.FeaturePipeline", return_value=pipeline):
-                with patch("builtins.print") as mp:
+        with caplog.at_level(logging.INFO, logger="src.research.features"):
+            with patch.object(sys, "argv", ["features.py", "generate"]):
+                with patch("src.research.features.FeaturePipeline", return_value=pipeline):
                     cli_main()
-                    calls_text = " ".join(str(c) for c in mp.call_args_list)
-                    assert "SPY" in calls_text
+                    assert "SPY" in caplog.text
 
     def test_generate_no_features_message(self, tmp_path: pytest.TempPathFactory, caplog) -> None:  # type: ignore[misc]
         """Insufficient data prints a 'No features generated' message."""

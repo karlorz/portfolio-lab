@@ -8,6 +8,7 @@ and CLI invocation.
 """
 
 import json
+import logging
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -487,7 +488,7 @@ class TestEdgeCases:
         finally:
             Path(output_path).unlink()
 
-    def test_print_report_does_not_crash(self, capsys):
+    def test_print_report_does_not_crash(self, caplog):
         """print_report should produce output without errors."""
         dates, prices = TestRunBacktest._make_synthetic_prices(n_days=100)
         bt = CrossAssetRVBacktester(
@@ -496,12 +497,12 @@ class TestEdgeCases:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "Cross-Asset Relative Value" in captured.out
-        assert "Sharpe" in captured.out
-        assert "Signal Distribution" in captured.out
-        assert "Diverged Months" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.cross_asset_rv_backtest"):
+            bt.print_report(result)
+        assert "Cross-Asset Relative Value" in caplog.text
+        assert "Sharpe" in caplog.text
+        assert "Signal Distribution" in caplog.text
+        assert "Diverged Months" in caplog.text
 
     def test_load_data_missing_file_logs_error(self, caplog, monkeypatch):
         """load_data should return False when prices.json is missing."""
@@ -607,7 +608,7 @@ class TestBacktesterExtended:
         result = bt.load_data("/nonexistent/path.json")
         assert result is False
 
-    def test_print_report(self, capsys):
+    def test_print_report(self, caplog):
         bt = CrossAssetRVBacktester()
         from src.backtest.metrics import BacktestResult
         result = BacktestResult(
@@ -615,9 +616,9 @@ class TestBacktesterExtended:
             sharpe_ratio=0.79, max_drawdown=-0.25, total_rebalances=10,
             baseline_sharpe=0.72, extras={"scenario": "test"},
         )
-        bt.print_report(result)
-        captured = capsys.readouterr()
-        assert len(captured.out) > 0
+        with caplog.at_level(logging.INFO, logger="src.backtest.cross_asset_rv_backtest"):
+            bt.print_report(result)
+        assert len(caplog.text) > 0
 
     def test_save_results(self, tmp_path):
         bt = CrossAssetRVBacktester()

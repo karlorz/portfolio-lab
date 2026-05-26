@@ -461,7 +461,7 @@ def main():
     backtester = UnifiedOverlayBacktester()
 
     if not backtester.load_data():
-        print("Failed to load price data")
+        logger.info("Failed to load price data")
         sys.exit(1)
 
     result = backtester.run()

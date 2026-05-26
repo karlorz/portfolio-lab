@@ -202,7 +202,7 @@ if __name__ == '__main__':
     gate = SmartRebalanceGate()
 
     if len(sys.argv) > 1 and sys.argv[1] == 'status':
-        print(gate.to_json())
+        logger.info(gate.to_json())
     elif len(sys.argv) > 1 and sys.argv[1] == 'check':
         # Example check
         result = gate.evaluate(

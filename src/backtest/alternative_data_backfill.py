@@ -326,9 +326,9 @@ class AlternativeDataBackfill:
 
 def main():
     """Generate historical backfill for v2.60 Phase 4."""
-    print("=" * 60)
-    print("v2.60 Alternative Data - Phase 4.1 Historical Backfill")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("v2.60 Alternative Data - Phase 4.1 Historical Backfill")
+    logger.info("=" * 60)
     
     backfill = AlternativeDataBackfill(seed=42)
     
@@ -345,14 +345,14 @@ def main():
     metadata_path = str(SIGNALS_DIR / "alternative_data_metadata.json")
     save_results_json(metadata, output_path=str(metadata_path))
     
-    print(f"\nMetadata saved to {metadata_path}")
-    print("\nBackfill Summary:")
-    print(json.dumps(metadata, indent=2))
+    logger.info(f"\nMetadata saved to {metadata_path}")
+    logger.info("\nBackfill Summary:")
+    logger.info(json.dumps(metadata, indent=2))
     
     # Validation report
-    print("\n" + "=" * 60)
-    print("VALIDATION CHECKS")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("VALIDATION CHECKS")
+    logger.info("=" * 60)
     
     checks = [
         ("Total signals >= 2300", len(signals) >= 2300),
@@ -374,16 +374,16 @@ def main():
     all_passed = True
     for check_name, passed in checks:
         status = "✅ PASS" if passed else "❌ FAIL"
-        print(f"  {status}: {check_name}")
+        logger.info(f"  {status}: {check_name}")
         if not passed:
             all_passed = False
     
     if all_passed:
-        print("\n✅ All validation checks passed!")
-        print("\nPhase 4.1 Historical Backfill COMPLETE")
-        print("Next: Phase 4.2 Walk-Forward Testing (scheduled 2026-05-15)")
+        logger.info("\n✅ All validation checks passed!")
+        logger.info("\nPhase 4.1 Historical Backfill COMPLETE")
+        logger.info("Next: Phase 4.2 Walk-Forward Testing (scheduled 2026-05-15)")
     else:
-        print("\n⚠️  Some checks failed - review recommended")
+        logger.error("\n⚠️  Some checks failed - review recommended")
     
     return 0 if all_passed else 1
 

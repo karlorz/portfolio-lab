@@ -209,21 +209,21 @@ class InternationalMomentumBacktester:
 
     def print_report(self, result: BacktestResult):
         ex = result.extras
-        print(f"\n{'='*60}")
-        print(f"International Momentum Signal Backtest")
-        print(f"{'='*60}")
-        print(f"Period: {ex.get('start_date', '?')} to {ex.get('end_date', '?')}")
-        print(f"CAGR: {result.cagr:.2f}%")
-        print(f"Sharpe: {result.sharpe_ratio:.2f}")
-        print(f"Max Drawdown: {result.max_drawdown:.2f}%")
-        print(f"Rebalances: {result.total_rebalances}")
-        print(f"Total Cost: {result.total_transaction_costs:.1f} bps")
-        print(f"\nCrisis Years:")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"International Momentum Signal Backtest")
+        logger.info(f"{'='*60}")
+        logger.info(f"Period: {ex.get('start_date', '?')} to {ex.get('end_date', '?')}")
+        logger.info(f"CAGR: {result.cagr:.2f}%")
+        logger.info(f"Sharpe: {result.sharpe_ratio:.2f}")
+        logger.info(f"Max Drawdown: {result.max_drawdown:.2f}%")
+        logger.info(f"Rebalances: {result.total_rebalances}")
+        logger.info(f"Total Cost: {result.total_transaction_costs:.1f} bps")
+        logger.info(f"\nCrisis Years:")
         for year, ret in sorted((result.crisis_returns or {}).items()):
-            print(f"  {year}: {ret:+.2f}%")
-        print(f"\nSignal Distribution:")
+            logger.info(f"  {year}: {ret:+.2f}%")
+        logger.info(f"\nSignal Distribution:")
         for sig, count in ex.get('signal_distribution', {}).items():
-            print(f"  {sig}: {count}")
+            logger.info(f"  {sig}: {count}")
 
     def save_results(self, result: BacktestResult, output_path: str = None):
         from dataclasses import asdict

@@ -60,7 +60,7 @@
 |- **Centralized logging**: src/utils/log_config.py with configure_logging() using dictConfig — replaces 47 scattered logging.basicConfig() calls; LOG_LEVEL env var override
 |- **TTL computation cache**: src/utils/computation_cache.py — cachetools.TTLCache for realized volatility, correlation matrix, rolling returns (COMPUTATION_CACHE_TTL_SECONDS env var, default 300s); thread-safe with per-cache locks
 |- **TypeScript noImplicitAny**: enabled in tsconfig.json, 75 strict mode errors fixed — Zod v4 z.record() 2-arg, Recharts isAnimationActive typing, 17 panel data interface exports, proper type assertions after Zod validation
-|- **Production print→logging**: all production-path modules migrated (signals/16, strategy/14, monitor/10, broker/5, data/3, rebalancing/2, dashboard/1, chat/1, analytics/1, research/1) — 694 prints replaced; 321 remain in backtest scripts (245) + ML-gated modules (67) + stragglers (9)
+|- **Production print→logging**: all production-path modules migrated (signals/16, strategy/14, monitor/10, broker/5, data/3, rebalancing/2, dashboard/1, chat/1, analytics/1, research/1) — 694 prints replaced; backtest scripts migrated (245 prints in 13 files to logger.info/warning/error); non-ML stragglers (7) converted; remaining: ML-gated modules (57) + CLI help text (14)
 |- **TypeScript strictNullChecks**: enabled in tsconfig.json, 4 nullable expression errors fixed (App.tsx priceData, DurationOverlayPanel YieldCurveData, fetcher.ts adjClose)
 |- **Ruff T201 lint rule**: flake8-print detection configured in pyproject.toml — surfaces print() count for awareness, per-file-ignores for scripts/agents/ml/tests
 |- **Computation cache wired**: multi_speed_momentum, ensemble_voter, and risk_parity_weight_overlay use get_realized_volatility() from computation_cache — shared TTL cache hits within cron cycle
@@ -76,8 +76,11 @@
 |- **Freeze manifest**: src/monitor/freeze_manifest.py — config drift detection via git state + env vars + file hashes; diff_manifests() detects added/removed/modified files and config changes; wired into DashboardGenerator.run() startup
 |- **IC decay monitor**: src/monitor/ic_decay_monitor.py — per-signal Information Coefficient tracking via Spearman rank correlation; rolling IC, IC trend (stable/decaying/improving), status (healthy/warning/critical); save_state/load_state JSON persistence; wired into DashboardGenerator as ic_decay section
 |- **Per-signal walk-forward validation**: src/monitor/signal_walk_forward.py — SignalWalkForwardValidator with expanding-window IC validation; WFE (Walk-Forward Efficiency), mean IS/OOS IC, positive OOS ratio; status classification (validated/weak/unvalidated); wired into DashboardGenerator as signal_wfe section
-|- **Docker deployment**: Dockerfile (multi-stage: Bun frontend + Python runtime), docker-compose.yml (pipeline service with cron + Caddy dashboard), .dockerignore
+|- **Docker deployment**: Dockerfile (multi-stage: Bun frontend + Python runtime + uv cache mount + non-root user + dedicated entrypoint), docker-compose.yml (init:true + stop_grace_period + Caddyfile reverse_proxy), Caddyfile (SPA + API proxy), compose.dev.yaml (Compose Watch), scripts/docker-entrypoint.sh (exec cron -f for signal handling)
 |- **Signal backtest integration tests**: tests/test_signal_backtest_integration.py — 18 end-to-end tests covering snapshot→reading→vote pipeline, regime gating, IC decay + SPC quality monitoring, Pydantic schema validation, cross-signal consistency
+|- **Ensemble voter decomposition Phase 14**: compute_vote() already well-decomposed (~50 lines); extracted _extract_signal_values (static), _apply_basis_pursuit, _apply_regret_weighting, _compute_asset_biases (static), _determine_action (static) from _apply_turnover_validation and _compute_consensus
+|- **Evaluator logger format fix**: logger.info("$%,.2f", val) → logger.info("$%.2f", val) — Python % formatting doesn't support , thousands separator; fixed 6 kill_switch test failures in full suite
+|- **Backtest print→logger bulk migration**: 245 print() calls in 13 backtest files converted to logger.info/warning/error; test_backtest_metrics.py capsys→caplog for 4 tests
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha

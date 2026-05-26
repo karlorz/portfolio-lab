@@ -456,31 +456,31 @@ if __name__ == "__main__":
     )
 
     if args.mode == "summary" or args.summary:
-        print(f"\n=== Stacking Ensemble Backtest ===")
-        print(f"Period: {result.start_date} to {result.end_date} "
+        logger.info(f"\n=== Stacking Ensemble Backtest ===")
+        logger.info(f"Period: {result.start_date} to {result.end_date} "
               f"({result.trading_days} days, {result.mc_trials} MC trials)")
-        print(f"\nBaseline 46/38/16 (no signals):")
-        print(f"  CAGR: {result.baseline_cagr}%  Vol: {result.baseline_vol}%  "
+        logger.info(f"\nBaseline 46/38/16 (no signals):")
+        logger.info(f"  CAGR: {result.baseline_cagr}%  Vol: {result.baseline_vol}%  "
               f"Sharpe: {result.baseline_sharpe}  MaxDD: {result.baseline_max_dd}%")
-        print(f"\nWeighted Voting ({BASELINE_ACCURACY:.0%} accuracy):")
-        print(f"  Sharpe: {result.voting_sharpe_mean:.3f} +/- {result.voting_sharpe_std:.3f}  "
+        logger.info(f"\nWeighted Voting ({BASELINE_ACCURACY:.0%} accuracy):")
+        logger.info(f"  Sharpe: {result.voting_sharpe_mean:.3f} +/- {result.voting_sharpe_std:.3f}  "
               f"CAGR: {result.voting_cagr_mean:.2f}%  MaxDD: {result.voting_max_dd_mean:.1f}%")
-        print(f"  P(Sharpe > baseline): {result.voting_sharpe_gt_baseline_pct:.0f}%")
-        print(f"\nStacking Ensemble ({STACKING_ACCURACY:.0%} accuracy):")
-        print(f"  Sharpe: {result.stacking_sharpe_mean:.3f} +/- {result.stacking_sharpe_std:.3f}  "
+        logger.info(f"  P(Sharpe > baseline): {result.voting_sharpe_gt_baseline_pct:.0f}%")
+        logger.info(f"\nStacking Ensemble ({STACKING_ACCURACY:.0%} accuracy):")
+        logger.info(f"  Sharpe: {result.stacking_sharpe_mean:.3f} +/- {result.stacking_sharpe_std:.3f}  "
               f"CAGR: {result.stacking_cagr_mean:.2f}%  MaxDD: {result.stacking_max_dd_mean:.1f}%")
-        print(f"  P(Sharpe > baseline): {result.stacking_sharpe_gt_baseline_pct:.0f}%")
-        print(f"\nStacking vs Voting Delta:")
-        print(f"  Sharpe: {result.sharpe_delta_mean:+.3f} +/- {result.sharpe_delta_std:.3f}  "
+        logger.info(f"  P(Sharpe > baseline): {result.stacking_sharpe_gt_baseline_pct:.0f}%")
+        logger.info(f"\nStacking vs Voting Delta:")
+        logger.info(f"  Sharpe: {result.sharpe_delta_mean:+.3f} +/- {result.sharpe_delta_std:.3f}  "
               f"CAGR: {result.cagr_delta_mean:+.2f}pp  MaxDD: {result.dd_delta_mean:+.1f}pp")
-        print(f"  t-stat: {result.sharpe_delta_t_stat:.2f}  "
+        logger.info(f"  t-stat: {result.sharpe_delta_t_stat:.2f}  "
               f"Significant: {'YES' if result.sharpe_delta_significant else 'NO'}")
-        print(f"\nTargets:")
-        print(f"  Sharpe delta >= +0.05 -> "
+        logger.info(f"\nTargets:")
+        logger.info(f"  Sharpe delta >= +0.05 -> "
               f"{'MET' if result.meets_sharpe_target else 'NOT MET'}")
-        print(f"  Accuracy >= 76% -> "
+        logger.info(f"  Accuracy >= 76% -> "
               f"{'MET' if result.meets_accuracy_target else 'NOT MET'}")
 
     if args.output:
         save_results_json(result.to_dict(), output_path=args.output)
-        print(f"\nResults saved to {args.output}")
+        logger.info(f"\nResults saved to {args.output}")

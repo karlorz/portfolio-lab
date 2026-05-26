@@ -28,7 +28,7 @@ LABEL description="All-Season Portfolio Lab — signal pipeline + dashboard"
 # System deps
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        curl git build-essential && \
+        curl git build-essential cron && \
     rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -39,7 +39,8 @@ WORKDIR /app
 
 # Python deps — install first for layer caching
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-group ml
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-group ml
 
 # Copy Python source
 COPY src/ src/
@@ -50,17 +51,24 @@ COPY Makefile crontab ./
 COPY --from=frontend /app/dist /app/dist
 COPY --from=frontend /app/public/data /app/public/data
 
-# Create data directories
-RUN mkdir -p /app/data /app/public/data /app/data/signals /app/data/cache
+# Copy entrypoint script
+COPY scripts/docker-entrypoint.sh /app/scripts/docker-entrypoint.sh
+RUN chmod +x /app/scripts/docker-entrypoint.sh
+
+# Create data directories and non-root user
+RUN mkdir -p /app/data /app/public/data /app/data/signals /app/data/cache /app/data/logs && \
+    adduser --disabled-password --gecos "" appuser && \
+    chown -R appuser:appuser /app/data /app/public/data
 
 # Environment defaults
 ENV PORTFOLIO_LAB_ENABLE_ML=0
 ENV CRON_BACKEND=crontab
 ENV PYTHONUNBUFFERED=1
 
-# Health check — verify Python pipeline can import
-HEALTHCHECK --interval=5m --timeout=30s --retries=3 \
-    CMD python -c "from src.dashboard.generator import DashboardGenerator; print('ok')" || exit 1
+# Health check — verify data freshness (signals.json updated within 4h)
+HEALTHCHECK --interval=5m --timeout=30s --retries=3 --start-period=60s \
+    CMD python -c "import os, time; f='data/signals/signals.json'; assert os.path.exists(f) and time.time()-os.path.getmtime(f)<14400, 'stale data'" || exit 1
 
-# Default: run the full cron pipeline once
-CMD ["uv", "run", "make", "all"]
+EXPOSE 8000
+
+ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]

@@ -7,6 +7,7 @@ price data, edge cases (insufficient data, missing symbols), and CLI invocation.
 """
 
 import json
+import logging
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -527,7 +528,7 @@ class TestEdgeCases:
         finally:
             Path(output_path).unlink()
 
-    def test_print_report_does_not_crash(self, capsys):
+    def test_print_report_does_not_crash(self, caplog):
         """print_report should produce output without errors."""
         dates, prices = TestRunBacktest._make_synthetic_prices(n_days=100)
         bt = InternationalMomentumBacktester(
@@ -536,11 +537,11 @@ class TestEdgeCases:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        bt.print_report(result)
-        captured = capsys.readouterr()
-        assert "International Momentum" in captured.out
-        assert "Sharpe" in captured.out
-        assert "Signal Distribution" in captured.out
+        with caplog.at_level(logging.INFO, logger="src.backtest.international_momentum_backtest"):
+            bt.print_report(result)
+        assert "International Momentum" in caplog.text
+        assert "Sharpe" in caplog.text
+        assert "Signal Distribution" in caplog.text
 
     def test_load_data_missing_file_logs_error(self, caplog, monkeypatch):
         """load_data should return False when prices.json is missing."""

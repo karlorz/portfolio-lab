@@ -427,7 +427,7 @@ def main_cli() -> None:
     if args.save and result.get("status") == "ok":
         save_state(result)
 
-    print(json.dumps(result, indent=2, default=str))
+    logger.info(json.dumps(result, indent=2, default=str))
 
 
 if __name__ == "__main__":
