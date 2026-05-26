@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **12880 safe** (12567 Python + 313 TypeScript, 27 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **13169 safe** (12838 Python + 313 TypeScript, 28 skipped, 0 failures, 4 ordering-dependent, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
