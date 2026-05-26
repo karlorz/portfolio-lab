@@ -14,6 +14,7 @@ Usage:
 """
 
 import json
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,8 @@ from typing import Dict, Any, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR
 
@@ -140,11 +143,14 @@ def main():
                         help="Portfolio mode to capture")
     args = parser.parse_args()
 
-    print(f"Daily P&L Capture — {datetime.now().isoformat()}")
+    from src.utils.log_config import configure_logging
+    configure_logging()
+
+    logger.info("Daily P&L Capture — %s", datetime.now().isoformat())
 
     portfolio = load_portfolio(args.mode)
     if not portfolio:
-        print(f"  ERROR: No portfolio_{args.mode}.json found")
+        logger.error("No portfolio_%s.json found", args.mode)
         sys.exit(1)
 
     snapshot = compute_pnl_snapshot(portfolio)
@@ -154,13 +160,10 @@ def main():
 
     save_snapshot(snapshot, append_path, latest_path)
 
-    print(f"  Date:          {snapshot['date']}")
-    print(f"  Total Value:   ${snapshot['total_value']:,.2f}")
-    print(f"  Total P&L:     ${snapshot['total_pnl']:,.2f} ({snapshot['total_pnl_pct']:.2%})")
-    print(f"  Daily Return:  {snapshot['daily_return']:.4%}")
-    print(f"  Drawdown:      {snapshot['drawdown']:.2%}")
-    print(f"  Positions:     {snapshot['positions_count']}")
-    print(f"  Saved to:      {append_path}")
+    logger.info("Date: %s | Value: $%.2f | P&L: $%.2f (%.2f%%) | Daily: %.4f%% | DD: %.2f%% | Positions: %d",
+                snapshot['date'], snapshot['total_value'], snapshot['total_pnl'],
+                snapshot['total_pnl_pct'] * 100, snapshot['daily_return'] * 100,
+                snapshot['drawdown'] * 100, snapshot['positions_count'])
 
 
 if __name__ == "__main__":

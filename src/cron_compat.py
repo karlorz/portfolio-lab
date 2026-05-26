@@ -13,7 +13,7 @@ Hermes and non-Hermes environments.
 """
 
 import os
-from src.paths import LOCK_DIR
+from src.paths import DATA_DIR, LOCK_DIR
 
 BACKEND: str = os.getenv("CRON_BACKEND", "hermes")
 IS_HERMES: bool = BACKEND == "hermes"
@@ -73,7 +73,4 @@ def active_backend() -> str:
 
 def cron_status_path() -> str:
     """Return the path to the cron status file (backend-agnostic)."""
-    from pathlib import Path
-    # Resolve relative to project root regardless of cwd
-    this_dir = Path(__file__).resolve().parent.parent
-    return str(this_dir / "data" / "cron_status.json")
+    return str(DATA_DIR / "cron_status.json")

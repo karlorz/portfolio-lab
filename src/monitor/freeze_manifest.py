@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +153,7 @@ def create_manifest(project_root: Optional[Path] = None) -> Dict[str, Any]:
         Dict with git_state, config_state, file_hashes, timestamp.
     """
     if project_root is None:
-        # Auto-detect: go up from src/paths.py location
-        project_root = Path(__file__).resolve().parent.parent.parent
+        project_root = PROJECT_ROOT
 
     manifest = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

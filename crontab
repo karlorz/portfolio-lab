@@ -49,5 +49,8 @@
 # Performance attribution — hourly at :47
 47 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab attribution >> /root/projects/portfolio-lab/data/attribution.log 2>&1
 
+# Daily P&L capture — every 30 minutes at :17
+17,47 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab daily-pnl >> /root/projects/portfolio-lab/data/daily_pnl.log 2>&1
+
 # GARCH-CVaR risk — hourly at :51
 51 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab garch-risk >> /root/projects/portfolio-lab/data/garch.log 2>&1
