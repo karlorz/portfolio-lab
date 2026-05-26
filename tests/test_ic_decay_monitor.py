@@ -197,6 +197,74 @@ class TestICMonitor:
         assert ic_x > 0  # Positive correlation
         assert ic_y < 0  # Negative correlation
 
+    def test_stage_predictions_stores_state(self):
+        """stage_predictions should store the prediction dict and date."""
+        monitor = ICMonitor()
+        monitor.stage_predictions({"sig_a": 0.5, "sig_b": -0.2}, "2026-05-26")
+        assert monitor.has_staged_predictions()
+        assert monitor.get_staged_date() == "2026-05-26"
+
+    def test_stage_predictions_replaces_previous(self):
+        """Calling stage_predictions twice should replace, not append."""
+        monitor = ICMonitor()
+        monitor.stage_predictions({"sig_a": 0.5}, "2026-05-26")
+        monitor.stage_predictions({"sig_b": -0.2}, "2026-05-27")
+        assert monitor.get_staged_date() == "2026-05-27"
+        n = monitor.resolve_staged(0.02)
+        assert n == 1
+
+    def test_resolve_staged_empty(self):
+        """resolve_staged with nothing staged should return 0."""
+        monitor = ICMonitor()
+        n = monitor.resolve_staged(0.02)
+        assert n == 0
+
+    def test_resolve_staged_records_pairs(self):
+        """resolve_staged should pair each prediction with the forward return."""
+        monitor = ICMonitor(window_size=30)
+        monitor.stage_predictions({"sig_a": 0.8, "sig_b": -0.3}, "2026-05-26")
+        n = monitor.resolve_staged(0.015)
+        assert n == 2
+        assert not monitor.has_staged_predictions()
+        # Each signal should have 1 observation in _data
+        assert "sig_a" in monitor._data
+        assert "sig_b" in monitor._data
+        assert len(monitor._data["sig_a"]) == 1
+        assert len(monitor._data["sig_b"]) == 1
+
+    def test_resolve_staged_skips_none(self):
+        """None/inf/nan prediction values should be skipped, not recorded."""
+        monitor = ICMonitor()
+        monitor.stage_predictions(
+            {"good": 0.5, "bad_none": None, "bad_nan": float("nan"), "bad_inf": float("inf")},
+            "2026-05-26",
+        )
+        n = monitor.resolve_staged(0.02)
+        assert n == 1  # only "good" recorded
+        assert "good" in monitor._data
+        assert "bad_none" not in monitor._data
+
+    def test_has_staged_predictions_empty_dict(self):
+        """has_staged_predictions with empty predictions should return False."""
+        monitor = ICMonitor()
+        monitor._staged = {"date": "2026-05-26", "predictions": {}}
+        assert not monitor.has_staged_predictions()
+
+    def test_staged_survives_save_load_cycle(self, tmp_path):
+        """Staged predictions should persist through save/load."""
+        monitor = ICMonitor()
+        monitor.record("sig_a", 0.1, 0.01)
+        monitor.stage_predictions({"sig_a": 0.5}, "2026-05-26")
+
+        path = tmp_path / "ic_state.json"
+        monitor.save_state(path=path)
+
+        monitor2 = ICMonitor()
+        monitor2.load_state(path=path)
+        assert monitor2.has_staged_predictions()
+        assert monitor2.get_staged_date() == "2026-05-26"
+        assert len(monitor2._data["sig_a"]) == 1
+
 
 class TestICMonitorPersistence:
     """Test save/load state persistence."""

@@ -127,6 +127,9 @@ class ICMonitor:
 
         # Per-signal data: deque of (prediction, actual_return)
         self._data: Dict[str, deque] = {}
+        # Staged predictions waiting for forward-return resolution
+        # Format: {"date": "2026-05-26", "predictions": {"signal_name": value, ...}}
+        self._staged: Optional[Dict] = None
 
     def record(self, signal_name: str, prediction: float, actual_return: float) -> None:
         """Record a signal prediction and the corresponding actual return.
@@ -139,6 +142,53 @@ class ICMonitor:
         if signal_name not in self._data:
             self._data[signal_name] = deque(maxlen=self.window_size)
         self._data[signal_name].append((prediction, actual_return))
+
+    def stage_predictions(self, predictions: Dict[str, float], date_str: str) -> None:
+        """Stage predictions for resolution on the next cron run.
+
+        Predictions are stored with a date. On the next run, resolve_staged()
+        pairs each prediction with the forward return that materialized between
+        the staged date and the current date.
+
+        Args:
+            predictions: Dict mapping signal_name → prediction value.
+            date_str: ISO date string when predictions were made.
+        """
+        self._staged = {"date": date_str, "predictions": dict(predictions)}
+
+    def resolve_staged(self, forward_return: float) -> int:
+        """Resolve previously staged predictions with the actual forward return.
+
+        Pairs each staged prediction with the given forward return and records
+        them via record(), then clears the staged predictions.
+
+        Args:
+            forward_return: The actual return that materialized (e.g., SPY
+                            return between staged date and now).
+
+        Returns:
+            Number of predictions resolved (0 if nothing was staged).
+        """
+        if not self._staged:
+            return 0
+        predictions = self._staged["predictions"]
+        count = 0
+        for signal_name, prediction in predictions.items():
+            if prediction is not None and np.isfinite(prediction):
+                self.record(signal_name, float(prediction), forward_return)
+                count += 1
+        self._staged = None
+        return count
+
+    def has_staged_predictions(self) -> bool:
+        """Check if there are unresolved staged predictions."""
+        return self._staged is not None and len(self._staged.get("predictions", {})) > 0
+
+    def get_staged_date(self) -> Optional[str]:
+        """Return the date of staged predictions, if any."""
+        if self._staged:
+            return self._staged.get("date")
+        return None
 
     def compute_ic(self, signal_name: str) -> Optional[float]:
         """Compute rolling IC for a specific signal.
@@ -236,9 +286,11 @@ class ICMonitor:
         """Save current monitor state to JSON for persistence across runs."""
         if path is None:
             path = IC_STATE_PATH
-        state = {}
+        state: Dict[str, object] = {}
         for signal_name, data in self._data.items():
             state[signal_name] = list(data)
+        if self._staged:
+            state["__staged__"] = self._staged
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(state, f)
@@ -254,10 +306,13 @@ class ICMonitor:
         try:
             with open(path) as f:
                 state = json.load(f)
-            for signal_name, observations in state.items():
-                self._data[signal_name] = deque(maxlen=self.window_size)
-                for pred, actual in observations:
-                    self._data[signal_name].append((pred, actual))
+            for key, observations in state.items():
+                if key == "__staged__":
+                    self._staged = observations
+                else:
+                    self._data[key] = deque(maxlen=self.window_size)
+                    for pred, actual in observations:
+                        self._data[key].append((pred, actual))
             logger.info("IC monitor state loaded: %d signals", len(state))
         except (json.JSONDecodeError, OSError, TypeError) as e:
             logger.warning("Failed to load IC monitor state: %s", e)

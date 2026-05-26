@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13054 safe** (12723 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **13139 safe** (12808 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
@@ -14,7 +14,13 @@
 |- **Regime walk-forward validation**: 10 expanding windows, ARI=1.0 (STABLE — rule-based classifier labels consistent across expanding windows), economic coherence 3/3 (GFC, COVID, RateHike all correctly detected); regime persistence: NORMAL 7.6d, CRISIS 9.9d, LOW_VOL 10.0d, HIGH_VOL 7.1d, RECOVERY 1.4d
 |- **Correlation-adaptive TLT/IEF allocation**: NEUTRAL (Sharpe delta -0.0008) — GLD-TLT has been correlated 99.98% of days since 2006, so dynamic IEF switching never activates. Simpler is better: just keep TLT 20%.
 |- **Volatility targeting overlay**: 9% target vol + 1.5x max leverage lifts Sharpe +0.04 (0.95→0.99) and reduces Max DD from -27% to -20%. 11% target is NEGATIVE (-0.05 Sharpe). Leverage mean 1.19x at 9% target.
+|- **Regime-conditional vol targeting**: +0.052 Sharpe delta (0.95→1.00) — beats fixed 9% target (+0.041). Relative-to-median regime classifier (CRISIS >1.7x median, HIGH_VOL 1.25-1.7x, NORMAL 0.75-1.25x, LOW_VOL <0.75x). Targets: 5%/7%/9%/11%/10%. Regime distribution: 8.3% CRISIS, 15.6% HIGH_VOL, 55.6% NORMAL, 20.3% LOW_VOL. Max DD -20.1%. 18 new tests.
 |- **44/36/20 challenger validation**: Sharpe 0.95 vs champion 0.94, Max DD -25.9% vs -27.6% (improved +1.7%). Validated as challenger — slightly lower CAGR (-0.3%) for better risk profile.
+|- **Walk-forward champion validation**: 15 expanding windows (5yr IS, 1yr OOS), WFE=1.39, mean OOS Sharpe=1.32 vs IS=0.95 — champion ALLOCATION VALIDATED. Beats SPY in 9/15 OOS windows, beats 60/40 in 6/15. 73.3% OOS-positive win rate.
+|- **Champion vs Challenger walk-forward**: head-to-head through same 15 windows — Champion 46/38/16 WFE=1.39 vs Challenger 44/36/20 WFE=1.37 (delta -0.02). Champion beats challenger in 9/15 OOS windows. Both validated; challenger trails by 0.002 OOS Sharpe. Champion remains primary; challenger is defensive alternative.
+|- **IC decay wired**: ICMonitor.stage_predictions() + resolve_staged() two-phase lifecycle — DashboardGenerator._record_ic_data() resolves previous-run predictions with SPY forward returns, stages current biases (ensemble equity/gold/duration/consensus, alternative_data, behavioral_sentiment, factor_rotation, fred_macro) for next run; 7 new staged-prediction tests
+|- **Two-stage k-means wired to dashboard**: TwoStageKMeansRegime integrated into DashboardGenerator as `two_stage_regime` section — Pydantic `TwoStageRegimeSignal` + TypeScript `SignalsData.two_stage_regime` types; graceful fallback when FRED API key unavailable; `_generate_two_stage_regime()` fits on FRED-MD data via FredMdFetcher.get_all_series()
+|- **Numpy-only two-stage k-means regime classifier**: src/regime/fred_md_two_stage_kmeans.py — Oliveira et al. 2025 (arXiv 2503.11499) implemented in pure numpy (no sklearn). Layer 1: L2 k-means (k=2) for crisis/outlier detection. Layer 2: Cosine k-means (k=5) for directional normal regimes. PCA via numpy SVD (95% variance). Soft probability assignments via logarithmic scaling. 6 regimes mapped to 5 portfolio-lab regimes. 21 tests.
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
 |- **Overlay data pipeline**: overlay_dashboard data merged into signals.json — 9 panels now render with real data
 |- **Graduation checklist v2**: 12 criteria (added regime_coverage, signal_diversity, sharpe_ci_lower)

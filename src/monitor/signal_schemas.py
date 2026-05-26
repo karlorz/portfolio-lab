@@ -129,6 +129,26 @@ class FredMacroSignal(BaseModel):
     timestamp: str = ""
 
 
+class TwoStageRegimeSignal(BaseModel):
+    """Validates the ``two_stage_regime`` section of signals.json.
+
+    Two-stage k-means macro regime classifier (Oliveira et al. 2025).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    regime: str = "UNKNOWN"
+    confidence: float = 0.0
+    crisis_probability: float = 0.0
+    probabilities: Dict[str, float] = Field(default_factory=dict)
+    n_pca_components: int = 0
+    variance_retained: float = 0.0
+    n_observations: int = 0
+    n_series: int = 0
+    method: str = "oliveira_2025_two_stage_kmeans"
+    timestamp: str = ""
+
+
 # ─────────────────────────────────────────────────────────────
 #  Signal model registry
 # ─────────────────────────────────────────────────────────────
@@ -184,6 +204,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "yield_curve": YieldCurveSignal,
     "signal_snapshot": SignalSnapshotSchema,
     "fred_macro": FredMacroSignal,
+    "two_stage_regime": TwoStageRegimeSignal,
     "ic_decay": IcDecaySignal,
     "signal_wfe": SignalWfeSignal,
     "ramp": RampSignal,

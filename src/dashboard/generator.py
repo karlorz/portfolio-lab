@@ -193,6 +193,158 @@ class DashboardGenerator:
 
         return result
 
+    def _record_ic_data(self, output: Dict) -> None:
+        """Record signal predictions for IC decay monitoring.
+
+        Two-phase lifecycle:
+        1. Resolve: pair previously staged predictions with the forward
+           return that materialized since they were staged.
+        2. Stage: store current predictions for resolution next run.
+
+        Uses SPY return as the forward return for all signals (SPY is the
+        primary portfolio driver). Saves monitor state to disk so IC data
+        survives across cron runs.
+        """
+        try:
+            from src.monitor.ic_decay_monitor import ICMonitor
+
+            monitor = ICMonitor()
+            monitor.load_state()
+
+            # Phase 1: Resolve previously staged predictions
+            if monitor.has_staged_predictions():
+                staged_date = monitor.get_staged_date()
+                if staged_date:
+                    # Compute SPY forward return from staged date to latest
+                    cursor = self.conn.cursor()
+                    cursor.execute(
+                        "SELECT date, close FROM prices WHERE symbol = 'SPY' "
+                        "AND date >= ? ORDER BY date ASC LIMIT 1",
+                        (staged_date,),
+                    )
+                    start_row = cursor.fetchone()
+                    cursor.execute(
+                        "SELECT date, close FROM prices WHERE symbol = 'SPY' "
+                        "ORDER BY date DESC LIMIT 1",
+                    )
+                    end_row = cursor.fetchone()
+                    if start_row and end_row and start_row[0] != end_row[0]:
+                        start_price = float(start_row[1])
+                        end_price = float(end_row[1])
+                        if start_price > 0:
+                            forward_return = (end_price / start_price) - 1.0
+                            n_resolved = monitor.resolve_staged(forward_return)
+                            logger.info(
+                                "IC decay: resolved %d staged predictions "
+                                "(%s → %s, forward return=%.4f%%)",
+                                n_resolved, staged_date, end_row[0],
+                                forward_return * 100,
+                            )
+
+            # Phase 2: Stage current predictions for next run
+            predictions: Dict[str, float] = {}
+
+            # Ensemble voter biases
+            ensemble = output.get("ensemble_voting")
+            if isinstance(ensemble, dict):
+                if "equity_bias" in ensemble and ensemble["equity_bias"] is not None:
+                    predictions["ensemble_equity"] = float(ensemble["equity_bias"])
+                if "gold_bias" in ensemble and ensemble["gold_bias"] is not None:
+                    predictions["ensemble_gold"] = float(ensemble["gold_bias"])
+                if "duration_bias" in ensemble and ensemble["duration_bias"] is not None:
+                    predictions["ensemble_duration"] = float(ensemble["duration_bias"])
+                if "weighted_consensus" in ensemble and ensemble["weighted_consensus"] is not None:
+                    predictions["ensemble_consensus"] = float(ensemble["weighted_consensus"])
+
+            # Alternative data composite score
+            alt = output.get("alternative_data")
+            if isinstance(alt, dict) and alt.get("composite_score") is not None:
+                predictions["alternative_data"] = float(alt["composite_score"])
+
+            # Behavioral sentiment composite
+            beh = output.get("behavioral_sentiment")
+            if isinstance(beh, dict) and beh.get("composite_score") is not None:
+                predictions["behavioral_sentiment"] = float(beh["composite_score"])
+
+            # Factor rotation signal strength
+            fr = output.get("factor_rotation")
+            if isinstance(fr, dict) and fr.get("signal_strength") is not None:
+                predictions["factor_rotation"] = float(fr["signal_strength"])
+
+            # FRED-MD macro confidence
+            fred = output.get("fred_macro")
+            if isinstance(fred, dict) and fred.get("confidence") is not None:
+                predictions["fred_macro"] = float(fred["confidence"])
+
+            if predictions:
+                monitor.stage_predictions(
+                    predictions,
+                    datetime.now().strftime("%Y-%m-%d"),
+                )
+
+            monitor.save_state()
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("ic_decay_record", e)
+
+    def _generate_two_stage_regime(self) -> Optional[Dict]:
+        """Generate two-stage k-means macro regime signal.
+
+        Uses Oliveira et al. 2025 two-layer k-means (L2 crisis detection +
+        cosine directional clustering) on FRED-MD data. Falls back gracefully
+        if FRED-MD data or fredapi is not available.
+
+        Returns:
+            Dict with regime, confidence, probabilities, or None if unavailable.
+        """
+        try:
+            from src.regime.fred_md_two_stage_kmeans import TwoStageKMeansRegime
+            from src.data.fred_data import FredMdFetcher
+        except ImportError:
+            return None
+
+        # Try to load FRED-MD data via the existing pipeline
+        try:
+            fetcher = FredMdFetcher()
+            df = fetcher.get_all_series(cache_ok=True)
+        except (ValueError, ImportError) as e:
+            logger.info("FRED-MD data not available for two-stage k-means: %s", e)
+            return None
+
+        if df is None or df.empty or len(df.columns) < 10:
+            logger.info("Insufficient FRED-MD series for two-stage k-means")
+            return None
+
+        # Build data matrix: rows=dates, cols=series
+        # Forward-fill missing values, drop rows with too many NaNs
+        df_filled = df.ffill().dropna(thresh=max(10, len(df.columns) // 2))
+        if len(df_filled) < 24:
+            logger.info("Too few FRED-MD observations for two-stage k-means")
+            return None
+
+        # Standardize: z-score each series
+        X_raw = df_filled.values.astype(np.float64)
+        X_std = (X_raw - np.nanmean(X_raw, axis=0)) / np.nanstd(X_raw, axis=0)
+        X = np.nan_to_num(X_std, nan=0.0)
+
+        # Fit two-stage k-means
+        classifier = TwoStageKMeansRegime(random_state=42, max_pca_components=15)
+        classifier.fit(X)
+
+        signal = classifier.get_signal(latest_index=-1)
+
+        return {
+            "regime": signal["regime"],
+            "confidence": signal["confidence"],
+            "crisis_probability": signal.get("crisis_probability", 0.0),
+            "probabilities": signal.get("probabilities", {}),
+            "n_pca_components": signal.get("n_pca_components", 0),
+            "variance_retained": signal.get("variance_retained", 0.0),
+            "n_observations": len(df_filled),
+            "n_series": len(df_filled.columns),
+            "method": "oliveira_2025_two_stage_kmeans",
+            "timestamp": datetime.now().isoformat(),
+        }
+
     def generate_signals_json(self) -> Path:
         """Generate current signals and allocations."""
         cursor = self.conn.cursor()
@@ -664,6 +816,21 @@ class DashboardGenerator:
                 "error": str(e),
             }
 
+        # Two-stage k-means macro regime classifier (Oliveira et al. 2025)
+        try:
+            two_stage_signal = self._generate_two_stage_regime()
+            if two_stage_signal:
+                output["two_stage_regime"] = validate_signal(
+                    "two_stage_regime", two_stage_signal,
+                )
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("two_stage_regime", e)
+            output["two_stage_regime"] = {
+                "regime": "UNKNOWN",
+                "confidence": 0.0,
+                "error": str(e),
+            }
+
         # Health check report
         try:
             from src.monitor.health_check import run_health_check
@@ -680,6 +847,9 @@ class DashboardGenerator:
 
         # SPC signal quality monitoring
         output["spc"] = self._run_spc_monitor(output)
+
+        # IC decay data recording — resolve staged predictions + stage new ones
+        self._record_ic_data(output)
 
         # IC decay monitoring (signal predictive quality tracking)
         try:

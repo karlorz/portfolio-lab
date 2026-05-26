@@ -125,6 +125,19 @@ export interface SignalsData {
     indicators: Record<string, number>;
     timestamp: string;
   };
+  // Two-stage k-means macro regime classifier (Oliveira et al. 2025)
+  two_stage_regime?: {
+    regime: string;
+    confidence: number;
+    crisis_probability: number;
+    probabilities: Record<string, number>;
+    n_pca_components: number;
+    variance_retained: number;
+    n_observations: number;
+    n_series: number;
+    method: string;
+    timestamp: string;
+  };
   // IC decay monitoring for signal quality tracking
   ic_decay?: {
     signals?: Record<string, {
