@@ -6,12 +6,15 @@ functions that were previously copy-pasted across 11+ backtest files.
 """
 
 import json
+import logging
 import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.paths import BASE_ALLOCATION
+
+logger = logging.getLogger(__name__)
 from src.costs.etf_cost_table import ETF_COST_BPS as _ETF_COST_BPS
 
 
@@ -374,8 +377,12 @@ def save_results_json(data: dict, output_path: str = None, default_dir: Path = N
         return
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2, default=_json_serializer)
+    try:
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2, default=_json_serializer)
+    except (OSError, TypeError) as e:
+        logger.error("Failed to save results to %s: %s", path, e)
+        raise
 
 
 def _json_serializer(obj):
