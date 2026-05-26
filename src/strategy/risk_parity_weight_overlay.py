@@ -33,6 +33,7 @@ from dataclasses import dataclass, asdict
 from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
 from src.data.price_cache import get_prices, get_prices_df
+from src.utils.computation_cache import get_realized_volatility
 
 
 __all__ = ['VOL_LOOKBACK', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'DEFAULT_BASE', 'RPWeightOverlay', 'RiskParityWeightOverlay', 'RPBacktester']
@@ -112,12 +113,7 @@ class RiskParityWeightOverlay:
             return None
         
         recent_prices = prices.iloc[-self.vol_lookback:]
-        returns = recent_prices.pct_change().dropna()
-        
-        if len(returns) < 20:
-            return None
-        
-        return float(returns.std() * np.sqrt(252))
+        return get_realized_volatility(recent_prices, window=self.vol_lookback)
     
     def calculate_rp_overlay(
         self,
