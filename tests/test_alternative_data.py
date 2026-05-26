@@ -1900,6 +1900,7 @@ class TestSupplyChainScoreMappingBranches:
         uses data[:days] for recent and data[days:90] for historical.
         Values are slightly jittered so within-group stddev > 0."""
         import random
+        random.seed(42)
         data = []
         # Recent entries first (used as data[:days] in calculate_signal)
         for i in range(recent_count):
