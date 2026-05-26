@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **12539 safe** (12266 Python + 272 TypeScript, 27 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
+| - Test count: **12580 safe** (12267 Python + 313 TypeScript, 28 skipped, 0 failures, 42 BL mapper tests gated behind pypfopt)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **GARCH-CVaR EWMA fallback**: 3-tier chain (GARCH → EWMA → historical) fixes zero-output bug for paper trading with few daily returns
@@ -35,7 +35,9 @@
 |- **Broker error handling**: alpaca.py submit_order() returns None on failure, get_orders() returns [] on failure
 |- **Circuit breaker (pybreaker)**: src/broker/circuit_breaker.py — 3-state (closed/open/half-open) wrapping alpaca.py submit_order() and get_positions(), fail_max=3, reset_timeout=60, state-change logging, BROKER_CIRCUIT_FAIL_MAX/RESET_TIMEOUT env vars, get_circuit_state() for dashboard integration
 |- **Pydantic signal validation**: src/monitor/signal_schemas.py — Pydantic v2 models for regime, yield_curve, ensemble_voting, garch_cvar, smart_rebalance; validate_signal() at generator.py output boundaries; graceful degradation (returns original data on ValidationError)
-|- **Zod fetch validation**: src/schemas/signals.ts — Zod safeParse() at LiveDashboard fetch boundary; 15+ typed signal schemas; validateSignalsData() with graceful fallback to raw data on parse failure
+|- **Zod fetch validation**: src/schemas/signals.ts — Zod safeParse() at all 15 LiveDashboard fetch boundaries; 15+ typed signal schemas; validateFetchData<T>() generic + validateSignalsData() with graceful fallback
+|- **Ensemble weight externalization**: REGIME_WEIGHTS loaded from data/ensemble_weights.json (ENSEMBLE_WEIGHTS_FILE env var override); hardcoded fallback when file missing
+|- **Pydantic validator in save_results_json**: validator= callback parameter for pre-serialization validation; validate_all_signals() wired into DashboardGenerator
 |- **SPC state persistence**: spc_monitor.py save_state/load_state — JSON serialization to DATA_DIR/spc_state.json, wired into DashboardGenerator
 |- **VPIN query cache**: vpin_bvc.py TTLCache(maxsize=64, ttl=300s) for SQLite OHLCV queries
 |- **Lazy SQLite connections**: ResearchAgent/WikiSync use lazy property with setter + close() + try/finally, generator.py close() narrows except
