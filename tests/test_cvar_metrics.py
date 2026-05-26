@@ -580,8 +580,8 @@ class TestCalculateCvarEmptyTail:
 class TestCLIHistoryFlag:
     """Test main() with --history flag."""
 
-    def test_history_displays_entry_count(self):
-        """--history prints entry count and column headers."""
+    def test_history_displays_entry_count(self, caplog):
+        """--history logs entry count."""
         test_data = [
             {"timestamp": "2026-05-14T00:00:00", "var_95": -2.5,
              "cvar_95": -3.8, "cvar_ratio": 1.52},
@@ -592,12 +592,11 @@ class TestCLIHistoryFlag:
                    return_value=test_data):
             with patch('sys.argv',
                        ['cvar_metrics', '--history']):
-                with patch('builtins.print') as mock_print:
+                with caplog.at_level(logging.INFO, logger="src.monitor.cvar_metrics"):
                     main()
-                    mock_print.assert_any_call(
-                        '\nHistorical CVaR Data (2 entries):')
+        assert "2 entries" in caplog.text
 
-    def test_history_shows_last_30_only(self):
+    def test_history_shows_last_30_only(self, caplog):
         """--history limits display to last 30 entries."""
         test_data = [{"timestamp": f"2026-05-{d:02d}T00:00:00",
                        "var_95": -2.0, "cvar_95": -3.0,
@@ -606,22 +605,19 @@ class TestCLIHistoryFlag:
                    return_value=test_data):
             with patch('sys.argv',
                        ['cvar_metrics', '--history']):
-                with patch('builtins.print') as mock_print:
+                with caplog.at_level(logging.INFO, logger="src.monitor.cvar_metrics"):
                     main()
-                    # Should display count as 50 (total), but only prints last 30
-                    mock_print.assert_any_call(
-                        '\nHistorical CVaR Data (50 entries):')
+        assert "50 entries" in caplog.text
 
-    def test_history_empty(self):
+    def test_history_empty(self, caplog):
         """--history with no entries shows zero count."""
         with patch('src.monitor.cvar_metrics.load_history',
                    return_value=[]):
             with patch('sys.argv',
                        ['cvar_metrics', '--history']):
-                with patch('builtins.print') as mock_print:
+                with caplog.at_level(logging.INFO, logger="src.monitor.cvar_metrics"):
                     main()
-                    mock_print.assert_any_call(
-                        '\nHistorical CVaR Data (0 entries):')
+        assert "0 entries" in caplog.text
 
     def test_history_returns_early_no_display(self):
         """--history returns before computing metrics."""

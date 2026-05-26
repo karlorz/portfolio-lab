@@ -16,7 +16,7 @@ Usage:
 
     decomposer = RiskDecomposer(window=60)
     result = decomposer.decompose(weights={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16})
-    print(result.to_dict())
+    logger.info("Risk decomposition: %s", result.to_dict())
 
 CLI:
     python -m src.monitor.risk_decomposition decompose --weights 46/38/16
@@ -773,29 +773,24 @@ def main():
             result = decompose_portfolio(weights=weights, window=args.window)
 
             if args.json:
-                print(json.dumps(result.to_dict(), indent=2, default=str))
+                logger.info("Risk decomposition: %s", json.dumps(result.to_dict(), indent=2, default=str))
             else:
-                print(result.summary_string())
+                logger.info(result.summary_string())
 
         elif args.command == "check":
             decomposer = RiskDecomposer(window=args.window)
-            print(decomposer.check_asset_factor_exposure(args.symbol.upper()))
+            logger.info(decomposer.check_asset_factor_exposure(args.symbol.upper()))
 
         elif args.command == "factors":
             decomposer = RiskDecomposer()
             corr = decomposer.get_factor_correlations()
-            print("Factor Correlation Matrix:\n")
+            logger.info("Factor Correlation Matrix:")
             factors = list(corr)
-            # Header
-            print(f"{'':20s}", end="")
-            for f in factors:
-                print(f"{f:15s}", end="")
-            print()
+            header = f"{'':20s}" + "".join(f"{f:15s}" for f in factors)
+            logger.info(header)
             for f1 in factors:
-                print(f"{f1:20s}", end="")
-                for f2 in factors:
-                    print(f"{corr[f1][f2]:+8.4f}    ", end="")
-                print()
+                row = f"{f1:20s}" + "".join(f"{corr[f1][f2]:+8.4f}    " for f2 in factors)
+                logger.info(row)
 
         else:
             parser.print_help()

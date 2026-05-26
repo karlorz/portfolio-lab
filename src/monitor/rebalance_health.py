@@ -161,11 +161,12 @@ def main():
     public_dir.mkdir(parents=True, exist_ok=True)
     save_results_json(data, output_path=str(public_dir / "rebalance_health.json"))
 
-    print(f"Rebalance health data exported to {OUTPUT_PATH}")
-    print(f"  Executions: {data['total_executions']}")
-    print(f"  Next rebalance: {data['next_rebalance']['date']} "
-          f"({data['next_rebalance']['days_until']} days)")
-    print(f"  Compliance: {data['schedule_compliance']['compliance_pct']}%")
+    logger.info("Rebalance health data exported to %s", OUTPUT_PATH)
+    logger.info("  Executions: %d", data['total_executions'])
+    logger.info("  Next rebalance: %s (%d days)",
+                data['next_rebalance']['date'],
+                data['next_rebalance']['days_until'])
+    logger.info("  Compliance: %s%%", data['schedule_compliance']['compliance_pct'])
 
 
 if __name__ == "__main__":

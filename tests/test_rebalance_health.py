@@ -1,6 +1,7 @@
 """Tests for src/monitor/rebalance_health.py — Rebalance Health Data Exporter."""
 
 import json
+import logging
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -814,9 +815,9 @@ class TestMain:
         assert data_content == public_content
 
     def test_main_output_format(
-        self, tmp_path, capsys
+        self, tmp_path, caplog
     ):
-        """main() should print expected summary lines."""
+        """main() should log expected summary lines."""
         import src.monitor.rebalance_health as rh
         data_dir = tmp_path / "data"
         public_dir = tmp_path / "public"
@@ -833,14 +834,14 @@ class TestMain:
             patch.object(rh, 'PUBLIC_DATA_DIR', public_dir),
             patch.object(rh, 'OUTPUT_PATH', output_path),
             patch.object(rh, 'ORDERS_DIR', orders_dir),
+            caplog.at_level(logging.INFO, logger="src.monitor.rebalance_health"),
         ):
             rh.main()
 
-        captured = capsys.readouterr()
-        assert "Rebalance health data exported" in captured.out
-        assert "Executions:" in captured.out
-        assert "Next rebalance:" in captured.out
-        assert "Compliance:" in captured.out
+        assert "Rebalance health data exported" in caplog.text
+        assert "Executions" in caplog.text
+        assert "Next rebalance" in caplog.text
+        assert "Compliance" in caplog.text
 
     def test_main_with_no_orders(self, tmp_path):
         """main() should handle empty ORDERS_DIR gracefully."""

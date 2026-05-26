@@ -469,6 +469,16 @@ class DashboardGenerator:
         # Load broker data (Phase 4: live trading prep)
         broker_data = self._load_broker_data()
 
+        # Portfolio drift alerting
+        try:
+            from src.monitor.alerting import check_drift_and_alert
+            drift_info = broker_data.get("drift", {})
+            max_drift = drift_info.get("max_drift_pct", 0.0) if isinstance(drift_info, dict) else 0.0
+            if max_drift:
+                check_drift_and_alert(max_drift)
+        except (ImportError, ValueError, OSError, RuntimeError) as e:
+            _log_signal_error("drift_alerting", e)
+
         # Add GARCH-CVaR metrics (v3.21)
         garch_cvar_data = self._load_garch_cvar_data()
 

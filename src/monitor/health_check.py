@@ -146,7 +146,7 @@ def main():
     from src.utils.log_config import configure_logging
     configure_logging()
     report = run_health_check()
-    print(json.dumps(report, indent=2))
+    logger.info("Health check: %s", json.dumps(report, indent=2))
     return 0 if report["status"] == "ok" else 1
 
 

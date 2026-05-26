@@ -654,11 +654,11 @@ def main():
         if report:
             print_report(report)
         else:
-            print("No saved reports found. Run 'report' first.")
+            logger.warning("No saved reports found. Run 'report' first.")
 
     elif args.command == "patch":
         patch_save_vote()
-        print("EnsembleVoter patched. Run ensemble_voter vote to populate source_readings.")
+        logger.info("EnsembleVoter patched. Run ensemble_voter vote to populate source_readings.")
 
     else:
         parser.print_help()

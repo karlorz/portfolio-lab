@@ -266,25 +266,23 @@ def main():
     
     if args.history:
         history = load_history()
-        print(f"\nHistorical CVaR Data ({len(history)} entries):")
-        print("-" * 70)
+        logger.info("Historical CVaR Data (%d entries):", len(history))
         for entry in history[-30:]:  # Show last 30
             ts = entry.get('timestamp', 'N/A')[:10]
-            print(f"{ts} | VaR: {entry['var_95']:>6.2f}% | CVaR: {entry['cvar_95']:>6.2f}% | Ratio: {entry['cvar_ratio']:.2f}x")
+            logger.info("%s | VaR: %6.2f%% | CVaR: %6.2f%% | Ratio: %.2fx",
+                        ts, entry['var_95'], entry['cvar_95'], entry['cvar_ratio'])
         return
-    
+
     # Compute metrics
     metrics = compute_cvar_metrics(args.window)
-    
+
     # Display
     display_metrics(metrics)
-    
+
     # Export if requested
     if args.export:
         export_metrics(metrics)
-        print(f"\n✓ Exported to:")
-        print(f"  - {RISK_METRICS_PATH}")
-        print(f"  - {RISK_HISTORY_PATH}")
+        logger.info("Exported to: %s, %s", RISK_METRICS_PATH, RISK_HISTORY_PATH)
 
 
 if __name__ == "__main__":
