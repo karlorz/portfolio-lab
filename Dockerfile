@@ -65,9 +65,9 @@ ENV PORTFOLIO_LAB_ENABLE_ML=0
 ENV CRON_BACKEND=crontab
 ENV PYTHONUNBUFFERED=1
 
-# Health check — verify data freshness (signals.json updated within 4h)
+# Health check — verify cron is running AND data freshness (signals.json updated within 4h)
 HEALTHCHECK --interval=5m --timeout=30s --retries=3 --start-period=60s \
-    CMD python -c "import os, time; f='data/signals/signals.json'; assert os.path.exists(f) and time.time()-os.path.getmtime(f)<14400, 'stale data'" || exit 1
+    CMD pgrep -x cron > /dev/null && python -c "import os, time; f='data/signals/signals.json'; assert os.path.exists(f) and time.time()-os.path.getmtime(f)<14400, 'stale data'" || exit 1
 
 EXPOSE 8000
 

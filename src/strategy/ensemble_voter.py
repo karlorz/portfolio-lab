@@ -854,9 +854,11 @@ class EnsembleVoter:
         2. _apply_regime_gating — zero out signals net-negative in this regime
         3. _apply_adaptive_weights — attribution-based weight adjustment
         4. _apply_health_weights — reduce weight for poor health scores
-        5. _apply_turnover_validation — turnover + basis-pursuit + regret-weighted
-        6. _compute_consensus — weighted consensus, agreement, asset biases, action
-        7. _persist_vote — save vote and persist regret state
+        5. _apply_utility_reweighting — boost/reduce by profitability (Sharpe contribution + hit rate)
+        6. _apply_exploration_noise — epsilon-greedy Dirichlet exploration for weight discovery
+        7. _apply_turnover_validation — turnover + basis-pursuit + regret-weighted
+        8. _compute_consensus — weighted consensus, agreement, asset biases, action
+        9. _persist_vote — save vote and persist regret state
         """
         readings, regime, regime_confidence = self._resolve_inputs(
             readings, regime, regime_confidence
@@ -866,6 +868,8 @@ class EnsembleVoter:
         weights = self._apply_regime_gating(weights, regime.name)
         weights = self._apply_adaptive_weights(weights, regime)
         weights = self._apply_health_weights(weights)
+        weights = self._apply_utility_reweighting(weights, regime)
+        weights = self._apply_exploration_noise(weights, regime)
         weights = self._apply_turnover_validation(weights, readings, regime)
 
         # Apply weights to readings
@@ -1011,6 +1015,122 @@ class EnsembleVoter:
         except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Could not apply health-adjusted weights: %s", e)
         return weights
+
+    def _apply_utility_reweighting(self, weights: Dict, regime: Regime) -> Dict:
+        """Apply utility-based reweighting from signal profitability data.
+
+        Boosts weights for signals with positive Sharpe contribution from
+        attribution data, reduces weights for negative contributors.
+        This is complementary to health-based adjustment: health measures
+        signal reliability (IC, consistency), utility measures profitability.
+
+        The adjustment is conservative: max ±30% weight change, and only
+        applied when attribution has enough observations (>=20 readings).
+        """
+        try:
+            attribution_dir = ATTRIBUTION_DIR
+            attribution_files = sorted(attribution_dir.glob("attribution_*.json"), reverse=True)
+
+            if not attribution_files:
+                return weights
+
+            with open(attribution_files[0]) as f:
+                attribution_data = json.load(f)
+
+            # Check freshness
+            attr_timestamp = attribution_data.get("timestamp", "")
+            if attr_timestamp:
+                attr_date = attr_timestamp[:10]
+                days_stale = (datetime.now() - datetime.strptime(attr_date, "%Y-%m-%d")).days
+            else:
+                days_stale = 999
+
+            if days_stale > 7:
+                return weights
+
+            sources = attribution_data.get("sources", {})
+            if not sources:
+                return weights
+
+            adjusted = {}
+            for source_enum, base_weight in weights.items():
+                source_str = source_enum.value
+                source_data = sources.get(source_str, {})
+
+                # Need enough observations for meaningful Sharpe
+                total_readings = source_data.get("total_readings", 0)
+                if total_readings < 20:
+                    adjusted[source_enum] = base_weight
+                    continue
+
+                sharpe_contrib = source_data.get("sharpe_contribution", 0.0)
+                hit_rate = source_data.get("hit_rate", 0.0)
+
+                # Utility score: blend Sharpe contribution (primary) and hit rate (secondary)
+                # Sharpe contribution is in annualized units; normalize to [-1, 1] range
+                sharpe_signal = np.clip(sharpe_contrib / 2.0, -1.0, 1.0)  # ±2 Sharpe = full signal
+                hit_signal = (hit_rate - 0.5) * 2.0 if hit_rate > 0 else 0.0  # 50% hit rate = neutral
+
+                # Weighted blend: 70% Sharpe, 30% hit rate
+                utility_score = 0.7 * sharpe_signal + 0.3 * hit_signal
+
+                # Conservative adjustment: max ±30% weight change
+                # Positive utility → boost, negative → reduce
+                adjustment = 1.0 + np.clip(utility_score * 0.3, -0.3, 0.3)
+                adjusted[source_enum] = base_weight * adjustment
+
+                if abs(utility_score) > 0.1:
+                    logger.info("Utility-reweighted %s: %.2f%% → %.2f%% (utility=%.3f, sharpe_contrib=%.3f, hit_rate=%.2f)",
+                                source_str, base_weight * 100, adjusted[source_enum] * 100,
+                                utility_score, sharpe_contrib, hit_rate)
+
+            # Renormalize
+            total = sum(adjusted.values())
+            if total > 0:
+                adjusted = {k: v / total for k, v in adjusted.items()}
+
+            return adjusted
+
+        except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
+            logger.warning("Could not apply utility-based reweighting: %s", e)
+        return weights
+
+    def _apply_exploration_noise(self, weights: Dict, regime: Regime) -> Dict:
+        """Apply epsilon-greedy exploration noise to weight allocation.
+
+        With probability exploration_epsilon, draws weights from a Dirichlet
+        distribution centered on current weights. This allows the system to
+        discover better weight configurations that might otherwise go untested,
+        without risking large deviations from the baseline allocation.
+
+        Dirichlet concentration alpha controls how close the samples stay
+        to the mean — higher alpha = closer to current weights.
+        """
+        epsilon = float(os.environ.get("ENSEMBLE_EXPLORATION_EPSILON", "0.05"))
+        if random.random() >= epsilon:
+            return weights
+
+        # Dirichlet concentration parameter — higher = closer to current weights
+        # alpha=10 means samples typically stay within ±10% of current weights
+        alpha_base = float(os.environ.get("ENSEMBLE_EXPLORATION_ALPHA", "10.0"))
+
+        weight_values = [weights[k] for k in weights]
+        n = len(weight_values)
+        if n < 2:
+            return weights
+
+        # Dirichlet alpha: concentration * current weight for each component
+        alpha = [max(0.1, alpha_base * w) for w in weight_values]
+
+        # Sample from Dirichlet
+        try:
+            sampled = np.random.dirichlet(alpha)
+            result = {k: float(sampled[i]) for i, k in enumerate(weights)}
+            logger.info("Exploration noise applied: epsilon=%.2f, regime=%s", epsilon, regime.value)
+            return result
+        except (ValueError, FloatingPointError) as e:
+            logger.warning("Exploration noise failed: %s", e)
+            return weights
 
     @staticmethod
     def _extract_signal_values(readings: Dict) -> Dict[str, float]:

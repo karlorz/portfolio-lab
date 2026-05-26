@@ -3,6 +3,7 @@
 Tests for ensemble voter — enums, data classes, regime weights,
 regime detection, vote computation, allocation recommendation.
 """
+import json
 import logging
 
 import numpy as np
@@ -3610,4 +3611,149 @@ class TestThompsonSamplingBandit:
 
         good_count = sum(1 for _ in range(200) if bw.select('NORMAL') == 'good')
         assert good_count > 180, f"Expected good >90%, got {good_count/200:.1%}"
+
+
+# ===========================================================================
+# Category 6: Utility-Based Reweighting Tests
+# ===========================================================================
+
+class TestUtilityReweighting:
+    """Tests for utility-based ensemble reweighting (profitability proxy)."""
+
+    def _make_voter_with_attribution(self, tmp_path, sources_data):
+        """Create a voter with mock attribution data."""
+        attr_dir = tmp_path / "attribution"
+        attr_dir.mkdir(exist_ok=True)
+        voter = _make_voter(tmp_path)
+        attribution = {
+            "timestamp": datetime.now().isoformat(),
+            "start_date": "2026-01-01",
+            "end_date": "2026-05-26",
+            "analysis_days": 90,
+            "sources": sources_data,
+        }
+        with open(attr_dir / "attribution_2026-05-26.json", "w") as f:
+            json.dump(attribution, f)
+        return voter, attr_dir
+
+    def test_no_adjustment_without_attribution(self, tmp_path):
+        """Without attribution files, weights should pass through unchanged."""
+        voter = _make_voter(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.2, SignalSource.ALTERNATIVE_DATA: 0.8}
+        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", tmp_path / "nonexistent"):
+            result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
+        assert result == weights
+
+    def test_no_adjustment_with_few_readings(self, tmp_path):
+        """With <20 readings, no adjustment should be made."""
+        sources = {
+            "multi_speed_momentum": {"total_readings": 5, "sharpe_contribution": 1.0, "hit_rate": 0.8},
+        }
+        voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
+        weights = {SignalSource.MULTI_SPEED_MOM: 1.0}
+        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+            result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
+        assert abs(result[SignalSource.MULTI_SPEED_MOM] - 1.0) < 1e-6
+
+    def test_positive_sharpe_boosts_weight(self, tmp_path):
+        """Signal with positive Sharpe contribution should get weight boost."""
+        sources = {
+            "alternative_data": {
+                "total_readings": 50,
+                "sharpe_contribution": 1.5,
+                "hit_rate": 0.65,
+            },
+            "cross_asset_rv": {
+                "total_readings": 50,
+                "sharpe_contribution": 0.0,
+                "hit_rate": 0.5,
+            },
+        }
+        voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
+        weights = {SignalSource.ALTERNATIVE_DATA: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
+        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+            result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
+        assert result[SignalSource.ALTERNATIVE_DATA] > result[SignalSource.CROSS_ASSET_RV]
+        assert abs(sum(result.values()) - 1.0) < 0.01
+
+    def test_negative_sharpe_reduces_weight(self, tmp_path):
+        """Signal with negative Sharpe contribution should get weight reduction."""
+        sources = {
+            "multi_speed_momentum": {
+                "total_readings": 50,
+                "sharpe_contribution": -1.5,
+                "hit_rate": 0.3,
+            },
+            "alternative_data": {
+                "total_readings": 50,
+                "sharpe_contribution": 0.5,
+                "hit_rate": 0.55,
+            },
+        }
+        voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.5, SignalSource.ALTERNATIVE_DATA: 0.5}
+        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+            result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
+        assert result[SignalSource.MULTI_SPEED_MOM] < result[SignalSource.ALTERNATIVE_DATA]
+
+    def test_max_adjustment_capped_at_30pct(self, tmp_path):
+        """Weight adjustment should be capped at ±30%."""
+        sources = {
+            "alternative_data": {
+                "total_readings": 100,
+                "sharpe_contribution": 10.0,
+                "hit_rate": 0.95,
+            },
+            "cross_asset_rv": {
+                "total_readings": 100,
+                "sharpe_contribution": 0.0,
+                "hit_rate": 0.5,
+            },
+        }
+        voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
+        weights = {SignalSource.ALTERNATIVE_DATA: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
+        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+            result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
+        alt_weight = result[SignalSource.ALTERNATIVE_DATA]
+        rv_weight = result[SignalSource.CROSS_ASSET_RV]
+        assert alt_weight > rv_weight
+        assert alt_weight < 0.9
+
+    def test_stale_attribution_ignored(self, tmp_path):
+        """Attribution data older than 7 days should be ignored."""
+        attr_dir = tmp_path / "attribution"
+        attr_dir.mkdir(exist_ok=True)
+        stale_attribution = {
+            "timestamp": "2026-05-01T12:00:00",
+            "sources": {
+                "alternative_data": {
+                    "total_readings": 100,
+                    "sharpe_contribution": 5.0,
+                    "hit_rate": 0.9,
+                },
+            },
+        }
+        with open(attr_dir / "attribution_2026-05-01.json", "w") as f:
+            json.dump(stale_attribution, f)
+
+        voter = _make_voter(tmp_path)
+        weights = {SignalSource.ALTERNATIVE_DATA: 1.0}
+        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+            result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
+        assert abs(result[SignalSource.ALTERNATIVE_DATA] - 1.0) < 1e-6
+
+    def test_mixed_signals_renormalize(self, tmp_path):
+        """After utility reweighting, weights should still sum to 1.0."""
+        sources = {}
+        for name in ["multi_speed_momentum", "cross_asset_rv", "alternative_data"]:
+            sources[name] = {
+                "total_readings": 50,
+                "sharpe_contribution": float(np.random.uniform(-1, 1)),
+                "hit_rate": float(np.random.uniform(0.3, 0.7)),
+            }
+        voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.3, SignalSource.CROSS_ASSET_RV: 0.3, SignalSource.ALTERNATIVE_DATA: 0.4}
+        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+            result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
+        assert abs(sum(result.values()) - 1.0) < 0.01
 
