@@ -16,7 +16,11 @@ Weight Adjustments (applied in order):
 1. Static REGIME_WEIGHTS (per-regime allocation)
 2. Adaptive ensemble weighting (v6.09, from attribution data)
 3. Health-adjusted weighting (v3.12, from signal health scores)
-4. Turnover-aware validation (v8.01, with basis-pursuit + regret-weighted)
+4. Correlation penalty (v2.59, from IC prediction correlations)
+5. Regime-conditional weights (v2.60, per-regime signal multipliers)
+6. Utility-based reweighting (v2.58, Sharpe contribution + hit rate)
+7. Exploration noise (v2.57, Dirichlet sampling)
+8. Turnover-aware validation (v8.01, with basis-pursuit + regret-weighted)
 
 Consensus threshold: 2/3 weighted signals agree for action
 
@@ -45,7 +49,7 @@ from src.utils import safe_get
 from src.utils.computation_cache import get_realized_volatility
 
 
-__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'BanditWeighter', 'EnsembleVoter']
+__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'BanditWeighter', 'EnsembleVoter', 'compute_signal_correlation_matrix']
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +258,143 @@ def _load_regime_weights() -> Dict[Regime, Dict[SignalSource, float]]:
 
 
 REGIME_WEIGHTS = _load_regime_weights()
+
+
+# ── Regime-Conditional Signal Weights ──
+
+REGIME_CONDITIONAL_WEIGHTS = {
+    "CRISIS": {
+        "alternative_data": 1.3,       # Alt data shines in dislocation
+        "unified_overlay": 0.3,        # Reduce defensive overlays
+        "cross_asset_rv": 0.5,
+        "cross_asset_regime_arb": 1.2,
+        "international_momentum": 0.7,
+    },
+    "HIGH_VOL": {
+        "unified_overlay": 1.2,        # Defensive overlays more valuable
+        "cross_asset_rv": 1.1,
+        "cross_asset_regime_arb": 1.1,
+        "international_momentum": 0.8,
+        "alternative_data": 1.1,
+    },
+    "NORMAL": {
+        # All signals at 1.0 (baseline — no adjustment)
+    },
+    "LOW_VOL": {
+        "international_momentum": 1.2,  # Trend-following works in calm
+        "cross_asset_regime_arb": 0.5,  # Gate off mean-reversion
+        "unified_overlay": 0.7,
+        "alternative_data": 0.8,
+    },
+    "RECOVERY": {
+        "international_momentum": 1.3,  # Momentum strongest post-crisis
+        "alternative_data": 1.1,
+        "cross_asset_rv": 0.8,
+    },
+}
+
+
+# ── Signal Correlation Matrix ──
+
+
+def compute_signal_correlation_matrix(
+    ic_data: Optional[Dict] = None,
+    threshold: float = 0.7,
+) -> Dict[str, Any]:
+    """Compute pairwise signal prediction correlation matrix from IC decay data.
+
+    Reads from the ICMonitor persisted state to get aligned prediction series
+    for each signal. Computes pairwise Spearman rank correlation of predictions
+    to detect redundant signals — two signals whose predictions are highly
+    correlated (>threshold) provide overlapping information and should have
+    their ensemble weights penalized.
+
+    Args:
+        ic_data: Optional pre-loaded ICMonitor state dict (for testing).
+                 If None, reads from DATA_DIR/ic_monitor_state.json.
+        threshold: Correlation above this flags a pair as redundant.
+
+    Returns:
+        Dict with keys:
+        - matrix: nested dict {s1: {s2: corr, ...}, ...}
+        - redundant_pairs: list of (s1, s2, correlation) tuples
+        - correlation_penalties: per-signal penalty factor 1/(1+mean_abs_corr)
+    """
+    # Load IC state
+    if ic_data is None:
+        state_path = DATA_DIR / "ic_monitor_state.json"
+        if not state_path.exists():
+            return {"matrix": {}, "redundant_pairs": [], "correlation_penalties": {}}
+        try:
+            with open(state_path) as f:
+                ic_data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {"matrix": {}, "redundant_pairs": [], "correlation_penalties": {}}
+
+    if not ic_data:
+        return {"matrix": {}, "redundant_pairs": [], "correlation_penalties": {}}
+
+    # Extract prediction series for each signal (skip __staged__)
+    signal_predictions: Dict[str, List[float]] = {}
+    for signal_name, observations in ic_data.items():
+        if signal_name == "__staged__":
+            continue
+        if not isinstance(observations, list):
+            continue
+        preds = []
+        for obs in observations:
+            if isinstance(obs, (list, tuple)) and len(obs) >= 1:
+                preds.append(float(obs[0]))
+        if len(preds) >= 10:
+            signal_predictions[signal_name] = preds
+
+    if len(signal_predictions) < 2:
+        return {"matrix": {}, "redundant_pairs": [], "correlation_penalties": {}}
+
+    # Compute pairwise correlations on aligned observations
+    from src.monitor.ic_decay_monitor import _spearman_rank_correlation
+
+    signals = sorted(signal_predictions.keys())
+    matrix: Dict[str, Dict[str, float]] = {}
+    redundant_pairs: List[Tuple[str, str, float]] = []
+
+    for i, s1 in enumerate(signals):
+        matrix[s1] = {}
+        for j, s2 in enumerate(signals):
+            if i >= j:
+                continue
+            preds1 = signal_predictions[s1]
+            preds2 = signal_predictions[s2]
+            min_len = min(len(preds1), len(preds2))
+            corr = _spearman_rank_correlation(preds1[:min_len], preds2[:min_len])
+            matrix[s1][s2] = corr
+            if abs(corr) > threshold:
+                redundant_pairs.append((s1, s2, round(corr, 4)))
+
+    # Compute per-signal correlation penalty factor
+    # penalty = 1 / (1 + mean_abs_correlation_with_others)
+    # Reduces weight for signals highly correlated with peers
+    correlation_penalties: Dict[str, float] = {}
+    for s1 in signals:
+        correlations: List[float] = []
+        for s2 in signals:
+            if s1 == s2:
+                continue
+            if s1 in matrix and s2 in matrix[s1]:
+                correlations.append(abs(matrix[s1][s2]))
+            elif s2 in matrix and s1 in matrix[s2]:
+                correlations.append(abs(matrix[s2][s1]))
+        if correlations:
+            mean_corr = sum(correlations) / len(correlations)
+            correlation_penalties[s1] = round(1.0 / (1.0 + mean_corr), 6)
+        else:
+            correlation_penalties[s1] = 1.0
+
+    return {
+        "matrix": matrix,
+        "redundant_pairs": redundant_pairs,
+        "correlation_penalties": correlation_penalties,
+    }
 
 
 # ── Epsilon-Greedy Contextual Bandit for Dynamic Signal Weighting ──
@@ -854,11 +995,13 @@ class EnsembleVoter:
         2. _apply_regime_gating — zero out signals net-negative in this regime
         3. _apply_adaptive_weights — attribution-based weight adjustment
         4. _apply_health_weights — reduce weight for poor health scores
-        5. _apply_utility_reweighting — boost/reduce by profitability (Sharpe contribution + hit rate)
-        6. _apply_exploration_noise — epsilon-greedy Dirichlet exploration for weight discovery
-        7. _apply_turnover_validation — turnover + basis-pursuit + regret-weighted
-        8. _compute_consensus — weighted consensus, agreement, asset biases, action
-        9. _persist_vote — save vote and persist regret state
+        5. _apply_correlation_penalty — reduce weight for redundant signals
+        6. _apply_regime_weights — per-regime signal weight multipliers
+        7. _apply_utility_reweighting — boost/reduce by profitability (Sharpe contribution + hit rate)
+        8. _apply_exploration_noise — epsilon-greedy Dirichlet exploration for weight discovery
+        9. _apply_turnover_validation — turnover + basis-pursuit + regret-weighted
+       10. _compute_consensus — weighted consensus, agreement, asset biases, action
+       11. _persist_vote — save vote and persist regret state
         """
         readings, regime, regime_confidence = self._resolve_inputs(
             readings, regime, regime_confidence
@@ -868,6 +1011,8 @@ class EnsembleVoter:
         weights = self._apply_regime_gating(weights, regime.name)
         weights = self._apply_adaptive_weights(weights, regime)
         weights = self._apply_health_weights(weights)
+        weights = self._apply_correlation_penalty(weights)
+        weights = self._apply_regime_weights(weights, regime)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
         weights = self._apply_turnover_validation(weights, readings, regime)
@@ -1014,6 +1159,117 @@ class EnsembleVoter:
                 weights = {k: v / total for k, v in adjusted_weights.items()}
         except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Could not apply health-adjusted weights: %s", e)
+        return weights
+
+    def _apply_correlation_penalty(self, weights: Dict) -> Dict:
+        """Apply correlation penalty to reduce weight of redundant signals.
+
+        Computes pairwise prediction correlations from IC decay data.
+        Signals highly correlated with peers have their weights reduced
+        to improve ensemble diversification and prevent double-counting.
+
+        The penalty is conservative: max 30% reduction for perfectly
+        correlated signals. The penalty factor is 1/(1+mean_abs_corr),
+        so a signal correlated at 0.7 with peers gets ~0.59 penalty.
+        """
+        try:
+            corr_data = compute_signal_correlation_matrix()
+            penalties = corr_data.get("correlation_penalties", {})
+            if not penalties:
+                return weights
+
+            redundant = corr_data.get("redundant_pairs", [])
+            if redundant:
+                logger.info(
+                    "Redundant signal pairs detected: %s",
+                    ', '.join(f'{s1}/{s2}(r={c:.2f})' for s1, s2, c in redundant)
+                )
+
+            adjusted = {}
+            for source_enum, base_weight in weights.items():
+                source_str = source_enum.value
+                penalty = penalties.get(source_str, 1.0)
+                # Clip to prevent excessive reduction: min penalty = 0.5
+                penalty = max(0.5, penalty)
+                adjusted[source_enum] = base_weight * penalty
+                if abs(penalty - 1.0) > 0.01:
+                    logger.info(
+                        "Correlation-penalized %s: %.3f -> %.3f (penalty=%.3f)",
+                        source_str, base_weight, adjusted[source_enum], penalty
+                    )
+
+            # Re-normalize
+            total = sum(adjusted.values())
+            if total > 0:
+                adjusted = {k: v / total for k, v in adjusted.items()}
+
+            return adjusted
+        except (KeyError, ValueError, TypeError, OSError, ImportError) as e:
+            logger.warning("Could not apply correlation penalty: %s", e)
+        return weights
+
+    def _apply_regime_weights(self, weights: Dict, regime: Regime) -> Dict:
+        """Apply per-regime signal weight multipliers.
+
+        Varies ensemble signal weights by macro regime using the
+        REGIME_CONDITIONAL_WEIGHTS map. Each regime has multipliers
+        reflecting which signals perform well in that environment:
+
+        - CRISIS: boost alternative_data, reduce unified_overlay
+        - HIGH_VOL: boost unified_overlay (defensive), reduce intl_momentum
+        - NORMAL: baseline (no adjustment)
+        - LOW_VOL: boost international_momentum, reduce regime_arb (mean-reversion)
+        - RECOVERY: boost international_momentum (post-crisis momentum)
+
+        Multipliers are capped at [0.3, 1.5] per signal and weights are
+        renormalized to sum=1.0 after adjustment.
+        """
+        try:
+            regime_name = regime.name if hasattr(regime, 'name') else str(regime)
+            regime_multipliers = REGIME_CONDITIONAL_WEIGHTS.get(regime_name, {})
+
+            if not regime_multipliers and regime_name == "NORMAL":
+                return weights
+
+            adjusted = {}
+            for source_enum, base_weight in weights.items():
+                source_str = source_enum.value
+                multiplier = float(regime_multipliers.get(source_str, 1.0))
+                # Conservative caps: min 0.3, max 1.5
+                multiplier = max(0.3, min(1.5, multiplier))
+                adjusted[source_enum] = base_weight * multiplier
+
+            total = sum(adjusted.values())
+            if total <= 0:
+                return weights
+
+            # Gate signals below 5% of total weight to zero
+            min_threshold = 0.05 * total
+            gated = {
+                k: (v if v >= min_threshold else 0.0)
+                for k, v in adjusted.items()
+            }
+            gated_total = sum(gated.values())
+            if gated_total <= 0:
+                return weights
+
+            # Renormalize
+            result = {k: v / gated_total for k, v in gated.items()}
+
+            if regime_name != "NORMAL":
+                logger.info(
+                    "Regime-conditional weights (%s): %s",
+                    regime_name,
+                    ', '.join(
+                        f'{k.value}={result[k]:.3f}'
+                        for k in result if result[k] > 0
+                    )
+                )
+
+            return result
+
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
+            logger.warning("Could not apply regime-conditional weights: %s", e)
         return weights
 
     def _apply_utility_reweighting(self, weights: Dict, regime: Regime) -> Dict:
