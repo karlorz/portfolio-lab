@@ -3,6 +3,8 @@
 Tests for ensemble voter — enums, data classes, regime weights,
 regime detection, vote computation, allocation recommendation.
 """
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -3106,10 +3108,10 @@ class TestEnsembleVoterInitCases:
 # ===========================================================================
 
 class TestCLIEntryPoints:
-    """Tests for main() CLI entry points via capsys."""
+    """Tests for main() CLI entry points via caplog."""
 
-    def test_main_vote_command(self, capsys):
-        """main() with 'vote' command should print ensemble vote."""
+    def test_main_vote_command(self, caplog):
+        """main() with 'vote' command should log ensemble vote."""
         mock_vote = EnsembleVote(
             timestamp='2026-06-01T12:00:00',
             regime=Regime.NORMAL,
@@ -3138,16 +3140,16 @@ class TestCLIEntryPoints:
             mock_instance.compute_vote.return_value = mock_vote
             MockVoter.return_value = mock_instance
             with patch('sys.argv', ['ensemble_voter', 'vote']):
-                from src.strategy.ensemble_voter import main
-                main()
-        captured = capsys.readouterr()
-        assert '=== Ensemble Vote ===' in captured.out
-        assert 'NORMAL' in captured.out
-        assert 'INCREASE_EQUITY' in captured.out
-        assert '0.35' in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.ensemble_voter"):
+                    from src.strategy.ensemble_voter import main
+                    main()
+        assert 'Ensemble Vote' in caplog.text
+        assert 'NORMAL' in caplog.text
+        assert 'INCREASE_EQUITY' in caplog.text
+        assert '0.35' in caplog.text
 
-    def test_main_recommend_command(self, capsys):
-        """main() with 'recommend' command should print allocation."""
+    def test_main_recommend_command(self, caplog):
+        """main() with 'recommend' command should log allocation."""
         mock_vote = EnsembleVote(
             timestamp='2026-06-01T12:00:00',
             regime=Regime.NORMAL,
@@ -3180,16 +3182,16 @@ class TestCLIEntryPoints:
             }
             MockVoter.return_value = mock_instance
             with patch('sys.argv', ['ensemble_voter', 'recommend', '--portfolio', '46/38/16']):
-                from src.strategy.ensemble_voter import main
-                main()
-        captured = capsys.readouterr()
-        assert '=== Allocation Recommendation ===' in captured.out
-        assert '46/38/16' in captured.out
-        assert 'SPY' in captured.out
-        assert 'GLD' in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.ensemble_voter"):
+                    from src.strategy.ensemble_voter import main
+                    main()
+        assert 'Allocation Recommendation' in caplog.text
+        assert '46/38/16' in caplog.text
+        assert 'SPY' in caplog.text
+        assert 'GLD' in caplog.text
 
-    def test_main_explain_command(self, capsys):
-        """main() with 'explain' command should print reasoning."""
+    def test_main_explain_command(self, caplog):
+        """main() with 'explain' command should log reasoning."""
         mock_vote = EnsembleVote(
             timestamp='2026-06-01T12:00:00',
             regime=Regime.NORMAL,
@@ -3217,13 +3219,13 @@ class TestCLIEntryPoints:
             mock_instance.compute_vote.return_value = mock_vote
             MockVoter.return_value = mock_instance
             with patch('sys.argv', ['ensemble_voter', 'explain']):
-                from src.strategy.ensemble_voter import main
-                main()
-        captured = capsys.readouterr()
-        assert '=== Ensemble Vote Explanation ===' in captured.out
-        # Reasoning is printed (should contain the vote's reasoning text)
-        assert 'Test reasoning line 1' in captured.out
-        assert 'multi_speed_momentum' in captured.out
+                with caplog.at_level(logging.INFO, logger="src.strategy.ensemble_voter"):
+                    from src.strategy.ensemble_voter import main
+                    main()
+        assert 'Ensemble Vote Explanation' in caplog.text
+        # Reasoning is logged (should contain the vote's reasoning text)
+        assert 'Test reasoning line 1' in caplog.text
+        assert 'multi_speed_momentum' in caplog.text
 
     def test_main_no_command_prints_help(self, capsys):
         """main() with no command should print help."""
@@ -3242,7 +3244,7 @@ class TestCLIEntryPoints:
         captured = capsys.readouterr()
         assert 'usage:' in captured.out.lower() or captured.err
 
-    def test_main_vote_with_date(self, capsys):
+    def test_main_vote_with_date(self, caplog):
         """main() vote command with --date should pass date to collect_signals."""
         with patch('src.strategy.ensemble_voter.EnsembleVoter') as MockVoter:
             mock_instance = MagicMock()
@@ -3256,11 +3258,11 @@ class TestCLIEntryPoints:
             mock_instance.compute_vote.return_value = mock_vote
             MockVoter.return_value = mock_instance
             with patch('sys.argv', ['ensemble_voter', 'vote', '--date', '2026-06-01']):
-                from src.strategy.ensemble_voter import main
-                main()
+                with caplog.at_level(logging.INFO, logger="src.strategy.ensemble_voter"):
+                    from src.strategy.ensemble_voter import main
+                    main()
             mock_instance.collect_signals.assert_called_once_with('2026-06-01')
-        captured = capsys.readouterr()
-        assert '=== Ensemble Vote ===' in captured.out
+        assert 'Ensemble Vote' in caplog.text
 
 
 # ===========================================================================

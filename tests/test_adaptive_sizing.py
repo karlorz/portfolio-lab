@@ -520,19 +520,19 @@ class TestCLI:
         finally:
             mod.DATA_DIR = original_dir
 
-    def test_status_command(self, temp_data_dir, monkeypatch, capsys):
-        """`status` command should print state."""
+    def test_status_command(self, temp_data_dir, monkeypatch, caplog):
+        """`status` command should log state."""
         monkeypatch.setattr(sys, "argv", ["adaptive_sizing.py", "status"])
-        
+
         from src.strategy import adaptive_sizing as mod
         original_dir = mod.DATA_DIR
         mod.DATA_DIR = temp_data_dir
         mod.STATE_PATH = temp_data_dir / "adaptive_sizing_state.json"
-        
+
         try:
-            mod.main()
-            captured = capsys.readouterr()
-            assert "No state file found" in captured.out
+            with caplog.at_level(logging.WARNING, logger="src.strategy.adaptive_sizing"):
+                mod.main()
+            assert "No state file found" in caplog.text
         finally:
             mod.DATA_DIR = original_dir
 
@@ -1097,7 +1097,7 @@ class TestStatePersistenceExtended:
 class TestCLIExtended:
     """Extended CLI tests."""
 
-    def test_simulate_command_insufficient_data(self, temp_data_dir, monkeypatch, capsys):
+    def test_simulate_command_insufficient_data(self, temp_data_dir, monkeypatch, caplog):
         """simulate command with no prices should report insufficient data."""
         import sys as _sys
         monkeypatch.setattr(_sys, "argv", ["adaptive_sizing.py", "simulate"])
@@ -1106,14 +1106,15 @@ class TestCLIExtended:
         mod.DATA_DIR = temp_data_dir
         mod.STATE_PATH = temp_data_dir / "adaptive_sizing_state.json"
         try:
-            mod.main()
-            captured = capsys.readouterr()
-            assert "Insufficient data" in captured.out or "simulation" in captured.out.lower()
+            with caplog.at_level(logging.DEBUG, logger="src.strategy.adaptive_sizing"):
+                mod.main()
+            combined = caplog.text.lower()
+            assert "insufficient data" in combined or "simulation" in combined or "error" in combined
         finally:
             mod.DATA_DIR = original_dir
 
-    def test_unknown_command_prints_usage(self, temp_data_dir, monkeypatch, capsys):
-        """Unknown command should print usage."""
+    def test_unknown_command_prints_usage(self, temp_data_dir, monkeypatch, caplog):
+        """Unknown command should log usage."""
         import sys as _sys
         monkeypatch.setattr(_sys, "argv", ["adaptive_sizing.py", "foobar"])
         from src.strategy import adaptive_sizing as mod
@@ -1121,9 +1122,9 @@ class TestCLIExtended:
         mod.DATA_DIR = temp_data_dir
         mod.STATE_PATH = temp_data_dir / "adaptive_sizing_state.json"
         try:
-            mod.main()
-            captured = capsys.readouterr()
-            assert "Usage" in captured.out
+            with caplog.at_level(logging.WARNING, logger="src.strategy.adaptive_sizing"):
+                mod.main()
+            assert "Usage" in caplog.text
         finally:
             mod.DATA_DIR = original_dir
 

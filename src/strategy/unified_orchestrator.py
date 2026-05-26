@@ -614,36 +614,28 @@ def main():
     orch = UnifiedOrchestrator()
     rec = orch.recommend()
 
-    print("=" * 60)
-    print("UNIFIED OVERLAY ORCHESTRATOR v9.15")
-    print("=" * 60)
-    print(f"Timestamp: {rec.timestamp}")
-    print()
-    print("Portfolio Allocation:")
-    print(f"  Baseline: SPY {rec.baseline_spy:.0%} / "
-          f"GLD {rec.baseline_gld:.0%} / TLT {rec.baseline_tlt:.0%}")
-    print(f"  Unified:  SPY {rec.spy:.1%} / GLD {rec.gld:.1%} / "
-          f"TLT {rec.tlt:.1%} / IEF {rec.ief:.1%} / SHY {rec.shy:.1%} / "
-          f"BTC {rec.btc:.1%} / ETH {rec.eth:.1%}")
-    print(f"  SPY Delta: {rec.total_spy_delta:+.2%}")
-    print()
-    print("Active Overlays:")
+    logger.info("UNIFIED OVERLAY ORCHESTRATOR v9.15")
+    logger.info("Timestamp: %s", rec.timestamp)
+    logger.info("Portfolio Allocation:")
+    logger.info("  Baseline: SPY %.0f%% / GLD %.0f%% / TLT %.0f%%",
+                rec.baseline_spy * 100, rec.baseline_gld * 100, rec.baseline_tlt * 100)
+    logger.info("  Unified:  SPY %.1f%% / GLD %.1f%% / TLT %.1f%% / IEF %.1f%% / SHY %.1f%% / BTC %.1f%% / ETH %.1f%%",
+                rec.spy * 100, rec.gld * 100, rec.tlt * 100, rec.ief * 100,
+                rec.shy * 100, rec.btc * 100, rec.eth * 100)
+    logger.info("  SPY Delta: %+.2f%%", rec.total_spy_delta * 100)
+    logger.info("Active Overlays:")
     for c in rec.contributions:
         if c.status != "disabled":
-            flag = "✓" if c.status == "active" else "~"
-            print(f"  {flag} {c.name} (v{c.version}): {c.reason}")
-    print()
-    print(f"Conflicts: {rec.conflict_count}")
+            flag = "+" if c.status == "active" else "~"
+            logger.info("  %s %s (v%s): %s", flag, c.name, c.version, c.reason)
+    logger.info("Conflicts: %d", rec.conflict_count)
     for conflict in rec.conflicts_resolved:
-        print(f"  ⚠ {conflict}")
-    print()
-    print(f"Calendar: {rec.calendar_modifier:.2f}x → {rec.execution_recommendation}")
-    print(f"Estimated Sharpe: {rec.estimated_sharpe:.3f}")
-    print(f"Confidence: {rec.confidence:.0f}%")
-    print(f"Actionable: {rec.is_actionable}")
-    print()
-    print(f"Recommendation: {rec.recommendation}")
-    print("=" * 60)
+        logger.warning("  Conflict: %s", conflict)
+    logger.info("Calendar: %.2fx -> %s", rec.calendar_modifier, rec.execution_recommendation)
+    logger.info("Estimated Sharpe: %.3f", rec.estimated_sharpe)
+    logger.info("Confidence: %.0f%%", rec.confidence * 100)
+    logger.info("Actionable: %s", rec.is_actionable)
+    logger.info("Recommendation: %s", rec.recommendation)
 
     if "--save" in sys.argv:
         orch.save_recommendation(rec)

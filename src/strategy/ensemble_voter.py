@@ -1452,44 +1452,45 @@ def main():
     if args.command == 'vote':
         readings = voter.collect_signals(args.date)
         vote = voter.compute_vote(readings)
-        
-        print("\n=== Ensemble Vote ===")
-        print(f"Timestamp: {vote.timestamp}")
-        print(f"Regime: {vote.regime.value.upper()} (confidence: {vote.regime_confidence:.1%})")
-        print(f"\nSources: {vote.num_sources}")
-        print(f"Consensus: {vote.weighted_consensus:+.3f}")
-        print(f"Agreement: {vote.agreement_ratio:.1%}")
-        print(f"\nAsset Biases:")
-        print(f"  Equity (SPY):   {vote.equity_bias:+.3f}")
-        print(f"  Duration (TLT): {vote.duration_bias:+.3f}")
-        print(f"  Gold (GLD):     {vote.gold_bias:+.3f}")
-        print(f"\nRecommended Action: {vote.action.upper()}")
-        print(f"Confidence: {vote.confidence:.1%}")
-    
+
+        logger.info("Ensemble Vote")
+        logger.info("Timestamp: %s", vote.timestamp)
+        logger.info("Regime: %s (confidence: %.1f%%)", vote.regime.value.upper(), vote.regime_confidence * 100)
+        logger.info("Sources: %d", vote.num_sources)
+        logger.info("Consensus: %+.3f", vote.weighted_consensus)
+        logger.info("Agreement: %.1f%%", vote.agreement_ratio * 100)
+        logger.info("Asset Biases:")
+        logger.info("  Equity (SPY):   %+.3f", vote.equity_bias)
+        logger.info("  Duration (TLT): %+.3f", vote.duration_bias)
+        logger.info("  Gold (GLD):     %+.3f", vote.gold_bias)
+        logger.info("Recommended Action: %s", vote.action.upper())
+        logger.info("Confidence: %.1f%%", vote.confidence * 100)
+
     elif args.command == 'recommend':
         weights = [float(w) / 100 for w in args.portfolio.split('/')]
         base = {'SPY': weights[0], 'GLD': weights[1], 'TLT': weights[2]}
-        
+
         vote = voter.compute_vote()
         rec = voter.recommend_allocation(base, vote, args.max_shift)
-        
-        print(f"\n=== Allocation Recommendation ===")
-        print(f"Base: {args.portfolio}")
-        print(f"Regime: {rec['regime'].upper()} (confidence: {rec['confidence']:.1%})")
-        print(f"Consensus: {rec['consensus']:+.3f}")
-        print(f"\nRecommended Allocation:")
-        
+
+        logger.info("Allocation Recommendation")
+        logger.info("Base: %s", args.portfolio)
+        logger.info("Regime: %s (confidence: %.1f%%)", rec['regime'].upper(), rec['confidence'] * 100)
+        logger.info("Consensus: %+.3f", rec['consensus'])
+        logger.info("Recommended Allocation:")
         for asset, data in rec['assets'].items():
-            print(f"  {asset}: {data['base']:.1%} → {data['new']:.1%} (shift: {data['normalized_shift']:+.1%})")
-    
+            logger.info("  %s: %.1f%% -> %.1f%% (shift: %+.1f%%)",
+                        asset, data['base'] * 100, data['new'] * 100, data['normalized_shift'] * 100)
+
     elif args.command == 'explain':
         vote = voter.compute_vote()
-        
-        print("\n=== Ensemble Vote Explanation ===")
-        print(vote.reasoning)
-        print(f"\nActive Sources ({len(vote.source_votes)}):")
+
+        logger.info("Ensemble Vote Explanation")
+        logger.info(vote.reasoning)
+        logger.info("Active Sources (%d):", len(vote.source_votes))
         for src in vote.source_votes:
-            print(f"  {src.source.value:25} | value: {src.value:+.3f} | weight: {src.weight:.2f} | conf: {src.confidence:.1%}")
+            logger.info("  %25s | value: %+.3f | weight: %.2f | conf: %.1f%%",
+                        src.source.value, src.value, src.weight, src.confidence * 100)
     
     else:
         parser.print_help()

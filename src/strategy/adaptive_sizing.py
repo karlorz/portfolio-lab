@@ -491,37 +491,36 @@ def main():
         # Show current state without re-computing
         state_path = STATE_PATH
         if state_path.exists():
-            print(json.dumps(json.loads(state_path.read_text()), indent=2))
+            logger.info(json.dumps(json.loads(state_path.read_text()), indent=2))
         else:
-            print("No state file found. Run 'adjust' first.")
-    
+            logger.warning("No state file found. Run 'adjust' first.")
+
     elif sys.argv[1] == "simulate":
         # Simple backtest: compare static vs dynamic over last 252 days
-        print("Simulation: sampling from historical data every 21 days...")
+        logger.info("Simulation: sampling from historical data every 21 days...")
         sizer._load_prices()
         spy = sizer._get_series("SPY")
         if spy is None or len(spy) < 252:
-            print("Insufficient data for simulation")
+            logger.warning("Insufficient data for simulation")
             return
-        
+
         # Sample every 21 trading days (~monthly)
         n = len(spy)
         sample_indices = list(range(n - 60, n, 21))
-        
-        print(f"  Evaluating {len(sample_indices)} rebalance points over {len(sample_indices) * 21} trading days")
-        print()
-        
-        
+
+        logger.info("Evaluating %d rebalance points over %d trading days",
+                    len(sample_indices), len(sample_indices) * 21)
+
         for i, idx in enumerate(sample_indices):
             # We'd need a proper backtest engine for rigorous comparison
             # This is a simplified simulation
             pass
-        
-        print("  Full simulation requires backtest engine integration.")
-        print("  Use: python -m src.backtest.backtest_engine for rigorous comparison.")
-    
+
+        logger.info("Full simulation requires backtest engine integration.")
+        logger.info("Use: python -m src.backtest.backtest_engine for rigorous comparison.")
+
     else:
-        print("Usage: python -m src.strategy.adaptive_sizing [adjust|status|simulate]")
+        logger.warning("Usage: python -m src.strategy.adaptive_sizing [adjust|status|simulate]")
 
 
 if __name__ == "__main__":

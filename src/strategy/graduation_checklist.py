@@ -882,6 +882,6 @@ if __name__ == "__main__":
     elif command == "progress":
         sys.exit(run_progress_and_exit())
     else:
-        print(f"Unknown command: {command}")
-        print("Usage: python -m src.strategy.graduation_checklist [check|report|progress]")
+        logger.warning("Unknown command: %s", command)
+        logger.warning("Usage: python -m src.strategy.graduation_checklist [check|report|progress]")
         sys.exit(1)

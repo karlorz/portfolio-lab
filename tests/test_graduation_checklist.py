@@ -1383,14 +1383,15 @@ class TestCLIMain:
         assert "Progress" in caplog.text or "Readiness" in caplog.text
 
     def test_main_unknown_command(self):
-        """Unknown command should print error and exit with 1."""
+        """Unknown command should log error and exit with 1."""
         import subprocess
         result = subprocess.run(
             ["uv", "run", "python", "-m", "src.strategy.graduation_checklist", "unknown_cmd"],
             capture_output=True, text=True, timeout=30,
         )
         assert result.returncode == 1
-        assert "Unknown command" in result.stdout
+        # After print→logger migration, output goes to stderr
+        assert "Unknown command" in result.stderr or "Unknown command" in result.stdout
 
 
 # ---------------------------------------------------------------------------

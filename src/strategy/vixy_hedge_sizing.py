@@ -487,7 +487,7 @@ def main():
     sizer = VIXYHedgeSizer()
 
     if args.mode == "status":
-        print(_format_status(sizer))
+        logger.info(_format_status(sizer))
 
     elif args.mode == "recommend":
         # Try to get VIX from existing data or use provided value
@@ -503,17 +503,17 @@ def main():
                 vix = 18.0  # Default for development
 
         signal = sizer.get_signal(vix)
-        print(_format_recommend(signal))
+        logger.info(_format_recommend(signal))
 
         if args.save:
             sizer.save_state(signal)
-            print(f"\nState saved to {sizer._state_file}")
+            logger.info("State saved to %s", sizer._state_file)
 
     elif args.mode == "update":
         vix = args.vix or 18.0
         signal = sizer.get_signal(vix)
         sizer.save_state(signal)
-        print(f"Updated: allocation={signal.allocation_pct}% (VIX={vix})")
+        logger.info("Updated: allocation=%d%% (VIX=%s)", signal.allocation_pct, vix)
 
     elif args.mode == "backtest":
         _run_backtest(sizer, args.start)

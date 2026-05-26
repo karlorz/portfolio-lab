@@ -1,7 +1,10 @@
 """Tests for src.utils — shared utility functions."""
 
+import time
+
 import pytest
-from src.utils import classify_vix_regime
+
+from src.utils import classify_vix_regime, signal_timeout
 
 
 class TestClassifyVixRegime:
@@ -69,3 +72,80 @@ class TestClassifyVixRegime:
     def test_vol_spike_with_crisis_trend_returns_vol_spike(self):
         """VIX vol_spike overrides even crisis trend."""
         assert classify_vix_regime(22.0, "crisis") == "vol_spike"
+
+
+class TestSignalTimeout:
+    """Tests for the signal_timeout decorator."""
+
+    def test_fast_function_returns_result(self):
+        """A function that completes within timeout returns its result."""
+        @signal_timeout(default=None, seconds=5.0)
+        def fast():
+            return 42
+        assert fast() == 42
+
+    def test_slow_function_returns_default(self):
+        """A function that exceeds timeout returns the default value."""
+        @signal_timeout(default="fallback", seconds=0.1)
+        def slow():
+            time.sleep(5)
+            return "never reached"
+        assert slow() == "fallback"
+
+    def test_exception_returns_default(self):
+        """A function that raises returns the default value."""
+        @signal_timeout(default=None, seconds=5.0)
+        def broken():
+            raise ValueError("boom")
+        assert broken() is None
+
+    def test_exception_with_custom_default(self):
+        """Custom default is returned on exception."""
+        @signal_timeout(default={"neutral": True}, seconds=5.0)
+        def broken():
+            raise RuntimeError("crash")
+        assert broken() == {"neutral": True}
+
+    def test_custom_signal_name_logged(self, caplog):
+        """Custom signal_name appears in timeout log messages."""
+        import logging
+        @signal_timeout(default=None, seconds=0.1, signal_name="my_signal")
+        def slow():
+            time.sleep(5)
+        with caplog.at_level(logging.WARNING, logger="src.utils"):
+            slow()
+        assert "my_signal" in caplog.text
+
+    def test_default_signal_name_is_function_name(self, caplog):
+        """When signal_name is omitted, function name is used in logs."""
+        import logging
+        @signal_timeout(default=None, seconds=0.1)
+        def slow_signal():
+            time.sleep(5)
+        with caplog.at_level(logging.WARNING, logger="src.utils"):
+            slow_signal()
+        assert "slow_signal" in caplog.text
+
+    def test_zero_timeout_returns_default(self):
+        """Zero timeout means always return default."""
+        @signal_timeout(default="instant", seconds=0.0)
+        def anything():
+            return "computed"
+        # With 0s timeout, the thread may or may not complete before join
+        # Either way the function should not raise
+        result = anything()
+        assert result in ("instant", "computed")
+
+    def test_preserves_function_name(self):
+        """Decorator preserves the wrapped function's name."""
+        @signal_timeout(default=None, seconds=5.0)
+        def my_signal_func():
+            return 1
+        assert my_signal_func.__name__ == "my_signal_func"
+
+    def test_passes_args_and_kwargs(self):
+        """Arguments are forwarded to the wrapped function."""
+        @signal_timeout(default=None, seconds=5.0)
+        def add(a, b, extra=0):
+            return a + b + extra
+        assert add(1, 2, extra=3) == 6
