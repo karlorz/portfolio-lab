@@ -6,6 +6,7 @@ import pytest
 import numpy as np
 import math
 import sys
+import logging
 from unittest.mock import patch
 from src.monitor.bayesian_vol import (
     BayesianVolModel, BayesianVolPipeline, BayesianVolEstimate,
@@ -563,7 +564,7 @@ class TestConvenienceFunctions:
 class TestCLI:
     """CLI main() function tests."""
 
-    def test_main_runs(self, capsys):
+    def test_main_runs(self, caplog):
         from src.monitor.bayesian_vol import main
         with patch.object(BayesianVolPipeline, 'estimate') as mock_est:
             mock_est.return_value = BayesianVolEstimate(
@@ -577,6 +578,6 @@ class TestCLI:
                 n_obs=20, is_valid=True,
             )
             with patch.object(sys, 'argv', ['bayesian_vol.py', '--symbol', 'SPY']):
-                main()
-        captured = capsys.readouterr()
-        assert "BAYESIAN VOLATILITY" in captured.out
+                with caplog.at_level(logging.INFO, logger="src.monitor.bayesian_vol"):
+                    main()
+        assert "BAYESIAN VOLATILITY" in caplog.text

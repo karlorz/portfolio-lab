@@ -12,6 +12,7 @@ import logging
 import os
 import json
 import sqlite3
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass, asdict
@@ -27,7 +28,8 @@ from src.broker.circuit_breaker import (
 )
 
 
-__all__ = ['OrderRequest', 'Order', 'Position', 'AlpacaClient', 'PaperTradingManager', 'check_alpaca_status', 'get_circuit_state']
+__all__ = ['OrderRequest', 'Order', 'Position', 'AlpacaClient', 'PaperTradingManager',
+           'check_alpaca_status', 'get_circuit_state', 'RampPhase', 'LiveTransitionManager']
 
 logger = logging.getLogger(__name__)
 
@@ -549,15 +551,19 @@ class PaperTradingManager:
 
 # Convenience functions for CLI usage
 def check_alpaca_status() -> Dict[str, Any]:
-    """Quick status check for CLI/health monitoring."""
-    client = AlpacaClient(paper=True)
-    
+    """Quick status check for CLI/health monitoring.
+
+    Detects paper vs live mode from ALPACA_PAPER env var (default: True).
+    """
+    paper_mode = os.environ.get("ALPACA_PAPER", "true").lower() not in ("false", "0", "no")
+    client = AlpacaClient(paper=paper_mode)
+
     status = {
         "sdk_available": ALPACA_AVAILABLE,
         "configured": client.is_configured(),
-        "paper": True,
+        "paper": paper_mode,
     }
-    
+
     if ALPACA_AVAILABLE and client.is_configured():
         try:
             account = client.get_account()
@@ -565,6 +571,12 @@ def check_alpaca_status() -> Dict[str, Any]:
             status["equity"] = account.get("equity")
             status["cash"] = account.get("cash")
             status["connected"] = True
+            # Live account compliance flags
+            if not paper_mode:
+                status["trading_blocked"] = account.get("trading_blocked", False)
+                status["transfers_blocked"] = account.get("transfers_blocked", False)
+                status["account_blocked"] = account.get("account_blocked", False)
+                status["shorting_enabled"] = account.get("shorting_enabled", False)
         except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             status["connected"] = False
             status["error"] = str(e)
@@ -574,38 +586,331 @@ def check_alpaca_status() -> Dict[str, Any]:
             status["error"] = "alpaca-py SDK not installed"
         elif not client.is_configured():
             status["error"] = "ALPACA_API_KEY and ALPACA_API_SECRET not set"
-    
+
     return status
+
+
+# ---------------------------------------------------------------------------
+# Paper → Live Transition: Ramp Protocol
+# ---------------------------------------------------------------------------
+
+class RampPhase(str, Enum):
+    """5-phase ramp protocol for transitioning from paper to live trading.
+
+    Each phase increases the allocation percentage. The system must pass
+    graduation criteria and remain within risk bounds before advancing.
+
+    Phases:
+        PAPER:    Paper trading only (no real capital at risk)
+        PHASE_1:  1% of target allocation in live
+        PHASE_2:  5% of target allocation in live
+        PHASE_3:  25% of target allocation in live
+        PHASE_4:  50% of target allocation in live
+        LIVE:     100% of target allocation in live
+    """
+    PAPER = "paper"
+    PHASE_1 = "phase_1"      # 1%
+    PHASE_2 = "phase_2"      # 5%
+    PHASE_3 = "phase_3"      # 25%
+    PHASE_4 = "phase_4"      # 50%
+    LIVE = "live"            # 100%
+
+
+# Allocation multiplier per ramp phase
+RAMP_ALLOCATION_PCT: Dict[str, float] = {
+    RampPhase.PAPER.value: 0.00,
+    RampPhase.PHASE_1.value: 0.01,
+    RampPhase.PHASE_2.value: 0.05,
+    RampPhase.PHASE_3.value: 0.25,
+    RampPhase.PHASE_4.value: 0.50,
+    RampPhase.LIVE.value: 1.00,
+}
+
+# Minimum trading days required at each phase before advancing
+RAMP_MIN_DAYS: Dict[str, int] = {
+    RampPhase.PAPER.value: 63,     # Full graduation period
+    RampPhase.PHASE_1.value: 21,
+    RampPhase.PHASE_2.value: 21,
+    RampPhase.PHASE_3.value: 42,
+    RampPhase.PHASE_4.value: 42,
+    RampPhase.LIVE.value: 0,       # Already at full allocation
+}
+
+# Maximum drawdown allowed at each phase before automatic rollback
+RAMP_MAX_DRAWDOWN: Dict[str, float] = {
+    RampPhase.PAPER.value: 1.0,
+    RampPhase.PHASE_1.value: 0.10,
+    RampPhase.PHASE_2.value: 0.12,
+    RampPhase.PHASE_3.value: 0.15,
+    RampPhase.PHASE_4.value: 0.20,
+    RampPhase.LIVE.value: 0.25,
+}
+
+RAMP_STATE_FILE = DATA_DIR / "ramp_state.json"
+
+
+class LiveTransitionManager:
+    """Manages the paper→live transition ramp protocol.
+
+    State is persisted to ``DATA_DIR/ramp_state.json``. The manager tracks:
+    - Current ramp phase
+    - Days accumulated at current phase
+    - Peak equity and max drawdown at current phase
+    - Compliance prerequisites before advancing
+
+    Usage::
+
+        mgr = LiveTransitionManager()
+        status = mgr.get_status()
+        can_advance = mgr.can_advance()
+        if can_advance:
+            mgr.advance()
+    """
+
+    def __init__(self, state_path: Optional[str] = None):
+        self.state_path = Path(state_path) if state_path else RAMP_STATE_FILE
+        self._state: Dict[str, Any] = {}
+        self._load_state()
+
+    def _default_state(self) -> Dict[str, Any]:
+        return {
+            "phase": RampPhase.PAPER.value,
+            "phase_started": None,
+            "days_at_phase": 0,
+            "peak_equity": None,
+            "max_drawdown_pct": 0.0,
+            "advancement_log": [],
+        }
+
+    def _load_state(self):
+        """Load ramp state from disk."""
+        if self.state_path.exists():
+            try:
+                self._state = json.loads(self.state_path.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to load ramp state: %s", e)
+                self._state = self._default_state()
+        else:
+            self._state = self._default_state()
+
+    def _save_state(self):
+        """Persist ramp state to disk."""
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            self.state_path.write_text(json.dumps(self._state, indent=2))
+        except OSError as e:
+            logger.error("Failed to save ramp state: %s", e)
+
+    @property
+    def phase(self) -> RampPhase:
+        return RampPhase(self._state.get("phase", RampPhase.PAPER.value))
+
+    @property
+    def allocation_pct(self) -> float:
+        """Current allocation percentage for live trading."""
+        return RAMP_ALLOCATION_PCT.get(self.phase.value, 0.0)
+
+    @property
+    def days_at_phase(self) -> int:
+        return self._state.get("days_at_phase", 0)
+
+    @property
+    def max_drawdown_pct(self) -> float:
+        return self._state.get("max_drawdown_pct", 0.0)
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get full ramp status for dashboard integration."""
+        return {
+            "phase": self.phase.value,
+            "allocation_pct": self.allocation_pct,
+            "days_at_phase": self.days_at_phase,
+            "min_days_required": RAMP_MIN_DAYS.get(self.phase.value, 0),
+            "max_drawdown_pct": self.max_drawdown_pct,
+            "max_drawdown_allowed": RAMP_MAX_DRAWDOWN.get(self.phase.value, 1.0),
+            "can_advance": self.can_advance(),
+            "alpaca_status": check_alpaca_status(),
+        }
+
+    def can_advance(self) -> bool:
+        """Check if all prerequisites for advancing to next phase are met.
+
+        Prerequisites:
+        1. Not already at LIVE phase
+        2. Minimum days at current phase accumulated
+        3. Max drawdown within bounds
+        4. Alpaca account is connected and not blocked
+        5. Graduation criteria met (for PAPER → PHASE_1)
+        """
+        if self.phase == RampPhase.LIVE:
+            return False
+
+        # Check days requirement
+        min_days = RAMP_MIN_DAYS.get(self.phase.value, 0)
+        if self.days_at_phase < min_days:
+            return False
+
+        # Check drawdown bound
+        max_dd_allowed = RAMP_MAX_DRAWDOWN.get(self.phase.value, 1.0)
+        if self.max_drawdown_pct > max_dd_allowed:
+            return False
+
+        # Check Alpaca connectivity
+        alpaca = check_alpaca_status()
+        if not alpaca.get("connected", False):
+            return False
+
+        # Check live account is not blocked (for phases beyond PAPER)
+        if self.phase != RampPhase.PAPER:
+            if alpaca.get("trading_blocked", False):
+                return False
+            if alpaca.get("account_blocked", False):
+                return False
+
+        return True
+
+    def advance(self) -> Dict[str, Any]:
+        """Advance to the next ramp phase.
+
+        Returns:
+            Dict with success status and new phase info.
+
+        Raises:
+            RuntimeError: If prerequisites are not met.
+        """
+        if not self.can_advance():
+            return {
+                "success": False,
+                "reason": "Prerequisites not met for advancement",
+                "status": self.get_status(),
+            }
+
+        phase_order = [RampPhase.PAPER, RampPhase.PHASE_1, RampPhase.PHASE_2,
+                       RampPhase.PHASE_3, RampPhase.PHASE_4, RampPhase.LIVE]
+        current_idx = phase_order.index(self.phase)
+        next_phase = phase_order[current_idx + 1]
+
+        log_entry = {
+            "from": self.phase.value,
+            "to": next_phase.value,
+            "timestamp": datetime.now().isoformat(),
+            "allocation_pct": RAMP_ALLOCATION_PCT[next_phase.value],
+        }
+
+        self._state["phase"] = next_phase.value
+        self._state["phase_started"] = datetime.now().isoformat()
+        self._state["days_at_phase"] = 0
+        self._state["peak_equity"] = None
+        self._state["max_drawdown_pct"] = 0.0
+        self._state["advancement_log"] = self._state.get("advancement_log", []) + [log_entry]
+
+        self._save_state()
+        logger.info("Ramp advanced: %s → %s (allocation: %.0f%%)",
+                     log_entry["from"], next_phase.value, log_entry["allocation_pct"] * 100)
+
+        return {"success": True, "new_phase": next_phase.value, **log_entry}
+
+    def rollback(self, reason: str = "") -> Dict[str, Any]:
+        """Roll back to the previous ramp phase due to risk breach.
+
+        Returns:
+            Dict with rollback status.
+        """
+        if self.phase == RampPhase.PAPER:
+            return {"success": False, "reason": "Already at PAPER phase"}
+
+        phase_order = [RampPhase.PAPER, RampPhase.PHASE_1, RampPhase.PHASE_2,
+                       RampPhase.PHASE_3, RampPhase.PHASE_4, RampPhase.LIVE]
+        current_idx = phase_order.index(self.phase)
+        prev_phase = phase_order[current_idx - 1]
+
+        log_entry = {
+            "from": self.phase.value,
+            "to": prev_phase.value,
+            "timestamp": datetime.now().isoformat(),
+            "reason": reason,
+            "allocation_pct": RAMP_ALLOCATION_PCT[prev_phase.value],
+        }
+
+        self._state["phase"] = prev_phase.value
+        self._state["phase_started"] = datetime.now().isoformat()
+        self._state["days_at_phase"] = 0
+        self._state["peak_equity"] = None
+        self._state["max_drawdown_pct"] = 0.0
+        self._state["advancement_log"] = self._state.get("advancement_log", []) + [log_entry]
+
+        self._save_state()
+        logger.warning("Ramp rolled back: %s → %s (reason: %s)",
+                       log_entry["from"], prev_phase.value, reason)
+
+        return {"success": True, "new_phase": prev_phase.value, **log_entry}
+
+    def update_daily(self, equity: float) -> None:
+        """Update daily tracking for drawdown monitoring.
+
+        Args:
+            equity: Current account equity.
+        """
+        self._state["days_at_phase"] = self._state.get("days_at_phase", 0) + 1
+
+        if self._state.get("peak_equity") is None or equity > self._state["peak_equity"]:
+            self._state["peak_equity"] = equity
+
+        if self._state["peak_equity"] and self._state["peak_equity"] > 0:
+            dd_pct = (self._state["peak_equity"] - equity) / self._state["peak_equity"]
+            if dd_pct > self._state.get("max_drawdown_pct", 0.0):
+                self._state["max_drawdown_pct"] = dd_pct
+
+                # Auto-rollback if drawdown exceeds phase limit
+                max_dd_allowed = RAMP_MAX_DRAWDOWN.get(self.phase.value, 1.0)
+                if dd_pct > max_dd_allowed:
+                    self.rollback(f"Drawdown {dd_pct:.1%} exceeds phase limit {max_dd_allowed:.1%}")
+                    return
+
+        self._save_state()
 
 
 if __name__ == "__main__":
     # CLI interface for testing
+    from src.utils.log_config import configure_logging
+    configure_logging()
     import sys
-    
+
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
-        
+
         if cmd == "status":
-            print(json.dumps(check_alpaca_status(), indent=2))
+            logger.info(json.dumps(check_alpaca_status(), indent=2))
         elif cmd == "account":
             client = AlpacaClient(paper=True)
             if client.is_ready():
-                print(json.dumps(client.get_account(), indent=2))
+                logger.info(json.dumps(client.get_account(), indent=2))
             else:
-                print("Alpaca not configured. Set ALPACA_API_KEY and ALPACA_API_SECRET.")
+                logger.info("Alpaca not configured. Set ALPACA_API_KEY and ALPACA_API_SECRET.")
         elif cmd == "positions":
             client = AlpacaClient(paper=True)
             if client.is_ready():
                 positions = client.get_positions()
-                print(json.dumps([asdict(p) for p in positions], indent=2))
+                logger.info(json.dumps([asdict(p) for p in positions], indent=2))
             else:
-                print("Alpaca not configured.")
+                logger.info("Alpaca not configured.")
         elif cmd == "sync":
             manager = PaperTradingManager()
-            print(json.dumps(manager.sync_positions(), indent=2))
+            logger.info(json.dumps(manager.sync_positions(), indent=2))
+        elif cmd == "ramp":
+            ramp_mgr = LiveTransitionManager()
+            logger.info(json.dumps(ramp_mgr.get_status(), indent=2))
+        elif cmd == "ramp-advance":
+            ramp_mgr = LiveTransitionManager()
+            result = ramp_mgr.advance()
+            logger.info(json.dumps(result, indent=2))
+        elif cmd == "ramp-rollback":
+            ramp_mgr = LiveTransitionManager()
+            reason = sys.argv[2] if len(sys.argv) > 2 else "manual"
+            result = ramp_mgr.rollback(reason)
+            logger.info(json.dumps(result, indent=2))
         else:
-            print(f"Unknown command: {cmd}")
-            print("Commands: status, account, positions, sync")
+            logger.info("Unknown command: %s", cmd)
+            logger.info("Commands: status, account, positions, sync, ramp, ramp-advance, ramp-rollback")
     else:
         # Default: print status
-        print(json.dumps(check_alpaca_status(), indent=2))
+        logger.info(json.dumps(check_alpaca_status(), indent=2))

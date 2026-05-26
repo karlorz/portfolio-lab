@@ -1359,13 +1359,13 @@ class TestCLIEdgeCases:
                 except SystemExit as e:
                     assert e.code == 0
 
-    def test_status_text_flag_returns_string(self, tmp_path, capsys):
+    def test_status_text_flag_returns_string(self, tmp_path, caplog):
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             test_args = ["unified_dashboard.py", "--status-text"]
             with patch.object(sys, "argv", test_args):
-                main()
-            captured = capsys.readouterr()
-            assert len(captured.out) > 0
+                with caplog.at_level(logging.INFO, logger="src.monitor.unified_dashboard"):
+                    main()
+            assert len(caplog.text) > 0
 
     def test_check_flag_with_errors_only(self, tmp_path):
         """Cron has errors; health is fine → should exit 1."""

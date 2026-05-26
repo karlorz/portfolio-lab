@@ -378,7 +378,8 @@ class TestMainCLI:
                 MockRouter.return_value = mock
                 main()
         captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
+        err = captured.err.strip()
+        data = json.loads(err[err.index("{"):])
         assert data["ready"] is True
 
     def test_signals_command(self, capsys):
@@ -393,7 +394,8 @@ class TestMainCLI:
                 MockRouter.return_value = mock
                 main()
         captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
+        err = captured.err.strip()
+        data = json.loads(err[err.index("["):])
         assert len(data) == 1
         assert data[0]["symbol"] == "SPY"
 
@@ -408,7 +410,8 @@ class TestMainCLI:
                 MockRouter.return_value = mock
                 main()
         captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
+        err = captured.err.strip()
+        data = json.loads(err[err.index("{"):])
         assert "SPY" in data
 
     def test_unknown_command(self, capsys):
@@ -418,7 +421,7 @@ class TestMainCLI:
                 MockRouter.return_value = MagicMock()
                 main()
         captured = capsys.readouterr()
-        assert "Unknown" in captured.out or "unknown" in captured.out.lower()
+        assert "Unknown" in captured.err or "unknown" in captured.err.lower()
 
 
 class TestSignalExtended:

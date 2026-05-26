@@ -322,12 +322,12 @@ def main():
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("Failed to generate unified dashboard narrative: %s", e)
 
-    print(brief["full_text"])
+    logger.info(brief["full_text"])
 
     if args.save:
         out_path = DATA_DIR / "daily_brief.json"
         save_results_json(brief, output_path=str(out_path))
-        print(f"\nSaved to {out_path}")
+        logger.info("Saved to %s", out_path)
 
 
 if __name__ == "__main__":

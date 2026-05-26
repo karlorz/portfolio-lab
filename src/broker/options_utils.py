@@ -507,18 +507,21 @@ if __name__ == "__main__":
     async def test():
         fetcher = OptionsChainFetcher()
         chain = await fetcher.fetch_0dte_chain("SPY")
-        
-        print(f"Fetched {len(chain.quotes)} quotes for {chain.underlying}")
-        print(f"0DTE calls: {len(chain.get_0dte())}")
-        
+
+        logger.info("Fetched %d quotes for %s", len(chain.quotes), chain.underlying)
+        logger.info("0DTE calls: %d", len(chain.get_0dte()))
+
         best = chain.find_optimal_call(target_delta=0.30)
         if best:
-            print(f"\nBest 30-delta call:")
-            print(f"  Strike: ${best.strike:.2f}")
-            print(f"  Mark: ${best.mark:.2f}")
-            print(f"  Delta: {best.delta:.3f}" if best.delta else "  Delta: N/A")
-            print(f"  Volume: {best.volume}")
-            print(f"  Spread: {best.bid_ask_spread_pct:.2f}%")
-            print(f"  Liquid: {best.is_liquid}")
+            logger.info("Best 30-delta call:")
+            logger.info("  Strike: $%.2f", best.strike)
+            logger.info("  Mark: $%.2f", best.mark)
+            if best.delta:
+                logger.info("  Delta: %.3f", best.delta)
+            else:
+                logger.info("  Delta: N/A")
+            logger.info("  Volume: %d", best.volume)
+            logger.info("  Spread: %.2f%%", best.bid_ask_spread_pct)
+            logger.info("  Liquid: %s", best.is_liquid)
     
     asyncio.run(test())

@@ -368,6 +368,8 @@ class OrderRouter:
 
 def main():
     """CLI interface for order router."""
+    from src.utils.log_config import configure_logging
+    configure_logging()
     import sys
     
     router = OrderRouter()
@@ -376,27 +378,27 @@ def main():
         cmd = sys.argv[1]
         
         if cmd == "status":
-            print(json.dumps({
+            logger.info(json.dumps({
                 "ready": router.is_ready(),
                 "paper": router.paper,
             }, indent=2))
             
         elif cmd == "signals":
             signals = router.load_signals()
-            print(json.dumps([{
+            logger.info(json.dumps([{
                 "symbol": s.symbol,
                 "target": s.target_allocation,
             } for s in signals], indent=2))
             
         elif cmd == "positions":
             positions = router.get_current_positions()
-            print(json.dumps(positions, indent=2))
+            logger.info(json.dumps(positions, indent=2))
             
         elif cmd == "plan":
             signals = router.load_signals()
             positions = router.get_current_positions()
             orders = router.calculate_orders(signals, positions)
-            print(json.dumps([{
+            logger.info(json.dumps([{
                 "symbol": o.symbol,
                 "side": o.side,
                 "qty": o.qty,
@@ -407,21 +409,21 @@ def main():
         elif cmd == "rebalance":
             dry_run = "--live" not in sys.argv
             result = router.rebalance(dry_run=dry_run)
-            print(json.dumps(result, indent=2))
+            logger.info(json.dumps(result, indent=2))
             
         else:
-            print(f"Unknown command: {cmd}")
-            print("Commands: status, signals, positions, plan, rebalance [--live]")
+            logger.info("Unknown command: %s", cmd)
+            logger.info("Commands: status, signals, positions, plan, rebalance [--live]")
     else:
         # Default: show plan
         signals = router.load_signals()
         positions = router.get_current_positions()
         orders = router.calculate_orders(signals, positions)
-        print(f"Signals: {len(signals)}")
-        print(f"Current positions: {len(positions)}")
-        print(f"Orders needed: {len(orders)}")
+        logger.info("Signals: %d", len(signals))
+        logger.info("Current positions: %d", len(positions))
+        logger.info("Orders needed: %d", len(orders))
         for o in orders:
-            print(f"  {o.side} {o.qty} {o.symbol} (~${o.estimated_value:.2f})")
+            logger.info("  %s %s %s (~$%.2f)", o.side, o.qty, o.symbol, o.estimated_value)
 
 
 if __name__ == "__main__":

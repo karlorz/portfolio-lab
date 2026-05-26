@@ -1044,7 +1044,7 @@ class TestCliGuard:
             self._runpy_with_cleanup("src.broker.options_utils")
 
         captured = capsys.readouterr()
-        assert "Fetched" in captured.out or "Best" in captured.out
+        assert "Fetched" in captured.err or "Best" in captured.err
 
     def test_main_block_runs_asyncio_run(self, capsys):
         """The __main__ block calls asyncio.run()."""
@@ -1084,11 +1084,11 @@ class TestCliGuard:
             self._runpy_with_cleanup("src.broker.options_utils")
 
         captured = capsys.readouterr()
-        assert "Strike:" in captured.out
-        assert "Delta:" in captured.out
-        assert "Volume:" in captured.out
-        assert "Spread:" in captured.out
-        assert "Liquid:" in captured.out
+        assert "Strike:" in captured.err
+        assert "Delta:" in captured.err
+        assert "Volume:" in captured.err
+        assert "Spread:" in captured.err
+        assert "Liquid:" in captured.err
 
     def test_main_block_logs_fetch_counts(self, caplog):
         """__main__ should log via the fetcher initialization."""

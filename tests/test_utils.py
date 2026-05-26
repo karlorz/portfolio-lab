@@ -74,6 +74,41 @@ class TestClassifyVixRegime:
         assert classify_vix_regime(22.0, "crisis") == "vol_spike"
 
 
+    def test_very_high_vix(self):
+        """Extreme VIX values are still classified as crisis."""
+        assert classify_vix_regime(80.0, "normal") == "crisis"
+        assert classify_vix_regime(50.0, "low_vol") == "crisis"
+
+    def test_very_low_vix(self):
+        """Very low VIX values are low_vol."""
+        assert classify_vix_regime(9.0, "normal") == "low_vol"
+        assert classify_vix_regime(5.0, "recovery") == "low_vol"
+
+    def test_recovery_trend_with_normal_vix(self):
+        """VIX in normal range with recovery trend → recovery."""
+        assert classify_vix_regime(18.0, "recovery") == "recovery"
+
+    def test_high_vol_trend_with_normal_vix(self):
+        """VIX in normal range with high_vol trend → high_vol."""
+        assert classify_vix_regime(18.0, "high_vol") == "high_vol"
+
+    def test_low_vol_trend_with_low_vix(self):
+        """Low VIX with low_vol trend → low_vol."""
+        assert classify_vix_regime(12.0, "low_vol") == "low_vol"
+
+    def test_floating_point_boundary_crisis(self):
+        """VIX=25.0001 is crisis (just above threshold)."""
+        assert classify_vix_regime(25.0001, "normal") == "crisis"
+
+    def test_floating_point_boundary_vol_spike(self):
+        """VIX=20.0001 is vol_spike (just above threshold)."""
+        assert classify_vix_regime(20.0001, "normal") == "vol_spike"
+
+    def test_floating_point_boundary_low_vol(self):
+        """VIX=14.9999 is low_vol (just below threshold)."""
+        assert classify_vix_regime(14.9999, "normal") == "low_vol"
+
+
 class TestSignalTimeout:
     """Tests for the signal_timeout decorator."""
 

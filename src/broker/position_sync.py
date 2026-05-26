@@ -296,6 +296,8 @@ class PositionSync:
 
 def main():
     """CLI interface for position sync."""
+    from src.utils.log_config import configure_logging
+    configure_logging()
     import sys
     
     sync = PositionSync()
@@ -304,39 +306,41 @@ def main():
         cmd = sys.argv[1]
         
         if cmd == "status":
-            print(json.dumps({
+            logger.info(json.dumps({
                 "ready": sync.is_ready(),
                 "paper": True,
             }, indent=2))
-            
+
         elif cmd == "sync":
             dry_run = "--dry-run" in sys.argv
             result = sync.sync(dry_run=dry_run)
-            print(json.dumps(result, indent=2))
-            
+            logger.info(json.dumps(result, indent=2))
+
         elif cmd == "reconcile":
             result = sync.reconcile_to_broker()
-            print(json.dumps(result, indent=2))
-            
+            logger.info(json.dumps(result, indent=2))
+
         elif cmd == "drift":
             result = sync.sync(dry_run=True)
             if result.get("status") == "success":
                 drift_items = safe_get(result, "drift", "items", default=[])
                 if drift_items:
-                    print(f"Found {len(drift_items)} position drifts:")
+                    logger.info("Found %d position drifts:", len(drift_items))
                     for d in drift_items:
-                        print(f"  {d['symbol']}: {d['qty_delta']:+.2f} shares, ${d['value_delta']:+.2f} ({d['drift_pct']:+.2f}%)")
+                        logger.info("  %s: %+.2f shares, $%+.2f (%+.2f%%)",
+                                    d["symbol"], d["qty_delta"],
+                                    d["value_delta"], d["drift_pct"])
                 else:
-                    print("No position drift detected")
+                    logger.info("No position drift detected")
             else:
-                print(f"Error: {result.get('message')}")
+                logger.info("Error: %s", result.get("message"))
         else:
-            print(f"Unknown command: {cmd}")
-            print("Commands: status, sync [--dry-run], reconcile, drift")
+            logger.info("Unknown command: %s", cmd)
+            logger.info("Commands: status, sync [--dry-run], reconcile, drift")
     else:
         # Default: run sync
         result = sync.sync()
-        print(json.dumps(result, indent=2))
+        logger.info(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

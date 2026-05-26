@@ -8,7 +8,6 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import logging
 
 
 from src.signals.international_momentum import (
@@ -1264,9 +1263,8 @@ class TestInternationalMomentumCli(unittest.TestCase):
         self.assertIn('International Momentum Signal Generator', output)
         self.assertIn('--generate', output)
 
-    def test_cli_current_empty(self, caplog):
+    def test_cli_current_empty(self):
         """--current with no signal should exit with code 1 and print error to stderr."""
-        caplog.set_level(logging.ERROR)
         import sys
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
         mock_gen.get_current_signal.return_value = None
@@ -1276,12 +1274,13 @@ class TestInternationalMomentumCli(unittest.TestCase):
                 'src.signals.international_momentum.InternationalMomentumGenerator',
                 return_value=mock_gen,
             ):
-                with self.assertRaises(SystemExit) as ctx:
-                    main()
+                with self.assertLogs('src.signals.international_momentum', level='ERROR') as log:
+                    with self.assertRaises(SystemExit) as ctx:
+                        main()
         self.assertEqual(ctx.exception.code, 1)
-        self.assertIn('No signal found', caplog.text)
+        self.assertIn('No signal found', ' '.join(log.output))
 
-    def test_cli_current_with_signal(self, caplog):
+    def test_cli_current_with_signal(self):
         """--current with a stored signal should print JSON to stdout."""
         import io
         import sys
@@ -1303,13 +1302,13 @@ class TestInternationalMomentumCli(unittest.TestCase):
                 'src.signals.international_momentum.InternationalMomentumGenerator',
                 return_value=mock_gen,
             ):
-                main()
-        self.assertIn('efa_lead', caplog.text)
-        self.assertIn('signal_type', caplog.text)
+                with self.assertLogs('src.signals.international_momentum', level='INFO') as log:
+                    main()
+                self.assertIn('efa_lead', ' '.join(log.output))
+                self.assertIn('signal_type', ' '.join(log.output))
 
-    def test_cli_stats(self, caplog):
+    def test_cli_stats(self):
         """--stats should print JSON statistics to stdout."""
-        caplog.set_level(logging.INFO)
         import sys
         stats = {'total_signals': 3, 'activation_rate': 0.67}
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
@@ -1320,13 +1319,13 @@ class TestInternationalMomentumCli(unittest.TestCase):
                 'src.signals.international_momentum.InternationalMomentumGenerator',
                 return_value=mock_gen,
             ):
-                main()
-        self.assertIn('"total_signals"', caplog.text)
-        self.assertIn('"activation_rate"', caplog.text)
+                with self.assertLogs('src.signals.international_momentum', level='INFO') as log:
+                    main()
+                self.assertIn('"total_signals"', ' '.join(log.output))
+                self.assertIn('"activation_rate"', ' '.join(log.output))
 
-    def test_cli_generate_no_file(self, caplog):
+    def test_cli_generate_no_file(self):
         """--generate with non-existent file should exit with code 1."""
-        caplog.set_level(logging.ERROR)
         import sys
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
         test_args = ['prog', '--generate', '--data-file', '/nonexistent/path/data.json']
@@ -1335,10 +1334,11 @@ class TestInternationalMomentumCli(unittest.TestCase):
                 'src.signals.international_momentum.InternationalMomentumGenerator',
                 return_value=mock_gen,
             ):
-                with self.assertRaises(SystemExit) as ctx:
-                    main()
+                with self.assertLogs('src.signals.international_momentum', level='ERROR') as log:
+                    with self.assertRaises(SystemExit) as ctx:
+                        main()
         self.assertEqual(ctx.exception.code, 1)
-        self.assertIn('Data file not found', caplog.text)
+        self.assertIn('Data file not found', ' '.join(log.output))
 
 
 class TestInternationalMomentumGeneratorRiskBoundaries(unittest.TestCase):

@@ -4,6 +4,7 @@ Tests for multi-speed momentum ensemble — data classes, speed tier signals,
 ensemble aggregation, confidence calculation, and portfolio construction.
 """
 import json
+import logging
 import numpy as np
 import pandas as pd
 

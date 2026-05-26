@@ -482,12 +482,12 @@ if __name__ == "__main__":
     # Demo/test
     import sys
     
-    print("GARCH-Filtered CVaR Calculator v3.21")
-    print("=" * 50)
+    logger.info("GARCH-Filtered CVaR Calculator v3.21")
+    logger.info("=" * 50)
     
     if not ARCH_AVAILABLE:
-        print("\n⚠️  arch library not installed. Install with: uv pip install arch")
-        print("   Falling back to historical CVaR...")
+        logger.info("arch library not installed. Install with: uv pip install arch")
+        logger.info("   Falling back to historical CVaR...")
     
     # Generate synthetic test data with volatility clustering
     np.random.seed(42)
@@ -501,34 +501,34 @@ if __name__ == "__main__":
         vol = np.sqrt(0.000001 + 0.1 * returns[t-1]**2 + 0.85 * vol**2)
         returns[t] = np.random.normal(0, vol)
     
-    print(f"\nTest data: {n} days of synthetic returns")
-    print(f"Mean return: {np.mean(returns)*100:.3f}%")
-    print(f"Volatility: {np.std(returns)*np.sqrt(252)*100:.1f}% (annualized)")
+    logger.info("Test data: %d days of synthetic returns", n)
+    logger.info("Mean return: %.3f%%", np.mean(returns) * 100)
+    logger.info("Volatility: %.1f%% (annualized)", np.std(returns) * np.sqrt(252) * 100)
     
     # Calculate GARCH-CVaR
     metrics = calculate_garch_cvar(returns, current_drawdown=-0.02, max_drawdown=-0.15)
     
-    print(f"\n{'='*50}")
-    print("CVaR METRICS:")
-    print(f"  VaR (95%):     {metrics.var_95:>6.2f}%")
-    print(f"  CVaR (95%):    {metrics.cvar_95:>6.2f}%")
-    print(f"  Tail Severity: {metrics.tail_severity} ({metrics.cvar_ratio:.2f}x)")
-    print(f"  Vol (hist):    {metrics.volatility_annual:>6.2f}%")
+    logger.info("%s", "=" * 50)
+    logger.info("CVaR METRICS:")
+    logger.info("  VaR (95%%):     %6.2f%%", metrics.var_95)
+    logger.info("  CVaR (95%%):    %6.2f%%", metrics.cvar_95)
+    logger.info("  Tail Severity: %s (%.2fx)", metrics.tail_severity, metrics.cvar_ratio)
+    logger.info("  Vol (hist):    %6.2f%%", metrics.volatility_annual)
     
     if metrics.filter_active:
-        print(f"\nGARCH PARAMETERS:")
-        print(f"  ω (omega):     {metrics.garch_omega:.2e}")
-        print(f"  α (alpha):     {metrics.garch_alpha:.3f}")
-        print(f"  β (beta):      {metrics.garch_beta:.3f}")
-        print(f"  Persistence:   {metrics.garch_persistence:.3f}")
-        print(f"  Cond Vol:      {metrics.conditional_volatility_current:.2f}%")
+        logger.info("GARCH PARAMETERS:")
+        logger.info("  ω (omega):     %.2e", metrics.garch_omega)
+        logger.info("  α (alpha):     %.3f", metrics.garch_alpha)
+        logger.info("  β (beta):      %.3f", metrics.garch_beta)
+        logger.info("  Persistence:   %.3f", metrics.garch_persistence)
+        logger.info("  Cond Vol:      %.2f%%", metrics.conditional_volatility_current)
     else:
-        print(f"\n⚠️  GARCH filtering inactive: {metrics.filter_reason}")
+        logger.info("GARCH filtering inactive: %s", metrics.filter_reason)
     
     # Comparison
     comparison = compare_cvar_methods(returns)
-    print(f"\n{'='*50}")
-    print("VALIDATION:")
-    print(f"  Historical VaR breach rate: {comparison['historical']['var_breach_rate']:.1f}%")
-    print(f"  Target breach rate:         {comparison['target_breach_rate']:.1f}%")
-    print(f"  Accuracy delta:             {comparison['accuracy_delta']:+.1f}%")
+    logger.info("%s", "=" * 50)
+    logger.info("VALIDATION:")
+    logger.info("  Historical VaR breach rate: %.1f%%", comparison['historical']['var_breach_rate'])
+    logger.info("  Target breach rate:         %.1f%%", comparison['target_breach_rate'])
+    logger.info("  Accuracy delta:             %+.1f%%", comparison['accuracy_delta'])

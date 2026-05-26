@@ -4,6 +4,7 @@ Covers: section generation, severity thresholds, LLM narrative fallback,
 save/load roundtrip, template rendering.
 """
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
@@ -776,15 +777,13 @@ class TestDailyBriefCLI:
                     mock_narrative.assert_not_called()
 
     @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
-    def test_no_narrative_preserves_brief_output(self, mock_dashboard, sample_dashboard):
-        """With --no-narrative, brief output should still be printed."""
+    def test_no_narrative_preserves_brief_output(self, mock_dashboard, sample_dashboard, caplog):
+        """With --no-narrative, brief output should still be logged."""
         mock_dashboard.return_value = sample_dashboard
-        printed_texts = []
         with patch("sys.argv", ["daily_brief", "--no-narrative"]):
-            with patch("builtins.print") as mock_print:
+            with caplog.at_level(logging.INFO, logger="src.monitor.daily_brief"):
                 daily_brief_main()
-                # print should be called at least once (the brief text)
-                assert mock_print.call_count >= 1
+        assert "PORTFOLIO-LAB DAILY BRIEF" in caplog.text
 
     @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
     @patch("src.monitor.daily_brief.generate_narrative")
@@ -809,20 +808,15 @@ class TestDailyBriefCLI:
     @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
     @patch("src.monitor.daily_brief.generate_narrative")
     def test_narrative_updates_has_narrative_in_full_text(
-        self, mock_narrative, mock_dashboard, sample_dashboard,
+        self, mock_narrative, mock_dashboard, sample_dashboard, caplog,
     ):
-        """When narrative is returned, it should appear in printed output."""
+        """When narrative is returned, it should appear in logged output."""
         mock_dashboard.return_value = sample_dashboard
         mock_narrative.return_value = "Markets are calm."
-        printed = []
         with patch("sys.argv", ["daily_brief"]):
-            with patch("builtins.print") as mock_print:
+            with caplog.at_level(logging.INFO, logger="src.monitor.daily_brief"):
                 daily_brief_main()
-                # One of the print calls should contain the narrative text
-                all_output = " ".join(
-                    str(call.args[0]) for call in mock_print.call_args_list
-                )
-                assert "Markets are calm." in all_output
+        assert "Markets are calm." in caplog.text
 
     @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
     def test_save_with_narrative_writes_file(self, mock_dashboard, sample_dashboard, tmp_path):
@@ -837,15 +831,11 @@ class TestDailyBriefCLI:
         assert out_path.exists()
 
     @patch("src.monitor.unified_dashboard.generate_unified_dashboard")
-    def test_save_prints_confirmation(self, mock_dashboard, sample_dashboard, tmp_path):
-        """--save flag should print 'Saved to' confirmation message."""
+    def test_save_prints_confirmation(self, mock_dashboard, sample_dashboard, tmp_path, caplog):
+        """--save flag should log 'Saved to' confirmation message."""
         mock_dashboard.return_value = sample_dashboard
         with patch("sys.argv", ["daily_brief", "--save", "--no-narrative"]):
             with patch("src.monitor.daily_brief.DATA_DIR", tmp_path):
-                printed_texts = []
-                with patch("builtins.print") as mock_print:
+                with caplog.at_level(logging.INFO, logger="src.monitor.daily_brief"):
                     daily_brief_main()
-                    all_output = " ".join(
-                        str(call.args[0]) for call in mock_print.call_args_list
-                    )
-                    assert "Saved to" in all_output
+                assert "Saved to" in caplog.text

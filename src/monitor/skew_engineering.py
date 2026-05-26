@@ -376,22 +376,22 @@ def cli_compute(args: argparse.Namespace) -> None:
     """CLI: compute skew metrics."""
     engine = SkewEngine(symbol=args.symbol)
     metrics = engine.compute()
-    print(json.dumps(metrics.to_dict(), indent=2))
+    logger.info(json.dumps(metrics.to_dict(), indent=2))
 
 
 def cli_summary(args: argparse.Namespace) -> None:
     """CLI: print human-readable summary."""
     engine = SkewEngine(symbol=args.symbol)
-    print(engine.summarize())
+    logger.info(engine.summarize())
 
 
 def cli_adjust(args: argparse.Namespace) -> None:
     """CLI: get vol target adjustment."""
     engine = SkewEngine(symbol=args.symbol)
     adjusted = engine.get_vol_adjustment(target_vol=args.target_vol)
-    print(f"Base target: {args.target_vol:.1%}")
-    print(f"Adjusted target: {adjusted:.1%}")
-    print(f"Reduction: {(1.0 - adjusted / args.target_vol):.1%}")
+    logger.info("Base target: %.1f%%", args.target_vol * 100)
+    logger.info("Adjusted target: %.1f%%", adjusted * 100)
+    logger.info("Reduction: %.1f%%", (1.0 - adjusted / args.target_vol) * 100)
 
 
 def main():

@@ -979,7 +979,7 @@ class TestBoundaryConditions:
 
 
 class TestCliOutput:
-    """CLI function output with capsys."""
+    """CLI function output with caplog."""
 
     def _get_cli_compute(self):
         from src.monitor.skew_engineering import cli_compute as _f
@@ -997,80 +997,84 @@ class TestCliOutput:
         from src.monitor.skew_engineering import main as _main
         return _main
 
-    def test_cli_compute_prints_json(self, capsys):
+    def test_cli_compute_prints_json(self, caplog):
         args = argparse.Namespace(symbol="SPY", command="compute")
         with patch.object(SkewEngine, "_get_prices") as mock_prices:
             mock_prices.return_value = np.random.randn(260) * 0.01
-            self._get_cli_compute()(args)
-        captured = capsys.readouterr()
-        assert captured.out.strip().startswith("{")
-        assert '"symbol": "SPY"' in captured.out
+            with caplog.at_level(logging.INFO, logger="src.monitor.skew_engineering"):
+                self._get_cli_compute()(args)
+        assert len(caplog.records) == 1
+        msg = caplog.records[0].message
+        assert msg.strip().startswith("{")
+        assert '"symbol": "SPY"' in msg
 
-    def test_cli_compute_serializable(self, capsys):
+    def test_cli_compute_serializable(self, caplog):
         args = argparse.Namespace(symbol="GLD", command="compute")
         with patch.object(SkewEngine, "_get_prices") as mock_prices:
             mock_prices.return_value = np.random.randn(260) * 0.01
-            self._get_cli_compute()(args)
-        captured = capsys.readouterr()
-        parsed = json.loads(captured.out)
+            with caplog.at_level(logging.INFO, logger="src.monitor.skew_engineering"):
+                self._get_cli_compute()(args)
+        assert len(caplog.records) == 1
+        msg = caplog.records[0].message
+        parsed = json.loads(msg.strip())
         assert parsed["symbol"] == "GLD"
         assert "skew_ratio_21d" in parsed
 
-    def test_cli_summary_prints_summary(self, capsys):
+    def test_cli_summary_prints_summary(self, caplog):
         args = argparse.Namespace(symbol="SPY", command="summary")
         with patch.object(SkewEngine, "_get_prices") as mock_prices:
             mock_prices.return_value = np.random.randn(260) * 0.01
-            self._get_cli_summary()(args)
-        captured = capsys.readouterr()
-        assert "Skew Engineering" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.monitor.skew_engineering"):
+                self._get_cli_summary()(args)
+        assert "Skew Engineering" in caplog.text
 
-    def test_cli_adjust_prints_adjustment(self, capsys):
+    def test_cli_adjust_prints_adjustment(self, caplog):
         args = argparse.Namespace(symbol="SPY", command="adjust", target_vol=0.12)
         with patch.object(SkewEngine, "_get_prices") as mock_prices:
             mock_prices.return_value = np.random.randn(260) * 0.01
-            self._get_cli_adjust()(args)
-        captured = capsys.readouterr()
-        assert "Base target:" in captured.out
-        assert "Adjusted target:" in captured.out
-        assert "Reduction:" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.monitor.skew_engineering"):
+                self._get_cli_adjust()(args)
+        assert "Base target:" in caplog.text
+        assert "Adjusted target:" in caplog.text
+        assert "Reduction:" in caplog.text
 
-    def test_main_compute_command(self, capsys):
+    def test_main_compute_command(self, caplog):
         with patch.object(
             SkewEngine, "_get_prices", return_value=np.random.randn(260) * 0.01
         ), patch(
             "sys.argv", ["skew_engineering", "--symbol", "SPY", "compute"]
         ):
-            self._get_main()()
-        captured = capsys.readouterr()
-        assert '"symbol": "SPY"' in captured.out
+            with caplog.at_level(logging.INFO, logger="src.monitor.skew_engineering"):
+                self._get_main()()
+        assert '"symbol": "SPY"' in caplog.text
 
-    def test_main_summary_command(self, capsys):
+    def test_main_summary_command(self, caplog):
         with patch.object(
             SkewEngine, "_get_prices", return_value=np.random.randn(260) * 0.01
         ), patch(
             "sys.argv", ["skew_engineering", "--symbol", "QQQ", "summary"]
         ):
-            self._get_main()()
-        captured = capsys.readouterr()
-        assert "QQQ" in captured.out
+            with caplog.at_level(logging.INFO, logger="src.monitor.skew_engineering"):
+                self._get_main()()
+        assert "QQQ" in caplog.text
 
-    def test_main_adjust_command(self, capsys):
+    def test_main_adjust_command(self, caplog):
         with patch.object(
             SkewEngine, "_get_prices", return_value=np.random.randn(260) * 0.01
         ), patch(
             "sys.argv", ["skew_engineering", "--symbol", "SPY", "adjust", "--target-vol", "0.15"]
         ):
-            self._get_main()()
-        captured = capsys.readouterr()
-        assert "15.0%" in captured.out.replace(" ", "").replace("\n", "")
+            with caplog.at_level(logging.INFO, logger="src.monitor.skew_engineering"):
+                self._get_main()()
+        assert "15.0%" in caplog.text.replace(" ", "").replace("\n", "")
 
-    def test_main_no_command_prints_help(self, capsys):
+    def test_main_no_command_prints_help(self):
         with patch(
             "sys.argv", ["skew_engineering"]
         ):
-            self._get_main()()
-        captured = capsys.readouterr()
-        assert "Skew Engineering" in captured.out or "usage:" in captured.out
+            with patch("argparse.ArgumentParser.print_help") as mock_help:
+                self._get_main()()
+                mock_help.assert_called_once()
 
 
 class TestExportCompleteness:

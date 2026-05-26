@@ -614,10 +614,10 @@ def main():
     if "--json" in sys.argv or "--save" in sys.argv:
         out_path = DATA_DIR / "unified_dashboard.json"
         save_results_json(dashboard, output_path=str(out_path))
-        print(f"Saved unified dashboard to {out_path}")
+        logger.info("Saved unified dashboard to %s", out_path)
 
     if "--status-text" in sys.argv:
-        print(generate_status_text())
+        logger.info(generate_status_text())
         return
 
     if "--check" in sys.argv:

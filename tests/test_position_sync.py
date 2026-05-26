@@ -333,7 +333,8 @@ class TestCLI:
                 MockSync.return_value = mock
                 main()
         captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
+        err = captured.err.strip()
+        data = json.loads(err[err.index("{"):])
         assert data["ready"] is True
 
     def test_drift_command_no_drift(self, capsys):
@@ -348,7 +349,7 @@ class TestCLI:
                 MockSync.return_value = mock
                 main()
         captured = capsys.readouterr()
-        assert "No position drift" in captured.out
+        assert "No position drift" in captured.err
 
     def test_drift_command_with_drift(self, capsys):
         from src.broker.position_sync import main
@@ -368,8 +369,8 @@ class TestCLI:
                 MockSync.return_value = mock
                 main()
         captured = capsys.readouterr()
-        assert "Found 1 position drift" in captured.out
-        assert "SPY" in captured.out
+        assert "Found 1 position drift" in captured.err
+        assert "SPY" in captured.err
 
     def test_unknown_command(self, capsys):
         from src.broker.position_sync import main
@@ -378,7 +379,7 @@ class TestCLI:
                 MockSync.return_value = MagicMock()
                 main()
         captured = capsys.readouterr()
-        assert "Unknown command" in captured.out
+        assert "Unknown command" in captured.err
 
     def test_default_no_args(self, capsys):
         from src.broker.position_sync import main
@@ -393,7 +394,8 @@ class TestCLI:
                 MockSync.return_value = mock
                 main()
         captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
+        err = captured.err.strip()
+        data = json.loads(err[err.index("{"):])
         assert data["status"] == "success"
 
 
@@ -918,7 +920,8 @@ class TestCLIExtended:
                 main()
                 mock.sync.assert_called_once_with(dry_run=True)
         captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
+        err = captured.err.strip()
+        data = json.loads(err[err.index("{"):])
         assert data["status"] == "success"
 
     def test_reconcile_command(self, capsys):
@@ -934,7 +937,8 @@ class TestCLIExtended:
                 MockSync.return_value = mock
                 main()
         captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
+        err = captured.err.strip()
+        data = json.loads(err[err.index("{"):])
         assert data["status"] == "success"
         assert data["positions_updated"] == 2
 
@@ -948,7 +952,7 @@ class TestCLIExtended:
                 MockSync.return_value = mock
                 main()
         captured = capsys.readouterr()
-        assert "Error: API failure" in captured.out
+        assert "Error: API failure" in captured.err
 
     def test_sync_command_no_args(self, capsys):
         """sync command without args calls sync() with defaults."""

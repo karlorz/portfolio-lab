@@ -316,57 +316,60 @@ def main():
     bridge = CollarOptionsBridge()
     strikes = asyncio.run(bridge.fetch_optimal_collar())
 
-    print("=" * 60)
-    print("COLLAR OPTIONS BRIDGE v4.80")
-    print("=" * 60)
-    print(f"Source: {strikes.source}")
-    print(f"Timestamp: {strikes.timestamp}")
-    print(f"SPY: ${strikes.underlying_price:.2f}")
-    print(f"VIX: {strikes.vix_level:.1f}")
-    print(f"DTE: {strikes.days_to_expiry}")
-    print()
-    print("CALL (Short):")
-    print(f"  Symbol: {strikes.call_symbol}")
-    print(f"  Strike: ${strikes.call_strike:.2f}")
-    print(f"  Bid/Ask: ${strikes.call_bid:.2f} / ${strikes.call_ask:.2f}")
-    print(f"  Mark: ${strikes.call_mark:.2f}")
+    logger.info("=" * 60)
+    logger.info("COLLAR OPTIONS BRIDGE v4.80")
+    logger.info("=" * 60)
+    logger.info("Source: %s", strikes.source)
+    logger.info("Timestamp: %s", strikes.timestamp)
+    logger.info("SPY: $%.2f", strikes.underlying_price)
+    logger.info("VIX: %.1f", strikes.vix_level)
+    logger.info("DTE: %d", strikes.days_to_expiry)
+    logger.info("")
+    logger.info("CALL (Short):")
+    logger.info("  Symbol: %s", strikes.call_symbol)
+    logger.info("  Strike: $%.2f", strikes.call_strike)
+    logger.info("  Bid/Ask: $%.2f / $%.2f", strikes.call_bid, strikes.call_ask)
+    logger.info("  Mark: $%.2f", strikes.call_mark)
     if strikes.call_delta:
-        print(f"  Delta: {strikes.call_delta:.3f}")
-    print(f"  Volume/OI: {strikes.call_volume}/{strikes.call_oi}")
-    print(f"  Liquid: {strikes.call_liquid}")
-    print()
-    print("PUT (Long):")
-    print(f"  Symbol: {strikes.put_symbol}")
-    print(f"  Strike: ${strikes.put_strike:.2f}")
-    print(f"  Bid/Ask: ${strikes.put_bid:.2f} / ${strikes.put_ask:.2f}")
-    print(f"  Mark: ${strikes.put_mark:.2f}")
+        logger.info("  Delta: %.3f", strikes.call_delta)
+    logger.info("  Volume/OI: %d/%d", strikes.call_volume, strikes.call_oi)
+    logger.info("  Liquid: %s", strikes.call_liquid)
+    logger.info("")
+    logger.info("PUT (Long):")
+    logger.info("  Symbol: %s", strikes.put_symbol)
+    logger.info("  Strike: $%.2f", strikes.put_strike)
+    logger.info("  Bid/Ask: $%.2f / $%.2f", strikes.put_bid, strikes.put_ask)
+    logger.info("  Mark: $%.2f", strikes.put_mark)
     if strikes.put_delta:
-        print(f"  Delta: {strikes.put_delta:.3f}")
-    print(f"  Volume/OI: {strikes.put_volume}/{strikes.put_oi}")
-    print(f"  Liquid: {strikes.put_liquid}")
-    print()
-    print(f"Net Premium: ${strikes.net_premium:.2f}")
-    print(f"Cashless: {strikes.is_cashless}")
-    print(f"Collar Cost: {strikes.collar_cost_pct:.2f}%")
-    print(f"Bid-Ask Spread: {strikes.bid_ask_spread_pct:.2f}%")
-    print("=" * 60)
+        logger.info("  Delta: %.3f", strikes.put_delta)
+    logger.info("  Volume/OI: %d/%d", strikes.put_volume, strikes.put_oi)
+    logger.info("  Liquid: %s", strikes.put_liquid)
+    logger.info("")
+    logger.info("Net Premium: $%.2f", strikes.net_premium)
+    logger.info("Cashless: %s", strikes.is_cashless)
+    logger.info("Collar Cost: %.2f%%", strikes.collar_cost_pct)
+    logger.info("Bid-Ask Spread: %.2f%%", strikes.bid_ask_spread_pct)
+    logger.info("=" * 60)
 
     if "--save" in sys.argv:
         bridge.save_strikes(strikes)
 
     if "--compare" in sys.argv:
-        print()
+        logger.info("")
         comparison = bridge.compare_with_signal(strikes)
-        print("Live vs Black-Scholes Comparison:")
-        print(f"  Call: ${comparison['live_call_strike']:.2f} vs "
-              f"${comparison['bs_call_strike']:.2f} "
-              f"({comparison['call_diff_pct']:+.1f}%)")
-        print(f"  Put:  ${comparison['live_put_strike']:.2f} vs "
-              f"${comparison['bs_put_strike']:.2f} "
-              f"({comparison['put_diff_pct']:+.1f}%)")
-        print(f"  Net Premium: ${comparison['live_net_premium']:.2f} vs "
-              f"${comparison['bs_net_premium']:.2f}")
-        print(f"  Source: {comparison['source']}")
+        logger.info("Live vs Black-Scholes Comparison:")
+        logger.info("  Call: $%.2f vs $%.2f (%+.1f%%)",
+                     comparison["live_call_strike"],
+                     comparison["bs_call_strike"],
+                     comparison["call_diff_pct"])
+        logger.info("  Put:  $%.2f vs $%.2f (%+.1f%%)",
+                     comparison["live_put_strike"],
+                     comparison["bs_put_strike"],
+                     comparison["put_diff_pct"])
+        logger.info("  Net Premium: $%.2f vs $%.2f",
+                     comparison["live_net_premium"],
+                     comparison["bs_net_premium"])
+        logger.info("  Source: %s", comparison["source"])
 
 
 if __name__ == "__main__":
