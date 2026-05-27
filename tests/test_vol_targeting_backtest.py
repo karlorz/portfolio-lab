@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Tests for src/backtest/vol_targeting_backtest.py."""
+"""Tests for src/backtest/vol_targeting_backtest.py.
+
+Coverage: _compute_vol_target_leverage (6), _classify_regime_from_vol (6),
+compute_vol_target_backtest (8), compute_regime_conditional_vol_target_backtest (6),
+VolTargetResult (2), RegimeVolTargetResult (2), edge cases (5).
+"""
 
 import numpy as np
 import pytest
@@ -190,3 +195,152 @@ class TestRegimeVolTargetBacktest:
         d = result.__dict__ if hasattr(result, '__dict__') else {}
         # Should have key fields
         assert "static_sharpe" in str(result) or hasattr(result, 'static_sharpe')
+
+
+class TestComputeVolTargetBacktest:
+    """Tests for compute_vol_target_backtest (previously untested)."""
+
+    def test_basic_run_returns_vol_target_result(self):
+        from src.backtest.vol_targeting_backtest import (
+            compute_vol_target_backtest, VolTargetResult,
+        )
+        result = compute_vol_target_backtest(target_vol=0.11, max_leverage=1.5)
+        assert isinstance(result, VolTargetResult)
+
+    def test_sharpes_are_finite(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        result = compute_vol_target_backtest(target_vol=0.11, max_leverage=1.5)
+        assert np.isfinite(result.static_sharpe)
+        assert np.isfinite(result.vol_target_sharpe)
+        assert np.isfinite(result.sharpe_delta)
+
+    def test_leverage_stats_in_range(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        result = compute_vol_target_backtest(target_vol=0.09, max_leverage=1.5)
+        assert result.mean_leverage >= 0.5
+        assert result.mean_leverage <= 2.0
+        assert result.max_leverage_reached <= 1.5 + 0.01  # within max_leverage cap
+        assert 0.0 <= result.leverage_above_1_pct <= 1.0
+
+    def test_max_dd_non_positive(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        result = compute_vol_target_backtest(target_vol=0.11, max_leverage=1.5)
+        assert result.static_max_dd <= 0.0
+        assert result.vol_target_max_dd <= 0.0
+
+    def test_cagr_non_negative(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        result = compute_vol_target_backtest(target_vol=0.11, max_leverage=1.5)
+        # Over 20 years of real data, CAGR should be positive
+        assert result.static_cagr > 0
+        assert result.vol_target_cagr > 0
+
+    def test_summary_contains_key_info(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        result = compute_vol_target_backtest(target_vol=0.11, max_leverage=1.5)
+        assert "Sharpe" in result.summary
+        assert "leverage" in result.summary.lower()
+
+    def test_default_allocation_is_463816(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        result = compute_vol_target_backtest()
+        assert result.base_allocation == {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.00}
+
+    def test_custom_allocation(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        custom = {"SPY": 0.60, "GLD": 0.40, "TLT": 0.0, "IEF": 0.0}
+        result = compute_vol_target_backtest(base_allocation=custom)
+        assert result.base_allocation == custom
+
+
+class TestVolTargetResultDataclass:
+    """Tests for VolTargetResult dataclass fields."""
+
+    def test_all_fields_present(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        result = compute_vol_target_backtest(target_vol=0.11, max_leverage=1.5)
+        assert hasattr(result, 'analysis_date')
+        assert hasattr(result, 'base_allocation')
+        assert hasattr(result, 'target_vol')
+        assert hasattr(result, 'vol_lookback')
+        assert hasattr(result, 'max_leverage')
+        assert hasattr(result, 'static_sharpe')
+        assert hasattr(result, 'vol_target_sharpe')
+        assert hasattr(result, 'sharpe_delta')
+        assert hasattr(result, 'static_cagr')
+        assert hasattr(result, 'vol_target_cagr')
+        assert hasattr(result, 'static_max_dd')
+        assert hasattr(result, 'vol_target_max_dd')
+        assert hasattr(result, 'mean_leverage')
+        assert hasattr(result, 'max_leverage_reached')
+        assert hasattr(result, 'leverage_above_1_pct')
+        assert hasattr(result, 'summary')
+
+    def test_sharpe_delta_consistent(self):
+        from src.backtest.vol_targeting_backtest import compute_vol_target_backtest
+        result = compute_vol_target_backtest(target_vol=0.11, max_leverage=1.5)
+        expected_delta = round(result.vol_target_sharpe - result.static_sharpe, 4)
+        assert result.sharpe_delta == expected_delta
+
+
+class TestRegimeVolTargetResultDataclass:
+    """Tests for RegimeVolTargetResult dataclass fields."""
+
+    def test_regime_breakdown_structure(self):
+        from src.backtest.vol_targeting_backtest import (
+            compute_regime_conditional_vol_target_backtest,
+        )
+        result = compute_regime_conditional_vol_target_backtest(
+            vol_lookback=63, max_leverage=1.5,
+        )
+        for regime, info in result.regime_breakdown.items():
+            assert "days" in info
+            assert "pct_of_time" in info
+            assert "mean_leverage" in info
+            assert "target_vol" in info
+
+    def test_regime_targets_stored(self):
+        from src.backtest.vol_targeting_backtest import (
+            compute_regime_conditional_vol_target_backtest, REGIME_VOL_TARGETS,
+        )
+        result = compute_regime_conditional_vol_target_backtest(
+            vol_lookback=63, max_leverage=1.5,
+        )
+        for regime, target in REGIME_VOL_TARGETS.items():
+            assert regime in result.regime_targets
+
+
+class TestRegimeClassificationEdgeCases:
+    """Additional edge case tests for _classify_regime_from_vol."""
+
+    def test_boundary_crisis_high_vol(self):
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+        # Exactly 1.7x median → CRISIS
+        assert _classify_regime_from_vol(0.17, median_vol=0.10) == "CRISIS"
+
+    def test_boundary_high_vol_normal(self):
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+        # Exactly 1.25x median → HIGH_VOL
+        assert _classify_regime_from_vol(0.125, median_vol=0.10) == "HIGH_VOL"
+
+    def test_boundary_normal_low_vol(self):
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+        # Just above 0.75x → NORMAL
+        assert _classify_regime_from_vol(0.076, median_vol=0.10) == "NORMAL"
+        # Just below 0.75x → LOW_VOL
+        assert _classify_regime_from_vol(0.074, median_vol=0.10) == "LOW_VOL"
+
+    def test_recovery_only_from_crisis_or_high_vol(self):
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+        # From NORMAL with declining → stays NORMAL (not RECOVERY)
+        regime = _classify_regime_from_vol(
+            0.10, median_vol=0.10, prev_regime="NORMAL", vol_declining=True,
+        )
+        assert regime == "NORMAL"
+
+    def test_recovery_from_high_vol(self):
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+        regime = _classify_regime_from_vol(
+            0.10, median_vol=0.10, prev_regime="HIGH_VOL", vol_declining=True,
+        )
+        assert regime == "RECOVERY"
