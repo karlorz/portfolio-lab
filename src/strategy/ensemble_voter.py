@@ -60,6 +60,11 @@ __all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WE
 
 logger = logging.getLogger(__name__)
 
+# Bandit blend parameters — controls static/bandit weight mixing
+# Starts 100% static, shifts to (1-BANDIT_MAX_BLEND)/BANDIT_MAX_BLEND after warmup
+BANDIT_MAX_BLEND: float = float(os.environ.get("ENSEMBLE_BANDIT_MAX_BLEND", "0.7"))
+BANDIT_WARMUP_DAYS: int = int(os.environ.get("ENSEMBLE_BANDIT_WARMUP_DAYS", "252"))
+
 # Module-level health tracker singleton (lazy initialized)
 _health_tracker = None
 
@@ -897,8 +902,8 @@ class EnsembleVoter:
         if bandit is None:
             return static  # Cold start: 100% static
 
-        # Blend: starts 100% static, shifts to 30/70 static/bandit after 252 days
-        blend = min(0.7, self.bandit_observations / 252 * 0.7)
+        # Blend: starts 100% static, shifts to (1-MAX_BLEND)/MAX_BLEND after warmup
+        blend = min(BANDIT_MAX_BLEND, self.bandit_observations / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND)
 
         # Convert static keys from SignalSource enum to string values for matching
         static_by_value = {k.value: v for k, v in static.items()}

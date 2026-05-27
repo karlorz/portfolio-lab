@@ -388,15 +388,6 @@ def fetch_factor_prices_from_pipeline(symbol: str, prices_data: Optional[Dict] =
     return records
 
 
-def fetch_factor_prices_from_yahoo(symbol: str, days: int = 252) -> List[Dict]:
-    """Fetch price data from Yahoo Finance (deprecated - use pipeline).
-    
-    Kept for backward compatibility. New code should use fetch_factor_prices_from_pipeline().
-    """
-    logger.info("Fetching %d days of data for %s from Yahoo Finance", days, symbol)
-    return fetch_factor_prices_from_pipeline(symbol)
-
-
 def main():
     """CLI for factor data management."""
     import argparse
@@ -444,14 +435,14 @@ def main():
         
     elif args.command == "fetch":
         if args.symbol:
-            prices = fetch_factor_prices_from_yahoo(args.symbol, args.days)
+            prices = fetch_factor_prices_from_pipeline(args.symbol)
             if prices:
                 manager.store_prices(args.symbol, prices)
             else:
                 logger.info("No data fetched (placeholder implementation)")
         else:
             for symbol in FACTOR_ETFS:
-                prices = fetch_factor_prices_from_yahoo(symbol, args.days)
+                prices = fetch_factor_prices_from_pipeline(symbol)
                 if prices:
                     manager.store_prices(symbol, prices)
                 
