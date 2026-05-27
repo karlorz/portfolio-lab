@@ -3757,3 +3757,132 @@ class TestUtilityReweighting:
             result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
         assert abs(sum(result.values()) - 1.0) < 0.01
 
+
+# ===========================================================================
+# Category 7: Weight Pipeline Sub-Method Unit Tests
+# ===========================================================================
+
+class TestExtractSignalValues:
+    """Tests for _extract_signal_values static method."""
+
+    def test_basic_extraction(self):
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.5),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=-0.3),
+        }
+        result = EnsembleVoter._extract_signal_values(readings)
+        assert result["multi_speed_momentum"] == 0.5
+        assert result["cross_asset_rv"] == -0.3
+
+    def test_skips_nan_values(self):
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=float('nan')),
+            SignalSource.CROSS_ASSET_RV: _make_reading(value=0.2),
+        }
+        result = EnsembleVoter._extract_signal_values(readings)
+        assert "multi_speed_momentum" not in result
+        assert "cross_asset_rv" in result
+
+    def test_empty_readings(self):
+        result = EnsembleVoter._extract_signal_values({})
+        assert result == {}
+
+    def test_all_nan(self):
+        readings = {
+            SignalSource.MULTI_SPEED_MOM: _make_reading(value=float('nan')),
+            SignalSource.ALTERNATIVE_DATA: _make_reading(source=SignalSource.ALTERNATIVE_DATA, value=float('nan')),
+        }
+        result = EnsembleVoter._extract_signal_values(readings)
+        assert result == {}
+
+    def test_preserves_all_valid_values(self):
+        readings = {src: _make_reading(source=src, value=i * 0.1)
+                    for i, src in enumerate(SignalSource)}
+        result = EnsembleVoter._extract_signal_values(readings)
+        assert len(result) == len(SignalSource)
+
+
+class TestDetermineAction:
+    """Tests for _determine_action static method."""
+
+    def test_crisis_always_risk_off(self):
+        action, conf = EnsembleVoter._determine_action(Regime.CRISIS, 0.9, 0.5, 0.8)
+        assert action == "risk_off"
+        assert conf == 0.9
+
+    def test_positive_bias_high_agreement(self):
+        action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.5, 0.5, 0.8)
+        assert action == "increase_equity"
+        assert conf > 0
+
+    def test_negative_bias_high_agreement(self):
+        action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.5, -0.5, 0.8)
+        assert action == "decrease_equity"
+
+    def test_low_agreement_neutral(self):
+        action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.5, 0.5, 0.3)
+        assert action == "neutral"
+        assert conf == 0.5
+
+    def test_small_bias_neutral(self):
+        action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.5, 0.1, 0.8)
+        assert action == "neutral"
+
+    def test_uses_consensus_threshold(self):
+        """Agreement just below threshold should be neutral."""
+        from src.paths import ENSEMBLE_CONSENSUS_THRESHOLD
+        action, _ = EnsembleVoter._determine_action(
+            Regime.NORMAL, 0.5, 0.5, ENSEMBLE_CONSENSUS_THRESHOLD - 0.01
+        )
+        assert action == "neutral"
+        # Just above threshold should trigger action
+        action, _ = EnsembleVoter._determine_action(
+            Regime.NORMAL, 0.5, 0.5, ENSEMBLE_CONSENSUS_THRESHOLD + 0.01
+        )
+        assert action == "increase_equity"
+
+
+class TestComputeAssetBiases:
+    """Tests for _compute_asset_biases static method."""
+
+    def test_basic_biases(self):
+        r1 = _make_reading(asset_signals={'SPY': 0.5, 'TLT': -0.3, 'GLD': 0.1})
+        r1.weight = 0.5
+        r2 = _make_reading(asset_signals={'SPY': 0.3, 'TLT': -0.1, 'GLD': 0.2})
+        r2.weight = 0.5
+        biases = EnsembleVoter._compute_asset_biases([r1, r2], 0.0)
+        assert 'SPY' in biases
+        assert 'TLT' in biases
+        assert 'GLD' in biases
+        assert biases['SPY'] > 0  # Both positive
+        assert biases['TLT'] < 0  # Both negative
+
+    def test_fallback_on_empty_signals(self):
+        biases = EnsembleVoter._compute_asset_biases([], 0.42)
+        assert all(v == 0.42 for v in biases.values())
+
+    def test_fallback_on_missing_asset(self):
+        r = _make_reading(asset_signals={'SPY': 0.5})
+        r.weight = 0.5
+        biases = EnsembleVoter._compute_asset_biases([r], 0.0)
+        assert biases['SPY'] == 0.5
+        assert biases['TLT'] == 0.0  # fallback
+        assert biases['GLD'] == 0.0  # fallback
+
+    def test_weighted_average(self):
+        r1 = _make_reading(value=0.5, asset_signals={'SPY': 0.8, 'TLT': 0.0, 'GLD': 0.0})
+        r1.weight = 0.7
+        r2 = _make_reading(value=0.3, asset_signals={'SPY': 0.2, 'TLT': 0.0, 'GLD': 0.0})
+        r2.weight = 0.3
+        biases = EnsembleVoter._compute_asset_biases([r1, r2], 0.0)
+        # Weighted: (0.8*0.7 + 0.2*0.3) / 1.0 = 0.62
+        assert abs(biases['SPY'] - 0.62) < 0.01
+
+    def test_skips_nan_asset_signals(self):
+        r1 = _make_reading(asset_signals={'SPY': float('nan'), 'TLT': -0.3, 'GLD': 0.1})
+        r1.weight = 0.5
+        r2 = _make_reading(asset_signals={'SPY': 0.5, 'TLT': -0.1, 'GLD': 0.2})
+        r2.weight = 0.5
+        biases = EnsembleVoter._compute_asset_biases([r1, r2], 0.0)
+        assert biases['SPY'] == 0.5  # Only second reading contributes
+
