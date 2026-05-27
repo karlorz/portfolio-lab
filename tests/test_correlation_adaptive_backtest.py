@@ -174,3 +174,141 @@ class TestVolTargetLeverage:
 
         lev = _compute_vol_target_leverage(0.0, 0.11)
         assert lev == 1.0
+
+
+class TestComputeCorrelationAdaptiveBacktest:
+    """Tests for compute_correlation_adaptive_backtest (previously untested)."""
+
+    def test_basic_run_returns_result(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest, CorrelationAdaptiveResult,
+        )
+        result = compute_correlation_adaptive_backtest()
+        assert isinstance(result, CorrelationAdaptiveResult)
+
+    def test_sharpes_are_finite(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        assert np.isfinite(result.static_sharpe)
+        assert np.isfinite(result.adaptive_sharpe)
+        assert np.isfinite(result.sharpe_delta)
+
+    def test_max_dd_non_positive(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        assert result.static_max_dd <= 0.0
+        assert result.adaptive_max_dd <= 0.0
+
+    def test_regime_distribution_sums_to_total(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        total = sum(result.correlation_regime_distribution.values())
+        assert total > 0
+        # All regimes should be present
+        for r in ["diversifying", "neutral", "correlated"]:
+            assert r in result.correlation_regime_distribution
+
+    def test_ief_shift_frequency_in_range(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        assert 0.0 <= result.ief_shift_frequency <= 1.0
+
+    def test_adaptive_weights_mean_sum_to_one(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        total = sum(result.adaptive_weights_mean.values())
+        assert abs(total - 1.0) < 0.02
+
+    def test_default_allocation(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        assert result.base_weights == {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.00}
+
+    def test_custom_corr_window(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest(corr_window=126)
+        assert np.isfinite(result.sharpe_delta)
+
+    def test_summary_contains_key_info(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        assert "Sharpe" in result.summary
+        assert "IEF" in result.summary
+
+
+class TestCorrelationAdaptiveResultDataclass:
+    """Tests for CorrelationAdaptiveResult fields."""
+
+    def test_all_fields_present(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        assert hasattr(result, 'analysis_date')
+        assert hasattr(result, 'base_weights')
+        assert hasattr(result, 'adaptive_weights_mean')
+        assert hasattr(result, 'static_sharpe')
+        assert hasattr(result, 'adaptive_sharpe')
+        assert hasattr(result, 'sharpe_delta')
+        assert hasattr(result, 'static_max_dd')
+        assert hasattr(result, 'adaptive_max_dd')
+        assert hasattr(result, 'correlation_regime_distribution')
+        assert hasattr(result, 'ief_shift_frequency')
+        assert hasattr(result, 'summary')
+
+    def test_sharpe_delta_consistent(self):
+        from src.backtest.correlation_adaptive_backtest import (
+            compute_correlation_adaptive_backtest,
+        )
+        result = compute_correlation_adaptive_backtest()
+        expected = round(result.adaptive_sharpe - result.static_sharpe, 4)
+        assert result.sharpe_delta == expected
+
+
+class TestAdaptiveWeightsEdgeCases:
+    """Edge case tests for _get_adaptive_weights."""
+
+    def test_extreme_correlation_full_shift(self):
+        from src.backtest.correlation_adaptive_backtest import _get_adaptive_weights
+        base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.0}
+        w = _get_adaptive_weights(0.99, base, max_ief_shift=0.50)
+        # At correlation 0.99, shift_fraction = min((0.99-0.15)/0.35, 1.0) * 0.50 = 0.50
+        assert w["IEF"] > 0.07
+        assert w["TLT"] < 0.09
+
+    def test_zero_correlation_neutral(self):
+        from src.backtest.correlation_adaptive_backtest import _get_adaptive_weights
+        base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.0}
+        w = _get_adaptive_weights(0.0, base)
+        # In neutral zone, some partial shift
+        assert w["TLT"] + w["IEF"] == pytest.approx(0.16, abs=0.001)
+
+    def test_total_bond_preserved(self):
+        from src.backtest.correlation_adaptive_backtest import _get_adaptive_weights
+        base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.0}
+        for corr in [-0.5, -0.15, 0.0, 0.15, 0.5]:
+            w = _get_adaptive_weights(corr, base)
+            assert w["TLT"] + w["IEF"] == pytest.approx(0.16, abs=0.001)
+
+    def test_spy_gld_unchanged(self):
+        from src.backtest.correlation_adaptive_backtest import _get_adaptive_weights
+        base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.0}
+        w = _get_adaptive_weights(0.5, base)
+        assert w["SPY"] == 0.46
+        assert w["GLD"] == 0.38
