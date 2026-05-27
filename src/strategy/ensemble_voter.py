@@ -43,7 +43,14 @@ from pathlib import Path
 from enum import Enum
 import logging
 
-from src.paths import DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect
+from src.paths import (
+    DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect,
+    ENSEMBLE_CRISIS_VOL_THRESHOLD, ENSEMBLE_CRISIS_DRAWDOWN_THRESHOLD,
+    ENSEMBLE_HIGH_VOL_VOL_THRESHOLD, ENSEMBLE_HIGH_VOL_DRAWDOWN_THRESHOLD,
+    ENSEMBLE_LOW_VOL_VOL_THRESHOLD, ENSEMBLE_LOW_VOL_MOM_THRESHOLD,
+    ENSEMBLE_RECOVERY_DRAWDOWN_THRESHOLD, ENSEMBLE_RECOVERY_MOM_THRESHOLD,
+    ENSEMBLE_CONSENSUS_THRESHOLD,
+)
 from src.data.price_cache import get_prices, get_prices_df
 from src.utils import safe_get
 from src.utils.computation_cache import get_realized_volatility
@@ -564,16 +571,16 @@ class EnsembleVoter:
     weighting, and produces consensus recommendations.
     """
 
-    # Regime detection thresholds
-    CRISIS_VOL_THRESHOLD = 0.30        # 20d annualized vol above this → CRISIS
-    CRISIS_DRAWDOWN_THRESHOLD = -0.10  # Drawdown below this → CRISIS
-    HIGH_VOL_VOL_THRESHOLD = 0.20      # 20d annualized vol above this → HIGH_VOL
-    HIGH_VOL_DRAWDOWN_THRESHOLD = -0.05
+    # Regime detection thresholds (centralized in src/paths.py, env-var configurable)
+    CRISIS_VOL_THRESHOLD = ENSEMBLE_CRISIS_VOL_THRESHOLD
+    CRISIS_DRAWDOWN_THRESHOLD = ENSEMBLE_CRISIS_DRAWDOWN_THRESHOLD
+    HIGH_VOL_VOL_THRESHOLD = ENSEMBLE_HIGH_VOL_VOL_THRESHOLD
+    HIGH_VOL_DRAWDOWN_THRESHOLD = ENSEMBLE_HIGH_VOL_DRAWDOWN_THRESHOLD
     HIGH_VOL_MOM_THRESHOLD = 0.0       # Negative momentum with drawdown → HIGH_VOL
-    LOW_VOL_VOL_THRESHOLD = 0.12       # 20d annualized vol below this → LOW_VOL
-    LOW_VOL_MOM_THRESHOLD = 0.01       # Positive momentum required for LOW_VOL
-    RECOVERY_DRAWDOWN_THRESHOLD = -0.03
-    RECOVERY_MOM_THRESHOLD = 0.02
+    LOW_VOL_VOL_THRESHOLD = ENSEMBLE_LOW_VOL_VOL_THRESHOLD
+    LOW_VOL_MOM_THRESHOLD = ENSEMBLE_LOW_VOL_MOM_THRESHOLD
+    RECOVERY_DRAWDOWN_THRESHOLD = ENSEMBLE_RECOVERY_DRAWDOWN_THRESHOLD
+    RECOVERY_MOM_THRESHOLD = ENSEMBLE_RECOVERY_MOM_THRESHOLD
     
     def __init__(
         self,
@@ -1554,9 +1561,9 @@ class EnsembleVoter:
         """Determine portfolio action from regime, equity bias, and agreement."""
         if regime == Regime.CRISIS:
             return "risk_off", regime_confidence
-        elif equity_bias > 0.3 and agreement > 0.6:
+        elif equity_bias > 0.3 and agreement > ENSEMBLE_CONSENSUS_THRESHOLD:
             return "increase_equity", agreement * abs(equity_bias)
-        elif equity_bias < -0.3 and agreement > 0.6:
+        elif equity_bias < -0.3 and agreement > ENSEMBLE_CONSENSUS_THRESHOLD:
             return "decrease_equity", agreement * abs(equity_bias)
         else:
             return "neutral", 0.5

@@ -10,6 +10,7 @@ import logging
 import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
+from scipy import stats as sp_stats
 from typing import Any, Callable, Dict, List, Optional
 
 from src.paths import BASE_ALLOCATION
@@ -116,6 +117,16 @@ class BacktestMetrics:
     sharpe_ratio: float
     max_drawdown: float
 
+    # Risk-adjusted ratios
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
+    tail_ratio: float = 0.0
+    omega_ratio: float = 0.0
+
+    # Distribution shape
+    skewness: float = 0.0
+    kurtosis: float = 0.0
+
     # Trade stats
     total_rebalances: int = 0
     total_transaction_costs: float = 0.0
@@ -185,12 +196,46 @@ def compute_metrics(
         dd = (val - peak) / peak if peak > 0 else 0.0
         max_dd = min(max_dd, dd)
 
+    returns_arr = np.array(returns)
+
+    # Sortino ratio (downside deviation)
+    downside_returns = returns_arr[returns_arr < 0]
+    downside_dev = np.std(downside_returns) * np.sqrt(trading_days_per_year) if len(downside_returns) > 0 else 0.0
+    sortino = cagr / downside_dev if downside_dev > 0 else 0.0
+
+    # Calmar ratio (CAGR / abs max drawdown)
+    calmar = cagr / abs(max_dd) if max_dd != 0 else 0.0
+
+    # Tail ratio (95th percentile gain / abs 5th percentile loss)
+    if len(returns_arr) >= 20:
+        p95 = np.percentile(returns_arr, 95)
+        p5 = np.percentile(returns_arr, 5)
+        tail_ratio = p95 / abs(p5) if p5 != 0 else 0.0
+    else:
+        tail_ratio = 0.0
+
+    # Omega ratio (probability-weighted gain / loss)
+    threshold = 0.0
+    gains = returns_arr[returns_arr > threshold] - threshold
+    losses = threshold - returns_arr[returns_arr <= threshold]
+    omega = float(np.sum(gains) / np.sum(losses)) if np.sum(losses) > 0 else 0.0
+
+    # Skewness and kurtosis
+    skewness = float(sp_stats.skew(returns_arr)) if len(returns_arr) >= 3 else 0.0
+    kurtosis = float(sp_stats.kurtosis(returns_arr)) if len(returns_arr) >= 4 else 0.0
+
     return BacktestMetrics(
         total_return=round(total_return * 100, 2),
         cagr=round(cagr * 100, 2),
         volatility=round(vol * 100, 2),
         sharpe_ratio=round(sharpe, 4),
         max_drawdown=round(max_dd * 100, 2),
+        sortino_ratio=round(sortino, 4),
+        calmar_ratio=round(calmar, 4),
+        tail_ratio=round(tail_ratio, 4),
+        omega_ratio=round(omega, 4),
+        skewness=round(skewness, 4),
+        kurtosis=round(kurtosis, 4),
     )
 
 
@@ -279,6 +324,12 @@ def print_metrics_report(metrics: BacktestMetrics, title: str = "Backtest Result
     logger.info(f"CAGR: {metrics.cagr:.2f}%")
     logger.info(f"Volatility: {metrics.volatility:.2f}%")
     logger.info(f"Sharpe Ratio: {metrics.sharpe_ratio:.4f}")
+    logger.info(f"Sortino Ratio: {metrics.sortino_ratio:.4f}")
+    logger.info(f"Calmar Ratio: {metrics.calmar_ratio:.4f}")
+    logger.info(f"Tail Ratio: {metrics.tail_ratio:.4f}")
+    logger.info(f"Omega Ratio: {metrics.omega_ratio:.4f}")
+    logger.info(f"Skewness: {metrics.skewness:.4f}")
+    logger.info(f"Kurtosis: {metrics.kurtosis:.4f}")
     logger.info(f"Max Drawdown: {metrics.max_drawdown:.2f}%")
     if metrics.total_rebalances > 0:
         logger.info(f"Rebalances: {metrics.total_rebalances}")

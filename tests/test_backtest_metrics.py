@@ -267,6 +267,83 @@ class TestComputeMetrics:
         assert isinstance(m.total_return, float)
 
 
+class TestNewMetrics:
+    """Tests for Sortino, Calmar, Tail, Omega, Skewness, Kurtosis."""
+
+    def test_sortino_positive_for_upward_curve(self):
+        np.random.seed(42)
+        curve = [100000]
+        for _ in range(251):
+            curve.append(curve[-1] * (1 + np.random.normal(0.0004, 0.01)))
+        m = compute_metrics(curve, 100000)
+        assert m.sortino_ratio > 0
+        # Sortino >= Sharpe when returns have downside asymmetry
+        assert m.sortino_ratio >= m.sharpe_ratio * 0.5
+
+    def test_sortino_zero_for_no_downside(self):
+        # Monotonically increasing — no negative returns
+        curve = [100000 + i * 100 for i in range(300)]
+        m = compute_metrics(curve, 100000)
+        assert m.sortino_ratio == 0.0  # No downside deviation
+
+    def test_calmar_ratio(self):
+        curve = [100000, 110000, 95000, 115000, 120000]
+        m = compute_metrics(curve, 100000)
+        # Calmar = CAGR / abs(max_drawdown)
+        assert m.calmar_ratio != 0.0
+        assert isinstance(m.calmar_ratio, float)
+
+    def test_tail_ratio_bounds(self):
+        np.random.seed(42)
+        curve = [100000]
+        for _ in range(251):
+            curve.append(curve[-1] * (1 + np.random.normal(0.0004, 0.01)))
+        m = compute_metrics(curve, 100000)
+        # Tail ratio should be positive and finite
+        assert m.tail_ratio > 0
+        assert np.isfinite(m.tail_ratio)
+
+    def test_omega_ratio_above_one_for_positive_returns(self):
+        np.random.seed(42)
+        curve = [100000]
+        for _ in range(251):
+            curve.append(curve[-1] * (1 + np.random.normal(0.0005, 0.008)))
+        m = compute_metrics(curve, 100000)
+        # Omega > 1 means gains outweigh losses
+        assert m.omega_ratio > 1.0
+
+    def test_skewness_and_kurtosis_finite(self):
+        np.random.seed(42)
+        curve = [100000]
+        for _ in range(251):
+            curve.append(curve[-1] * (1 + np.random.normal(0.0004, 0.01)))
+        m = compute_metrics(curve, 100000)
+        assert np.isfinite(m.skewness)
+        assert np.isfinite(m.kurtosis)
+
+    def test_new_metrics_defaults_for_short_curve(self):
+        # Single value — all new metrics should default to 0.0
+        m = compute_metrics([100000], 100000)
+        assert m.sortino_ratio == 0.0
+        assert m.calmar_ratio == 0.0
+        assert m.tail_ratio == 0.0
+        assert m.omega_ratio == 0.0
+        assert m.skewness == 0.0
+        assert m.kurtosis == 0.0
+
+    def test_new_metrics_in_backtest_metrics_dataclass(self):
+        m = BacktestMetrics(
+            total_return=10.0, cagr=5.0, volatility=12.0,
+            sharpe_ratio=0.5, max_drawdown=-15.0,
+        )
+        assert m.sortino_ratio == 0.0
+        assert m.calmar_ratio == 0.0
+        assert m.tail_ratio == 0.0
+        assert m.omega_ratio == 0.0
+        assert m.skewness == 0.0
+        assert m.kurtosis == 0.0
+
+
 class TestComputeCrisisReturns:
     def test_basic(self):
         prices = {

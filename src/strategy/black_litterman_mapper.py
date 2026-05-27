@@ -306,8 +306,8 @@ def compute_bl_weights(
 
     prices_subset = prices_df[available]
 
-    # Compute covariance matrix
-    S = risk_models.sample_cov(prices_subset)
+    # Compute covariance matrix with Ledoit-Wolf shrinkage for stability
+    S = risk_models.CovarianceShrinkage(prices_subset).ledoit_wolf()
     cov_matrix = S.values
 
     # Map biases to views

@@ -82,6 +82,22 @@ VIX_LOW_VOL_THRESHOLD: float = float(os.environ.get("VIX_LOW_VOL_THRESHOLD", "15
 # Override via RISK_FREE_RATE env var (e.g., "5.0" for 5%).
 RISK_FREE_RATE: float = float(os.environ.get("RISK_FREE_RATE", "4.5"))
 
+# ── Ensemble Voter Regime Thresholds ──────────────────────────────────
+# Used by ensemble_voter.py EnsembleVoter class for regime detection.
+# Single source of truth — import from here instead of hardcoding.
+ENSEMBLE_CRISIS_VOL_THRESHOLD: float = float(os.environ.get("ENSEMBLE_CRISIS_VOL_THRESHOLD", "0.30"))
+ENSEMBLE_CRISIS_DRAWDOWN_THRESHOLD: float = float(os.environ.get("ENSEMBLE_CRISIS_DRAWDOWN_THRESHOLD", "-0.10"))
+ENSEMBLE_HIGH_VOL_VOL_THRESHOLD: float = float(os.environ.get("ENSEMBLE_HIGH_VOL_VOL_THRESHOLD", "0.20"))
+ENSEMBLE_HIGH_VOL_DRAWDOWN_THRESHOLD: float = float(os.environ.get("ENSEMBLE_HIGH_VOL_DRAWDOWN_THRESHOLD", "-0.05"))
+ENSEMBLE_LOW_VOL_VOL_THRESHOLD: float = float(os.environ.get("ENSEMBLE_LOW_VOL_VOL_THRESHOLD", "0.12"))
+ENSEMBLE_LOW_VOL_MOM_THRESHOLD: float = float(os.environ.get("ENSEMBLE_LOW_VOL_MOM_THRESHOLD", "0.01"))
+ENSEMBLE_RECOVERY_DRAWDOWN_THRESHOLD: float = float(os.environ.get("ENSEMBLE_RECOVERY_DRAWDOWN_THRESHOLD", "-0.03"))
+ENSEMBLE_RECOVERY_MOM_THRESHOLD: float = float(os.environ.get("ENSEMBLE_RECOVERY_MOM_THRESHOLD", "0.02"))
+
+# ── Ensemble Voter Consensus ─────────────────────────────────────────
+# Fraction of weighted signals that must agree for action.
+ENSEMBLE_CONSENSUS_THRESHOLD: float = float(os.environ.get("ENSEMBLE_CONSENSUS_THRESHOLD", str(2/3)))
+
 
 def sqlite_connect(db_path: Union[str, Path], **kwargs) -> sqlite3.Connection:
     """Open a SQLite connection with WAL journal mode enabled.
