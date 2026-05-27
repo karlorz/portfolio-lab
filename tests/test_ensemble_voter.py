@@ -3886,3 +3886,79 @@ class TestComputeAssetBiases:
         biases = EnsembleVoter._compute_asset_biases([r1, r2], 0.0)
         assert biases['SPY'] == 0.5  # Only second reading contributes
 
+
+# ===========================================================================
+# Category 8: Correlation Penalty Tests
+# ===========================================================================
+
+class TestApplyCorrelationPenalty:
+    """Tests for _apply_correlation_penalty method with mocked matrix."""
+
+    def _make_voter_corr(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        return voter
+
+    def test_no_penalties_returns_original(self, tmp_path):
+        """Empty penalties dict returns unchanged weights."""
+        voter = self._make_voter_corr(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.3, SignalSource.CROSS_ASSET_RV: 0.7}
+        mock_data = {"correlation_penalties": {}, "redundant_pairs": []}
+        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
+            result = voter._apply_correlation_penalty(weights)
+        assert result == weights
+
+    def test_penalty_reduces_weights_and_renormalizes(self, tmp_path):
+        """Correlated signal weight is penalized, others re-normalized."""
+        voter = self._make_voter_corr(tmp_path)
+        weights = {
+            SignalSource.MULTI_SPEED_MOM: 0.5,
+            SignalSource.CROSS_ASSET_RV: 0.5,
+        }
+        mock_data = {
+            "correlation_penalties": {
+                "multi_speed_momentum": 0.5,  # 50% penalty (max)
+                "cross_asset_rv": 1.0,  # no penalty
+            },
+            "redundant_pairs": [],
+        }
+        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
+            result = voter._apply_correlation_penalty(weights)
+        # MSM: 0.5 * 0.5 = 0.25, RV: 0.5 * 1.0 = 0.5 → total = 0.75
+        # Renormalized: MSM = 0.25/0.75 = 0.333, RV = 0.5/0.75 = 0.667
+        assert abs(result[SignalSource.MULTI_SPEED_MOM] - 0.333) < 0.01
+        assert abs(result[SignalSource.CROSS_ASSET_RV] - 0.667) < 0.01
+        assert abs(sum(result.values()) - 1.0) < 0.001
+
+    def test_clips_min_penalty_at_0_5(self, tmp_path):
+        """Penalty below 0.5 is clipped to 0.5 (max 50% reduction)."""
+        voter = self._make_voter_corr(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 1.0}
+        mock_data = {
+            "correlation_penalties": {"multi_speed_momentum": 0.1},  # extreme penalty
+            "redundant_pairs": [],
+        }
+        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
+            result = voter._apply_correlation_penalty(weights)
+        # Penalty clipped to 0.5, weight = 1.0 * 0.5 = 0.5, renorm = 1.0
+        assert abs(result[SignalSource.MULTI_SPEED_MOM] - 1.0) < 0.001
+
+    def test_exception_returns_original(self, tmp_path):
+        """On exception, returns original weights unchanged."""
+        voter = self._make_voter_corr(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.5}
+        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", side_effect=ValueError("test")):
+            result = voter._apply_correlation_penalty(weights)
+        assert result == weights
+
+    def test_no_redundant_pairs_logs_nothing(self, tmp_path, caplog):
+        """When redundant_pairs is empty, no redundant info is logged."""
+        voter = self._make_voter_corr(tmp_path)
+        weights = {SignalSource.MULTI_SPEED_MOM: 0.5}
+        mock_data = {
+            "correlation_penalties": {"multi_speed_momentum": 0.8},
+            "redundant_pairs": [],
+        }
+        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
+            voter._apply_correlation_penalty(weights)
+        assert "Redundant signal pairs detected" not in caplog.text
+
