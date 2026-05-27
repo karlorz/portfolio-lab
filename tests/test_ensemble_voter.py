@@ -2055,8 +2055,9 @@ class TestConstantsValidation:
                 assert np.isfinite(w), f"{source} weight in {regime} is not finite: {w}"
 
     def test_regime_weights_have_exactly_six_keys_per_regime(self):
+        expected = len(list(SignalSource))
         for regime in Regime:
-            assert len(REGIME_WEIGHTS[regime]) == 6, f"{regime} does not have 6 entries"
+            assert len(REGIME_WEIGHTS[regime]) == expected, f"{regime} does not have {expected} entries"
 
     def test_ensemble_voter_crisis_vol_threshold(self):
         assert EnsembleVoter.CRISIS_VOL_THRESHOLD == 0.30
@@ -3094,7 +3095,7 @@ class TestEnsembleVoterInitCases:
     def test_init_creates_bandit_with_six_signals(self, tmp_path):
         with patch('src.signals.regime_gate.RegimeGate'):
             voter = EnsembleVoter(data_path=tmp_path)
-        assert len(voter.bandit.signals) == 6
+        assert len(voter.bandit.signals) == len(list(SignalSource))
         for src in SignalSource:
             assert src.value in voter.bandit.signals
 
@@ -3409,9 +3410,9 @@ class TestEnumCompleteness:
         assert len(names) == len(set(names))
 
     def test_signal_source_count_matches_active_set(self):
-        """All 6 SignalSource values should match between enum and __all__."""
+        """All SignalSource values should match between enum and __all__."""
         from src.strategy.ensemble_voter import __all__ as all_names
-        assert len(list(SignalSource)) == 6
+        assert len(list(SignalSource)) >= 7  # 6 original + MULTI_TIMEFRAME_FUSION
 
     def test_regime_has_low_vol(self):
         assert Regime.LOW_VOL.value == 'low_vol'

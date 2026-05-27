@@ -330,9 +330,9 @@ class TestCollectSignalsRegimeGating:
 
 
 class TestCollectSignalsFullPipeline:
-    """End-to-end: all 6 signals return valid snapshots → all 6 readings present."""
+    """End-to-end: all signals return valid snapshots → all readings present."""
 
-    def test_all_six_signals_collected(self, tmp_path):
+    def test_all_signals_collected(self, tmp_path):
         voter = _make_voter(tmp_path)
 
         snapshots = {
@@ -351,6 +351,9 @@ class TestCollectSignalsFullPipeline:
             "arb": SignalSnapshot(source="cross_asset_regime_arb", timestamp="2026-05-23T12:00:00",
                                   value=0.2, confidence=0.6, asset_signals={"SPY": -0.1, "GLD": 0.2},
                                   regime_fit="all", is_active=True, explanation="Arb divergence"),
+            "mtf": SignalSnapshot(source="multi_timeframe_fusion", timestamp="2026-05-23T12:00:00",
+                                  value=0.25, confidence=0.7, asset_signals={"SPY": 0.2, "GLD": 0.1, "TLT": 0.3},
+                                  regime_fit="all", is_active=True, explanation="MTF fusion"),
         }
 
         mock_unified_reading = SignalReading(
@@ -378,6 +381,7 @@ class TestCollectSignalsFullPipeline:
              patch("src.signals.alternative_data_signal.AlternativeDataSignalGenerator") as MockAlt, \
              patch("src.signals.cross_asset_regime_arb.CrossAssetRegimeArbDetector") as MockArb, \
              patch("src.strategy.orchestrator_ensemble_bridge.OrchestratorEnsembleBridge") as MockUnified, \
+             patch("src.signals.multi_timeframe_fusion.MultiTimeframeFusion") as MockMTF, \
              patch.object(voter, "_load_price_data", return_value=price_df):
 
             MockMSM.return_value.get_signal_snapshot.return_value = snapshots["msm"]
@@ -386,13 +390,15 @@ class TestCollectSignalsFullPipeline:
             MockAlt.return_value.get_signal_snapshot.return_value = snapshots["alt"]
             MockArb.return_value.get_signal_snapshot.return_value = snapshots["arb"]
             MockUnified.return_value.get_ensemble_reading.return_value = mock_unified_reading
+            MockMTF.return_value.get_signal_snapshot.return_value = snapshots["mtf"]
 
             readings = voter.collect_signals()
 
-        assert len(readings) == 6
+        assert len(readings) == 7
         assert SignalSource.MULTI_SPEED_MOM in readings
         assert SignalSource.CROSS_ASSET_RV in readings
         assert SignalSource.INTERNATIONAL_MOMENTUM in readings
         assert SignalSource.ALTERNATIVE_DATA in readings
         assert SignalSource.CROSS_ASSET_REGIME_ARB in readings
         assert SignalSource.UNIFIED_OVERLAY in readings
+        assert SignalSource.MULTI_TIMEFRAME_FUSION in readings

@@ -96,6 +96,7 @@ class SignalSource(Enum):
     ALTERNATIVE_DATA = "alternative_data"  # Alternative data signal (SEC EDGAR, NewsAPI, jobs)
     CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # Cross-asset regime arbitrage
     UNIFIED_OVERLAY = "unified_overlay"       # Unified overlay (ref'd by orchestrator_ensemble_bridge)
+    MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # Multi-timeframe signal fusion (v806)
 
 
 @dataclass
@@ -158,43 +159,48 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
     return {
         Regime.LOW_VOL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
-            SignalSource.CROSS_ASSET_RV: 0.1500,
-            SignalSource.ALTERNATIVE_DATA: 0.3500,
-            SignalSource.INTERNATIONAL_MOMENTUM: 0.2800,
+            SignalSource.CROSS_ASSET_RV: 0.1350,
+            SignalSource.ALTERNATIVE_DATA: 0.3150,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.2520,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.0000,  # marginal in calm markets
-            SignalSource.UNIFIED_OVERLAY: 0.2200,
+            SignalSource.UNIFIED_OVERLAY: 0.1980,
+            SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
         },
         Regime.NORMAL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
-            SignalSource.CROSS_ASSET_RV: 0.1300,
-            SignalSource.ALTERNATIVE_DATA: 0.3050,
-            SignalSource.INTERNATIONAL_MOMENTUM: 0.2450,
-            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-            SignalSource.UNIFIED_OVERLAY: 0.1900,
+            SignalSource.CROSS_ASSET_RV: 0.1170,
+            SignalSource.ALTERNATIVE_DATA: 0.2745,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.2205,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
+            SignalSource.UNIFIED_OVERLAY: 0.1710,
+            SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
         },
         Regime.HIGH_VOL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
-            SignalSource.CROSS_ASSET_RV: 0.1300,
-            SignalSource.INTERNATIONAL_MOMENTUM: 0.2100,
-            SignalSource.ALTERNATIVE_DATA: 0.3300,
-            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-            SignalSource.UNIFIED_OVERLAY: 0.2000,
+            SignalSource.CROSS_ASSET_RV: 0.1170,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.1890,
+            SignalSource.ALTERNATIVE_DATA: 0.2970,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
+            SignalSource.UNIFIED_OVERLAY: 0.1800,
+            SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
         },
         Regime.CRISIS: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
-            SignalSource.CROSS_ASSET_RV: 0.3650,
-            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1700,
+            SignalSource.CROSS_ASSET_RV: 0.3285,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1530,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
-            SignalSource.ALTERNATIVE_DATA: 0.2000,
-            SignalSource.UNIFIED_OVERLAY: 0.2650,
+            SignalSource.ALTERNATIVE_DATA: 0.1800,
+            SignalSource.UNIFIED_OVERLAY: 0.2385,
+            SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
         },
         Regime.RECOVERY: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
-            SignalSource.ALTERNATIVE_DATA: 0.3050,
-            SignalSource.CROSS_ASSET_RV: 0.1300,
-            SignalSource.INTERNATIONAL_MOMENTUM: 0.2450,
-            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1300,
-            SignalSource.UNIFIED_OVERLAY: 0.1900,
+            SignalSource.ALTERNATIVE_DATA: 0.2745,
+            SignalSource.CROSS_ASSET_RV: 0.1170,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.2205,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
+            SignalSource.UNIFIED_OVERLAY: 0.1710,
+            SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
         }
     }
 
@@ -281,6 +287,7 @@ REGIME_CONDITIONAL_WEIGHTS = {
         "cross_asset_rv": 0.5,
         "cross_asset_regime_arb": 1.2,
         "international_momentum": 0.7,
+        "multi_timeframe_fusion": 1.0, # No adjustment — internal fusion already adapts
     },
     "HIGH_VOL": {
         "unified_overlay": 1.2,        # Defensive overlays more valuable
@@ -288,20 +295,24 @@ REGIME_CONDITIONAL_WEIGHTS = {
         "cross_asset_regime_arb": 1.1,
         "international_momentum": 0.8,
         "alternative_data": 1.1,
+        "multi_timeframe_fusion": 1.0,
     },
     "NORMAL": {
         # All signals at 1.0 (baseline — no adjustment)
+        "multi_timeframe_fusion": 1.0,
     },
     "LOW_VOL": {
         "international_momentum": 1.2,  # Trend-following works in calm
         "cross_asset_regime_arb": 0.5,  # Gate off mean-reversion
         "unified_overlay": 0.7,
         "alternative_data": 0.8,
+        "multi_timeframe_fusion": 1.0,
     },
     "RECOVERY": {
         "international_momentum": 1.3,  # Momentum strongest post-crisis
         "alternative_data": 1.1,
         "cross_asset_rv": 0.8,
+        "multi_timeframe_fusion": 1.0,
     },
 }
 
@@ -718,23 +729,19 @@ class EnsembleVoter:
     
     def collect_signals(self, date: Optional[str] = None, regime: Optional[Regime] = None) -> Dict[SignalSource, SignalReading]:
         """
-        Collect signals from active (non-deprecated) sources.
+        Collect signals from active sources.
 
         If regime is provided, skip signal sources with zero weight for that
         regime — avoids wasted computation on signals that won't affect the vote.
 
-        Active sources (5 survivor signals per v9.19 pruning):
+        Active sources (7 signals):
         - Multi-speed momentum (primary trend signal)
         - Cross-asset relative value (mean-reversion triggers)
         - International equity momentum (EFA/VXUS trend)
         - Alternative data (SEC EDGAR, NewsAPI, jobs)
         - Cross-asset regime arbitrage (divergence detection)
-
-        Removed in v9.19 (deprecated, zero weight, no data feeds):
-        MACRO_MOMENTUM, CLOSING_AUCTION, FACTOR_ROTATION, MEAN_REVERSION,
-        TRANSIENT_FACTORS, VISIBILITY_GRAPH, VP_MACD, FACTOR_TIMING,
-        LLM_NARRATIVE, MACRO_REGIME_SYNTHESIS, FX_CARRY, COMMODITY_CURVE,
-        ZERO_DTE, TSFM_MOMENTUM (no data feed), DURATION_REGIME (no data feed).
+        - Unified overlay (collar + bond + crypto + calendar)
+        - Multi-timeframe fusion (v806 redo — timeframe decomposition)
         """
         # Determine which signals have non-zero weight for this regime
         active_sources = None
@@ -751,6 +758,7 @@ class EnsembleVoter:
         self._collect_alt_data_signal(readings, active_sources, regime)
         self._collect_regime_arb_signal(readings, active_sources, regime)
         self._collect_unified_overlay_signal(readings, active_sources, regime)
+        self._collect_mtf_signal(readings, active_sources, regime, date)
 
         self.current_readings = readings
         return readings
@@ -883,6 +891,30 @@ class EnsembleVoter:
             pass
         except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Unified overlay unavailable: %s", e)
+
+    def _collect_mtf_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+        date: Optional[str] = None,
+    ) -> None:
+        """Collect multi-timeframe fusion signal (v806 redo)."""
+        if self._should_skip(SignalSource.MULTI_TIMEFRAME_FUSION, active_sources, regime):
+            return
+        try:
+            from src.signals.multi_timeframe_fusion import MultiTimeframeFusion
+            prices_df = self._load_price_data()
+            mtf = MultiTimeframeFusion(prices_df=prices_df)
+            regime_name = regime.value if regime else "normal"
+            snapshot = mtf.get_signal_snapshot(
+                tickers=['SPY', 'GLD', 'TLT'],
+                date=date,
+                regime=regime_name,
+            )
+            if snapshot.is_active:
+                readings[SignalSource.MULTI_TIMEFRAME_FUSION] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Multi-timeframe fusion unavailable: %s", e)
 
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
@@ -1241,7 +1273,10 @@ class EnsembleVoter:
             regime_name = regime.name if hasattr(regime, 'name') else str(regime)
             regime_multipliers = REGIME_CONDITIONAL_WEIGHTS.get(regime_name, {})
 
-            if not regime_multipliers and regime_name == "NORMAL":
+            # NORMAL is baseline: all signals at 1.0, no adjustment needed
+            if regime_name == "NORMAL" and not any(
+                v != 1.0 for v in regime_multipliers.values()
+            ):
                 return weights
 
             adjusted = {}
