@@ -309,3 +309,90 @@ class TestWalkForwardIntegration:
         # Both should survive walk-forward (WFE > 0.80 for "mostly validated")
         assert comp.champion.wfe > 0.80, f"Champion WFE={comp.champion.wfe:.4f} too low"
         assert comp.challenger.wfe > 0.80, f"Challenger WFE={comp.challenger.wfe:.4f} too low"
+
+
+class TestComputeAllocationResult:
+    """Tests for _compute_allocation_result (previously untested)."""
+
+    def _make_window(self, oos_sharpe=0.5, oos_cagr=0.08, oos_dd=-0.15,
+                     spy_sharpe=0.3, sf_sharpe=0.4):
+        from src.backtest.walk_forward_champion import WalkForwardWindow
+        return WalkForwardWindow(
+            window_index=0, is_start="2010-01-01", is_end="2014-12-31",
+            oos_start="2015-01-01", oos_end="2015-12-31",
+            is_days=1260, oos_days=252,
+            champion_is_sharpe=0.9, champion_oos_sharpe=oos_sharpe,
+            champion_oos_cagr=oos_cagr, champion_oos_max_dd=oos_dd,
+            challenger_is_sharpe=0.85, challenger_oos_sharpe=oos_sharpe * 0.95,
+            challenger_oos_cagr=oos_cagr * 0.95, challenger_oos_max_dd=oos_dd * 1.1,
+            benchmark_spy_oos_sharpe=spy_sharpe,
+            benchmark_6040_oos_sharpe=sf_sharpe,
+        )
+
+    def test_empty_windows_returns_zero(self):
+        from src.backtest.walk_forward_champion import _compute_allocation_result
+        result = _compute_allocation_result([], "test", 0.9, "champion_oos_sharpe", "champion_oos_cagr", "champion_oos_max_dd")
+        assert result.n_windows == 0
+        assert result.wfe == 0.0
+        assert result.mean_oos_sharpe == 0.0
+
+    def test_wfe_above_one_validated(self):
+        from src.backtest.walk_forward_champion import _compute_allocation_result
+        w = self._make_window(oos_sharpe=1.0)
+        result = _compute_allocation_result([w], "champion", 0.8, "champion_oos_sharpe", "champion_oos_cagr", "champion_oos_max_dd")
+        assert result.wfe >= 1.0
+        assert "VALIDATED" in result.summary
+
+    def test_wfe_below_one_not_validated(self):
+        from src.backtest.walk_forward_champion import _compute_allocation_result
+        w = self._make_window(oos_sharpe=0.3)
+        result = _compute_allocation_result([w], "champion", 1.0, "champion_oos_sharpe", "champion_oos_cagr", "champion_oos_max_dd")
+        assert result.wfe < 0.80
+        assert "NOT VALIDATED" in result.summary
+
+    def test_wfe_between_08_and_1_mostly_validated(self):
+        from src.backtest.walk_forward_champion import _compute_allocation_result
+        w = self._make_window(oos_sharpe=0.75)
+        result = _compute_allocation_result([w], "champion", 0.9, "champion_oos_sharpe", "champion_oos_cagr", "champion_oos_max_dd")
+        assert 0.80 <= result.wfe < 1.0
+        assert "MOSTLY VALIDATED" in result.summary
+
+    def test_beats_spy_count(self):
+        from src.backtest.walk_forward_champion import _compute_allocation_result
+        w = self._make_window(oos_sharpe=0.5, spy_sharpe=0.3)
+        result = _compute_allocation_result([w], "champion", 0.9, "champion_oos_sharpe", "champion_oos_cagr", "champion_oos_max_dd")
+        assert result.beats_spy == 1
+
+    def test_positive_oos_ratio(self):
+        from src.backtest.walk_forward_champion import _compute_allocation_result
+        w1 = self._make_window(oos_sharpe=0.5)
+        w2 = self._make_window(oos_sharpe=-0.2)
+        result = _compute_allocation_result([w1, w2], "champion", 0.9, "champion_oos_sharpe", "champion_oos_cagr", "champion_oos_max_dd")
+        assert result.oos_sharpe_positive_pct == 0.5
+
+    def test_zero_is_sharpe_returns_zero_wfe(self):
+        from src.backtest.walk_forward_champion import _compute_allocation_result
+        w = self._make_window(oos_sharpe=0.5)
+        result = _compute_allocation_result([w], "test", 0.0, "champion_oos_sharpe", "champion_oos_cagr", "champion_oos_max_dd")
+        assert result.wfe == 0.0
+
+
+class TestWalkForwardResultEdgeCases:
+    """Additional integration edge case tests."""
+
+    def test_champion_result_fields(self):
+        from src.backtest.walk_forward_champion import run_walk_forward_champion
+        result = run_walk_forward_champion(is_years=5, oos_years=1)
+        assert hasattr(result, 'wfe')
+        assert hasattr(result, 'mean_oos_sharpe')
+        assert hasattr(result, 'windows')
+        assert hasattr(result, 'beats_spy')
+        assert hasattr(result, 'beats_6040')
+        assert result.n_windows >= 10
+
+    def test_comparison_has_summary(self):
+        from src.backtest.walk_forward_champion import run_walk_forward_comparison
+        comp = run_walk_forward_comparison(is_years=5, oos_years=1)
+        assert len(comp.champion.summary) > 0
+        assert len(comp.challenger.summary) > 0
+        assert "WFE" in comp.champion.summary
