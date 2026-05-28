@@ -344,3 +344,210 @@ class TestRegimeClassificationEdgeCases:
             0.10, median_vol=0.10, prev_regime="HIGH_VOL", vol_declining=True,
         )
         assert regime == "RECOVERY"
+
+
+# ── Edge-case tests ────────────────────────────────────────────────────────
+
+class TestVolTargetLeverageEdgeCases:
+    """Edge cases for _compute_vol_target_leverage."""
+
+    def test_zero_vol_returns_one_with_default_smoothing(self):
+        """realized_vol=0 should short-circuit to 1.0 regardless of smoothing."""
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        lev = _compute_vol_target_leverage(0.0, 0.10)
+        assert lev == 1.0
+
+    def test_negative_vol_returns_one(self):
+        """Negative realized_vol (data artifact) should short-circuit to 1.0."""
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        lev = _compute_vol_target_leverage(-0.05, 0.10, smoothing=1.0)
+        assert lev == 1.0
+
+    def test_smoothing_zero_ignores_raw(self):
+        """smoothing=0 should keep leverage at prev_leverage unchanged."""
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        lev = _compute_vol_target_leverage(0.05, 0.10, smoothing=0.0, prev_leverage=1.0)
+        # raw = 0.10/0.05 = 2.0, but smoothing=0 => 0*2.0 + 1*1.0 = 1.0
+        assert abs(lev - 1.0) < 0.01
+
+    def test_smoothing_one_uses_raw_directly(self):
+        """smoothing=1 should use the raw leverage directly (no prev blending)."""
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        # raw = 0.10/0.05 = 2.0, smoothing=1 => 1*2.0 + 0*1.5 = 2.0
+        lev = _compute_vol_target_leverage(0.05, 0.10, smoothing=1.0, prev_leverage=1.5)
+        assert abs(lev - 2.0) < 0.01
+
+    def test_max_leverage_floor_enforced(self):
+        """The 1/max_leverage floor should prevent extreme deleveraging."""
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        # raw = 0.10/0.30 = 0.333, floor = 1/2.0 = 0.5
+        lev = _compute_vol_target_leverage(0.30, 0.10, max_leverage=2.0, smoothing=1.0)
+        assert lev >= 0.5 - 0.001  # floor at 1/max_leverage
+
+    def test_leverage_clamped_to_max(self):
+        """Raw leverage exceeding max_leverage should be clamped."""
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        # raw = 0.10/0.01 = 10.0, max_leverage=1.5 => capped at 1.5
+        lev = _compute_vol_target_leverage(0.01, 0.10, max_leverage=1.5, smoothing=1.0)
+        assert abs(lev - 1.5) < 0.01
+
+    def test_leverage_rounded_to_four_decimals(self):
+        """Result should be rounded to 4 decimal places."""
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        lev = _compute_vol_target_leverage(0.08, 0.10, smoothing=0.5, prev_leverage=1.0)
+        # Verify rounding: no more than 4 decimal places
+        assert lev == round(lev, 4)
+
+
+class TestRegimeClassificationEdgeCasesExtra:
+    """Edge cases for _classify_regime_from_vol boundaries and transitions."""
+
+    def test_ratio_clearly_above_075x_is_normal(self):
+        """ratio clearly above 0.75 (but below 1.25) should be NORMAL.
+
+        Note: 0.075/0.10 loses precision in float64, so we test with values
+        that produce ratio=0.76, safely above the 0.75 threshold.
+        """
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+
+        # 0.076/0.10 = 0.76 > 0.75 => NORMAL
+        assert _classify_regime_from_vol(0.076, median_vol=0.10) == "NORMAL"
+
+    def test_just_below_075x_is_low_vol(self):
+        """ratio just under 0.75 should classify as LOW_VOL."""
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+
+        assert _classify_regime_from_vol(0.0749, median_vol=0.10) == "LOW_VOL"
+
+    def test_exactly_125x_is_high_vol(self):
+        """ratio == 1.25 should be HIGH_VOL (>= 1.25 branch)."""
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+
+        assert _classify_regime_from_vol(0.125, median_vol=0.10) == "HIGH_VOL"
+
+    def test_exactly_17x_is_crisis(self):
+        """ratio == 1.7 should be CRISIS (>= 1.7 branch)."""
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+
+        assert _classify_regime_from_vol(0.17, median_vol=0.10) == "CRISIS"
+
+    def test_recovery_not_triggered_without_vol_declining(self):
+        """From CRISIS in normal range without vol_declining => NORMAL, not RECOVERY."""
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+
+        regime = _classify_regime_from_vol(
+            0.10, median_vol=0.10, prev_regime="CRISIS", vol_declining=False,
+        )
+        assert regime == "NORMAL"
+
+    def test_recovery_not_from_low_vol(self):
+        """RECOVERY transition should not fire from LOW_VOL even with vol_declining."""
+        from src.backtest.vol_targeting_backtest import _classify_regime_from_vol
+
+        regime = _classify_regime_from_vol(
+            0.10, median_vol=0.10, prev_regime="LOW_VOL", vol_declining=True,
+        )
+        assert regime == "NORMAL"
+
+
+class TestRegimeVolTargetsCoverage:
+    """Verify REGIME_VOL_TARGETs has all 5 regimes with reasonable values."""
+
+    def test_all_five_regimes_defined(self):
+        from src.backtest.vol_targeting_backtest import REGIME_VOL_TARGETS
+
+        expected = {"CRISIS", "HIGH_VOL", "NORMAL", "LOW_VOL", "RECOVERY"}
+        assert set(REGIME_VOL_TARGETS.keys()) == expected
+
+    def test_all_targets_positive(self):
+        from src.backtest.vol_targeting_backtest import REGIME_VOL_TARGETS
+
+        for regime, target in REGIME_VOL_TARGETS.items():
+            assert target > 0, f"{regime} target should be positive"
+
+    def test_crisis_has_lowest_target(self):
+        from src.backtest.vol_targeting_backtest import REGIME_VOL_TARGETS
+
+        assert REGIME_VOL_TARGETS["CRISIS"] <= REGIME_VOL_TARGETS["HIGH_VOL"]
+        assert REGIME_VOL_TARGETS["CRISIS"] <= REGIME_VOL_TARGETS["NORMAL"]
+
+    def test_low_vol_has_highest_target(self):
+        from src.backtest.vol_targeting_backtest import REGIME_VOL_TARGETS
+
+        assert REGIME_VOL_TARGETS["LOW_VOL"] >= REGIME_VOL_TARGETS["NORMAL"]
+        assert REGIME_VOL_TARGETS["LOW_VOL"] >= REGIME_VOL_TARGETS["HIGH_VOL"]
+
+
+class TestRegimeBacktestEmptyAndSingleDay:
+    """Edge cases for compute_regime_conditional_vol_target_backtest."""
+
+    def test_single_day_prices(self, monkeypatch):
+        """Single-day price data should produce a valid result (no crash)."""
+        import json
+        from unittest.mock import patch
+        from src.backtest.vol_targeting_backtest import (
+            compute_regime_conditional_vol_target_backtest,
+        )
+
+        # Single day of prices for each symbol
+        single_day = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}],
+            "GLD": [{"d": "2020-01-02", "p": 100.0}],
+            "TLT": [{"d": "2020-01-02", "p": 100.0}],
+            "IEF": [{"d": "2020-01-02", "p": 100.0}],
+        }
+
+        monkeypatch.setattr(
+            "src.backtest.vol_targeting_backtest._load_prices",
+            lambda: __import__("pandas").DataFrame(
+                {k: [e["p"] for e in v] for k, v in single_day.items()},
+                index=__import__("pandas").to_datetime([e["d"] for e in single_day["SPY"]]),
+            ),
+        )
+
+        result = compute_regime_conditional_vol_target_backtest(
+            vol_lookback=63, max_leverage=1.5,
+        )
+        # Should not crash; static and vol-target Sharpe should both be finite
+        assert np.isfinite(result.static_sharpe)
+        assert np.isfinite(result.vol_target_sharpe)
+        assert result.static_max_dd <= 0.0
+
+    def test_two_day_prices(self, monkeypatch):
+        """Two-day price data should produce valid result with one return."""
+        import pandas as pd
+        from src.backtest.vol_targeting_backtest import (
+            compute_regime_conditional_vol_target_backtest,
+        )
+
+        dates = pd.to_datetime(["2020-01-02", "2020-01-03"])
+        two_day = pd.DataFrame(
+            {
+                "SPY": [100.0, 102.0],
+                "GLD": [100.0, 101.0],
+                "TLT": [100.0, 99.0],
+                "IEF": [100.0, 100.5],
+            },
+            index=dates,
+        )
+        two_day.index.name = "date"
+
+        monkeypatch.setattr(
+            "src.backtest.vol_targeting_backtest._load_prices",
+            lambda: two_day,
+        )
+
+        result = compute_regime_conditional_vol_target_backtest(
+            vol_lookback=63, max_leverage=1.5,
+        )
+        assert np.isfinite(result.static_sharpe)
+        assert np.isfinite(result.vol_target_sharpe)
+        # With 2 days, static and vol-target should be the same (no vol estimation yet)
+        assert result.static_sharpe == result.vol_target_sharpe
