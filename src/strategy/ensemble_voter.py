@@ -280,17 +280,18 @@ REGIME_WEIGHTS = _load_regime_weights()
 
 # ── Regime-Conditional Signal Weights ──
 
-REGIME_CONDITIONAL_WEIGHTS = {
+# Hardcoded defaults — same as data/regime_conditional_weights.json
+_REGIME_CONDITIONAL_WEIGHTS_DEFAULTS = {
     "CRISIS": {
-        "alternative_data": 1.3,       # Alt data shines in dislocation
-        "unified_overlay": 0.3,        # Reduce defensive overlays
+        "alternative_data": 1.3,
+        "unified_overlay": 0.3,
         "cross_asset_rv": 0.5,
         "cross_asset_regime_arb": 1.2,
         "international_momentum": 0.7,
-        "multi_timeframe_fusion": 1.0, # No adjustment — internal fusion already adapts
+        "multi_timeframe_fusion": 1.0,
     },
     "HIGH_VOL": {
-        "unified_overlay": 1.2,        # Defensive overlays more valuable
+        "unified_overlay": 1.2,
         "cross_asset_rv": 1.1,
         "cross_asset_regime_arb": 1.1,
         "international_momentum": 0.8,
@@ -298,23 +299,64 @@ REGIME_CONDITIONAL_WEIGHTS = {
         "multi_timeframe_fusion": 1.0,
     },
     "NORMAL": {
-        # All signals at 1.0 (baseline — no adjustment)
         "multi_timeframe_fusion": 1.0,
     },
     "LOW_VOL": {
-        "international_momentum": 1.2,  # Trend-following works in calm
-        "cross_asset_regime_arb": 0.5,  # Gate off mean-reversion
+        "international_momentum": 1.2,
+        "cross_asset_regime_arb": 0.5,
         "unified_overlay": 0.7,
         "alternative_data": 0.8,
         "multi_timeframe_fusion": 1.0,
     },
     "RECOVERY": {
-        "international_momentum": 1.3,  # Momentum strongest post-crisis
+        "international_momentum": 1.3,
         "alternative_data": 1.1,
         "cross_asset_rv": 0.8,
         "multi_timeframe_fusion": 1.0,
     },
 }
+
+
+def _load_regime_conditional_weights(
+    weights_file: Optional[str] = None,
+) -> Dict[str, Dict[str, float]]:
+    """Load REGIME_CONDITIONAL_WEIGHTS from JSON config file.
+
+    Supports ENSEMBLE_CONDITIONAL_WEIGHTS_FILE env var override.
+    Falls back to hardcoded defaults if the file doesn't exist or is invalid.
+    """
+    if weights_file is None:
+        weights_file = os.environ.get(
+            "ENSEMBLE_CONDITIONAL_WEIGHTS_FILE",
+            str(DATA_DIR / "regime_conditional_weights.json"),
+        )
+    weights_path = Path(weights_file)
+
+    if not weights_path.exists():
+        logger.info(
+            "Regime conditional weights file not found at %s, using hardcoded defaults",
+            weights_path,
+        )
+        return dict(_REGIME_CONDITIONAL_WEIGHTS_DEFAULTS)
+
+    try:
+        with open(weights_path) as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(
+            "Failed to load regime conditional weights from %s: %s, using hardcoded defaults",
+            weights_path, e,
+        )
+        return dict(_REGIME_CONDITIONAL_WEIGHTS_DEFAULTS)
+
+    logger.info(
+        "Loaded regime conditional weights from %s (%d regimes)",
+        weights_path, len(raw),
+    )
+    return raw
+
+
+REGIME_CONDITIONAL_WEIGHTS = _load_regime_conditional_weights()
 
 
 # ── Signal Correlation Matrix ──

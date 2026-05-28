@@ -17,7 +17,7 @@ from unittest.mock import patch, MagicMock
 
 from src.strategy.ensemble_voter import (
     Regime, SignalSource, SignalReading, EnsembleVote, BanditWeighter,
-    REGIME_WEIGHTS, EnsembleVoter,
+    REGIME_WEIGHTS, REGIME_CONDITIONAL_WEIGHTS, EnsembleVoter,
 )
 
 
@@ -240,6 +240,64 @@ class TestRegimeWeights:
         for regime in Regime:
             assert REGIME_WEIGHTS[regime][SignalSource.UNIFIED_OVERLAY] >= 0.10, \
                 f"UNIFIED_OVERLAY weight too low in {regime.value}"
+
+
+class TestRegimeConditionalWeights:
+    """Tests for REGIME_CONDITIONAL_WEIGHTS — per-regime signal multipliers."""
+
+    def test_all_regimes_present(self):
+        """Every regime should have conditional weight entries."""
+        for regime in Regime:
+            assert regime.name in REGIME_CONDITIONAL_WEIGHTS or regime == Regime.NORMAL, \
+                f"{regime.name} missing from REGIME_CONDITIONAL_WEIGHTS"
+
+    def test_multipliers_in_valid_range(self):
+        """All multipliers should be in [0.0, 2.0] — extreme values break normalization."""
+        for regime, multipliers in REGIME_CONDITIONAL_WEIGHTS.items():
+            for signal, mult in multipliers.items():
+                assert 0.0 <= mult <= 2.0, \
+                    f"{signal} multiplier {mult} out of range in {regime}"
+
+    def test_crisis_boosts_alt_data(self):
+        """CRISIS regime should boost alternative_data (shines in dislocation)."""
+        crisis = REGIME_CONDITIONAL_WEIGHTS.get("CRISIS", {})
+        assert crisis.get("alternative_data", 1.0) > 1.0
+
+    def test_low_vol_boosts_intl_momentum(self):
+        """LOW_VOL regime should boost international_momentum (trend-following in calm)."""
+        low_vol = REGIME_CONDITIONAL_WEIGHTS.get("LOW_VOL", {})
+        assert low_vol.get("international_momentum", 1.0) > 1.0
+
+    def test_loads_from_json_file(self, tmp_path):
+        """Should load conditional weights from JSON file when available."""
+        from src.strategy.ensemble_voter import _load_regime_conditional_weights
+        import json
+        weights_file = tmp_path / "regime_conditional_weights.json"
+        weights_file.write_text(json.dumps({
+            "CRISIS": {"alternative_data": 1.5, "unified_overlay": 0.2},
+            "HIGH_VOL": {"unified_overlay": 1.3},
+            "NORMAL": {},
+            "LOW_VOL": {"international_momentum": 1.4},
+            "RECOVERY": {"international_momentum": 1.5},
+        }))
+        result = _load_regime_conditional_weights(str(weights_file))
+        assert result["CRISIS"]["alternative_data"] == 1.5
+        assert result["NORMAL"] == {}
+
+    def test_fallback_on_missing_file(self, tmp_path):
+        """Should fall back to hardcoded defaults when file doesn't exist."""
+        from src.strategy.ensemble_voter import _load_regime_conditional_weights
+        result = _load_regime_conditional_weights(str(tmp_path / "nonexistent.json"))
+        assert "CRISIS" in result
+        assert result["CRISIS"]["alternative_data"] == 1.3
+
+    def test_fallback_on_invalid_json(self, tmp_path):
+        """Should fall back to hardcoded defaults on parse error."""
+        from src.strategy.ensemble_voter import _load_regime_conditional_weights
+        weights_file = tmp_path / "bad.json"
+        weights_file.write_text("not valid json{{{")
+        result = _load_regime_conditional_weights(str(weights_file))
+        assert "CRISIS" in result
 
 
 # ---------------------------------------------------------------------------
