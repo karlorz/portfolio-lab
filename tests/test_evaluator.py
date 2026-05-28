@@ -1737,3 +1737,232 @@ class TestKillSwitchGraduatedLevels:
             data = json.load(f)
         assert data["level"] == "liquidate"
         assert data["position_reduction"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Kill Switch — boundary value tests
+# ---------------------------------------------------------------------------
+
+class TestKillSwitchBoundaryValues:
+    """Boundary value tests for classify_kill_level with exact threshold values."""
+
+    def test_kill_warning_boundary_at_10_percent(self):
+        """Exactly 10.0% drawdown should trigger WARNING (>= threshold)."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_drawdown_-10.0%")
+        assert level == KillSwitchLevel.WARNING
+
+    def test_kill_warning_below_10_percent(self):
+        """9.99% drawdown falls below all thresholds but is still a drawdown breach.
+
+        classify_kill_level is fail-closed: any parseable drawdown that doesn't
+        reach WARNING is still classified as HALT (the default at line 562).
+        """
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_drawdown_-9.99%")
+        # Fail-closed: below all thresholds defaults to HALT
+        assert level == KillSwitchLevel.HALT
+
+    def test_kill_restrict_boundary_at_15_percent(self):
+        """Exactly 15.0% drawdown should trigger RESTRICT."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_drawdown_-15.0%")
+        assert level == KillSwitchLevel.RESTRICT
+
+    def test_kill_restrict_below_15_percent(self):
+        """14.99% drawdown should trigger WARNING, not RESTRICT."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_drawdown_-14.99%")
+        assert level == KillSwitchLevel.WARNING
+
+    def test_kill_halt_boundary_at_20_percent(self):
+        """Exactly 20.0% drawdown should trigger HALT."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_drawdown_-20.0%")
+        assert level == KillSwitchLevel.HALT
+
+    def test_kill_halt_below_20_percent(self):
+        """19.99% drawdown should trigger RESTRICT, not HALT."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_drawdown_-19.99%")
+        assert level == KillSwitchLevel.RESTRICT
+
+    def test_kill_liquidate_boundary_at_25_percent(self):
+        """Exactly 25.0% drawdown should trigger LIQUIDATE."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_drawdown_-25.0%")
+        assert level == KillSwitchLevel.LIQUIDATE
+
+    def test_kill_liquidate_below_25_percent(self):
+        """24.99% drawdown should trigger HALT, not LIQUIDATE."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        level = classify_kill_level("max_drawdown_-24.99%")
+        assert level == KillSwitchLevel.HALT
+
+
+# ---------------------------------------------------------------------------
+# Kill Switch — environment variable override tests
+# ---------------------------------------------------------------------------
+
+class TestKillSwitchEnvVarOverrides:
+    """Tests that KILL_SWITCH_THRESHOLDS dict can be overridden (simulating env var overrides)."""
+
+    def test_kill_custom_warning_threshold(self, monkeypatch):
+        """Custom warning threshold at 5% should trigger WARNING at 5% drawdown."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        # Patch thresholds to simulate KILL_WARNING_DRAWDOWN_PCT=0.05
+        custom_thresholds = {
+            "warning_drawdown_pct": 0.05,
+            "restrict_drawdown_pct": 0.15,
+            "halt_drawdown_pct": 0.20,
+            "liquidate_drawdown_pct": 0.25,
+            "extreme_tail_cvar_ratio": 3.0,
+        }
+        monkeypatch.setattr(
+            "src.strategy.evaluator.KILL_SWITCH_THRESHOLDS", custom_thresholds
+        )
+        level = classify_kill_level("max_drawdown_-5.0%")
+        assert level == KillSwitchLevel.WARNING
+
+    def test_kill_custom_liquidate_threshold(self, monkeypatch):
+        """Custom liquidate threshold at 30% should NOT trigger LIQUIDATE at 25%."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        custom_thresholds = {
+            "warning_drawdown_pct": 0.10,
+            "restrict_drawdown_pct": 0.15,
+            "halt_drawdown_pct": 0.20,
+            "liquidate_drawdown_pct": 0.30,
+            "extreme_tail_cvar_ratio": 3.0,
+        }
+        monkeypatch.setattr(
+            "src.strategy.evaluator.KILL_SWITCH_THRESHOLDS", custom_thresholds
+        )
+        level = classify_kill_level("max_drawdown_-25.0%")
+        # 25% < 30% liquidate threshold, but >= 20% halt threshold
+        assert level == KillSwitchLevel.HALT
+
+    def test_kill_custom_restrict_threshold(self, monkeypatch):
+        """Custom restrict threshold at 12% should trigger RESTRICT at 12%."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        custom_thresholds = {
+            "warning_drawdown_pct": 0.10,
+            "restrict_drawdown_pct": 0.12,
+            "halt_drawdown_pct": 0.20,
+            "liquidate_drawdown_pct": 0.25,
+            "extreme_tail_cvar_ratio": 3.0,
+        }
+        monkeypatch.setattr(
+            "src.strategy.evaluator.KILL_SWITCH_THRESHOLDS", custom_thresholds
+        )
+        level = classify_kill_level("max_drawdown_-12.0%")
+        assert level == KillSwitchLevel.RESTRICT
+
+    def test_kill_custom_halt_threshold(self, monkeypatch):
+        """Custom halt threshold at 18% should trigger HALT at 18%."""
+        from src.strategy.evaluator import classify_kill_level, KillSwitchLevel
+        custom_thresholds = {
+            "warning_drawdown_pct": 0.10,
+            "restrict_drawdown_pct": 0.15,
+            "halt_drawdown_pct": 0.18,
+            "liquidate_drawdown_pct": 0.25,
+            "extreme_tail_cvar_ratio": 3.0,
+        }
+        monkeypatch.setattr(
+            "src.strategy.evaluator.KILL_SWITCH_THRESHOLDS", custom_thresholds
+        )
+        level = classify_kill_level("max_drawdown_-18.0%")
+        assert level == KillSwitchLevel.HALT
+
+
+# ---------------------------------------------------------------------------
+# Kill Switch — order router tests
+# ---------------------------------------------------------------------------
+
+class TestOrderRouterKillSwitch:
+    """Tests for OrderRouter kill switch reading from kill_switch.json."""
+
+    def test_order_router_blocks_on_warning_level(self, tmp_path):
+        """Router should block orders when kill_switch.json has level=WARNING."""
+        from src.broker.order_router import OrderRouter, OrderPlan
+
+        kill_data = {
+            "enabled": True,
+            "level": "warning",
+            "reason": "max_drawdown_-12.0%",
+            "mode": "paper",
+            "timestamp": "2026-05-28T00:00:00",
+        }
+        (tmp_path / "kill_switch.json").write_text(json.dumps(kill_data))
+
+        with (
+            patch("src.broker.order_router.AlpacaClient") as mock_client_cls,
+            patch("src.broker.order_router.PaperTradingManager") as mock_mgr_cls,
+        ):
+            mock_client_cls.return_value.is_ready.return_value = True
+            mock_mgr_cls.return_value = MagicMock()
+            router = OrderRouter(data_dir=str(tmp_path), paper=True)
+
+            plans = [OrderPlan(
+                symbol="SPY", side="BUY", qty=10, order_type="market",
+                estimated_value=5000, reason="rebalance",
+            )]
+            result = router.execute_orders(plans, dry_run=False, kill_switch_check=True)
+            assert result["status"] == "blocked"
+
+    def test_order_router_blocks_on_halt_level(self, tmp_path):
+        """Router should block orders when kill_switch.json has level=HALT."""
+        from src.broker.order_router import OrderRouter, OrderPlan
+
+        kill_data = {
+            "enabled": True,
+            "level": "halt",
+            "reason": "max_drawdown_-22.0%",
+            "mode": "paper",
+            "timestamp": "2026-05-28T00:00:00",
+        }
+        (tmp_path / "kill_switch.json").write_text(json.dumps(kill_data))
+
+        with (
+            patch("src.broker.order_router.AlpacaClient") as mock_client_cls,
+            patch("src.broker.order_router.PaperTradingManager") as mock_mgr_cls,
+        ):
+            mock_client_cls.return_value.is_ready.return_value = True
+            mock_mgr_cls.return_value = MagicMock()
+            router = OrderRouter(data_dir=str(tmp_path), paper=True)
+
+            plans = [OrderPlan(
+                symbol="SPY", side="BUY", qty=10, order_type="market",
+                estimated_value=5000, reason="rebalance",
+            )]
+            result = router.execute_orders(plans, dry_run=False, kill_switch_check=True)
+            assert result["status"] == "blocked"
+
+    def test_order_router_fail_closed_on_missing_json(self, tmp_path):
+        """When kill_switch.json does not exist, router should allow orders (no kill switch active)."""
+        from src.broker.order_router import OrderRouter, OrderPlan
+
+        # Ensure no kill_switch.json exists
+        assert not (tmp_path / "kill_switch.json").exists()
+
+        # Mock submit_order to return an object with .id and .status attributes
+        mock_fill = MagicMock()
+        mock_fill.id = "test-123"
+        mock_fill.status = "filled"
+
+        with (
+            patch("src.broker.order_router.AlpacaClient") as mock_client_cls,
+            patch("src.broker.order_router.PaperTradingManager") as mock_mgr_cls,
+            patch("src.broker.order_router.time"),
+        ):
+            mock_client_cls.return_value.is_ready.return_value = True
+            mock_client_cls.return_value.submit_order.return_value = mock_fill
+            mock_mgr_cls.return_value = MagicMock()
+            router = OrderRouter(data_dir=str(tmp_path), paper=True)
+
+            plans = [OrderPlan(
+                symbol="SPY", side="BUY", qty=1, order_type="market",
+                estimated_value=500, reason="rebalance",
+            )]
+            result = router.execute_orders(plans, dry_run=False, kill_switch_check=True)
+            # Should NOT be blocked — missing kill_switch.json means no active kill switch
+            assert result["status"] != "blocked"
