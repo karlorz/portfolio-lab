@@ -241,7 +241,7 @@ def run_black_litterman(
         logger.warning("BL EfficientFrontier.max_sharpe failed: %s", e)
         # Fallback: BL weights from posterior (no EF optimization)
         raw_weights = bl.bl_weights()
-        cleaned = {s: round(w, 4) for s, w in zip(symbols, raw_weights)}
+        cleaned = {s: round(w, 4) for s, w in raw_weights.items()}
         perf = (None, None, None)
 
     # Build result

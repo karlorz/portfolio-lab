@@ -561,38 +561,35 @@ class TestBLComparison:
         assert clamped_gld == -1.0
 
     def test_compute_bl_returns_none_on_exception(self, orch, tmp_path):
-        """Should return None gracefully when compute_bl_weights raises."""
-        import src.paths
-        original = src.paths.DATA_DIR
-        src.paths.DATA_DIR = tmp_path
-        try:
-            # No prices.json → method returns None before reaching compute_bl_weights
+        """Should return None gracefully when price data is unavailable."""
+        from unittest.mock import patch
+        import pandas as pd
+        # Mock get_prices_df to return empty DataFrame — simulates missing data
+        with patch(
+            "src.strategy.unified_orchestrator.get_prices_df",
+            return_value=pd.DataFrame(),
+        ):
             result = orch._compute_bl_comparison({
                 "spy": 0.46, "gld": 0.38, "tlt": 0.16,
                 "ief": 0, "shy": 0, "btc": 0, "eth": 0,
             })
             assert result is None
-        finally:
-            src.paths.DATA_DIR = original
 
     def test_compute_bl_missing_symbol_in_prices(self, orch, tmp_path):
-        """Should return None when prices.json doesn't have all 3 symbols."""
-        import src.paths
-        original = src.paths.DATA_DIR
-        src.paths.DATA_DIR = tmp_path
-        try:
-            # Only SPY, missing GLD and TLT
-            prices_file = tmp_path / "prices.json"
-            prices_file.write_text(json.dumps({
-                "spy": {"p": [500 + i for i in range(50)]},
-            }))
+        """Should return None when prices data doesn't have all 3 symbols."""
+        from unittest.mock import patch
+        import pandas as pd
+        # Only SPY column — missing GLD and TLT
+        df = pd.DataFrame({"SPY": [500.0 + i for i in range(50)]})
+        with patch(
+            "src.strategy.unified_orchestrator.get_prices_df",
+            return_value=df,
+        ):
             result = orch._compute_bl_comparison({
                 "spy": 0.46, "gld": 0.38, "tlt": 0.16,
                 "ief": 0, "shy": 0, "btc": 0, "eth": 0,
             })
             assert result is None
-        finally:
-            src.paths.DATA_DIR = original
 
 
 class TestOverlayContributionValidation:

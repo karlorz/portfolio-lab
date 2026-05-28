@@ -81,6 +81,7 @@ _ML_BLOCKED = frozenset({"torch", "sklearn", "xgboost", "hmmlearn"})
 _SKLEARN_SAFE_PREFIXES = (
     "sklearn.model_selection",  # TimeSeriesSplit, KFold, etc. (data splitting only)
     "sklearn.utils",            # Validation, math helpers
+    "sklearn.covariance",       # Ledoit-Wolf shrinkage for pypfopt CovarianceShrinkage
 )
 _original_import = builtins.__import__
 
@@ -102,6 +103,14 @@ def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
             if top_level == "sklearn":
                 if any(name.startswith(prefix) for prefix in _SKLEARN_SAFE_PREFIXES):
                     _sklearn_safe_active = True
+                # Also check fromlist items: `from sklearn.covariance import X`
+                # triggers __import__('sklearn', ..., fromlist=('covariance',))
+                if fromlist and not _sklearn_safe_active:
+                    for item in fromlist:
+                        qualified = f"{name}.{item}"
+                        if any(qualified.startswith(prefix) for prefix in _SKLEARN_SAFE_PREFIXES):
+                            _sklearn_safe_active = True
+                            break
                 if _sklearn_safe_active:
                     pass  # Allow sklearn internals while safe import is active
                 else:

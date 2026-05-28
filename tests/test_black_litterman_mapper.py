@@ -789,26 +789,30 @@ class TestRunBlackLittermanEdgeCases:
         assert result.prior_type == "market"
 
     def test_nan_in_covariance(self):
-        """NaN in covariance raises exception (EF fails, fallback iter bug over Series)."""
+        """NaN in covariance degrades gracefully — EF fails, fallback returns empty weights."""
         cov = np.array([
             [0.0225, float("nan"), -0.0063],
             [float("nan"), 0.0256, 0.0022],
             [-0.0063, 0.0022, 0.0196],
         ])
         views = map_biases_to_views(0.5, 0.3, 0.2)
-        with pytest.raises((ValueError, TypeError)):
-            run_black_litterman(cov, views)
+        result = run_black_litterman(cov, views)
+        assert isinstance(result, BLResult)
+        assert result.bl_weights == {}
+        assert result.expected_sharpe is None
 
     def test_inf_in_covariance(self):
-        """Inf in covariance raises exception (EF fails, fallback iter bug over Series)."""
+        """Inf in covariance degrades gracefully — EF fails, fallback returns empty weights."""
         cov = np.array([
             [0.0225, 0.0000, float("inf")],
             [0.0000, 0.0256, 0.0022],
             [float("inf"), 0.0022, 0.0196],
         ])
         views = map_biases_to_views(0.5, 0.3, 0.2)
-        with pytest.raises((ValueError, TypeError)):
-            run_black_litterman(cov, views)
+        result = run_black_litterman(cov, views)
+        assert isinstance(result, BLResult)
+        assert result.bl_weights == {}
+        assert result.expected_sharpe is None
 
     def test_single_asset_covariance(self):
         """1x1 covariance with single view should work."""

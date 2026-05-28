@@ -39,6 +39,7 @@ dependencies = [
     "fredapi>=0.5.2",
     "python-json-logger>=4.1.0",
     "tenacity>=9.1.4",
+    "pyportfolioopt>=1.5",
 ]
 
 [dependency-groups]
