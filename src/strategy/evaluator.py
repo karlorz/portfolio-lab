@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, NamedTuple
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, REGIME_OVERRIDES
+from src.strategy.regime_allocation import get_regime_allocation_with_override
 from src.backtest.metrics import save_results_json
 from enum import Enum
 
@@ -628,7 +629,11 @@ def main():
         logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
 
     # Determine target allocation
-    target_alloc = REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION
+    if os.environ.get("REGIME_ALLOC_ENABLED", "0") == "1":
+        target_alloc = get_regime_allocation_with_override(regime)
+        logger.info("Regime-conditional allocation (%s): %s", regime, target_alloc)
+    else:
+        target_alloc = REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION
     logger.info("Target allocation: %s", target_alloc)
 
     # Generate orders

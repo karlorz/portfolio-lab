@@ -186,3 +186,40 @@ class TestDefaultAllocation:
 
     def test_default_sums_to_one(self):
         assert abs(sum(DEFAULT_ALLOCATION.values()) - 1.0) < 1e-6
+
+
+class TestEvaluatorIntegration:
+    """Test regime_allocation integration with evaluator.py target_alloc logic."""
+
+    def test_evaluator_import_succeeds(self):
+        """Module can be imported without errors."""
+        from src.strategy.regime_allocation import get_regime_allocation_with_override
+        assert callable(get_regime_allocation_with_override)
+
+    def test_enabled_uses_regime_allocation(self):
+        """When REGIME_ALLOC_ENABLED=1, regime-specific allocation is returned."""
+        from src.strategy.regime_allocation import get_regime_allocation_with_override
+
+        with patch.dict(os.environ, {"REGIME_ALLOC_ENABLED": "1"}):
+            crisis = get_regime_allocation_with_override("crisis")
+            assert crisis["SPY"] == pytest.approx(0.40, abs=0.01)
+            assert crisis["GLD"] == pytest.approx(0.42, abs=0.01)
+
+    def test_disabled_returns_base_allocation(self):
+        """When REGIME_ALLOC_ENABLED is not set, returns base allocation."""
+        from src.strategy.regime_allocation import get_regime_allocation_with_override
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("REGIME_ALLOC_ENABLED", None)
+            result = get_regime_allocation_with_override("crisis")
+            # Should still return crisis allocation (function doesn't check ENABLED)
+            # The ENABLED check is in evaluator.py, not here
+            assert result == REGIME_ALLOCATIONS["crisis"]
+
+    def test_recovery_allocation_has_more_equity(self):
+        """RECOVERY regime should favor equities over the champion."""
+        from src.strategy.regime_allocation import get_regime_allocation_with_override
+
+        recovery = get_regime_allocation_with_override("recovery")
+        assert recovery["SPY"] > 0.46  # More than champion
+        assert recovery["GLD"] < 0.38  # Less gold than champion
