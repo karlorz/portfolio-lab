@@ -23,9 +23,10 @@ class TestRegimeConditionalWeights:
         assert low_vol["cross_asset_regime_arb"] < 1.0
         assert low_vol["international_momentum"] > 1.0
 
-    def test_normal_has_no_multipliers(self):
+    def test_normal_has_no_nonidentity_multipliers(self):
         from src.strategy.ensemble_voter import REGIME_CONDITIONAL_WEIGHTS
-        assert REGIME_CONDITIONAL_WEIGHTS["NORMAL"] == {}
+        for val in REGIME_CONDITIONAL_WEIGHTS["NORMAL"].values():
+            assert val == 1.0, f"NORMAL regime should only have identity (1.0) multipliers, got {val}"
 
 
 class TestApplyRegimeWeights:
