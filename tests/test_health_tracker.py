@@ -159,12 +159,12 @@ class TestHealthScoreFormula:
         today = datetime.now()
         # Insert 15 predictions with actual directions over 100 days
         for i in range(15):
-            ts = (today - timedelta(days=i * 7)).strftime("%Y-%m-%dT10:00:00")
+            ts = (today - timedelta(days=i * 8)).strftime("%Y-%m-%dT10:00:00")
             tracker.log_prediction_simple(source="cta", signal_value=0.50, confidence=0.80, timestamp=ts)
 
         # Update actual directions (bull market → direction 1)
         for i in range(15):
-            day = (today - timedelta(days=i * 7)).strftime("%Y-%m-%d")
+            day = (today - timedelta(days=i * 8)).strftime("%Y-%m-%d")
             tracker.update_actual_directions({"SPY": 0.01}, day)
 
         result = tracker.calculate_health_score("cta")
@@ -1416,7 +1416,7 @@ class TestDetectICAlertsEdgeCases:
 
         # current=0.05, history=[0.10, 0.10, 0.10]
         # peak=0.10, drawdown=(0.10-0.05)/0.10=0.5, 0.5 > 0.5 ? No
-        ic_values = iter([0.05, 0.10, 0.10, 0.10] * 7)
+        ic_values = iter([0.05, 0.10, 0.10, 0.10] * 8)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -1434,7 +1434,7 @@ class TestDetectICAlertsEdgeCases:
 
         # current=-0.05, history=[-0.05, -0.05, -0.05]
         # streak = 3 >= 3 -> alert
-        ic_values = iter([-0.05, -0.05, -0.05, -0.05] * 7)
+        ic_values = iter([-0.05, -0.05, -0.05, -0.05] * 8)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -1456,7 +1456,7 @@ class TestDetectICAlertsEdgeCases:
         # peak = max(|-0.05|,|-0.05|,|0.03|) = 0.05
         # drawdown=(0.05-0.03)/0.05=0.4 < 0.5 -> no drawdown
         # ratio=0.03/0.05=0.6 > 0.3 -> no ratio
-        ic_values = iter([0.03, -0.05, -0.05, 0.03] * 7)
+        ic_values = iter([0.03, -0.05, -0.05, 0.03] * 8)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -3520,7 +3520,7 @@ class TestDetectICAlertsLowRatio:
         # current=0.01 (low), history=[0.10, 0.12, 0.08] (peak=0.12)
         # ratio = 0.01/0.12 = 0.083 < 0.3 -> alert
         # peak=0.12 > 0.02 so ratio check runs
-        ic_values = iter([0.01, 0.10, 0.12, 0.08] * 7)
+        ic_values = iter([0.01, 0.10, 0.12, 0.08] * 8)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -3539,7 +3539,7 @@ class TestDetectICAlertsLowRatio:
 
         # current=0.08, history=[0.10, 0.12, 0.08] (peak=0.12)
         # ratio = 0.08/0.12 = 0.67 > 0.3 -> no alert
-        ic_values = iter([0.08, 0.10, 0.12, 0.08] * 7)
+        ic_values = iter([0.08, 0.10, 0.12, 0.08] * 8)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -3566,7 +3566,7 @@ class TestDetectICAlertsPeakGuards:
 
         # current=0.005, history=[0.01, 0.02, 0.015] (peak=0.02)
         # peak_ic > 0.02? No (0.02 > 0.02 is False) -> skip ratio and drawdown
-        ic_values = iter([0.005, 0.01, 0.02, 0.015] * 7)
+        ic_values = iter([0.005, 0.01, 0.02, 0.015] * 8)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)

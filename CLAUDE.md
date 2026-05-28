@@ -120,15 +120,17 @@
 |- **Performance.jsonl windowed pruning**: _prune_performance_log() truncates to 5000 entries after each append (env MAX_PERFORMANCE_ENTRIES) — prevents unbounded log growth during paper trading
 |- **Deflated Sharpe Ratio**: DSR=0.979 with 94 grid search configs — champion survives multiple-testing correction
 
-### Active Ensemble Signals (6)
-MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB, UNIFIED_OVERLAY (all 6 active)
+### Active Ensemble Signals (8)
+MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB, UNIFIED_OVERLAY, MULTI_TIMEFRAME_FUSION, GOOGLE_TRENDS
 - **MULTI_SPEED_MOM health: 0.55** (below 0.60 viability floor) — 0.00 weight (disabled), gated OFF in HIGH_VOL/CRISIS by RegimeGate
 - **RegimeGate**: behavioral_sentiment ON only in LOW_VOL; cross_asset_regime_arb OFF in LOW_VOL; LOW_VOL added to Regime enum (vol < 12% + momentum > 1%)
 - **v806 multi-timeframe signal fusion**: Re-implemented in commit 592210f (347 lines, 48 tests passing). Classifies signals into SHORT (5d), MEDIUM (21d), LONG (63d) buckets with regime-dependent fusion weights. Integrated as 7th signal source with 10% weight across all regimes.
+- **Google Trends sentiment signal** (8th signal, 5% weight): Replaces net-negative behavioral sentiment (VIX-proxy, -0.216 Sharpe, 65.8% FPR). Uses Z-scores of search volume for "recession", "inflation", "stock market crash", "interest rates". Data from data/google_trends.json via `make fetch-trends`. Contrarian: fear spike = buy signal.
+|- **Regime-conditional base allocation**: src/strategy/regime_allocation.py — varies SPY/GLD/TLT weights by regime. NORMAL 46/38/16, CRISIS 40/42/18, HIGH_VOL 42/40/18, LOW_VOL 50/34/16, RECOVERY 52/32/16. Activated via REGIME_ALLOC_ENABLED=1. REGIME_ALLOC_OVERRIDE env var for A/B testing.
 |- **Data-driven regime gating**: src/monitor/regime_sharpe_matrix.py (570 lines, 45 tests) — computes per-signal, per-regime Sharpe ratios with stationary bootstrap significance testing (10K iterations). Extracts signal-regime data from SQLite, derives gate rules (ON/OFF) and weight multipliers. DashboardGenerator persists computed rules to data/regime_gate_persisted.json; EnsembleVoter loads at startup (fallback: hardcoded GATE_RULES). Regime-conditional vol targeting: +0.052 Sharpe delta.
 
 ### Current Weights (NORMAL regime)
-ALT_DATA 0.305, INTL_MOM 0.245, CROSS_RV 0.13, REGIME_ARB 0.13, UNIFIED 0.19
+ALT_DATA 0.2245, INTL_MOM 0.2205, CROSS_RV 0.117, REGIME_ARB 0.117, UNIFIED 0.171, MTF 0.10, GOOGLE_TRENDS 0.05
 MSM 0.00 (disabled — net-negative -0.012 Sharpe, health 0.55)
 Max per-signal cap: 50%
 

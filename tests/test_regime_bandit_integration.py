@@ -404,6 +404,7 @@ class TestPipelineEdgeCases:
             "cross_asset_regime_arb": {"CRISIS"},
             "unified_overlay": {"CRISIS"},
             "multi_timeframe_fusion": {"CRISIS"},
+            "google_trends": {"CRISIS"},
         })
         weights = dict(REGIME_WEIGHTS[Regime.CRISIS])
         filtered = gate.filter_weights(weights, "CRISIS")
