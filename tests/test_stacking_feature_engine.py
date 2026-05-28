@@ -1068,8 +1068,8 @@ class TestCLI:
         assert isinstance(fv, FeatureVector)
         assert isinstance(arr, np.ndarray)
         from src.signals.stacking_feature_engine import StackingFeatureEngine
-        engine = StackingFeatureEngine()
-        assert arr.shape == (engine.TOTAL_DIMENSIONS,)
+        sfe = StackingFeatureEngine()
+        assert arr.shape == (sfe.TOTAL_DIMENSIONS,)
 
     def test_main_names_flag(self, caplog):
         """main(['--names']) logs 59 feature names."""
