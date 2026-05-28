@@ -22,6 +22,7 @@ class SignalSource(Enum):
     CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"
     UNIFIED_OVERLAY = "unified_overlay"
     MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # v806
+    GOOGLE_TRENDS = "google_trends"  # replaces behavioral_sentiment
 
 
 __all__ = ["SignalSource"]

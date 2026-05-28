@@ -152,47 +152,52 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
         Regime.LOW_VOL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1350,
-            SignalSource.ALTERNATIVE_DATA: 0.3150,
+            SignalSource.ALTERNATIVE_DATA: 0.2650,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.2520,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.0000,  # marginal in calm markets
             SignalSource.UNIFIED_OVERLAY: 0.1980,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         },
         Regime.NORMAL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1170,
-            SignalSource.ALTERNATIVE_DATA: 0.2745,
+            SignalSource.ALTERNATIVE_DATA: 0.2245,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.2205,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
             SignalSource.UNIFIED_OVERLAY: 0.1710,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         },
         Regime.HIGH_VOL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1170,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.1890,
-            SignalSource.ALTERNATIVE_DATA: 0.2970,
+            SignalSource.ALTERNATIVE_DATA: 0.2470,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
             SignalSource.UNIFIED_OVERLAY: 0.1800,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         },
         Regime.CRISIS: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.3285,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1530,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
-            SignalSource.ALTERNATIVE_DATA: 0.1800,
+            SignalSource.ALTERNATIVE_DATA: 0.1300,
             SignalSource.UNIFIED_OVERLAY: 0.2385,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         },
         Regime.RECOVERY: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
-            SignalSource.ALTERNATIVE_DATA: 0.2745,
+            SignalSource.ALTERNATIVE_DATA: 0.2245,
             SignalSource.CROSS_ASSET_RV: 0.1170,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.2205,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
             SignalSource.UNIFIED_OVERLAY: 0.1710,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         }
     }
 
@@ -808,6 +813,7 @@ class EnsembleVoter:
         self._collect_regime_arb_signal(readings, active_sources, regime)
         self._collect_unified_overlay_signal(readings, active_sources, regime)
         self._collect_mtf_signal(readings, active_sources, regime, date)
+        self._collect_google_trends(readings, active_sources, regime, date)
 
         self.current_readings = readings
         return readings
@@ -964,6 +970,23 @@ class EnsembleVoter:
             pass
         except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Multi-timeframe fusion unavailable: %s", e)
+
+    def _collect_google_trends(
+        self, readings: dict, active_sources: set, regime, date: str
+    ) -> None:
+        """Collect Google Trends sentiment signal."""
+        if self._should_skip(SignalSource.GOOGLE_TRENDS, active_sources, regime):
+            return
+        try:
+            from src.signals.google_trends_signal import GoogleTrendsSignal
+            gt = GoogleTrendsSignal()
+            snapshot = gt.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.GOOGLE_TRENDS] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Google Trends signal unavailable: %s", e)
 
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
