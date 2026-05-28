@@ -213,6 +213,8 @@ def run_black_litterman(
     risk_free_rate: float = RISK_FREE_RATE / 100,
     market_caps: Optional[Dict[str, float]] = None,
     pi: Optional[np.ndarray] = None,
+    transaction_costs: bool = True,
+    regime: Optional[str] = None,
 ) -> BLResult:
     """Run Black-Litterman optimization with PyPortfolioOpt.
 
@@ -277,6 +279,23 @@ def run_black_litterman(
     # Posterior returns
     posterior_rets = bl.bl_returns()
 
+    # Transaction cost adjustment: subtract annualized round-trip costs
+    # from posterior returns to penalize high-cost assets.
+    cost_penalties_bps = {}
+    if transaction_costs:
+        from src.costs.etf_cost_table import estimate_cost_bps
+        if isinstance(posterior_rets, pd.Series):
+            rets_series = posterior_rets
+        else:
+            rets_series = pd.Series(posterior_rets, index=symbols)
+        for sym in symbols:
+            one_way_bps = estimate_cost_bps(sym, regime=regime)
+            # Annualize: assume monthly rebalance (12x per year)
+            annual_cost = one_way_bps * 2 * 12 / 1e4  # round-trip × 12 months
+            rets_series[sym] -= annual_cost
+            cost_penalties_bps[sym] = round(one_way_bps * 2, 1)
+        posterior_rets = rets_series
+
     # Posterior covariance
     posterior_cov = bl.bl_cov()
 
@@ -322,7 +341,11 @@ def run_black_litterman(
         expected_sharpe=round(perf[2], 4) if perf[2] is not None else None,
         expected_cagr=round(perf[0] * 100, 2) if perf[0] is not None else None,
         expected_volatility=round(perf[1] * 100, 2) if perf[1] is not None else None,
-        extras={"optimization_method": optimization_method},
+        extras={
+            "optimization_method": optimization_method,
+            "transaction_costs_applied": transaction_costs,
+            "cost_penalties_bps": cost_penalties_bps,
+        },
     )
 
 
@@ -335,6 +358,8 @@ def compute_bl_weights(
     tau: float = DEFAULT_TAU,
     prior: str = "equal",
     risk_free_rate: float = RISK_FREE_RATE / 100,
+    transaction_costs: bool = True,
+    regime: Optional[str] = None,
 ) -> BLResult:
     """Convenience function: prices → BL-optimized weights in one call.
 
@@ -396,6 +421,8 @@ def compute_bl_weights(
         cov_matrix=cov_matrix,
         views=views,
         risk_free_rate=risk_free_rate,
+        transaction_costs=transaction_costs,
+        regime=regime,
     )
 
 
