@@ -56,14 +56,18 @@ def fetch_trends(terms: list[str], days: int = 90) -> dict[str, dict[str, int]]:
 
     results = {}
 
-    for i, term in enumerate(terms):
-        if i > 0:
+    # Batch terms in groups of 5 (pytrends max per request)
+    batch_size = 5
+    for batch_start in range(0, len(terms), batch_size):
+        batch = terms[batch_start : batch_start + batch_size]
+
+        if batch_start > 0:
             time.sleep(RATE_LIMIT_DELAY)
 
         try:
-            logger.info("Fetching trends for '%s'...", term)
+            logger.info("Fetching trends for %s...", batch)
             pytrends.build_payload(
-                [term],
+                batch,
                 cat=0,
                 timeframe=timeframe,
                 geo="",
@@ -72,21 +76,22 @@ def fetch_trends(terms: list[str], days: int = 90) -> dict[str, dict[str, int]]:
             df = pytrends.interest_over_time()
 
             if df.empty:
-                logger.warning("No data returned for '%s'", term)
+                logger.warning("No data returned for %s", batch)
                 continue
 
-            # Convert to {date_str: volume} dict
-            term_data = {}
-            for date_idx, row in df.iterrows():
-                date_str = date_idx.strftime("%Y-%m-%d")
-                term_data[date_str] = int(row[term])
-
-            results[term] = term_data
-            logger.info("  Got %d data points for '%s'", len(term_data), term)
+            for term in batch:
+                if term not in df.columns:
+                    logger.warning("No column for '%s' in response", term)
+                    continue
+                term_data = {}
+                for date_idx, row in df.iterrows():
+                    date_str = date_idx.strftime("%Y-%m-%d")
+                    term_data[date_str] = int(row[term])
+                results[term] = term_data
+                logger.info("  Got %d data points for '%s'", len(term_data), term)
 
         except Exception as e:
-            logger.warning("Failed to fetch '%s': %s", term, e)
-            # Rate limit backoff
+            logger.warning("Failed to fetch batch %s: %s", batch, e)
             if "429" in str(e) or "Too Many" in str(e):
                 logger.info("Rate limited, waiting 60s...")
                 time.sleep(60)
