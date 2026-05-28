@@ -2152,11 +2152,11 @@ class TestGetHealthReportEdgeCases:
             with patch.object(tracker, 'compute_ic', return_value=0.05):
                 with patch.object(tracker, 'compute_ic_half_life', return_value=100.0):
                     report = tracker.get_health_report()
-        assert report["summary"]["healthy"] == 6
+        assert report["summary"]["healthy"] == 7
         assert report["summary"]["degraded"] == 1
         assert report["summary"]["unhealthy"] == 0
-        assert report["summary"]["total_tracked"] == 7
-        assert report["overall_health"] == "healthy"  # 6/7 = 86% >= 60%
+        assert report["summary"]["total_tracked"] == 8
+        assert report["overall_health"] == "healthy"  # 7/8 = 87.5% >= 60%
 
     def test_report_with_zero_healthy(self, tmp_path):
         """When no sources are healthy, overall_health should be 'degraded'."""
@@ -2176,7 +2176,7 @@ class TestGetHealthReportEdgeCases:
                 with patch.object(tracker, 'compute_ic_half_life', return_value=None):
                     report = tracker.get_health_report()
         assert report["summary"]["healthy"] == 0
-        assert report["summary"]["unhealthy"] == 7
+        assert report["summary"]["unhealthy"] == 8
         assert report["overall_health"] == "degraded"
 
 
@@ -3286,12 +3286,12 @@ class TestSignalSourceIteration:
 
     def test_iteration_yields_all_members(self):
         members = list(SignalSource)
-        assert len(members) == 7
+        assert len(members) == 8
         names = {m.name for m in members}
         expected = {
             'MULTI_SPEED_MOM', 'CROSS_ASSET_RV', 'INTERNATIONAL_MOMENTUM',
             'ALTERNATIVE_DATA', 'CROSS_ASSET_REGIME_ARB', 'UNIFIED_OVERLAY',
-            'MULTI_TIMEFRAME_FUSION',
+            'MULTI_TIMEFRAME_FUSION', 'GOOGLE_TRENDS',
         }
         assert names == expected
 
