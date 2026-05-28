@@ -4,16 +4,24 @@ Tests compute_rolling_correlation, detect_structural_breaks,
 analyze_correlation_regimes with synthetic data (no disk/network).
 """
 
+import json
+from dataclasses import asdict
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from src.research.gold_tlt_correlation import (
+    CorrelationAnalysis,
     CorrelationRegime,
     StructuralBreak,
+    _compute_implications,
+    _load_prices,
     compute_rolling_correlation,
     detect_structural_breaks,
     analyze_correlation_regimes,
+    run_analysis,
 )
 
 
@@ -198,3 +206,196 @@ class TestDataclasses:
         )
         assert b.significance == "high"
         assert b.change == -0.4
+
+
+# ── _compute_implications ─────────────────────────────────────────────────
+
+
+class TestComputeImplications:
+
+    def _make_analysis(self, **overrides):
+        defaults = dict(
+            symbol_pair="GLD/TLT",
+            analysis_date="2026-05-28",
+            window_days=252,
+            current_correlation=0.0,
+            current_regime="neutral",
+            mean_correlation=0.0,
+            min_correlation=-0.5,
+            max_correlation=0.5,
+            correlation_trend="stable",
+            structural_breaks=[],
+            regimes=[],
+            implications="",
+        )
+        defaults.update(overrides)
+        return CorrelationAnalysis(**defaults)
+
+    def test_positive_correlation(self):
+        result = _compute_implications(self._make_analysis(current_correlation=0.3))
+        assert "positive" in result
+        assert "eroding" in result
+
+    def test_negative_correlation(self):
+        result = _compute_implications(self._make_analysis(current_correlation=-0.3))
+        assert "negative" in result
+        assert "intact" in result
+
+    def test_near_zero_correlation(self):
+        result = _compute_implications(self._make_analysis(current_correlation=0.0))
+        assert "near-zero" in result
+
+    def test_increasing_trend(self):
+        result = _compute_implications(self._make_analysis(correlation_trend="increasing"))
+        assert "INCREASING" in result
+        assert "move together more" in result
+
+    def test_decreasing_trend(self):
+        result = _compute_implications(self._make_analysis(correlation_trend="decreasing"))
+        assert "DECREASING" in result
+        assert "strengthening" in result
+
+    def test_stable_trend_no_trend_text(self):
+        result = _compute_implications(self._make_analysis(correlation_trend="stable"))
+        assert "INCREASING" not in result
+        assert "DECREASING" not in result
+
+    def test_structural_breaks(self):
+        breaks = [
+            {"date": "2020-03-15", "before_correlation": 0.1,
+             "after_correlation": -0.3, "change": -0.4, "significance": "high"},
+            {"date": "2022-06-10", "before_correlation": -0.1,
+             "after_correlation": 0.2, "change": 0.3, "significance": "medium"},
+        ]
+        result = _compute_implications(self._make_analysis(structural_breaks=breaks))
+        assert "2 structural break(s)" in result
+        assert "1 high significance" in result
+        assert "regime has shifted" in result
+
+    def test_no_structural_breaks(self):
+        result = _compute_implications(self._make_analysis(structural_breaks=[]))
+        assert "structural break" not in result
+
+    def test_recent_regime(self):
+        regimes = [
+            {"start_date": "2024-06-01", "regime_label": "correlated",
+             "mean_correlation": 0.25},
+        ]
+        result = _compute_implications(self._make_analysis(regimes=regimes))
+        assert "Current regime" in result
+        assert "correlated" in result
+        assert "2024" in result
+
+    def test_no_recent_regime(self):
+        regimes = [
+            {"start_date": "2020-01-01", "regime_label": "diversifying",
+             "mean_correlation": -0.3},
+        ]
+        result = _compute_implications(self._make_analysis(regimes=regimes))
+        assert "Current regime" not in result
+
+
+# ── _load_prices ──────────────────────────────────────────────────────────
+
+
+class TestLoadPrices:
+
+    def _make_prices_json(self, symbols, tmp_path, fmt="list_of_dicts"):
+        """Create a synthetic prices.json and return its path."""
+        data = {}
+        for sym in symbols:
+            dates = pd.bdate_range("2020-01-02", periods=20)
+            if fmt == "list_of_dicts":
+                data[sym] = [{"d": str(d.date()), "p": 100.0 + i}
+                             for i, d in enumerate(dates)]
+            else:
+                data[sym] = {
+                    "d": [str(d.date()) for d in dates],
+                    "p": [100.0 + i for i in range(len(dates))],
+                }
+        path = tmp_path / "prices.json"
+        path.write_text(json.dumps(data))
+        return path
+
+    def test_list_of_dicts_format(self, tmp_path):
+        path = self._make_prices_json(["GLD", "TLT"], tmp_path, "list_of_dicts")
+        with patch("src.research.gold_tlt_correlation.PRICES_JSON", path):
+            df = _load_prices(["GLD", "TLT"])
+        assert set(df.columns) == {"GLD", "TLT"}
+        assert len(df) == 20
+
+    def test_dict_of_lists_format(self, tmp_path):
+        path = self._make_prices_json(["GLD", "TLT"], tmp_path, "dict_of_lists")
+        with patch("src.research.gold_tlt_correlation.PRICES_JSON", path):
+            df = _load_prices(["GLD", "TLT"])
+        assert set(df.columns) == {"GLD", "TLT"}
+        assert len(df) == 20
+
+    def test_missing_symbols_logged(self, tmp_path, caplog):
+        path = self._make_prices_json(["GLD"], tmp_path)
+        with patch("src.research.gold_tlt_correlation.PRICES_JSON", path):
+            with caplog.at_level("WARNING"):
+                df = _load_prices(["GLD", "MISSING"])
+        assert "MISSING" in caplog.text
+        assert "GLD" in df.columns
+
+    def test_nonexistent_file(self):
+        with patch("src.research.gold_tlt_correlation.PRICES_JSON", "/nonexistent/path.json"):
+            with pytest.raises(FileNotFoundError):
+                _load_prices(["GLD"])
+
+    def test_default_symbols(self, tmp_path):
+        path = self._make_prices_json(["GLD", "TLT", "SPY", "IEF"], tmp_path)
+        with patch("src.research.gold_tlt_correlation.PRICES_JSON", path):
+            df = _load_prices()
+        assert set(df.columns) == {"GLD", "TLT", "SPY", "IEF"}
+
+
+# ── run_analysis ──────────────────────────────────────────────────────────
+
+
+class TestRunAnalysis:
+
+    def _make_prices_json(self, tmp_path):
+        """Create synthetic prices.json with GLD/TLT/SPY/IEF."""
+        symbols = ["GLD", "TLT", "SPY", "IEF"]
+        np.random.seed(123)
+        dates = pd.bdate_range("2010-01-04", periods=500)
+        data = {}
+        for i, sym in enumerate(symbols):
+            data[sym] = [
+                {"d": str(d.date()), "p": round(float(100 + i * 10 + np.random.normal(0, 1)), 2)}
+                for d in dates
+            ]
+        path = tmp_path / "prices.json"
+        path.write_text(json.dumps(data))
+        return path
+
+    def test_returns_correlation_analysis(self, tmp_path):
+        path = self._make_prices_json(tmp_path)
+        with patch("src.research.gold_tlt_correlation.PRICES_JSON", path):
+            result = run_analysis(window=63)
+        assert isinstance(result, CorrelationAnalysis)
+        assert result.symbol_pair == "GLD/TLT"
+        assert result.window_days == 63
+        assert isinstance(result.current_correlation, float)
+        assert isinstance(result.correlation_trend, str)
+        assert isinstance(result.implications, str)
+        assert isinstance(result.structural_breaks, list)
+        assert isinstance(result.regimes, list)
+
+    def test_save_writes_json(self, tmp_path):
+        path = self._make_prices_json(tmp_path)
+        with patch("src.research.gold_tlt_correlation.PRICES_JSON", path):
+            with patch("src.research.gold_tlt_correlation.save_results_json") as mock_save:
+                run_analysis(window=63, save=True)
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args
+        assert "gold_tlt_correlation.json" in call_kwargs.kwargs.get("output_path", call_kwargs[1].get("output_path", ""))
+
+    def test_no_save_skips_write(self, tmp_path):
+        path = self._make_prices_json(tmp_path)
+        with patch("src.research.gold_tlt_correlation.PRICES_JSON", path):
+            with patch("src.research.gold_tlt_correlation.save_results_json") as mock_save:
+                run_analysis(window=63, save=False)
+        mock_save.assert_not_called()
