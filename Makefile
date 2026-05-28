@@ -429,3 +429,8 @@ verify-cron-sync:
 	@echo ""
 	@echo "Checking cron_status.json integrity..."
 	@cd $(PROJECT_DIR) && python3 scripts/cron_verify.py
+
+.PHONY: fetch-trends
+fetch-trends:
+	@echo "=== Google Trends: $$(date) ==="
+	cd $(PROJECT_DIR) && uv run python scripts/fetch_google_trends.py --days 90 2>&1 | tee -a $(DATA_DIR)/cron.log
