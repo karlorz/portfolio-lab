@@ -1751,6 +1751,51 @@ class DashboardGenerator:
                 "generated_at": datetime.now().isoformat(),
             }
 
+            # Compute data-driven regime Sharpe matrix (read-only, for monitoring)
+            try:
+                from src.monitor.regime_sharpe_matrix import (
+                    compute_regime_sharpe_matrix,
+                    derive_gate_rules,
+                    derive_regime_weight_multipliers,
+                    extract_signal_regime_data,
+                )
+
+                prices = self._load_price_data()
+                db_path = DATA_DIR / "ensemble_signals.db"
+                if prices is not None and db_path.exists():
+                    hist_df = extract_signal_regime_data(db_path, prices)
+                    if not hist_df.empty:
+                        matrix = compute_regime_sharpe_matrix(
+                            hist_df, n_bootstrap=500, seed=42,
+                        )
+                        data_rules = derive_gate_rules(matrix)
+                        data_multipliers = derive_regime_weight_multipliers(matrix)
+
+                        gate_data["data_driven"] = {
+                            "gate_rules": {
+                                sig: sorted(regimes)
+                                for sig, regimes in data_rules.items()
+                            },
+                            "weight_multipliers": data_multipliers,
+                            "n_observations": len(hist_df),
+                            "n_signals": hist_df["signal"].nunique(),
+                        }
+
+                        # Persist data-driven rules for EnsembleVoter to load
+                        persist_path = DATA_DIR / "regime_gate_persisted.json"
+                        persist_data = {
+                            "gate_rules": {
+                                sig: sorted(regimes)
+                                for sig, regimes in data_rules.items()
+                            },
+                            "weight_multipliers": data_multipliers,
+                            "computed_at": datetime.now().isoformat(),
+                            "n_observations": len(hist_df),
+                        }
+                        save_results_json(persist_data, output_path=str(persist_path))
+            except (ImportError, Exception) as e:
+                logger.debug("Regime Sharpe matrix computation skipped: %s", e)
+
             out_path = PUBLIC_DIR / "regime_gate.json"
             save_results_json(gate_data, output_path=str(out_path))
             return out_path

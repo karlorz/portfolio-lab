@@ -623,6 +623,21 @@ class EnsembleVoter:
         # Regime gate — disables signals in regimes where they are net-negative
         from src.signals.regime_gate import RegimeGate
         self.regime_gate = RegimeGate()
+
+        # Load data-driven gate rules if available (computed by DashboardGenerator)
+        try:
+            from src.monitor.regime_sharpe_matrix import load_persisted_gate_rules
+            persist_path = self.data_path / "regime_gate_persisted.json"
+            data_rules = load_persisted_gate_rules(persist_path)
+            if data_rules:
+                self.regime_gate.gate_rules.update(data_rules)
+                logger.info(
+                    "Loaded %d data-driven gate rules from persisted file",
+                    len(data_rules),
+                )
+        except (ImportError, Exception) as e:
+            logger.debug("Data-driven gate loading skipped: %s", e)
+
         self._prev_regime: Optional[str] = None
         self._days_in_regime: int = 999  # Start assuming stable regime
 

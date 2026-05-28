@@ -121,7 +121,8 @@
 MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB, UNIFIED_OVERLAY (all 6 active)
 - **MULTI_SPEED_MOM health: 0.55** (below 0.60 viability floor) — 0.00 weight (disabled), gated OFF in HIGH_VOL/CRISIS by RegimeGate
 - **RegimeGate**: behavioral_sentiment ON only in LOW_VOL; cross_asset_regime_arb OFF in LOW_VOL; LOW_VOL added to Regime enum (vol < 12% + momentum > 1%)
-- **v806 multi-timeframe signal fusion phantom completion**: .done file claims 620 lines + 43 tests implemented by autonomous agent on 2026-05-17, but zero files exist on disk (no multi_timeframe_fusion.py, no SignalSource.MULTI_TIMEFRAME_FUSION, commit b1650a6 not in git log). .done marker removed 2026-05-27. Architecture has since evolved to 6 active signals (from 22), so the original design needs re-evaluation before re-implementation.
+- **v806 multi-timeframe signal fusion**: Re-implemented in commit 592210f (347 lines, 48 tests passing). Classifies signals into SHORT (5d), MEDIUM (21d), LONG (63d) buckets with regime-dependent fusion weights. Integrated as 7th signal source with 10% weight across all regimes.
+|- **Data-driven regime gating**: src/monitor/regime_sharpe_matrix.py (570 lines, 45 tests) — computes per-signal, per-regime Sharpe ratios with stationary bootstrap significance testing (10K iterations). Extracts signal-regime data from SQLite, derives gate rules (ON/OFF) and weight multipliers. DashboardGenerator persists computed rules to data/regime_gate_persisted.json; EnsembleVoter loads at startup (fallback: hardcoded GATE_RULES). Regime-conditional vol targeting: +0.052 Sharpe delta.
 
 ### Current Weights (NORMAL regime)
 ALT_DATA 0.305, INTL_MOM 0.245, CROSS_RV 0.13, REGIME_ARB 0.13, UNIFIED 0.19

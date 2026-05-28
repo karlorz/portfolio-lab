@@ -450,17 +450,35 @@ def calculate_performance(portfolio: Portfolio, prices: Dict[str, float]) -> Dic
     # Calculate daily return relative to previous day's close.
     # Comparing against the last history entry (which may be intraday)
     # produces daily_return=0 for most snapshots. Instead, find the
-    # most recent entry from a different calendar date.
+    # close (16:00 or last entry) from the most recent completed day.
     daily_return = 0.0
     if portfolio.history:
         today = datetime.now().strftime("%Y-%m-%d")
         prev_day_total = None
-        for entry in reversed(portfolio.history):
+
+        # Collect all non-today entries, grouped by date
+        prev_entries: dict = {}
+        for entry in portfolio.history:
             ts = entry.get("timestamp", "")
             entry_date = ts[:10] if len(ts) >= 10 else ""
             if entry_date and entry_date != today:
-                prev_day_total = entry.get("total_value")
-                break
+                prev_entries.setdefault(entry_date, []).append(entry)
+
+        if prev_entries:
+            # Prefer the most recent date with a 16:00 close entry
+            for date in sorted(prev_entries.keys(), reverse=True):
+                entries = prev_entries[date]
+                for e in entries:
+                    if "16:00" in e.get("timestamp", ""):
+                        prev_day_total = e.get("total_value")
+                        break
+                if prev_day_total is not None:
+                    break
+            # Fallback: most recent non-today date, last entry
+            if prev_day_total is None:
+                latest_date = max(prev_entries.keys())
+                prev_day_total = prev_entries[latest_date][-1].get("total_value")
+
         # Fallback: if no previous-day entry, use last entry (first day)
         if prev_day_total is None:
             prev_day_total = portfolio.history[-1].get("total_value", 0)
