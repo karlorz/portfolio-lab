@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13248 safe** (12905 Python + 313 TypeScript + 30 integration, 27 skipped, 0 failures)
+| - Test count: **13261 safe** (12918 Python + 313 TypeScript + 30 integration, 28 skipped, 0 failures)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
@@ -115,6 +115,8 @@
 |- **PyPortfolioOpt finds higher theoretical Sharpe**: Max Sharpe 0.87 (weights 40/34/26), HRP 0.93 (weights 29/28/43) vs champion 0.79 (46/38/16)
 |- **Walk-forward validation (20 windows): WFE=1.02, mean OOS Sharpe=0.99** — champion portfolio validated out-of-sample
 |- **Black-Litterman mapper**: maps ensemble biases → BL views with Idzorek confidence from health_scores, tau=0.15
+|- **BL→HRP→EW fallback cascade**: 3-level optimizer fallback — BL max_sharpe → pypfopt.HRPOpt → equal weight; optimization_method recorded in BLResult.extras; 13 cascade tests
+|- **Performance.jsonl windowed pruning**: _prune_performance_log() truncates to 5000 entries after each append (env MAX_PERFORMANCE_ENTRIES) — prevents unbounded log growth during paper trading
 |- **Deflated Sharpe Ratio**: DSR=0.979 with 94 grid search configs — champion survives multiple-testing correction
 
 ### Active Ensemble Signals (6)
