@@ -20,7 +20,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Dict
 
-from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR, sqlite_connect
+from src.paths import DATA_DIR, MARKET_DB, SIGNALS_DIR, RISK_FREE_RATE, sqlite_connect
 from src.backtest.metrics import save_results_json
 
 
@@ -270,7 +270,7 @@ class CollarSignalGenerator:
 
     # Collar parameters
     DEFAULT_DAYS_TO_EXPIRY = 30
-    RISK_FREE_RATE = 0.045     # ~4.5% current
+    RISK_FREE_RATE = RISK_FREE_RATE / 100  # from src.paths (4.5 → 0.045)
     CASHLESS_TOLERANCE = 0.15  # |net premium| / spot < 0.15% considered cashless
 
     DATA_DIR = DATA_DIR

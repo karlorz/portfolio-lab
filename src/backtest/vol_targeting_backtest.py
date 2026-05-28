@@ -620,23 +620,24 @@ def main():
             save=args.save,
         )
 
-        print(f"\n{'='*60}")
-        print("REGIME-CONDITIONAL VOLATILITY TARGETING BACKTEST")
-        print(f"{'='*60}")
-        print(f"  Static Sharpe:      {result.static_sharpe:.4f}")
-        print(f"  Vol Target Sharpe:  {result.vol_target_sharpe:.4f}")
-        print(f"  Delta:              {result.sharpe_delta:+.4f}")
-        print(f"  Static CAGR:        {result.static_cagr:.4f}")
-        print(f"  Vol Target CAGR:    {result.vol_target_cagr:.4f}")
-        print(f"  Mean Leverage:      {result.mean_leverage:.2f}x")
-        print(f"  Max Leverage:       {result.max_leverage_reached:.2f}x")
-        print(f"  Leverage > 1x:      {result.leverage_above_1_pct:.1%}")
-        print(f"\n  Regime breakdown:")
+        logger.info("\n%s", "=" * 60)
+        logger.info("REGIME-CONDITIONAL VOLATILITY TARGETING BACKTEST")
+        logger.info("%s", "=" * 60)
+        logger.info("  Static Sharpe:      %.4f", result.static_sharpe)
+        logger.info("  Vol Target Sharpe:  %.4f", result.vol_target_sharpe)
+        logger.info("  Delta:              %+.4f", result.sharpe_delta)
+        logger.info("  Static CAGR:        %.4f", result.static_cagr)
+        logger.info("  Vol Target CAGR:    %.4f", result.vol_target_cagr)
+        logger.info("  Mean Leverage:      %.2fx", result.mean_leverage)
+        logger.info("  Max Leverage:       %.2fx", result.max_leverage_reached)
+        logger.info("  Leverage > 1x:      %.1f%%", result.leverage_above_1_pct * 100)
+        logger.info("\n  Regime breakdown:")
         for reg, info in result.regime_breakdown.items():
-            print(f"    {reg:<12}: {int(info['days']):>4d}d ({info['pct_of_time']:>6.1%}) "
-                  f"target={info['target_vol']:.0%} mean_lev={info['mean_leverage']:.2f}x")
-        print(f"\n  {result.summary}")
-        print(f"{'='*60}")
+            logger.info("    %-12s: %4dd (%6.1f%%) target=%d%% mean_lev=%.2fx",
+                        reg, int(info['days']), info['pct_of_time'] * 100,
+                        int(info['target_vol'] * 100), info['mean_leverage'])
+        logger.info("\n  %s", result.summary)
+        logger.info("%s", "=" * 60)
     else:
         result = compute_vol_target_backtest(
             target_vol=args.target_vol,
@@ -646,21 +647,21 @@ def main():
             save=args.save,
         )
 
-    print(f"\n{'='*60}")
-    print("VOLATILITY TARGETING OVERLAY BACKTEST")
-    print(f"{'='*60}")
-    print(f"  Static Sharpe:      {result.static_sharpe:.4f}")
-    print(f"  Vol Target Sharpe:  {result.vol_target_sharpe:.4f}")
-    print(f"  Delta:              {result.sharpe_delta:+.4f}")
-    print(f"  Static CAGR:        {result.static_cagr:.4f}")
-    print(f"  Vol Target CAGR:    {result.vol_target_cagr:.4f}")
-    print(f"  Static Max DD:      {result.static_max_dd:.4f}")
-    print(f"  Vol Target Max DD:  {result.vol_target_max_dd:.4f}")
-    print(f"  Mean Leverage:      {result.mean_leverage:.2f}x")
-    print(f"  Max Leverage:       {result.max_leverage_reached:.2f}x")
-    print(f"  Leverage > 1x:      {result.leverage_above_1_pct:.1%}")
-    print(f"\n  {result.summary}")
-    print(f"{'='*60}")
+    logger.info("\n%s", "=" * 60)
+    logger.info("VOLATILITY TARGETING OVERLAY BACKTEST")
+    logger.info("%s", "=" * 60)
+    logger.info("  Static Sharpe:      %.4f", result.static_sharpe)
+    logger.info("  Vol Target Sharpe:  %.4f", result.vol_target_sharpe)
+    logger.info("  Delta:              %+.4f", result.sharpe_delta)
+    logger.info("  Static CAGR:        %.4f", result.static_cagr)
+    logger.info("  Vol Target CAGR:    %.4f", result.vol_target_cagr)
+    logger.info("  Static Max DD:      %.4f", result.static_max_dd)
+    logger.info("  Vol Target Max DD:  %.4f", result.vol_target_max_dd)
+    logger.info("  Mean Leverage:      %.2fx", result.mean_leverage)
+    logger.info("  Max Leverage:       %.2fx", result.max_leverage_reached)
+    logger.info("  Leverage > 1x:      %.1f%%", result.leverage_above_1_pct * 100)
+    logger.info("\n  %s", result.summary)
+    logger.info("%s", "=" * 60)
 
 
 if __name__ == "__main__":

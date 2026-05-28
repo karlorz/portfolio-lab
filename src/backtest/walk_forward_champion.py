@@ -473,30 +473,31 @@ def main():
         save=args.save,
     )
 
-    print(f"\n{'='*70}")
-    print("WALK-FORWARD CHAMPION vs CHALLENGER")
-    print(f"{'='*70}")
-    print(f"  Data: {result.data_range}, {result.n_windows} windows")
+    logger.info("\n%s", "=" * 70)
+    logger.info("WALK-FORWARD CHAMPION vs CHALLENGER")
+    logger.info("%s", "=" * 70)
+    logger.info("  Data: %s, %d windows", result.data_range, result.n_windows)
 
-    print(f"\n  {'Allocation':<25} {'IS Sharpe':>10} {'OOS Sharpe':>10} {'WFE':>8} {'Max DD':>8} {'OOS+%':>7}")
-    print(f"  {'-'*68}")
+    logger.info("\n  %-25s %10s %10s %8s %8s %7s", "Allocation", "IS Sharpe", "OOS Sharpe", "WFE", "Max DD", "OOS+%")
+    logger.info("  %s", "-" * 68)
     for label, r in [("Champion (46/38/16)", result.champion),
                       ("Challenger (44/36/20)", result.challenger)]:
-        print(f"  {label:<25} {r.is_sharpe:>10.4f} {r.mean_oos_sharpe:>10.4f} "
-              f"{r.wfe:>8.4f} {r.mean_oos_max_dd:>7.1f}% {r.oos_sharpe_positive_pct:>6.1%}")
+        logger.info("  %-25s %10.4f %10.4f %8.4f %7.1f%% %6.1f%%",
+                     label, r.is_sharpe, r.mean_oos_sharpe,
+                     r.wfe, r.mean_oos_max_dd, r.oos_sharpe_positive_pct * 100)
 
-    print(f"\n  Head-to-head (OOS):")
-    print(f"    Champion beats Challenger:  {result.champion_beats_challenger}/{result.n_windows}")
-    print(f"    Challenger beats Champion:  {result.challenger_beats_champion}/{result.n_windows}")
-    print(f"    Better WFE:                 {result.better_wfe} (delta {result.wfe_delta:+.4f})")
+    logger.info("\n  Head-to-head (OOS):")
+    logger.info("    Champion beats Challenger:  %d/%d", result.champion_beats_challenger, result.n_windows)
+    logger.info("    Challenger beats Champion:  %d/%d", result.challenger_beats_champion, result.n_windows)
+    logger.info("    Better WFE:                 %s (delta %+.4f)", result.better_wfe, result.wfe_delta)
 
-    print(f"\n  Benchmarks:")
-    print(f"    Champion > SPY:   {result.champion.beats_spy}/{result.n_windows}")
-    print(f"    Challenger > SPY: {result.challenger.beats_spy}/{result.n_windows}")
-    print(f"    Champion > 60/40: {result.champion.beats_6040}/{result.n_windows}")
+    logger.info("\n  Benchmarks:")
+    logger.info("    Champion > SPY:   %d/%d", result.champion.beats_spy, result.n_windows)
+    logger.info("    Challenger > SPY: %d/%d", result.challenger.beats_spy, result.n_windows)
+    logger.info("    Champion > 60/40: %d/%d", result.champion.beats_6040, result.n_windows)
 
-    print(f"\n  {result.recommendation}")
-    print(f"{'='*70}")
+    logger.info("\n  %s", result.recommendation)
+    logger.info("%s", "=" * 70)
 
 
 if __name__ == "__main__":
