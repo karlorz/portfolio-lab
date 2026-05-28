@@ -88,15 +88,7 @@ class Regime(Enum):
     RECOVERY = "recovery"
 
 
-class SignalSource(Enum):
-    """Available signal sources."""
-    MULTI_SPEED_MOM = "multi_speed_momentum"  # Multi-speed momentum
-    CROSS_ASSET_RV = "cross_asset_rv"         # Cross-asset relative value
-    INTERNATIONAL_MOMENTUM = "international_momentum"  # International equity momentum
-    ALTERNATIVE_DATA = "alternative_data"  # Alternative data signal (SEC EDGAR, NewsAPI, jobs)
-    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"  # Cross-asset regime arbitrage
-    UNIFIED_OVERLAY = "unified_overlay"       # Unified overlay (ref'd by orchestrator_ensemble_bridge)
-    MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # Multi-timeframe signal fusion (v806)
+from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
 
 
 @dataclass

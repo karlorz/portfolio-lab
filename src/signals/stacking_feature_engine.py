@@ -28,7 +28,6 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import combinations
-from enum import Enum
 from pathlib import Path
 
 
@@ -38,14 +37,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ['SignalSource', 'Signal', 'RegimeContext', 'HistoricalAccuracy', 'FeatureVector', 'StackingFeatureEngine', 'StackingAccuracyTracker', 'demo', 'main']
 
-class SignalSource(Enum):
-    """Signal source identifiers for stacking features."""
-    MULTI_SPEED_MOM = "multi_speed_momentum"
-    CROSS_ASSET_RV = "cross_asset_rv"
-    INTERNATIONAL_MOMENTUM = "international_momentum"
-    ALTERNATIVE_DATA = "alternative_data"
-    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"
-    UNIFIED_OVERLAY = "unified_overlay"
+from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
 
 
 @dataclass
@@ -76,47 +68,47 @@ class HistoricalAccuracy:
 
 @dataclass  
 class FeatureVector:
-    """Complete 59-dimensional feature vector."""
-    # Base signals (6)
+    """Complete feature vector — dimension count computed dynamically."""
+    # Base signals
     base_values: Dict[SignalSource, float]
     
-    # Pairwise interactions (45)
-    multiplicative: Dict[Tuple[SignalSource, SignalSource], float]  # 15
-    disagreement: Dict[Tuple[SignalSource, SignalSource], float]     # 15
-    averages: Dict[Tuple[SignalSource, SignalSource], float]        # 15
+    # Pairwise interactions
+    multiplicative: Dict[Tuple[SignalSource, SignalSource], float]
+    disagreement: Dict[Tuple[SignalSource, SignalSource], float]
+    averages: Dict[Tuple[SignalSource, SignalSource], float]
     
     # Regime context (2)
     vix_normalized: float
     trend_strength: float
     
-    # Historical accuracy (6)
+    # Historical accuracy
     accuracy_values: Dict[SignalSource, float]
 
     # Metadata
     timestamp: datetime
-    dimension_count: int = 59
+    dimension_count: int = 79
 
 
 class StackingFeatureEngine:
     """
-    Generate 59-dimensional feature vectors for XGBoost meta-learner.
+    Generate 79-dimensional feature vectors for XGBoost meta-learner.
 
     Features:
-    - Base signal values (6)
-    - Pairwise multiplicative interactions (15)
-    - Pairwise disagreement features (15)
-    - Pairwise average features (15)
+    - Base signal values (7)
+    - Pairwise multiplicative interactions (21)
+    - Pairwise disagreement features (21)
+    - Pairwise average features (21)
     - Regime context (2)
-    - Historical accuracy (6)
+    - Historical accuracy (7)
 
-    Total: 59 features
+    Total: 79 features
     """
 
-    NUM_BASE_SIGNALS = 6
-    NUM_PAIRWISE_COMBINATIONS = 15  # C(6,2) = 15
+    NUM_BASE_SIGNALS = len(list(SignalSource))
+    NUM_PAIRWISE_COMBINATIONS = 21  # C(7,2) = 21
     NUM_REGIME_FEATURES = 2
-    NUM_ACCURACY_FEATURES = 6
-    TOTAL_DIMENSIONS = 59
+    NUM_ACCURACY_FEATURES = len(list(SignalSource))
+    TOTAL_DIMENSIONS = len(list(SignalSource)) + 21 * 3 + 2 + len(list(SignalSource))  # base + pairwise*3 + regime + accuracy
     
     def __init__(self, vix_normalization_factor: float = 30.0):
         """
@@ -141,7 +133,7 @@ class StackingFeatureEngine:
         historical_accuracy: Dict[SignalSource, HistoricalAccuracy]
     ) -> FeatureVector:
         """
-        Generate complete 59-dimensional feature vector.
+        Generate complete 79-dimensional feature vector.
 
         Args:
             signals: Dictionary of Signal objects keyed by SignalSource
@@ -149,10 +141,10 @@ class StackingFeatureEngine:
             historical_accuracy: Dictionary of HistoricalAccuracy by SignalSource
 
         Returns:
-            FeatureVector with all 59 features computed
+            FeatureVector with all 79 features computed
 
         Raises:
-            ValueError: If not all 6 signal sources are provided
+            ValueError: If not all signal sources are provided
         """
         # Validate input
         if len(signals) != self.NUM_BASE_SIGNALS:
@@ -210,15 +202,15 @@ class StackingFeatureEngine:
         Convert FeatureVector to numpy array for XGBoost inference.
         
         Returns:
-            numpy array of shape (59,) with all features concatenated
-            Order: base (6) + multiplicative (15) + disagreement (15) +
-                   averages (15) + regime (2) + accuracy (6)
+            numpy array of shape (79,) with all features concatenated
+            Order: base (7) + multiplicative (21) + disagreement (21) +
+                   averages (21) + regime (2) + accuracy (7)
         """
         features = []
-        
+
         # Base signals in fixed order
         for source in SignalSource:
-            features.append(feature_vector.base_values[source])
+            features.append(feature_vector.base_values.get(source, 0.0))
         
         # Pairwise features in fixed order (sorted by source enum value)
         pairs = sorted(feature_vector.multiplicative.keys(), 
@@ -239,7 +231,7 @@ class StackingFeatureEngine:
         
         # Historical accuracy in fixed order
         for source in SignalSource:
-            features.append(feature_vector.accuracy_values[source])
+            features.append(feature_vector.accuracy_values.get(source, 0.0))
         
         return np.array(features, dtype=np.float32)
     
@@ -514,6 +506,12 @@ def demo():
             value=0.40,
             timestamp=datetime.now(),
             confidence=0.75
+        ),
+        SignalSource.MULTI_TIMEFRAME_FUSION: Signal(
+            source=SignalSource.MULTI_TIMEFRAME_FUSION,
+            value=0.25,
+            timestamp=datetime.now(),
+            confidence=0.60
         ),
     }
 

@@ -44,7 +44,7 @@ def tracker():
 
 @pytest.fixture
 def full_signals():
-    """Complete set of 6 signals for testing."""
+    """Complete set of 7 signals for testing."""
     now = datetime.now()
     return {
         SignalSource.MULTI_SPEED_MOM: Signal(SignalSource.MULTI_SPEED_MOM, 0.7, now, 0.85),
@@ -53,6 +53,7 @@ def full_signals():
         SignalSource.ALTERNATIVE_DATA: Signal(SignalSource.ALTERNATIVE_DATA, 0.65, now, 0.82),
         SignalSource.CROSS_ASSET_REGIME_ARB: Signal(SignalSource.CROSS_ASSET_REGIME_ARB, 0.31, now, 0.71),
         SignalSource.UNIFIED_OVERLAY: Signal(SignalSource.UNIFIED_OVERLAY, 0.40, now, 0.75),
+        SignalSource.MULTI_TIMEFRAME_FUSION: Signal(SignalSource.MULTI_TIMEFRAME_FUSION, 0.25, now, 0.60),
     }
 
 
@@ -86,8 +87,8 @@ def historical_accuracy(tracker):
 # ---------------------------------------------------------------------------
 
 def test_signal_source_count():
-    """Test: Exactly 6 signal sources defined."""
-    assert len(SignalSource) == 6
+    """Test: Exactly 7 signal sources defined."""
+    assert len(SignalSource) == 7
 
 
 def test_signal_source_values():
@@ -106,9 +107,9 @@ def test_signal_source_values():
 
 def test_feature_engine_initialization(engine):
     """Test: Feature engine initializes correctly."""
-    assert engine.NUM_BASE_SIGNALS == 6
-    assert engine.NUM_PAIRWISE_COMBINATIONS == 15
-    assert engine.TOTAL_DIMENSIONS == 59
+    assert engine.NUM_BASE_SIGNALS == len(SignalSource)
+    assert engine.NUM_PAIRWISE_COMBINATIONS == 21
+    assert engine.TOTAL_DIMENSIONS == 79
     assert engine.vix_normalization_factor == 30.0
 
 
@@ -121,7 +122,7 @@ def test_create_features_requires_all_signals(engine, regime_context, historical
     with pytest.raises(ValueError) as exc_info:
         engine.create_features(partial_signals, regime_context, historical_accuracy)
 
-    assert "Expected 6 signals, got 1" in str(exc_info.value)
+    assert "Expected 7 signals, got 1" in str(exc_info.value)
 
 
 def test_create_features_success(engine, full_signals, regime_context, historical_accuracy):
@@ -129,11 +130,11 @@ def test_create_features_success(engine, full_signals, regime_context, historica
     fv = engine.create_features(full_signals, regime_context, historical_accuracy)
 
     assert isinstance(fv, FeatureVector)
-    assert fv.dimension_count == 59
-    assert len(fv.base_values) == 6
-    assert len(fv.multiplicative) == 15
-    assert len(fv.disagreement) == 15
-    assert len(fv.averages) == 15
+    assert fv.dimension_count == 79
+    assert len(fv.base_values) == 7
+    assert len(fv.multiplicative) == 21
+    assert len(fv.disagreement) == 21
+    assert len(fv.averages) == 21
     assert fv.vix_normalized == 20.0 / 30.0  # Normalized
     assert fv.trend_strength == 0.5
 
@@ -181,7 +182,7 @@ def test_to_numpy_shape(engine, full_signals, regime_context, historical_accurac
     arr = engine.to_numpy(fv)
 
     assert isinstance(arr, np.ndarray)
-    assert arr.shape == (59,)
+    assert arr.shape == (79,)
     assert arr.dtype == np.float32
 
 
@@ -198,7 +199,7 @@ def test_to_numpy_order(engine, full_signals, regime_context, historical_accurac
 def test_get_feature_names_count(engine):
     """Test: Feature names list has 59 entries."""
     names = engine.get_feature_names()
-    assert len(names) == 59
+    assert len(names) == 79
     assert all(isinstance(n, str) for n in names)
 
 
@@ -211,7 +212,7 @@ def test_to_dict_serializable(engine, full_signals, regime_context, historical_a
     assert "base_values" in d
     assert "multiplicative" in d
     assert "timestamp" in d
-    assert d["dimension_count"] == 59
+    assert d["dimension_count"] == 79
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +305,7 @@ def test_explain_features(engine, full_signals, regime_context, historical_accur
 
     # Check bullish/bearish/neutral counts
     summary = explanation["base_signals_summary"]
-    assert summary["bullish_count"] + summary["bearish_count"] + summary["neutral_count"] == 6
+    assert summary["bullish_count"] + summary["bearish_count"] + summary["neutral_count"] == 7
 
 
 # ---------------------------------------------------------------------------
@@ -377,13 +378,13 @@ class TestPairwiseCombinations:
     def test_correct_pair_count(self, engine):
         """C(6,2) = 15 pairwise combinations."""
         pairs = engine._get_pairwise_combinations(list(SignalSource))
-        assert len(pairs) == 15
+        assert len(pairs) == 21
 
     def test_pairs_are_unique(self, engine):
         """No duplicate pairs."""
         pairs = engine._get_pairwise_combinations(list(SignalSource))
         pair_set = set(pairs)
-        assert len(pair_set) == 15
+        assert len(pair_set) == 21
 
     def test_pair_ordering_consistent(self, engine):
         """Pairs should be in consistent (sorted) order."""
@@ -439,9 +440,9 @@ class TestFeatureNames:
         mult_names = [n for n in names if n.startswith("mult_")]
         disagree_names = [n for n in names if n.startswith("disagree_")]
         avg_names = [n for n in names if n.startswith("avg_")]
-        assert len(mult_names) == 15
-        assert len(disagree_names) == 15
-        assert len(avg_names) == 15
+        assert len(mult_names) == 21
+        assert len(disagree_names) == 21
+        assert len(avg_names) == 21
 
     def test_regime_feature_names(self, engine):
         """Regime features should be named vix_normalized and trend_strength."""
@@ -468,7 +469,7 @@ class TestFeatureExplanation:
         }
         fv = engine.create_features(bearish_signals, regime_context, historical_accuracy)
         explanation = engine.explain_features(fv)
-        assert explanation["base_signals_summary"]["bearish_count"] == 6
+        assert explanation["base_signals_summary"]["bearish_count"] == 7
         assert explanation["base_signals_summary"]["bullish_count"] == 0
 
     def test_explain_volatility_regime(self, engine, full_signals, historical_accuracy):
@@ -547,14 +548,14 @@ class TestToDictExtended:
         fv = engine.create_features(full_signals, regime_context, historical_accuracy)
         d = engine.to_dict(fv)
         assert "disagreement" in d
-        assert len(d["disagreement"]) == 15
+        assert len(d["disagreement"]) == 21
 
     def test_to_dict_averages_present(self, engine, full_signals, regime_context, historical_accuracy):
         """Average features should be in serialized dict."""
         fv = engine.create_features(full_signals, regime_context, historical_accuracy)
         d = engine.to_dict(fv)
         assert "averages" in d
-        assert len(d["averages"]) == 15
+        assert len(d["averages"]) == 21
 
 
 class TestStackingAccuracyTrackerExtended:
@@ -591,7 +592,7 @@ class TestStackingAccuracyTrackerExtended:
         """get_all_accuracies should return entry for each source."""
         now = datetime.now()
         accs = tracker.get_all_accuracies(now)
-        assert len(accs) == 6
+        assert len(accs) == len(SignalSource)
         for source in SignalSource:
             assert source in accs
 
@@ -722,7 +723,7 @@ class TestFeatureVectorDirectConstruction:
             averages={}, vix_normalized=0.0, trend_strength=0.0,
             accuracy_values={}, timestamp=datetime.now()
         )
-        assert fv.dimension_count == 59
+        assert fv.dimension_count == 79
 
     def test_empty_structures_acceptable(self):
         """Empty dicts accepted in FeatureVector fields."""
@@ -867,22 +868,22 @@ class TestFeatureNamesEdgeCases:
         assert len(names) == len(set(names))
 
     def test_feature_names_first_are_base(self, engine):
-        """First 6 names are base signals."""
+        """First N names are base signals."""
         names = engine.get_feature_names()
         for i, source in enumerate(SignalSource):
             assert names[i] == f"base_{source.value}"
 
     def test_feature_names_last_are_accuracy(self, engine):
-        """Last 6 names are accuracy features."""
+        """Last N names are accuracy features."""
         names = engine.get_feature_names()
         for i, source in enumerate(SignalSource):
-            assert names[-6 + i] == f"acc90d_{source.value}"
+            assert names[-len(SignalSource) + i] == f"acc90d_{source.value}"
 
-    def test_feature_names_vix_and_trend_at_51_52(self, engine):
-        """VIX at index 51, trend at index 52."""
+    def test_feature_names_vix_and_trend_position(self, engine):
+        """VIX and trend at base+N*3+pairwise index."""
         names = engine.get_feature_names()
-        assert names[51] == "vix_normalized"
-        assert names[52] == "trend_strength"
+        assert names[len(SignalSource) + engine.NUM_PAIRWISE_COMBINATIONS * 3] == "vix_normalized"
+        assert names[len(SignalSource) + engine.NUM_PAIRWISE_COMBINATIONS * 3 + 1] == "trend_strength"
 
     def test_feature_names_section_order(self, engine):
         """Sections appear in correct order: base, mult, disagree, avg, regime, acc."""
@@ -914,7 +915,7 @@ class TestExplainFeaturesEdgeCases:
         neutral = {s: Signal(s, 0.0, now, 0.5) for s in SignalSource}
         fv = engine.create_features(neutral, regime_context, historical_accuracy)
         explanation = engine.explain_features(fv)
-        assert explanation["base_signals_summary"]["neutral_count"] == 6
+        assert explanation["base_signals_summary"]["neutral_count"] == 7
         assert explanation["base_signals_summary"]["bullish_count"] == 0
         assert explanation["base_signals_summary"]["bearish_count"] == 0
 
@@ -922,7 +923,7 @@ class TestExplainFeaturesEdgeCases:
         """top_n > 15 caps at 15 pairs (does not error)."""
         fv = engine.create_features(full_signals, regime_context, historical_accuracy)
         explanation = engine.explain_features(fv, top_n=100)
-        assert len(explanation["pairwise_interactions"]["high_synergy"]) == 15
+        assert len(explanation["pairwise_interactions"]["high_synergy"]) == 21
 
     def test_explain_top_n_zero(self, engine, full_signals, regime_context, historical_accuracy):
         """top_n=0 returns empty lists."""
@@ -963,7 +964,7 @@ class TestToDictEdgeCases:
         """dimension_count present in dict output."""
         fv = engine.create_features(full_signals, regime_context, historical_accuracy)
         d = engine.to_dict(fv)
-        assert d["dimension_count"] == 59
+        assert d["dimension_count"] == 79
 
 
 # ==============================================================================
@@ -1032,7 +1033,7 @@ class TestIntegration:
         arr = engine.to_numpy(fv)
         names = engine.get_feature_names()
         explanation = engine.explain_features(fv)
-        base_mean = np.mean(arr[0:6])
+        base_mean = np.mean(arr[0:len(SignalSource)])
         assert base_mean == pytest.approx(explanation["base_signals_summary"]["mean"])
 
     def test_tracker_pipeline(self):
@@ -1059,7 +1060,7 @@ class TestCLI:
         from src.signals.stacking_feature_engine import FeatureVector
         assert isinstance(fv, FeatureVector)
         assert isinstance(arr, np.ndarray)
-        assert arr.shape == (59,)
+        assert arr.shape == (79,)
 
     def test_main_names_flag(self, caplog):
         """main(['--names']) logs 59 feature names."""
@@ -1068,7 +1069,7 @@ class TestCLI:
         from src.signals.stacking_feature_engine import main
         main(["--names"])
         lines = caplog.text.strip().split("\n")
-        assert len(lines) == 59
+        assert len(lines) == 79
         assert "base_multi_speed_momentum" in caplog.text
         assert "acc90d_unified_overlay" in caplog.text
 
@@ -1079,7 +1080,7 @@ class TestCLI:
         from src.signals.stacking_feature_engine import main
         main(["--test"])
         assert "Feature vector created" in caplog.text
-        assert "Shape: (59," in caplog.text
+        assert "Shape: (79," in caplog.text
 
     def test_main_no_args_prints_help(self, capsys):
         """main([]) prints help to stdout."""

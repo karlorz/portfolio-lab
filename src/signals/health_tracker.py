@@ -33,14 +33,7 @@ logger = logging.getLogger(__name__)
 DB_PATH = MARKET_DB
 STATE_PATH = DATA_DIR / ".signal_health_state.json"
 
-class SignalSource(Enum):
-    """Signal sources tracked for health monitoring."""
-    MULTI_SPEED_MOM = "multi_speed_momentum"
-    CROSS_ASSET_RV = "cross_asset_rv"
-    INTERNATIONAL_MOMENTUM = "international_momentum"
-    ALTERNATIVE_DATA = "alternative_data"
-    CROSS_ASSET_REGIME_ARB = "cross_asset_regime_arb"
-    UNIFIED_OVERLAY = "unified_overlay"
+from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
 
 class SignalHealthStatus(Enum):
     """Health status classification."""
