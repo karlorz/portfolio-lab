@@ -86,12 +86,12 @@ class FeatureVector:
 
     # Metadata
     timestamp: datetime
-    dimension_count: int = 79
+    dimension_count: int = 0  # set dynamically by create_features
 
 
 class StackingFeatureEngine:
     """
-    Generate 79-dimensional feature vectors for XGBoost meta-learner.
+    Generate feature vectors for XGBoost meta-learner.
 
     Features:
     - Base signal values (7)
@@ -105,10 +105,10 @@ class StackingFeatureEngine:
     """
 
     NUM_BASE_SIGNALS = len(list(SignalSource))
-    NUM_PAIRWISE_COMBINATIONS = 21  # C(7,2) = 21
+    NUM_PAIRWISE_COMBINATIONS = NUM_BASE_SIGNALS * (NUM_BASE_SIGNALS - 1) // 2  # C(n,2)
     NUM_REGIME_FEATURES = 2
     NUM_ACCURACY_FEATURES = len(list(SignalSource))
-    TOTAL_DIMENSIONS = len(list(SignalSource)) + 21 * 3 + 2 + len(list(SignalSource))  # base + pairwise*3 + regime + accuracy
+    TOTAL_DIMENSIONS = NUM_BASE_SIGNALS + NUM_PAIRWISE_COMBINATIONS * 3 + 2 + NUM_ACCURACY_FEATURES  # base + pairwise*3 + regime + accuracy
     
     def __init__(self, vix_normalization_factor: float = 30.0):
         """
@@ -194,7 +194,8 @@ class StackingFeatureEngine:
             vix_normalized=vix_normalized,
             trend_strength=trend_strength,
             accuracy_values=accuracy_values,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            dimension_count=self.TOTAL_DIMENSIONS,
         )
     
     def to_numpy(self, feature_vector: FeatureVector) -> np.ndarray:
@@ -512,6 +513,12 @@ def demo():
             value=0.25,
             timestamp=datetime.now(),
             confidence=0.60
+        ),
+        SignalSource.GOOGLE_TRENDS: Signal(
+            source=SignalSource.GOOGLE_TRENDS,
+            value=-0.30,
+            timestamp=datetime.now(),
+            confidence=0.55
         ),
     }
 

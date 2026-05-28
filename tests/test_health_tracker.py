@@ -33,7 +33,7 @@ class TestSignalSource:
         assert "unified_overlay" in sources
 
     def test_count(self):
-        assert len(SignalSource) == 7  # canonical enum includes MULTI_TIMEFRAME_FUSION
+        assert len(SignalSource) == 8  # canonical enum includes MULTI_TIMEFRAME_FUSION + GOOGLE_TRENDS
 
 
 # ---------------------------------------------------------------------------
