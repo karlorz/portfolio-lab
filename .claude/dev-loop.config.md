@@ -1,6 +1,6 @@
 ---
 name: Dev loop project config — portfolio-lab
-description: Drives the dev-loop skill for the portfolio-lab repo. PRD via superpowers, knowledge via skillwiki vault at ~/wiki, no publish/deploy (private research project).
+description: Drives the dev-loop skill for the portfolio-lab repo. PRD via TDD (test-first), knowledge via skillwiki vault at ~/wiki, no publish/deploy (private research project).
 type: config
 ---
 
@@ -20,42 +20,35 @@ release_branch: main
 
 ## PRD layer
 
-Full superpowers pipeline (brainstorm → spec → plan → execute → review).
-The project already follows this rhythm: each `v2.xx` feature gets a
-spec.md + plan.md under `projects/portfolio-lab/work/YYYY-MM-DD-<slug>/`
-in the vault, then implementation lands in `src/`. Keep it.
+TDD-first pipeline: plan (test design) → execute (red→green→refactor) → review → merge.
+The plan step IS the test suite — write failing tests first, then implement to pass.
+No brainstorm/spec steps; the test suite defines the requirements.
 
 ```yaml
-prd_layer: superpowers
-prd_pipeline: full
+prd_layer: tdd
+prd_pipeline: tdd-first
 ```
 
 ### PRD backends registry
 
 ```yaml
 prd_backends:
-  superpowers:
-    capabilities: [brainstorm, spec, plan, execute, review, subagent_dispatch]
+  tdd:
+    capabilities: [plan, execute, review]
     skills:
-      brainstorm: superpowers:brainstorming
       plan: superpowers:writing-plans
-      execute: superpowers:subagent-driven-development
-      execute_fallback: superpowers:executing-plans
+      execute: superpowers:test-driven-development
       review: simplify
 ```
 
 ### Cross-cutting disciplines
 
-TDD is advisory rather than mandatory — backtest scripts and analysis
-notebooks are not all test-first candidates, but new agents / signal
-modules / risk code benefit from it. Systematic debugging fires
-reactively on EXECUTE failures.
+TDD is the pipeline itself (not a cross-cutting discipline). Systematic
+debugging fires reactively on EXECUTE failures. Verification is mandatory
+before completion.
 
 ```yaml
 prd_disciplines:
-  - skill: superpowers:test-driven-development
-    when: execute
-    mode: advisory
   - skill: superpowers:systematic-debugging
     when: failure
     mode: reactive
@@ -106,8 +99,9 @@ cli_entry_override:
 - `src/crypto/`, `src/options/`, `src/broker/`, `src/trading/` — asset
   class specific + broker abstraction + live trading prep
 
-Python tests live in `tests/` (currently `test_sentiment_client.py`).
-TypeScript has no formal test harness yet — vite/vitest is not wired.
+Python tests: 157 test files, 12,429 safe tests (ML disabled, 3GB cap).
+TypeScript tests: 14 test files, 191 tests (`bun test tests/ts/`).
+Total: 13,248 tests safe. Run via `make test` (ML disabled) or `make test-ml`.
 
 ## E2E
 
@@ -158,7 +152,7 @@ defines key terms: overlay, ensemble voting, regime detection, MARL agents,
 VIX regime, VPIN, drift-based rebalancing, etc.
 
 Agents dispatched by dev-loop should load CONTEXT.md as a reference before
-writing specs or implementation code. Keep it updated as new concepts land.
+writing tests or implementation code. Keep it updated as new concepts land.
 
 ```yaml
 glossary:
@@ -217,9 +211,9 @@ critical_paths:
 
 ## Fact-check tier
 
-No web search MCP detected. Fact-checking limited to local repo, context7
-library docs, and vault queries. Specs/plans cite sources when consulting
-external docs.
+Full fact-checking enabled. Source order: local repo, context7 library docs,
+vault queries, then web search (WebSearch/WebFetch built-in tools). Specs and
+plans cite sources when consulting external docs.
 
 ```yaml
 fact_check:
@@ -228,6 +222,9 @@ fact_check:
     - local_repo
     - context7
     - vault
+    - web
+  web_tools:
+    primary: WebSearch
   evidence_contract:
     require_sources_used_section: true
   triggers:
@@ -274,8 +271,7 @@ browser_verification:
 ## Reactive debugging
 
 Cap retries at 2, capture evidence on failure, escalate after 3 consecutive
-idle cycles with the same error signature. No fact_check_tool (no web MCP
-available).
+idle cycles with the same error signature.
 
 ```yaml
 reactive_debugging:
@@ -292,8 +288,8 @@ reactive_debugging:
 
 ## Code review
 
-simplify-worker (sonnet) is the base reviewer. Codex is installed and ready
-but disabled by default — opt-in per intensity.
+simplify-worker (sonnet) is the base reviewer. Codex is installed but
+disabled by default — opt-in per intensity.
 
 ```yaml
 code_review:
@@ -315,6 +311,15 @@ notes:
     bun run fetch-data refreshes public/data/prices.json from Yahoo
     Finance v8. App + backtests load from prices.json — never re-fetch
     in-loop without explicit need.
+  tdd_conventions: |
+    - TDD is mandatory: write failing test first, watch it fail, implement minimal code, refactor
+    - Python: pytest with --import-mode=importlib, tests/ directory
+    - TypeScript: bun test tests/ts/
+    - ML-gated: always PORTFOLIO_LAB_ENABLE_ML=0 unless user explicitly requests ML
+    - Test run: make test (safe, 3GB cap) or make test-ml (full suite)
+    - New signal modules: test signal generation, snapshot format, regime gating
+    - New strategy modules: test weight computation, edge cases, integration with ensemble voter
+    - Backtest scripts: test metric computation, data loading, not necessarily TDD for parameter sweeps
   conventions: |
     - Work item slugs follow vXX-<feature> pattern (e.g., v292-etf-premium-monitor)
     - Compound pages in vault track every implemented strategy with
@@ -333,10 +338,14 @@ notes:
     - Concurrent writes on src/llm/sentiment_client.py have been a
       problem before (see vault observation #307) — coordinate when
       dispatching parallel agents into that file.
-    - ensemble_voter.py was specced but never implemented as of
-      May 2026 (vault obs #301) — verify before referencing it.
+    - ensemble_voter.py IS implemented (v2.58) — the earlier vault obs #301
+      is stale. The 8-layer weight pipeline is production code.
     - Backtest data covers 2005-01-03 to 2026-05-08 (5371 trading days,
       15 symbols). Do not assume newer data without re-fetching.
+    - pytest importlib mode (--import-mode=importlib via pyproject.toml addopts)
+      eliminates sys.modules pollution — keep it.
+    - 4-layer ML safety defense: collect_ignore, env var, import hook, leak check.
+      Never bypass without explicit user request.
 ```
 
 ## Gitignore
