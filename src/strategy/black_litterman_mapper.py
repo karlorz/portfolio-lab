@@ -91,6 +91,55 @@ class BLResult:
     extras: Dict[str, Any] = field(default_factory=dict)
 
 
+# ── HRP Fallback ────────────────────────────────────────────────────────
+
+def _run_hrp_fallback(
+    cov_matrix: np.ndarray,
+    symbols: List[str],
+    returns: Optional[pd.DataFrame] = None,
+) -> Dict[str, float]:
+    """Run Hierarchical Risk Parity as fallback when BL EF optimization fails.
+
+    HRP clusters assets by correlation structure and allocates inversely
+    proportional to cluster variance. No expected-return input needed —
+    purely covariance-driven, making it robust when BL views produce
+    degenerate returns.
+
+    Args:
+        cov_matrix: NxN covariance matrix.
+        symbols: Asset symbol labels.
+        returns: Optional returns DataFrame for HRP clustering. If None,
+            synthetic returns are generated from the covariance matrix
+            with a deterministic seed.
+
+    Returns:
+        Dict of {symbol: weight}. Empty dict on failure.
+    """
+    try:
+        from pypfopt import HRPOpt
+        import pandas as pd
+
+        if returns is None:
+            # Generate deterministic synthetic returns from covariance
+            cov_df = pd.DataFrame(cov_matrix, index=symbols, columns=symbols)
+            # Seed from covariance hash for reproducibility
+            seed = int(abs(np.sum(cov_matrix)) * 1e6) % (2**31)
+            rng = np.random.RandomState(seed)
+            returns = pd.DataFrame(
+                rng.multivariate_normal(np.zeros(len(symbols)), cov_df, size=252),
+                columns=symbols,
+            )
+
+        hrp = HRPOpt(returns)
+        hrp.optimize()
+        cleaned = hrp.clean_weights()
+        weights = {k: round(v, 4) for k, v in cleaned.items() if v > 0.001}
+        return weights
+    except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError, OverflowError) as e:
+        logger.warning("HRP fallback failed: %s", e)
+        return {}
+
+
 # ── View Mapping ───────────────────────────────────────────────────────
 
 def map_biases_to_views(
@@ -231,7 +280,9 @@ def run_black_litterman(
     # Posterior covariance
     posterior_cov = bl.bl_cov()
 
-    # Optimize via EfficientFrontier
+    # Optimize via EfficientFrontier with cascade fallback:
+    # BL max_sharpe → HRP → Equal Weight
+    optimization_method = "bl_max_sharpe"
     ef = EfficientFrontier(posterior_rets, posterior_cov)
     try:
         raw_weights = ef.max_sharpe(risk_free_rate=risk_free_rate)
@@ -239,10 +290,21 @@ def run_black_litterman(
         perf = ef.portfolio_performance(risk_free_rate=risk_free_rate)
     except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
         logger.warning("BL EfficientFrontier.max_sharpe failed: %s", e)
-        # Fallback: BL weights from posterior (no EF optimization)
-        raw_weights = bl.bl_weights()
-        cleaned = {s: round(w, 4) for s, w in raw_weights.items()}
-        perf = (None, None, None)
+
+        # Fallback 1: HRP — covariance-driven, no return estimates needed
+        hrp_weights = _run_hrp_fallback(cov_matrix, symbols)
+        if hrp_weights:
+            cleaned = hrp_weights
+            perf = (None, None, None)
+            optimization_method = "bl_hrp"
+            logger.info("BL cascade: using HRP fallback (%d assets)", len(hrp_weights))
+        else:
+            # Fallback 2: Equal weight — last resort
+            n = len(symbols)
+            cleaned = {s: round(1.0 / n, 4) for s in symbols}
+            perf = (None, None, None)
+            optimization_method = "bl_equal_weight"
+            logger.warning("BL cascade: HRP failed, using equal-weight fallback")
 
     # Build result
     if isinstance(posterior_rets, pd.Series):
@@ -260,6 +322,7 @@ def run_black_litterman(
         expected_sharpe=round(perf[2], 4) if perf[2] is not None else None,
         expected_cagr=round(perf[0] * 100, 2) if perf[0] is not None else None,
         expected_volatility=round(perf[1] * 100, 2) if perf[1] is not None else None,
+        extras={"optimization_method": optimization_method},
     )
 
 

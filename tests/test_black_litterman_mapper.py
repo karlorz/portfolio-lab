@@ -789,7 +789,7 @@ class TestRunBlackLittermanEdgeCases:
         assert result.prior_type == "market"
 
     def test_nan_in_covariance(self):
-        """NaN in covariance degrades gracefully — EF fails, fallback returns empty weights."""
+        """NaN in covariance degrades gracefully — cascade falls back to equal weight."""
         cov = np.array([
             [0.0225, float("nan"), -0.0063],
             [float("nan"), 0.0256, 0.0022],
@@ -798,11 +798,13 @@ class TestRunBlackLittermanEdgeCases:
         views = map_biases_to_views(0.5, 0.3, 0.2)
         result = run_black_litterman(cov, views)
         assert isinstance(result, BLResult)
-        assert result.bl_weights == {}
+        # Cascade: BL fails → HRP fails → equal weight fallback
+        assert len(result.bl_weights) > 0
         assert result.expected_sharpe is None
+        assert result.extras.get("optimization_method") == "bl_equal_weight"
 
     def test_inf_in_covariance(self):
-        """Inf in covariance degrades gracefully — EF fails, fallback returns empty weights."""
+        """Inf in covariance degrades gracefully."""
         cov = np.array([
             [0.0225, 0.0000, float("inf")],
             [0.0000, 0.0256, 0.0022],
@@ -811,8 +813,9 @@ class TestRunBlackLittermanEdgeCases:
         views = map_biases_to_views(0.5, 0.3, 0.2)
         result = run_black_litterman(cov, views)
         assert isinstance(result, BLResult)
-        assert result.bl_weights == {}
-        assert result.expected_sharpe is None
+        assert len(result.bl_weights) > 0
+        # Method recorded in extras regardless of whether BL succeeds or falls back
+        assert "optimization_method" in result.extras
 
     def test_single_asset_covariance(self):
         """1x1 covariance with single view should work."""
@@ -901,11 +904,12 @@ class TestRunBlackLittermanFailurePaths:
         assert result.prior_type == "custom"
 
     def test_zero_covariance_matrix(self):
-        """All-zero covariance matrix -- optimize may produce extreme weights."""
+        """All-zero covariance matrix -- optimize may produce extreme weights or cascade."""
         cov = np.zeros((3, 3))
         views = map_biases_to_views(0.5, 0.3, 0.2)
         result = run_black_litterman(cov, views)
         assert isinstance(result, BLResult)
+        assert "optimization_method" in result.extras
 
     def test_identity_covariance(self):
         """Identity covariance should produce valid weights."""

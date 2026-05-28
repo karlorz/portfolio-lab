@@ -54,6 +54,34 @@ DB_PATH = MARKET_DB
 ORDERS_LOG = DATA_DIR / "orders.jsonl"
 PERFORMANCE_LOG = DATA_DIR / "performance.jsonl"
 
+# Max entries retained in performance log (~80 trading days at ~62/day).
+# Well above the 63-day graduation window (2× headroom).
+_MAX_PERFORMANCE_ENTRIES = int(os.getenv("MAX_PERFORMANCE_ENTRIES", "5000"))
+
+
+def _prune_performance_log() -> None:
+    """Truncate performance.jsonl to the most recent max entries.
+
+    Runs after each append during paper evaluation. Keeps the log from growing
+    unbounded (was 1128 entries for 18 trading dates). File I/O is cheap enough
+    for a periodic windowed-prune on a small JSONL file.
+    """
+    try:
+        logfile = Path(PERFORMANCE_LOG)
+        if not logfile.exists():
+            return
+        with open(logfile) as f:
+            lines = f.readlines()
+        if len(lines) <= _MAX_PERFORMANCE_ENTRIES:
+            return
+        trimmed = len(lines) - _MAX_PERFORMANCE_ENTRIES
+        with open(logfile, 'w') as f:
+            f.writelines(lines[-_MAX_PERFORMANCE_ENTRIES:])
+        logger.info("Pruned %d entries from performance log (retained %d)", trimmed, _MAX_PERFORMANCE_ENTRIES)
+    except (OSError, IOError) as e:
+        logger.warning("Failed to prune performance log: %s", e)
+
+
 # Paper trading config (defaults — override via env vars)
 PAPER_CONFIG = {
     "initial_capital": int(os.environ.get("PAPER_INITIAL_CAPITAL", "100000")),
@@ -631,6 +659,8 @@ def main():
     # Log performance
     with open(PERFORMANCE_LOG, 'a') as f:
         f.write(json.dumps(perf) + '\n')
+
+    _prune_performance_log()
     
     # Check graduation criteria (paper mode only)
     if mode == "paper":
