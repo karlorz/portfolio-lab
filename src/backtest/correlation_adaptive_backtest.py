@@ -368,19 +368,19 @@ def main():
         save=args.save,
     )
 
-    print(f"\n{'='*60}")
-    print("CORRELATION-ADAPTIVE ALLOCATION BACKTEST")
-    print(f"{'='*60}")
-    print(f"  Static Sharpe:     {result.static_sharpe:.4f}")
-    print(f"  Adaptive Sharpe:   {result.adaptive_sharpe:.4f}")
-    print(f"  Delta:             {result.sharpe_delta:+.4f}")
-    print(f"  Static Max DD:     {result.static_max_dd:.4f}")
-    print(f"  Adaptive Max DD:   {result.adaptive_max_dd:.4f}")
-    print(f"  IEF Shift Freq:    {result.ief_shift_frequency:.1%}")
-    print(f"  Regime Dist:       {result.correlation_regime_distribution}")
-    print(f"  Mean Weights:      {result.adaptive_weights_mean}")
-    print(f"\n  {result.summary}")
-    print(f"{'='*60}")
+    logger.info("\n%s", "=" * 60)
+    logger.info("CORRELATION-ADAPTIVE ALLOCATION BACKTEST")
+    logger.info("%s", "=" * 60)
+    logger.info("  Static Sharpe:     %.4f", result.static_sharpe)
+    logger.info("  Adaptive Sharpe:   %.4f", result.adaptive_sharpe)
+    logger.info("  Delta:             %+.4f", result.sharpe_delta)
+    logger.info("  Static Max DD:     %.4f", result.static_max_dd)
+    logger.info("  Adaptive Max DD:   %.4f", result.adaptive_max_dd)
+    logger.info("  IEF Shift Freq:    %.1f%%", result.ief_shift_frequency * 100)
+    logger.info("  Regime Dist:       %s", result.correlation_regime_distribution)
+    logger.info("  Mean Weights:      %s", result.adaptive_weights_mean)
+    logger.info("\n  %s", result.summary)
+    logger.info("%s", "=" * 60)
 
 
 if __name__ == "__main__":
