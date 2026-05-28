@@ -116,6 +116,7 @@
 |- **Walk-forward validation (20 windows): WFE=1.02, mean OOS Sharpe=0.99** — champion portfolio validated out-of-sample
 |- **Black-Litterman mapper**: maps ensemble biases → BL views with Idzorek confidence from health_scores, tau=0.15
 |- **BL→HRP→EW fallback cascade**: 3-level optimizer fallback — BL max_sharpe → pypfopt.HRPOpt → equal weight; optimization_method recorded in BLResult.extras; 13 cascade tests
+|- **BL transaction cost adjustment**: subtracts annualized round-trip costs from BL posterior returns (transaction_costs=True default); regime-aware via etf_cost_table multipliers; SPY 4bps, GLD 10bps, TLT 16bps annual penalty; 8 tests
 |- **Performance.jsonl windowed pruning**: _prune_performance_log() truncates to 5000 entries after each append (env MAX_PERFORMANCE_ENTRIES) — prevents unbounded log growth during paper trading
 |- **Deflated Sharpe Ratio**: DSR=0.979 with 94 grid search configs — champion survives multiple-testing correction
 
