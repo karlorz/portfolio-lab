@@ -56,7 +56,7 @@ from src.utils import safe_get
 from src.utils.computation_cache import get_realized_volatility
 
 
-__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'BanditWeighter', 'EnsembleVoter', 'compute_signal_correlation_matrix']
+__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'REGIME_CONSENSUS_THRESHOLDS', 'BanditWeighter', 'EnsembleVoter', 'compute_signal_correlation_matrix']
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,18 @@ logger = logging.getLogger(__name__)
 # Starts 100% static, shifts to (1-BANDIT_MAX_BLEND)/BANDIT_MAX_BLEND after warmup
 BANDIT_MAX_BLEND: float = float(os.environ.get("ENSEMBLE_BANDIT_MAX_BLEND", "0.7"))
 BANDIT_WARMUP_DAYS: int = int(os.environ.get("ENSEMBLE_BANDIT_WARMUP_DAYS", "252"))
+
+# Regime-conditional consensus thresholds
+# CRISIS: lower threshold (act faster with fewer signals)
+# NORMAL: higher threshold (require more consensus when time permits)
+# Falls back to ENSEMBLE_CONSENSUS_THRESHOLD env var for unlisted regimes
+REGIME_CONSENSUS_THRESHOLDS: dict = {
+    "CRISIS": 0.50,
+    "HIGH_VOL": 0.55,
+    "LOW_VOL": 0.67,
+    "NORMAL": 0.75,
+    "RECOVERY": 0.60,
+}
 
 # Module-level health tracker singleton (lazy initialized)
 _health_tracker = None
@@ -1674,12 +1686,24 @@ class EnsembleVoter:
     def _determine_action(
         regime: Regime, regime_confidence: float, equity_bias: float, agreement: float
     ) -> Tuple[str, float]:
-        """Determine portfolio action from regime, equity bias, and agreement."""
+        """Determine portfolio action from regime, equity bias, and agreement.
+
+        Uses regime-conditional consensus thresholds:
+        CRISIS 0.50, HIGH_VOL 0.55, RECOVERY 0.60, LOW_VOL 0.67, NORMAL 0.75.
+        Falls back to ENSEMBLE_CONSENSUS_THRESHOLD env var for unknown regimes.
+        """
         if regime == Regime.CRISIS:
             return "risk_off", regime_confidence
-        elif equity_bias > 0.3 and agreement > ENSEMBLE_CONSENSUS_THRESHOLD:
+
+        # Regime-specific threshold (falls back to global constant)
+        threshold = REGIME_CONSENSUS_THRESHOLDS.get(
+            regime.value.upper() if hasattr(regime.value, 'upper') else str(regime.value).upper(),
+            ENSEMBLE_CONSENSUS_THRESHOLD,
+        )
+
+        if equity_bias > 0.3 and agreement > threshold:
             return "increase_equity", agreement * abs(equity_bias)
-        elif equity_bias < -0.3 and agreement > ENSEMBLE_CONSENSUS_THRESHOLD:
+        elif equity_bias < -0.3 and agreement > threshold:
             return "decrease_equity", agreement * abs(equity_bias)
         else:
             return "neutral", 0.5
