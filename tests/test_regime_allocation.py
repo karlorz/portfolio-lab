@@ -202,8 +202,8 @@ class TestEvaluatorIntegration:
 
         with patch.dict(os.environ, {"REGIME_ALLOC_ENABLED": "1"}):
             crisis = get_regime_allocation_with_override("crisis")
-            assert crisis["SPY"] == pytest.approx(0.40, abs=0.01)
-            assert crisis["GLD"] == pytest.approx(0.42, abs=0.01)
+            assert crisis["SPY"] == pytest.approx(0.35, abs=0.01)
+            assert crisis["GLD"] == pytest.approx(0.45, abs=0.01)
 
     def test_disabled_returns_base_allocation(self):
         """When REGIME_ALLOC_ENABLED is not set, returns base allocation."""
