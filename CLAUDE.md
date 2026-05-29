@@ -132,6 +132,7 @@ MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS
 |- **Online IC weighter**: src/strategy/online_ic_weighter.py (175 lines, 17 tests) — non-ML alternative to XGBoost stacking integrator. EMA of per-signal IC values with temperature-scaled softmax weight conversion. Supports blend_with_static() for hybrid mode with regime-conditional weights. Trend penalty for decaying IC signals. Configurable half-life (21d), min/max weight caps, state persistence.
 |- **BL turnover penalty**: black_litterman_mapper.py — quadratic penalty on weight deviations from current portfolio via EfficientFrontier.add_objective(). turnover_penalty lambda parameter (0=off, 0.5=moderate, 2+=heavy) + current_weights dict. Extras dict records turnover_bps for monitoring. 8 tests.
 |- **Effective signal count (N_eff)**: ensemble_voter.py — Shannon entropy-based N_eff = exp(H) added to EnsembleVote dataclass. Measures how many signals are effectively contributing (1=concentrated, 8=uniform). Reported in signals.json. 10 tests.
+|- **Adaptive consensus thresholds**: ensemble_voter.py — REGIME_CONSENSUS_THRESHOLDS dict varies action gate by regime. CRISIS 0.50 (act fast), HIGH_VOL 0.55, RECOVERY 0.60, LOW_VOL 0.67, NORMAL 0.75 (require consensus). Falls back to ENSEMBLE_CONSENSUS_THRESHOLD env var. 9 tests.
 
 ### Current Weights (NORMAL regime)
 ALT_DATA 0.2245, INTL_MOM 0.2205, CROSS_RV 0.117, REGIME_ARB 0.117, UNIFIED 0.171, MTF 0.10, GOOGLE_TRENDS 0.05
