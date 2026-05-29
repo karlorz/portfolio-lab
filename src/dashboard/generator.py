@@ -515,6 +515,8 @@ class DashboardGenerator:
                     "duration_bias": round(ensemble_result.duration_bias, 3),
                     "gold_bias": round(ensemble_result.gold_bias, 3),
                     "num_sources": ensemble_result.num_sources,
+                    "n_eff": round(getattr(ensemble_result, 'n_eff', 0), 2),
+                    "weight_entropy": round(getattr(ensemble_result, 'weight_entropy', 0), 4),
                     "source_breakdown": source_breakdown,
                 }
         except SIGNAL_EXCEPTIONS as e:

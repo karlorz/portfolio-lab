@@ -133,9 +133,13 @@ class EnsembleVote:
     action: str            # "increase_equity", "decrease_equity", "neutral", "risk_off"
     confidence: float      # 0-1
     reasoning: str
-    
+
     # Source breakdown
     source_votes: List[SignalReading]
+
+    # Diversity diagnostics
+    n_eff: float = 0.0          # Effective number of signals (exp of Shannon entropy)
+    weight_entropy: float = 0.0 # Shannon entropy of weight distribution (nats)
 
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
@@ -1749,6 +1753,16 @@ class EnsembleVoter:
         for r in weighted_signals[:3]:
             reasons.append(f"  {r.source.value}: {r.value:+.3f} (w={r.weight:.2f}, conf={r.confidence:.1%})")
 
+        # Compute effective signal count (N_eff) and Shannon entropy
+        weights_arr = np.array([r.weight for r in weighted_signals])
+        weights_arr = weights_arr[weights_arr > 0]
+        if len(weights_arr) > 0:
+            weight_entropy = float(-np.sum(weights_arr * np.log(weights_arr)))
+            n_eff = float(np.exp(weight_entropy))
+        else:
+            weight_entropy = 0.0
+            n_eff = 0.0
+
         return EnsembleVote(
             timestamp=str(datetime.now()),
             regime=regime,
@@ -1762,7 +1776,9 @@ class EnsembleVoter:
             action=consensus.action,
             confidence=consensus.action_confidence,
             reasoning="\n".join(reasons),
-            source_votes=weighted_signals
+            source_votes=weighted_signals,
+            n_eff=round(n_eff, 2),
+            weight_entropy=round(weight_entropy, 4),
         )
 
     def _persist_vote(self, vote: EnsembleVote, weighted_consensus: float) -> None:
