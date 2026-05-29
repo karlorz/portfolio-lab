@@ -831,6 +831,29 @@ class DashboardGenerator:
                 "error": str(e),
             }
 
+        # Regime transition forecast (Oliveira et al. 2025 step 2)
+        try:
+            from src.regime.regime_transition_forecaster import RegimeTransitionForecaster
+            forecaster = RegimeTransitionForecaster()
+            # Extract regime labels from two_stage_regime signal or VIX classification
+            current = output.get("two_stage_regime", {}).get("regime", current_regime)
+            # Fit on recent regime history from regime_log
+            cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 100")
+            history = [row[0] for row in cursor.fetchall()]
+            if len(history) >= 2:
+                forecaster.fit(list(reversed(history)))
+                forecast = forecaster.forecast(current, horizon_days=5)
+                output["regime_transition"] = {
+                    "current_regime": current,
+                    "horizon_days": 5,
+                    "forecast_probs": {k: round(v, 4) for k, v in forecast.probabilities.items()},
+                    "most_likely": forecast.most_likely,
+                    "persistence_params": {k: round(v, 1) for k, v in forecast.persistence_params.items()},
+                    "timestamp": datetime.now().isoformat(),
+                }
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("regime_transition", e)
+
         # Health check report
         try:
             from src.monitor.health_check import run_health_check
@@ -1884,6 +1907,7 @@ class DashboardGenerator:
             "risk_decomposition": ("generated_at", None),
             "rebalance_health": ("generated_at", None),
             "two_stage_regime": ("timestamp", None),
+            "regime_transition": ("timestamp", None),
         }
 
         for signal_key, (ts_field, _) in timestamped_signals.items():
