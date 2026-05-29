@@ -2084,9 +2084,12 @@ class TestEnsembleVoteFieldValidation:
         assert False, "source_votes field not found"
 
     def test_no_fields_have_defaults(self):
-        """All 13 EnsembleVote fields are required — none have defaults."""
+        """All EnsembleVote fields are required except diagnostic fields."""
         import dataclasses
+        exempt = {"n_eff", "weight_entropy"}
         for f in fields(EnsembleVote):
+            if f.name in exempt:
+                continue
             assert f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING, \
                 f"{f.name} should not have a default — all required"
 
@@ -3888,15 +3891,16 @@ class TestDetermineAction:
         assert action == "neutral"
 
     def test_uses_consensus_threshold(self):
-        """Agreement just below threshold should be neutral."""
-        from src.paths import ENSEMBLE_CONSENSUS_THRESHOLD
+        """Agreement just below regime threshold should be neutral."""
+        from src.strategy.ensemble_voter import REGIME_CONSENSUS_THRESHOLDS
+        threshold = REGIME_CONSENSUS_THRESHOLDS["NORMAL"]  # 0.75
         action, _ = EnsembleVoter._determine_action(
-            Regime.NORMAL, 0.5, 0.5, ENSEMBLE_CONSENSUS_THRESHOLD - 0.01
+            Regime.NORMAL, 0.5, 0.5, threshold - 0.01
         )
         assert action == "neutral"
         # Just above threshold should trigger action
         action, _ = EnsembleVoter._determine_action(
-            Regime.NORMAL, 0.5, 0.5, ENSEMBLE_CONSENSUS_THRESHOLD + 0.01
+            Regime.NORMAL, 0.5, 0.5, threshold + 0.01
         )
         assert action == "increase_equity"
 
