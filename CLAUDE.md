@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13661 safe** (13348 Python + 313 TypeScript + 30 integration, ~36 skipped, 0 failures)
+| - Test count: **13676 safe** (13363 Python + 313 TypeScript + 30 integration, ~33 skipped, 0 failures)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
@@ -135,6 +135,7 @@ MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS
 |- **Effective signal count (N_eff)**: ensemble_voter.py — Shannon entropy-based N_eff = exp(H) added to EnsembleVote dataclass. Measures how many signals are effectively contributing (1=concentrated, 8=uniform). Reported in signals.json. 10 tests.
 |- **Adaptive consensus thresholds**: ensemble_voter.py — REGIME_CONSENSUS_THRESHOLDS dict varies action gate by regime. CRISIS 0.50 (act fast), HIGH_VOL 0.55, RECOVERY 0.60, LOW_VOL 0.67, NORMAL 0.75 (require consensus). Falls back to ENSEMBLE_CONSENSUS_THRESHOLD env var. 9 tests.
 |- **Maximum Diversification Portfolio**: src/strategy/max_diversification.py — maximizes diversification ratio (weighted avg vol / portfolio vol) per Choueifaty (2008). scipy.optimize SLSQP, long-only constraints. compute_mdp_weights() for standalone use or BL cascade integration. 10 tests.
+|- **Ensemble diversity floor**: ensemble_voter.py — _apply_diversity_floor() ensures each active signal retains minimum weight (DEFAULT_DIVERSITY_FLOOR=5%, ENSEMBLE_DIVERSITY_FLOOR env var). Prevents weight concentration by 8-step pipeline, improves N_eff. Applied after exploration noise, before turnover validation. 12 tests.
 
 ### Current Weights (NORMAL regime)
 ALT_DATA 0.2245, INTL_MOM 0.2205, CROSS_RV 0.117, REGIME_ARB 0.117, UNIFIED 0.171, MTF 0.10, GOOGLE_TRENDS 0.05

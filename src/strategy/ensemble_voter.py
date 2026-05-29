@@ -56,7 +56,7 @@ from src.utils import safe_get
 from src.utils.computation_cache import get_realized_volatility
 
 
-__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'REGIME_CONSENSUS_THRESHOLDS', 'BanditWeighter', 'EnsembleVoter', 'compute_signal_correlation_matrix']
+__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'REGIME_CONSENSUS_THRESHOLDS', 'DEFAULT_DIVERSITY_FLOOR', 'BanditWeighter', 'EnsembleVoter', 'compute_signal_correlation_matrix']
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,12 @@ logger = logging.getLogger(__name__)
 # Starts 100% static, shifts to (1-BANDIT_MAX_BLEND)/BANDIT_MAX_BLEND after warmup
 BANDIT_MAX_BLEND: float = float(os.environ.get("ENSEMBLE_BANDIT_MAX_BLEND", "0.7"))
 BANDIT_WARMUP_DAYS: int = int(os.environ.get("ENSEMBLE_BANDIT_WARMUP_DAYS", "252"))
+
+# Diversity floor — minimum weight for each active signal to prevent
+# weight concentration. Improves N_eff (effective signal count) by ensuring
+# no signal is completely zeroed out by the weight pipeline.
+# Set to 0 to disable. Range: 0.02-0.08 recommended.
+DEFAULT_DIVERSITY_FLOOR: float = float(os.environ.get("ENSEMBLE_DIVERSITY_FLOOR", "0.05"))
 
 # Regime-conditional consensus thresholds
 # CRISIS: lower threshold (act faster with fewer signals)
@@ -1131,6 +1137,7 @@ class EnsembleVoter:
         6. _apply_regime_weights — per-regime signal weight multipliers
         7. _apply_utility_reweighting — boost/reduce by profitability (Sharpe contribution + hit rate)
         8. _apply_exploration_noise — epsilon-greedy Dirichlet exploration for weight discovery
+        8a. _apply_diversity_floor — minimum weight floor for active signals (N_eff improvement)
         9. _apply_turnover_validation — turnover + basis-pursuit + regret-weighted
        10. _compute_consensus — weighted consensus, agreement, asset biases, action
        11. _persist_vote — save vote and persist regret state
@@ -1148,6 +1155,7 @@ class EnsembleVoter:
             weights = self._apply_regime_weights(weights, regime)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
+        weights = self._apply_diversity_floor(weights)
         weights = self._apply_turnover_validation(weights, readings, regime)
 
         # Apply weights to readings
@@ -1523,6 +1531,69 @@ class EnsembleVoter:
         except (ValueError, FloatingPointError) as e:
             logger.warning("Exploration noise failed: %s", e)
             return weights
+
+    def _apply_diversity_floor(
+        self,
+        weights: Dict,
+        floor: Optional[float] = None,
+    ) -> Dict:
+        """Apply diversity floor — minimum weight for each active signal.
+
+        Prevents weight concentration by ensuring every signal that was
+        originally active (weight > 0) retains at least `floor` fraction
+        of the total weight. This raises N_eff (effective signal count)
+        without overriding the signal quality assessment.
+
+        The floor is applied as a lower bound, not an equalizer: signals
+        with higher quality still get proportionally more weight.
+
+        Args:
+            weights: Current weight dict {SignalSource: weight}.
+            floor: Minimum weight fraction per active signal. If None,
+                uses DEFAULT_DIVERSITY_FLOOR.
+
+        Returns:
+            Adjusted weights dict summing to 1.0.
+        """
+        if floor is None:
+            floor = DEFAULT_DIVERSITY_FLOOR
+        if floor <= 0:
+            return weights
+
+        # Only apply to signals that were active (weight > 0) before this step
+        active = {k: v for k, v in weights.items() if v > 0}
+        if len(active) <= 1:
+            return weights
+
+        total = sum(weights.values())
+        if total <= 0:
+            return weights
+
+        # Normalize to get fractional weights
+        frac = {k: v / total for k, v in weights.items()}
+
+        # Identify signals below the floor
+        adjusted = dict(frac)
+        raised_count = 0
+        for source in active:
+            if adjusted[source] < floor:
+                adjusted[source] = floor
+                raised_count += 1
+
+        if raised_count == 0:
+            return weights  # No adjustment needed
+
+        # Re-normalize so weights sum to 1.0
+        new_total = sum(adjusted.values())
+        if new_total > 0:
+            adjusted = {k: v / new_total for k, v in adjusted.items()}
+
+        logger.info(
+            "Diversity floor applied: raised %d/%d active signals (floor=%.1f%%)",
+            raised_count, len(active), floor * 100,
+        )
+
+        return adjusted
 
     @staticmethod
     def _extract_signal_values(readings: Dict) -> Dict[str, float]:
