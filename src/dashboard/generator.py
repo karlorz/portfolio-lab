@@ -738,6 +738,13 @@ class DashboardGenerator:
         # Merge overlay dashboard data (collar, crypto, calendar, kurtosis, etc.)
         overlay_data = self._get_overlay_data()
 
+        # Hedge selector recommendation
+        hedge_selector_signal = None
+        try:
+            hedge_selector_signal = self._get_hedge_selector_signal(vix_level, current_regime)
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("hedge_selector", e)
+
         output = {
             "generated_at": datetime.now().isoformat(),
             "regime": validate_signal("regime", regime_data),
@@ -772,6 +779,7 @@ class DashboardGenerator:
             "garch_cvar": validate_signal("garch_cvar", garch_cvar_data),
             "entropy": entropy_data,
             "bond_momentum": overlay_data.get("bond_momentum", {}),
+            "hedge_selector": validate_signal("hedge_selector", hedge_selector_signal),
         }
 
         # Rebalance health data
@@ -1854,6 +1862,39 @@ class DashboardGenerator:
                            e, DashboardGenerator._last_regime)
             return DashboardGenerator._last_regime.lower() in {"high_vol", "crisis"}
 
+    def _get_hedge_selector_signal(self, vix_level: Optional[float], regime: str) -> Optional[Dict]:
+        """Get hedge selector recommendation for dashboard."""
+        if vix_level is None:
+            return None
+        try:
+            from src.strategy.hedge_selector import HedgeSelector
+            selector = HedgeSelector()
+            # Estimate confidence based on regime stability
+            regime_confidence = 0.8 if regime in ["normal", "crisis"] else 0.6
+            rec = selector.select(
+                vix_level=vix_level,
+                regime_confidence=regime_confidence,
+                regime_label=regime
+            )
+            return {
+                "available": True,
+                "generated_at": datetime.now().isoformat(),
+                "regime": rec.regime,
+                "regime_confidence": rec.regime_confidence,
+                "primary_hedge": rec.primary_hedge,
+                "primary_size_pct": rec.primary_size_pct,
+                "secondary_hedge": rec.secondary_hedge,
+                "secondary_size_pct": rec.secondary_size_pct,
+                "cost_benefit_gate": rec.cost_benefit_gate,
+                "net_benefit_bps": rec.net_benefit_bps,
+                "kelly_fraction": rec.kelly_fraction,
+                "expected_cost_bps": rec.expected_cost_bps,
+                "expected_benefit_bps": rec.expected_benefit_bps,
+            }
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("hedge_selector", e)
+            return None
+
     # Signal staleness detection (production readiness)
     SIGNAL_STALENESS_TTL_HOURS = int(os.environ.get("SIGNAL_STALENESS_TTL_HOURS", "4"))
     STALENESS_DECAY_TAU_HOURS = float(os.environ.get("STALENESS_DECAY_TAU_HOURS", "2.0"))
@@ -1910,6 +1951,7 @@ class DashboardGenerator:
             "rebalance_health": ("generated_at", None),
             "two_stage_regime": ("timestamp", None),
             "regime_transition": ("timestamp", None),
+            "hedge_selector": ("generated_at", None),
         }
 
         for signal_key, (ts_field, _) in timestamped_signals.items():
