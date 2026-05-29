@@ -239,6 +239,67 @@ def compute_metrics(
     )
 
 
+def compute_metrics_from_returns(
+    returns: List[float],
+    risk_free_rate: Optional[float] = None,
+    trading_days_per_year: int = TRADING_DAYS_PER_YEAR,
+) -> Dict[str, float]:
+    """Compute core metrics directly from daily returns.
+
+    Lightweight alternative to compute_metrics() when you have raw
+    returns instead of an equity curve. Returns a flat dict for easy
+    integration into backtest scripts.
+
+    Args:
+        returns: List or array of daily returns (e.g., [0.01, -0.005, ...]).
+        risk_free_rate: Annual risk-free rate (default from RISK_FREE_RATE).
+        trading_days_per_year: Annualization factor (default 252).
+
+    Returns:
+        Dict with keys: total_return, cagr, volatility, sharpe, max_drawdown, calmar.
+        Values are decimals (not percentages) for direct use in calculations.
+    """
+    if risk_free_rate is None:
+        from src.paths import RISK_FREE_RATE
+        risk_free_rate = RISK_FREE_RATE / 100
+
+    returns_arr = np.array(returns, dtype=float)
+    n = len(returns_arr)
+
+    if n == 0:
+        return {
+            'total_return': 0.0, 'cagr': 0.0, 'volatility': 0.0,
+            'sharpe': 0.0, 'max_drawdown': 0.0, 'calmar': 0.0,
+        }
+
+    total_return = float(np.prod(1 + returns_arr) - 1)
+    years = n / trading_days_per_year
+    cagr = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0.0
+
+    daily_vol = float(np.std(returns_arr, ddof=1)) if n > 1 else 0.0
+    annualized_vol = daily_vol * np.sqrt(trading_days_per_year)
+
+    # Sharpe: (CAGR - Rf) / vol
+    sharpe = (cagr - risk_free_rate) / annualized_vol if annualized_vol > 0 else 0.0
+
+    # Max drawdown from cumulative returns
+    cumulative = np.cumprod(1 + returns_arr)
+    running_max = np.maximum.accumulate(cumulative)
+    drawdown = (cumulative - running_max) / running_max
+    max_dd = float(np.min(drawdown))
+
+    calmar = cagr / abs(max_dd) if max_dd != 0 else 0.0
+
+    return {
+        'total_return': round(total_return, 6),
+        'cagr': round(cagr, 6),
+        'volatility': round(annualized_vol, 6),
+        'sharpe': round(sharpe, 4),
+        'max_drawdown': round(max_dd, 6),
+        'calmar': round(calmar, 4),
+    }
+
+
 def compute_crisis_returns(
     prices: Dict[str, Dict[str, float]],
     trading_days: List[str],

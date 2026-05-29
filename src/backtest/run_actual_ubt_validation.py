@@ -12,7 +12,7 @@ from math import sqrt, pow
 import numpy as np
 
 from src.paths import HISTORICAL_JSON, DATA_DIR, RISK_FREE_RATE
-from src.backtest.metrics import save_results_json
+from src.backtest.metrics import save_results_json, compute_metrics_from_returns
 
 
 import logging
@@ -75,60 +75,36 @@ def align_series(dates1, prices1, dates2, prices2):
     return aligned_dates, aligned_p1, aligned_p2
 
 def calculate_metrics(returns, dates, scenario, base_returns=None, expected_multiple=1):
-    """Calculate backtest metrics"""
-    total_return = np.prod([1 + r for r in returns]) - 1
-    years = len(returns) / 252
-    cagr = pow(1 + total_return, 1/years) - 1 if years > 0 else 0
+    """Calculate backtest metrics using shared compute_metrics_from_returns."""
+    core = compute_metrics_from_returns(list(returns))
 
-    daily_vol = np.std(returns, ddof=1)
-    annualized_vol = daily_vol * sqrt(252)
-    
-    # Max drawdown
-    max_dd = 0
-    peak = 1
-    current = 1
-    for r in returns:
-        current *= (1 + r)
-        if current > peak:
-            peak = current
-        dd = (current - peak) / peak
-        if dd < max_dd:
-            max_dd = dd
-    
-    # Sharpe (using centralized risk-free rate)
-    sharpe = (cagr - RISK_FREE_RATE / 100) / annualized_vol if annualized_vol > 0 else 0
-    calmar = cagr / abs(max_dd) if max_dd != 0 else cagr
-    
-    # Tracking error
+    # UBT/TMF-specific extras: tracking error
     tracking_error = 0
     if base_returns and len(base_returns) == len(returns):
-        differences = []
-        for i in range(len(returns)):
-            expected = base_returns[i] * expected_multiple
-            diff = returns[i] - expected
-            differences.append(diff)
-        te = np.std(differences, ddof=1) * sqrt(252)
-        tracking_error = te
-    
+        differences = [returns[i] - base_returns[i] * expected_multiple
+                       for i in range(len(returns))]
+        tracking_error = float(np.std(differences, ddof=1) * sqrt(252))
+
     # Volatility decay estimate
-    variance = daily_vol ** 2
-    decay = -0.5 * (expected_multiple ** 2) * variance * 252 if expected_multiple > 1 else 0
-    
+    daily_vol = core['volatility'] / sqrt(252) if core['volatility'] > 0 else 0
+    decay = -0.5 * (expected_multiple ** 2) * (daily_vol ** 2) * 252 if expected_multiple > 1 else 0
+
     # Expense impact
+    years = len(returns) / 252
     expense_ratio = 0.0080 if 'UBT' in scenario else 0.0091 if 'TMF' in scenario else 0.0015
     expense_impact = pow(1 - expense_ratio, years) - 1
-    
+
     return {
         'scenario': scenario,
         'startDate': dates[0] if dates else '',
         'endDate': dates[-1] if dates else '',
         'days': len(returns),
-        'cagr': cagr,
-        'volatility': annualized_vol,
-        'sharpe': sharpe,
-        'maxDrawdown': max_dd,
-        'calmar': calmar,
-        'totalReturn': total_return,
+        'cagr': core['cagr'],
+        'volatility': core['volatility'],
+        'sharpe': core['sharpe'],
+        'maxDrawdown': core['max_drawdown'],
+        'calmar': core['calmar'],
+        'totalReturn': core['total_return'],
         'trackingErrorVsTLT': tracking_error,
         'volatilityDecayEstimate': decay,
         'annualizedExpenseImpact': expense_impact
