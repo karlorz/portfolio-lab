@@ -24,7 +24,10 @@ import pandas as pd
 from src.paths import RISK_FREE_RATE
 
 
-__all__ = ['BLViews', 'BLResult', 'map_biases_to_views', 'run_black_litterman', 'compute_bl_weights', 'tau_sensitivity']
+__all__ = [
+    'BLViews', 'BLResult', 'map_biases_to_views', 'run_black_litterman',
+    'compute_bl_weights', 'compute_regime_covariances', 'tau_sensitivity',
+]
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,24 @@ BIAS_TO_RETURN_SCALE: float = 0.10  # 10% max shift per unit bias
 
 # Minimum view confidence (avoids zero-confidence degeneracy)
 MIN_VIEW_CONFIDENCE: float = 0.10
+
+# ── Regime-Conditional Covariance ──────────────────────────────────────
+
+# Rolling window (trading days) for realized vol regime classification.
+REGIME_COV_WINDOW: int = 21
+
+# Minimum observations per regime to compute a regime-specific covariance.
+# Falls back to full-sample if any regime has fewer samples.
+REGIME_COV_MIN_SAMPLES: int = 60
+
+# Annualized vol thresholds for regime classification from rolling realized vol.
+# Aligned with VIX regime thresholds (VIX ~ annualized vol × 100).
+REGIME_VOL_THRESHOLDS: Dict[str, float] = {
+    "crisis": 0.30,    # annualized vol > 30%
+    "high_vol": 0.20,  # annualized vol > 20%
+    "normal": 0.12,    # annualized vol > 12%
+    "low_vol": 0.0,    # catch-all below 12%
+}
 
 
 # ── Dataclasses ────────────────────────────────────────────────────────
@@ -138,6 +159,119 @@ def _run_hrp_fallback(
     except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError, OverflowError) as e:
         logger.warning("HRP fallback failed: %s", e)
         return {}
+
+
+# ── Regime-Conditional Covariance ──────────────────────────────────────
+
+def _classify_regime_from_vol(annualized_vol: float) -> str:
+    """Classify regime from annualized realized volatility.
+
+    Args:
+        annualized_vol: Annualized volatility (e.g., 0.20 = 20%).
+
+    Returns:
+        Regime name: "crisis", "high_vol", "normal", or "low_vol".
+    """
+    if annualized_vol >= REGIME_VOL_THRESHOLDS["crisis"]:
+        return "crisis"
+    if annualized_vol >= REGIME_VOL_THRESHOLDS["high_vol"]:
+        return "high_vol"
+    if annualized_vol >= REGIME_VOL_THRESHOLDS["normal"]:
+        return "normal"
+    return "low_vol"
+
+
+def compute_regime_covariances(
+    prices_df: pd.DataFrame,
+    symbols: Optional[List[str]] = None,
+    window: int = REGIME_COV_WINDOW,
+    min_samples: int = REGIME_COV_MIN_SAMPLES,
+) -> Dict[str, np.ndarray]:
+    """Compute per-regime covariance matrices from historical price data.
+
+    Segments historical returns by realized volatility regime, then computes
+    Ledoit-Wolf shrinkage covariance for each regime. This allows the BL
+    posterior to use regime-appropriate risk estimates instead of a single
+    full-sample covariance.
+
+    Args:
+        prices_df: DataFrame with datetime index and symbol columns.
+        symbols: Asset symbols. If None, uses all columns in prices_df.
+        window: Rolling window in trading days for realized vol computation.
+        min_samples: Minimum return observations per regime to compute a
+            regime-specific covariance. Regimes with fewer samples are merged
+            into "normal" or skipped.
+
+    Returns:
+        Dict mapping regime name ("crisis", "high_vol", "normal", "low_vol")
+        to an NxN covariance matrix. At minimum, "normal" is always present.
+    """
+    from pypfopt import risk_models
+
+    if symbols is None:
+        symbols = list(prices_df.columns)
+
+    available = [s for s in symbols if s in prices_df.columns]
+    if len(available) < 2:
+        logger.warning("Need at least 2 symbols for covariance, got %d", len(available))
+        return {"normal": np.eye(len(symbols)) * 0.0001}
+
+    prices = prices_df[available].dropna()
+    returns = prices.pct_change().dropna()
+
+    if len(returns) < window + 10:
+        logger.warning("Insufficient history (%d days) for regime covariance, using full-sample", len(returns))
+        cov = risk_models.CovarianceShrinkage(prices).ledoit_wolf().values
+        return {"normal": cov}
+
+    # Compute rolling realized vol (annualized)
+    rolling_vol = returns.rolling(window).std() * np.sqrt(252)
+    # Use mean vol across assets as regime classifier
+    mean_vol = rolling_vol.mean(axis=1).dropna()
+
+    # Classify each window into a regime
+    regimes = mean_vol.apply(_classify_regime_from_vol)
+
+    # Segment returns by regime (drop first `window` NaN rows)
+    valid_returns = returns.iloc[window:]
+    aligned_regimes = regimes.reindex(valid_returns.index)
+
+    regime_returns: Dict[str, pd.DataFrame] = {}
+    for regime_name in REGIME_VOL_THRESHOLDS:
+        mask = aligned_regimes == regime_name
+        subset = valid_returns[mask]
+        if len(subset) >= min_samples:
+            regime_returns[regime_name] = subset
+        elif len(subset) > 0:
+            # Too few samples — merge into "normal"
+            regime_returns.setdefault("normal", pd.DataFrame())
+            if not subset.empty:
+                regime_returns["normal"] = pd.concat([regime_returns["normal"], subset])
+
+    # Compute covariance per regime
+    result: Dict[str, np.ndarray] = {}
+    for regime_name, rets in regime_returns.items():
+        if len(rets) < min_samples:
+            continue
+        try:
+            # Reconstruct prices from returns for CovarianceShrinkage
+            cum_ret = (1 + rets).cumprod()
+            cov_shrunk = risk_models.CovarianceShrinkage(cum_ret).ledoit_wolf()
+            cov = cov_shrunk.values
+            # Ensure correct dimensions match symbols
+            if cov.shape[0] == len(available):
+                result[regime_name] = cov
+        except (ValueError, np.linalg.LinAlgError) as e:
+            logger.warning("Covariance computation failed for regime %s: %s", regime_name, e)
+
+    # Guarantee at least "normal" is present via full-sample fallback
+    if "normal" not in result:
+        full_cov = risk_models.CovarianceShrinkage(prices).ledoit_wolf().values
+        result["normal"] = full_cov
+
+    logger.info("Regime covariances computed: %s (%d regimes)",
+                list(result.keys()), len(result))
+    return result
 
 
 # ── View Mapping ───────────────────────────────────────────────────────
@@ -434,9 +568,30 @@ def compute_bl_weights(
 
     prices_subset = prices_df[available]
 
-    # Compute covariance matrix with Ledoit-Wolf shrinkage for stability
-    S = risk_models.CovarianceShrinkage(prices_subset).ledoit_wolf()
-    cov_matrix = S.values
+    # Compute covariance matrix — regime-specific if regime is provided,
+    # full-sample with Ledoit-Wolf shrinkage otherwise.
+    regime_cov_used: Optional[str] = None
+    if regime is not None:
+        regime_covs = compute_regime_covariances(prices_subset, symbols=available)
+        regime_key = regime.lower().strip()
+        if regime_key in regime_covs:
+            cov_matrix = regime_covs[regime_key]
+            regime_cov_used = regime_key
+            logger.info("Using %s regime covariance for BL", regime_key)
+        elif "normal" in regime_covs:
+            # Unknown regime — fall back to normal regime covariance
+            cov_matrix = regime_covs["normal"]
+            regime_cov_used = "normal"
+            logger.info("Unknown regime '%s', using normal covariance", regime)
+        else:
+            S = risk_models.CovarianceShrinkage(prices_subset).ledoit_wolf()
+            cov_matrix = S.values
+            regime_cov_used = "full_sample"
+            logger.warning("Unknown regime '%s', using full-sample covariance", regime)
+    else:
+        S = risk_models.CovarianceShrinkage(prices_subset).ledoit_wolf()
+        cov_matrix = S.values
+        regime_cov_used = "full_sample"
 
     # Map biases to views
     views = map_biases_to_views(
@@ -457,7 +612,7 @@ def compute_bl_weights(
         for s in available if s in sym_to_idx
     ]
 
-    return run_black_litterman(
+    result = run_black_litterman(
         cov_matrix=cov_matrix,
         views=views,
         risk_free_rate=risk_free_rate,
@@ -466,6 +621,11 @@ def compute_bl_weights(
         turnover_penalty=turnover_penalty,
         current_weights=current_weights,
     )
+
+    # Record regime covariance usage in extras
+    result.extras["regime_covariance"] = regime_cov_used
+
+    return result
 
 
 def tau_sensitivity(

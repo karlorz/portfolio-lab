@@ -154,7 +154,7 @@ class TestEnsembleVote:
             'timestamp', 'regime', 'regime_confidence', 'num_sources',
             'weighted_consensus', 'agreement_ratio', 'equity_bias',
             'duration_bias', 'gold_bias', 'action', 'confidence',
-            'reasoning', 'source_votes',
+            'reasoning', 'source_votes', 'n_eff', 'weight_entropy',
         }
         actual = {f.name for f in fields(EnsembleVote)}
         assert actual == expected, f"Missing fields: {expected - actual}"
@@ -2057,7 +2057,7 @@ class TestEnsembleVoteFieldValidation:
 
     def test_field_count(self):
         flds = fields(EnsembleVote)
-        assert len(flds) == 13
+        assert len(flds) == 15
 
     def test_all_field_types(self):
         """Verify specific type annotations for EnsembleVote fields."""
