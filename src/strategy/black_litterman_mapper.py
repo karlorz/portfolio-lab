@@ -207,6 +207,22 @@ def map_biases_to_views(
     )
 
 
+def _compute_turnover_bps(
+    new_weights: Dict[str, float],
+    current_weights: Optional[Dict[str, float]],
+    symbols: List[str],
+) -> float:
+    """Compute one-way turnover in basis points."""
+    if current_weights is None:
+        return 0.0
+    total_turnover = 0.0
+    for s in symbols:
+        curr = current_weights.get(s, 0.0)
+        new = new_weights.get(s, 0.0)
+        total_turnover += abs(new - curr)
+    return round(total_turnover / 2 * 10000, 1)  # One-way, in bps
+
+
 def run_black_litterman(
     cov_matrix: np.ndarray,
     views: BLViews,
@@ -215,6 +231,8 @@ def run_black_litterman(
     pi: Optional[np.ndarray] = None,
     transaction_costs: bool = True,
     regime: Optional[str] = None,
+    turnover_penalty: float = 0.0,
+    current_weights: Optional[Dict[str, float]] = None,
 ) -> BLResult:
     """Run Black-Litterman optimization with PyPortfolioOpt.
 
@@ -227,6 +245,8 @@ def run_black_litterman(
         risk_free_rate: Annual risk-free rate (default centralized).
         market_caps: Market cap dict (required if prior="market").
         pi: Custom prior returns array (overrides views.prior).
+        turnover_penalty: Lambda penalty for turnover (0=off, 0.5=moderate, 2+=heavy).
+        current_weights: Current portfolio weights for turnover computation.
 
     Returns:
         BLResult with posterior returns, optimized weights, and metrics.
@@ -302,7 +322,22 @@ def run_black_litterman(
     # Optimize via EfficientFrontier with cascade fallback:
     # BL max_sharpe → HRP → Equal Weight
     optimization_method = "bl_max_sharpe"
+    turnover_applied = False
+    turnover_lambda = turnover_penalty
     ef = EfficientFrontier(posterior_rets, posterior_cov)
+
+    # Turnover penalty: quadratic penalty on weight changes from current
+    if turnover_penalty > 0 and current_weights is not None:
+        import cvxpy as cp
+        curr_w = np.array([current_weights.get(s, 0.0) for s in symbols])
+
+        def _turnover_penalty(w):
+            return turnover_penalty * cp.sum(cp.square(w - curr_w))
+
+        ef.add_objective(_turnover_penalty)
+        turnover_applied = True
+        logger.info("BL turnover penalty applied: lambda=%.2f", turnover_penalty)
+
     try:
         raw_weights = ef.max_sharpe(risk_free_rate=risk_free_rate)
         cleaned = ef.clean_weights()
@@ -345,6 +380,9 @@ def run_black_litterman(
             "optimization_method": optimization_method,
             "transaction_costs_applied": transaction_costs,
             "cost_penalties_bps": cost_penalties_bps,
+            "turnover_penalty_applied": turnover_applied,
+            "turnover_penalty_lambda": turnover_lambda,
+            "turnover_bps": _compute_turnover_bps(weights_dict, current_weights, symbols) if turnover_applied else 0,
         },
     )
 
@@ -360,6 +398,8 @@ def compute_bl_weights(
     risk_free_rate: float = RISK_FREE_RATE / 100,
     transaction_costs: bool = True,
     regime: Optional[str] = None,
+    turnover_penalty: float = 0.0,
+    current_weights: Optional[Dict[str, float]] = None,
 ) -> BLResult:
     """Convenience function: prices → BL-optimized weights in one call.
 
@@ -423,6 +463,8 @@ def compute_bl_weights(
         risk_free_rate=risk_free_rate,
         transaction_costs=transaction_costs,
         regime=regime,
+        turnover_penalty=turnover_penalty,
+        current_weights=current_weights,
     )
 
 
