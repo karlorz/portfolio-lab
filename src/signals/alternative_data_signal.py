@@ -4,12 +4,13 @@ Alternative Data Signal Generator — v9.00 Expansion
 Refactored to use **free data sources from the existing pipeline** only.
 No TypeScript dependencies, no mock data, no API keys needed.
 
-Data Sources (all from public/data/prices.json):
+Data Sources:
   1. Treasury Curve — TLT/SHY price ratio (yield curve slope proxy)
   2. Sector Rotation — XLF vs XLY momentum differential (risk appetite)
   3. Credit Spread — AGG/IEF ratio (credit cycle proxy)
   4. Tail Risk — SPY realized vol vs long-term average
   5. Broad Momentum — SPY 3-month trend (market health)
+  6. Crypto Sentiment — BTC momentum + volatility (sentiment proxy)
 
 Output is compatible with the existing ensemble_voter integration
 which reads data/signals/alternative_data_latest.json.
@@ -37,15 +38,16 @@ logger = logging.getLogger(__name__)
 PRICES_PATH = PRICES_JSON
 
 # Symbols needed for each component
-SYMBOLS_REQUIRED = ["SPY", "TLT", "SHY", "XLF", "XLY", "AGG", "IEF"]
+SYMBOLS_REQUIRED = ["SPY", "TLT", "SHY", "XLF", "XLY", "AGG", "IEF", "BTC-USD"]
 
-# Default weights for the 5-component composite (must sum to 1.0)
+# Default weights for the 6-component composite (must sum to 1.0)
 COMPONENT_WEIGHTS: Dict[str, float] = {
-    "treasury_curve": 0.25,
-    "sector_rotation": 0.20,
-    "credit_spread": 0.20,
+    "treasury_curve": 0.20,
+    "sector_rotation": 0.18,
+    "credit_spread": 0.18,
     "tail_risk": 0.15,
-    "broad_momentum": 0.20,
+    "broad_momentum": 0.18,
+    "crypto_sentiment": 0.11,
 }
 
 
@@ -359,6 +361,56 @@ class AlternativeDataSignalGenerator:
             },
         )
 
+    # ---- Component 6: Crypto Sentiment ----
+
+    def _crypto_sentiment_signal(self) -> ComponentSignal:
+        """Crypto Fear & Greed Index as sentiment proxy.
+        
+        Uses BTC momentum and realized volatility as a proxy for crypto market
+        sentiment. Extreme fear in crypto often precedes broader market risk-on
+        moves, while extreme greed often precedes market corrections.
+        
+        Note: BTC-USD may not be in prices.json pipeline. When unavailable,
+        returns neutral signal with low confidence.
+        """
+        btc = self._get_prices("BTC-USD", 126)
+        
+        # If BTC data not available, return neutral signal
+        if not btc or len(btc) < 60:
+            return ComponentSignal("crypto_sentiment", 0.0, 0.1, {"error": "BTC data unavailable", "fallback": "neutral"})
+        
+        # 20-day momentum
+        mom_20 = self._returns(btc, 20) or 0.0
+        
+        # 60-day realized volatility
+        daily_returns = [(btc[i] / btc[i-1]) - 1.0 for i in range(1, len(btc))]
+        vol_60 = statistics.stdev(daily_returns[-60:]) * math.sqrt(252) if len(daily_returns) >= 60 else 0.0
+        
+        # Compute a fear/greed score from momentum and vol
+        # High momentum + low vol = greed (positive)
+        # Low momentum + high vol = fear (negative)
+        mom_score = mom_20 / 0.10  # Normalize: 10% move = 1.0
+        vol_score = 1.0 - (vol_60 / 0.80)  # 80% annual vol = 0.0, 0% = 1.0
+        
+        # Blend: momentum signals direction, vol signals confidence
+        value = mom_score * 0.6 + vol_score * 0.4
+        value = max(-1.0, min(1.0, value))
+        
+        # Confidence: higher when both signals agree
+        confidence = 0.5 + 0.3 * abs(value)
+        
+        return ComponentSignal(
+            name="crypto_sentiment",
+            value=value,
+            confidence=round(confidence, 4),
+            raw_inputs={
+                "btc_price": btc[-1],
+                "btc_mom_20d": round(mom_20 * 100, 2),
+                "btc_vol_60d": round(vol_60 * 100, 2),
+                "vol_score": round(vol_score, 4),
+            },
+        )
+
     # ---- Composite calculation ----
 
     def _compute_z_score(self, composite_score: float) -> float:
@@ -526,6 +578,7 @@ class AlternativeDataSignalGenerator:
             self._credit_spread_signal(),
             self._tail_risk_signal(),
             self._broad_momentum_signal(),
+            self._crypto_sentiment_signal(),
         ]
 
         composite = self.calculate_composite(components)
