@@ -471,6 +471,10 @@ export interface GarchCvarData {
   current_volatility: number;
   forecast_volatility: number;
   volatility_clustering: 'low' | 'normal' | 'elevated' | 'high';
+  // Conformal CVaR cross-check (distribution-free)
+  conformal_cvar_95?: number | null;
+  conformal_var_95?: number | null;
+  conformal_cvar_ratio?: number | null;
 }
 
 // Entropy Monitor Types (v3.22)

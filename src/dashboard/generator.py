@@ -1044,7 +1044,11 @@ class DashboardGenerator:
         return broker
 
     def _load_garch_cvar_data(self) -> Dict:
-        """Load GARCH-filtered CVaR metrics for dashboard (v3.21)."""
+        """Load GARCH-filtered CVaR metrics for dashboard (v3.21).
+
+        Also computes a conformal CVaR cross-check (distribution-free)
+        as a model-risk validation against the parametric GARCH estimate.
+        """
         garch_cvar = {
             "cvar_95": -0.0179,
             "cvar_95_garch": -0.0215,
@@ -1055,7 +1059,36 @@ class DashboardGenerator:
             "current_volatility": 0.012,
             "forecast_volatility": 0.015,
             "volatility_clustering": "elevated",
+            # Conformal cross-check defaults
+            "conformal_cvar_95": None,
+            "conformal_var_95": None,
+            "conformal_cvar_ratio": None,
         }
+
+        # Compute conformal CVaR cross-check from SPY returns
+        try:
+            from src.monitor.conformal_risk import conformal_cvar, conformal_var
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT close FROM prices WHERE symbol = 'SPY' ORDER BY date ASC"
+            )
+            rows = cursor.fetchall()
+            if len(rows) >= 22:  # Need at least 22 days for meaningful split
+                prices = np.array([r[0] for r in rows], dtype=float)
+                returns = np.diff(np.log(prices))
+                garch_cvar["conformal_cvar_95"] = round(
+                    float(conformal_cvar(returns, alpha=0.05)), 6,
+                )
+                garch_cvar["conformal_var_95"] = round(
+                    float(conformal_var(returns, alpha=0.05)), 6,
+                )
+                if garch_cvar["conformal_var_95"] != 0:
+                    garch_cvar["conformal_cvar_ratio"] = round(
+                        garch_cvar["conformal_cvar_95"]
+                        / garch_cvar["conformal_var_95"], 3,
+                    )
+        except (ImportError, ValueError, IndexError) as e:
+            logger.info("Conformal CVaR cross-check unavailable: %s", e)
 
         try:
             # Load from GARCH-CVaR health report (flat format from compute_garch_risk.py)

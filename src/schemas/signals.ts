@@ -64,6 +64,10 @@ export const GarchCvarSchema = z.object({
   current_volatility: z.number(),
   forecast_volatility: z.number(),
   volatility_clustering: z.enum(['low', 'normal', 'elevated', 'high']),
+  // Conformal CVaR cross-check (distribution-free)
+  conformal_cvar_95: z.optional(z.nullable(z.number())),
+  conformal_var_95: z.optional(z.nullable(z.number())),
+  conformal_cvar_ratio: z.optional(z.nullable(z.number())),
 });
 
 // ---------------------------------------------------------------------------

@@ -57,6 +57,10 @@ class GarchCvarSignal(BaseModel):
     current_volatility: float = 0.0
     forecast_volatility: Optional[float] = None
     volatility_clustering: str = "normal"
+    # Conformal CVaR cross-check (distribution-free) — optional
+    conformal_cvar_95: Optional[float] = None
+    conformal_var_95: Optional[float] = None
+    conformal_cvar_ratio: Optional[float] = None
 
 
 class SmartRebalanceSignal(BaseModel):
