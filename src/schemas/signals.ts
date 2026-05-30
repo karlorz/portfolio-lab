@@ -431,6 +431,17 @@ export const SignalsDataSchema = z.object({
   factor_rotation_dashboard: z.optional(z.record(z.string(), z.unknown())),
   collar: z.optional(z.record(z.string(), z.unknown())),
   kurtosis_regime: z.optional(z.record(z.string(), z.unknown())),
+  bocd_regime: z.optional(z.object({
+    regime: z.number(),
+    regime_change_prob: z.number(),
+    changepoint_count: z.number(),
+    current_run_length: z.number(),
+    hazard_rate: z.number(),
+    threshold: z.number(),
+    n_observations: z.number(),
+    description: z.string(),
+    timestamp: z.string(),
+  })),
   volatility_parity: z.optional(z.record(z.string(), z.unknown())),
   rebalance_health: z.optional(z.record(z.string(), z.unknown())),
   broker_circuit_breaker: z.optional(z.object({

@@ -345,6 +345,43 @@ class DashboardGenerator:
             "timestamp": datetime.now().isoformat(),
         }
 
+    def _generate_bocd_regime(self) -> Optional[Dict]:
+        """Generate BOCD (Bayesian Online Changepoint Detection) regime signal.
+
+        Uses Adams & MacKay (2007) for real-time structural break detection
+        in daily return series without fixed observation windows.
+
+        Returns:
+            Dict with regime, regime_change_prob, changepoint_count, etc.
+            None if insufficient data.
+        """
+        try:
+            from src.regime.bocd_detector import BOCDDetector
+        except ImportError:
+            return None
+
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT date, close FROM prices
+            WHERE symbol = 'SPY'
+            ORDER BY date ASC
+        """)
+        rows = cursor.fetchall()
+        if len(rows) < 2:
+            return None
+
+        prices = np.array([row[1] for row in rows], dtype=float)
+        returns = np.diff(np.log(prices))
+
+        detector = BOCDDetector(hazard_rate=1.0 / 252, threshold=0.5, min_run_length=5)
+        detector.fit(returns)
+
+        signal = detector.get_signal()
+        bocd_data = signal["bocd_detector"]
+        bocd_data["timestamp"] = datetime.now().isoformat()
+
+        return bocd_data
+
     def generate_signals_json(self) -> Path:
         """Generate current signals and allocations."""
         cursor = self.conn.cursor()
@@ -838,6 +875,21 @@ class DashboardGenerator:
             output["two_stage_regime"] = {
                 "regime": "UNKNOWN",
                 "confidence": 0.0,
+                "error": str(e),
+            }
+
+        # Bayesian Online Changepoint Detection (BOCD) regime signal
+        try:
+            bocd_signal = self._generate_bocd_regime()
+            if bocd_signal:
+                output["bocd_regime"] = validate_signal(
+                    "bocd_regime", bocd_signal,
+                )
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("bocd_regime", e)
+            output["bocd_regime"] = {
+                "regime": 0,
+                "regime_change_prob": 0.0,
                 "error": str(e),
             }
 
@@ -1950,6 +2002,7 @@ class DashboardGenerator:
             "risk_decomposition": ("generated_at", None),
             "rebalance_health": ("generated_at", None),
             "two_stage_regime": ("timestamp", None),
+            "bocd_regime": ("timestamp", None),
             "regime_transition": ("timestamp", None),
             "hedge_selector": ("generated_at", None),
         }

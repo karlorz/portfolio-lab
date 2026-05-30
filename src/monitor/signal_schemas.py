@@ -149,6 +149,26 @@ class TwoStageRegimeSignal(BaseModel):
     timestamp: str = ""
 
 
+class BOCDSignal(BaseModel):
+    """Validates the ``bocd_regime`` section of signals.json.
+
+    Bayesian Online Changepoint Detection (Adams & MacKay 2007) for
+    real-time structural break detection in return series.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    regime: int = 0
+    regime_change_prob: float = 0.0
+    changepoint_count: int = 0
+    current_run_length: int = 0
+    hazard_rate: float = 1.0 / 252
+    threshold: float = 0.5
+    n_observations: int = 0
+    description: str = "Bayesian Online Changepoint Detection regime signal"
+    timestamp: str = ""
+
+
 # ─────────────────────────────────────────────────────────────
 #  Signal model registry
 # ─────────────────────────────────────────────────────────────
@@ -205,6 +225,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "signal_snapshot": SignalSnapshotSchema,
     "fred_macro": FredMacroSignal,
     "two_stage_regime": TwoStageRegimeSignal,
+    "bocd_regime": BOCDSignal,
     "ic_decay": IcDecaySignal,
     "signal_wfe": SignalWfeSignal,
     "ramp": RampSignal,
