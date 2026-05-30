@@ -4,16 +4,14 @@ Bayesian Online Changepoint Detection (BOCD) for Regime Detection.
 Implements Adams & MacKay (2007) for real-time structural break detection
 in time series data without fixed observation windows.
 
-Simplified implementation using conjugate Normal model for mean detection
-(rather than full Normal-Inverse-Gamma for variance).
+Uses MAP run length tracking for changepoint detection — when the
+most probable run length drops significantly, a changepoint is flagged.
 
 Algorithm:
 1. At each time step t, maintain a distribution over run lengths r_t.
 2. Calculate predictive probability of current observation given each run length.
 3. Update run length distribution using Bayes' rule.
-4. Probability of new changepoint is the prior probability of run length 0.
-
-For regime detection, we monitor shifts in return distribution.
+4. Track MAP (Maximum A Posteriori) run length — sudden drops indicate changepoints.
 
 Usage:
     from src.regime.bocd_detector import BOCDDetector
@@ -32,7 +30,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +53,19 @@ class BOCDDetector:
     Bayesian Online Changepoint Detection for regime detection.
     
     Uses conjugate Normal model for mean detection.
-    Maintains run length distribution and detects structural breaks.
+    Maintains run length distribution and detects structural breaks via MAP tracking.
     
     Parameters:
         hazard_rate: Prior probability of changepoint at each time step.
                      Default 1/252 assumes ~1 changepoint per year (daily data).
-        threshold: Probability threshold for regime change detection (default 0.5).
+        threshold: Minimum run length drop to flag changepoint (default 10 days).
         min_run_length: Minimum run length to consider stable (default 5).
     """
     
     def __init__(
         self,
         hazard_rate: float = 1.0 / 252,
-        threshold: float = 0.5,
+        threshold: float = 10.0,
         min_run_length: int = 5
     ):
         self.hazard_rate = hazard_rate
@@ -79,6 +76,7 @@ class BOCDDetector:
         self._run_length_probs: Optional[np.ndarray] = None
         self._changepoint_probs: Optional[np.ndarray] = None
         self._regime_labels: Optional[np.ndarray] = None
+        self._map_run_lengths: Optional[np.ndarray] = None
         self.timestamps: Optional[List] = None
         
         # Hyperparameters for Normal prior (conjugate for known variance)
@@ -95,7 +93,9 @@ class BOCDDetector:
     def fit(
         self,
         returns: np.ndarray,
-        timestamps: Optional[List] = None
+        timestamps: Optional[List] = None,
+        monitor_stat: str = "volatility",
+        vol_window: int = 21,
     ) -> 'BOCDDetector':
         """
         Fit BOCD detector on return series.
@@ -103,6 +103,10 @@ class BOCDDetector:
         Args:
             returns: 1D array of returns (e.g., daily log returns)
             timestamps: Optional list of timestamps for each observation
+            monitor_stat: What statistic to monitor for changepoints.
+                          'volatility' (default): rolling realized volatility.
+                          'returns': raw returns (only works for mean-shift detection).
+            vol_window: Window for rolling volatility calculation (default 21 days).
             
         Returns:
             self
@@ -116,15 +120,33 @@ class BOCDDetector:
             raise ValueError("Need at least 2 observations")
         
         self.timestamps = timestamps
+        self._monitor_stat = monitor_stat
+        
+        # Select the statistic to monitor
+        if monitor_stat == "volatility":
+            # Rolling realized volatility (absolute returns, smoothed)
+            # Use exponentially weighted std for responsiveness
+            alpha = 2.0 / (vol_window + 1)
+            abs_returns = np.abs(returns)
+            vol = np.zeros(n)
+            vol[0] = abs_returns[0]
+            for i in range(1, n):
+                vol[i] = alpha * abs_returns[i] + (1 - alpha) * vol[i-1]
+            # Scale to make BOCD work better (avoid very small values)
+            vol = vol * 100  # Scale to percentage
+            observations = vol
+        else:
+            observations = returns
         
         # Estimate observation variance from data (for predictive distribution)
-        self._obs_var = max(np.var(returns), 1e-10)
+        self._obs_var = max(np.var(observations), 1e-10)
         
         # Initialize run length distribution
         # Row 0 = before any observations, Row t = after observing t-th point
         self._run_length_probs = np.zeros((n + 1, n + 1))
         self._changepoint_probs = np.zeros(n)
         self._regime_labels = np.zeros(n, dtype=int)
+        self._map_run_lengths = np.zeros(n, dtype=int)
         
         # Sufficient statistics: for each run length r, maintain sum and count
         self._sum_x = np.zeros(n + 1)
@@ -135,7 +157,7 @@ class BOCDDetector:
         
         # Process each observation
         for t in range(n):
-            x = returns[t]
+            x = observations[t]
             
             # Current run length probabilities (before update)
             rlp = self._run_length_probs[t, :t+1].copy()
@@ -185,8 +207,11 @@ class BOCDDetector:
                 # Fallback: reset to run length 0
                 self._run_length_probs[t+1, 0] = 1.0
             
-            # Record changepoint probability
-            self._changepoint_probs[t] = changepoint_prob
+            # Record changepoint probability (normalized)
+            self._changepoint_probs[t] = self._run_length_probs[t+1, 0]
+            
+            # Track MAP (Maximum A Posteriori) run length
+            self._map_run_lengths[t] = np.argmax(self._run_length_probs[t+1, :t+2])
             
             # Update sufficient statistics for next step
             # For run length 0 (new run): reset
@@ -203,8 +228,13 @@ class BOCDDetector:
                     self._sum_x[r] = 0.0
                     self._count[r] = 0.0
             
-            # Determine regime label
-            self._regime_labels[t] = 1 if changepoint_prob > self.threshold else 0
+            # Determine regime label based on MAP run length drop
+            if t > 10:
+                recent_map = np.mean(self._map_run_lengths[max(0, t-20):t])
+                drop = recent_map - self._map_run_lengths[t]
+                self._regime_labels[t] = 1 if drop > self.threshold else 0
+            else:
+                self._regime_labels[t] = 0
         
         self._fitted = True
         return self
@@ -221,25 +251,24 @@ class BOCDDetector:
         
         # Calculate regime statistics
         n = len(self._regime_labels)
-        changepoint_count = np.sum(self._changepoint_probs > self.threshold)
+        changepoint_count = np.sum(self._regime_labels == 1)
         
-        # Determine current regime based on recent run length
-        # If high probability of short run length, we're in a new regime
-        recent_probs = self._run_length_probs[-1, :self.min_run_length+1]
-        regime_change_prob = np.sum(recent_probs)
+        # Determine current regime based on recent MAP run length
+        recent_map = np.mean(self._map_run_lengths[max(0, n-20):n]) if n > 20 else self._map_run_lengths[-1]
+        regime_change_prob = 1.0 - (recent_map / max(n, 1))  # Normalized drop probability
         
         # Map to portfolio-lab regime types
         # For volatility detection, we'll map to:
         # 0 = NORMAL, 1 = CRISIS, 2 = HIGH_VOL, 3 = LOW_VOL
         # Simplified: changepoint = regime change (CRISIS or HIGH_VOL)
-        current_regime = 1 if regime_change_prob > self.threshold else 0
+        current_regime = 1 if self._regime_labels[-1] == 1 else 0
         
         return {
             "bocd_detector": {
                 "regime": current_regime,
                 "regime_change_prob": float(regime_change_prob),
                 "changepoint_count": int(changepoint_count),
-                "current_run_length": int(np.argmax(self._run_length_probs[-1])),
+                "current_run_length": int(self._map_run_lengths[-1]),
                 "hazard_rate": self.hazard_rate,
                 "threshold": self.threshold,
                 "n_observations": n,
@@ -270,13 +299,13 @@ class BOCDDetector:
             # Return indices instead
             return [
                 (i, float(self._changepoint_probs[i]))
-                for i in range(len(self._changepoint_probs))
-                if self._changepoint_probs[i] > self.threshold
+                for i in range(len(self._regime_labels))
+                if self._regime_labels[i] == 1
             ]
         
         # Match timestamps to changepoints
         return [
             (timestamps[i], float(self._changepoint_probs[i]))
-            for i in range(len(self._changepoint_probs))
-            if self._changepoint_probs[i] > self.threshold
+            for i in range(len(self._regime_labels))
+            if self._regime_labels[i] == 1
         ]

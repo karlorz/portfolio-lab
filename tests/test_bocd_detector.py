@@ -22,18 +22,18 @@ class TestBOCDDetectorInit:
         """Default parameters should be valid."""
         detector = BOCDDetector()
         assert detector.hazard_rate == 1.0 / 252
-        assert detector.threshold == 0.5
+        assert detector.threshold == 10.0  # Run length drop threshold (days)
         assert detector.min_run_length == 5
     
     def test_custom_params(self):
         """Custom parameters should be accepted."""
         detector = BOCDDetector(
             hazard_rate=0.1,
-            threshold=0.3,
+            threshold=15.0,
             min_run_length=10
         )
         assert detector.hazard_rate == 0.1
-        assert detector.threshold == 0.3
+        assert detector.threshold == 15.0
         assert detector.min_run_length == 10
     
     def test_not_fitted_initially(self):
