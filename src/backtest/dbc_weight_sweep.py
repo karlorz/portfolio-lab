@@ -24,7 +24,8 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import numpy as np
 
-from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
+from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, \
+    compute_metrics_from_returns, save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -165,14 +166,14 @@ class DBCWeightSweep:
             daily_rets.append(ret)
             peak = max(peak, values[-1])
 
-        cagr = np.mean(daily_rets) * 252 * 100
-        vol = np.std(daily_rets) * math.sqrt(252) * 100
-        sharpe = cagr / vol if vol > 0 else 0
-        max_dd = min(
-            (v / peak - 1) * 100 for v in values
-        ) if values else 0
+        metrics = compute_metrics_from_returns(daily_rets)
 
-        return round(cagr, 2), round(vol, 2), round(sharpe, 3), round(max_dd, 2)
+        return (
+            round(metrics["cagr"] * 100, 2),
+            round(metrics["volatility"] * 100, 2),
+            round(metrics["sharpe"], 3),
+            round(metrics["max_drawdown"] * 100, 2),
+        )
 
     def run_sweep(self) -> DBCSweepResult:
         """Run full DBC weight sweep."""

@@ -345,6 +345,43 @@ class DashboardGenerator:
             "timestamp": datetime.now().isoformat(),
         }
 
+    def _generate_bocd_regime(self) -> Optional[Dict]:
+        """Generate BOCD (Bayesian Online Changepoint Detection) regime signal.
+
+        Uses Adams & MacKay (2007) for real-time structural break detection
+        in daily return series without fixed observation windows.
+
+        Returns:
+            Dict with regime, regime_change_prob, changepoint_count, etc.
+            None if insufficient data.
+        """
+        try:
+            from src.regime.bocd_detector import BOCDDetector
+        except ImportError:
+            return None
+
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT date, close FROM prices
+            WHERE symbol = 'SPY'
+            ORDER BY date ASC
+        """)
+        rows = cursor.fetchall()
+        if len(rows) < 2:
+            return None
+
+        prices = np.array([row[1] for row in rows], dtype=float)
+        returns = np.diff(np.log(prices))
+
+        detector = BOCDDetector(hazard_rate=1.0 / 252, threshold=0.5, min_run_length=5)
+        detector.fit(returns)
+
+        signal = detector.get_signal()
+        bocd_data = signal["bocd_detector"]
+        bocd_data["timestamp"] = datetime.now().isoformat()
+
+        return bocd_data
+
     def generate_signals_json(self) -> Path:
         """Generate current signals and allocations."""
         cursor = self.conn.cursor()
@@ -515,6 +552,8 @@ class DashboardGenerator:
                     "duration_bias": round(ensemble_result.duration_bias, 3),
                     "gold_bias": round(ensemble_result.gold_bias, 3),
                     "num_sources": ensemble_result.num_sources,
+                    "n_eff": round(getattr(ensemble_result, 'n_eff', 0), 2),
+                    "weight_entropy": round(getattr(ensemble_result, 'weight_entropy', 0), 4),
                     "source_breakdown": source_breakdown,
                 }
         except SIGNAL_EXCEPTIONS as e:
@@ -736,6 +775,13 @@ class DashboardGenerator:
         # Merge overlay dashboard data (collar, crypto, calendar, kurtosis, etc.)
         overlay_data = self._get_overlay_data()
 
+        # Hedge selector recommendation
+        hedge_selector_signal = None
+        try:
+            hedge_selector_signal = self._get_hedge_selector_signal(vix_level, current_regime)
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("hedge_selector", e)
+
         output = {
             "generated_at": datetime.now().isoformat(),
             "regime": validate_signal("regime", regime_data),
@@ -770,6 +816,7 @@ class DashboardGenerator:
             "garch_cvar": validate_signal("garch_cvar", garch_cvar_data),
             "entropy": entropy_data,
             "bond_momentum": overlay_data.get("bond_momentum", {}),
+            "hedge_selector": validate_signal("hedge_selector", hedge_selector_signal),
         }
 
         # Rebalance health data
@@ -830,6 +877,44 @@ class DashboardGenerator:
                 "confidence": 0.0,
                 "error": str(e),
             }
+
+        # Bayesian Online Changepoint Detection (BOCD) regime signal
+        try:
+            bocd_signal = self._generate_bocd_regime()
+            if bocd_signal:
+                output["bocd_regime"] = validate_signal(
+                    "bocd_regime", bocd_signal,
+                )
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("bocd_regime", e)
+            output["bocd_regime"] = {
+                "regime": 0,
+                "regime_change_prob": 0.0,
+                "error": str(e),
+            }
+
+        # Regime transition forecast (Oliveira et al. 2025 step 2)
+        try:
+            from src.regime.regime_transition_forecaster import RegimeTransitionForecaster
+            forecaster = RegimeTransitionForecaster()
+            # Extract regime labels from two_stage_regime signal or VIX classification
+            current = output.get("two_stage_regime", {}).get("regime", current_regime)
+            # Fit on recent regime history from regime_log
+            cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 100")
+            history = [row[0] for row in cursor.fetchall()]
+            if len(history) >= 2:
+                forecaster.fit(list(reversed(history)))
+                forecast = forecaster.forecast(current, horizon_days=5)
+                output["regime_transition"] = {
+                    "current_regime": current,
+                    "horizon_days": 5,
+                    "forecast_probs": {k: round(v, 4) for k, v in forecast.probabilities.items()},
+                    "most_likely": forecast.most_likely,
+                    "persistence_params": {k: round(v, 1) for k, v in forecast.persistence_params.items()},
+                    "timestamp": datetime.now().isoformat(),
+                }
+        except MONITOR_EXCEPTIONS as e:
+            _log_signal_error("regime_transition", e)
 
         # Health check report
         try:
@@ -959,7 +1044,11 @@ class DashboardGenerator:
         return broker
 
     def _load_garch_cvar_data(self) -> Dict:
-        """Load GARCH-filtered CVaR metrics for dashboard (v3.21)."""
+        """Load GARCH-filtered CVaR metrics for dashboard (v3.21).
+
+        Also computes a conformal CVaR cross-check (distribution-free)
+        as a model-risk validation against the parametric GARCH estimate.
+        """
         garch_cvar = {
             "cvar_95": -0.0179,
             "cvar_95_garch": -0.0215,
@@ -970,7 +1059,36 @@ class DashboardGenerator:
             "current_volatility": 0.012,
             "forecast_volatility": 0.015,
             "volatility_clustering": "elevated",
+            # Conformal cross-check defaults
+            "conformal_cvar_95": None,
+            "conformal_var_95": None,
+            "conformal_cvar_ratio": None,
         }
+
+        # Compute conformal CVaR cross-check from SPY returns
+        try:
+            from src.monitor.conformal_risk import conformal_cvar, conformal_var
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT close FROM prices WHERE symbol = 'SPY' ORDER BY date ASC"
+            )
+            rows = cursor.fetchall()
+            if len(rows) >= 22:  # Need at least 22 days for meaningful split
+                prices = np.array([r[0] for r in rows], dtype=float)
+                returns = np.diff(np.log(prices))
+                garch_cvar["conformal_cvar_95"] = round(
+                    float(conformal_cvar(returns, alpha=0.05)), 6,
+                )
+                garch_cvar["conformal_var_95"] = round(
+                    float(conformal_var(returns, alpha=0.05)), 6,
+                )
+                if garch_cvar["conformal_var_95"] != 0:
+                    garch_cvar["conformal_cvar_ratio"] = round(
+                        garch_cvar["conformal_cvar_95"]
+                        / garch_cvar["conformal_var_95"], 3,
+                    )
+        except (ImportError, ValueError, IndexError) as e:
+            logger.info("Conformal CVaR cross-check unavailable: %s", e)
 
         try:
             # Load from GARCH-CVaR health report (flat format from compute_garch_risk.py)
@@ -1829,6 +1947,39 @@ class DashboardGenerator:
                            e, DashboardGenerator._last_regime)
             return DashboardGenerator._last_regime.lower() in {"high_vol", "crisis"}
 
+    def _get_hedge_selector_signal(self, vix_level: Optional[float], regime: str) -> Optional[Dict]:
+        """Get hedge selector recommendation for dashboard."""
+        if vix_level is None:
+            return None
+        try:
+            from src.strategy.hedge_selector import HedgeSelector
+            selector = HedgeSelector()
+            # Estimate confidence based on regime stability
+            regime_confidence = 0.8 if regime in ["normal", "crisis"] else 0.6
+            rec = selector.select(
+                vix_level=vix_level,
+                regime_confidence=regime_confidence,
+                regime_label=regime
+            )
+            return {
+                "available": True,
+                "generated_at": datetime.now().isoformat(),
+                "regime": rec.regime,
+                "regime_confidence": rec.regime_confidence,
+                "primary_hedge": rec.primary_hedge,
+                "primary_size_pct": rec.primary_size_pct,
+                "secondary_hedge": rec.secondary_hedge,
+                "secondary_size_pct": rec.secondary_size_pct,
+                "cost_benefit_gate": rec.cost_benefit_gate,
+                "net_benefit_bps": rec.net_benefit_bps,
+                "kelly_fraction": rec.kelly_fraction,
+                "expected_cost_bps": rec.expected_cost_bps,
+                "expected_benefit_bps": rec.expected_benefit_bps,
+            }
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("hedge_selector", e)
+            return None
+
     # Signal staleness detection (production readiness)
     SIGNAL_STALENESS_TTL_HOURS = int(os.environ.get("SIGNAL_STALENESS_TTL_HOURS", "4"))
     STALENESS_DECAY_TAU_HOURS = float(os.environ.get("STALENESS_DECAY_TAU_HOURS", "2.0"))
@@ -1884,6 +2035,9 @@ class DashboardGenerator:
             "risk_decomposition": ("generated_at", None),
             "rebalance_health": ("generated_at", None),
             "two_stage_regime": ("timestamp", None),
+            "bocd_regime": ("timestamp", None),
+            "regime_transition": ("timestamp", None),
+            "hedge_selector": ("generated_at", None),
         }
 
         for signal_key, (ts_field, _) in timestamped_signals.items():

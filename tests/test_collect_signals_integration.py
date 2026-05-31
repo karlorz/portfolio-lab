@@ -394,7 +394,7 @@ class TestCollectSignalsFullPipeline:
 
             readings = voter.collect_signals()
 
-        assert len(readings) == 7
+        assert len(readings) == 8
         assert SignalSource.MULTI_SPEED_MOM in readings
         assert SignalSource.CROSS_ASSET_RV in readings
         assert SignalSource.INTERNATIONAL_MOMENTUM in readings
@@ -402,3 +402,4 @@ class TestCollectSignalsFullPipeline:
         assert SignalSource.CROSS_ASSET_REGIME_ARB in readings
         assert SignalSource.UNIFIED_OVERLAY in readings
         assert SignalSource.MULTI_TIMEFRAME_FUSION in readings
+        assert SignalSource.GOOGLE_TRENDS in readings

@@ -154,7 +154,7 @@ class TestEnsembleVote:
             'timestamp', 'regime', 'regime_confidence', 'num_sources',
             'weighted_consensus', 'agreement_ratio', 'equity_bias',
             'duration_bias', 'gold_bias', 'action', 'confidence',
-            'reasoning', 'source_votes',
+            'reasoning', 'source_votes', 'n_eff', 'weight_entropy',
         }
         actual = {f.name for f in fields(EnsembleVote)}
         assert actual == expected, f"Missing fields: {expected - actual}"
@@ -233,7 +233,7 @@ class TestRegimeWeights:
 
     def test_high_vol_alternative_data_dominant(self):
         """v9.35: ALT_DATA is the dominant signal in HIGH_VOL regime (only positive alpha)."""
-        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.25
+        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.24
 
     def test_unified_overlay_has_weight_in_all_regimes(self):
         """v9.31: UNIFIED_OVERLAY has 15% weight in all regimes (was dead code at 0%)."""
@@ -2057,7 +2057,7 @@ class TestEnsembleVoteFieldValidation:
 
     def test_field_count(self):
         flds = fields(EnsembleVote)
-        assert len(flds) == 13
+        assert len(flds) == 15
 
     def test_all_field_types(self):
         """Verify specific type annotations for EnsembleVote fields."""
@@ -2084,9 +2084,12 @@ class TestEnsembleVoteFieldValidation:
         assert False, "source_votes field not found"
 
     def test_no_fields_have_defaults(self):
-        """All 13 EnsembleVote fields are required — none have defaults."""
+        """All EnsembleVote fields are required except diagnostic fields."""
         import dataclasses
+        exempt = {"n_eff", "weight_entropy"}
         for f in fields(EnsembleVote):
+            if f.name in exempt:
+                continue
             assert f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING, \
                 f"{f.name} should not have a default — all required"
 
@@ -3888,15 +3891,16 @@ class TestDetermineAction:
         assert action == "neutral"
 
     def test_uses_consensus_threshold(self):
-        """Agreement just below threshold should be neutral."""
-        from src.paths import ENSEMBLE_CONSENSUS_THRESHOLD
+        """Agreement just below regime threshold should be neutral."""
+        from src.strategy.ensemble_voter import REGIME_CONSENSUS_THRESHOLDS
+        threshold = REGIME_CONSENSUS_THRESHOLDS["NORMAL"]  # 0.75
         action, _ = EnsembleVoter._determine_action(
-            Regime.NORMAL, 0.5, 0.5, ENSEMBLE_CONSENSUS_THRESHOLD - 0.01
+            Regime.NORMAL, 0.5, 0.5, threshold - 0.01
         )
         assert action == "neutral"
         # Just above threshold should trigger action
         action, _ = EnsembleVoter._determine_action(
-            Regime.NORMAL, 0.5, 0.5, ENSEMBLE_CONSENSUS_THRESHOLD + 0.01
+            Regime.NORMAL, 0.5, 0.5, threshold + 0.01
         )
         assert action == "increase_equity"
 

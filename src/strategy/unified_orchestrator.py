@@ -52,6 +52,13 @@ except ImportError:
     _HAS_VIXY = False
     VIXYHedgeSizer = None
 
+try:
+    from src.strategy.hedge_selector import HedgeSelector
+    _HAS_HEDGE_SELECTOR = True
+except ImportError:
+    _HAS_HEDGE_SELECTOR = False
+    HedgeSelector = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,7 +183,8 @@ class UnifiedOrchestrator:
         "bond_duration": 0.25,
         "calendar": 0.10,
         "vixy": 0.05,
-        # Remaining 25% is base passive allocation
+        "hedge_selector": 0.10,  # Dynamic hedge selector
+        # Remaining 15% is base passive allocation
     }
 
     # VIX thresholds for overlay activation
@@ -244,6 +252,9 @@ class UnifiedOrchestrator:
         contributions.extend(self._collect_crypto_overlay())
         contributions.extend(self._collect_bond_duration_overlay())
         contributions.extend(self._collect_calendar_overlay())
+        
+        # Dynamic hedge selector overlay
+        contributions.extend(self._collect_hedge_selector_overlay(vix_level))
 
         return contributions
 
@@ -391,6 +402,50 @@ class UnifiedOrchestrator:
             )]
         except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
             logger.warning("Calendar overlay unavailable: %s", e)
+        return []
+
+    def _collect_hedge_selector_overlay(
+        self, vix_level: float,
+    ) -> List[OverlayContribution]:
+        """Collect dynamic hedge selector overlay contribution."""
+        if not _HAS_HEDGE_SELECTOR:
+            return []
+        try:
+            assert HedgeSelector is not None  # _HAS_HEDGE_SELECTOR guarantees this
+            selector = HedgeSelector()
+            
+            # Get regime classification from the selector itself
+            regime_label = selector._classify_regime(vix_level).value
+            confidence = 0.8  # Default confidence for integration
+            
+            rec = selector.select(
+                vix_level=vix_level,
+                regime_confidence=confidence,
+                regime_label=regime_label,
+            )
+            
+            if rec.primary_hedge == "none":
+                return []
+                
+            # Hedge selector primarily sizes hedges, reducing SPY allocation
+            spy_shift = -rec.primary_size_pct / 100.0
+            
+            return [OverlayContribution(
+                name="hedge_selector", version="v1.00",
+                status="active" if rec.cost_benefit_gate else "suppressed",
+                weight=self.OVERLAY_WEIGHTS["hedge_selector"],
+                spy_delta=round(spy_shift, 4),
+                gld_delta=0.0, tlt_delta=0.0,
+                ief_delta=0.0, shy_delta=0.0,
+                btc_delta=0.0, eth_delta=0.0,
+                vol_impact=-0.005 if rec.primary_hedge in ["vixy", "vix_calls"] else 0.0,
+                sharpe_contribution=0.01 if rec.net_benefit_bps > 0 else 0.0,
+                confidence=confidence * 100,
+                reason=f"Dynamic Hedge: {rec.primary_hedge} ({rec.primary_size_pct:.1f}%), "
+                       f"net benefit {rec.net_benefit_bps:.1f}bps",
+            )]
+        except (KeyError, ValueError, TypeError, AttributeError, OSError, RuntimeError) as e:
+            logger.warning("Hedge selector overlay unavailable: %s", e)
         return []
 
     def resolve_conflicts(self, contributions: List[OverlayContribution]) -> Tuple[

@@ -29,7 +29,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import DATA_DIR, PRICES_JSON, RISK_FREE_RATE
 from src.backtest.metrics import (
     BacktestMetrics,
     compute_metrics,
@@ -198,14 +198,14 @@ def compute_vol_target_backtest(
             # Borrow cash to invest more
             borrowed = capital * excess_leverage
             invested_return = (capital + borrowed) * portfolio_returns[i]
-            # Borrowing cost: risk-free rate (4.5% annualized)
-            daily_rf = 0.045 / 252
+            # Borrowing cost: risk-free rate (from paths.py RISK_FREE_RATE env var)
+            daily_rf = RISK_FREE_RATE / 100 / 252
             borrowing_cost = borrowed * daily_rf
             daily_pnl = invested_return - borrowing_cost
         else:
             # Hold cash: (1-leverage) fraction in cash earning risk-free
             invested_return = capital * leverage * portfolio_returns[i]
-            cash_return = capital * (1 - leverage) * (0.045 / 252)
+            cash_return = capital * (1 - leverage) * (RISK_FREE_RATE / 100 / 252)
             daily_pnl = invested_return + cash_return
 
         capital += daily_pnl
@@ -474,12 +474,12 @@ def compute_regime_conditional_vol_target_backtest(
         if excess_leverage > 0:
             borrowed = capital * excess_leverage
             invested_return = (capital + borrowed) * portfolio_returns[i]
-            daily_rf = 0.045 / 252
+            daily_rf = RISK_FREE_RATE / 100 / 252
             borrowing_cost = borrowed * daily_rf
             daily_pnl = invested_return - borrowing_cost
         else:
             invested_return = capital * leverage * portfolio_returns[i]
-            cash_return = capital * (1 - leverage) * (0.045 / 252)
+            cash_return = capital * (1 - leverage) * (RISK_FREE_RATE / 100 / 252)
             daily_pnl = invested_return + cash_return
 
         capital += daily_pnl

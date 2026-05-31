@@ -138,6 +138,18 @@ export interface SignalsData {
     method: string;
     timestamp: string;
   };
+  // Bayesian Online Changepoint Detection (Adams & MacKay 2007)
+  bocd_regime?: {
+    regime: number;
+    regime_change_prob: number;
+    changepoint_count: number;
+    current_run_length: number;
+    hazard_rate: number;
+    threshold: number;
+    n_observations: number;
+    description: string;
+    timestamp: string;
+  };
   // IC decay monitoring for signal quality tracking
   ic_decay?: {
     signals?: Record<string, {
@@ -459,6 +471,10 @@ export interface GarchCvarData {
   current_volatility: number;
   forecast_volatility: number;
   volatility_clustering: 'low' | 'normal' | 'elevated' | 'high';
+  // Conformal CVaR cross-check (distribution-free)
+  conformal_cvar_95?: number | null;
+  conformal_var_95?: number | null;
+  conformal_cvar_ratio?: number | null;
 }
 
 // Entropy Monitor Types (v3.22)

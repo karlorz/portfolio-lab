@@ -56,7 +56,7 @@ from src.utils import safe_get
 from src.utils.computation_cache import get_realized_volatility
 
 
-__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'BanditWeighter', 'EnsembleVoter', 'compute_signal_correlation_matrix']
+__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'REGIME_CONSENSUS_THRESHOLDS', 'DEFAULT_DIVERSITY_FLOOR', 'BanditWeighter', 'EnsembleVoter', 'compute_signal_correlation_matrix']
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,24 @@ logger = logging.getLogger(__name__)
 # Starts 100% static, shifts to (1-BANDIT_MAX_BLEND)/BANDIT_MAX_BLEND after warmup
 BANDIT_MAX_BLEND: float = float(os.environ.get("ENSEMBLE_BANDIT_MAX_BLEND", "0.7"))
 BANDIT_WARMUP_DAYS: int = int(os.environ.get("ENSEMBLE_BANDIT_WARMUP_DAYS", "252"))
+
+# Diversity floor — minimum weight for each active signal to prevent
+# weight concentration. Improves N_eff (effective signal count) by ensuring
+# no signal is completely zeroed out by the weight pipeline.
+# Set to 0 to disable. Range: 0.02-0.08 recommended.
+DEFAULT_DIVERSITY_FLOOR: float = float(os.environ.get("ENSEMBLE_DIVERSITY_FLOOR", "0.05"))
+
+# Regime-conditional consensus thresholds
+# CRISIS: lower threshold (act faster with fewer signals)
+# NORMAL: higher threshold (require more consensus when time permits)
+# Falls back to ENSEMBLE_CONSENSUS_THRESHOLD env var for unlisted regimes
+REGIME_CONSENSUS_THRESHOLDS: dict = {
+    "CRISIS": 0.50,
+    "HIGH_VOL": 0.55,
+    "LOW_VOL": 0.67,
+    "NORMAL": 0.75,
+    "RECOVERY": 0.60,
+}
 
 # Module-level health tracker singleton (lazy initialized)
 _health_tracker = None
@@ -133,9 +151,13 @@ class EnsembleVote:
     action: str            # "increase_equity", "decrease_equity", "neutral", "risk_off"
     confidence: float      # 0-1
     reasoning: str
-    
+
     # Source breakdown
     source_votes: List[SignalReading]
+
+    # Diversity diagnostics
+    n_eff: float = 0.0          # Effective number of signals (exp of Shannon entropy)
+    weight_entropy: float = 0.0 # Shannon entropy of weight distribution (nats)
 
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
@@ -152,47 +174,52 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
         Regime.LOW_VOL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1350,
-            SignalSource.ALTERNATIVE_DATA: 0.3150,
+            SignalSource.ALTERNATIVE_DATA: 0.2650,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.2520,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.0000,  # marginal in calm markets
             SignalSource.UNIFIED_OVERLAY: 0.1980,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         },
         Regime.NORMAL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1170,
-            SignalSource.ALTERNATIVE_DATA: 0.2745,
+            SignalSource.ALTERNATIVE_DATA: 0.2245,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.2205,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
             SignalSource.UNIFIED_OVERLAY: 0.1710,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         },
         Regime.HIGH_VOL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1170,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.1890,
-            SignalSource.ALTERNATIVE_DATA: 0.2970,
+            SignalSource.ALTERNATIVE_DATA: 0.2470,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
             SignalSource.UNIFIED_OVERLAY: 0.1800,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         },
         Regime.CRISIS: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.3285,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1530,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.0000,
-            SignalSource.ALTERNATIVE_DATA: 0.1800,
+            SignalSource.ALTERNATIVE_DATA: 0.1300,
             SignalSource.UNIFIED_OVERLAY: 0.2385,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         },
         Regime.RECOVERY: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
-            SignalSource.ALTERNATIVE_DATA: 0.2745,
+            SignalSource.ALTERNATIVE_DATA: 0.2245,
             SignalSource.CROSS_ASSET_RV: 0.1170,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.2205,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1170,
             SignalSource.UNIFIED_OVERLAY: 0.1710,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
         }
     }
 
@@ -808,6 +835,7 @@ class EnsembleVoter:
         self._collect_regime_arb_signal(readings, active_sources, regime)
         self._collect_unified_overlay_signal(readings, active_sources, regime)
         self._collect_mtf_signal(readings, active_sources, regime, date)
+        self._collect_google_trends(readings, active_sources, regime, date)
 
         self.current_readings = readings
         return readings
@@ -965,6 +993,23 @@ class EnsembleVoter:
         except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Multi-timeframe fusion unavailable: %s", e)
 
+    def _collect_google_trends(
+        self, readings: dict, active_sources: set, regime, date: str
+    ) -> None:
+        """Collect Google Trends sentiment signal."""
+        if self._should_skip(SignalSource.GOOGLE_TRENDS, active_sources, regime):
+            return
+        try:
+            from src.signals.google_trends_signal import GoogleTrendsSignal
+            gt = GoogleTrendsSignal()
+            snapshot = gt.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.GOOGLE_TRENDS] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Google Trends signal unavailable: %s", e)
+
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
 
@@ -1092,6 +1137,7 @@ class EnsembleVoter:
         6. _apply_regime_weights — per-regime signal weight multipliers
         7. _apply_utility_reweighting — boost/reduce by profitability (Sharpe contribution + hit rate)
         8. _apply_exploration_noise — epsilon-greedy Dirichlet exploration for weight discovery
+        8a. _apply_diversity_floor — minimum weight floor for active signals (N_eff improvement)
         9. _apply_turnover_validation — turnover + basis-pursuit + regret-weighted
        10. _compute_consensus — weighted consensus, agreement, asset biases, action
        11. _persist_vote — save vote and persist regret state
@@ -1110,6 +1156,7 @@ class EnsembleVoter:
             weights = self._apply_regime_weights(weights, regime)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
+        weights = self._apply_diversity_floor(weights)
         weights = self._apply_turnover_validation(weights, readings, regime)
 
         # Safety fallback: when explicit readings are provided for analysis/tests,
@@ -1530,6 +1577,69 @@ class EnsembleVoter:
             logger.warning("Exploration noise failed: %s", e)
             return weights
 
+    def _apply_diversity_floor(
+        self,
+        weights: Dict,
+        floor: Optional[float] = None,
+    ) -> Dict:
+        """Apply diversity floor — minimum weight for each active signal.
+
+        Prevents weight concentration by ensuring every signal that was
+        originally active (weight > 0) retains at least `floor` fraction
+        of the total weight. This raises N_eff (effective signal count)
+        without overriding the signal quality assessment.
+
+        The floor is applied as a lower bound, not an equalizer: signals
+        with higher quality still get proportionally more weight.
+
+        Args:
+            weights: Current weight dict {SignalSource: weight}.
+            floor: Minimum weight fraction per active signal. If None,
+                uses DEFAULT_DIVERSITY_FLOOR.
+
+        Returns:
+            Adjusted weights dict summing to 1.0.
+        """
+        if floor is None:
+            floor = DEFAULT_DIVERSITY_FLOOR
+        if floor <= 0:
+            return weights
+
+        # Only apply to signals that were active (weight > 0) before this step
+        active = {k: v for k, v in weights.items() if v > 0}
+        if len(active) <= 1:
+            return weights
+
+        total = sum(weights.values())
+        if total <= 0:
+            return weights
+
+        # Normalize to get fractional weights
+        frac = {k: v / total for k, v in weights.items()}
+
+        # Identify signals below the floor
+        adjusted = dict(frac)
+        raised_count = 0
+        for source in active:
+            if adjusted[source] < floor:
+                adjusted[source] = floor
+                raised_count += 1
+
+        if raised_count == 0:
+            return weights  # No adjustment needed
+
+        # Re-normalize so weights sum to 1.0
+        new_total = sum(adjusted.values())
+        if new_total > 0:
+            adjusted = {k: v / new_total for k, v in adjusted.items()}
+
+        logger.info(
+            "Diversity floor applied: raised %d/%d active signals (floor=%.1f%%)",
+            raised_count, len(active), floor * 100,
+        )
+
+        return adjusted
+
     @staticmethod
     def _extract_signal_values(readings: Dict) -> Dict[str, float]:
         """Build signal_values dict from current readings, skipping NaN."""
@@ -1692,12 +1802,24 @@ class EnsembleVoter:
     def _determine_action(
         regime: Regime, regime_confidence: float, equity_bias: float, agreement: float
     ) -> Tuple[str, float]:
-        """Determine portfolio action from regime, equity bias, and agreement."""
+        """Determine portfolio action from regime, equity bias, and agreement.
+
+        Uses regime-conditional consensus thresholds:
+        CRISIS 0.50, HIGH_VOL 0.55, RECOVERY 0.60, LOW_VOL 0.67, NORMAL 0.75.
+        Falls back to ENSEMBLE_CONSENSUS_THRESHOLD env var for unknown regimes.
+        """
         if regime == Regime.CRISIS:
             return "risk_off", regime_confidence
-        elif equity_bias > 0.3 and agreement > ENSEMBLE_CONSENSUS_THRESHOLD:
+
+        # Regime-specific threshold (falls back to global constant)
+        threshold = REGIME_CONSENSUS_THRESHOLDS.get(
+            regime.value.upper() if hasattr(regime.value, 'upper') else str(regime.value).upper(),
+            ENSEMBLE_CONSENSUS_THRESHOLD,
+        )
+
+        if equity_bias > 0.3 and agreement > threshold:
             return "increase_equity", agreement * abs(equity_bias)
-        elif equity_bias < -0.3 and agreement > ENSEMBLE_CONSENSUS_THRESHOLD:
+        elif equity_bias < -0.3 and agreement > threshold:
             return "decrease_equity", agreement * abs(equity_bias)
         else:
             return "neutral", 0.5
@@ -1771,6 +1893,16 @@ class EnsembleVoter:
         for r in weighted_signals[:3]:
             reasons.append(f"  {r.source.value}: {r.value:+.3f} (w={r.weight:.2f}, conf={r.confidence:.1%})")
 
+        # Compute effective signal count (N_eff) and Shannon entropy
+        weights_arr = np.array([r.weight for r in weighted_signals])
+        weights_arr = weights_arr[weights_arr > 0]
+        if len(weights_arr) > 0:
+            weight_entropy = float(-np.sum(weights_arr * np.log(weights_arr)))
+            n_eff = float(np.exp(weight_entropy))
+        else:
+            weight_entropy = 0.0
+            n_eff = 0.0
+
         return EnsembleVote(
             timestamp=str(datetime.now()),
             regime=regime,
@@ -1784,7 +1916,9 @@ class EnsembleVoter:
             action=consensus.action,
             confidence=consensus.action_confidence,
             reasoning="\n".join(reasons),
-            source_votes=weighted_signals
+            source_votes=weighted_signals,
+            n_eff=round(n_eff, 2),
+            weight_entropy=round(weight_entropy, 4),
         )
 
     def _persist_vote(self, vote: EnsembleVote, weighted_consensus: float) -> None:

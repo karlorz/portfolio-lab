@@ -7,6 +7,7 @@ if cron_guard_start "pf-eval" 600; then
     cd /root/projects/portfolio-lab
     export PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src"
     export ALPHALAB_MODE="${ALPHALAB_MODE:-paper}"
+    export REGIME_ALLOC_ENABLED=1
 
     python3 src/strategy/evaluator.py 2>&1 | tee -a data/eval.log
 

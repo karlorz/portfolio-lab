@@ -6,7 +6,7 @@
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13558 safe** (13215 Python + 313 TypeScript + 30 integration, ~31 skipped, 0 failures)
+| - Test count: **13759 safe** (13446 Python + 313 TypeScript + 30 integration, ~33 skipped, 0 failures)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
@@ -120,15 +120,30 @@
 |- **Performance.jsonl windowed pruning**: _prune_performance_log() truncates to 5000 entries after each append (env MAX_PERFORMANCE_ENTRIES) — prevents unbounded log growth during paper trading
 |- **Deflated Sharpe Ratio**: DSR=0.979 with 94 grid search configs — champion survives multiple-testing correction
 
-### Active Ensemble Signals (6)
-MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB, UNIFIED_OVERLAY (all 6 active)
+### Active Ensemble Signals (8)
+MULTI_SPEED_MOM, CROSS_ASSET_RV, INTERNATIONAL_MOMENTUM, ALTERNATIVE_DATA, CROSS_ASSET_REGIME_ARB, UNIFIED_OVERLAY, MULTI_TIMEFRAME_FUSION, GOOGLE_TRENDS
 - **MULTI_SPEED_MOM health: 0.55** (below 0.60 viability floor) — 0.00 weight (disabled), gated OFF in HIGH_VOL/CRISIS by RegimeGate
 - **RegimeGate**: behavioral_sentiment ON only in LOW_VOL; cross_asset_regime_arb OFF in LOW_VOL; LOW_VOL added to Regime enum (vol < 12% + momentum > 1%)
 - **v806 multi-timeframe signal fusion**: Re-implemented in commit 592210f (347 lines, 48 tests passing). Classifies signals into SHORT (5d), MEDIUM (21d), LONG (63d) buckets with regime-dependent fusion weights. Integrated as 7th signal source with 10% weight across all regimes.
+- **Google Trends sentiment signal** (8th signal, 5% weight): Replaces net-negative behavioral sentiment (VIX-proxy, -0.216 Sharpe, 65.8% FPR). Uses Z-scores of search volume for "recession", "inflation", "stock market crash", "interest rates". Data from data/google_trends.json via `make fetch-trends`. Contrarian: fear spike = buy signal.
+|- **Regime-conditional base allocation**: src/strategy/regime_allocation.py — varies SPY/GLD/TLT weights by regime. NORMAL 46/38/16, CRISIS 35/45/20, HIGH_VOL 38/42/20, LOW_VOL 55/30/15, RECOVERY 58/27/15. Activated via REGIME_ALLOC_ENABLED=1 (default: enabled in cron eval). Aggressive tilt defaults validated: Sharpe 0.9942 (+0.0438 vs static). REGIME_ALLOC_OVERRIDE env var for A/B testing.
 |- **Data-driven regime gating**: src/monitor/regime_sharpe_matrix.py (570 lines, 45 tests) — computes per-signal, per-regime Sharpe ratios with stationary bootstrap significance testing (10K iterations). Extracts signal-regime data from SQLite, derives gate rules (ON/OFF) and weight multipliers. DashboardGenerator persists computed rules to data/regime_gate_persisted.json; EnsembleVoter loads at startup (fallback: hardcoded GATE_RULES). Regime-conditional vol targeting: +0.052 Sharpe delta.
+|- **Regime transition forecaster**: src/regime/regime_transition_forecaster.py (220 lines, 22 tests) — empirical 5×5 transition matrix from historical regime sequences, exponential survival persistence modeling (NORMAL 7.6d, CRISIS 9.9d, LOW_VOL 10.0d, HIGH_VOL 7.1d, RECOVERY 1.4d), forward-looking regime probabilities via matrix power with persistence blending. Wired into DashboardGenerator as regime_transition section in signals.json. Completes Oliveira et al. 2025 framework step 2 (forecast). Case-normalizes lowercase regime names from classify_vix_regime.
+|- **Online IC weighter**: src/strategy/online_ic_weighter.py (175 lines, 17 tests) — non-ML alternative to XGBoost stacking integrator. EMA of per-signal IC values with temperature-scaled softmax weight conversion. Supports blend_with_static() for hybrid mode with regime-conditional weights. Trend penalty for decaying IC signals. Configurable half-life (21d), min/max weight caps, state persistence.
+|- **BL turnover penalty**: black_litterman_mapper.py — quadratic penalty on weight deviations from current portfolio via EfficientFrontier.add_objective(). turnover_penalty lambda parameter (0=off, 0.5=moderate, 2+=heavy) + current_weights dict. Extras dict records turnover_bps for monitoring. 8 tests.
+|- **Regime-conditional BL covariance**: black_litterman_mapper.py — replaces static full-sample covariance with regime-specific estimates in BL posterior. compute_regime_covariances() segments returns by rolling 21d realized vol (crisis >30%, high_vol >20%, normal >12%, low_vol <12% annualized), computes Ledoit-Wolf shrinkage covariance per regime. compute_bl_weights() selects regime-appropriate matrix; BLResult.extras["regime_covariance"] tracks which was used. 18 tests.
+|- **Effective signal count (N_eff)**: ensemble_voter.py — Shannon entropy-based N_eff = exp(H) added to EnsembleVote dataclass. Measures how many signals are effectively contributing (1=concentrated, 8=uniform). Reported in signals.json. 10 tests.
+|- **Adaptive consensus thresholds**: ensemble_voter.py — REGIME_CONSENSUS_THRESHOLDS dict varies action gate by regime. CRISIS 0.50 (act fast), HIGH_VOL 0.55, RECOVERY 0.60, LOW_VOL 0.67, NORMAL 0.75 (require consensus). Falls back to ENSEMBLE_CONSENSUS_THRESHOLD env var. 9 tests.
+|- **Maximum Diversification Portfolio**: src/strategy/max_diversification.py — maximizes diversification ratio (weighted avg vol / portfolio vol) per Choueifaty (2008). scipy.optimize SLSQP, long-only constraints. compute_mdp_weights() for standalone use or BL cascade integration. 10 tests.
+|- **Ensemble diversity floor**: ensemble_voter.py — _apply_diversity_floor() ensures each active signal retains minimum weight (DEFAULT_DIVERSITY_FLOOR=5%, ENSEMBLE_DIVERSITY_FLOOR env var). Prevents weight concentration by 8-step pipeline, improves N_eff. Applied after exploration noise, before turnover validation. 12 tests.
+|- **Conformal risk quantifier**: src/monitor/conformal_risk.py — split-conformal prediction for distribution-free risk estimation with guaranteed coverage (Vovk et al., 2005). ConformalRiskQuantifier.fit()/predict() provides (1-alpha) prediction intervals. conformal_var() and conformal_cvar() for VaR/CVaR without distributional assumptions. No ML deps. 18 tests.
+|- **Conformal CVaR → GARCH cross-check**: _load_garch_cvar_data() now computes conformal_cvar_95/conformal_var_95/conformal_cvar_ratio from SPY returns as a distribution-free model-risk validation against parametric GARCH estimates. Pydantic GarchCvarSignal + Zod GarchCvarSchema + TypeScript GarchCvarData all include optional conformal fields.
+|- **compute_metrics_from_returns**: src/backtest/metrics.py — lightweight returns→metrics dict utility. Takes raw daily returns list, computes CAGR/Sharpe/max_drawdown/volatility/calmar using centralized RISK_FREE_RATE. Refactored run_actual_ubt_validation.py to use shared function. 10 tests.
+|- **BOCD dashboard wiring**: _generate_bocd_regime() in DashboardGenerator wired into signals.json as bocd_regime section — Bayesian Online Changepoint Detection (Adams & MacKay 2007) for real-time structural break detection. Pydantic BOCDSignal + TypeScript bocd_regime type + Zod schema. Staleness tracking via 4h TTL. 22 existing BOCD tests + 48 signal schema tests — all passing.
+|- **DBC sweep metrics migration**: dbc_weight_sweep.py _simulate_portfolio() migrated to compute_metrics_from_returns() — fixes arithmetic-mean CAGR bug → correct geometric CAGR. 54 tests passing. ensemble_backtest.py deferred (correct manual calculations, same fp edge-case precedent as duration migration). gold_allocation_sweep.py already uses compute_metrics().
 
 ### Current Weights (NORMAL regime)
-ALT_DATA 0.305, INTL_MOM 0.245, CROSS_RV 0.13, REGIME_ARB 0.13, UNIFIED 0.19
+ALT_DATA 0.2245, INTL_MOM 0.2205, CROSS_RV 0.117, REGIME_ARB 0.117, UNIFIED 0.171, MTF 0.10, GOOGLE_TRENDS 0.05
 MSM 0.00 (disabled — net-negative -0.012 Sharpe, health 0.55)
 Max per-signal cap: 50%
 

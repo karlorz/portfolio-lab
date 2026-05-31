@@ -85,6 +85,9 @@ class TestDataLoading:
         with open(prices_path) as f:
             data = json.load(f)
         for sym in SYMBOLS_REQUIRED:
+            # BTC-USD is optional - crypto sentiment has fallback
+            if sym == "BTC-USD" and sym not in data:
+                continue
             assert sym in data, f"{sym} missing from prices.json"
             assert len(data[sym]) > 0, f"{sym} has no data"
 
@@ -638,6 +641,9 @@ class TestRealData:
         gen = AlternativeDataSignalGenerator()
         prices = gen._load_prices()
         for sym in SYMBOLS_REQUIRED:
+            # BTC-USD is optional - crypto sentiment has fallback
+            if sym == "BTC-USD" and sym not in prices:
+                continue
             assert sym in prices, f"{sym} not found in prices.json"
             assert len(prices[sym]) > 200, f"{sym} has insufficient data"
 
@@ -778,14 +784,14 @@ class TestConstantsValidation:
             assert weight > 0, f"Weight for {name} is zero"
 
     def test_component_weights_have_expected_keys(self):
-        """COMPONENT_WEIGHTS has exactly the 5 expected keys."""
+        """COMPONENT_WEIGHTS has exactly the 7 expected keys."""
         expected = {"treasury_curve", "sector_rotation", "credit_spread",
-                    "tail_risk", "broad_momentum"}
+                    "tail_risk", "broad_momentum", "crypto_sentiment", "crypto_fg"}
         assert set(COMPONENT_WEIGHTS.keys()) == expected
 
     def test_symbols_required_all_present(self):
-        """SYMBOLS_REQUIRED includes all 7 expected tickers."""
-        expected = {"SPY", "TLT", "SHY", "XLF", "XLY", "AGG", "IEF"}
+        """SYMBOLS_REQUIRED includes all 8 expected tickers (including BTC-USD for crypto sentiment)."""
+        expected = {"SPY", "TLT", "SHY", "XLF", "XLY", "AGG", "IEF", "BTC-USD"}
         assert set(SYMBOLS_REQUIRED) == expected
 
     def test_symbols_required_no_duplicates(self):

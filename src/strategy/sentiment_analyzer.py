@@ -93,7 +93,7 @@ class SentimentAggregator:
             self.analyzer = SentimentAnalyzer()
             if self.analyzer.disabled:
                 self.analyzer = None
-        except (ImportError, OSError, KeyError, ValueError, TypeError, RuntimeError, AttributeError) as e:
+        except Exception as e:
             logger.warning("SentimentAnalyzer unavailable, disabling: %s", e)
             self.analyzer = None
 
@@ -272,7 +272,7 @@ class SentimentAnalyzerPipeline:
             self.analyzer = SentimentAnalyzer()
             if self.analyzer.disabled:
                 self.analyzer = None
-        except (ImportError, OSError, KeyError, ValueError, TypeError, RuntimeError, AttributeError) as e:
+        except Exception as e:
             logger.warning("SentimentAnalyzer unavailable, disabling: %s", e)
             self.analyzer = None
 

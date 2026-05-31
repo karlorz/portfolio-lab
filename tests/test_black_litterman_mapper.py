@@ -551,7 +551,7 @@ class TestExportCompleteness:
         expected = {
             "BLViews", "BLResult",
             "map_biases_to_views", "run_black_litterman",
-            "compute_bl_weights", "tau_sensitivity",
+            "compute_bl_weights", "compute_regime_covariances", "tau_sensitivity",
         }
         assert set(public_api) == expected
 
