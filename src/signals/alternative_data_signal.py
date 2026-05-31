@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
 from src.backtest.metrics import save_results_json
 from src.data.price_cache import get_prices
+from src.data.crypto_fg import get_crypto_fg, CryptoFgData
 
 
 __all__ = ['SYMBOLS_REQUIRED', 'ComponentSignal', 'AlternativeDataComposite', 'EnsembleSignal', 'AlternativeDataSignalGenerator']
@@ -40,14 +41,15 @@ PRICES_PATH = PRICES_JSON
 # Symbols needed for each component
 SYMBOLS_REQUIRED = ["SPY", "TLT", "SHY", "XLF", "XLY", "AGG", "IEF", "BTC-USD"]
 
-# Default weights for the 6-component composite (must sum to 1.0)
+# Default weights for the 7-component composite (must sum to 1.0)
 COMPONENT_WEIGHTS: Dict[str, float] = {
-    "treasury_curve": 0.20,
-    "sector_rotation": 0.18,
-    "credit_spread": 0.18,
+    "treasury_curve": 0.18,
+    "sector_rotation": 0.16,
+    "credit_spread": 0.16,
     "tail_risk": 0.15,
-    "broad_momentum": 0.18,
-    "crypto_sentiment": 0.11,
+    "broad_momentum": 0.16,
+    "crypto_sentiment": 0.05,
+    "crypto_fg": 0.14,
 }
 
 
@@ -361,10 +363,10 @@ class AlternativeDataSignalGenerator:
             },
         )
 
-    # ---- Component 6: Crypto Sentiment ----
+    # ---- Component 6: Crypto Sentiment (BTC Momentum/Vol Proxy) ----
 
     def _crypto_sentiment_signal(self) -> ComponentSignal:
-        """Crypto Fear & Greed Index as sentiment proxy.
+        """Crypto sentiment via BTC momentum and realized volatility.
         
         Uses BTC momentum and realized volatility as a proxy for crypto market
         sentiment. Extreme fear in crypto often precedes broader market risk-on
@@ -408,6 +410,48 @@ class AlternativeDataSignalGenerator:
                 "btc_mom_20d": round(mom_20 * 100, 2),
                 "btc_vol_60d": round(vol_60 * 100, 2),
                 "vol_score": round(vol_score, 4),
+            },
+        )
+
+    # ---- Component 7: Crypto Fear & Greed Index (API) ----
+
+    def _crypto_fg_signal(self) -> ComponentSignal:
+        """Crypto Fear & Greed Index from Alternative.me API.
+        
+        Contrarian signal:
+        - Extreme Fear (0-24) → Bullish (+1.0 to +0.5)
+        - Fear (25-49) → Slightly Bullish (+0.5 to 0)
+        - Neutral (50) → 0
+        - Greed (51-74) → Slightly Bearish (0 to -0.5)
+        - Extreme Greed (75-100) → Bearish (-0.5 to -1.0)
+        """
+        fg_data = get_crypto_fg()
+        
+        if fg_data is None:
+            return ComponentSignal("crypto_fg", 0.0, 0.2, {"error": "API unavailable", "fallback": "neutral"})
+        
+        # Contrarian mapping: Fear = Bullish (+), Greed = Bearish (-)
+        # Formula: value = 1.0 - (fg_value / 50.0)
+        # 0 (Extreme Fear) -> +1.0
+        # 50 (Neutral) -> 0
+        # 100 (Extreme Greed) -> -1.0
+        value = 1.0 - (fg_data.value / 50.0)
+        value = max(-1.0, min(1.0, value))
+        
+        # Confidence: higher at extremes (0 or 100), lower at neutral (50)
+        # 0 or 100 -> 0.9
+        # 50 -> 0.4
+        confidence = 0.9 - 0.5 * (abs(fg_data.value - 50) / 50)
+        confidence = max(0.3, min(0.9, confidence))
+        
+        return ComponentSignal(
+            name="crypto_fg",
+            value=value,
+            confidence=round(confidence, 4),
+            raw_inputs={
+                "fg_value": fg_data.value,
+                "fg_classification": fg_data.classification,
+                "api_timestamp": fg_data.timestamp,
             },
         )
 
@@ -579,6 +623,7 @@ class AlternativeDataSignalGenerator:
             self._tail_risk_signal(),
             self._broad_momentum_signal(),
             self._crypto_sentiment_signal(),
+            self._crypto_fg_signal(),
         ]
 
         composite = self.calculate_composite(components)

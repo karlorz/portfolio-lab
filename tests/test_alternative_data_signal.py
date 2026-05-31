@@ -784,9 +784,9 @@ class TestConstantsValidation:
             assert weight > 0, f"Weight for {name} is zero"
 
     def test_component_weights_have_expected_keys(self):
-        """COMPONENT_WEIGHTS has exactly the 6 expected keys."""
+        """COMPONENT_WEIGHTS has exactly the 7 expected keys."""
         expected = {"treasury_curve", "sector_rotation", "credit_spread",
-                    "tail_risk", "broad_momentum", "crypto_sentiment"}
+                    "tail_risk", "broad_momentum", "crypto_sentiment", "crypto_fg"}
         assert set(COMPONENT_WEIGHTS.keys()) == expected
 
     def test_symbols_required_all_present(self):
