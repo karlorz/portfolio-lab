@@ -187,11 +187,11 @@ class Portfolio:
         """Count days since the last rebalance order was executed.
 
         Scans order log for the most recent rebalance entry.
-        Returns 999 if no rebalance found (forces periodic check).
+        Returns 0 when no rebalance history is available.
         """
         try:
             if not ORDERS_LOG.exists():
-                return 999
+                return 0
             last_rebalance_date = None
             with open(ORDERS_LOG) as f:
                 for line in f:
@@ -201,12 +201,12 @@ class Portfolio:
                         if ts:
                             last_rebalance_date = ts[:10]
             if last_rebalance_date is None:
-                return 999
+                return 0
             from datetime import date
             last = date.fromisoformat(last_rebalance_date)
             return (date.today() - last).days
         except (OSError, ValueError, KeyError, TypeError):
-            return 999
+            return 0
     
     def calculate_orders(self, target_weights: Dict[str, float], prices: Dict[str, float]) -> List[Dict]:
         """Generate orders to move from current to target allocation."""

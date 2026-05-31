@@ -31,7 +31,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-from src.paths import DATA_DIR, MARKET_DB
+from src.paths import DATA_DIR, MARKET_DB, PRICES_JSON
 from src.backtest.metrics import save_results_json
 
 
@@ -126,6 +126,49 @@ class SkewEngine:
         self.symbol = symbol
         self.db_path = MARKET_DB
 
+    def _fallback_returns_from_prices_json(self, days: int) -> np.ndarray:
+        """Fallback returns from cached prices.json pipeline."""
+        # First try direct file read to avoid cache/module monkeypatch side effects.
+        try:
+            with open(PRICES_JSON) as f:
+                price_data = json.load(f)
+
+            symbol_series = price_data.get(self.symbol, [])
+            closes = []
+            if isinstance(symbol_series, list):
+                for point in symbol_series:
+                    if isinstance(point, dict):
+                        value = point.get("p", point.get("close"))
+                    else:
+                        value = point
+                    if value is not None:
+                        closes.append(float(value))
+
+            if len(closes) >= 2:
+                closes_arr = np.array(closes, dtype=np.float64)
+                clipped = closes_arr[-(days + 1):] if len(closes_arr) > days + 1 else closes_arr
+                return np.diff(clipped) / clipped[:-1]
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            logger.debug("Direct prices.json fallback unavailable for %s: %s", self.symbol, e)
+
+        # Secondary fallback via shared price cache helper.
+        try:
+            from src.data.price_cache import get_prices_df
+
+            prices_df = get_prices_df(symbols=[self.symbol])
+            if self.symbol not in prices_df.columns:
+                return np.array([])
+
+            closes = prices_df[self.symbol].dropna().to_numpy(dtype=np.float64)
+            if len(closes) < 2:
+                return np.array([])
+
+            clipped = closes[-(days + 1):] if len(closes) > days + 1 else closes
+            return np.diff(clipped) / clipped[:-1]
+        except (ImportError, OSError, KeyError, ValueError, TypeError) as e:
+            logger.debug("Price-cache fallback unavailable for %s: %s", self.symbol, e)
+            return np.array([])
+
     def _get_prices(self, days: int = 260) -> np.ndarray:
         """Fetch daily returns from market.db."""
         if not self.db_path.exists():
@@ -156,14 +199,17 @@ class SkewEngine:
                         ORDER BY date DESC
                         LIMIT ?
                     """
-                else:
-                    # Try generic approach
+                elif "market_data" in tables:
+                    # Generic fallback schema
                     query = """
                         SELECT close FROM market_data
                         WHERE symbol = ?
                         ORDER BY date DESC
                         LIMIT ?
                     """
+                else:
+                    logger.warning("No recognized price table found in %s", self.db_path)
+                    return self._fallback_returns_from_prices_json(days)
 
                 cursor.execute(query, (self.symbol, days + 1))
                 rows = cursor.fetchall()
@@ -172,7 +218,7 @@ class SkewEngine:
                 logger.warning(
                     "Not enough data for %s: %d rows", self.symbol, len(rows)
                 )
-                return np.array([])
+                return self._fallback_returns_from_prices_json(days)
 
             closes = np.array([r[0] for r in rows], dtype=np.float64)
             # Reverse to chronological order
@@ -182,7 +228,7 @@ class SkewEngine:
 
         except (sqlite3.Error, Exception) as e:
             logger.error("Error fetching prices: %s", e)
-            return np.array([])
+            return self._fallback_returns_from_prices_json(days)
 
     def compute_skew_ratio(
         self, returns: np.ndarray, window: int

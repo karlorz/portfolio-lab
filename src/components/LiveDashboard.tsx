@@ -89,6 +89,26 @@ interface LiveDashboardProps {
   refreshInterval?: number; // seconds
 }
 
+async function safeParseJson(response: Response, endpoint: string): Promise<unknown | null> {
+  if (!response.ok) return null;
+
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  if (!contentType.includes('application/json')) {
+    // Static preview servers may return index.html (text/html) for missing JSON assets.
+    // Skip parsing so one bad endpoint does not fail the whole dashboard refresh.
+    return null;
+  }
+
+  try {
+    return await response.json();
+  } catch {
+    if (import.meta.env.DEV) {
+      console.warn(`[${endpoint}] Failed to parse JSON response`);
+    }
+    return null;
+  }
+}
+
 type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'chat';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
@@ -127,51 +147,59 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         fetch('/data/explainability/explainability_latest.json')
       ]);
 
-      if (signalsRes.ok) {
-        const raw = await signalsRes.json();
+      const signalsRaw = await safeParseJson(signalsRes, 'signals');
+      if (signalsRaw) {
+        const raw = signalsRaw;
         const validated = validateSignalsData(raw);
         if (validated) {
           setSignals(validated);
           setLastUpdate(new Date(validated.timestamp).toLocaleTimeString());
         }
       }
-      if (dashboardRes.ok) {
-        const raw = await dashboardRes.json();
+      const dashboardRaw = await safeParseJson(dashboardRes, 'dashboard');
+      if (dashboardRaw) {
+        const raw = dashboardRaw;
         const validated = validateFetchData(raw, DashboardDataSchema, 'dashboard');
         if (validated) {
           setPerformance(validated.paper_portfolio || []);
           setDashboard(validated as DashboardData);
         }
       }
-      if (alertsRes.ok) {
-        const raw = await alertsRes.json();
+      const alertsRaw = await safeParseJson(alertsRes, 'alerts');
+      if (alertsRaw) {
+        const raw = alertsRaw;
         const validated = validateFetchData(raw, AlertsDataSchema, 'alerts');
         if (validated) {
           setAlerts(validated.alerts || []);
         }
       }
-      if (statsRes.ok) {
-        const raw = await statsRes.json();
+      const statsRaw = await safeParseJson(statsRes, 'stats');
+      if (statsRaw) {
+        const raw = statsRaw;
         const validated = validateFetchData(raw, StatsDataSchema, 'stats');
         if (validated) setStats(validated as StatsData);
       }
-      if (healthRes.ok) {
-        const raw = await healthRes.json();
+      const healthRaw = await safeParseJson(healthRes, 'health');
+      if (healthRaw) {
+        const raw = healthRaw;
         const validated = validateFetchData(raw, HealthDataSchema, 'health');
         if (validated) setHealth(validated as HealthData);
       }
-      if (analyticsRes.ok) {
-        const raw = await analyticsRes.json();
+      const analyticsRaw = await safeParseJson(analyticsRes, 'analytics');
+      if (analyticsRaw) {
+        const raw = analyticsRaw;
         const validated = validateFetchData(raw, AnalyticsDataSchema, 'analytics');
         if (validated) setAnalytics(validated as AnalyticsData);
       }
-      if (rhRes.ok) {
-        const raw = await rhRes.json();
+      const rebalanceHealthRaw = await safeParseJson(rhRes, 'rebalance_health');
+      if (rebalanceHealthRaw) {
+        const raw = rebalanceHealthRaw;
         const validated = validateFetchData(raw, RebalanceHealthSchema, 'rebalance_health');
         if (validated) setRebalanceHealth(validated as unknown as RebalanceHealthData);
       }
-      if (exRes.ok) {
-        const raw = await exRes.json();
+      const explainabilityRaw = await safeParseJson(exRes, 'explainability');
+      if (explainabilityRaw) {
+        const raw = explainabilityRaw;
         const validated = validateFetchData(raw, PassthroughSchema, 'explainability');
         if (validated) setExplainability(validated as unknown as ExplainabilityData);
       }
@@ -185,28 +213,33 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           fetch('/data/black_litterman.json'),
           fetch('/data/turnover_validator.json'),
         ]);
-        if (gradRes.ok) {
-          const raw = await gradRes.json();
+        const graduationRaw = await safeParseJson(gradRes, 'graduation');
+        if (graduationRaw) {
+          const raw = graduationRaw;
           const validated = validateFetchData(raw, GraduationDataSchema, 'graduation');
           if (validated) setGraduationData(validated as unknown as GraduationChecklistData);
         }
-        if (sizingRes.ok) {
-          const raw = await sizingRes.json();
+        const adaptiveSizingRaw = await safeParseJson(sizingRes, 'adaptive_sizing');
+        if (adaptiveSizingRaw) {
+          const raw = adaptiveSizingRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'adaptive_sizing');
           if (validated) setAdaptiveSizingData(validated as unknown as AdaptiveSizingData);
         }
-        if (vixyRes.ok) {
-          const raw = await vixyRes.json();
+        const vixyRaw = await safeParseJson(vixyRes, 'vixy_hedge');
+        if (vixyRaw) {
+          const raw = vixyRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'vixy_hedge');
           if (validated) setVixyHedgeData(validated as unknown as VixyHedgeSizingData);
         }
-        if (blRes.ok) {
-          const raw = await blRes.json();
+        const blackLittermanRaw = await safeParseJson(blRes, 'black_litterman');
+        if (blackLittermanRaw) {
+          const raw = blackLittermanRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'black_litterman');
           if (validated) setBLMapperData(validated as unknown as BlackLittermanMapperData);
         }
-        if (turnoverRes.ok) {
-          const raw = await turnoverRes.json();
+        const turnoverRaw = await safeParseJson(turnoverRes, 'turnover_validator');
+        if (turnoverRaw) {
+          const raw = turnoverRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'turnover_validator');
           if (validated) setTurnoverData(validated as unknown as TurnoverValidatorData);
         }
@@ -217,18 +250,21 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           fetch('/data/tsmom.json'),
           fetch('/data/cross_asset_rv.json'),
         ]);
-        if (rgRes.ok) {
-          const raw = await rgRes.json();
+        const regimeGateRaw = await safeParseJson(rgRes, 'regime_gate');
+        if (regimeGateRaw) {
+          const raw = regimeGateRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'regime_gate');
           if (validated) setRegimeGateData(validated as unknown as RegimeGateData);
         }
-        if (tsmomRes.ok) {
-          const raw = await tsmomRes.json();
+        const tsmomRaw = await safeParseJson(tsmomRes, 'tsmom');
+        if (tsmomRaw) {
+          const raw = tsmomRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'tsmom');
           if (validated) setTsmomData(validated as unknown as TSMOMData);
         }
-        if (rvRes.ok) {
-          const raw = await rvRes.json();
+        const crossAssetRVRaw = await safeParseJson(rvRes, 'cross_asset_rv');
+        if (crossAssetRVRaw) {
+          const raw = crossAssetRVRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'cross_asset_rv');
           if (validated) setCrossAssetRVData(validated as unknown as CrossAssetRVData);
         }

@@ -19,6 +19,7 @@ Strategy Logic:
 
 import json
 import logging
+import sqlite3
 from src.paths import sqlite_connect, RISK_FREE_RATE
 import numpy as np
 import pandas as pd
@@ -99,13 +100,13 @@ class FactorMomentumEngine:
     
     def __init__(
         self,
-        db_path: Path = MARKET_DB,
+        db_path: Optional[Path] = None,
         lookback_months: int = 12,
         top_n: int = 2,
         min_momentum: float = 0.0,  # Minimum 12m return to qualify
         vol_lookback: int = 20
     ):
-        self.db_path = db_path
+        self.db_path = Path(db_path) if db_path is not None else MARKET_DB
         self.lookback_months = lookback_months
         self.top_n = top_n
         self.min_momentum = min_momentum
@@ -121,19 +122,23 @@ class FactorMomentumEngine:
         """Fetch historical price data from SQLite"""
         if not self.db_path.exists():
             return []
-        
-        with sqlite_connect(self.db_path) as conn:
-            cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT date, close, volume
-                FROM prices
-                WHERE symbol = ?
-                ORDER BY date DESC
-                LIMIT ?
-            """, (symbol, days))
+        try:
+            with sqlite_connect(self.db_path) as conn:
+                cursor = conn.cursor()
 
-            rows = cursor.fetchall()
+                cursor.execute("""
+                    SELECT date, close, volume
+                    FROM prices
+                    WHERE symbol = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                """, (symbol, days))
+
+                rows = cursor.fetchall()
+        except (sqlite3.Error, OSError) as e:
+            logger.warning("Factor price fetch failed for %s from %s: %s", symbol, self.db_path, e)
+            return []
         
         return [
             {"date": row[0], "close": row[1], "volume": row[2]}
@@ -938,8 +943,11 @@ def main():
             logger.info("\nML Recommendation: %s", result.get('ml_recommendation', 'N/A'))
         else:
             selected_key = "selected_factors"
-            logger.info("\nSelected Factors: %s", ', '.join(result[selected_key]))
-            logger.info("\nRecommendation: %s", result['recommendation'])
+            logger.info("\nSelected Factors: %s", ', '.join(result.get(selected_key, [])))
+            logger.info(
+                "\nRecommendation: %s",
+                result.get('recommendation', result.get('error', 'N/A'))
+            )
 
         logger.info("\n%s", "-" * 70)
         logger.info("ALLOCATION")
@@ -949,7 +957,7 @@ def main():
         if use_tsfm:
             allocation = safe_get(result, 'tsfm', 'allocation_tsfm', default={})
         else:
-            allocation = result['allocation']
+            allocation = result.get('allocation', {})
 
         for symbol, weight in allocation.items():
             logger.info("  %s: %6.1f%%", symbol, weight * 100)
@@ -986,7 +994,7 @@ def main():
                         "Rank", "Factor", "12m", "6m", "3m", "Vol", "Score")
             logger.info("%s", "-" * 70)
 
-            scores = result['current_scores']
+            scores = result.get('current_scores', {})
             sorted_scores = sorted(
                 scores.items(),
                 key=lambda x: x[1]['momentum_score'],

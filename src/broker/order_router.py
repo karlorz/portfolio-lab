@@ -19,6 +19,7 @@ from src.broker.alpaca import (
 )
 
 from src.paths import MARKET_DB, SIGNALS_JSON, DATA_DIR, sqlite_connect
+from src.data.price_cache import get_prices
 
 
 
@@ -85,7 +86,24 @@ class OrderRouter:
             return float(row[0]) if row else 0.0
         except sqlite3.Error:
             logger.warning("Failed to fetch price from %s for %s", self.db_path, symbol)
-            return 0.0
+
+        # Fallback: cached prices.json pipeline (used by frontend/backtests).
+        try:
+            prices = get_prices()
+            series = prices.get(symbol, [])
+            if series:
+                last_point = series[-1]
+                if isinstance(last_point, dict):
+                    price = last_point.get("p", last_point.get("close", 0.0))
+                elif isinstance(last_point, (list, tuple)):
+                    price = last_point[-1] if last_point else 0.0
+                else:
+                    price = last_point
+                return float(price) if price else 0.0
+        except (TypeError, ValueError, KeyError, OSError, json.JSONDecodeError) as e:
+            logger.warning("Price fallback failed for %s: %s", symbol, e)
+
+        return 0.0
 
     def load_signals(self) -> List[Signal]:
         """Load signals from signals.json."""

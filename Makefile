@@ -47,6 +47,41 @@ help:
 	@echo "  make unified-dashboard  Generate unified system dashboard"
 	@echo "  make daily-pnl    Capture daily P&L snapshot"
 	@echo "  make mark-to-market  Update portfolio with current market prices"
+	@echo "  make deploy-preview DEPLOY_HOST=sg02 [DEPLOY_REMOTE_BASE=...] [DEPLOY_PREVIEW_PORT=4173] [DEPLOY_BOOTSTRAP_PREVIEW_DATA=1]"
+	@echo "  make deploy-production DEPLOY_HOST=sg01 [DEPLOY_REMOTE_BASE=...] [DEPLOY_PROD_WEB_ROOT=/var/www/portfolio-lab] [DEPLOY_RELOAD_SERVICE=caddy]"
+
+# ── Remote Deploy ─────────────────────────────────────────────────────
+
+DEPLOY_HOST ?=
+DEPLOY_REMOTE_BASE ?=
+DEPLOY_PREVIEW_PORT ?=4173
+DEPLOY_BOOTSTRAP_PREVIEW_DATA ?=1
+DEPLOY_PROD_WEB_ROOT ?=/var/www/portfolio-lab
+DEPLOY_RELOAD_SERVICE ?=
+DEPLOY_HEALTH_URL ?=
+DEPLOY_EXTRA_ARGS ?=
+
+.PHONY: deploy-preview
+deploy-preview:
+	@[ -n "$(DEPLOY_HOST)" ] || (echo "DEPLOY_HOST is required. Example: make deploy-preview DEPLOY_HOST=sg02" && exit 1)
+	@ARGS="--host $(DEPLOY_HOST) --mode preview --preview-port $(DEPLOY_PREVIEW_PORT)"; \
+	if [ -n "$(DEPLOY_REMOTE_BASE)" ]; then ARGS="$$ARGS --remote-base $(DEPLOY_REMOTE_BASE)"; fi; \
+	if [ "$(DEPLOY_BOOTSTRAP_PREVIEW_DATA)" = "0" ]; then ARGS="$$ARGS --no-bootstrap-preview-data"; fi; \
+	if [ -n "$(DEPLOY_HEALTH_URL)" ]; then ARGS="$$ARGS --health-url $(DEPLOY_HEALTH_URL)"; fi; \
+	if [ -n "$(DEPLOY_EXTRA_ARGS)" ]; then ARGS="$$ARGS $(DEPLOY_EXTRA_ARGS)"; fi; \
+	echo "Running: scripts/deploy-remote.sh $$ARGS"; \
+	scripts/deploy-remote.sh $$ARGS
+
+.PHONY: deploy-production
+deploy-production:
+	@[ -n "$(DEPLOY_HOST)" ] || (echo "DEPLOY_HOST is required. Example: make deploy-production DEPLOY_HOST=sg01" && exit 1)
+	@ARGS="--host $(DEPLOY_HOST) --mode production --prod-web-root $(DEPLOY_PROD_WEB_ROOT)"; \
+	if [ -n "$(DEPLOY_REMOTE_BASE)" ]; then ARGS="$$ARGS --remote-base $(DEPLOY_REMOTE_BASE)"; fi; \
+	if [ -n "$(DEPLOY_RELOAD_SERVICE)" ]; then ARGS="$$ARGS --reload-service $(DEPLOY_RELOAD_SERVICE)"; fi; \
+	if [ -n "$(DEPLOY_HEALTH_URL)" ]; then ARGS="$$ARGS --health-url $(DEPLOY_HEALTH_URL)"; fi; \
+	if [ -n "$(DEPLOY_EXTRA_ARGS)" ]; then ARGS="$$ARGS $(DEPLOY_EXTRA_ARGS)"; fi; \
+	echo "Running: scripts/deploy-remote.sh $$ARGS"; \
+	scripts/deploy-remote.sh $$ARGS
 
 # ── Test Suite ────────────────────────────────────────────────────────
 

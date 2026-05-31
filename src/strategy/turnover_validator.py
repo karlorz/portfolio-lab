@@ -318,12 +318,18 @@ class TurnoverValidator:
     def _load_state(self) -> TurnoverValidatorState:
         """Load state from JSON file."""
         path = self._resolve_path()
-        if path.exists():
+        try:
+            exists = path.exists()
+        except OSError as e:
+            logger.warning("Failed to check turnover validator state path %s: %s", path, e)
+            return TurnoverValidatorState(rolling_window=self.rolling_window)
+
+        if exists:
             try:
                 with open(path) as f:
                     data = json.load(f)
                 return TurnoverValidatorState.from_dict(data)
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, KeyError, OSError) as e:
                 logger.warning("Failed to load turnover validator state: %s", e)
         return TurnoverValidatorState(rolling_window=self.rolling_window)
 

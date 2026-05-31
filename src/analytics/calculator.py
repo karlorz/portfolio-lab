@@ -423,6 +423,8 @@ def main():
                 if data:
                     latest = data[-1]
                     logger.info("%s: Sharpe=%s, Vol=%s%%", window, latest['sharpe'], latest['volatility'])
+                else:
+                    logger.info("%s: Sharpe=N/A, Vol=N/A (insufficient data)", window)
 
         elif cmd == "report":
             report = calc.generate_analytics_report()

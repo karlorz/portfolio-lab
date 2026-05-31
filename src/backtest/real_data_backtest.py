@@ -12,8 +12,10 @@ Usage:
 import json
 import logging
 import math
+import sqlite3
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Tuple
 import numpy as np
 
@@ -38,33 +40,39 @@ class RealDataBacktest:
         """Load real price data from market.db."""
         db_path = self.DATA_DIR / "market.db"
         if not db_path.exists():
+            db_path = Path(MARKET_DB)
+        if not db_path.exists():
             logger.error("market.db not found")
             return {}
 
-        with sqlite_connect(str(db_path)) as conn:
-            cursor = conn.cursor()
+        try:
+            with sqlite_connect(str(db_path)) as conn:
+                cursor = conn.cursor()
 
-            data = {}
-            symbol_map = {
-                "SPY": "SPY", "GLD": "GLD", "TLT": "TLT", "IEF": "IEF",
-                "BTC": "BTC-USD", "ETH": "ETH-USD", "VIX": "^VIX",
-            }
+                data = {}
+                symbol_map = {
+                    "SPY": "SPY", "GLD": "GLD", "TLT": "TLT", "IEF": "IEF",
+                    "BTC": "BTC-USD", "ETH": "ETH-USD", "VIX": "^VIX",
+                }
 
-            for asset, db_sym in symbol_map.items():
-                cursor.execute(
-                    "SELECT date, close FROM prices WHERE symbol=? ORDER BY date",
-                    (db_sym,)
-                )
-                rows = cursor.fetchall()
-                if rows:
-                    data[asset] = {
-                        "dates": [r[0] for r in rows],
-                        "prices": [float(r[1]) for r in rows],
-                    }
-                    num_days = len(rows)
-                    first_price = data[asset]['prices'][0]
-                    last_price = data[asset]['prices'][-1]
-                    logger.info("Loaded %s: %d days, $%.2f -> $%.2f", asset, num_days, first_price, last_price)
+                for asset, db_sym in symbol_map.items():
+                    cursor.execute(
+                        "SELECT date, close FROM prices WHERE symbol=? ORDER BY date",
+                        (db_sym,)
+                    )
+                    rows = cursor.fetchall()
+                    if rows:
+                        data[asset] = {
+                            "dates": [r[0] for r in rows],
+                            "prices": [float(r[1]) for r in rows],
+                        }
+                        num_days = len(rows)
+                        first_price = data[asset]['prices'][0]
+                        last_price = data[asset]['prices'][-1]
+                        logger.info("Loaded %s: %d days, $%.2f -> $%.2f", asset, num_days, first_price, last_price)
+        except (sqlite3.Error, OSError) as e:
+            logger.warning("Could not load market data from %s: %s", db_path, e)
+            return {}
 
         return data
 

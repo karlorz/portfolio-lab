@@ -300,12 +300,25 @@ class SatelliteDataAdapter(AlternativeDataAdapter):
             """, (ticker, f'-{days} days'))
         
             rows = cursor.fetchall()
-        
+
             if not rows:
-                # Generate synthetic data for testing
-                # In production, this would fetch from API
-                rows = self._generate_synthetic_data(ticker, days)
-                self._store_data(rows)
+                # If recent rows are unavailable, prefer existing historical rows.
+                # This avoids replacing valid manually-seeded/null test fixtures with synthetic data.
+                cursor.execute("""
+                    SELECT ticker, date, parking_occupancy_pct, occupancy_vs_last_year_pct,
+                           store_count, data_quality_score, source
+                    FROM satellite_data
+                    WHERE ticker = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                """, (ticker, days))
+                rows = cursor.fetchall()
+
+                if not rows:
+                    # Generate synthetic data for testing
+                    # In production, this would fetch from API
+                    rows = self._generate_synthetic_data(ticker, days)
+                    self._store_data(rows)
         
         
         return [{
@@ -525,10 +538,23 @@ class CreditCardAdapter(AlternativeDataAdapter):
             """, (ticker, f'-{days} days'))
         
             rows = cursor.fetchall()
-        
+
             if not rows:
-                rows = self._generate_synthetic_data(ticker, days)
-                self._store_data(rows)
+                # Preserve existing historical rows before synthetic fallback.
+                cursor.execute("""
+                    SELECT ticker, date, spending_growth_yoy, spending_growth_mom,
+                           transaction_volume_index, avg_ticket_size, category_rank_pct,
+                           data_quality_score, source
+                    FROM credit_card_data
+                    WHERE ticker = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                """, (ticker, days))
+                rows = cursor.fetchall()
+
+                if not rows:
+                    rows = self._generate_synthetic_data(ticker, days)
+                    self._store_data(rows)
         
         
         return [{
@@ -745,10 +771,22 @@ class SupplyChainAdapter(AlternativeDataAdapter):
             """, (ticker, f'-{days} days'))
         
             rows = cursor.fetchall()
-        
+
             if not rows:
-                rows = self._generate_synthetic_data(ticker, days)
-                self._store_data(rows)
+                # Preserve existing historical rows before synthetic fallback.
+                cursor.execute("""
+                    SELECT ticker, date, container_throughput_index, inventory_days_coverage,
+                           supplier_lead_time_days, shipping_cost_index, data_quality_score, source
+                    FROM supply_chain_data
+                    WHERE ticker = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                """, (ticker, days))
+                rows = cursor.fetchall()
+
+                if not rows:
+                    rows = self._generate_synthetic_data(ticker, days)
+                    self._store_data(rows)
         
         
         return [{

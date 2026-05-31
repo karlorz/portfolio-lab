@@ -326,8 +326,8 @@ def save_state(result: Dict, state_file: Optional[Path] = None) -> None:
     """Save detection result to state file."""
     if state_file is None:
         state_file = STATE_FILE
-    state_file.parent.mkdir(parents=True, exist_ok=True)
     try:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
         save_results_json(result, output_path=str(state_file))
         logger.info("State saved to %s", state_file)
     except OSError as e:
