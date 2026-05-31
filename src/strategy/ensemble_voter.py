@@ -22,6 +22,8 @@ Weight Adjustments (applied in order):
 7. Exploration noise (v2.57, Dirichlet sampling)
 8. Turnover-aware validation (v8.01, with basis-pursuit + regret-weighted)
 
+# Online IC-based weight learning (new, gated by ENSEMBLE_USE_IC_WEIGHTS)
+
 Consensus threshold: 2/3 weighted signals agree for action
 
 Usage:
@@ -681,6 +683,24 @@ class EnsembleVoter:
         )
         self.bandit_observations: int = 0
 
+        # Online IC weighter for IC-based ensemble weight learning
+        # Gated by ENSEMBLE_USE_IC_WEIGHTS env var (default: off)
+        self._use_ic_weights = os.environ.get("ENSEMBLE_USE_IC_WEIGHTS", "0").lower() in ("1", "true")
+        self._ic_weighter = None
+        if self._use_ic_weights:
+            try:
+                from src.strategy.online_ic_weighter import OnlineICWeighter
+                self._ic_weighter = OnlineICWeighter()
+                # Load persisted IC weighter state if available
+                ic_weighter_state = self.data_path / "ic_weighter_state.json"
+                if ic_weighter_state.exists():
+                    with open(ic_weighter_state) as f:
+                        self._ic_weighter.load_state(json.load(f))
+                    logger.info("OnlineICWeighter state loaded from %s", ic_weighter_state)
+            except Exception as e:
+                logger.warning("Failed to initialize OnlineICWeighter: %s", e)
+                self._ic_weighter = None
+
         # Regime gate — disables signals in regimes where they are net-negative
         from src.signals.regime_gate import RegimeGate
         self.regime_gate = RegimeGate()
@@ -1150,6 +1170,7 @@ class EnsembleVoter:
         weights = self.get_blended_weights(regime.name)
         weights = self._apply_regime_gating(weights, regime.name)
         weights = self._apply_adaptive_weights(weights, regime)
+        weights = self._apply_ic_weights(weights, regime)
         weights = self._apply_health_weights(weights)
         weights = self._apply_correlation_penalty(weights)
         if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "").lower() not in ("1", "true"):
@@ -1316,6 +1337,101 @@ class EnsembleVoter:
                 return adaptive_weights_enum
         except (KeyError, ValueError, TypeError, AttributeError, ZeroDivisionError, OSError) as e:
             logger.warning("Could not apply adaptive ensemble weights: %s", e)
+        return weights
+
+    def _apply_ic_weights(self, weights: Dict, regime: Regime) -> Dict:
+        """Apply IC-based ensemble weight learning (online IC weighter).
+
+        Uses OnlineICWeighter to compute IC-based weights from the ICMonitor
+        persisted state, then blends with the current weights. This is gated
+        by ENSEMBLE_USE_IC_WEIGHTS env var (default: off).
+
+        The IC weighter:
+        1. Loads IC data from ICMonitor persisted state
+        2. Computes rolling IC for each signal
+        3. Uses EMA with exponential decay to track IC trends
+        4. Converts IC values to weights via temperature-scaled softmax
+        5. Blends online weights with current static weights
+
+        Expected impact: +0.005-0.01 Sharpe by dynamically reweighting
+        signals based on their recent predictive power.
+        """
+        if not getattr(self, '_use_ic_weights', False) or getattr(self, '_ic_weighter', None) is None:
+            return weights
+
+        try:
+            from src.monitor.ic_decay_monitor import ICMonitor
+
+            # Load IC monitor state
+            monitor = ICMonitor()
+            monitor.load_state()
+
+            # Get IC values and trends for each signal
+            ic_values: Dict[str, float] = {}
+            ic_trends: Dict[str, str] = {}
+
+            for source_enum in weights:
+                source_str = source_enum.value
+                ic = monitor.compute_ic(source_str)
+                if ic is not None and np.isfinite(ic):
+                    ic_values[source_str] = ic
+                    trend = monitor.compute_ic_trend(source_str)
+                    ic_trends[source_str] = trend
+
+            if not ic_values:
+                logger.debug("No IC data available for online weight learning")
+                return weights
+
+            # Update the OnlineICWeighter with current IC values and trends
+            self._ic_weighter.update(ic_values)
+            self._ic_weighter.update_trends(ic_trends)
+
+            # Get IC-based weights (raw)
+            ic_weights = self._ic_weighter.get_weights()
+
+            if not ic_weights:
+                return weights
+
+            # Convert weights to string format for blending
+            current_weights_str = {k.value: v for k, v in weights.items()}
+
+            # Blend IC-based weights with current weights
+            # blend_alpha controls how much we trust IC-based weights (0=static, 1=online)
+            # Start conservative: 30% IC-based, 70% current
+            blend_alpha = float(os.environ.get("ENSEMBLE_IC_WEIGHT_BLEND_ALPHA", "0.3"))
+            blended = {}
+
+            for sig_name in current_weights_str:
+                ic_w = ic_weights.get(sig_name, 0.0)
+                current_w = current_weights_str[sig_name]
+                blended[sig_name] = (1.0 - blend_alpha) * current_w + blend_alpha * ic_w
+
+            # Renormalize
+            total = sum(blended.values())
+            if total > 0:
+                blended = {k: v / total for k, v in blended.items()}
+
+            # Convert back to enum-keyed dict
+            ic_adjusted = {}
+            for source_enum in weights:
+                source_str = source_enum.value
+                if source_str in blended:
+                    ic_adjusted[source_enum] = blended[source_str]
+
+            if ic_adjusted:
+                logger.info(
+                    "Online IC weights applied (blend_alpha=%.2f): %s",
+                    blend_alpha,
+                    ', '.join(
+                        f'{k.value}={v:.3f}'
+                        for k, v in ic_adjusted.items() if v > 0.01
+                    )
+                )
+                return ic_adjusted
+
+        except (ImportError, KeyError, ValueError, TypeError, AttributeError, OSError) as e:
+            logger.warning("Could not apply IC-based weights: %s", e)
+
         return weights
 
     def _apply_health_weights(self, weights: Dict) -> Dict:
@@ -1931,6 +2047,17 @@ class EnsembleVoter:
             rw_selector._save_state()
         except (ImportError, OSError, KeyError, ValueError, TypeError, AttributeError) as rw_e:
             logger.warning("Could not persist ensemble decision to regret-weighted state: %s", rw_e)
+
+        # Persist IC weighter state if enabled
+        if getattr(self, '_use_ic_weights', False) and getattr(self, '_ic_weighter', None) is not None:
+            try:
+                ic_state_path = self.data_path / "ic_weighter_state.json"
+                ic_state = self._ic_weighter.get_state()
+                with open(ic_state_path, "w") as f:
+                    json.dump(ic_state, f)
+                logger.debug("OnlineICWeighter state saved to %s", ic_state_path)
+            except (OSError, TypeError, ValueError) as e:
+                logger.warning("Failed to save OnlineICWeighter state: %s", e)
 
         # Check for IC-based signal decay alerts
         try:
