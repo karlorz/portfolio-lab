@@ -25,6 +25,9 @@ REMOTE_BASE=""
 SYNC_METHOD="auto"   # auto|rsync|tar
 PACKAGE_MANAGER="auto" # auto|bun|npm
 PREVIEW_PORT="4173"
+PREVIEW_HOST="127.0.0.1"
+PREVIEW_SERVICE="portfolio-lab-preview"
+PREVIEW_MEMORY_MAX="512M"
 HEALTH_URL=""
 PROD_WEB_ROOT="/var/www/portfolio-lab"
 RELOAD_SERVICE=""
@@ -58,6 +61,10 @@ Core options:
 
 Preview mode options:
   --preview-port <port>         Preview HTTP port (default: 4173)
+  --preview-host <host>         Preview bind host (default: 127.0.0.1)
+  --preview-service <name>      systemd service name (default: portfolio-lab-preview)
+  --no-preview-service          Disable systemd service; use nohup fallback
+  --preview-memory-max <size>   systemd MemoryMax for preview service (default: 512M)
 
 Production mode options:
   --prod-web-root <path>        Static web root (default: /var/www/portfolio-lab)
@@ -122,6 +129,10 @@ while [ $# -gt 0 ]; do
     --sync-method) SYNC_METHOD="${2:-}"; shift 2 ;;
     --package-manager) PACKAGE_MANAGER="${2:-}"; shift 2 ;;
     --preview-port) PREVIEW_PORT="${2:-}"; shift 2 ;;
+    --preview-host) PREVIEW_HOST="${2:-}"; shift 2 ;;
+    --preview-service) PREVIEW_SERVICE="${2:-}"; shift 2 ;;
+    --no-preview-service) PREVIEW_SERVICE=""; shift ;;
+    --preview-memory-max) PREVIEW_MEMORY_MAX="${2:-}"; shift 2 ;;
     --health-url) HEALTH_URL="${2:-}"; shift 2 ;;
     --prod-web-root) PROD_WEB_ROOT="${2:-}"; shift 2 ;;
     --reload-service) RELOAD_SERVICE="${2:-}"; shift 2 ;;
@@ -147,6 +158,8 @@ done
 is_integer "$SSH_PORT" || die "--ssh-port must be an integer"
 is_integer "$PREVIEW_PORT" || die "--preview-port must be an integer"
 is_integer "$KEEP_RELEASES" || die "--keep-releases must be an integer"
+[ -n "$PREVIEW_HOST" ] || die "--preview-host must not be empty"
+[ -n "$PREVIEW_MEMORY_MAX" ] || die "--preview-memory-max must not be empty"
 
 if [ -z "$REMOTE_BASE" ]; then
   if [ "$MODE" = "preview" ]; then
@@ -188,6 +201,8 @@ ssh_exec() {
     printf '[%s] [dry-run] ssh %s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$REMOTE" "$*" >&2
     return 0
   fi
+  # Values are intentionally expanded on the client before executing remotely.
+  # shellcheck disable=SC2029
   ssh "${SSH_ARGS[@]}" "$REMOTE" "$@"
 }
 
@@ -312,6 +327,8 @@ main() {
     if [ "$DRY_RUN" = "1" ]; then
       log "[dry-run] tar stream project -> ${REMOTE}:${remote_release_dir}"
     else
+      # The remote release dir is intentionally expanded locally for the SSH command.
+      # shellcheck disable=SC2029
       COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 \
       tar "${local_tar_flags[@]}" -C "$PROJECT_ROOT" --exclude-from="$excludes_tmp" -cf - . \
         | ssh "${SSH_ARGS[@]}" "$REMOTE" "tar -xf - -C '${remote_release_dir}'"
@@ -337,6 +354,9 @@ main() {
     printf 'RUN_GENERATOR=%q\n' "$RUN_GENERATOR"
     printf 'BOOTSTRAP_PREVIEW_DATA=%q\n' "$BOOTSTRAP_PREVIEW_DATA"
     printf 'PREVIEW_PORT=%q\n' "$PREVIEW_PORT"
+    printf 'PREVIEW_HOST=%q\n' "$PREVIEW_HOST"
+    printf 'PREVIEW_SERVICE=%q\n' "$PREVIEW_SERVICE"
+    printf 'PREVIEW_MEMORY_MAX=%q\n' "$PREVIEW_MEMORY_MAX"
     printf 'PROD_WEB_ROOT=%q\n' "$PROD_WEB_ROOT"
     printf 'RELOAD_SERVICE=%q\n' "$RELOAD_SERVICE"
     printf 'HEALTH_URL=%q\n' "$HEALTH_URL"
@@ -394,22 +414,155 @@ stop_port_listener() {
   sleep 1
 }
 
-start_preview() {
+preview_service_unit() {
+  local name="$PREVIEW_SERVICE"
+
+  case "$name" in
+    ""|"0"|"none") return 1 ;;
+  esac
+
+  case "$name" in
+    *.service) ;;
+    *) name="${name}.service" ;;
+  esac
+
+  case "$name" in
+    ""|*[!A-Za-z0-9_.@-]*)
+      warn "Invalid preview service name: ${PREVIEW_SERVICE}; using nohup fallback"
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "$name"
+}
+
+can_manage_systemd() {
+  command -v systemctl >/dev/null 2>&1 && [ "$(id -u)" = "0" ] && [ -d /etc/systemd/system ]
+}
+
+stop_preview() {
+  local port="$1"
+  local unit
+
+  unit="$(preview_service_unit 2>/dev/null || true)"
+  if [ -n "$unit" ] && can_manage_systemd; then
+    systemctl stop "$unit" >/dev/null 2>&1 || true
+  fi
+
+  stop_port_listener "$port"
+}
+
+write_preview_service() {
   local workdir="$1"
   local pm="$2"
   local port="$3"
+  local host="$4"
+  local unit="$5"
+  local pm_bin exec_start unit_path service_path
+
+  pm_bin="$(command -v "$pm" 2>/dev/null || true)"
+  if [ -z "$pm_bin" ]; then
+    warn "Could not resolve package manager binary for ${pm}; using nohup fallback"
+    return 1
+  fi
+
+  if [ "$pm" = "bun" ]; then
+    exec_start="${pm_bin} run preview --host ${host} --port ${port}"
+  else
+    exec_start="${pm_bin} run preview -- --host ${host} --port ${port}"
+  fi
+
+  unit_path="/etc/systemd/system/${unit}"
+  service_path="$PATH"
+
+  cat > "$unit_path" <<EOF
+[Unit]
+Description=Portfolio Lab protected preview app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${workdir}
+Environment=NODE_ENV=production
+Environment=PORTFOLIO_LAB_ENABLE_ML=0
+Environment=PATH=${service_path}
+ExecStartPre=/usr/bin/test -f ${workdir}/package.json
+ExecStartPre=/usr/bin/test -d ${workdir}/dist
+ExecStart=${exec_start}
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGTERM
+SyslogIdentifier=${unit%.service}
+MemoryMax=${PREVIEW_MEMORY_MAX}
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+start_preview_service() {
+  local workdir="$1"
+  local pm="$2"
+  local port="$3"
+  local host="$4"
+  local unit
+
+  unit="$(preview_service_unit 2>/dev/null || true)"
+  if [ -z "$unit" ]; then
+    return 1
+  fi
+
+  if ! can_manage_systemd; then
+    warn "systemd root access unavailable; using nohup fallback"
+    return 1
+  fi
+
+  log "Installing/restarting preview service: ${unit}"
+  write_preview_service "$workdir" "$pm" "$port" "$host" "$unit" || return 1
+  systemctl daemon-reload
+  systemctl enable "$unit" >/dev/null
+  systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+  systemctl restart "$unit"
+  sleep 2
+
+  systemctl is-active --quiet "$unit" && ss -ltnp "sport = :${port}" >/dev/null 2>&1
+}
+
+start_preview_nohup() {
+  local workdir="$1"
+  local pm="$2"
+  local port="$3"
+  local host="$4"
   local cmd
 
   if [ "$pm" = "bun" ]; then
-    cmd="bun run preview --host 0.0.0.0 --port ${port}"
+    cmd="bun run preview --host ${host} --port ${port}"
   else
-    cmd="npm run preview -- --host 0.0.0.0 --port ${port}"
+    cmd="npm run preview -- --host ${host} --port ${port}"
   fi
 
   (cd "$workdir" && nohup sh -c "$cmd" > preview.log 2>&1 < /dev/null &)
   sleep 2
 
   ss -ltnp "sport = :${port}" >/dev/null 2>&1
+}
+
+start_preview() {
+  local workdir="$1"
+  local pm="$2"
+  local port="$3"
+  local host="$4"
+
+  if start_preview_service "$workdir" "$pm" "$port" "$host"; then
+    return 0
+  fi
+
+  warn "Starting preview with nohup fallback; service will not survive reboot"
+  start_preview_nohup "$workdir" "$pm" "$port" "$host"
 }
 
 health_check() {
@@ -718,8 +871,8 @@ if [ "$SKIP_BUILD" != "1" ]; then
 fi
 
 if [ "$MODE" = "preview" ]; then
-  log "Stopping existing preview listener on port ${PREVIEW_PORT} (port-scoped)"
-  stop_port_listener "$PREVIEW_PORT"
+  log "Stopping existing preview service/listener on port ${PREVIEW_PORT}"
+  stop_preview "$PREVIEW_PORT"
 
   # Atomic current symlink switch
   ln -sfn "$release_dir" "${current_link}.new"
@@ -730,14 +883,14 @@ if [ "$MODE" = "preview" ]; then
     bootstrap_preview_data "$current_link"
   fi
 
-  log "Starting preview server on ${PREVIEW_PORT}"
-  if ! start_preview "$current_link" "$pm" "$PREVIEW_PORT"; then
+  log "Starting preview server on ${PREVIEW_HOST}:${PREVIEW_PORT}"
+  if ! start_preview "$current_link" "$pm" "$PREVIEW_PORT" "$PREVIEW_HOST"; then
     warn "Preview start failed; attempting rollback"
     if [ -n "$previous_target" ] && [ -d "$previous_target" ]; then
       ln -sfn "$previous_target" "${current_link}.new"
       mv -Tf "${current_link}.new" "$current_link"
-      stop_port_listener "$PREVIEW_PORT"
-      start_preview "$current_link" "$pm" "$PREVIEW_PORT" || true
+      stop_preview "$PREVIEW_PORT"
+      start_preview "$current_link" "$pm" "$PREVIEW_PORT" "$PREVIEW_HOST" || true
     fi
     exit 1
   fi
@@ -748,8 +901,8 @@ if [ "$MODE" = "preview" ]; then
     if [ -n "$previous_target" ] && [ -d "$previous_target" ]; then
       ln -sfn "$previous_target" "${current_link}.new"
       mv -Tf "${current_link}.new" "$current_link"
-      stop_port_listener "$PREVIEW_PORT"
-      start_preview "$current_link" "$pm" "$PREVIEW_PORT" || true
+      stop_preview "$PREVIEW_PORT"
+      start_preview "$current_link" "$pm" "$PREVIEW_PORT" "$PREVIEW_HOST" || true
     fi
     exit 1
   fi
