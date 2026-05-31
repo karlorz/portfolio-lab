@@ -2061,7 +2061,8 @@ class TestAdapterDataNullFields:
             init_database()
             adapter = SatelliteDataAdapter()
             adapter.db_path = tmp_path / "alt.db"
-            rows = [("WMT", "2026-03-01", None, None, 2500, None, "test")]
+            # Use a date within the last 90 days to avoid synthetic data generation
+            rows = [("WMT", "2026-05-01", None, None, 2500, None, "test")]
             adapter._store_data(rows)
             data = adapter.fetch_data("WMT", days=90)
         assert len(data) >= 1
@@ -2074,7 +2075,8 @@ class TestAdapterDataNullFields:
             init_database()
             adapter = CreditCardAdapter()
             adapter.db_path = tmp_path / "alt.db"
-            rows = [("AMZN", "2026-03-01", None, None, None, None, None, None, "test")]
+            # Use a date within the last 90 days to avoid synthetic data generation
+            rows = [("AMZN", "2026-05-01", None, None, None, None, None, None, "test")]
             adapter._store_data(rows)
             data = adapter.fetch_data("AMZN", days=90)
         assert len(data) >= 1
@@ -2086,7 +2088,8 @@ class TestAdapterDataNullFields:
             init_database()
             adapter = SupplyChainAdapter()
             adapter.db_path = tmp_path / "alt.db"
-            rows = [("AAPL", "2026-03-01", None, None, None, None, None, "test")]
+            # Use a date within the last 90 days to avoid synthetic data generation
+            rows = [("AAPL", "2026-05-01", None, None, None, None, None, "test")]
             adapter._store_data(rows)
             data = adapter.fetch_data("AAPL", days=90)
         assert len(data) >= 1
