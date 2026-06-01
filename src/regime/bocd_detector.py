@@ -253,9 +253,9 @@ class BOCDDetector:
         n = len(self._regime_labels)
         changepoint_count = np.sum(self._regime_labels == 1)
         
-        # Determine current regime based on recent MAP run length
-        recent_map = np.mean(self._map_run_lengths[max(0, n-20):n]) if n > 20 else self._map_run_lengths[-1]
-        regime_change_prob = 1.0 - (recent_map / max(n, 1))  # Normalized drop probability
+        # regime_change_prob: probability mass at run length 0 (changepoint just happened)
+        # This is the actual BOCD changepoint probability, not a MAP heuristic
+        regime_change_prob = float(self._changepoint_probs[-1]) if self._changepoint_probs is not None else 0.0
         
         # Map to portfolio-lab regime types
         # For volatility detection, we'll map to:
