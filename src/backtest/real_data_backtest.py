@@ -290,7 +290,7 @@ class RealDataBacktest:
         b_dd = min(dd_base) if dd_base else 0
         c_dd = min(dd_comb) if dd_comb else 0
 
-        meets = c_sharpe >= 0.90
+        meets = bool(c_sharpe >= 0.90)
 
         return BacktestResult(
             total_return=round((comb_val - 1) * 100, 1),

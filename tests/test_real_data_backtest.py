@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
@@ -380,24 +382,24 @@ class TestEdgeCases:
 
     def test_no_data_returns_safe_result(self):
         bt = RealDataBacktest()
-        # Point to non-existent path
-        bt.DATA_DIR = Path("/nonexistent")
-        result = bt.run()
+        # Mock _load_market_data to return empty dict
+        with patch.object(bt, '_load_market_data', return_value={}):
+            result = bt.run()
         assert result.extras["trading_days"] == 0
         assert "No data" in result.extras["recommendation"]
 
     def test_no_data_meets_target_false(self):
         """No-data result must have meets_target=False."""
         bt = RealDataBacktest()
-        bt.DATA_DIR = Path("/nonexistent")
-        result = bt.run()
+        with patch.object(bt, '_load_market_data', return_value={}):
+            result = bt.run()
         assert result.extras["meets_target"] is False
 
     def test_no_data_returns_zero_metrics(self):
         """No-data result must have all zero metrics."""
         bt = RealDataBacktest()
-        bt.DATA_DIR = Path("/nonexistent")
-        result = bt.run()
+        with patch.object(bt, '_load_market_data', return_value={}):
+            result = bt.run()
         assert result.total_return == 0.0
         assert result.cagr == 0.0
         assert result.volatility == 0.0
