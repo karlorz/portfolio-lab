@@ -58,6 +58,17 @@ class RegimeGate:
     # Minimum regime confidence to apply gating (below this, all signals stay ON)
     DEFAULT_CONFIDENCE_THRESHOLD = 0.7
 
+    # Regime-conditional confidence thresholds (v3.25)
+    # Lower thresholds in volatile regimes capture more signal diversity
+    # Higher thresholds in calm regimes reduce false positives
+    REGIME_CONFIDENCE_THRESHOLDS = {
+        "CRISIS": 0.45,      # Lower threshold: capture more signals in crisis
+        "HIGH_VOL": 0.55,    # Medium threshold: balanced approach in volatile markets
+        "NORMAL": 0.75,      # Higher threshold: reduce false positives in normal markets
+        "LOW_VOL": 0.85,     # Highest threshold: strict filtering in calm markets
+        "RECOVERY": 0.60,    # Medium threshold: moderate filtering during recovery
+    }
+
     def __init__(
         self,
         gate_rules: Optional[Dict[str, Set[str]]] = None,
@@ -119,13 +130,17 @@ class RegimeGate:
     ) -> List[str]:
         """Gate signals combining both hysteresis and confidence thresholding.
 
-        When regime confidence is below the threshold, all signals remain ON
-        (gating is deferred to avoid premature switching on uncertain regime
-        classification). When confidence is sufficient, normal gating applies
-        with hysteresis protection.
+        Uses regime-conditional confidence thresholds (v3.25):
+        - CRISIS: 0.45 (lower threshold to capture more signal diversity)
+        - HIGH_VOL: 0.55 (medium threshold for volatile markets)
+        - NORMAL: 0.75 (higher threshold to reduce false positives)
+        - LOW_VOL: 0.85 (highest threshold for calm markets)
+        - RECOVERY: 0.60 (medium threshold during recovery)
 
-        This prevents rapid ON/OFF oscillation when the regime classifier
-        is uncertain or when regime transitions are transient.
+        When regime confidence is below the regime-specific threshold,
+        all signals remain ON (gating is deferred to avoid premature switching
+        on uncertain regime classification). When confidence is sufficient,
+        normal gating applies with hysteresis protection.
 
         Args:
             regime_name: Current detected regime
@@ -136,7 +151,12 @@ class RegimeGate:
         Returns:
             List of gated signal names that are active
         """
-        if confidence < self.confidence_threshold:
+        # Get regime-specific confidence threshold (fall back to default if unknown regime)
+        regime_threshold = self.REGIME_CONFIDENCE_THRESHOLDS.get(
+            regime_name, self.confidence_threshold
+        )
+        
+        if confidence < regime_threshold:
             # Low confidence: don't apply gating, all signals stay ON
             return list(self.gate_rules.keys())
         return self.gate_with_hysteresis(regime_name, prev_regime, days_in_regime)

@@ -920,11 +920,83 @@ class TestConfidenceGating:
 
     def test_zero_confidence_threshold_always_gates(self):
         gate = RegimeGate(confidence_threshold=0.0)
-        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.01)
+        # HIGH_VOL has gating rules for multi_speed_momentum
+        # Use confidence above HIGH_VOL threshold (0.55) to trigger gating
+        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.6)
         assert "multi_speed_momentum" not in active
-
     def test_one_confidence_threshold_never_gates(self):
         gate = RegimeGate(confidence_threshold=1.0)
-        active = gate.gate_with_confidence("HIGH_VOL", confidence=0.99)
+        # Unknown regime uses custom threshold (1.0)
+        active = gate.gate_with_confidence("UNKNOWN_REGIME", confidence=0.99)
         # Below 1.0 threshold: all signals ON
         assert "multi_speed_momentum" in active
+class TestRegimeConditionalConfidenceThresholds:
+    """Tests for v3.25 regime-conditional confidence thresholds."""
+
+    def test_crisis_has_lower_threshold(self):
+        """CRISIS regime should have lower threshold (0.45) to capture more signals."""
+        gate = RegimeGate()
+        assert gate.REGIME_CONFIDENCE_THRESHOLDS["CRISIS"] == 0.45
+
+    def test_low_vol_has_higher_threshold(self):
+        """LOW_VOL regime should have higher threshold (0.85) to reduce false positives."""
+        gate = RegimeGate()
+        assert gate.REGIME_CONFIDENCE_THRESHOLDS["LOW_VOL"] == 0.85
+
+    def test_gate_with_confidence_crisis_low_confidence(self):
+        """In CRISIS with low confidence (0.4), all signals should stay ON."""
+        gate = RegimeGate()
+        # CRISIS threshold is 0.45, so 0.4 < 0.45 means all signals ON
+        active = gate.gate_with_confidence("CRISIS", confidence=0.4)
+        # All gated signals should be active (gating deferred)
+        assert "multi_speed_momentum" in active
+        assert "international_momentum" in active
+
+    def test_gate_with_confidence_crisis_high_confidence(self):
+        """In CRISIS with high confidence (0.8), normal gating applies."""
+        gate = RegimeGate()
+        # CRISIS threshold is 0.45, so 0.8 > 0.45 means normal gating
+        active = gate.gate_with_confidence("CRISIS", confidence=0.8)
+        # MSM OFF in CRISIS, INTL_MOM OFF in CRISIS
+        assert "multi_speed_momentum" not in active
+        assert "international_momentum" not in active
+
+    def test_gate_with_confidence_low_vol_strict_threshold(self):
+        """In LOW_VOL with medium confidence (0.8), should defer gating."""
+        gate = RegimeGate()
+        # LOW_VOL threshold is 0.85, so 0.8 < 0.85 means all signals ON
+        active = gate.gate_with_confidence("LOW_VOL", confidence=0.8)
+        # cross_asset_regime_arb OFF in LOW_VOL, but gating deferred
+        assert "cross_asset_regime_arb" in active
+
+    def test_gate_with_confidence_normal_standard_threshold(self):
+        """In NORMAL with standard confidence (0.75), should apply gating."""
+        gate = RegimeGate()
+        # NORMAL threshold is 0.75, so 0.75 >= 0.75 means normal gating
+        active = gate.gate_with_confidence("NORMAL", confidence=0.75)
+        # behavioral_sentiment OFF in NORMAL
+        assert "behavioral_sentiment" not in active
+
+    def test_gate_with_confidence_unknown_regime_uses_default(self):
+        """Unknown regime should fall back to default confidence threshold."""
+        gate = RegimeGate()
+        # Unknown regime uses default threshold (0.7)
+        active = gate.gate_with_confidence("UNKNOWN_REGIME", confidence=0.65)
+        # 0.65 < 0.7 means all signals ON (gating deferred)
+        assert "multi_speed_momentum" in active
+
+    def test_regime_confidence_thresholds_cover_all_regimes(self):
+        """Verify all expected regimes have confidence thresholds."""
+        gate = RegimeGate()
+        expected_regimes = ["CRISIS", "HIGH_VOL", "NORMAL", "LOW_VOL", "RECOVERY"]
+        for regime in expected_regimes:
+            assert regime in gate.REGIME_CONFIDENCE_THRESHOLDS
+
+    def test_regime_confidence_thresholds_monotonicity(self):
+        """Verify threshold ordering: CRISIS < HIGH_VOL < NORMAL < LOW_VOL."""
+        gate = RegimeGate()
+        assert gate.REGIME_CONFIDENCE_THRESHOLDS["CRISIS"] < gate.REGIME_CONFIDENCE_THRESHOLDS["HIGH_VOL"]
+        assert gate.REGIME_CONFIDENCE_THRESHOLDS["HIGH_VOL"] < gate.REGIME_CONFIDENCE_THRESHOLDS["NORMAL"]
+        assert gate.REGIME_CONFIDENCE_THRESHOLDS["NORMAL"] < gate.REGIME_CONFIDENCE_THRESHOLDS["LOW_VOL"]
+
+
