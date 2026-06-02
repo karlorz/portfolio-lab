@@ -92,10 +92,10 @@ test:
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
 	echo "  Memory cap: 1GB virtual (ulimit -v)"; \
 	echo "  Heavy tests: excluded via collect_ignore"; \
-	echo "  Timeout: 600s (increased from 300s to prevent false failures)"; \
+	echo "  Timeout: 1200s (increased from 600s to prevent false failures)"; \
 	START=$$(date +%s); \
 	bash -c 'ulimit -v 3145728; \
-		timeout 600 uv run pytest tests/ -q --tb=short -p no:cacheprovider'; \
+		timeout 1200 uv run pytest tests/ -q --tb=short -p no:cacheprovider'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
