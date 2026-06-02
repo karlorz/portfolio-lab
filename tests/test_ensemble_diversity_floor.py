@@ -159,7 +159,7 @@ class TestDiversityFloorIntegration:
             readings, Regime.NORMAL, 0.8
         )), patch.object(voter, 'get_blended_weights', return_value={
             s: 0.15 for s in SignalSource
-        }), patch.object(voter, '_apply_regime_gating', side_effect=lambda w, r: w), \
+        }), patch.object(voter, '_apply_regime_gating', side_effect=lambda w, r, c=0.8: w), \
             patch.object(voter, '_apply_adaptive_weights', side_effect=lambda w, r: w), \
             patch.object(voter, '_apply_health_weights', side_effect=lambda w: w), \
             patch.object(voter, '_apply_correlation_penalty', side_effect=lambda w: w), \

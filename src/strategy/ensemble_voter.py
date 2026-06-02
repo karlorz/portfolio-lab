@@ -1168,7 +1168,7 @@ class EnsembleVoter:
         )
 
         weights = self.get_blended_weights(regime.name)
-        weights = self._apply_regime_gating(weights, regime.name)
+        weights = self._apply_regime_gating(weights, regime.name, regime_confidence)
         weights = self._apply_adaptive_weights(weights, regime)
         weights = self._apply_ic_weights(weights, regime)
         weights = self._apply_health_weights(weights)
@@ -1275,14 +1275,31 @@ class EnsembleVoter:
         return readings, regime, regime_confidence
 
     def _apply_regime_gating(
-        self, weights: Dict, regime_name: str
+        self, weights: Dict, regime_name: str, regime_confidence: float = 0.5
     ) -> Dict:
-        """Apply regime gating — zero out signals that are net-negative in this regime."""
+        """Apply regime gating — zero out signals that are net-negative in this regime.
+        
+        Uses confidence-weighted gating (v3.26) to defer gating when regime confidence is low,
+        preventing premature switching on uncertain regime classification.
+        """
         if hasattr(self, 'regime_gate') and self.regime_gate is not None:
-            weights = self.regime_gate.filter_weights(weights, regime_name)
-            total = sum(weights.values())
+            # Get active signals based on confidence and hysteresis
+            active_signal_names = self.regime_gate.gate_with_confidence(
+                regime_name, 
+                regime_confidence
+            )
+            
+            # Zero out signals not in the active list
+            gated_weights = {}
+            for source, weight in weights.items():
+                source_name = source.value if hasattr(source, 'value') else str(source)
+                gated_weights[source] = weight if source_name in active_signal_names else 0.0
+            
+            total = sum(gated_weights.values())
             if total > 0:
-                weights = {k: v / total for k, v in weights.items()}
+                gated_weights = {k: v / total for k, v in gated_weights.items()}
+            
+            return gated_weights
         return weights
 
     def _apply_adaptive_weights(

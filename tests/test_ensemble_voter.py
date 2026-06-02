@@ -616,14 +616,14 @@ class TestApplyRegimeGating:
     def test_with_regime_gate_filters(self, tmp_path):
         voter = _make_voter(tmp_path)
         mock_gate = MagicMock()
-        mock_gate.filter_weights.return_value = {
-            SignalSource.MULTI_SPEED_MOM: 0.0,
-            SignalSource.CROSS_ASSET_RV: 1.0,
-        }
+        # v3.26: use gate_with_confidence instead of filter_weights
+        mock_gate.gate_with_confidence.return_value = [
+            'cross_asset_rv'  # Only CROSS_ASSET_RV is active
+        ]
         voter.regime_gate = mock_gate
         weights = {SignalSource.MULTI_SPEED_MOM: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
-        result = voter._apply_regime_gating(weights, 'CRISIS')
-        # Should call filter_weights and normalize
+        result = voter._apply_regime_gating(weights, 'CRISIS', regime_confidence=0.8)
+        # Should call gate_with_confidence and normalize
         assert result[SignalSource.CROSS_ASSET_RV] == 1.0
         assert result[SignalSource.MULTI_SPEED_MOM] == 0.0
 
@@ -3445,15 +3445,15 @@ class TestApplyRegimeGatingEdgeCases:
         """When gate zeros some weights, remaining should be renormalized."""
         voter = _make_voter(tmp_path)
         mock_gate = MagicMock()
-        mock_gate.filter_weights.return_value = {
-            SignalSource.MULTI_SPEED_MOM: 0.0,
-            SignalSource.CROSS_ASSET_RV: 0.5,
-            SignalSource.ALTERNATIVE_DATA: 0.5,
-        }
+        # v3.26: use gate_with_confidence instead of filter_weights
+        mock_gate.gate_with_confidence.return_value = [
+            'cross_asset_rv', 'alternative_data'
+        ]
         voter.regime_gate = mock_gate
         result = voter._apply_regime_gating(
             {SignalSource.MULTI_SPEED_MOM: 0.3, SignalSource.CROSS_ASSET_RV: 0.4, SignalSource.ALTERNATIVE_DATA: 0.3},
             'NORMAL',
+            regime_confidence=0.8,
         )
         assert result[SignalSource.MULTI_SPEED_MOM] == 0.0
         assert abs(result[SignalSource.CROSS_ASSET_RV] + result[SignalSource.ALTERNATIVE_DATA] - 1.0) < 0.01
