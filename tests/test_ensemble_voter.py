@@ -152,9 +152,9 @@ class TestEnsembleVote:
         """EnsembleVote should have all expected dataclass fields."""
         expected = {
             'timestamp', 'regime', 'regime_confidence', 'num_sources',
-            'weighted_consensus', 'agreement_ratio', 'equity_bias',
-            'duration_bias', 'gold_bias', 'action', 'confidence',
-            'reasoning', 'source_votes', 'n_eff', 'weight_entropy',
+            'weighted_consensus', 'agreement_ratio', 'equity_bias', 'duration_bias',
+            'gold_bias', 'action', 'confidence', 'reasoning', 'source_votes', 'n_eff', 'weight_entropy',
+            'regime_multipliers',
         }
         actual = {f.name for f in fields(EnsembleVote)}
         assert actual == expected, f"Missing fields: {expected - actual}"
@@ -2057,7 +2057,7 @@ class TestEnsembleVoteFieldValidation:
 
     def test_field_count(self):
         flds = fields(EnsembleVote)
-        assert len(flds) == 15
+        assert len(flds) == 16
 
     def test_all_field_types(self):
         """Verify specific type annotations for EnsembleVote fields."""
@@ -2086,7 +2086,7 @@ class TestEnsembleVoteFieldValidation:
     def test_no_fields_have_defaults(self):
         """All EnsembleVote fields are required except diagnostic fields."""
         import dataclasses
-        exempt = {"n_eff", "weight_entropy"}
+        exempt = {"n_eff", "weight_entropy", "regime_multipliers"}
         for f in fields(EnsembleVote):
             if f.name in exempt:
                 continue

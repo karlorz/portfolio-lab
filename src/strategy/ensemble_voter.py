@@ -161,6 +161,9 @@ class EnsembleVote:
     n_eff: float = 0.0          # Effective number of signals (exp of Shannon entropy)
     weight_entropy: float = 0.0 # Shannon entropy of weight distribution (nats)
 
+    # Regime-conditional diagnostics (v2.60)
+    regime_multipliers: Optional[Dict[str, float]] = None
+
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
 # MSM disabled (net-negative -0.012 Sharpe), weight redistributed to ALT_DATA and INTL_MOM.
