@@ -351,9 +351,10 @@ health:
 
 .PHONY: garch-risk
 garch-risk:
+
 	@echo "=== GARCH-CVaR Risk: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 scripts/compute_garch_risk.py 2>&1; \
+	cd $(PROJECT_DIR) && uv run python scripts/compute_garch_risk.py 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
