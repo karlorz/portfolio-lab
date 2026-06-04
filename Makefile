@@ -110,7 +110,29 @@ test:
 	fi; \
 	exit $$EXIT
 
-.PHONY: test test-ml
+.PHONY: test test-ml test-fast
+
+test-fast:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (fast mode): $$(date) ==="; \
+	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
+	echo "  Focus: Core signal and ensemble tests only"; \
+	echo "  Target: <2 minutes execution time"; \
+	START=$$(date +%s); \
+	PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py -q --tb=short -p no:cacheprovider; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite (fast): exit $$EXIT, duration $${DUR}s ==="; \
+	if [ $$EXIT -eq 124 ]; then \
+		echo "TIMEOUT (124): Fast test suite exceeded 120s limit."; \
+	elif [ $$EXIT -eq 137 ]; then \
+		echo "SIGKILL (137): memory limit exceeded."; \
+	elif [ $$EXIT -ne 0 ]; then \
+		echo "Some tests failed (exit $$EXIT). Review output above."; \
+	fi; \
+	exit $$EXIT
 
 # ── Test Isolation (bypasses pollution) ────────────────
 
