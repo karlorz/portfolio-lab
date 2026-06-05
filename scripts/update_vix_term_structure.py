@@ -85,14 +85,13 @@ def update_vix_term_structure():
             entry = {
                 "date": date,
                 "vix_spot": vix,
-                "vix3m": vix3m,
+                "front_month": vix3m,  # VIX3M is front month (3-month)
+                "third_month": None,  # VIX6M not available
                 "vix_vix3m_ratio": ratio,
                 "regime": regime,
                 "is_contango": is_contango,
                 "contango_spot_1m": (vix3m - vix) / vix * 100,  # Percentage
                 "contango_1m_2m": 0.0,  # Not available without VIX6M
-                "second_month": None,
-                "third_month": None,
                 "days_to_expiry_front": None
             }
             
