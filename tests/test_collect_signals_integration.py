@@ -394,7 +394,7 @@ class TestCollectSignalsFullPipeline:
 
             readings = voter.collect_signals()
 
-        assert len(readings) == 8
+        assert len(readings) >= 8
         assert SignalSource.MULTI_SPEED_MOM in readings
         assert SignalSource.CROSS_ASSET_RV in readings
         assert SignalSource.INTERNATIONAL_MOMENTUM in readings

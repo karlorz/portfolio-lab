@@ -1,57 +1,57 @@
 {
   "low_vol": {
     "multi_speed_momentum": 0.0,
-    "cross_asset_rv": 0.135,
-    "alternative_data": 0.265,
-    "international_momentum": 0.252,
+    "cross_asset_rv": 0.12857,
+    "alternative_data": 0.25238,
+    "international_momentum": 0.24,
     "cross_asset_regime_arb": 0.0,
-    "unified_overlay": 0.198,
-    "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05,
-    "vix_term_structure": 0.05
+    "unified_overlay": 0.18857,
+    "multi_timeframe_fusion": 0.09524,
+    "google_trends": 0.04762,
+    "vix_term_structure": 0.04762
   },
   "normal": {
     "multi_speed_momentum": 0.0,
-    "cross_asset_rv": 0.117,
-    "alternative_data": 0.2245,
-    "international_momentum": 0.2205,
-    "cross_asset_regime_arb": 0.117,
-    "unified_overlay": 0.171,
-    "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05,
-    "vix_term_structure": 0.05
+    "cross_asset_rv": 0.11143,
+    "alternative_data": 0.21381,
+    "international_momentum": 0.21,
+    "cross_asset_regime_arb": 0.11143,
+    "unified_overlay": 0.16286,
+    "multi_timeframe_fusion": 0.09524,
+    "google_trends": 0.04762,
+    "vix_term_structure": 0.04762
   },
   "high_vol": {
     "multi_speed_momentum": 0.0,
-    "cross_asset_rv": 0.117,
-    "international_momentum": 0.189,
-    "alternative_data": 0.247,
-    "cross_asset_regime_arb": 0.117,
-    "unified_overlay": 0.18,
-    "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05,
-    "vix_term_structure": 0.05
+    "cross_asset_rv": 0.11143,
+    "international_momentum": 0.18,
+    "alternative_data": 0.23524,
+    "cross_asset_regime_arb": 0.11143,
+    "unified_overlay": 0.17143,
+    "multi_timeframe_fusion": 0.09524,
+    "google_trends": 0.04762,
+    "vix_term_structure": 0.04762
   },
   "crisis": {
     "multi_speed_momentum": 0.0,
-    "cross_asset_rv": 0.3285,
-    "cross_asset_regime_arb": 0.153,
+    "cross_asset_rv": 0.31286,
+    "cross_asset_regime_arb": 0.14571,
     "international_momentum": 0.0,
-    "alternative_data": 0.13,
-    "unified_overlay": 0.2385,
-    "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05,
-    "vix_term_structure": 0.05
+    "alternative_data": 0.12381,
+    "unified_overlay": 0.22714,
+    "multi_timeframe_fusion": 0.09524,
+    "google_trends": 0.04762,
+    "vix_term_structure": 0.04762
   },
   "recovery": {
     "multi_speed_momentum": 0.0,
-    "alternative_data": 0.2245,
-    "cross_asset_rv": 0.117,
-    "international_momentum": 0.2205,
-    "cross_asset_regime_arb": 0.117,
-    "unified_overlay": 0.171,
-    "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05,
-    "vix_term_structure": 0.05
+    "alternative_data": 0.21381,
+    "cross_asset_rv": 0.11143,
+    "international_momentum": 0.21,
+    "cross_asset_regime_arb": 0.11143,
+    "unified_overlay": 0.16286,
+    "multi_timeframe_fusion": 0.09524,
+    "google_trends": 0.04762,
+    "vix_term_structure": 0.04762
   }
 }
