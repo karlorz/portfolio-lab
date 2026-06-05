@@ -185,6 +185,7 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.UNIFIED_OVERLAY: 0.1980,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
+            SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
         },
         Regime.NORMAL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
@@ -195,6 +196,7 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.UNIFIED_OVERLAY: 0.1710,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
+            SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
         },
         Regime.HIGH_VOL: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
@@ -205,6 +207,7 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.UNIFIED_OVERLAY: 0.1800,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
+            SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
         },
         Regime.CRISIS: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
@@ -215,6 +218,7 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.UNIFIED_OVERLAY: 0.2385,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
+            SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
         },
         Regime.RECOVERY: {
             SignalSource.MULTI_SPEED_MOM: 0.0000,
@@ -225,6 +229,7 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.UNIFIED_OVERLAY: 0.1710,
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
+            SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
         }
     }
 
@@ -859,6 +864,7 @@ class EnsembleVoter:
         self._collect_unified_overlay_signal(readings, active_sources, regime)
         self._collect_mtf_signal(readings, active_sources, regime, date)
         self._collect_google_trends(readings, active_sources, regime, date)
+        self._collect_vix_term_structure_signal(readings, active_sources, regime)
 
         self.current_readings = readings
         return readings
@@ -1032,6 +1038,21 @@ class EnsembleVoter:
             pass
         except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             logger.warning("Google Trends signal unavailable: %s", e)
+
+    def _collect_vix_term_structure_signal(self, readings: dict, active_sources: set, regime) -> None:
+        """Collect VIX term structure signal for intraday volatility timing."""
+        if self._should_skip(SignalSource.VIX_TERM_STRUCTURE, active_sources, regime):
+            return
+        try:
+            from src.signals.vix_term_structure import VIXTermStructureSignalGenerator
+            vix_generator = VIXTermStructureSignalGenerator()
+            signal = vix_generator.generate_signal()
+            if signal.is_valid:
+                readings[SignalSource.VIX_TERM_STRUCTURE] = signal.to_signal_snapshot().to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("VIX term structure signal unavailable: %s", e)
 
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.

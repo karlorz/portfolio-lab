@@ -23,6 +23,7 @@ class SignalSource(Enum):
     UNIFIED_OVERLAY = "unified_overlay"
     MULTI_TIMEFRAME_FUSION = "multi_timeframe_fusion"  # v806
     GOOGLE_TRENDS = "google_trends"  # replaces behavioral_sentiment
+    VIX_TERM_STRUCTURE = "vix_term_structure"  # v3.23 intraday vol timing
 
 
 __all__ = ["SignalSource"]

@@ -46,6 +46,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.0",
+    "ruff>=0.15.16",
 ]
 ml = [
     "torch>=2.5",
@@ -82,4 +83,10 @@ select = ["T201"]  # flake8-print: detect print() calls
 "**/__main__.py" = ["T201"]  # CLI entry points
 "src/agents/**" = ["T201"]   # ML-gated — off-limits
 "src/ml/**" = ["T201"]       # ML-gated — off-limits
+"src/chat/portfolio_query.py" = ["T201"]  # CLI query output
+"src/llm/sentiment_client.py" = ["T201"]  # CLI JSON output
+"src/regime/transformer_regime.py" = ["T201"]  # ML-gated CLI output
+"src/research/gold_tlt_correlation.py" = ["T201"]  # research CLI summary
+"src/research/regime_walk_forward.py" = ["T201"]  # research CLI summary
+"src/strategy/hedge_selector.py" = ["T201"]  # CLI status/selection output
 "tests/**" = ["T201"]        # Test output — print() is expected
