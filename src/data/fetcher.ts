@@ -24,7 +24,7 @@ export interface TreasuryYield {
 }
 
 // Core portfolio symbols
-const CORE_SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS'];
+const CORE_SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', '^VIX3M'];
 
 // Factor ETFs for alternative risk premia harvesting (v4.10)
 const FACTOR_ETFS = [
