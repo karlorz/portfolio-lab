@@ -7,7 +7,8 @@
     "cross_asset_regime_arb": 0.0,
     "unified_overlay": 0.198,
     "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05
+    "google_trends": 0.05,
+    "vix_term_structure": 0.05
   },
   "normal": {
     "multi_speed_momentum": 0.0,
@@ -17,7 +18,8 @@
     "cross_asset_regime_arb": 0.117,
     "unified_overlay": 0.171,
     "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05
+    "google_trends": 0.05,
+    "vix_term_structure": 0.05
   },
   "high_vol": {
     "multi_speed_momentum": 0.0,
@@ -27,7 +29,8 @@
     "cross_asset_regime_arb": 0.117,
     "unified_overlay": 0.18,
     "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05
+    "google_trends": 0.05,
+    "vix_term_structure": 0.05
   },
   "crisis": {
     "multi_speed_momentum": 0.0,
@@ -37,7 +40,8 @@
     "alternative_data": 0.13,
     "unified_overlay": 0.2385,
     "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05
+    "google_trends": 0.05,
+    "vix_term_structure": 0.05
   },
   "recovery": {
     "multi_speed_momentum": 0.0,
@@ -47,6 +51,7 @@
     "cross_asset_regime_arb": 0.117,
     "unified_overlay": 0.171,
     "multi_timeframe_fusion": 0.1,
-    "google_trends": 0.05
+    "google_trends": 0.05,
+    "vix_term_structure": 0.05
   }
 }
