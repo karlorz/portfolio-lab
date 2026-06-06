@@ -32,7 +32,10 @@ class VIXTermStructure:
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'VIXTermStructure':
-        return cls(**data)
+        # Filter out unexpected keys to maintain backward compatibility
+        valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered_data)
 
 
 from src.paths import DATA_DIR
