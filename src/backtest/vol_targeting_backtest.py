@@ -35,6 +35,7 @@ from src.backtest.metrics import (
     compute_metrics,
     save_results_json,
 )
+from src.signals.vix_term_structure import VIXTermStructureSignalGenerator, VIXRegime
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +307,39 @@ REGIME_VOL_TARGETS: Dict[str, float] = {
     "RECOVERY": 0.10,
 }
 
+# VIX term structure regime to vol target bias mapping
+# Based on research: VIX3M/VIX ratio predicts equity returns better than absolute VIX level
+VIX_REGIME_VOL_BIAS: Dict[str, float] = {
+    "extreme_contango": 0.02,    # Complacency: slightly higher risk budget
+    "contango": 0.01,            # Normal: minor boost
+    "flat": 0.0,                 # Neutral: no adjustment
+    "backwardation": -0.01,      # Caution: reduce risk slightly
+    "extreme_backwardation": -0.03,  # Crisis: significant risk reduction
+}
+
+def _load_vix_term_structure_data() -> Dict:
+    """Load VIX term structure data for backtest integration."""
+    vix_data_path = DATA_DIR / 'vix_term_structure.json'
+    if not vix_data_path.exists():
+        return {}
+    try:
+        with open(vix_data_path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError):
+        return {}
+
+
+def _get_vix_regime_for_date(date_str: str, vix_data: Dict) -> Optional[str]:
+    """Get VIX term structure regime for a given date."""
+    if date_str in vix_data:
+        return vix_data[date_str].get('regime')
+    # Try closest date
+    dates = sorted(vix_data.keys())
+    for d in reversed(dates):
+        if d <= date_str:
+            return vix_data[d].get('regime')
+    return None
+
 
 def _classify_regime_from_vol(
     realized_vol: float,
@@ -405,6 +439,10 @@ def compute_regime_conditional_vol_target_backtest(
     prices = _load_prices()
     logger.info("Loaded %d days of price data", len(prices))
 
+    # Load VIX term structure data for enhanced regime classification
+    vix_data = _load_vix_term_structure_data()
+    logger.info("Loaded VIX term structure data: %d records", len(vix_data))
+
     symbols = ["SPY", "GLD", "TLT", "IEF"]
     n_days = len(prices)
 
@@ -463,6 +501,18 @@ def compute_regime_conditional_vol_target_backtest(
             vol_declining = False
         regime = _classify_regime_from_vol(realized_vol, median_vol, prev_regime, vol_declining)
         target_vol = regime_targets.get(regime, 0.09)
+
+        # Enhance regime classification with VIX term structure signal
+        # VIX slope is a proven predictor of equity returns better than absolute VIX level
+        if vix_data:
+            # Convert index to string date (works with DatetimeIndex)
+            date_str = str(prices.index[i])[:10]  # "2024-01-05"
+            vix_regime = _get_vix_regime_for_date(date_str, vix_data)
+            if vix_regime:
+                vix_bias = VIX_REGIME_VOL_BIAS.get(vix_regime, 0.0)
+                target_vol = max(0.03, min(0.15, target_vol + vix_bias))
+                logger.debug("VIX regime %s: target vol adjusted by %+.3f to %.3f",
+                           vix_regime, vix_bias, target_vol)
 
         # Compute target leverage
         leverage = _compute_vol_target_leverage(
