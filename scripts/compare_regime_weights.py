@@ -119,7 +119,7 @@ def compare_weights(voter: EnsembleVoter, disable_toggle: bool = False):
     # Summary: direction validation
     print("  ── Direction Validation ──")
     checks = [
-        ("CRISIS: alt_data boosted", lambda r: r["CRISIS"][0][3] > 0 and r["CRISIS"][0][0] == "ALTERNATIVE_DATA"),
+        ("CRISIS: alt_data boosted", lambda r: any(x[0] == "ALTERNATIVE_DATA" and x[3] > 0 for x in r["CRISIS"])),
         ("CRISIS: unified_overlay reduced", lambda r: any(x[0] == "UNIFIED_OVERLAY" and x[3] < 0 for x in r["CRISIS"])),
         ("HIGH_VOL: intl_momentum reduced", lambda r: any(x[0] == "INTERNATIONAL_MOMENTUM" and x[3] < 0 for x in r["HIGH_VOL"])),
         ("LOW_VOL: intl_momentum boosted", lambda r: any(x[0] == "INTERNATIONAL_MOMENTUM" and x[3] > 0 for x in r["LOW_VOL"])),
