@@ -33,7 +33,7 @@ class TestSignalSource:
         assert "unified_overlay" in sources
 
     def test_count(self):
-        assert len(SignalSource) == 8  # canonical enum includes MULTI_TIMEFRAME_FUSION + GOOGLE_TRENDS
+        assert len(SignalSource) == 9  # canonical enum includes MULTI_TIMEFRAME_FUSION + GOOGLE_TRENDS + VIX_TERM_STRUCTURE
 
 
 # ---------------------------------------------------------------------------
@@ -1416,7 +1416,7 @@ class TestDetectICAlertsEdgeCases:
 
         # current=0.05, history=[0.10, 0.10, 0.10]
         # peak=0.10, drawdown=(0.10-0.05)/0.10=0.5, 0.5 > 0.5 ? No
-        ic_values = iter([0.05, 0.10, 0.10, 0.10] * 8)
+        ic_values = iter([0.05, 0.10, 0.10, 0.10] * 9)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -1434,7 +1434,7 @@ class TestDetectICAlertsEdgeCases:
 
         # current=-0.05, history=[-0.05, -0.05, -0.05]
         # streak = 3 >= 3 -> alert
-        ic_values = iter([-0.05, -0.05, -0.05, -0.05] * 8)
+        ic_values = iter([-0.05, -0.05, -0.05, -0.05] * 9)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -1456,7 +1456,7 @@ class TestDetectICAlertsEdgeCases:
         # peak = max(|-0.05|,|-0.05|,|0.03|) = 0.05
         # drawdown=(0.05-0.03)/0.05=0.4 < 0.5 -> no drawdown
         # ratio=0.03/0.05=0.6 > 0.3 -> no ratio
-        ic_values = iter([0.03, -0.05, -0.05, 0.03] * 8)
+        ic_values = iter([0.03, -0.05, -0.05, 0.03] * 9)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -2152,11 +2152,11 @@ class TestGetHealthReportEdgeCases:
             with patch.object(tracker, 'compute_ic', return_value=0.05):
                 with patch.object(tracker, 'compute_ic_half_life', return_value=100.0):
                     report = tracker.get_health_report()
-        assert report["summary"]["healthy"] == 7
+        assert report["summary"]["healthy"] == 8
         assert report["summary"]["degraded"] == 1
         assert report["summary"]["unhealthy"] == 0
-        assert report["summary"]["total_tracked"] == 8
-        assert report["overall_health"] == "healthy"  # 7/8 = 87.5% >= 60%
+        assert report["summary"]["total_tracked"] == 9
+        assert report["overall_health"] == "healthy"  # 8/9 = 88.9% >= 60%
 
     def test_report_with_zero_healthy(self, tmp_path):
         """When no sources are healthy, overall_health should be 'degraded'."""
@@ -2176,7 +2176,7 @@ class TestGetHealthReportEdgeCases:
                 with patch.object(tracker, 'compute_ic_half_life', return_value=None):
                     report = tracker.get_health_report()
         assert report["summary"]["healthy"] == 0
-        assert report["summary"]["unhealthy"] == 8
+        assert report["summary"]["unhealthy"] == 9
         assert report["overall_health"] == "degraded"
 
 
@@ -3286,12 +3286,12 @@ class TestSignalSourceIteration:
 
     def test_iteration_yields_all_members(self):
         members = list(SignalSource)
-        assert len(members) == 8
+        assert len(members) == 9
         names = {m.name for m in members}
         expected = {
             'MULTI_SPEED_MOM', 'CROSS_ASSET_RV', 'INTERNATIONAL_MOMENTUM',
             'ALTERNATIVE_DATA', 'CROSS_ASSET_REGIME_ARB', 'UNIFIED_OVERLAY',
-            'MULTI_TIMEFRAME_FUSION', 'GOOGLE_TRENDS',
+            'MULTI_TIMEFRAME_FUSION', 'GOOGLE_TRENDS', 'VIX_TERM_STRUCTURE',
         }
         assert names == expected
 
@@ -3520,7 +3520,7 @@ class TestDetectICAlertsLowRatio:
         # current=0.01 (low), history=[0.10, 0.12, 0.08] (peak=0.12)
         # ratio = 0.01/0.12 = 0.083 < 0.3 -> alert
         # peak=0.12 > 0.02 so ratio check runs
-        ic_values = iter([0.01, 0.10, 0.12, 0.08] * 8)
+        ic_values = iter([0.01, 0.10, 0.12, 0.08] * 9)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -3539,7 +3539,7 @@ class TestDetectICAlertsLowRatio:
 
         # current=0.08, history=[0.10, 0.12, 0.08] (peak=0.12)
         # ratio = 0.08/0.12 = 0.67 > 0.3 -> no alert
-        ic_values = iter([0.08, 0.10, 0.12, 0.08] * 8)
+        ic_values = iter([0.08, 0.10, 0.12, 0.08] * 9)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)
@@ -3566,7 +3566,7 @@ class TestDetectICAlertsPeakGuards:
 
         # current=0.005, history=[0.01, 0.02, 0.015] (peak=0.02)
         # peak_ic > 0.02? No (0.02 > 0.02 is False) -> skip ratio and drawdown
-        ic_values = iter([0.005, 0.01, 0.02, 0.015] * 8)
+        ic_values = iter([0.005, 0.01, 0.02, 0.015] * 9)
 
         def mock_ic(source, lookback_days=90, end_date=None):
             return next(ic_values)

@@ -44,7 +44,7 @@ def tracker():
 
 @pytest.fixture
 def full_signals():
-    """Complete set of 8 signals for testing."""
+    """Complete set of 9 signals for testing."""
     now = datetime.now()
     return {
         SignalSource.MULTI_SPEED_MOM: Signal(SignalSource.MULTI_SPEED_MOM, 0.7, now, 0.85),
@@ -55,6 +55,7 @@ def full_signals():
         SignalSource.UNIFIED_OVERLAY: Signal(SignalSource.UNIFIED_OVERLAY, 0.40, now, 0.75),
         SignalSource.MULTI_TIMEFRAME_FUSION: Signal(SignalSource.MULTI_TIMEFRAME_FUSION, 0.25, now, 0.60),
         SignalSource.GOOGLE_TRENDS: Signal(SignalSource.GOOGLE_TRENDS, -0.30, now, 0.55),
+        SignalSource.VIX_TERM_STRUCTURE: Signal(SignalSource.VIX_TERM_STRUCTURE, 0.20, now, 0.65),
     }
 
 
@@ -89,7 +90,7 @@ def historical_accuracy(tracker):
 
 def test_signal_source_count():
     """Test: Signal source count matches enum."""
-    assert len(SignalSource) == 8
+    assert len(SignalSource) == 9
 
 
 def test_signal_source_values():
@@ -126,7 +127,7 @@ def test_create_features_requires_all_signals(engine, regime_context, historical
     with pytest.raises(ValueError) as exc_info:
         engine.create_features(partial_signals, regime_context, historical_accuracy)
 
-    assert "Expected 8 signals, got 1" in str(exc_info.value)
+    assert "Expected 9 signals, got 1" in str(exc_info.value)
 
 
 def test_create_features_success(engine, full_signals, regime_context, historical_accuracy):

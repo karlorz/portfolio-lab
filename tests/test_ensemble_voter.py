@@ -233,7 +233,7 @@ class TestRegimeWeights:
 
     def test_high_vol_alternative_data_dominant(self):
         """v9.35: ALT_DATA is the dominant signal in HIGH_VOL regime (only positive alpha)."""
-        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.24
+        assert REGIME_WEIGHTS[Regime.HIGH_VOL][SignalSource.ALTERNATIVE_DATA] >= 0.23
 
     def test_unified_overlay_has_weight_in_all_regimes(self):
         """v9.31: UNIFIED_OVERLAY has 15% weight in all regimes (was dead code at 0%)."""

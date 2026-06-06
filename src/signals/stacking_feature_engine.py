@@ -520,6 +520,12 @@ def demo():
             timestamp=datetime.now(),
             confidence=0.55
         ),
+        SignalSource.VIX_TERM_STRUCTURE: Signal(
+            source=SignalSource.VIX_TERM_STRUCTURE,
+            value=0.20,
+            timestamp=datetime.now(),
+            confidence=0.65
+        ),
     }
 
     # Add some mock historical accuracy data

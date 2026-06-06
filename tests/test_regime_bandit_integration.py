@@ -405,6 +405,7 @@ class TestPipelineEdgeCases:
             "unified_overlay": {"CRISIS"},
             "multi_timeframe_fusion": {"CRISIS"},
             "google_trends": {"CRISIS"},
+            "vix_term_structure": {"CRISIS"},
         })
         weights = dict(REGIME_WEIGHTS[Regime.CRISIS])
         filtered = gate.filter_weights(weights, "CRISIS")
