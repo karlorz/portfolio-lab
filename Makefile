@@ -235,7 +235,7 @@ eval:
 research:
 	@echo "=== Research Agent: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 python3 -m src.research.agent 2>&1 | tee -a $(DATA_DIR)/research.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 python3 -m src.research.agent 2>&1 | tee -a $(DATA_DIR)/research.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
