@@ -1312,12 +1312,19 @@ class EnsembleVoter:
                 regime_name, 
                 regime_confidence
             )
+            active_signal_set = set(active_signal_names)
+            gate_rules = getattr(self.regime_gate, "gate_rules", None)
+            explicit_gate_rules = gate_rules if isinstance(gate_rules, dict) else None
             
             # Zero out signals not in the active list
             gated_weights = {}
             for source, weight in weights.items():
                 source_name = source.value if hasattr(source, 'value') else str(source)
-                gated_weights[source] = weight if source_name in active_signal_names else 0.0
+                has_explicit_gate = (
+                    explicit_gate_rules is None or source_name in explicit_gate_rules
+                )
+                is_active = source_name in active_signal_set or not has_explicit_gate
+                gated_weights[source] = weight if is_active else 0.0
             
             total = sum(gated_weights.values())
             if total > 0:

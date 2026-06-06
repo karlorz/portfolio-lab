@@ -627,6 +627,29 @@ class TestApplyRegimeGating:
         assert result[SignalSource.CROSS_ASSET_RV] == 1.0
         assert result[SignalSource.MULTI_SPEED_MOM] == 0.0
 
+    def test_real_gate_preserves_implicit_on_signals(self, tmp_path):
+        """Signals without explicit gate rules should remain active."""
+        from src.signals.regime_gate import RegimeGate
+
+        voter = _make_voter(tmp_path)
+        voter.regime_gate = RegimeGate()
+        weights = {
+            SignalSource.CROSS_ASSET_RV: 0.4,        # explicitly OFF in HIGH_VOL
+            SignalSource.ALTERNATIVE_DATA: 0.35,     # implicit ON
+            SignalSource.VIX_TERM_STRUCTURE: 0.25,   # implicit ON
+        }
+
+        result = voter._apply_regime_gating(
+            weights,
+            "HIGH_VOL",
+            regime_confidence=0.9,
+        )
+
+        assert result[SignalSource.CROSS_ASSET_RV] == 0.0
+        assert result[SignalSource.ALTERNATIVE_DATA] > 0.0
+        assert result[SignalSource.VIX_TERM_STRUCTURE] > 0.0
+        assert sum(result.values()) == pytest.approx(1.0)
+
     def test_all_zero_weights_stays_zero(self, tmp_path):
         voter = _make_voter(tmp_path)
         mock_gate = MagicMock()
@@ -4024,4 +4047,3 @@ class TestApplyCorrelationPenalty:
         with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
             voter._apply_correlation_penalty(weights)
         assert "Redundant signal pairs detected" not in caplog.text
-

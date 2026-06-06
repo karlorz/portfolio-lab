@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from src.monitor.signal_schemas import (
     EnsembleVotingSignal,
     GarchCvarSignal,
+    PortfolioExplainabilitySignal,
     RegimeSignal,
     SignalSnapshotSchema,
     SignalsData,
@@ -53,6 +54,38 @@ class TestEnsembleVotingSignal:
         assert model.weighted_consensus == 0.0
         assert model.num_sources == 0
         assert model.source_breakdown == []
+
+
+class TestPortfolioExplainabilitySignal:
+    def test_valid_data(self):
+        data = {
+            "latest_decision": {
+                "regime": "normal",
+                "action": "neutral",
+                "signals": [
+                    {"source": "alternative_data", "contribution": 0.2},
+                ],
+                "top_drivers": [
+                    {"source": "alternative_data", "contribution": 0.2, "direction": "bullish"},
+                ],
+                "top_opposers": [],
+            },
+            "top_sources_today": ["alternative_data"],
+            "decision_quality": {"status": "ok"},
+        }
+
+        model = PortfolioExplainabilitySignal.model_validate(data)
+
+        assert model.latest_decision is not None
+        assert model.latest_decision["regime"] == "normal"
+        assert model.top_sources_today == ["alternative_data"]
+
+    def test_missing_fields_use_defaults(self):
+        model = PortfolioExplainabilitySignal.model_validate({})
+
+        assert model.latest_decision is None
+        assert model.top_sources_today == []
+        assert model.decision_quality == {}
         assert model.action == "hold"
 
     def test_partial_data(self):
