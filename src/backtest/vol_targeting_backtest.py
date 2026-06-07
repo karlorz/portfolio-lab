@@ -32,6 +32,7 @@ import pandas as pd
 
 from src.paths import (
     DATA_DIR,
+    PRICES_JSON,
     REGIME_VOL_LOOKBACKS,
     REGIME_VOL_SCALING_EXPONENTS,
     RISK_FREE_RATE,
@@ -81,6 +82,22 @@ def _load_prices() -> pd.DataFrame:
     """Load price data through the shared TTL-cached price DataFrame accessor."""
     symbols = ["SPY", "GLD", "TLT", "IEF"]
     df = get_prices_df(symbols=symbols).dropna()
+    if len(df) <= 1:
+        try:
+            raw = json.loads(PRICES_JSON.read_text())
+            records = []
+            for sym in symbols:
+                for entry in raw.get(sym, []):
+                    records.append({"date": entry["d"], "ticker": sym, "price": entry["p"]})
+            if records:
+                fallback_df = pd.DataFrame(records)
+                fallback_df["date"] = pd.to_datetime(fallback_df["date"])
+                fallback_df = fallback_df.pivot(index="date", columns="ticker", values="price")
+                fallback_df = fallback_df.sort_index().dropna()
+                if len(fallback_df) > len(df):
+                    df = fallback_df
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+            logger.warning("Fallback price load from %s failed: %s", PRICES_JSON, exc)
     df.index.name = "date"
     return df
 

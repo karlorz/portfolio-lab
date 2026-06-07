@@ -1159,15 +1159,16 @@ class TestHealthJSONEdgeCases:
     """Test generate_health_json edge cases."""
 
     def test_cron_fallback(self, tmp_path):
-        """No cron_status.json uses fallback cron jobs."""
+        """No cron_status.json does not invent scheduled cron jobs."""
         gen, _ = _make_generator(tmp_path)
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 path = gen.generate_health_json()
         with open(path) as f:
             data = json.load(f)
-        assert len(data["cron_jobs"]) == 7
-        assert all(j["status"] == "unknown" for j in data["cron_jobs"])
+        assert data["cron_jobs"] == []
+        assert data["system_status"] == "warning"
+        assert data["scheduler_status"]["status"] == "unavailable"
         gen.conn.close()
 
     def test_cron_error_degraded(self, tmp_path):
@@ -1223,6 +1224,7 @@ class TestHealthJSONEdgeCases:
     def test_healthy_when_all_fresh(self, tmp_path):
         """Fresh data and no cron errors gives healthy status."""
         gen, _ = _make_generator(tmp_path)
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 path = gen.generate_health_json()

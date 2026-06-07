@@ -22,6 +22,7 @@ from src.backtest.real_data_backtest import (
     run_real_data_backtest,
 )
 from src.backtest import real_data_backtest as real_data_backtest_module
+from src.backtest.rolling_vol import precomputed_rolling_volatility
 
 
 class TestRealDataBacktestResult:
@@ -249,6 +250,21 @@ class TestRealDataBacktest:
         vols = bt._compute_rolling_vol(rets, window)
 
         assert vols == pytest.approx(expected)
+
+    def test_precomputed_rolling_vol_accepts_numpy_array(self):
+        """Shared helper should handle ndarray inputs without truth-value ambiguity."""
+        rets = np.array([0.01, -0.02, 0.015, -0.005])
+
+        vols = precomputed_rolling_volatility(
+            rets,
+            window=3,
+            fallback_vol=0.20,
+            warmup_std_min_index=2,
+        )
+
+        assert len(vols) == len(rets)
+        assert vols[0] == 0.20
+        assert vols[-1] > 0
 
     def test_compute_rolling_vol_negative_returns(self, bt):
         """Negative-only returns still produce positive vol."""

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test';
+import { readFileSync } from 'fs';
 import { downsampleLTTB, autoDownsample } from '../../src/utils/lttb';
 
 /** Helper: generate a sine wave as DataPoint[] */
@@ -108,5 +109,16 @@ describe('autoDownsample', () => {
     const result = autoDownsample(data, 100, 'date', 'value', 1000);
     expect(result[0]).toEqual(data[0]);
     expect(result[result.length - 1]).toEqual(data[data.length - 1]);
+  });
+});
+
+describe('dashboard chart data transforms', () => {
+  it('RollingMetricsChart does not merge windows with repeated find scans', () => {
+    const source = readFileSync('src/components/AnalyticsCharts.tsx', 'utf8');
+    const start = source.indexOf('export const RollingMetricsChart');
+    const end = source.indexOf('interface CrisisPeriod');
+    const rollingMetricsSource = source.slice(start, end);
+
+    expect(rollingMetricsSource).not.toContain('.find(');
   });
 });

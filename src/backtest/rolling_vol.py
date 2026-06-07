@@ -20,7 +20,7 @@ def precomputed_rolling_volatility(
     output day.  This keeps the same population-standard-deviation contract
     while making each window lookup O(1).
     """
-    if not returns:
+    if len(returns) == 0:
         return []
     if window <= 0:
         raise ValueError("window must be positive")

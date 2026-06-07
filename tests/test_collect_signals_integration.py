@@ -354,6 +354,9 @@ class TestCollectSignalsFullPipeline:
             "mtf": SignalSnapshot(source="multi_timeframe_fusion", timestamp="2026-05-23T12:00:00",
                                   value=0.25, confidence=0.7, asset_signals={"SPY": 0.2, "GLD": 0.1, "TLT": 0.3},
                                   regime_fit="all", is_active=True, explanation="MTF fusion"),
+            "google_trends": SignalSnapshot(source="google_trends", timestamp="2026-05-23T12:00:00",
+                                            value=0.2, confidence=0.7, asset_signals={"SPY": 0.2},
+                                            regime_fit="all", is_active=True, explanation="Trends bull"),
         }
 
         mock_unified_reading = SignalReading(
@@ -382,6 +385,7 @@ class TestCollectSignalsFullPipeline:
              patch("src.signals.cross_asset_regime_arb.CrossAssetRegimeArbDetector") as MockArb, \
              patch("src.strategy.orchestrator_ensemble_bridge.OrchestratorEnsembleBridge") as MockUnified, \
              patch("src.signals.multi_timeframe_fusion.MultiTimeframeFusion") as MockMTF, \
+             patch("src.signals.google_trends_signal.GoogleTrendsSignal") as MockTrends, \
              patch.object(voter, "_load_price_data", return_value=price_df):
 
             MockMSM.return_value.get_signal_snapshot.return_value = snapshots["msm"]
@@ -391,6 +395,7 @@ class TestCollectSignalsFullPipeline:
             MockArb.return_value.get_signal_snapshot.return_value = snapshots["arb"]
             MockUnified.return_value.get_ensemble_reading.return_value = mock_unified_reading
             MockMTF.return_value.get_signal_snapshot.return_value = snapshots["mtf"]
+            MockTrends.return_value.get_signal_snapshot.return_value = snapshots["google_trends"]
 
             readings = voter.collect_signals()
 

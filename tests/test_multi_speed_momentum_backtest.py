@@ -270,6 +270,43 @@ class TestMultiSpeedMomentumBacktester:
             assert isinstance(dr.gld_return, float)
             assert isinstance(dr.tlt_return, float)
 
+    def test_load_data_honors_explicit_data_path(self, tmp_path):
+        """Explicit temporary price files should not be ignored."""
+        path = tmp_path / "prices.json"
+        path.write_text(json.dumps({
+            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 101.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-03", "p": 51.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-03", "p": 79.0}],
+        }))
+        bt = MultiSpeedMomentumBacktester()
+
+        assert bt.load_data(str(path)) is True
+
+        assert len(bt.data) == 1
+        assert bt.prices_raw["SPY"][0]["p"] == 100.0
+
+    def test_get_prices_slice_uses_loaded_indexes(self):
+        """Slice lookup should use built indexes instead of scanning every raw row."""
+
+        class ExplodingRows(list):
+            def __iter__(self):
+                raise AssertionError("raw rows should not be scanned after indexes are built")
+
+        bt = MultiSpeedMomentumBacktester()
+        rows = [{"d": f"2020-01-{day:02d}", "p": float(day)} for day in range(1, 32)]
+        bt.prices_raw = {
+            "SPY": list(rows),
+            "GLD": list(rows),
+            "TLT": list(rows),
+        }
+        bt._process_price_data()
+        bt.prices_raw = {ticker: ExplodingRows(values) for ticker, values in bt.prices_raw.items()}
+
+        sliced = bt._get_prices_slice("2020-01-20", lookback=5)
+
+        assert sliced["SPY"][0]["d"] == "2020-01-01"
+        assert sliced["SPY"][-1]["d"] == "2020-01-20"
+
     # ── Signal Computation (fallback path) ──
 
     def test_compute_signal_insufficient_data(self):

@@ -668,6 +668,7 @@ describe('SignalsDataSchema', () => {
     const result = SignalsDataSchema.safeParse(data);
     expect(result.success).toBe(true);
   });
+
 });
 
 // ===========================================================================

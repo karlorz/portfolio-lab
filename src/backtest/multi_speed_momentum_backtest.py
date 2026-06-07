@@ -108,6 +108,7 @@ class MultiSpeedMomentumBacktester:
                 with open(prices_path) as f:
                     self.prices_raw = json.load(f)
 
+            self._price_indexes = {}
             self._process_price_data()
             logger.info("Loaded %d days of price data", len(self.data))
             return True
@@ -225,8 +226,10 @@ class MultiSpeedMomentumBacktester:
                 logger.warning("MultiSpeedMomentum signal failed for %s on %s: %s", ticker, end_date, exc)
 
         # -- Fallback: simple 12-month momentum proxy --
-        raw = self.prices_raw.get(ticker, [])
-        hist = sorted([e for e in raw if e["d"] <= end_date], key=lambda x: x["d"])
+        if not self._price_indexes:
+            self._build_price_indexes()
+        dates, entries = self._price_indexes.get(ticker, ([], []))
+        hist = entries[:bisect_right(dates, end_date)]
         if len(hist) < 260:
             return 0.0  # not enough data
 

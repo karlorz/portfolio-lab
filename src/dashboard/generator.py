@@ -1542,16 +1542,13 @@ class DashboardGenerator:
                     cron_data = json.load(f)
                 health_data["cron_jobs"] = cron_data.get("jobs", [])
             else:
-                # Fallback: mark as unknown but system healthy
-                health_data["cron_jobs"] = [
-                    {"name": "portfolio-lab-data", "status": "unknown", "state": "scheduled"},
-                    {"name": "portfolio-lab-eval", "status": "unknown", "state": "scheduled"},
-                    {"name": "portfolio-lab-dashboard", "status": "unknown", "state": "scheduled"},
-                    {"name": "portfolio-lab-research", "status": "unknown", "state": "scheduled"},
-                    {"name": "portfolio-lab-wiki-sync", "status": "unknown", "state": "scheduled"},
-                    {"name": "portfolio-lab-health", "status": "unknown", "state": "scheduled"},
-                    {"name": "portfolio-lab-build", "status": "unknown", "state": "scheduled"},
-                ]
+                health_data["cron_jobs"] = []
+                health_data["scheduler_status"] = {
+                    "status": "unavailable",
+                    "source": str(cron_status_file),
+                    "reason": "cron_status.json missing; scheduler state not verified",
+                }
+                health_data["system_status"] = "warning"
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             health_data["system_status"] = "degraded"
             health_data["error"] = f"Failed to get cron status: {str(e)}"
@@ -1600,6 +1597,8 @@ class DashboardGenerator:
         stale_count = sum(1 for d in health_data["data_freshness"].values() if d.get("status") != "fresh")
         failed_jobs = sum(1 for j in health_data["cron_jobs"] if j.get("status") == "error")
         
+        if health_data["system_status"] not in {"warning", "critical", "degraded"}:
+            health_data["system_status"] = "healthy"
         if failed_jobs > 0 or stale_count > 5:
             health_data["system_status"] = "warning"
         if failed_jobs > 2 or stale_count > 10:
