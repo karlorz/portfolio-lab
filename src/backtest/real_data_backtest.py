@@ -20,6 +20,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from src.backtest.metrics import BacktestResult, save_results_json
+from src.backtest.rolling_vol import precomputed_rolling_volatility
 from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, sqlite_connect
 from src.utils import safe_get
 
@@ -80,13 +81,12 @@ class RealDataBacktest:
         return [(prices[i] / prices[i-1] - 1) for i in range(1, len(prices))]
 
     def _compute_rolling_vol(self, returns: List[float], window: int = 30) -> List[float]:
-        vols = []
-        for i in range(len(returns)):
-            if i < window:
-                vols.append(np.std(returns[:i+1]) * math.sqrt(252) if i > 1 else 0.20)
-            else:
-                vols.append(np.std(returns[i-window:i]) * math.sqrt(252))
-        return vols
+        return precomputed_rolling_volatility(
+            returns,
+            window=window,
+            fallback_vol=0.20,
+            warmup_std_min_index=2,
+        )
 
     def _collar_signal(self, vix: float) -> float:
         """VIX-based collar: reduce SPY when vol elevated."""
@@ -345,7 +345,7 @@ def main():
     logger.info("=" * 65)
     logger.info(f"Period: {result.extras['data_start']} → {result.extras['data_end']}")
     logger.info(f"Trading Days: {result.extras['trading_days']}")
-    logger.info()
+    logger.info("")
     logger.info(f"{'Metric':<25} {'Baseline':>10} {'Combined':>10} {'Δ':>10}")
     logger.info("-" * 55)
     logger.info(f"{'CAGR':<25} {result.extras['baseline_cagr']:>9.2f}% {result.cagr:>9.2f}% {result.cagr - result.extras['baseline_cagr']:>+9.2f}%")
@@ -353,12 +353,12 @@ def main():
     logger.info(f"{'Sharpe Ratio':<25} {result.baseline_sharpe:>10.3f} {result.sharpe_ratio:>10.3f} {result.sharpe_improvement:>+10.3f}")
     logger.info(f"{'Max Drawdown':<25} {result.extras['baseline_max_dd']:>9.2f}% {result.max_drawdown:>9.2f}% {result.extras['dd_improvement']:>+9.2f}pp")
     logger.info(f"{'Total Return':<25} {result.extras['baseline_total_return']:>9.1f}% {result.total_return:>9.1f}%")
-    logger.info()
+    logger.info("")
     logger.info("Overlay Activity (real data):")
     logger.info(f"  Collar active: {result.extras['collar_days_pct']:.0f}% of days")
     logger.info(f"  Crypto active: {result.extras['crypto_days_pct']:.0f}% of days")
     logger.info(f"  Avg TLT in bond sleeve: {result.extras['avg_tlt_sleeve_pct']:.0f}%")
-    logger.info()
+    logger.info("")
     logger.info(f"Sharpe Target (0.90): {'MET' if result.extras['meets_target'] else 'NOT MET'}")
     logger.info(f"Recommendation: {result.extras['recommendation']}")
     logger.info("=" * 65)

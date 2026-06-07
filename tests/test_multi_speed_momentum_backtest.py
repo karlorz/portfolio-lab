@@ -602,6 +602,60 @@ class TestMultiSpeedMomentumBacktester:
         sliced = bt._get_prices_slice("2020-01-03")
         assert len(sliced["SPY"]) == 0
 
+    def test_load_data_honors_explicit_data_path(self, monkeypatch, tmp_path):
+        """Explicit data_path should be read even when the default PRICES_JSON is absent."""
+        custom_data = {
+            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 101.0}],
+            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-03", "p": 52.0}],
+            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-03", "p": 79.0}],
+        }
+        custom_path = tmp_path / "custom_prices.json"
+        custom_path.write_text(json.dumps(custom_data))
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest.PRICES_JSON",
+            tmp_path / "missing_default_prices.json",
+        )
+
+        bt = MultiSpeedMomentumBacktester()
+
+        assert bt.load_data(str(custom_path)) is True
+        assert bt.prices_raw == custom_data
+        assert len(bt.data) == 1
+
+    def test_get_prices_slice_uses_built_index_without_iterating_raw_series(self):
+        """After indexes are built, repeated slices should not scan raw ticker lists."""
+
+        class CountingSeries(list):
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.iterations = 0
+
+            def __iter__(self):
+                self.iterations += 1
+                return super().__iter__()
+
+        raw = CountingSeries(
+            [
+                {
+                    "d": (datetime(2020, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d"),
+                    "p": 100.0 + i,
+                }
+                for i in range(500)
+            ]
+        )
+        bt = MultiSpeedMomentumBacktester()
+        bt.prices_raw = {"SPY": raw, "GLD": CountingSeries(raw), "TLT": CountingSeries(raw)}
+        bt._build_price_indexes()
+
+        for series in bt.prices_raw.values():
+            series.iterations = 0
+
+        sliced = bt._get_prices_slice("2021-04-15", lookback=400)
+
+        assert len(sliced["SPY"]) <= 450
+        assert sliced["SPY"][-1]["d"] <= "2021-04-15"
+        assert all(series.iterations == 0 for series in bt.prices_raw.values())
+
 
 # ── Edge Cases ──────────────────────────────────────────────────────────────
 

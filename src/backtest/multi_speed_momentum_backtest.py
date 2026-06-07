@@ -12,12 +12,15 @@ Period: 2006-2026 (20+ years including GFC, COVID, 2022 rate hikes)
 
 import json
 import logging
+from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
 
+from src import paths as project_paths
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
     BacktestResult,
@@ -83,21 +86,27 @@ class MultiSpeedMomentumBacktester:
         self.config = config or BacktestConfig()
         self.data: List[DailyReturn] = []
         self.prices_raw: Dict = {}  # raw prices keyed by ticker
+        self._price_indexes: Dict[str, tuple[List[str], List[dict]]] = {}
         self._signal_engine = None
 
     # ------------------------------------------------------------------
     # Data loading
     # ------------------------------------------------------------------
     def load_data(self, data_path: Optional[str] = None) -> bool:
-        """Load price data from PRICES_JSON."""
+        """Load price data from an explicit path or the default prices.json."""
         try:
-            prices_path = PRICES_JSON
+            prices_path = Path(data_path) if data_path is not None else Path(PRICES_JSON)
             if not prices_path.exists():
-                logger.error("Price data not found at %s", PRICES_JSON)
+                logger.error("Price data not found at %s", prices_path)
                 return False
 
-            with open(prices_path) as f:
-                self.prices_raw = json.load(f)
+            if data_path is None and prices_path == Path(project_paths.PRICES_JSON):
+                from src.data.price_cache import get_prices
+
+                self.prices_raw = get_prices()
+            else:
+                with open(prices_path) as f:
+                    self.prices_raw = json.load(f)
 
             self._process_price_data()
             logger.info("Loaded %d days of price data", len(self.data))
@@ -109,6 +118,8 @@ class MultiSpeedMomentumBacktester:
 
     def _process_price_data(self) -> None:
         """Build DailyReturn list from raw price dicts."""
+        self.data = []
+        self._build_price_indexes()
         spy = self.prices_raw.get("SPY", [])
         gld = self.prices_raw.get("GLD", [])
         tlt = self.prices_raw.get("TLT", [])
@@ -141,6 +152,20 @@ class MultiSpeedMomentumBacktester:
                     )
                 )
 
+    def _build_price_indexes(self) -> None:
+        """Build sorted date indexes once for repeated price-window slices."""
+        self._price_indexes = {}
+        for ticker, raw_entries in self.prices_raw.items():
+            if not isinstance(raw_entries, list):
+                continue
+            entries = [
+                entry
+                for entry in raw_entries
+                if isinstance(entry, dict) and "d" in entry and "p" in entry
+            ]
+            entries = sorted(entries, key=lambda entry: entry["d"])
+            self._price_indexes[ticker] = ([entry["d"] for entry in entries], entries)
+
     def _get_prices_slice(self, end_date: str, lookback: int = 400) -> dict:
         """
         Return a price dict up to (and including) *end_date* with at least
@@ -148,15 +173,15 @@ class MultiSpeedMomentumBacktester:
 
         This is what the MultiSpeedMomentum signal engine consumes.
         """
+        if not self._price_indexes:
+            self._build_price_indexes()
+
         result: dict = {}
         for ticker in ("SPY", "GLD", "TLT"):
-            raw = self.prices_raw.get(ticker, [])
-            # keep entries up to end_date
-            filtered = [e for e in raw if e["d"] <= end_date]
-            # ensure enough history for the slow tier (252 + 21 + buffer)
-            if len(filtered) > lookback:
-                filtered = filtered[-(lookback + 50) :]
-            result[ticker] = filtered
+            dates, entries = self._price_indexes.get(ticker, ([], []))
+            end_idx = bisect_right(dates, end_date)
+            start_idx = max(0, end_idx - (lookback + 50))
+            result[ticker] = entries[start_idx:end_idx]
         return result
 
     # ------------------------------------------------------------------

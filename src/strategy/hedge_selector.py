@@ -153,7 +153,7 @@ class HedgeSelector:
         
         # 1. Classify regime
         if regime_label:
-            regime = RegimeLabel(regime_label)
+            regime = self._resolve_regime_label(regime_label, vix_level)
         else:
             regime = self._classify_regime(vix_level)
         
@@ -213,6 +213,20 @@ class HedgeSelector:
             return RegimeLabel.STRESS
         else:
             return RegimeLabel.CRISIS
+
+    def _resolve_regime_label(self, regime_label: str, vix_level: float) -> RegimeLabel:
+        """Map portfolio-lab regime labels onto hedge-selector regimes."""
+        normalized = regime_label.lower().strip()
+        mapping = {
+            "normal": RegimeLabel.NORMAL,
+            "low_vol": RegimeLabel.NORMAL,
+            "elevated": RegimeLabel.ELEVATED,
+            "high_vol": RegimeLabel.STRESS,
+            "stress": RegimeLabel.STRESS,
+            "crisis": RegimeLabel.CRISIS,
+            "recovery": RegimeLabel.RECOVERY,
+        }
+        return mapping.get(normalized, self._classify_regime(vix_level))
     
     def _select_instruments(
         self, regime: RegimeLabel, vix_level: float

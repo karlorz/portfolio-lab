@@ -6,6 +6,7 @@ utility edge cases, backtest result validation, and synthetic data.
 """
 
 import json
+import logging
 import math
 import pytest
 import numpy as np
@@ -17,6 +18,7 @@ from src.backtest.combined_overlay_backtest import (
     CombinedOverlayBacktest,
     run_combined_backtest,
 )
+from src.backtest import combined_overlay_backtest as combined_overlay_backtest_module
 from src.backtest.metrics import (
     BacktestResult,
     BacktestMetrics,
@@ -147,6 +149,56 @@ class TestCombinedOverlayBacktest:
         result = run_combined_backtest()
         assert isinstance(result, BacktestResult)
 
+    def test_main_logs_report_without_blank_logger_type_error(self, monkeypatch, caplog):
+        """CLI report should emit blank lines with logger.info("") not bare logger.info()."""
+        result = BacktestResult(
+            total_return=10.0,
+            cagr=5.0,
+            volatility=8.0,
+            sharpe_ratio=0.7,
+            max_drawdown=-12.0,
+            crisis_returns={
+                "2008_baseline": -10.0,
+                "2008_combined": -8.0,
+                "2020_baseline": -5.0,
+                "2020_combined": -4.0,
+                "2022_baseline": -12.0,
+                "2022_combined": -11.0,
+            },
+            extras={
+                "start_date": "2022-01-01",
+                "end_date": "2026-01-01",
+                "trading_days": 100,
+                "baseline_cagr": 4.0,
+                "combined_cagr": 5.0,
+                "cagr_delta": 1.0,
+                "baseline_vol": 8.5,
+                "combined_vol": 8.0,
+                "baseline_sharpe": 0.6,
+                "sharpe_delta": 0.1,
+                "baseline_max_dd": -14.0,
+                "combined_max_dd": -12.0,
+                "dd_improvement": 2.0,
+                "collar_active_pct": 10.0,
+                "crypto_active_pct": 20.0,
+                "bond_rotation_avg_tlt": 30.0,
+                "avg_overlays_active": 1.0,
+                "meets_sharpe_target": False,
+                "meets_dd_target": True,
+            },
+        )
+        monkeypatch.setattr(
+            combined_overlay_backtest_module.CombinedOverlayBacktest,
+            "run_backtest",
+            lambda _self: result,
+        )
+        monkeypatch.setattr("sys.argv", ["combined_overlay_backtest.py", "run"])
+        caplog.set_level(logging.INFO)
+
+        combined_overlay_backtest_module.main()
+
+        assert "COMBINED OVERLAY BACKTEST" in caplog.text
+
 
 class TestEdgeCases:
     """Edge cases for backtest."""
@@ -165,6 +217,36 @@ class TestEdgeCases:
         vols = bt._compute_rolling_vol(rets, 30)
         assert len(vols) == len(rets)
         assert vols[-1] > 0
+
+    def test_compute_rolling_vol_precomputes_without_daily_np_std(self, monkeypatch):
+        """Rolling volatility should preserve legacy values without per-day np.std calls."""
+        bt = CombinedOverlayBacktest()
+        rets = [((i % 19) - 9) / 1000 for i in range(500)]
+        window = 30
+
+        def population_std(values):
+            mean = sum(values) / len(values)
+            return math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+
+        expected = []
+        for i in range(len(rets)):
+            if i < window:
+                expected.append(
+                    population_std(rets[: i + 1]) * math.sqrt(252)
+                    if i > 0
+                    else 0.16
+                )
+            else:
+                expected.append(population_std(rets[i - window : i]) * math.sqrt(252))
+
+        def fail_std(*_args, **_kwargs):
+            raise AssertionError("np.std should not be called once per rolling-vol day")
+
+        monkeypatch.setattr("src.backtest.combined_overlay_backtest.np.std", fail_std)
+
+        vols = bt._compute_rolling_vol(rets, window)
+
+        assert vols == pytest.approx(expected)
 
 
 # ═══════════════════════════════════════════════════════════════

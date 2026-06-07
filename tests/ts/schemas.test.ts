@@ -3,6 +3,7 @@ import {
   RegimeSchema,
   YieldCurveSchema,
   DurationAllocationSchema,
+  HedgeSelectorSchema,
   PositionSchema,
   RecentOrderSchema,
   GarchCvarSchema,
@@ -304,6 +305,64 @@ describe('SmartRebalanceSchema', () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+});
+
+// ===========================================================================
+// HedgeSelectorSchema
+// ===========================================================================
+
+describe('HedgeSelectorSchema', () => {
+  const validHedgeSelector = () => ({
+    available: true,
+    generated_at: '2026-06-08T12:00:00Z',
+    regime: 'stress',
+    regime_confidence: 0.8,
+    primary_hedge: 'put_spread',
+    primary_size_pct: 6.0,
+    secondary_hedge: 'vixy',
+    secondary_size_pct: 4.0,
+    expected_benefit_bps: 300,
+    expected_cost_bps: 12,
+    net_benefit_bps: 288,
+    cost_benefit_gate: true,
+    kelly_fraction: 0.24,
+    confidence_scaled_size: 6.0,
+  });
+
+  it('accepts valid hedge selector data', () => {
+    const result = HedgeSelectorSchema.safeParse(validHedgeSelector());
+    expect(result.success).toBe(true);
+  });
+
+  it('fills defaults for partial hedge selector data', () => {
+    const result = HedgeSelectorSchema.safeParse({ available: true, primary_hedge: 'vixy' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.generated_at).toBe('');
+      expect(result.data.regime).toBe('unknown');
+      expect(result.data.secondary_hedge).toBeNull();
+      expect(result.data.cost_benefit_gate).toBe(false);
+    }
+  });
+
+  it('rejects invalid numeric fields', () => {
+    const result = HedgeSelectorSchema.safeParse({
+      ...validHedgeSelector(),
+      primary_size_pct: 'large',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('validates hedge_selector inside SignalsDataSchema', () => {
+    const result = SignalsDataSchema.safeParse({
+      ...validSignalsData(),
+      hedge_selector: validHedgeSelector(),
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.hedge_selector?.primary_hedge).toBe('put_spread');
+    }
   });
 });
 

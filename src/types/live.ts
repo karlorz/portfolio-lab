@@ -1,5 +1,22 @@
 // Types for live trading dashboard data
 
+export interface HedgeSelectorData {
+  available: boolean;
+  generated_at: string;
+  regime: string;
+  regime_confidence: number;
+  primary_hedge: string;
+  primary_size_pct: number;
+  secondary_hedge: string | null;
+  secondary_size_pct: number;
+  expected_benefit_bps: number;
+  expected_cost_bps: number;
+  net_benefit_bps: number;
+  cost_benefit_gate: boolean;
+  kelly_fraction: number;
+  confidence_scaled_size: number;
+}
+
 export interface SignalsData {
   timestamp: string;
   regime: {
@@ -83,6 +100,7 @@ export interface SignalsData {
   };
   vix_term_structure?: VIXTermStructureData;
   vix_overlay?: VIXOverlayState;
+  hedge_selector?: HedgeSelectorData;
   // Signal panel data — typed as Record<string, unknown> until each panel
   // defines a proper interface
   behavioral_sentiment?: Record<string, unknown>;

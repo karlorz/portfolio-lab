@@ -11,6 +11,7 @@ import {
   Area
 } from 'recharts';
 import type { StatsData, PerformanceEntry } from '../types/live';
+import { autoDownsample } from '../utils/lttb';
 
 interface SPYComparisonChartProps {
   stats: StatsData | null;
@@ -78,7 +79,10 @@ export function SPYComparisonChart({ stats, performance }: SPYComparisonChartPro
       outperformance: 0
     };
 
-    return { chartData: data, metrics: currentMetrics };
+    return {
+      chartData: autoDownsample(data, 600, 'date', 'portfolio', 1000),
+      metrics: currentMetrics,
+    };
   }, [performance, stats]);
 
   if (chartData.length < 2) {

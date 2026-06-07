@@ -10,8 +10,10 @@ from pydantic import ValidationError
 from src.monitor.signal_schemas import (
     EnsembleVotingSignal,
     GarchCvarSignal,
+    HedgeSelectorSignal,
     PortfolioExplainabilitySignal,
     RegimeSignal,
+    SIGNAL_MODELS,
     SignalSnapshotSchema,
     SignalsData,
     SmartRebalanceSignal,
@@ -87,6 +89,43 @@ class TestPortfolioExplainabilitySignal:
         assert model.top_sources_today == []
         assert model.decision_quality == {}
         assert model.action == "hold"
+
+
+class TestHedgeSelectorSignal:
+    def test_valid_data(self):
+        data = {
+            "available": True,
+            "generated_at": "2026-06-08T12:00:00",
+            "regime": "stress",
+            "regime_confidence": 0.8,
+            "primary_hedge": "put_spread",
+            "primary_size_pct": 6.0,
+            "secondary_hedge": "vixy",
+            "secondary_size_pct": 4.0,
+            "expected_benefit_bps": 300.0,
+            "expected_cost_bps": 12.0,
+            "net_benefit_bps": 288.0,
+            "cost_benefit_gate": True,
+            "kelly_fraction": 0.24,
+            "confidence_scaled_size": 6.0,
+        }
+
+        model = HedgeSelectorSignal.model_validate(data)
+
+        assert model.available is True
+        assert model.primary_hedge == "put_spread"
+        assert model.secondary_hedge == "vixy"
+        assert model.cost_benefit_gate is True
+
+    def test_missing_fields_use_defaults(self):
+        model = HedgeSelectorSignal.model_validate({})
+
+        assert model.available is False
+        assert model.generated_at == ""
+        assert model.regime == "unknown"
+        assert model.primary_hedge == "none"
+        assert model.secondary_hedge is None
+        assert model.cost_benefit_gate is False
 
     def test_partial_data(self):
         data = {"regime": "crisis", "weighted_consensus": -0.5}
@@ -398,6 +437,21 @@ class TestValidateSignal:
         assert result["value"] == 0.5
         assert result["regime_fit"] == "normal"  # default
 
+    def test_hedge_selector_validation(self):
+        data = {
+            "available": True,
+            "regime": "crisis",
+            "primary_hedge": "collar",
+            "primary_size_pct": 5.0,
+            "cost_benefit_gate": True,
+        }
+        result = validate_signal("hedge_selector", data)
+        assert result["available"] is True
+        assert result["primary_hedge"] == "collar"
+        assert result["secondary_hedge"] is None
+        assert result["generated_at"] == ""
+        assert "hedge_selector" in SIGNAL_MODELS
+
     def test_original_data_returned_on_validation_error(self):
         """When Pydantic validation fails (type error, constraint violation),
         the original data should be returned unchanged, not the validated model."""
@@ -436,6 +490,7 @@ class TestSignalsData:
             "garch_cvar": {"cvar_95": -0.03, "garch_active": True},
             "smart_rebalance": {"should_execute": True, "decision": "rebalance"},
             "yield_curve": {"spread2s10s": -20.0, "duration_regime": "inverted"},
+            "hedge_selector": {"available": True, "primary_hedge": "vixy"},
             "extra_top_level": "passed through",
         }
         model = SignalsData.model_validate(raw)
@@ -446,6 +501,8 @@ class TestSignalsData:
         assert model.ensemble_voting.weighted_consensus == -0.5
         assert model.garch_cvar is not None
         assert model.garch_cvar.cvar_95 == -0.03
+        assert model.hedge_selector is not None
+        assert model.hedge_selector.primary_hedge == "vixy"
 
     def test_extra_fields_at_top_level_preserved(self):
         raw = {"generated_at": "now", "unknown_section": {"foo": 1}}

@@ -324,6 +324,26 @@ export const VIXOverlaySchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Hedge Selector
+// ---------------------------------------------------------------------------
+export const HedgeSelectorSchema = z.object({
+  available: z.boolean().default(false),
+  generated_at: z.string().default(''),
+  regime: z.string().default('unknown'),
+  regime_confidence: z.number().default(0),
+  primary_hedge: z.string().default('none'),
+  primary_size_pct: z.number().default(0),
+  secondary_hedge: z.nullable(z.string()).default(null),
+  secondary_size_pct: z.number().default(0),
+  expected_benefit_bps: z.number().default(0),
+  expected_cost_bps: z.number().default(0),
+  net_benefit_bps: z.number().default(0),
+  cost_benefit_gate: z.boolean().default(false),
+  kelly_fraction: z.number().default(0),
+  confidence_scaled_size: z.number().default(0),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
 // ML Signals
 // ---------------------------------------------------------------------------
 const MLPredictionSchema = z.object({
@@ -420,6 +440,7 @@ export const SignalsDataSchema = z.object({
   bond_momentum: z.optional(BondMomentumSchema),
   vix_term_structure: z.optional(VIXTermStructureSchema),
   vix_overlay: z.optional(VIXOverlaySchema),
+  hedge_selector: z.optional(HedgeSelectorSchema),
 
   // Untyped signal panels — use z.unknown() so any shape passes
   behavioral_sentiment: z.optional(z.record(z.string(), z.unknown())),

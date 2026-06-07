@@ -235,6 +235,27 @@ class PortfolioExplainabilitySignal(BaseModel):
     weighted_consensus: float = 0.0
 
 
+class HedgeSelectorSignal(BaseModel):
+    """Validates the ``hedge_selector`` section of signals.json."""
+
+    model_config = ConfigDict(extra="allow")
+
+    available: bool = False
+    generated_at: str = ""
+    regime: str = "unknown"
+    regime_confidence: float = 0.0
+    primary_hedge: str = "none"
+    primary_size_pct: float = 0.0
+    secondary_hedge: Optional[str] = None
+    secondary_size_pct: float = 0.0
+    cost_benefit_gate: bool = False
+    net_benefit_bps: float = 0.0
+    kelly_fraction: float = 0.0
+    expected_cost_bps: float = 0.0
+    expected_benefit_bps: float = 0.0
+    confidence_scaled_size: float = 0.0
+
+
 SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "ensemble_voting": EnsembleVotingSignal,
     "garch_cvar": GarchCvarSignal,
@@ -250,6 +271,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "ramp": RampSignal,
     "gold_tlt_correlation": GoldTltCorrelationSignal,
     "portfolio_explainability": PortfolioExplainabilitySignal,
+    "hedge_selector": HedgeSelectorSignal,
 }
 
 # Signals for which schemas are defined — used when integrating into
@@ -328,6 +350,7 @@ class SignalsData(BaseModel):
     garch_cvar: Optional[GarchCvarSignal] = None
     smart_rebalance: Optional[SmartRebalanceSignal] = None
     yield_curve: Optional[YieldCurveSignal] = None
+    hedge_selector: Optional[HedgeSelectorSignal] = None
 
     @classmethod
     def validate_dict(cls, raw: Dict[str, Any]) -> Dict[str, Any]:

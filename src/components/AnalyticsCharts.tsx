@@ -12,6 +12,8 @@ import {
   Line,
 } from 'recharts';
 import { AlertTriangle, TrendingDown, TrendingUp } from 'lucide-react';
+import { mergeRollingMetrics } from '../utils/chartData';
+import { autoDownsample } from '../utils/lttb';
 
 interface DrawdownPoint {
   date: string;
@@ -53,10 +55,11 @@ export const UnderwaterChart: React.FC<UnderwaterChartProps> = ({
   height = 320,
 }) => {
   const chartData = useMemo(() => {
-    return series.map((p) => ({
+    const raw = series.map((p) => ({
       ...p,
       dateFormatted: formatDate(p.date),
     }));
+    return autoDownsample(raw, 600, 'date', 'drawdown', 1000);
   }, [series]);
 
   const maxDD = maxDrawdown?.max_drawdown || 0;
@@ -221,25 +224,9 @@ export const RollingMetricsChart: React.FC<RollingMetricsProps> = ({
   sharpe252d,
   height = 320,
 }) => {
-  // Combine all windows into single dataset
   const chartData = useMemo(() => {
-    // Get all unique dates
-    const allDates = new Set<string>([
-      ...sharpe63d.map((d) => d.date),
-      ...sharpe126d.map((d) => d.date),
-      ...sharpe252d.map((d) => d.date),
-    ]);
-
-    return Array.from(allDates)
-      .sort()
-      .map((date) => ({
-        date,
-        dateFormatted: formatDate(date),
-        sharpe63: sharpe63d.find((d) => d.date === date)?.sharpe ?? null,
-        sharpe126: sharpe126d.find((d) => d.date === date)?.sharpe ?? null,
-        sharpe252: sharpe252d.find((d) => d.date === date)?.sharpe ?? null,
-        vol63: sharpe63d.find((d) => d.date === date)?.volatility ?? null,
-      }));
+    const merged = mergeRollingMetrics(sharpe63d, sharpe126d, sharpe252d);
+    return autoDownsample(merged, 600, 'date', 'sharpe63', 1000);
   }, [sharpe63d, sharpe126d, sharpe252d]);
 
   const latest63 = sharpe63d[sharpe63d.length - 1]?.sharpe;

@@ -3,6 +3,7 @@ Tests for Real Data Combined Backtest (v4.90)
 """
 
 import json
+import logging
 import math
 import sqlite3
 from dataclasses import asdict
@@ -20,6 +21,7 @@ from src.backtest.real_data_backtest import (
     RealDataBacktest,
     run_real_data_backtest,
 )
+from src.backtest import real_data_backtest as real_data_backtest_module
 
 
 class TestRealDataBacktestResult:
@@ -219,6 +221,35 @@ class TestRealDataBacktest:
         # First element is warmup, last element uses full 30-element window
         assert vols[0] == 0.20
 
+    def test_compute_rolling_vol_precomputes_without_daily_np_std(self, bt, monkeypatch):
+        """Rolling volatility should preserve legacy values without per-day np.std calls."""
+        rets = [((i % 17) - 8) / 1000 for i in range(500)]
+        window = 30
+
+        def population_std(values):
+            mean = sum(values) / len(values)
+            return math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+
+        expected = []
+        for i in range(len(rets)):
+            if i < window:
+                expected.append(
+                    population_std(rets[: i + 1]) * math.sqrt(252)
+                    if i > 1
+                    else 0.20
+                )
+            else:
+                expected.append(population_std(rets[i - window : i]) * math.sqrt(252))
+
+        def fail_std(*_args, **_kwargs):
+            raise AssertionError("np.std should not be called once per rolling-vol day")
+
+        monkeypatch.setattr("src.backtest.real_data_backtest.np.std", fail_std)
+
+        vols = bt._compute_rolling_vol(rets, window)
+
+        assert vols == pytest.approx(expected)
+
     def test_compute_rolling_vol_negative_returns(self, bt):
         """Negative-only returns still produce positive vol."""
         rets = [-0.01] * 40
@@ -249,6 +280,44 @@ class TestRealDataBacktest:
     def test_collar_signal_zero_vix(self, bt):
         """Zero VIX treated as low vol -> no collar."""
         assert bt._collar_signal(0.0) == 0.0
+
+    def test_main_logs_report_without_blank_logger_type_error(self, monkeypatch, caplog):
+        """CLI report should emit blank lines with logger.info("") not bare logger.info()."""
+        result = BacktestResult(
+            total_return=10.0,
+            cagr=5.0,
+            volatility=8.0,
+            sharpe_ratio=0.7,
+            max_drawdown=-12.0,
+            baseline_sharpe=0.6,
+            sharpe_improvement=0.1,
+            extras={
+                "data_start": "2022-01-01",
+                "data_end": "2026-01-01",
+                "trading_days": 100,
+                "baseline_cagr": 4.0,
+                "baseline_vol": 8.5,
+                "baseline_max_dd": -14.0,
+                "baseline_total_return": 9.0,
+                "dd_improvement": 2.0,
+                "collar_days_pct": 10.0,
+                "crypto_days_pct": 20.0,
+                "avg_tlt_sleeve_pct": 30.0,
+                "meets_target": False,
+                "recommendation": "test",
+            },
+        )
+        monkeypatch.setattr(
+            real_data_backtest_module.RealDataBacktest,
+            "run",
+            lambda _self: result,
+        )
+        monkeypatch.setattr("sys.argv", ["real_data_backtest.py", "run"])
+        caplog.set_level(logging.INFO)
+
+        real_data_backtest_module.main()
+
+        assert "REAL DATA COMBINED BACKTEST" in caplog.text
 
     def test_bond_duration_signals(self, bt):
         t, i, s = bt._bond_duration_signal(0.15, 0)
