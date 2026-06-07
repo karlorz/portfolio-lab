@@ -21,6 +21,7 @@ Usage:
 
 import json
 import logging
+from bisect import bisect_right
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -29,12 +30,18 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.paths import DATA_DIR, PRICES_JSON, RISK_FREE_RATE
+from src.paths import (
+    DATA_DIR,
+    REGIME_VOL_LOOKBACKS,
+    REGIME_VOL_SCALING_EXPONENTS,
+    RISK_FREE_RATE,
+)
 from src.backtest.metrics import (
     BacktestMetrics,
     compute_metrics,
     save_results_json,
 )
+from src.data.price_cache import get_prices_df
 from src.signals.vix_term_structure import VIXTermStructureSignalGenerator, VIXRegime
 
 logger = logging.getLogger(__name__)
@@ -71,19 +78,9 @@ class VolTargetResult:
 
 
 def _load_prices() -> pd.DataFrame:
-    """Load price data from prices.json."""
-    with open(PRICES_JSON) as f:
-        raw = json.load(f)
-
-    frames = {}
-    for sym in ["SPY", "GLD", "TLT", "IEF"]:
-        entries = raw.get(sym, [])
-        if isinstance(entries, list) and len(entries) > 0 and isinstance(entries[0], dict):
-            dates = [e["d"] for e in entries]
-            prices = [e["p"] for e in entries]
-            frames[sym] = pd.Series(prices, index=pd.to_datetime(dates), name=sym)
-
-    df = pd.DataFrame(frames).dropna()
+    """Load price data through the shared TTL-cached price DataFrame accessor."""
+    symbols = ["SPY", "GLD", "TLT", "IEF"]
+    df = get_prices_df(symbols=symbols).dropna()
     df.index.name = "date"
     return df
 
@@ -94,6 +91,7 @@ def _compute_vol_target_leverage(
     max_leverage: float = 2.0,
     smoothing: float = 0.67,
     prev_leverage: float = 1.0,
+    scaling_exponent: float = 1.0,
 ) -> float:
     """Compute leverage factor for volatility targeting.
 
@@ -103,17 +101,100 @@ def _compute_vol_target_leverage(
         max_leverage: Maximum allowed leverage
         smoothing: Smoothing coefficient (0-1). Lower = more responsive.
         prev_leverage: Previous period's leverage factor
+        scaling_exponent: Exponent applied to target/realized vol ratio.
+            1.0 is legacy linear scaling; lower values dampen changes.
 
     Returns:
         Leverage factor (1.0 = no scaling)
     """
-    if realized_vol <= 0:
+    if realized_vol <= 0 or target_vol <= 0:
         return 1.0
 
-    raw_leverage = target_vol / realized_vol
+    safe_exponent = max(0.0, float(scaling_exponent))
+    raw_leverage = (target_vol / realized_vol) ** safe_exponent
     # Smooth to prevent excessive turnover
     smoothed = smoothing * raw_leverage + (1 - smoothing) * prev_leverage
     return round(max(1.0 / max_leverage, min(max_leverage, smoothed)), 4)
+
+
+def _get_regime_scaling_exponent(
+    regime: str,
+    regime_scaling_exponents: Optional[Dict[str, float]] = None,
+) -> float:
+    """Return leverage scaling exponent for a regime with safe fallback."""
+    config = regime_scaling_exponents or REGIME_VOL_SCALING_EXPONENTS
+    try:
+        return max(0.0, float(config.get(regime, 1.0)))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _get_regime_vol_lookback(
+    regime: str,
+    regime_lookbacks: Optional[Dict[str, int]] = None,
+    default_lookback: int = 63,
+) -> int:
+    """Return realized-volatility lookback for a regime with safe fallback."""
+    config = regime_lookbacks or REGIME_VOL_LOOKBACKS
+    try:
+        return max(2, int(config.get(regime, default_lookback)))
+    except (TypeError, ValueError):
+        return max(2, int(default_lookback))
+
+
+def _compute_realized_vol(
+    portfolio_returns: np.ndarray,
+    end_idx: int,
+    lookback: int,
+    fallback_vol: float = 0.15,
+) -> float:
+    """Compute annualized realized vol over a bounded historical window."""
+    window = max(2, int(lookback))
+    if end_idx >= window:
+        hist_returns = portfolio_returns[end_idx - window : end_idx]
+    else:
+        hist_returns = portfolio_returns[1:end_idx] if end_idx > 1 else np.array([0.0])
+    if len(hist_returns) <= 2:
+        return fallback_vol
+    return float(np.std(hist_returns) * np.sqrt(252))
+
+
+def _precompute_realized_vols(
+    portfolio_returns: np.ndarray,
+    lookbacks: List[int],
+    fallback_vol: float = 0.15,
+) -> Dict[int, np.ndarray]:
+    """Precompute realized-vol arrays for each lookback using prefix sums."""
+    returns = np.asarray(portfolio_returns, dtype=float)
+    n_days = len(returns)
+    prefix_sum = np.concatenate(([0.0], np.cumsum(returns)))
+    prefix_sq_sum = np.concatenate(([0.0], np.cumsum(returns * returns)))
+    realized_vols: Dict[int, np.ndarray] = {}
+
+    for raw_lookback in sorted(set(lookbacks)):
+        window = max(2, int(raw_lookback))
+        vols = np.full(n_days, fallback_vol, dtype=float)
+        for end_idx in range(n_days):
+            if end_idx >= window:
+                start_idx = end_idx - window
+            elif end_idx > 1:
+                start_idx = 1
+            else:
+                continue
+
+            count = end_idx - start_idx
+            if count <= 2:
+                continue
+
+            total = prefix_sum[end_idx] - prefix_sum[start_idx]
+            total_sq = prefix_sq_sum[end_idx] - prefix_sq_sum[start_idx]
+            mean = total / count
+            variance = max(0.0, (total_sq / count) - (mean * mean))
+            vols[end_idx] = float(np.sqrt(variance) * np.sqrt(252))
+
+        realized_vols[window] = vols
+
+    return realized_vols
 
 
 def compute_vol_target_backtest(
@@ -175,16 +256,14 @@ def compute_vol_target_backtest(
     leverage_history = [1.0]
     prev_leverage = 1.0
     cash = 0.0
+    sanitized_vol_lookback = max(2, int(vol_lookback))
+    realized_vols = _precompute_realized_vols(
+        portfolio_returns,
+        [sanitized_vol_lookback],
+    )[sanitized_vol_lookback]
 
     for i in range(1, n_days):
-        # Compute realized vol over lookback
-        if i >= vol_lookback:
-            hist_returns = portfolio_returns[i - vol_lookback : i]
-            realized_vol = float(np.std(hist_returns) * np.sqrt(252))
-        else:
-            # Insufficient history: use expanding window
-            hist_returns = portfolio_returns[1:i] if i > 1 else np.array([0.0])
-            realized_vol = float(np.std(hist_returns) * np.sqrt(252)) if len(hist_returns) > 2 else 0.15
+        realized_vol = float(realized_vols[i])
 
         # Compute target leverage
         leverage = _compute_vol_target_leverage(
@@ -297,14 +376,15 @@ def compute_vol_target_backtest(
 # ── Regime-Conditional Volatility Targeting ──────────────────────────────
 
 # Target volatilities by regime (annualized).
-# Based on grid search: 9% is optimal overall; 11% is negative.
-# Crisis/HighVol need lower targets; LowVol can take more risk.
+# Defensive defaults validated with regime-specific scaling/lookbacks.
+# Crisis/HighVol targets are low enough to reduce drawdown below 18%;
+# LowVol retains a moderate risk budget without letting leverage dominate.
 REGIME_VOL_TARGETS: Dict[str, float] = {
-    "CRISIS": 0.05,
-    "HIGH_VOL": 0.07,
-    "NORMAL": 0.09,
-    "LOW_VOL": 0.11,
-    "RECOVERY": 0.10,
+    "CRISIS": 0.03,
+    "HIGH_VOL": 0.05,
+    "NORMAL": 0.08,
+    "LOW_VOL": 0.10,
+    "RECOVERY": 0.09,
 }
 
 # VIX term structure regime to vol target bias mapping
@@ -329,16 +409,21 @@ def _load_vix_term_structure_data() -> Dict:
         return {}
 
 
-def _get_vix_regime_for_date(date_str: str, vix_data: Dict) -> Optional[str]:
+def _get_vix_regime_for_date(
+    date_str: str,
+    vix_data: Dict,
+    sorted_dates: Optional[List[str]] = None,
+) -> Optional[str]:
     """Get VIX term structure regime for a given date."""
     if date_str in vix_data:
         return vix_data[date_str].get('regime')
-    # Try closest date
-    dates = sorted(vix_data.keys())
-    for d in reversed(dates):
-        if d <= date_str:
-            return vix_data[d].get('regime')
-    return None
+    dates = sorted_dates if sorted_dates is not None else sorted(vix_data)
+    if not dates:
+        return None
+    idx = bisect_right(dates, date_str) - 1
+    if idx < 0:
+        return None
+    return vix_data[dates[idx]].get('regime')
 
 
 def _classify_regime_from_vol(
@@ -381,6 +466,8 @@ class RegimeVolTargetResult:
     analysis_date: str
     base_allocation: Dict[str, float]
     regime_targets: Dict[str, float]
+    regime_scaling_exponents: Dict[str, float]
+    regime_lookbacks: Dict[str, int]
     vol_lookback: int
     max_leverage: float
     static_sharpe: float
@@ -401,8 +488,10 @@ class RegimeVolTargetResult:
 def compute_regime_conditional_vol_target_backtest(
     base_allocation: Optional[Dict[str, float]] = None,
     regime_targets: Optional[Dict[str, float]] = None,
+    regime_scaling_exponents: Optional[Dict[str, float]] = None,
+    regime_lookbacks: Optional[Dict[str, int]] = None,
     vol_lookback: int = 63,
-    max_leverage: float = 1.5,
+    max_leverage: float = 2.0,
     smoothing: float = 0.67,
     rebalance_days: int = 21,
     transaction_cost_bps: float = 10.0,
@@ -420,6 +509,8 @@ def compute_regime_conditional_vol_target_backtest(
     Args:
         base_allocation: Base allocation (default: 46/38/16)
         regime_targets: Dict mapping regime → target vol (default: REGIME_VOL_TARGETS)
+        regime_scaling_exponents: Dict mapping regime → leverage scaling exponent
+        regime_lookbacks: Dict mapping regime → realized-vol lookback in days
         vol_lookback: Volatility estimation window in days
         max_leverage: Maximum leverage multiple
         smoothing: Leverage smoothing coefficient
@@ -434,6 +525,10 @@ def compute_regime_conditional_vol_target_backtest(
         base_allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.00}
     if regime_targets is None:
         regime_targets = dict(REGIME_VOL_TARGETS)
+    if regime_scaling_exponents is None:
+        regime_scaling_exponents = dict(REGIME_VOL_SCALING_EXPONENTS)
+    if regime_lookbacks is None:
+        regime_lookbacks = dict(REGIME_VOL_LOOKBACKS)
 
     logger.info("Loading prices for regime-conditional vol targeting backtest")
     prices = _load_prices()
@@ -441,6 +536,7 @@ def compute_regime_conditional_vol_target_backtest(
 
     # Load VIX term structure data for enhanced regime classification
     vix_data = _load_vix_term_structure_data()
+    vix_dates = sorted(vix_data) if vix_data else []
     logger.info("Loaded VIX term structure data: %d records", len(vix_data))
 
     symbols = ["SPY", "GLD", "TLT", "IEF"]
@@ -471,35 +567,52 @@ def compute_regime_conditional_vol_target_backtest(
     prev_leverage = 1.0
     prev_regime = "NORMAL"
 
-    # Compute long-term median vol for relative regime classification
-    # Use expanding window of at least 252 days so median is meaningful
-    rolling_vols: List[float] = []
-    for i in range(vol_lookback, n_days):
-        rv = float(np.std(portfolio_returns[i - vol_lookback : i]) * np.sqrt(252))
-        rolling_vols.append(rv)
-    median_vol = float(np.median(rolling_vols)) if rolling_vols else 0.11
-    logger.info("Portfolio median %dd realized vol: %.4f", vol_lookback, median_vol)
+    lookback_candidates = {vol_lookback}
+    for regime in set(regime_targets) | set(regime_lookbacks):
+        lookback_candidates.add(
+            _get_regime_vol_lookback(
+                regime, regime_lookbacks, default_lookback=vol_lookback,
+            )
+        )
+    realized_vols_by_lookback = _precompute_realized_vols(
+        portfolio_returns,
+        list(lookback_candidates),
+    )
+    classification_lookback = max(2, int(vol_lookback))
+    classification_vols = realized_vols_by_lookback[classification_lookback]
+
+    # Compute long-term median vol for relative regime classification.
+    rolling_vols = classification_vols[classification_lookback:]
+    median_vol = float(np.median(rolling_vols)) if len(rolling_vols) > 0 else 0.11
+    logger.info("Portfolio median %dd realized vol: %.4f", classification_lookback, median_vol)
 
     # Per-regime stats
     regime_days: Dict[str, int] = {r: 0 for r in regime_targets}
     regime_total_leverage: Dict[str, float] = {r: 0.0 for r in regime_targets}
 
     for i in range(1, n_days):
-        # Compute realized vol
-        if i >= vol_lookback:
-            hist_returns = portfolio_returns[i - vol_lookback : i]
-            realized_vol = float(np.std(hist_returns) * np.sqrt(252))
-        else:
-            hist_returns = portfolio_returns[1:i] if i > 1 else np.array([0.0])
-            realized_vol = float(np.std(hist_returns) * np.sqrt(252)) if len(hist_returns) > 2 else 0.15
+        # Classify regime from the stable baseline window, then estimate
+        # realized vol with the regime-specific adaptive lookback.
+        classification_vol = float(classification_vols[i])
 
         # Determine current regime from realized vol trend
-        if i >= vol_lookback * 2:
-            earlier_vol = float(np.std(portfolio_returns[i - vol_lookback * 2 : i - vol_lookback]) * np.sqrt(252))
-            vol_declining = realized_vol < earlier_vol * 0.85
+        if i >= classification_lookback * 2:
+            earlier_vol = float(classification_vols[i - classification_lookback])
+            vol_declining = classification_vol < earlier_vol * 0.85
         else:
             vol_declining = False
-        regime = _classify_regime_from_vol(realized_vol, median_vol, prev_regime, vol_declining)
+        regime = _classify_regime_from_vol(classification_vol, median_vol, prev_regime, vol_declining)
+        adaptive_lookback = _get_regime_vol_lookback(
+            regime, regime_lookbacks, default_lookback=vol_lookback,
+        )
+        if adaptive_lookback not in realized_vols_by_lookback:
+            realized_vols_by_lookback.update(
+                _precompute_realized_vols(portfolio_returns, [adaptive_lookback])
+            )
+        realized_vol = float(realized_vols_by_lookback[adaptive_lookback][i])
+        scaling_exponent = _get_regime_scaling_exponent(
+            regime, regime_scaling_exponents,
+        )
         target_vol = regime_targets.get(regime, 0.09)
 
         # Enhance regime classification with VIX term structure signal
@@ -507,7 +620,7 @@ def compute_regime_conditional_vol_target_backtest(
         if vix_data:
             # Convert index to string date (works with DatetimeIndex)
             date_str = str(prices.index[i])[:10]  # "2024-01-05"
-            vix_regime = _get_vix_regime_for_date(date_str, vix_data)
+            vix_regime = _get_vix_regime_for_date(date_str, vix_data, vix_dates)
             if vix_regime:
                 vix_bias = VIX_REGIME_VOL_BIAS.get(vix_regime, 0.0)
                 target_vol = max(0.03, min(0.15, target_vol + vix_bias))
@@ -516,7 +629,12 @@ def compute_regime_conditional_vol_target_backtest(
 
         # Compute target leverage
         leverage = _compute_vol_target_leverage(
-            realized_vol, target_vol, max_leverage, smoothing, prev_leverage,
+            realized_vol,
+            target_vol,
+            max_leverage,
+            smoothing,
+            prev_leverage,
+            scaling_exponent=scaling_exponent,
         )
 
         # Apply leverage
@@ -583,6 +701,12 @@ def compute_regime_conditional_vol_target_backtest(
                 regime_total_leverage.get(reg, 0.0) / max(days, 1), 4
             ),
             "target_vol": round(regime_targets.get(reg, 0.09), 4),
+            "scaling_exponent": round(
+                _get_regime_scaling_exponent(reg, regime_scaling_exponents), 4
+            ),
+            "vol_lookback": _get_regime_vol_lookback(
+                reg, regime_lookbacks, default_lookback=vol_lookback,
+            ),
         }
 
     # Summary
@@ -600,13 +724,17 @@ def compute_regime_conditional_vol_target_backtest(
         f"Sharpe {vol_target_sharpe:.4f} vs static {static_sharpe:.4f} "
         f"(delta {sharpe_delta:+.4f}). "
         f"Mean leverage: {mean_leverage:.2f}x, max: {max_lev:.2f}x. "
-        f"Targets: {regime_targets}. {verdict}"
+        f"Targets: {regime_targets}. "
+        f"Scaling exponents: {regime_scaling_exponents}. "
+        f"Lookbacks: {regime_lookbacks}. {verdict}"
     )
 
     result = RegimeVolTargetResult(
         analysis_date=datetime.now().isoformat(),
         base_allocation=base_allocation,
         regime_targets=regime_targets,
+        regime_scaling_exponents=regime_scaling_exponents,
+        regime_lookbacks=regime_lookbacks,
         vol_lookback=vol_lookback,
         max_leverage=max_leverage,
         static_sharpe=round(static_sharpe, 4),

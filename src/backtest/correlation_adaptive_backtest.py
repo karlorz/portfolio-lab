@@ -33,12 +33,15 @@ import pandas as pd
 
 from src.paths import DATA_DIR, PRICES_JSON
 from src.backtest.metrics import (
-    BacktestResult,
     compute_metrics,
     save_results_json,
 )
+from src.data.price_cache import get_prices_df
 
 logger = logging.getLogger(__name__)
+
+_PRICE_SYMBOLS = ["SPY", "GLD", "TLT", "IEF"]
+_DEFAULT_PRICES_JSON = PRICES_JSON
 
 __all__ = [
     "CorrelationAdaptiveResult",
@@ -63,13 +66,13 @@ class CorrelationAdaptiveResult:
     summary: str
 
 
-def _load_prices() -> pd.DataFrame:
-    """Load price data from prices.json."""
-    with open(PRICES_JSON) as f:
+def _load_prices_from_json(prices_path: Path | str) -> pd.DataFrame:
+    """Load price data from an explicit prices.json path."""
+    with open(prices_path) as f:
         raw = json.load(f)
 
     frames = {}
-    for sym in ["SPY", "GLD", "TLT", "IEF"]:
+    for sym in _PRICE_SYMBOLS:
         entries = raw.get(sym, [])
         if isinstance(entries, list) and len(entries) > 0 and isinstance(entries[0], dict):
             dates = [e["d"] for e in entries]
@@ -77,6 +80,16 @@ def _load_prices() -> pd.DataFrame:
             frames[sym] = pd.Series(prices, index=pd.to_datetime(dates), name=sym)
 
     df = pd.DataFrame(frames).dropna()
+    df.index.name = "date"
+    return df
+
+
+def _load_prices() -> pd.DataFrame:
+    """Load price data through the shared cache unless PRICES_JSON is overridden."""
+    if Path(PRICES_JSON) != Path(_DEFAULT_PRICES_JSON):
+        return _load_prices_from_json(PRICES_JSON)
+
+    df = get_prices_df(symbols=_PRICE_SYMBOLS).dropna()
     df.index.name = "date"
     return df
 

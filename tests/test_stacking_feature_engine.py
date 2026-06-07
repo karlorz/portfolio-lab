@@ -1073,13 +1073,13 @@ class TestCLI:
         assert arr.shape == (sfe.TOTAL_DIMENSIONS,)
 
     def test_main_names_flag(self, caplog):
-        """main(['--names']) logs 59 feature names."""
+        """main(['--names']) logs feature names for all signal sources."""
         import logging
         caplog.set_level(logging.INFO)
         from src.signals.stacking_feature_engine import main
         main(["--names"])
         lines = caplog.text.strip().split("\n")
-        assert len(lines) == 102
+        assert len(lines) == 128  # 9 base + 36 pairs * 3 + 2 regime + 9 accuracy
         assert "base_multi_speed_momentum" in caplog.text
         assert "acc90d_unified_overlay" in caplog.text
 
@@ -1090,7 +1090,7 @@ class TestCLI:
         from src.signals.stacking_feature_engine import main
         main(["--test"])
         assert "Feature vector created" in caplog.text
-        assert "Shape: (102," in caplog.text
+        assert "Shape: (128," in caplog.text
 
     def test_main_no_args_prints_help(self, capsys):
         """main([]) prints help to stdout."""

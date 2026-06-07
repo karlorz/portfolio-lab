@@ -220,6 +220,21 @@ class GoldTltCorrelationSignal(BaseModel):
     implications: str = ""
 
 
+class PortfolioExplainabilitySignal(BaseModel):
+    """Validates the ``portfolio_explainability`` section of signals.json."""
+
+    model_config = ConfigDict(extra="allow")
+
+    latest_decision: Optional[Dict[str, Any]] = None
+    recent_decisions: List[Dict[str, Any]] = Field(default_factory=list)
+    signal_deep_dives: Dict[str, Any] = Field(default_factory=dict)
+    top_sources_today: List[str] = Field(default_factory=list)
+    decision_quality: Dict[str, Any] = Field(default_factory=dict)
+    action: str = "hold"
+    regime: str = "unknown"
+    weighted_consensus: float = 0.0
+
+
 SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "ensemble_voting": EnsembleVotingSignal,
     "garch_cvar": GarchCvarSignal,
@@ -234,6 +249,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "signal_wfe": SignalWfeSignal,
     "ramp": RampSignal,
     "gold_tlt_correlation": GoldTltCorrelationSignal,
+    "portfolio_explainability": PortfolioExplainabilitySignal,
 }
 
 # Signals for which schemas are defined — used when integrating into

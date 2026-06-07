@@ -92,6 +92,40 @@ class TestVIXRegimeLookup:
         regime = _get_vix_regime_for_date("2023-12-01", vix_data)
         assert regime is None
 
+    def test_precomputed_dates_avoid_repeated_key_scans(self):
+        from src.backtest.vol_targeting_backtest import _get_vix_regime_for_date
+
+        class CountingVixData(dict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.keys_calls = 0
+
+            def keys(self):
+                self.keys_calls += 1
+                return super().keys()
+
+        vix_data = CountingVixData({
+            "2024-01-02": {"regime": "backwardation"},
+            "2024-01-05": {"regime": "flat"},
+            "2024-01-10": {"regime": "contango"},
+        })
+        sorted_dates = sorted(vix_data.keys())
+        vix_data.keys_calls = 0
+
+        assert (
+            _get_vix_regime_for_date("2024-01-04", vix_data, sorted_dates)
+            == "backwardation"
+        )
+        assert (
+            _get_vix_regime_for_date("2024-01-07", vix_data, sorted_dates)
+            == "flat"
+        )
+        assert (
+            _get_vix_regime_for_date("2024-01-11", vix_data, sorted_dates)
+            == "contango"
+        )
+        assert vix_data.keys_calls == 0
+
 
 class TestVIXRegimeVolBias:
     """Tests for VIX regime vol bias constants."""
@@ -210,4 +244,4 @@ class TestVIXEnhancedBacktest:
         
         # Regime targets should still be accessible
         assert "CRISIS" in REGIME_VOL_TARGETS
-        assert REGIME_VOL_TARGETS["CRISIS"] == 0.05
+        assert REGIME_VOL_TARGETS["CRISIS"] == 0.03

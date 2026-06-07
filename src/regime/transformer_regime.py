@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 # ML gate
 _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML") == "1"
+torch = None
+nn = None
+F = None
+optim = None
 _TORCH = None
 _F = None
 _nn = None
@@ -54,6 +58,8 @@ if _ML_ENABLED:
     except ImportError:
         logger.warning("PyTorch not available — transformer regime detector disabled")
         _ML_ENABLED = False
+
+_TORCH_MODULE_BASE = nn.Module if _ML_ENABLED and nn is not None else object
 
 
 class TransformerRegime(Enum):
@@ -154,7 +160,7 @@ class RegimeDataGenerator:
         return seq
 
 
-class TransformerRegimeModel(nn.Module):
+class TransformerRegimeModel(_TORCH_MODULE_BASE):
     """
     Lightweight transformer encoder for regime classification.
 
@@ -169,6 +175,10 @@ class TransformerRegimeModel(nn.Module):
     def __init__(self, d_model: int = 64, n_heads: int = 4,
                  n_layers: int = 2, n_classes: int = 5,
                  seq_len: int = 60, dropout: float = 0.1):
+        if not _ML_ENABLED or torch is None or nn is None:
+            raise RuntimeError(
+                "ML disabled. Set PORTFOLIO_LAB_ENABLE_ML=1 to use transformer regime model."
+            )
         super().__init__()
         self.d_model = d_model
         self.seq_len = seq_len

@@ -69,6 +69,26 @@ MAX_DEVIATION: float = float(os.environ.get("MAX_DEVIATION", "0.10")) # ±10% ma
 MIN_WEIGHT: float = float(os.environ.get("MIN_WEIGHT", "0.05"))       # Minimum 5% per asset
 REBALANCE_FREQ: int = int(os.environ.get("REBALANCE_FREQ", "21"))     # Monthly rebalancing
 
+# ── Regime-Conditional Volatility Targeting ───────────────────────────
+# Scaling exponents control how aggressively target_vol / realized_vol
+# translates into leverage by regime. 1.0 preserves the legacy linear rule.
+REGIME_VOL_SCALING_EXPONENTS: Dict[str, float] = {
+    "CRISIS": float(os.environ.get("REGIME_VOL_SCALING_CRISIS", "0.5")),
+    "HIGH_VOL": float(os.environ.get("REGIME_VOL_SCALING_HIGH_VOL", "0.75")),
+    "NORMAL": float(os.environ.get("REGIME_VOL_SCALING_NORMAL", "1.0")),
+    "LOW_VOL": float(os.environ.get("REGIME_VOL_SCALING_LOW_VOL", "0.5")),
+    "RECOVERY": float(os.environ.get("REGIME_VOL_SCALING_RECOVERY", "0.8")),
+}
+
+# Adaptive realized-volatility windows used after regime classification.
+REGIME_VOL_LOOKBACKS: Dict[str, int] = {
+    "CRISIS": int(os.environ.get("REGIME_VOL_LOOKBACK_CRISIS", "252")),
+    "HIGH_VOL": int(os.environ.get("REGIME_VOL_LOOKBACK_HIGH_VOL", "126")),
+    "NORMAL": int(os.environ.get("REGIME_VOL_LOOKBACK_NORMAL", "63")),
+    "LOW_VOL": int(os.environ.get("REGIME_VOL_LOOKBACK_LOW_VOL", "20")),
+    "RECOVERY": int(os.environ.get("REGIME_VOL_LOOKBACK_RECOVERY", "63")),
+}
+
 # ── VIX regime thresholds ─────────────────────────────────────────────
 # Used by evaluator.py get_current_regime() and generator.py.
 # Single source of truth — import from here instead of hardcoding.

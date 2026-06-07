@@ -532,6 +532,40 @@ class TestLoadPricesEdgeCases:
                          for d, v in zip(dates, arr)]
         return data
 
+    def test_default_loader_uses_shared_price_dataframe_cache(self, monkeypatch):
+        """Default _load_prices should use the shared TTL-cached DataFrame accessor."""
+        from src.backtest import correlation_adaptive_backtest as cab
+
+        dates = pd.bdate_range("2020-01-01", periods=4)
+        cached_df = pd.DataFrame(
+            {
+                "SPY": [300.0, 301.0, 302.0, 303.0],
+                "GLD": [150.0, 151.0, 152.0, 153.0],
+                "TLT": [100.0, 101.0, 102.0, 103.0],
+                "IEF": [80.0, 81.0, 82.0, 83.0],
+            },
+            index=dates,
+        )
+        calls = []
+
+        def fake_get_prices_df(symbols=None):
+            calls.append(symbols)
+            return cached_df
+
+        def fail_open(*args, **kwargs):
+            raise AssertionError("default loader should not re-read prices.json")
+
+        monkeypatch.setattr(cab, "get_prices_df", fake_get_prices_df, raising=False)
+        monkeypatch.setattr("builtins.open", fail_open)
+
+        df = cab._load_prices()
+
+        assert calls == [["SPY", "GLD", "TLT", "IEF"]]
+        expected = cached_df.copy()
+        expected.index.name = "date"
+        pd.testing.assert_frame_equal(df, expected)
+        assert df.index.name == "date"
+
     def test_missing_symbol_ief(self, monkeypatch, tmp_path):
         """Missing IEF symbol should still produce a DataFrame (dropna drops it)."""
         import json

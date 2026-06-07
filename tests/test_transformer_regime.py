@@ -4,10 +4,51 @@ ML-gated — requires PORTFOLIO_LAB_ENABLE_ML=1
 """
 
 import os
+import importlib
+import sys
 import pytest
 import numpy as np
 
 ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML") == "1"
+
+
+def _import_transformer_with_ml_disabled(monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_LAB_ENABLE_ML", raising=False)
+    sys.modules.pop("src.regime.transformer_regime", None)
+    return importlib.import_module("src.regime.transformer_regime")
+
+
+class TestMLDisabledFallback:
+    """Default-runtime behavior when PyTorch/ML is not enabled."""
+
+    def test_importable_without_ml_enabled(self, monkeypatch):
+        torch_already_loaded = "torch" in sys.modules
+
+        module = _import_transformer_with_ml_disabled(monkeypatch)
+
+        assert module._ML_ENABLED is False
+        assert hasattr(module, "detect_transformer_regime")
+        if not torch_already_loaded:
+            assert "torch" not in sys.modules
+
+    def test_convenience_function_returns_fallback_prediction(self, monkeypatch):
+        module = _import_transformer_with_ml_disabled(monkeypatch)
+
+        result = module.detect_transformer_regime([0.01, -0.005, 0.002])
+
+        assert result.regime == "unknown"
+        assert result.confidence == 0.0
+        assert result.probabilities == {}
+        assert result.signal_value == 0.0
+        assert result.trend_strength == 0.0
+        assert result.vol_regime == "unknown"
+        assert "PORTFOLIO_LAB_ENABLE_ML=1" in result.explanation
+
+    def test_detector_constructor_raises_clear_error(self, monkeypatch):
+        module = _import_transformer_with_ml_disabled(monkeypatch)
+
+        with pytest.raises(RuntimeError, match="ML disabled"):
+            module.TransformerRegimeDetector()
 
 
 @pytest.mark.skipif(not ML_ENABLED, reason="ML disabled")

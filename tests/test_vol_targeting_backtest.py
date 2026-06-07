@@ -10,6 +10,43 @@ import numpy as np
 import pytest
 
 
+class TestLoadPrices:
+    """Tests for cached price loading."""
+
+    def test_load_prices_uses_shared_price_dataframe_cache(self, monkeypatch):
+        import pandas as pd
+        from src.backtest import vol_targeting_backtest as mod
+
+        dates = pd.to_datetime(["2020-01-02", "2020-01-03"])
+        cached_df = pd.DataFrame(
+            {
+                "SPY": [100.0, 101.0],
+                "GLD": [100.0, 99.5],
+                "TLT": [100.0, 100.5],
+                "IEF": [100.0, 100.1],
+            },
+            index=dates,
+        )
+        calls = []
+
+        def fake_get_prices_df(symbols=None):
+            calls.append(symbols)
+            return cached_df
+
+        def fail_open(*args, **kwargs):
+            raise AssertionError("_load_prices should use get_prices_df")
+
+        monkeypatch.setattr(mod, "get_prices_df", fake_get_prices_df, raising=False)
+        monkeypatch.setattr("builtins.open", fail_open)
+
+        result = mod._load_prices()
+
+        assert calls == [["SPY", "GLD", "TLT", "IEF"]]
+        assert result.index.name == "date"
+        assert list(result.columns) == ["SPY", "GLD", "TLT", "IEF"]
+        assert result.equals(cached_df.rename_axis("date"))
+
+
 class TestVolTargetLeverage:
     """Tests for _compute_vol_target_leverage."""
 
@@ -56,6 +93,68 @@ class TestVolTargetLeverage:
         smoothed = _compute_vol_target_leverage(0.05, 0.10, smoothing=0.67, prev_leverage=1.0)
         assert abs(raw - smoothed) > 0.1  # smoothing should make a difference
         assert 1.0 < smoothed < raw  # between prev and raw
+
+    def test_scaling_exponent_dampens_low_vol_leverage(self):
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        linear = _compute_vol_target_leverage(
+            0.05, 0.10, max_leverage=3.0, smoothing=1.0, scaling_exponent=1.0,
+        )
+        square_root = _compute_vol_target_leverage(
+            0.05, 0.10, max_leverage=3.0, smoothing=1.0, scaling_exponent=0.5,
+        )
+
+        assert linear == pytest.approx(2.0)
+        assert square_root == pytest.approx(np.sqrt(2.0), abs=0.0001)
+        assert 1.0 < square_root < linear
+
+    def test_scaling_exponent_dampens_high_vol_deleveraging(self):
+        from src.backtest.vol_targeting_backtest import _compute_vol_target_leverage
+
+        linear = _compute_vol_target_leverage(
+            0.20, 0.10, max_leverage=3.0, smoothing=1.0, scaling_exponent=1.0,
+        )
+        reduced = _compute_vol_target_leverage(
+            0.20, 0.10, max_leverage=3.0, smoothing=1.0, scaling_exponent=0.5,
+        )
+
+        assert linear == pytest.approx(0.5)
+        assert reduced == pytest.approx(np.sqrt(0.5), abs=0.0001)
+        assert linear < reduced < 1.0
+
+
+class TestRegimeVolScalingConfig:
+    """Tests for regime-specific vol-targeting scaling configuration."""
+
+    def test_default_scaling_exponents_cover_all_regimes(self):
+        from src.backtest.vol_targeting_backtest import REGIME_VOL_SCALING_EXPONENTS
+
+        expected = {"CRISIS", "HIGH_VOL", "NORMAL", "LOW_VOL", "RECOVERY"}
+        assert set(REGIME_VOL_SCALING_EXPONENTS.keys()) == expected
+        assert REGIME_VOL_SCALING_EXPONENTS["NORMAL"] == pytest.approx(1.0)
+        assert REGIME_VOL_SCALING_EXPONENTS["LOW_VOL"] == pytest.approx(0.5)
+        assert (
+            REGIME_VOL_SCALING_EXPONENTS["CRISIS"]
+            <= REGIME_VOL_SCALING_EXPONENTS["HIGH_VOL"]
+        )
+
+    def test_default_adaptive_lookbacks_cover_all_regimes(self):
+        from src.backtest.vol_targeting_backtest import REGIME_VOL_LOOKBACKS
+
+        expected = {"CRISIS", "HIGH_VOL", "NORMAL", "LOW_VOL", "RECOVERY"}
+        assert set(REGIME_VOL_LOOKBACKS.keys()) == expected
+        assert REGIME_VOL_LOOKBACKS["LOW_VOL"] == 20
+        assert REGIME_VOL_LOOKBACKS["NORMAL"] == 63
+        assert REGIME_VOL_LOOKBACKS["CRISIS"] == 252
+
+    def test_unknown_regime_falls_back_to_default_scaling_and_lookback(self):
+        from src.backtest.vol_targeting_backtest import (
+            _get_regime_scaling_exponent,
+            _get_regime_vol_lookback,
+        )
+
+        assert _get_regime_scaling_exponent("UNKNOWN") == pytest.approx(1.0)
+        assert _get_regime_vol_lookback("UNKNOWN", default_lookback=63) == 63
 
 
 class TestRegimeClassification:
@@ -138,6 +237,25 @@ class TestRegimeVolTargetBacktest:
             expected_target = REGIME_VOL_TARGETS.get(reg, 0.09)
             assert info["target_vol"] == expected_target
 
+    def test_default_regime_targets_are_defensive(self):
+        from src.backtest.vol_targeting_backtest import REGIME_VOL_TARGETS
+
+        assert REGIME_VOL_TARGETS["CRISIS"] == pytest.approx(0.03)
+        assert REGIME_VOL_TARGETS["HIGH_VOL"] == pytest.approx(0.05)
+        assert REGIME_VOL_TARGETS["NORMAL"] == pytest.approx(0.08)
+        assert REGIME_VOL_TARGETS["LOW_VOL"] == pytest.approx(0.10)
+        assert REGIME_VOL_TARGETS["RECOVERY"] == pytest.approx(0.09)
+
+    def test_default_regime_scaling_meets_risk_targets(self):
+        from src.backtest.vol_targeting_backtest import (
+            compute_regime_conditional_vol_target_backtest,
+        )
+
+        result = compute_regime_conditional_vol_target_backtest()
+
+        assert result.vol_target_sharpe >= 1.0
+        assert result.vol_target_max_dd >= -18.0
+
     def test_custom_regime_targets(self):
         from src.backtest.vol_targeting_backtest import (
             compute_regime_conditional_vol_target_backtest,
@@ -199,6 +317,36 @@ class TestRegimeVolTargetBacktest:
 
 class TestComputeVolTargetBacktest:
     """Tests for compute_vol_target_backtest (previously untested)."""
+
+    def test_basic_backtest_uses_precomputed_realized_vols(self, monkeypatch):
+        import pandas as pd
+        from src.backtest import vol_targeting_backtest as mod
+
+        dates = pd.date_range("2020-01-02", periods=12, freq="B")
+        prices = pd.DataFrame(
+            {
+                "SPY": np.linspace(100.0, 111.0, len(dates)),
+                "GLD": np.linspace(100.0, 105.0, len(dates)),
+                "TLT": np.linspace(100.0, 98.0, len(dates)),
+                "IEF": np.linspace(100.0, 101.0, len(dates)),
+            },
+            index=dates,
+        )
+        prices.index.name = "date"
+        calls = []
+        original_precompute = mod._precompute_realized_vols
+
+        def record_precompute(portfolio_returns, lookbacks, fallback_vol=0.15):
+            calls.append(tuple(lookbacks))
+            return original_precompute(portfolio_returns, lookbacks, fallback_vol)
+
+        monkeypatch.setattr(mod, "_load_prices", lambda: prices)
+        monkeypatch.setattr(mod, "_precompute_realized_vols", record_precompute)
+
+        result = mod.compute_vol_target_backtest(vol_lookback=3, max_leverage=1.5)
+
+        assert calls == [(3,)]
+        assert np.isfinite(result.vol_target_sharpe)
 
     def test_basic_run_returns_vol_target_result(self):
         from src.backtest.vol_targeting_backtest import (
@@ -298,6 +446,8 @@ class TestRegimeVolTargetResultDataclass:
             assert "pct_of_time" in info
             assert "mean_leverage" in info
             assert "target_vol" in info
+            assert "scaling_exponent" in info
+            assert "vol_lookback" in info
 
     def test_regime_targets_stored(self):
         from src.backtest.vol_targeting_backtest import (
@@ -308,6 +458,23 @@ class TestRegimeVolTargetResultDataclass:
         )
         for regime, target in REGIME_VOL_TARGETS.items():
             assert regime in result.regime_targets
+
+    def test_regime_scaling_and_lookbacks_stored(self):
+        from src.backtest.vol_targeting_backtest import (
+            REGIME_VOL_LOOKBACKS,
+            REGIME_VOL_SCALING_EXPONENTS,
+            compute_regime_conditional_vol_target_backtest,
+        )
+
+        result = compute_regime_conditional_vol_target_backtest(
+            vol_lookback=63, max_leverage=1.5,
+        )
+
+        assert result.regime_scaling_exponents == REGIME_VOL_SCALING_EXPONENTS
+        assert result.regime_lookbacks == REGIME_VOL_LOOKBACKS
+        for regime, info in result.regime_breakdown.items():
+            assert info["scaling_exponent"] == REGIME_VOL_SCALING_EXPONENTS[regime]
+            assert info["vol_lookback"] == REGIME_VOL_LOOKBACKS[regime]
 
 
 class TestRegimeClassificationEdgeCases:
@@ -487,6 +654,55 @@ class TestRegimeVolTargetsCoverage:
 
 class TestRegimeBacktestEmptyAndSingleDay:
     """Edge cases for compute_regime_conditional_vol_target_backtest."""
+
+    def test_regime_backtest_uses_precomputed_realized_vols(self, monkeypatch):
+        """Regime backtest should not recompute realized vol inside the daily loop."""
+        import pandas as pd
+        from src.backtest.vol_targeting_backtest import (
+            compute_regime_conditional_vol_target_backtest,
+        )
+
+        dates = pd.date_range("2020-01-02", periods=12, freq="B")
+        prices = pd.DataFrame(
+            {
+                "SPY": np.linspace(100.0, 111.0, len(dates)),
+                "GLD": np.linspace(100.0, 105.0, len(dates)),
+                "TLT": np.linspace(100.0, 98.0, len(dates)),
+                "IEF": np.linspace(100.0, 101.0, len(dates)),
+            },
+            index=dates,
+        )
+        prices.index.name = "date"
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("daily loop should use precomputed realized vols")
+
+        monkeypatch.setattr(
+            "src.backtest.vol_targeting_backtest._load_prices",
+            lambda: prices,
+        )
+        monkeypatch.setattr(
+            "src.backtest.vol_targeting_backtest._load_vix_term_structure_data",
+            lambda: {},
+        )
+        monkeypatch.setattr(
+            "src.backtest.vol_targeting_backtest._compute_realized_vol",
+            fail_if_called,
+        )
+
+        result = compute_regime_conditional_vol_target_backtest(
+            vol_lookback=3,
+            regime_lookbacks={
+                "CRISIS": 5,
+                "HIGH_VOL": 4,
+                "NORMAL": 3,
+                "LOW_VOL": 2,
+                "RECOVERY": 3,
+            },
+            max_leverage=1.5,
+        )
+
+        assert np.isfinite(result.vol_target_sharpe)
 
     def test_single_day_prices(self, monkeypatch):
         """Single-day price data should produce a valid result (no crash)."""
