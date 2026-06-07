@@ -13,6 +13,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HERMES_HEALTH_WRAPPER = Path("/root/.hermes/scripts/portfolio-lab-health-monitor.sh")
 GUARD_SOURCE_LINE = "CRON_GUARD_MEMORY_MB=1024 source /root/projects/portfolio-lab/scripts/cron_guard.sh"
+RUNTIME_PATH = "/root/projects/portfolio-lab/scripts/python_runtime.sh"
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -55,9 +56,10 @@ def _run_wrapper(tmp_path: Path, python_body: str) -> tuple[subprocess.Completed
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     python_args = tmp_path / "python-args.txt"
+    runtime_stub = tmp_path / "python_runtime.sh"
 
     _write_executable(
-        bin_dir / "python3",
+        runtime_stub,
         f"""#!/bin/bash
 printf '%s\\n' "$@" > "{python_args}"
 {python_body}
@@ -68,8 +70,9 @@ printf '%s\\n' "$@" > "{python_args}"
         """#!/bin/bash
 cat >/dev/null
 exit 0
-""",
+        """,
     )
+    wrapper.write_text(wrapper.read_text().replace(RUNTIME_PATH, str(runtime_stub)))
 
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"

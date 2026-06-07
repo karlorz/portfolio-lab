@@ -11,6 +11,7 @@ source /root/projects/portfolio-lab/scripts/cron_guard.sh
 CRON_GUARD_MAX_LOAD=3 cron_guard_start "pf-autonomous" 300 || exit $?
 
 cd /root/projects/portfolio-lab
+PYTHON_RUNTIME="${PYTHON_RUNTIME:-/root/projects/portfolio-lab/scripts/python_runtime.sh}"
 
 echo "[$(date)] Autonomous agent cycle starting..."
 echo "[$(date)] Checking for work items and triggers..."
@@ -23,7 +24,7 @@ if [ -f data/.regime_trigger ]; then
 fi
 
 if [ -f data/.health_report.json ]; then
-    HEALTH_STATUS=$(python3 -c "import json; print(json.load(open('data/.health_report.json'))['status'])" 2>/dev/null || echo "unknown")
+    HEALTH_STATUS=$("$PYTHON_RUNTIME" -c "import json; print(json.load(open('data/.health_report.json'))['status'])" 2>/dev/null || echo "unknown")
     echo "[$(date)] HEALTH_STATUS: $HEALTH_STATUS"
 fi
 

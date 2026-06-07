@@ -6,12 +6,13 @@ source /root/projects/portfolio-lab/scripts/cron_guard.sh
 if cron_guard_start "pf-build" 600; then
     export PATH="/root/.bun/bin:$PATH"
     cd /root/projects/portfolio-lab
+    PYTHON_RUNTIME="${PYTHON_RUNTIME:-/root/projects/portfolio-lab/scripts/python_runtime.sh}"
 
     echo "Checking dashboard data..."
     if [ ! -f public/data/dashboard.json ]; then
         echo "Dashboard data missing, running generator..."
         export PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src"
-        python3 src/dashboard/generator.py
+        "$PYTHON_RUNTIME" src/dashboard/generator.py
     fi
 
     echo "Running TypeScript check..."

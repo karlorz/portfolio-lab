@@ -5,11 +5,12 @@ source /root/projects/portfolio-lab/scripts/cron_guard.sh
 
 if cron_guard_start "pf-eval" 600; then
     cd /root/projects/portfolio-lab
+    PYTHON_RUNTIME="${PYTHON_RUNTIME:-/root/projects/portfolio-lab/scripts/python_runtime.sh}"
     export PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src"
     export ALPHALAB_MODE="${ALPHALAB_MODE:-paper}"
     export REGIME_ALLOC_ENABLED=1
 
-    python3 src/strategy/evaluator.py 2>&1 | tee -a data/eval.log
+    "$PYTHON_RUNTIME" src/strategy/evaluator.py 2>&1 | tee -a data/eval.log
 
     if [ -f data/.promote_to_live ]; then
         echo "PROMOTION_CANDIDATE: $(cat data/.promote_to_live)"

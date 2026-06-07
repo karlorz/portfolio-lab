@@ -22,6 +22,7 @@ SHELL := /bin/bash
 PROJECT_DIR := $(shell pwd)
 DATA_DIR := $(PROJECT_DIR)/data
 CRON_UPDATE := $(PROJECT_DIR)/scripts/cron_update.py
+PYTHON_RUNTIME := $(PROJECT_DIR)/scripts/python_runtime.sh
 PYTHONPATH := $(PROJECT_DIR)/src:$(PYTHONPATH)
 export PYTHONPATH
 
@@ -194,7 +195,7 @@ data:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
 	echo "Data pipeline done ($$STATUS, $${DUR}s)"
 
 # ── Dashboard ────────────────────────────────────────────────────────
@@ -203,7 +204,7 @@ data:
 dashboard:
 	@echo "=== Dashboard Generator: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.dashboard.generator 2>&1 | tee -a $(DATA_DIR)/dashboard.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.dashboard.generator 2>&1 | tee -a $(DATA_DIR)/dashboard.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -211,7 +212,7 @@ dashboard:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR
 
 # ── Strategy Evaluator ───────────────────────────────────────────────
 
@@ -219,7 +220,7 @@ dashboard:
 eval:
 	@echo "=== Strategy Evaluator: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && ALPHALAB_MODE=$${ALPHALAB_MODE:-paper} timeout 600 python3 -m src.strategy.evaluator 2>&1 | tee -a $(DATA_DIR)/eval.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && ALPHALAB_MODE=$${ALPHALAB_MODE:-paper} timeout 600 $(PYTHON_RUNTIME) -m src.strategy.evaluator 2>&1 | tee -a $(DATA_DIR)/eval.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -227,7 +228,7 @@ eval:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-eval $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-eval $$STATUS $$DUR
 
 # ── Research Agent ───────────────────────────────────────────────────
 
@@ -235,7 +236,7 @@ eval:
 research:
 	@echo "=== Research Agent: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 python3 -m src.research.agent 2>&1 | tee -a $(DATA_DIR)/research.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 $(PYTHON_RUNTIME) -m src.research.agent 2>&1 | tee -a $(DATA_DIR)/research.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -243,7 +244,7 @@ research:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-research $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-research $$STATUS $$DUR
 
 # ── Wiki Sync ────────────────────────────────────────────────────────
 
@@ -251,7 +252,7 @@ research:
 wiki-sync:
 	@echo "=== Wiki Sync: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 1048576 && timeout 120 python3 -m src.research.wiki_sync 2>&1 | tee -a $(DATA_DIR)/wiki_sync.log; \
+	cd $(PROJECT_DIR) && ulimit -v 1048576 && timeout 120 $(PYTHON_RUNTIME) -m src.research.wiki_sync 2>&1 | tee -a $(DATA_DIR)/wiki_sync.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -259,7 +260,7 @@ wiki-sync:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR
 
 # ── App Build ────────────────────────────────────────────────────────
 
@@ -276,7 +277,7 @@ build:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-build $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-build $$STATUS $$DUR
 
 # ── Position Sync ────────────────────────────────────────────────────
 
@@ -284,7 +285,7 @@ build:
 sync:
 	@echo "=== Position Sync: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 python3 -m src.broker.position_sync 2>&1 | tee -a $(DATA_DIR)/position_sync.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 $(PYTHON_RUNTIME) -m src.broker.position_sync 2>&1 | tee -a $(DATA_DIR)/position_sync.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -292,7 +293,7 @@ sync:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR
 
 # ── Overlay Pipeline ──────────────────────────────────────────────────
 
@@ -302,14 +303,15 @@ overlay-signals:
 	START=$$(date +%s); \
 	export PROJECT_DIR="$(PROJECT_DIR)"; \
 	export DATA_DIR="$(DATA_DIR)"; \
+	export PYTHON_RUNTIME="$(PYTHON_RUNTIME)"; \
 	timeout 600 sh -c '\
 		cd $$PROJECT_DIR && ulimit -v 3145728 && \
-		python3 -m src.signals.collar_signal --save 2>&1 | tail -1 && \
-		python3 -m src.signals.calendar_seasonality --save 2>&1 | tail -1 && \
-		python3 -m src.signals.crypto_momentum --save 2>&1 | tail -1 && \
-		python3 -m src.signals.bond_duration_signal --save 2>&1 | tail -1 && \
-		python3 -m src.regime.kurtosis_regime --save 2>&1 | tail -1 && \
-		python3 -m src.monitor.rebalance_health 2>&1 | tail -1'; \
+		"$$PYTHON_RUNTIME" -m src.signals.collar_signal --save 2>&1 | tail -1 && \
+		"$$PYTHON_RUNTIME" -m src.signals.calendar_seasonality --save 2>&1 | tail -1 && \
+		"$$PYTHON_RUNTIME" -m src.signals.crypto_momentum --save 2>&1 | tail -1 && \
+		"$$PYTHON_RUNTIME" -m src.signals.bond_duration_signal --save 2>&1 | tail -1 && \
+		"$$PYTHON_RUNTIME" -m src.regime.kurtosis_regime --save 2>&1 | tail -1 && \
+		"$$PYTHON_RUNTIME" -m src.monitor.rebalance_health 2>&1 | tail -1'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -317,13 +319,13 @@ overlay-signals:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR
 
 .PHONY: overlay-dashboard
 overlay-dashboard:
 	@echo "=== Overlay Dashboard: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.dashboard.overlay_dashboard --save 2>&1; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.dashboard.overlay_dashboard --save 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -331,13 +333,13 @@ overlay-dashboard:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
 
 .PHONY: health
 health:
 	@echo "=== Health Monitor: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.monitor.rebalance_health 2>&1; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.monitor.rebalance_health 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -345,7 +347,7 @@ health:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR
 
 # ── GARCH-CVaR Risk Metrics ────────────────────────────────────────────
 
@@ -354,7 +356,7 @@ garch-risk:
 
 	@echo "=== GARCH-CVaR Risk: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && uv run python scripts/compute_garch_risk.py 2>&1; \
+	cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/compute_garch_risk.py 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -362,7 +364,7 @@ garch-risk:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR
 
 # ── Mark-to-Market ──────────────────────────────────────────────────
 
@@ -370,7 +372,7 @@ garch-risk:
 mark-to-market:
 	@echo "=== Mark-to-Market: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 scripts/mark_to_market.py 2>&1; \
+	cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/mark_to_market.py 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -378,7 +380,7 @@ mark-to-market:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-mark-to-market $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-mark-to-market $$STATUS $$DUR
 
 # ── Daily P&L Capture ────────────────────────────────────────────────
 
@@ -386,7 +388,7 @@ mark-to-market:
 daily-pnl: mark-to-market
 	@echo "=== Daily P&L Capture: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 scripts/capture_daily_pnl.py 2>&1; \
+	cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/capture_daily_pnl.py 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -394,7 +396,7 @@ daily-pnl: mark-to-market
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR
 
 # ── Performance Attribution ────────────────────────────────────────────
 
@@ -402,14 +404,14 @@ daily-pnl: mark-to-market
 attribution:
 	@echo "=== Performance Attribution: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && python3 -m src.monitor.performance_attribution report --save 2>&1 | tee -a $(DATA_DIR)/attribution.log; \
+	cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) -m src.monitor.performance_attribution report --save 2>&1 | tee -a $(DATA_DIR)/attribution.log; \
 	EXIT=$${PIPESTATUS[0]}; \
-	cd $(PROJECT_DIR) && python3 -m src.strategy.adaptive_ensemble_weights update --regime normal 2>&1 | tee -a $(DATA_DIR)/adaptive_weights.log; \
+	cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) -m src.strategy.adaptive_ensemble_weights update --regime normal 2>&1 | tee -a $(DATA_DIR)/adaptive_weights.log; \
 	EXIT2=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ] && [ $$EXIT2 -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-attribution $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution $$STATUS $$DUR
 
 # ── Unified Dashboard ────────────────────────────────────────────────
 
@@ -417,7 +419,7 @@ attribution:
 unified-dashboard:
 	@echo "=== Unified Dashboard: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 python3 -m src.monitor.unified_dashboard --save 2>&1; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.monitor.unified_dashboard --save 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -425,7 +427,7 @@ unified-dashboard:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	python3 $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR
 
 # ── Daily Brief ──────────────────────────────────────────────────────
 
@@ -452,20 +454,20 @@ all: data dashboard health eval research wiki-sync sync build overlay-signals ov
 .PHONY: cron-reset
 cron-reset:
 	@mkdir -p $(DATA_DIR)
-	@python3 $(CRON_UPDATE) portfolio-lab-data pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-dashboard pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard pending 0 manual
 
-	@python3 $(CRON_UPDATE) portfolio-lab-eval pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-research pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-wiki-sync pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-build pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-position-sync pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-garch-risk pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-daily-pnl pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
-	@python3 $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-eval pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-research pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-build pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-position-sync pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 
 # ── Verification ─────────────────────────────────────────────────────
@@ -473,7 +475,7 @@ cron-reset:
 .PHONY: verify-cron-sync
 verify-cron-sync:
 	@echo "=== Cron Backend Sync Check ==="
-	@python3 -c "from cron_compat import active_backend; print(f'Active backend: {active_backend()}')"
+	@$(PYTHON_RUNTIME) -c "from cron_compat import active_backend; print(f'Active backend: {active_backend()}')"
 	@echo ""
 	@echo "Checking Makefile target coverage vs crontab..."
 	@MISSING=0; \
@@ -489,7 +491,7 @@ verify-cron-sync:
 	if [ $$MISSING -eq 0 ]; then echo "OK: All targets synced"; else echo "FAIL: $$MISSING targets missing from crontab"; exit 1; fi
 	@echo ""
 	@echo "Checking cron_status.json integrity..."
-	@cd $(PROJECT_DIR) && python3 scripts/cron_verify.py
+	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/cron_verify.py
 
 .PHONY: fetch-trends
 fetch-trends:
