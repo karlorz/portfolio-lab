@@ -643,6 +643,22 @@ class TestRunWalkForward:
         )
         assert result["n_configs"] == len(GRID_CONFIGS)
 
+    def test_result_includes_canonical_output_contract(self, long_synthetic_prices):
+        """Canonical walk-forward output should be registry-friendly and versioned."""
+        import walk_forward_validation as wfv
+
+        result = run_walk_forward(
+            long_synthetic_prices,
+            n_splits=3,
+            test_size=126,
+            gap=10,
+        )
+
+        assert result["schema_version"] == wfv.WALK_FORWARD_SCHEMA_VERSION
+        assert result["artifact_path"] == str(wfv.CANONICAL_WALK_FORWARD_ARTIFACT)
+        assert result["window_mode"] == wfv.CANONICAL_WINDOW_MODE
+        assert result["metrics_source"] == "src.backtest.metrics"
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  print_report
@@ -860,6 +876,8 @@ class TestMainFunction:
             report = json.loads(report_path.read_text())
             assert "n_windows" in report
             assert report["n_windows"] == 3
+            assert report["schema_version"] == wfv.WALK_FORWARD_SCHEMA_VERSION
+            assert report["artifact_path"] == str(wfv.CANONICAL_WALK_FORWARD_ARTIFACT)
 
     def test_main_parse_args_defaults(self):
         """Default argument parsing should set expected defaults."""
@@ -872,6 +890,24 @@ class TestMainFunction:
 
             result = wfv.main()
             assert result is None
+
+
+class TestDeprecatedWalkForwardValidate:
+    """Tests for the deprecated walk_forward_validate.py wrapper."""
+
+    def test_legacy_script_delegates_to_canonical_main(self, caplog):
+        import importlib
+
+        import walk_forward_validate as legacy
+
+        called = []
+        legacy = importlib.reload(legacy)
+        with patch.object(legacy, "canonical_main", lambda: called.append(True)):
+            legacy.main()
+
+        assert called == [True]
+        assert legacy.CANONICAL_SCRIPT == "scripts/walk_forward_validation.py"
+        assert "deprecated" in caplog.text.lower()
 
 
 if __name__ == "__main__":

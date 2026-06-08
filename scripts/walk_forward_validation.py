@@ -44,8 +44,27 @@ from src.backtest.metrics import (
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
+WALK_FORWARD_SCHEMA_VERSION = "walk-forward-validation/v1"
+CANONICAL_WINDOW_MODE = "expanding"
+CANONICAL_WALK_FORWARD_ARTIFACT = Path("data") / "walk_forward_report.json"
+METRICS_SOURCE = "src.backtest.metrics"
+
 
 # ── Grid Search Configurations ────────────────────────────────────────
+
+
+def _with_canonical_contract(result: dict) -> dict:
+    """Attach the stable walk-forward artifact contract."""
+    contracted = dict(result)
+    contracted.update({
+        "schema_version": WALK_FORWARD_SCHEMA_VERSION,
+        "analysis_type": "walk_forward_validation",
+        "window_mode": CANONICAL_WINDOW_MODE,
+        "artifact_path": str(CANONICAL_WALK_FORWARD_ARTIFACT),
+        "metrics_source": METRICS_SOURCE,
+    })
+    return contracted
+
 
 def generate_grid_configs() -> list[dict[str, float]]:
     """Generate the 94 grid search configurations for SPY/GLD/TLT.
@@ -264,7 +283,7 @@ def run_walk_forward(
             window_results.append(result)
 
     if not window_results:
-        return {"error": "No valid walk-forward windows produced"}
+        return _with_canonical_contract({"error": "No valid walk-forward windows produced"})
 
     # Aggregate metrics
     is_sharpes = [r["is_sharpe"] for r in window_results]
@@ -315,7 +334,7 @@ def run_walk_forward(
             "max": round(float(np.max(vals)), 4),
         }
 
-    return {
+    return _with_canonical_contract({
         "n_windows": len(window_results),
         "n_configs": len(configs),
         "walk_forward_efficiency": round(float(wfe), 4),
@@ -336,7 +355,7 @@ def run_walk_forward(
         "crisis_summary": crisis_summary,
         "champion_weight_consistency": weight_stats,
         "windows": window_results,
-    }
+    })
 
 
 def print_report(result: dict):
@@ -425,6 +444,7 @@ def main():
         test_size=args.test_size,
         gap=args.gap,
     )
+    result = _with_canonical_contract(result)
 
     if "error" in result:
         logger.error("Walk-forward failed: %s", result["error"])
@@ -433,7 +453,7 @@ def main():
     print_report(result)
 
     if args.save:
-        output_path = DATA_DIR / "walk_forward_report.json"
+        output_path = DATA_DIR / CANONICAL_WALK_FORWARD_ARTIFACT.name
         save_results_json(
             result,
             output_path=str(output_path),
@@ -449,6 +469,8 @@ def main():
                     "n_splits": args.n_splits,
                     "test_size": args.test_size,
                     "gap": args.gap,
+                    "schema_version": WALK_FORWARD_SCHEMA_VERSION,
+                    "window_mode": CANONICAL_WINDOW_MODE,
                 },
                 "input_paths": [PRICES_JSON],
             },
