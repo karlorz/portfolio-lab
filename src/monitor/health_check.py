@@ -21,12 +21,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+from src.monitor.hermes_cron import (
+    combine_scheduler_backends,
+    load_hermes_portfolio_cron_jobs,
+    load_local_cron_jobs,
+    resolve_hermes_cron_jobs_path,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_health_check"]
 
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
+_DEFAULT_DATA_DIR = DATA_DIR
 
 
 def _check_data_freshness() -> dict:
@@ -62,21 +69,37 @@ def _check_data_freshness() -> dict:
 
     # Cron status
     cron_path = DATA_DIR / "cron_status.json"
-    if cron_path.exists():
-        try:
-            with open(cron_path) as f:
-                cron_data = json.load(f)
-            jobs = cron_data.get("jobs", [])
-            failed = [j for j in jobs if j.get("status") == "error"]
-            checks["cron"] = {
-                "status": "ok" if not failed else "degraded",
-                "total_jobs": len(jobs),
-                "failed_jobs": len(failed),
-            }
-        except (json.JSONDecodeError, OSError):
-            checks["cron"] = {"status": "error", "total_jobs": 0, "failed_jobs": 0}
+    local_jobs, local_backend = load_local_cron_jobs(cron_path)
+    scheduler_backends = {"local": local_backend}
+    jobs = list(local_jobs)
+
+    hermes_path = resolve_hermes_cron_jobs_path(
+        current_data_dir=DATA_DIR,
+        default_data_dir=_DEFAULT_DATA_DIR,
+    )
+    if hermes_path is not None:
+        hermes_jobs, hermes_backend = load_hermes_portfolio_cron_jobs(hermes_path)
+        scheduler_backends["hermes"] = hermes_backend
+        jobs.extend(hermes_jobs)
+
+    scheduler_status = combine_scheduler_backends(scheduler_backends)
+    failed = [job for job in jobs if job.get("status") == "error"]
+    backend_error = any(backend.get("status") == "error" for backend in scheduler_backends.values())
+    if backend_error:
+        cron_status = "error"
+    elif local_backend.get("status") == "unavailable" and len(scheduler_backends) == 1:
+        cron_status = "missing"
+    elif scheduler_status["status"] in {"unavailable", "warning"}:
+        cron_status = "warning"
     else:
-        checks["cron"] = {"status": "missing", "total_jobs": 0, "failed_jobs": 0}
+        cron_status = scheduler_status["status"]
+    checks["cron"] = {
+        "status": cron_status,
+        "total_jobs": len(jobs),
+        "failed_jobs": len(failed),
+        "backends": scheduler_status["backends"],
+        "jobs": jobs,
+    }
 
     return checks
 
@@ -107,7 +130,7 @@ def _compute_system_status(checks: dict, circuit: dict) -> str:
 
     if "error" in statuses or "missing" in statuses:
         return "degraded"
-    if "stale" in statuses or "degraded" in statuses:
+    if "stale" in statuses or "degraded" in statuses or "warning" in statuses or "unavailable" in statuses:
         return "warning"
     if all(s == "ok" for s in statuses):
         return "ok"

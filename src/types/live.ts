@@ -235,6 +235,7 @@ export interface HealthData {
   data_freshness: Record<string, DataFreshness>;
   system_status: 'healthy' | 'warning' | 'critical' | 'degraded';
   generated_at: string;
+  scheduler_status?: SchedulerStatus;
   error?: string;
 }
 
@@ -246,6 +247,24 @@ export interface CronJobStatus {
   next_run: string | null;
   status: 'ok' | 'error' | 'unknown';
   state: 'scheduled' | 'paused' | 'running';
+  backend?: string;
+  source?: string;
+  error?: string;
+  duration_seconds?: number;
+}
+
+export interface SchedulerStatus {
+  status: 'ok' | 'degraded' | 'warning' | 'unavailable' | 'unknown';
+  backends: Record<string, SchedulerBackendStatus>;
+}
+
+export interface SchedulerBackendStatus {
+  backend: string;
+  status: 'ok' | 'degraded' | 'warning' | 'unavailable' | 'error' | 'unknown';
+  source: string;
+  total_jobs: number;
+  failed_jobs: number;
+  reason?: string;
 }
 
 export interface DataFreshness {

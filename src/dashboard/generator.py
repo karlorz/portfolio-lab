@@ -18,6 +18,12 @@ import numpy as np
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
 from src.utils import safe_get, classify_vix_regime
 from src.backtest.metrics import save_results_json
+from src.monitor.hermes_cron import (
+    combine_scheduler_backends,
+    load_hermes_portfolio_cron_jobs,
+    load_local_cron_jobs,
+    resolve_hermes_cron_jobs_path,
+)
 from src.monitor.signal_schemas import validate_all_signals, validate_signal
 
 __all__ = [
@@ -69,6 +75,15 @@ def _log_signal_error(signal_name: str, exc: Exception) -> None:
 
 PUBLIC_DIR = PUBLIC_DATA_DIR
 DB_PATH = MARKET_DB
+_DEFAULT_DATA_DIR = DATA_DIR
+
+
+def _resolve_hermes_cron_jobs_path() -> Optional[Path]:
+    """Return the Hermes cron jobs file to probe, if this run should probe it."""
+    return resolve_hermes_cron_jobs_path(
+        current_data_dir=DATA_DIR,
+        default_data_dir=_DEFAULT_DATA_DIR,
+    )
 
 class DashboardGenerator:
     # SPC monitor instance (class-level to persist across runs)
@@ -1534,24 +1549,20 @@ class DashboardGenerator:
             "generated_at": datetime.now().isoformat()
         }
         
-        # Get cron job status from project-local status file
-        try:
-            cron_status_file = DATA_DIR / "cron_status.json"
-            if cron_status_file.exists():
-                with open(cron_status_file) as f:
-                    cron_data = json.load(f)
-                health_data["cron_jobs"] = cron_data.get("jobs", [])
-            else:
-                health_data["cron_jobs"] = []
-                health_data["scheduler_status"] = {
-                    "status": "unavailable",
-                    "source": str(cron_status_file),
-                    "reason": "cron_status.json missing; scheduler state not verified",
-                }
-                health_data["system_status"] = "warning"
-        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-            health_data["system_status"] = "degraded"
-            health_data["error"] = f"Failed to get cron status: {str(e)}"
+        # Get cron job status from project-local status file and Hermes, when available.
+        scheduler_backends = {}
+        cron_status_file = DATA_DIR / "cron_status.json"
+        local_jobs, local_backend = load_local_cron_jobs(cron_status_file)
+        health_data["cron_jobs"].extend(local_jobs)
+        scheduler_backends["local"] = local_backend
+
+        hermes_jobs_path = _resolve_hermes_cron_jobs_path()
+        if hermes_jobs_path is not None:
+            hermes_jobs, hermes_backend = load_hermes_portfolio_cron_jobs(hermes_jobs_path)
+            health_data["cron_jobs"].extend(hermes_jobs)
+            scheduler_backends["hermes"] = hermes_backend
+
+        health_data["scheduler_status"] = combine_scheduler_backends(scheduler_backends)
         
         # Get data freshness from SQLite
         cursor = self.conn.cursor()
@@ -1596,10 +1607,17 @@ class DashboardGenerator:
         # Overall system health
         stale_count = sum(1 for d in health_data["data_freshness"].values() if d.get("status") != "fresh")
         failed_jobs = sum(1 for j in health_data["cron_jobs"] if j.get("status") == "error")
+        scheduler_status = health_data.get("scheduler_status", {}).get("status")
+        backend_error = any(
+            backend.get("status") == "error"
+            for backend in health_data.get("scheduler_status", {}).get("backends", {}).values()
+        )
         
         if health_data["system_status"] not in {"warning", "critical", "degraded"}:
             health_data["system_status"] = "healthy"
-        if failed_jobs > 0 or stale_count > 5:
+        if backend_error:
+            health_data["system_status"] = "degraded"
+        elif scheduler_status in {"degraded", "warning", "unavailable"} or failed_jobs > 0 or stale_count > 5:
             health_data["system_status"] = "warning"
         if failed_jobs > 2 or stale_count > 10:
             health_data["system_status"] = "critical"

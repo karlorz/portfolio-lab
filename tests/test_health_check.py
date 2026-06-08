@@ -52,6 +52,51 @@ class TestCheckDataFreshness:
         freshness = _check_data_freshness()
         assert freshness["signals"]["status"] == "missing"
 
+    def test_hermes_cron_error_degrades_cron_check(self, tmp_path, monkeypatch):
+        """Hermes scheduler errors should be included in health cron checks."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "jobs": [{"name": "portfolio-lab-data", "status": "ok"}]
+        }))
+        hermes_jobs = tmp_path / "hermes_jobs.json"
+        hermes_jobs.write_text(json.dumps({
+            "jobs": [
+                {
+                    "id": "bad-job",
+                    "name": "portfolio-lab-health",
+                    "last_status": "error",
+                    "last_error": "Script exited with code 1",
+                    "state": "scheduled",
+                    "enabled": True,
+                }
+            ]
+        }))
+        monkeypatch.setenv("HERMES_CRON_JOBS_PATH", str(hermes_jobs))
+
+        freshness = _check_data_freshness()
+
+        assert freshness["cron"]["status"] == "degraded"
+        assert freshness["cron"]["failed_jobs"] == 1
+        assert freshness["cron"]["backends"]["hermes"]["failed_jobs"] == 1
+        assert freshness["cron"]["jobs"][0]["backend"] == "local"
+        assert freshness["cron"]["jobs"][1]["backend"] == "hermes"
+
+    def test_missing_hermes_cron_state_warns(self, tmp_path, monkeypatch):
+        """Missing configured Hermes state should be a warning, not a crash."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "jobs": [{"name": "portfolio-lab-data", "status": "ok"}]
+        }))
+        monkeypatch.setenv("HERMES_CRON_JOBS_PATH", str(tmp_path / "missing-jobs.json"))
+
+        freshness = _check_data_freshness()
+
+        assert freshness["cron"]["status"] == "warning"
+        assert freshness["cron"]["backends"]["hermes"]["status"] == "unavailable"
+        assert "missing-jobs.json" in freshness["cron"]["backends"]["hermes"]["source"]
+
 
 class TestCheckCircuitBreaker:
     """Test circuit breaker state check."""
@@ -101,6 +146,16 @@ class TestComputeSystemStatus:
             "signals": {"status": "ok"},
         }
         circuit = {"status": "degraded"}
+        assert _compute_system_status(checks, circuit) == "warning"
+
+    def test_warning_component(self):
+        """Explicit warning components should produce warning system status."""
+        checks = {
+            "prices": {"status": "ok"},
+            "signals": {"status": "ok"},
+            "cron": {"status": "warning"},
+        }
+        circuit = {"status": "ok"}
         assert _compute_system_status(checks, circuit) == "warning"
 
 

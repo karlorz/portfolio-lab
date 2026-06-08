@@ -1234,6 +1234,93 @@ class TestHealthJSONEdgeCases:
         assert len(data["data_freshness"]) == 4
         gen.conn.close()
 
+    def test_hermes_error_degrades_dashboard_health(self, tmp_path, monkeypatch):
+        """Active Hermes portfolio-lab errors should be visible in dashboard health."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "jobs": [
+                {
+                    "name": "portfolio-lab-data",
+                    "status": "ok",
+                    "last_run": "2026-06-08T12:00:00+08:00",
+                    "backend": "local",
+                }
+            ]
+        }))
+        hermes_jobs = tmp_path / "hermes_jobs.json"
+        hermes_jobs.write_text(json.dumps({
+            "jobs": [
+                {
+                    "id": "ok-job",
+                    "name": "portfolio-lab-dashboard",
+                    "schedule_display": "15 * * * *",
+                    "last_run_at": "2026-06-08T12:15:00+08:00",
+                    "next_run_at": "2026-06-08T13:15:00+08:00",
+                    "last_status": "ok",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "workdir": str(tmp_path),
+                },
+                {
+                    "id": "bad-job",
+                    "name": "portfolio-lab-autonomous-agent",
+                    "schedule_display": "40 */2 * * *",
+                    "last_run_at": "2026-06-08T12:47:00+08:00",
+                    "next_run_at": "2026-06-08T14:40:00+08:00",
+                    "last_status": "error",
+                    "last_error": "RuntimeError: final report text",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "workdir": str(tmp_path),
+                },
+                {
+                    "id": "other-project",
+                    "name": "finance-digest",
+                    "last_status": "error",
+                    "enabled": True,
+                },
+            ]
+        }))
+        monkeypatch.setenv("HERMES_CRON_JOBS_PATH", str(hermes_jobs))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_health_json()
+        with open(path) as f:
+            data = json.load(f)
+
+        hermes_error = next(j for j in data["cron_jobs"] if j["id"] == "bad-job")
+        assert data["system_status"] == "warning"
+        assert data["scheduler_status"]["status"] == "degraded"
+        assert data["scheduler_status"]["backends"]["hermes"]["failed_jobs"] == 1
+        assert hermes_error["backend"] == "hermes"
+        assert hermes_error["name"] == "portfolio-lab-autonomous-agent"
+        assert hermes_error["schedule"] == "40 */2 * * *"
+        assert hermes_error["last_run"] == "2026-06-08T12:47:00+08:00"
+        assert hermes_error["status"] == "error"
+        assert hermes_error["error"] == "RuntimeError: final report text"
+        assert not any(j["name"] == "finance-digest" for j in data["cron_jobs"])
+        gen.conn.close()
+
+    def test_missing_hermes_state_warns_without_crashing(self, tmp_path, monkeypatch):
+        """Unavailable Hermes state should be explicit warning metadata."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "jobs": [{"name": "portfolio-lab-data", "status": "ok"}]
+        }))
+        monkeypatch.setenv("HERMES_CRON_JOBS_PATH", str(tmp_path / "missing-jobs.json"))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_health_json()
+        with open(path) as f:
+            data = json.load(f)
+
+        assert data["system_status"] == "warning"
+        assert data["scheduler_status"]["backends"]["hermes"]["status"] == "unavailable"
+        assert "missing-jobs.json" in data["scheduler_status"]["backends"]["hermes"]["source"]
+        gen.conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Stats JSON edge cases
@@ -2425,7 +2512,8 @@ class TestHealthJSONSignalHealth:
         with open(path) as f:
             data = json.load(f)
         assert len(data["cron_jobs"]) == 2
-        assert data["cron_jobs"][0]["status"] == "success"
+        assert data["cron_jobs"][0]["status"] == "ok"
+        assert data["cron_jobs"][0]["backend"] == "local"
         gen.conn.close()
 
 

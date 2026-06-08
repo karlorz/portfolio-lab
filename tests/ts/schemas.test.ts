@@ -940,6 +940,51 @@ describe('HealthDataSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('preserves cron backend metadata', () => {
+    const data = {
+      ...validHealth(),
+      cron_jobs: [{
+        ...validHealth().cron_jobs[0],
+        backend: 'hermes' as const,
+        source: '/root/.hermes/cron/jobs.json',
+        error: 'RuntimeError: final report text',
+      }],
+    };
+    const result = HealthDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+    expect(result.data?.cron_jobs[0].backend).toBe('hermes');
+    expect(result.data?.cron_jobs[0].error).toContain('RuntimeError');
+  });
+
+  it('accepts scheduler backend status metadata', () => {
+    const data = {
+      ...validHealth(),
+      scheduler_status: {
+        status: 'degraded' as const,
+        backends: {
+          local: {
+            backend: 'local',
+            status: 'ok' as const,
+            source: '/root/projects/portfolio-lab/data/cron_status.json',
+            total_jobs: 1,
+            failed_jobs: 0,
+          },
+          hermes: {
+            backend: 'hermes',
+            status: 'degraded' as const,
+            source: '/root/.hermes/cron/jobs.json',
+            total_jobs: 2,
+            failed_jobs: 1,
+            reason: 'fixture',
+          },
+        },
+      },
+    };
+    const result = HealthDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+    expect(result.data?.scheduler_status?.backends.hermes.failed_jobs).toBe(1);
+  });
+
   it('rejects invalid system_status', () => {
     const data = { ...validHealth(), system_status: 'unknown' };
     const result = HealthDataSchema.safeParse(data);

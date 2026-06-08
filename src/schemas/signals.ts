@@ -585,7 +585,11 @@ const CronJobStatusSchema = z.object({
   next_run: z.nullable(z.string()),
   status: z.enum(['ok', 'error', 'unknown']),
   state: z.enum(['scheduled', 'paused', 'running']),
-});
+  backend: z.optional(z.string()),
+  source: z.optional(z.string()),
+  error: z.optional(z.string()),
+  duration_seconds: z.optional(z.number()),
+}).passthrough();
 
 const DataFreshnessSchema = z.object({
   last_update: z.string(),
@@ -593,11 +597,26 @@ const DataFreshnessSchema = z.object({
   status: z.enum(['fresh', 'stale', 'critical']),
 });
 
+const SchedulerBackendSchema = z.object({
+  backend: z.string(),
+  status: z.enum(['ok', 'degraded', 'warning', 'unavailable', 'error', 'unknown']),
+  source: z.string(),
+  total_jobs: z.number(),
+  failed_jobs: z.number(),
+  reason: z.optional(z.string()),
+}).passthrough();
+
+const SchedulerStatusSchema = z.object({
+  status: z.enum(['ok', 'degraded', 'warning', 'unavailable', 'unknown']),
+  backends: z.record(z.string(), SchedulerBackendSchema),
+}).passthrough();
+
 export const HealthDataSchema = z.object({
   cron_jobs: z.array(CronJobStatusSchema),
   data_freshness: z.record(z.string(), DataFreshnessSchema),
   system_status: z.enum(['healthy', 'warning', 'critical', 'degraded']),
   generated_at: z.string(),
+  scheduler_status: z.optional(SchedulerStatusSchema),
   error: z.optional(z.string()),
 }).passthrough();
 
