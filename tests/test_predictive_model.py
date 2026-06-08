@@ -308,6 +308,44 @@ class TestPredictiveModelPredict:
         assert result.valid is True
         assert result.metadata.get("n_bootstrap", 0) == 0
 
+    def test_predict_honors_use_bootstrap_false_even_with_bootstrap_count(self, simple_prices, monkeypatch):
+        model = PredictiveModel(n_assets=4, use_bootstrap=False, n_bootstrap=50)
+        model.fit(simple_prices)
+
+        def fail_if_sampled(*args, **kwargs):
+            raise AssertionError("bootstrap residual sampling should be skipped")
+
+        monkeypatch.setattr(np.random, "choice", fail_if_sampled)
+
+        result = model.predict()
+
+        assert result.valid is True
+        assert result.metadata["n_bootstrap"] == 0
+
+    def test_predict_seeded_bootstrap_replays_step_confidence(self, simple_prices):
+        model1 = PredictiveModel(n_assets=4, random_state=123)
+        model2 = PredictiveModel(n_assets=4, random_state=123)
+        model1.fit(simple_prices)
+        model2.fit(simple_prices)
+
+        result1 = model1.predict(horizon=4, n_bootstrap=25)
+        result2 = model2.predict(horizon=4, n_bootstrap=25)
+
+        assert result1.metadata["n_bootstrap"] == 25
+        assert result2.metadata["n_bootstrap"] == 25
+        np.testing.assert_array_equal(result1.step_confidence, result2.step_confidence)
+
+    def test_predict_accepts_generator_for_bootstrap_replay(self, simple_prices):
+        model1 = PredictiveModel(n_assets=4, random_state=np.random.default_rng(456))
+        model2 = PredictiveModel(n_assets=4, random_state=np.random.default_rng(456))
+        model1.fit(simple_prices)
+        model2.fit(simple_prices)
+
+        result1 = model1.predict(horizon=4, n_bootstrap=25)
+        result2 = model2.predict(horizon=4, n_bootstrap=25)
+
+        np.testing.assert_array_equal(result1.step_confidence, result2.step_confidence)
+
     def test_predict_custom_n_bootstrap(self, fitted_model):
         result = fitted_model.predict(n_bootstrap=10)
         assert result.valid is True
@@ -536,6 +574,42 @@ class TestTrajectoryOptimizerGenerate:
         candidates = optimizer.generate_trajectories(prediction, current_weights, horizon=3)
         for c in candidates:
             assert len(c.step_scores) == 3
+
+    def test_seeded_generate_trajectories_replays_top_candidate(self, fitted_model):
+        prediction = fitted_model.predict(horizon=3, n_bootstrap=0)
+        current_weights = np.array([0.46, 0.38, 0.16, 0.0])
+        opt1 = TrajectoryOptimizer(n_assets=4, n_candidates=20, n_elite=5, n_iterations=2, random_state=789)
+        opt2 = TrajectoryOptimizer(n_assets=4, n_candidates=20, n_elite=5, n_iterations=2, random_state=789)
+
+        candidates1 = opt1.generate_trajectories(prediction, current_weights, horizon=3)
+        candidates2 = opt2.generate_trajectories(prediction, current_weights, horizon=3)
+
+        np.testing.assert_array_equal(candidates1[0].allocations, candidates2[0].allocations)
+        assert candidates1[0].score == pytest.approx(candidates2[0].score)
+
+    def test_generate_trajectories_accepts_generator_for_replay(self, fitted_model):
+        prediction = fitted_model.predict(horizon=3, n_bootstrap=0)
+        current_weights = np.array([0.46, 0.38, 0.16, 0.0])
+        opt1 = TrajectoryOptimizer(
+            n_assets=4,
+            n_candidates=20,
+            n_elite=5,
+            n_iterations=2,
+            random_state=np.random.default_rng(101),
+        )
+        opt2 = TrajectoryOptimizer(
+            n_assets=4,
+            n_candidates=20,
+            n_elite=5,
+            n_iterations=2,
+            random_state=np.random.default_rng(101),
+        )
+
+        candidates1 = opt1.generate_trajectories(prediction, current_weights, horizon=3)
+        candidates2 = opt2.generate_trajectories(prediction, current_weights, horizon=3)
+
+        np.testing.assert_array_equal(candidates1[0].allocations, candidates2[0].allocations)
+        assert candidates1[0].score == pytest.approx(candidates2[0].score)
 
 
 class TestTrajectoryOptimizerSelect:

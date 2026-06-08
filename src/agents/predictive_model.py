@@ -20,6 +20,17 @@ import numpy as np
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
+RandomStateInput = Optional[int | np.random.Generator]
+
+
+def _resolve_rng(random_state: RandomStateInput) -> Any:
+    """Return a numpy-compatible RNG while preserving global RNG defaults."""
+    if random_state is None:
+        return np.random
+    if isinstance(random_state, np.random.Generator):
+        return random_state
+    return np.random.default_rng(random_state)
+
 
 @dataclass
 class PredictionResult:
@@ -81,12 +92,14 @@ class PredictiveModel:
         horizon: int = 5,
         use_bootstrap: bool = True,
         n_bootstrap: int = 100,
+        random_state: RandomStateInput = None,
     ):
         self.n_assets = n_assets
         self.window = window
         self.horizon = horizon
         self.use_bootstrap = use_bootstrap
         self.n_bootstrap = n_bootstrap
+        self._rng = _resolve_rng(random_state)
 
         # Fitted parameters
         self._A: Optional[np.ndarray] = None  # (n_assets, n_assets)
@@ -221,14 +234,16 @@ class PredictiveModel:
         expected_returns = np.sum(trajectory, axis=0)
 
         # Bootstrap confidence estimation
-        n_boot = n_bootstrap or self.n_bootstrap
+        n_boot = self.n_bootstrap if n_bootstrap is None else n_bootstrap
+        if not self.use_bootstrap:
+            n_boot = 0
         step_confidence = np.ones(h)
 
         if self._residuals is not None and self._residuals.shape[0] > 10 and n_boot > 0:
             boot_trajectories = np.zeros((n_boot, h, self.n_assets))
             for b in range(n_boot):
                 sampled_residuals = self._residuals[
-                    np.random.choice(self._residuals.shape[0], size=h, replace=True)
+                    self._rng.choice(self._residuals.shape[0], size=h, replace=True)
                 ]
                 current_return_boot = latest_return.copy()
                 for step in range(h):
@@ -330,11 +345,13 @@ class TrajectoryOptimizer:
         n_candidates: int = 50,
         n_elite: int = 10,
         n_iterations: int = 3,
+        random_state: RandomStateInput = None,
     ):
         self.n_assets = n_assets
         self.n_candidates = n_candidates
         self.n_elite = n_elite
         self.n_iterations = n_iterations
+        self._rng = _resolve_rng(random_state)
 
         # Default allocation weights
         self.default_weights = np.array([0.46, 0.38, 0.16, 0.0])
@@ -393,7 +410,7 @@ class TrajectoryOptimizer:
 
             for _ in range(self.n_candidates):
                 # Sample allocation adjustments
-                delta = np.random.multivariate_normal(mu, sigma)
+                delta = self._rng.multivariate_normal(mu, sigma)
                 # Clip to [0, 1]
                 weights = np.clip(delta, 0.0, 1.0)
                 # Normalize to sum to 1
