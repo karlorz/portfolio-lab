@@ -8,6 +8,9 @@ import {
   parseLabsJson,
   type LabsDashboardData,
   type LabsEndpointKey,
+  type LabsRegistryData,
+  type LabsReplayData,
+  type LabsScorecardData,
 } from '../schemas/labs';
 
 export const LABS_DASHBOARD_ENDPOINTS: Record<LabsEndpointKey, string> = {
@@ -16,6 +19,8 @@ export const LABS_DASHBOARD_ENDPOINTS: Record<LabsEndpointKey, string> = {
   replays: '/data/labs_replays.json',
   validation: '/data/labs_validation.json',
 };
+
+export const LABS_RENDER_ROW_LIMIT = 100;
 
 const LABS_ENDPOINT_KEYS: LabsEndpointKey[] = ['registry', 'scorecards', 'replays', 'validation'];
 
@@ -36,6 +41,20 @@ export function buildEmptyLabsDashboardData(missing: LabsEndpointKey[] = LABS_EN
     validation: null,
     missing,
     errors: [],
+  };
+}
+
+function capLabsRows<T>(rows: T[]): T[] {
+  return rows.length > LABS_RENDER_ROW_LIMIT ? rows.slice(0, LABS_RENDER_ROW_LIMIT) : rows;
+}
+
+function capRegistryRows(registry: LabsRegistryData | null): LabsRegistryData | null {
+  if (registry === null) {
+    return null;
+  }
+  return {
+    ...registry,
+    experiments: capLabsRows(registry.experiments),
   };
 }
 
@@ -95,9 +114,9 @@ export async function fetchLabsDashboardData(fetcher: LabsFetcher = fetch): Prom
 
   const data: LabsDashboardData = {
     available: missing.length < LABS_ENDPOINT_KEYS.length && errors.length === 0,
-    registry: registry.data,
-    scorecards: scorecards.data ?? [],
-    replays: replays.data ?? [],
+    registry: capRegistryRows(registry.data),
+    scorecards: capLabsRows<LabsScorecardData>(scorecards.data ?? []),
+    replays: capLabsRows<LabsReplayData>(replays.data ?? []),
     validation: validation.data,
     missing,
     errors,

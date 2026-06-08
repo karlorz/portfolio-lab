@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from src.paths import PUBLIC_DATA_DIR
+from src.dashboard.public_data_size_budget import (
+    measure_public_data_size_budget,
+    missing_public_data_size_budget,
+)
 from src.research.experiment_artifact_validator import (
     LABS_REGISTRY_SCHEMA_VERSION,
     LABS_REPLAY_SCHEMA_VERSION,
@@ -160,6 +164,7 @@ def _public_data_entry(path: Path | None, filename: str, generated_at: str, publ
             "validation_status": "missing",
             "validation_errors": [],
             "size_bytes": None,
+            "size_budget": missing_public_data_size_budget(),
             "sha256": None,
             "generated_at": generated_at,
         }
@@ -179,6 +184,7 @@ def _public_data_entry(path: Path | None, filename: str, generated_at: str, publ
         "validation_status": validation_status,
         "validation_errors": validation_errors,
         "size_bytes": path.stat().st_size,
+        "size_budget": measure_public_data_size_budget(path),
         "sha256": _sha256_file(path),
         "generated_at": _generated_at_for_file(path, generated_at),
     }

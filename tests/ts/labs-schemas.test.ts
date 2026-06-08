@@ -109,4 +109,37 @@ describe('Labs dashboard data fetch helper', () => {
     expect(data.missing).toEqual([]);
     expect(data.errors).toEqual([]);
   });
+
+  it('caps oversized Labs rows before dashboard rendering', async () => {
+    const registryFixture = loadLabsFixture('valid_registry');
+    const registryRow = registryFixture.experiments[0];
+    const scorecardFixture = loadLabsFixture('valid_scorecard');
+    const replayFixture = loadLabsFixture('valid_replay_pass');
+    const payloads: Record<string, unknown> = {
+      [LABS_DASHBOARD_ENDPOINTS.registry]: {
+        ...registryFixture,
+        experiments: Array.from({ length: 150 }, (_, idx) => ({
+          ...registryRow,
+          experiment_id: `experiment-${idx}`,
+        })),
+      },
+      [LABS_DASHBOARD_ENDPOINTS.scorecards]: Array.from({ length: 150 }, (_, idx) => ({
+        ...scorecardFixture,
+        experiment_id: `experiment-${idx}`,
+      })),
+      [LABS_DASHBOARD_ENDPOINTS.replays]: Array.from({ length: 150 }, (_, idx) => ({
+        ...replayFixture,
+        experiment_id: `experiment-${idx}`,
+      })),
+      [LABS_DASHBOARD_ENDPOINTS.validation]: loadLabsFixture('validation_report'),
+    };
+    const fetcher = async (url: string) => new Response(JSON.stringify(payloads[url]), { status: 200 });
+
+    const data = await fetchLabsDashboardData(fetcher);
+
+    expect(data.registry?.experiments).toHaveLength(100);
+    expect(data.scorecards).toHaveLength(100);
+    expect(data.replays).toHaveLength(100);
+    expect(data.available).toBe(true);
+  });
 });
