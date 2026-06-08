@@ -50,6 +50,14 @@ else:
         def zero_grad(self): pass
         def __repr__(self): return "StubModule()"
 
+    class _StubOptimizer:
+        """Stand-in for torch.optim optimizers during no-ML smoke runs."""
+        def __init__(self, *args, **kwargs): pass
+        def zero_grad(self): pass
+        def step(self): pass
+        def state_dict(self): return {}
+        def load_state_dict(self, *args, **kwargs): pass
+
     _stub_torch = _types.ModuleType("torch")
     _stub_torch.Tensor = np.ndarray
     _stub_torch.tensor = lambda x, **kw: np.array(x)
@@ -80,14 +88,19 @@ else:
     _stub_nn.Dropout = lambda *a, **kw: _StubModule()
     _stub_nn.Softmax = lambda *a, **kw: lambda x: x
 
+    _stub_optim = _types.ModuleType("torch.optim")
+    _stub_optim.Adam = _StubOptimizer
+
     torch = _stub_torch
     nn = _stub_nn
+    torch.optim = _stub_optim
 
     # Register stubs in sys.modules so other agent modules find them
     # (overwrites any existing entries to prevent silent no-op from setdefault)
     import sys as _sys
     _sys.modules["torch"] = _stub_torch
     _sys.modules["torch.nn"] = _stub_nn
+    _sys.modules["torch.optim"] = _stub_optim
 
 
 class AgentType(Enum):

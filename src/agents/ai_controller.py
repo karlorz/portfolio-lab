@@ -124,6 +124,22 @@ def parse_allocation_string(alloc_str: str) -> Dict[str, float]:
     return allocation
 
 
+def _resolve_device(requested_device: str) -> str:
+    """Resolve CLI device requests without importing torch in safe mode."""
+    if not requested_device.startswith("cuda"):
+        return requested_device
+
+    if not _ML_ENABLED:
+        print("CUDA requested but ML is disabled; using CPU")
+        return "cpu"
+
+    if not torch.cuda.is_available():
+        print("CUDA not available, using CPU")
+        return "cpu"
+
+    return requested_device
+
+
 class AIController:
     """
     Main AI Controller for v2.51 MARL system.
@@ -452,10 +468,7 @@ def main():
     args = parser.parse_args()
     
     # Device
-    device = args.device
-    if device == 'cuda' and not torch.cuda.is_available():
-        print("CUDA not available, using CPU")
-        device = 'cpu'
+    device = _resolve_device(args.device)
     
     # Checkpoint
     checkpoint = None

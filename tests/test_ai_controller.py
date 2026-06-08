@@ -6,6 +6,8 @@ infrastructure, CLI parsing, and data utility functions. Does NOT test
 ML inference/training (requires torch).
 """
 import os
+import subprocess
+import sys
 import pytest
 import numpy as np
 from pathlib import Path
@@ -18,6 +20,7 @@ from src.agents.ai_controller import (
     parse_allocation_string,
     AIController,
     VERSION,
+    main,
 )
 
 
@@ -125,6 +128,58 @@ class TestAIControllerStatus:
             ctrl = AIController(use_signal_integrator=False)
             status = ctrl.get_status()
             assert status["inference_count"] == 0
+
+
+class TestAIControllerCli:
+    def test_status_cuda_request_falls_back_in_safe_mode_without_torch(self, monkeypatch, capsys):
+        monkeypatch.setenv("PORTFOLIO_LAB_ENABLE_ML", "0")
+        monkeypatch.setattr(
+            "sys.argv",
+            ["ai_controller", "--mode", "status", "--device", "cuda"],
+        )
+
+        with patch("src.agents.ai_controller.AIController") as mock_controller_cls:
+            mock_controller = MagicMock()
+            mock_controller.get_status.return_value = {
+                "version": VERSION,
+                "device": "cpu",
+                "agents_loaded": [],
+            }
+            mock_controller_cls.return_value = mock_controller
+
+            main()
+
+        mock_controller_cls.assert_called_once()
+        assert mock_controller_cls.call_args.kwargs["device"] == "cpu"
+        output = capsys.readouterr().out
+        assert "CUDA requested but ML is disabled" in output
+        assert '"device": "cpu"' in output
+
+    def test_status_cuda_request_cli_exits_cleanly_in_safe_mode(self):
+        env = os.environ.copy()
+        env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "src.agents.ai_controller",
+                "--mode",
+                "status",
+                "--device",
+                "cuda",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "CUDA requested but ML is disabled" in result.stdout
+        assert '"device": "cpu"' in result.stdout
 
 
 class TestAIControllerFetchPriceHistory:
