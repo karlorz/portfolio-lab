@@ -17,7 +17,7 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 | 3. Memory | `ulimit -v` | 3 GB (3072 MB) |
 | 4. Timeout | Background watchdog → SIGTERM → SIGKILL | Per-job (see below) |
 
-**Critical gap**: The autonomous agent's LLM dispatch happens *outside* this guard — Hermes cron scheduler spawns the Claude Code process directly, bypassing all 4 layers. The pre-flight script is safe, but if the Hermes LLM cron job is re-enabled with the original prompt, the same CPU exhaustion will recur.
+**Critical gap fixed**: The autonomous job must stay in Hermes `no-agent` mode so the guarded script runs directly. Use `scripts/cron/configure_autonomous_agent_job.py` after Hermes job edits to restore `script=portfolio-lab-autonomous-agent.sh`, `no_agent=true`, and the repo-backed wrapper copy.
 
 ## Job Inventory
 
@@ -29,11 +29,11 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 | `portfolio-lab-strategy-eval.sh` | `make eval` | 600s | 10 min | `20 */2 * * *` |
 | `portfolio-lab-research-agent.sh` | `make research` | 300s | 5 min | `25 */2 * * *` |
 | `portfolio-lab-wiki-sync.sh` | `make wiki-sync` | 120s | 2 min | `35 */2 * * *` |
-| `portfolio-lab-autonomous-agent.sh` | *(Hermes-only)* | 300s | 60s¹ | `40 */2 * * *` |
+| `portfolio-lab-autonomous-agent.sh` | *(Hermes no-agent)* | 300s | 60s¹ | `40 */2 * * *` |
 | `portfolio-lab-position-sync.sh` | `make sync` | 60s | 60s² | `55 */2 * * *` |
 | `portfolio-lab-app-build.sh` | `make build` | 600s | — | **PAUSED**³ |
 
-¹ Pre-flight checks only. LLM dispatch removed post-incident.  
+¹ Pre-flight checks only. LLM dispatch removed post-incident; the configurator enforces no-agent mode.
 ² Placeholder — no broker API wired yet.  
 ³ No web server consumers found (`/var/www/portfolio-lab` doesn't exist, no caddy/nginx config).
 

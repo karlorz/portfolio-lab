@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +17,20 @@ try:
 except ImportError:
     _default_backend = os.environ.get("CRON_BACKEND", "manual")
 
+_METADATA_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _parse_metadata(args):
+    metadata = {}
+    for item in args:
+        if "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        if not _METADATA_KEY_RE.match(key):
+            continue
+        metadata[key] = value
+    return metadata
+
 def main():
     if len(sys.argv) < 4:
         print(f"Usage: {sys.argv[0]} <job_name> <status> <duration_seconds> [backend]", file=sys.stderr)
@@ -25,6 +40,7 @@ def main():
     status = sys.argv[2]
     duration = float(sys.argv[3])
     backend = sys.argv[4] if len(sys.argv) > 4 else _default_backend
+    metadata = _parse_metadata(sys.argv[5:])
 
     status_file = os.path.join(
         str(PROJECT_ROOT),
@@ -47,17 +63,20 @@ def main():
             job["last_run"] = now
             job["duration_seconds"] = duration
             job["backend"] = backend
+            job.update(metadata)
             found = True
             break
 
     if not found:
-        data["jobs"].append({
+        row = {
             "name": job_name,
             "status": status,
             "last_run": now,
             "duration_seconds": duration,
             "backend": backend,
-        })
+        }
+        row.update(metadata)
+        data["jobs"].append(row)
 
     with open(status_file, "w") as f:
         json.dump(data, f, indent=2)

@@ -20,6 +20,7 @@ record_hermes_cron_status() {
     local exit_code="${2:-0}"
     local duration_seconds="${3:-0}"
     local backend="${CRON_BACKEND:-hermes}"
+    shift 3 || true
 
     if [ "$backend" != "hermes" ]; then
         return 0
@@ -30,7 +31,7 @@ record_hermes_cron_status() {
     local status
     status="$(cron_status_from_exit "$exit_code")"
 
-    "$python_runtime" scripts/cron_update.py "$job_name" "$status" "$duration_seconds" hermes || {
+    "$python_runtime" scripts/cron_update.py "$job_name" "$status" "$duration_seconds" hermes "$@" || {
         echo "WARN: failed to update cron status for $job_name" >&2
         return 0
     }

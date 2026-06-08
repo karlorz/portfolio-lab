@@ -67,10 +67,13 @@ cron_guard_start() {
     # Spawn a subshell that SIGTERMs the parent after timeout_secs,
     # then SIGKILLs 30s later if still alive.
     (
+        trap 'exit 0' TERM INT
         if [[ "$lock_fd" =~ ^[0-9]+$ ]]; then
             eval "exec ${lock_fd}>&-" 2>/dev/null || true
         fi
-        sleep "$timeout_secs" </dev/null >/dev/null 2>&1
+        sleep "$timeout_secs" </dev/null >/dev/null 2>&1 &
+        watchdog_sleep_pid=$!
+        wait "$watchdog_sleep_pid" || exit 0
         echo "[$(date -Iseconds)] CRON_GUARD: $job_name TIMEOUT after ${timeout_secs}s — sending SIGTERM" >&2
         kill -TERM $$ 2>/dev/null || true
         sleep 30

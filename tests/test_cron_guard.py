@@ -43,3 +43,35 @@ exit "$status"
     assert result.returncode == 42
     assert "CRON_GUARD: unit-health FAILED exit=42" in output
     assert "end_status=42" in output
+
+
+def test_cron_guard_end_does_not_emit_timeout_for_success(tmp_path: Path) -> None:
+    """Stopping the watchdog during normal completion must not log a timeout."""
+    env = os.environ.copy()
+    env["CRON_GUARD_LOCK_DIR"] = str(tmp_path / "locks")
+    env["CRON_GUARD_MAX_LOAD"] = "999"
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"""
+source "{CRON_GUARD}"
+cron_guard_start "unit-success" 60
+sleep 1
+cron_guard_end "unit-success" 0
+""",
+        ],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "CRON_GUARD: unit-success COMPLETED" in output
+    assert "Terminated" not in output
+    assert "TIMEOUT" not in output
+    assert "FORCE KILL" not in output
