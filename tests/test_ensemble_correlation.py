@@ -1,5 +1,7 @@
 """Tests for signal correlation matrix in ensemble voting."""
 
+import time
+
 import numpy as np
 import pytest
 
@@ -169,6 +171,66 @@ class TestComputeSignalCorrelationMatrix:
         # Zero variance → Spearman returns 0.0, below threshold
         assert len(result["redundant_pairs"]) == 0
         assert abs(result["matrix"]["signal_a"]["signal_b"]) < 0.01
+
+    def test_unequal_lengths_and_invalid_observations_are_filtered(self):
+        from src.strategy.ensemble_voter import compute_signal_correlation_matrix
+
+        ic_data = {
+            "__staged__": {"date": "2026-06-08", "predictions": {"ignored": 0.2}},
+            "signal_a": [
+                [1.0, 0.0],
+                ["bad", 0.0],
+                [2.0, 0.0],
+                [None, 0.0],
+                [float("nan"), 0.0],
+                [3.0, 0.0],
+                [4.0, 0.0],
+                [5.0, 0.0],
+                [6.0, 0.0],
+                [7.0, 0.0],
+                [8.0, 0.0],
+                [9.0, 0.0],
+                [10.0, 0.0],
+            ],
+            "signal_b": [[float(i), 0.0] for i in range(1, 11)],
+            "signal_c": [[0.25, 0.0]] * 12,
+        }
+
+        result = compute_signal_correlation_matrix(ic_data=ic_data, threshold=0.7)
+
+        assert "signal_a" in result["matrix"]
+        assert result["matrix"]["signal_a"]["signal_b"] > 0.9
+        assert result["matrix"]["signal_a"]["signal_c"] == 0.0
+        redundant_pairs = {(left, right): corr for left, right, corr in result["redundant_pairs"]}
+        assert redundant_pairs[("signal_a", "signal_b")] > 0.9
+        assert result["correlation_penalties"]["signal_a"] < 1.0
+        assert "__staged__" not in result["correlation_penalties"]
+
+    def test_large_signal_set_avoids_pairwise_rank_helper_cost(self, monkeypatch):
+        from src.strategy.ensemble_voter import compute_signal_correlation_matrix
+
+        rng = np.random.RandomState(42)
+        base = rng.normal(size=500)
+        ic_data = {
+            f"signal_{idx:02d}": [[float(value + idx * 0.001), 0.0] for value in base]
+            for idx in range(20)
+        }
+
+        def slow_pairwise_helper(_x, _y):
+            time.sleep(0.001)
+            return 0.0
+
+        monkeypatch.setattr(
+            "src.monitor.ic_decay_monitor._spearman_rank_correlation",
+            slow_pairwise_helper,
+        )
+
+        started = time.perf_counter()
+        result = compute_signal_correlation_matrix(ic_data=ic_data, threshold=0.7)
+        elapsed = time.perf_counter() - started
+
+        assert len(result["correlation_penalties"]) == 20
+        assert elapsed < 0.05
 
 
 class TestCorrelationPenaltyIntegration:

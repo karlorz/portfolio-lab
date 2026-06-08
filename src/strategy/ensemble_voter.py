@@ -391,6 +391,67 @@ REGIME_CONDITIONAL_WEIGHTS = _load_regime_conditional_weights()
 # ── Signal Correlation Matrix ──
 
 
+def _extract_signal_predictions(ic_data: Dict) -> Dict[str, List[float]]:
+    """Extract prediction series from IC monitor state, preserving invalid slots."""
+    signal_predictions: Dict[str, List[float]] = {}
+    for signal_name, observations in ic_data.items():
+        if signal_name == "__staged__" or not isinstance(observations, list):
+            continue
+
+        preds: List[float] = []
+        for obs in observations:
+            if not isinstance(obs, (list, tuple)) or len(obs) < 1:
+                preds.append(float("nan"))
+                continue
+            try:
+                pred = float(obs[0])
+            except (TypeError, ValueError):
+                preds.append(float("nan"))
+                continue
+            preds.append(pred if np.isfinite(pred) else float("nan"))
+
+        if int(np.isfinite(np.asarray(preds, dtype=float)).sum()) >= 10:
+            signal_predictions[signal_name] = preds
+    return signal_predictions
+
+
+def _rank_prediction_matrix(signal_predictions: Dict[str, List[float]]) -> Tuple[List[str], np.ndarray]:
+    """Build a padded matrix of per-signal ranks, ranking each signal once."""
+    signals = sorted(signal_predictions.keys())
+    max_len = max(len(signal_predictions[signal]) for signal in signals)
+    ranks = np.full((len(signals), max_len), np.nan, dtype=float)
+
+    for row_idx, signal in enumerate(signals):
+        values = np.asarray(signal_predictions[signal], dtype=float)
+        finite_mask = np.isfinite(values)
+        finite_values = values[finite_mask]
+        if finite_values.size < 5 or np.ptp(finite_values) < 1e-10:
+            continue
+        row_ranks = np.argsort(np.argsort(finite_values)).astype(float)
+        rank_row = ranks[row_idx, : values.size]
+        rank_row[finite_mask] = row_ranks
+
+    return signals, ranks
+
+
+def _rank_correlation_from_matrix(ranks: np.ndarray, i: int, j: int) -> float:
+    """Compute Pearson correlation of two pre-ranked rows."""
+    x_rank = ranks[i]
+    y_rank = ranks[j]
+    mask = np.isfinite(x_rank) & np.isfinite(y_rank)
+    if int(mask.sum()) < 5:
+        return 0.0
+
+    x = x_rank[mask]
+    y = y_rank[mask]
+    x_dev = x - x.mean()
+    y_dev = y - y.mean()
+    denominator = np.sqrt((x_dev ** 2).sum() * (y_dev ** 2).sum())
+    if denominator < 1e-10:
+        return 0.0
+    return float((x_dev * y_dev).sum() / denominator)
+
+
 def compute_signal_correlation_matrix(
     ic_data: Optional[Dict] = None,
     threshold: float = 0.7,
@@ -428,27 +489,12 @@ def compute_signal_correlation_matrix(
     if not ic_data:
         return {"matrix": {}, "redundant_pairs": [], "correlation_penalties": {}}
 
-    # Extract prediction series for each signal (skip __staged__)
-    signal_predictions: Dict[str, List[float]] = {}
-    for signal_name, observations in ic_data.items():
-        if signal_name == "__staged__":
-            continue
-        if not isinstance(observations, list):
-            continue
-        preds = []
-        for obs in observations:
-            if isinstance(obs, (list, tuple)) and len(obs) >= 1:
-                preds.append(float(obs[0]))
-        if len(preds) >= 10:
-            signal_predictions[signal_name] = preds
+    signal_predictions = _extract_signal_predictions(ic_data)
 
     if len(signal_predictions) < 2:
         return {"matrix": {}, "redundant_pairs": [], "correlation_penalties": {}}
 
-    # Compute pairwise correlations on aligned observations
-    from src.monitor.ic_decay_monitor import _spearman_rank_correlation
-
-    signals = sorted(signal_predictions.keys())
+    signals, ranks = _rank_prediction_matrix(signal_predictions)
     matrix: Dict[str, Dict[str, float]] = {}
     redundant_pairs: List[Tuple[str, str, float]] = []
 
@@ -457,10 +503,7 @@ def compute_signal_correlation_matrix(
         for j, s2 in enumerate(signals):
             if i >= j:
                 continue
-            preds1 = signal_predictions[s1]
-            preds2 = signal_predictions[s2]
-            min_len = min(len(preds1), len(preds2))
-            corr = _spearman_rank_correlation(preds1[:min_len], preds2[:min_len])
+            corr = _rank_correlation_from_matrix(ranks, i, j)
             matrix[s1][s2] = corr
             if abs(corr) > threshold:
                 redundant_pairs.append((s1, s2, round(corr, 4)))
