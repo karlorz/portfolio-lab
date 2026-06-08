@@ -1341,6 +1341,61 @@ class TestLoadState:
             gc.DATA_DIR = original
 
 
+class TestJsonlTailReads:
+    """Regression coverage for bounded JSONL reads in graduation checks."""
+
+    def test_load_state_keeps_only_performance_tail(self, tmp_path):
+        with open(tmp_path / "performance.jsonl", "w") as f:
+            for i in range(525):
+                f.write(json.dumps({"seq": i, "sharpe": 0.5}) + "\n")
+
+        with patch("src.strategy.graduation_checklist.DATA_DIR", Path(tmp_path)):
+            state = GraduationChecklist()._load_state()
+
+        assert len(state["performance"]) == 500
+        assert state["performance"][0]["seq"] == 25
+        assert state["performance"][-1]["seq"] == 524
+
+    def test_tca_order_file_count_uses_bounded_tail(self, tmp_path):
+        with open(tmp_path / "orders.jsonl", "w") as f:
+            for i in range(1050):
+                f.write(json.dumps({"order_id": i}) + "\n")
+
+        with patch("src.strategy.graduation_checklist.DATA_DIR", Path(tmp_path)):
+            result = GraduationChecklist()._check_tca_orders({"tca": {"orders_by_symbol": {}}})
+
+        assert result.passed is True
+        assert result.value == 1000
+
+    def test_regime_coverage_uses_bounded_tail(self, tmp_path):
+        with open(tmp_path / "regime_log.json", "w") as f:
+            for i in range(5):
+                f.write(json.dumps({"regime": f"OLD_{i}"}) + "\n")
+            for i in range(1000):
+                regime = "NORMAL" if i % 2 == 0 else "HIGH_VOL"
+                f.write(json.dumps({"regime": regime}) + "\n")
+
+        with patch("src.strategy.graduation_checklist.DATA_DIR", Path(tmp_path)):
+            result = GraduationChecklist()._check_regime_coverage({})
+
+        assert result.passed is True
+        assert result.value == 2
+
+    def test_signal_diversity_uses_bounded_tail(self, tmp_path):
+        with open(tmp_path / "orders.jsonl", "w") as f:
+            for i in range(5):
+                f.write(json.dumps({"signal_source": f"stale_signal_{i}"}) + "\n")
+            for i in range(1000):
+                signal = ["alt_data", "intl_mom", "cross_rv", "unified"][i % 4]
+                f.write(json.dumps({"signal_source": signal}) + "\n")
+
+        with patch("src.strategy.graduation_checklist.DATA_DIR", Path(tmp_path)):
+            result = GraduationChecklist()._check_signal_diversity({})
+
+        assert result.passed is True
+        assert result.value == 4
+
+
 # ---------------------------------------------------------------------------
 # Test: CLI __main__ block
 # ---------------------------------------------------------------------------

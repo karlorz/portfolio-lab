@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sys
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, NamedTuple
@@ -28,6 +29,10 @@ logger = logging.getLogger(__name__)
 from src.paths import DATA_DIR
 from src.backtest.metrics import save_results_json
 
+
+PERFORMANCE_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_PERFORMANCE_LOG_TAIL_LINES", "500"))
+ORDER_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_ORDER_LOG_TAIL_LINES", "1000"))
+REGIME_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_REGIME_LOG_TAIL_LINES", "1000"))
 
 
 __all__ = ['CheckResult', 'GraduationChecklist', 'run_check_and_exit', 'run_report_and_exit', 'run_progress_and_exit']
@@ -105,6 +110,27 @@ class GraduationChecklist:
 
     def __init__(self, criteria: Optional[Dict] = None):
         self.criteria = copy.deepcopy(criteria) if criteria is not None else copy.deepcopy(self.DEFAULT_CRITERIA)
+
+    @staticmethod
+    def _read_jsonl_tail(path: Path, max_lines: int, label: str) -> list[Dict]:
+        """Read and parse a bounded JSONL tail, skipping malformed lines."""
+        entries = []
+        with open(path) as f:
+            for line in deque(f, maxlen=max_lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    logger.debug("Skipping malformed %s line: %s", label, e)
+        return entries
+
+    @staticmethod
+    def _count_nonempty_tail_lines(path: Path, max_lines: int) -> int:
+        """Count non-empty lines in a bounded file tail."""
+        with open(path) as f:
+            return sum(1 for line in deque(f, maxlen=max_lines) if line.strip())
 
     def check(self, state: Optional[Dict] = None) -> Dict[str, CheckResult]:
         """Check all graduation criteria against current state.
@@ -257,17 +283,11 @@ class GraduationChecklist:
         # Performance history
         perf_file = DATA_DIR / "performance.jsonl"
         if perf_file.exists():
-            perf_entries = []
-            with open(perf_file) as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            perf_entries.append(json.loads(line))
-                        except json.JSONDecodeError as e:
-                            logger.debug("Skipping malformed performance line: %s", e)
-                            continue
-            state["performance"] = perf_entries
+            state["performance"] = self._read_jsonl_tail(
+                perf_file,
+                PERFORMANCE_LOG_TAIL_LINES,
+                "performance",
+            )
 
         # TCA scorecard (producer removed v977)
 
@@ -495,8 +515,10 @@ class GraduationChecklist:
         # Also check orders.jsonl directly
         orders_file = DATA_DIR / "orders.jsonl"
         if orders_file.exists():
-            with open(orders_file) as f:
-                file_orders = sum(1 for _ in f if _.strip())
+            file_orders = self._count_nonempty_tail_lines(
+                orders_file,
+                ORDER_LOG_TAIL_LINES,
+            )
             total_orders = max(total_orders, file_orders)
         
         required = int(self.criteria["min_tca_orders"]["value"])
@@ -659,12 +681,14 @@ class GraduationChecklist:
         regime_log = DATA_DIR / "regime_log.json"
         if regime_log.exists():
             try:
-                with open(regime_log) as f:
-                    for line in f:
-                        entry = json.loads(line.strip())
-                        regime = entry.get("regime", "")
-                        if regime:
-                            regimes_seen.add(regime)
+                for entry in self._read_jsonl_tail(
+                    regime_log,
+                    REGIME_LOG_TAIL_LINES,
+                    "regime log",
+                ):
+                    regime = entry.get("regime", "")
+                    if regime:
+                        regimes_seen.add(regime)
             except (OSError, ValueError):
                 pass
 
@@ -705,12 +729,14 @@ class GraduationChecklist:
         orders_file = DATA_DIR / "orders.jsonl"
         if orders_file.exists():
             try:
-                with open(orders_file) as f:
-                    for line in f:
-                        entry = json.loads(line.strip())
-                        signal = entry.get("signal_source", "")
-                        if signal:
-                            signals_contributing.add(signal)
+                for entry in self._read_jsonl_tail(
+                    orders_file,
+                    ORDER_LOG_TAIL_LINES,
+                    "orders",
+                ):
+                    signal = entry.get("signal_source", "")
+                    if signal:
+                        signals_contributing.add(signal)
             except (OSError, ValueError):
                 pass
 
