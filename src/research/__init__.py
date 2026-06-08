@@ -2,6 +2,7 @@
 
 __all__ = [
     "agent",
+    "experiment_manifest",
     "features",
     "wiki_sync",
 ]

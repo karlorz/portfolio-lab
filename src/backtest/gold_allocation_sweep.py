@@ -314,13 +314,31 @@ def run_gold_sweep(output: Optional[str] = None) -> GoldSweepResult:
     sweep = GoldAllocationSweep()
     result = sweep.run_sweep()
 
+    def provenance_config(out_path: Path) -> dict:
+        return {
+            "experiment_id": "gold-allocation-sweep",
+            "manifest_mode": "sidecar",
+            "module": __name__,
+            "command": "python -m src.backtest.gold_allocation_sweep run",
+            "config_snapshot": {"output": str(out_path)},
+            "input_paths": [PRICES_JSON],
+        }
+
     if output:
         out_path = Path(output)
-        save_results_json(result.to_dict(), out_path)
+        save_results_json(
+            result.to_dict(),
+            out_path,
+            experiment_manifest=provenance_config(out_path),
+        )
         logger.info("Gold sweep results saved to %s", out_path)
     else:
         out_path = DATA_DIR / "gold_allocation_sweep.json"
-        save_results_json(result.to_dict(), out_path)
+        save_results_json(
+            result.to_dict(),
+            out_path,
+            experiment_manifest=provenance_config(out_path),
+        )
         logger.info("Gold sweep results saved to %s", out_path)
 
     # Print summary

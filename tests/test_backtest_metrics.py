@@ -460,6 +460,42 @@ class TestSaveResultsJson:
             loaded = json.load(f)
         assert loaded == {"cagr": 8.5}
 
+    def test_experiment_manifest_opt_in_embeds_provenance(self, tmp_path, monkeypatch):
+        """Experiment provenance should only appear when explicitly requested."""
+        path = tmp_path / "experiment.json"
+
+        monkeypatch.setattr(
+            "src.research.experiment_manifest.freeze_manifest.create_manifest",
+            lambda project_root=None: {
+                "timestamp": "2026-06-08T00:00:00+00:00",
+                "git": {"commit": "abc123", "branch": "main", "dirty": False, "tag": None},
+                "config": {},
+                "file_hashes": {},
+                "file_count": 0,
+            },
+        )
+
+        save_results_json(
+            {"cagr": 8.5},
+            output_path=str(path),
+            experiment_manifest={"experiment_id": "metric-parity", "manifest_mode": "embedded"},
+        )
+
+        with open(path) as f:
+            loaded = json.load(f)
+        assert loaded["cagr"] == 8.5
+        assert loaded["_provenance"]["experiment_id"] == "metric-parity"
+
+    def test_no_experiment_manifest_preserves_plain_json(self, tmp_path):
+        """Normal dashboard/signal writes should not receive provenance by default."""
+        path = tmp_path / "plain.json"
+
+        save_results_json({"cagr": 8.5}, output_path=str(path))
+
+        with open(path) as f:
+            loaded = json.load(f)
+        assert loaded == {"cagr": 8.5}
+
 
 # ---------------------------------------------------------------------------
 # compute_deflated_sharpe_ratio

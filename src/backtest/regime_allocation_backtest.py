@@ -356,7 +356,18 @@ def run_regime_alloc_backtest(save: bool = False) -> RegimeAllocBacktestResult:
 
     if save:
         output_path = str(DATA_DIR / "regime_alloc_backtest_results.json")
-        save_results_json(asdict(result), output_path)
+        save_results_json(
+            asdict(result),
+            output_path,
+            experiment_manifest={
+                "experiment_id": "regime-allocation-backtest",
+                "manifest_mode": "sidecar",
+                "module": __name__,
+                "command": "python -m src.backtest.regime_allocation_backtest --save",
+                "config_snapshot": {"allocation_regimes": sorted(REGIME_ALLOCATIONS.keys())},
+                "input_paths": [PRICES_JSON],
+            },
+        )
         logger.info("Saved results to %s", output_path)
 
     return result

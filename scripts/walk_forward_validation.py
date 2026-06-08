@@ -38,7 +38,7 @@ from sklearn.model_selection import TimeSeriesSplit
 from src.paths import PRICES_JSON, DATA_DIR
 from src.backtest.metrics import (
     BacktestMetrics, compute_metrics, compute_crisis_returns,
-    compute_deflated_sharpe_ratio, DEFAULT_CRISIS_YEARS,
+    compute_deflated_sharpe_ratio, DEFAULT_CRISIS_YEARS, save_results_json,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -434,9 +434,25 @@ def main():
 
     if args.save:
         output_path = DATA_DIR / "walk_forward_report.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as f:
-            json.dump(result, f, indent=2, default=str)
+        save_results_json(
+            result,
+            output_path=str(output_path),
+            experiment_manifest={
+                "experiment_id": "walk-forward-validation",
+                "manifest_mode": "sidecar",
+                "module": __name__,
+                "command": (
+                    "python scripts/walk_forward_validation.py --save "
+                    f"--n-splits {args.n_splits} --test-size {args.test_size} --gap {args.gap}"
+                ),
+                "config_snapshot": {
+                    "n_splits": args.n_splits,
+                    "test_size": args.test_size,
+                    "gap": args.gap,
+                },
+                "input_paths": [PRICES_JSON],
+            },
+        )
         logger.info("Results saved to %s", output_path)
 
 

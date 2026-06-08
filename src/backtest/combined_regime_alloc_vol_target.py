@@ -460,7 +460,18 @@ def run_combined_backtest(save: bool = False) -> CombinedRegimeResult:
 
     if save:
         output_path = str(DATA_DIR / "combined_regime_alloc_vol_target_results.json")
-        save_results_json(asdict(result), output_path)
+        save_results_json(
+            asdict(result),
+            output_path,
+            experiment_manifest={
+                "experiment_id": "combined-regime-alloc-vol-target",
+                "manifest_mode": "sidecar",
+                "module": __name__,
+                "command": "python -m src.backtest.combined_regime_alloc_vol_target run --save",
+                "config_snapshot": {"regime_vol_targets": REGIME_VOL_TARGETS},
+                "input_paths": [PRICES_JSON],
+            },
+        )
         logger.info("Saved results to %s", output_path)
 
     return result

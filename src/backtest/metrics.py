@@ -472,7 +472,13 @@ def compute_deflated_sharpe_ratio(
     return round(dsr, 4)
 
 
-def save_results_json(data: dict, output_path: str = None, default_dir: Path = None, validator: Callable[[dict], dict] = None):
+def save_results_json(
+    data: dict,
+    output_path: str = None,
+    default_dir: Path = None,
+    validator: Callable[[dict], dict] = None,
+    experiment_manifest: Optional[Dict[str, Any]] = None,
+):
     """Save results dict to JSON file.
 
     Args:
@@ -482,6 +488,11 @@ def save_results_json(data: dict, output_path: str = None, default_dir: Path = N
         validator: Optional validation function. If provided, data is passed
             through this function before serialization. Should return validated
             data or the original data on validation failure.
+        experiment_manifest: Optional provenance config for experiment result
+            artifacts. When provided, must include ``experiment_id`` and may
+            include ``manifest_mode`` (embedded or sidecar), command, module,
+            config_snapshot, env_keys, and input_paths. Normal JSON writes are
+            unchanged when omitted.
     """
     if validator is not None:
         try:
@@ -495,6 +506,14 @@ def save_results_json(data: dict, output_path: str = None, default_dir: Path = N
         default_dir.mkdir(parents=True, exist_ok=True)
         path = default_dir / "backtest_results.json"
     else:
+        return
+
+    if experiment_manifest is not None:
+        from src.research.experiment_manifest import save_experiment_result_json
+
+        manifest_config = dict(experiment_manifest)
+        experiment_id = manifest_config.pop("experiment_id")
+        save_experiment_result_json(data, path, experiment_id=experiment_id, **manifest_config)
         return
 
     path.parent.mkdir(parents=True, exist_ok=True)
