@@ -1,36 +1,62 @@
 #!/bin/bash
 # cron-app-build.sh - Build Vite app with latest dashboard data
 # Protected by cron_guard: load-gate (max 5), flock, 600s timeout, 3GB ulimit
-source /root/projects/portfolio-lab/scripts/cron_guard.sh
+PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}"
+source "$PROJECT_DIR/scripts/cron_guard.sh"
+source "$PROJECT_DIR/scripts/cron/hermes_status.sh"
 
 if cron_guard_start "pf-build" 600; then
+    START=$(date +%s)
     export PATH="/root/.bun/bin:$PATH"
-    cd /root/projects/portfolio-lab
-    PYTHON_RUNTIME="${PYTHON_RUNTIME:-/root/projects/portfolio-lab/scripts/python_runtime.sh}"
+    cd "$PROJECT_DIR"
+    PYTHON_RUNTIME="${PYTHON_RUNTIME:-$PROJECT_DIR/scripts/python_runtime.sh}"
+    EXIT=0
 
     echo "Checking dashboard data..."
     if [ ! -f public/data/dashboard.json ]; then
         echo "Dashboard data missing, running generator..."
         export PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src"
+        set +e
         "$PYTHON_RUNTIME" src/dashboard/generator.py
+        EXIT=$?
+        set -e
     fi
 
-    echo "Running TypeScript check..."
-    bun run tsc --noEmit 2>&1 | tee -a data/build.log || {
+    if [ "$EXIT" -eq 0 ]; then
+        echo "Running TypeScript check..."
+        set +e
+        bun run tsc --noEmit 2>&1 | tee -a data/build.log
+        EXIT=${PIPESTATUS[0]}
+        set -e
+    fi
+
+    if [ "$EXIT" -eq 0 ]; then
+        echo "Building production app..."
+        set +e
+        bun run build 2>&1 | tee -a data/build.log
+        EXIT=${PIPESTATUS[0]}
+        set -e
+    else
         echo "TypeScript errors detected, build aborted"
-        cron_guard_end "pf-build" 1
-        exit 1
-    }
-
-    echo "Building production app..."
-    bun run build 2>&1 | tee -a data/build.log
-
-    if [ -d "/var/www/portfolio-lab" ]; then
-        echo "Syncing to deployment directory..."
-        cp -r dist/* /var/www/portfolio-lab/
-        echo "Deployed to /var/www/portfolio-lab/"
     fi
 
-    echo "Build completed at $(date)"
-    cron_guard_end "pf-build" $?
+    if [ "$EXIT" -eq 0 ] && [ -d "/var/www/portfolio-lab" ]; then
+        echo "Syncing to deployment directory..."
+        set +e
+        cp -r dist/* /var/www/portfolio-lab/
+        EXIT=$?
+        set -e
+        if [ "$EXIT" -eq 0 ]; then
+            echo "Deployed to /var/www/portfolio-lab/"
+        fi
+    fi
+
+    if [ "$EXIT" -eq 0 ]; then
+        echo "Build completed at $(date)"
+    fi
+
+    END=$(date +%s)
+    DUR=$((END - START))
+    record_hermes_cron_status "portfolio-lab-build" "$EXIT" "$DUR"
+    cron_guard_end "pf-build" "$EXIT"
 fi

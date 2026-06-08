@@ -1,22 +1,14 @@
 #!/usr/bin/env python3
-"""Detect overlapping cron jobs between Hermes and system crontab.
+"""Detect duplicate ownership between live Hermes cron and system crontab."""
 
-This script checks that no portfolio-lab job is scheduled by both Hermes cron
-and system crontab. It reads:
-  - `crontab -l` (system crontab)
-  - `hermes cron list` (human-readable output)  [fallback: cron_status.json]
-  - `data/cron_status.json` (backend field)
+from __future__ import annotations
 
-It returns exit code 0 if no overlap, 1 if overlap detected.
-"""
-import subprocess
 import re
-import json
+import subprocess
 import sys
-from pathlib import Path
-from typing import Set
+from typing import Iterable
 
-# Mapping from Make target to expected job name (as used in Hermes cron)
+
 MAKE_TO_JOB = {
     "data": "portfolio-lab-data",
     "dashboard": "portfolio-lab-dashboard",
@@ -34,66 +26,74 @@ MAKE_TO_JOB = {
     "build": "portfolio-lab-build",
 }
 
-def get_crontab_jobs() -> Set[str]:
-    """Extract active (non-commented) portfolio-lab job names from crontab."""
-    try:
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError:
-        return set()
-    jobs = set()
-    for line in result.stdout.splitlines():
-        # Skip comments and empty lines
-        if line.strip().startswith("#") or not line.strip():
+
+def crontab_jobs_from_text(text: str) -> set[str]:
+    """Return active portfolio-lab jobs from crontab text."""
+    jobs: set[str] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        # Look for make -C /root/projects/portfolio-lab <target>
         match = re.search(r"make -C /root/projects/portfolio-lab (\w[\w-]*)", line)
-        if match:
-            target = match.group(1)
-            if target in MAKE_TO_JOB:
-                jobs.add(MAKE_TO_JOB[target])
+        if match and match.group(1) in MAKE_TO_JOB:
+            jobs.add(MAKE_TO_JOB[match.group(1)])
     return jobs
 
-def get_hermes_jobs() -> Set[str]:
-    """Extract portfolio-lab job names from hermes cron list (human-readable)."""
-    try:
-        result = subprocess.run(["hermes", "cron", "list"], capture_output=True, text=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # Fallback to cron_status.json backend field
-        return get_hermes_jobs_from_status()
-    jobs = set()
-    for line in result.stdout.splitlines():
-        # Lines like "    Name:      portfolio-lab-data"
+
+def hermes_jobs_from_text(text: str) -> set[str]:
+    """Return active portfolio-lab jobs from `hermes cron list` text."""
+    jobs: set[str] = set()
+    in_active_block = False
+    for line in text.splitlines():
+        block = re.match(r"\s+[a-f0-9]{12} \[(\w+)\]", line)
+        if block:
+            in_active_block = block.group(1) == "active"
+            continue
+        if not in_active_block:
+            continue
         match = re.match(r"\s+Name:\s+(portfolio-lab-\S+)", line)
         if match:
             jobs.add(match.group(1))
-    # Filter only portfolio-lab jobs
-    return {j for j in jobs if j.startswith("portfolio-lab-")}
-
-def get_hermes_jobs_from_status() -> Set[str]:
-    """Fallback: infer Hermes jobs from cron_status.json backend='hermes'."""
-    status_path = Path("data/cron_status.json")
-    if not status_path.exists():
-        return set()
-    with open(status_path) as f:
-        data = json.load(f)
-    jobs = set()
-    for entry in data.get("jobs", []):
-        if entry.get("backend") == "hermes":
-            jobs.add(entry["name"])
     return jobs
 
-def main():
-    crontab_jobs = get_crontab_jobs()
-    hermes_jobs = get_hermes_jobs()
-    overlap = crontab_jobs & hermes_jobs
-    if overlap:
-        print(f"ERROR: Overlapping cron jobs detected: {overlap}")
-        print("System crontab and Hermes cron both own these jobs.")
-        print("Fix: comment out the crontab entries or pause Hermes jobs.")
-        return 1
-    else:
-        print(f"OK: No overlap. Crontab owns {crontab_jobs or 'none'}, Hermes owns {hermes_jobs or 'none'}.")
+
+def find_overlap(crontab_text: str, hermes_text: str) -> set[str]:
+    """Return jobs actively owned by both schedulers."""
+    return crontab_jobs_from_text(crontab_text) & hermes_jobs_from_text(hermes_text)
+
+
+def _run_command(command: Iterable[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(list(command), capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:
+        return subprocess.CompletedProcess(list(command), 127, "", str(exc))
+
+
+def main() -> int:
+    crontab_result = _run_command(["crontab", "-l"])
+    crontab_text = crontab_result.stdout if crontab_result.returncode == 0 else ""
+
+    hermes_result = _run_command(["hermes", "cron", "list"])
+    if hermes_result.returncode != 0:
+        print("WARN: hermes cron list unavailable; skipped live Hermes overlap check")
         return 0
+
+    crontab_jobs = crontab_jobs_from_text(crontab_text)
+    hermes_jobs = hermes_jobs_from_text(hermes_result.stdout)
+    overlap = crontab_jobs & hermes_jobs
+
+    if overlap:
+        print(f"ERROR: Overlapping cron jobs detected: {sorted(overlap)}")
+        print("System crontab and Hermes cron both own these jobs.")
+        return 1
+
+    print(
+        "OK: No overlap. "
+        f"Crontab owns {sorted(crontab_jobs) or 'none'}, "
+        f"Hermes owns {sorted(hermes_jobs) or 'none'}."
+    )
+    return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

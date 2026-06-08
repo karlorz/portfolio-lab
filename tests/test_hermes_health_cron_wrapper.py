@@ -12,8 +12,8 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HERMES_HEALTH_WRAPPER = Path("/root/.hermes/scripts/portfolio-lab-health-monitor.sh")
-GUARD_SOURCE_LINE = "CRON_GUARD_MEMORY_MB=1024 source /root/projects/portfolio-lab/scripts/cron_guard.sh"
-RUNTIME_PATH = "/root/projects/portfolio-lab/scripts/python_runtime.sh"
+PROJECT_DIR_LINE = 'PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}"'
+RUNTIME_LINE = 'PYTHON_RUNTIME="${PYTHON_RUNTIME:-$PROJECT_DIR/scripts/python_runtime.sh}"'
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -26,8 +26,12 @@ def _wrapper_with_stubbed_guard(tmp_path: Path) -> Path:
         pytest.skip(f"{HERMES_HEALTH_WRAPPER} is not present on this host")
 
     wrapper_text = HERMES_HEALTH_WRAPPER.read_text()
-    assert GUARD_SOURCE_LINE in wrapper_text
+    assert PROJECT_DIR_LINE in wrapper_text
 
+    project = tmp_path / "project"
+    scripts_dir = project / "scripts"
+    cron_dir = scripts_dir / "cron"
+    cron_dir.mkdir(parents=True)
     guard_stub = tmp_path / "cron_guard_stub.sh"
     guard_stub.write_text(
         """#!/bin/bash
@@ -44,9 +48,19 @@ cron_guard_end() {
 }
 """
     )
+    (cron_dir / "hermes_status.sh").write_text(
+        """#!/bin/bash
+record_hermes_cron_status() {
+    echo "record_status $*"
+}
+"""
+    )
 
     wrapper_copy = tmp_path / "portfolio-lab-health-monitor.sh"
-    wrapper_copy.write_text(wrapper_text.replace(GUARD_SOURCE_LINE, f"source {guard_stub}"))
+    wrapper_copy.write_text(
+        wrapper_text.replace(PROJECT_DIR_LINE, f'PROJECT_DIR="{project}"')
+        .replace('CRON_GUARD_MEMORY_MB=1024 source "$PROJECT_DIR/scripts/cron_guard.sh"', f"source {guard_stub}")
+    )
     wrapper_copy.chmod(wrapper_copy.stat().st_mode | stat.S_IXUSR)
     return wrapper_copy
 
@@ -72,7 +86,7 @@ cat >/dev/null
 exit 0
         """,
     )
-    wrapper.write_text(wrapper.read_text().replace(RUNTIME_PATH, str(runtime_stub)))
+    wrapper.write_text(wrapper.read_text().replace(RUNTIME_LINE, f'PYTHON_RUNTIME="${{PYTHON_RUNTIME:-{runtime_stub}}}"'))
 
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"

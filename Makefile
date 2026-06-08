@@ -492,6 +492,9 @@ verify-cron-sync:
 	@echo ""
 	@echo "Checking cron_status.json integrity..."
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/cron_verify.py
+	@echo ""
+	@echo "Checking live Hermes/system crontab overlap..."
+	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/detect_cron_overlap.py
 
 .PHONY: fetch-trends
 fetch-trends:

@@ -17,6 +17,7 @@ REPO_CRON_SCRIPTS = [
     PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-app-build.sh",
     PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-dashboard.sh",
     PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-data-pipeline.sh",
+    PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-health-monitor.sh",
     PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-research-agent.sh",
     PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-strategy-eval.sh",
     PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-wiki-sync.sh",

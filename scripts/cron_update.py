@@ -4,11 +4,14 @@ import json
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 # Use cron_compat for backend discovery
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 try:
-    from cron_compat import active_backend
+    from src.cron_compat import active_backend
     _default_backend = active_backend()
 except ImportError:
     _default_backend = os.environ.get("CRON_BACKEND", "manual")
@@ -24,7 +27,7 @@ def main():
     backend = sys.argv[4] if len(sys.argv) > 4 else _default_backend
 
     status_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        str(PROJECT_ROOT),
         "data", "cron_status.json"
     )
 

@@ -3,13 +3,17 @@
 import json
 import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-from cron_compat import CRON_TARGETS
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-status_file = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "cron_status.json"
+from src.cron_compat import CRON_TARGETS
+
+status_file = os.environ.get(
+    "CRON_STATUS_FILE",
+    os.path.join(str(PROJECT_ROOT), "data", "cron_status.json"),
 )
 
 if not os.path.exists(status_file):

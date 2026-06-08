@@ -5,13 +5,17 @@
 # NOTE: The LLM-powered agent is dispatched by Hermes cron, NOT by this script.
 # This placeholder runs the lightweight pre-flight checks only.
 # The cron_guard load-gate prevents dispatch when CPU is already saturated.
-source /root/projects/portfolio-lab/scripts/cron_guard.sh
+PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}"
+source "$PROJECT_DIR/scripts/cron_guard.sh"
+source "$PROJECT_DIR/scripts/cron/hermes_status.sh"
 
 # Use lower load threshold for autonomous agent — it's the most expensive job
-CRON_GUARD_MAX_LOAD=3 cron_guard_start "pf-autonomous" 300 || exit $?
+CRON_GUARD_MAX_LOAD=3
+if cron_guard_start "pf-autonomous" 300; then
+START=$(date +%s)
 
-cd /root/projects/portfolio-lab
-PYTHON_RUNTIME="${PYTHON_RUNTIME:-/root/projects/portfolio-lab/scripts/python_runtime.sh}"
+cd "$PROJECT_DIR"
+PYTHON_RUNTIME="${PYTHON_RUNTIME:-$PROJECT_DIR/scripts/python_runtime.sh}"
 
 echo "[$(date)] Autonomous agent cycle starting..."
 echo "[$(date)] Checking for work items and triggers..."
@@ -29,4 +33,8 @@ if [ -f data/.health_report.json ]; then
 fi
 
 echo "[$(date)] Autonomous cycle complete. Run with LLM via Hermes cron for full agent capabilities."
-cron_guard_end "pf-autonomous" $?
+END=$(date +%s)
+DUR=$((END - START))
+record_hermes_cron_status "portfolio-lab-autonomous-agent" 0 "$DUR"
+cron_guard_end "pf-autonomous" 0
+fi
