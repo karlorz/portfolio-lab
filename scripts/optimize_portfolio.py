@@ -8,8 +8,8 @@ Loads prices.json and runs multiple optimization strategies:
 - Efficient Risk (target 10% vol)
 - Hierarchical Risk Parity (HRP)
 
-Outputs weights as JSON to data/optimized_weights.json for comparison
-with the champion SPY/GLD/TLT 46/38/16 (Sharpe 0.79).
+Outputs Labs-compatible optimizer rows to data/optimized_weights.json for
+comparison with the champion SPY/GLD/TLT 46/38/16 (Sharpe 0.79).
 
 Usage:
     uv run python scripts/optimize_portfolio.py
@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from src.paths import PRICES_JSON, DATA_DIR
+from src.research.optimizer_labs_contract import save_optimizer_labs_output
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -233,8 +234,12 @@ def main():
 
     if args.save:
         output_path = DATA_DIR / "optimized_weights.json"
-        with open(output_path, "w") as f:
-            json.dump(results, f, indent=2, default=str)
+        save_optimizer_labs_output(
+            results,
+            output_path=output_path,
+            symbols=list(prices.columns),
+            target_vol=args.target_vol,
+        )
         logger.info("Results saved to %s", output_path)
 
 
