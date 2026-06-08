@@ -1,58 +1,20 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { HealthPanel } from './HealthPanel';
-import { RegimeTimeline } from './RegimeTimeline';
-import { SPYComparisonChart } from './SPYComparisonChart';
-import { RebalancePanel } from './RebalancePanel';
-import { SmartRebalancePanel } from './SmartRebalancePanel';
-import { BrokerPanel } from './BrokerPanel';
-import { ClosingAuctionPanel } from './ClosingAuctionPanel';
-import { UnderwaterChart, RollingMetricsChart, CrisisOverlay } from './AnalyticsCharts';
+import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
-import { ZeroDTEPanel } from './ZeroDTEPanel';
 import DurationOverlayPanel from './DurationOverlayPanel';
-import { GarchCvarPanel } from './GarchCvarPanel';
-import { EntropyPanel } from './EntropyPanel';
-import { BondMomentumPanel } from './BondMomentumPanel';
-import { VIXTermStructurePanel } from './VIXTermStructurePanel';
 import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData, HedgeSelectorData } from '../types/live';
-import { RebalanceHealthPanel } from './RebalanceHealthPanel';
 import type { RebalanceHealthData } from './RebalanceHealthPanel';
-import { PortfolioExplainabilityPanel } from './PortfolioExplainabilityPanel';
 import type { ExplainabilityData } from './PortfolioExplainabilityPanel';
 import { BehavioralSentimentPanel } from './BehavioralSentimentPanel';
 import { CalendarSeasonalityPanel } from './CalendarSeasonalityPanel';
-import { CollarPanel } from './CollarPanel';
 import { CryptoAllocationPanel } from './CryptoAllocationPanel';
-import { FactorRotationPanel } from './FactorRotationPanel';
-import { KurtosisRegimePanel } from './KurtosisRegimePanel';
-import { ModelValidationPanel } from './ModelValidationPanel';
-import { StackingEnsemblePanel } from './StackingEnsemblePanel';
-import { ChatPanel } from './ChatPanel';
-import { EnsembleVotingPanel } from './EnsembleVotingPanel';
-import { AlternativeDataPanel } from './AlternativeDataPanel';
-import { ConvexityHarvestPanel } from './ConvexityHarvestPanel';
-import { LLMSentimentPanel } from './LLMSentimentPanel';
-import { SectorRotationPanel } from './SectorRotationPanel';
-import { VolatilityParityPanel } from './VolatilityParityPanel';
-import { MLSignalsPanel } from './MLSignalsPanel';
-import { FactorRotationDashboardPanel } from './FactorRotationDashboardPanel';
-import { GraduationChecklistPanel } from './GraduationChecklistPanel';
 import type { GraduationChecklistData } from './GraduationChecklistPanel';
-import { AdaptiveSizingPanel } from './AdaptiveSizingPanel';
 import type { AdaptiveSizingData } from './AdaptiveSizingPanel';
-import { VixyHedgeSizingPanel } from './VixyHedgeSizingPanel';
 import type { VixyHedgeSizingData } from './VixyHedgeSizingPanel';
-import { HedgeSelectorPanel } from './HedgeSelectorPanel';
-import { BlackLittermanMapperPanel } from './BlackLittermanMapperPanel';
 import type { BlackLittermanMapperData } from './BlackLittermanMapperPanel';
-import { TurnoverValidatorPanel } from './TurnoverValidatorPanel';
 import type { TurnoverValidatorData } from './TurnoverValidatorPanel';
-import { RegimeGatePanel } from './RegimeGatePanel';
 import type { RegimeGateData } from './RegimeGatePanel';
-import { TSMOMPanel } from './TSMOMPanel';
 import type { TSMOMData } from './TSMOMPanel';
-import { CrossAssetRVPanel } from './CrossAssetRVPanel';
 import type { CrossAssetRVData } from './CrossAssetRVPanel';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
 import type { BehavioralSentimentData } from './BehavioralSentimentPanel';
@@ -85,6 +47,55 @@ import { z } from 'zod';
 
 // Catch-all schema for panel endpoints without dedicated schemas
 const PassthroughSchema = z.object({}).passthrough();
+
+const HealthPanel = lazy(() => import('./HealthPanel').then((module) => ({ default: module.HealthPanel })));
+const RegimeTimeline = lazy(() => import('./RegimeTimeline').then((module) => ({ default: module.RegimeTimeline })));
+const SPYComparisonChart = lazy(() => import('./SPYComparisonChart').then((module) => ({ default: module.SPYComparisonChart })));
+const RebalancePanel = lazy(() => import('./RebalancePanel').then((module) => ({ default: module.RebalancePanel })));
+const SmartRebalancePanel = lazy(() => import('./SmartRebalancePanel').then((module) => ({ default: module.SmartRebalancePanel })));
+const BrokerPanel = lazy(() => import('./BrokerPanel').then((module) => ({ default: module.BrokerPanel })));
+const RebalanceHealthPanel = lazy(() => import('./RebalanceHealthPanel').then((module) => ({ default: module.RebalanceHealthPanel })));
+const UnderwaterChart = lazy(() => import('./AnalyticsCharts').then((module) => ({ default: module.UnderwaterChart })));
+const RollingMetricsChart = lazy(() => import('./AnalyticsCharts').then((module) => ({ default: module.RollingMetricsChart })));
+const CrisisOverlay = lazy(() => import('./AnalyticsCharts').then((module) => ({ default: module.CrisisOverlay })));
+const PortfolioExplainabilityPanel = lazy(() => import('./PortfolioExplainabilityPanel').then((module) => ({ default: module.PortfolioExplainabilityPanel })));
+const EnsembleVotingPanel = lazy(() => import('./EnsembleVotingPanel').then((module) => ({ default: module.EnsembleVotingPanel })));
+const AlternativeDataPanel = lazy(() => import('./AlternativeDataPanel').then((module) => ({ default: module.AlternativeDataPanel })));
+const FactorRotationPanel = lazy(() => import('./FactorRotationPanel').then((module) => ({ default: module.FactorRotationPanel })));
+const StackingEnsemblePanel = lazy(() => import('./StackingEnsemblePanel').then((module) => ({ default: module.StackingEnsemblePanel })));
+const ConvexityHarvestPanel = lazy(() => import('./ConvexityHarvestPanel').then((module) => ({ default: module.ConvexityHarvestPanel })));
+const LLMSentimentPanel = lazy(() => import('./LLMSentimentPanel').then((module) => ({ default: module.LLMSentimentPanel })));
+const SectorRotationPanel = lazy(() => import('./SectorRotationPanel').then((module) => ({ default: module.SectorRotationPanel })));
+const MLSignalsPanel = lazy(() => import('./MLSignalsPanel').then((module) => ({ default: module.MLSignalsPanel })));
+const FactorRotationDashboardPanel = lazy(() => import('./FactorRotationDashboardPanel').then((module) => ({ default: module.FactorRotationDashboardPanel })));
+const GraduationChecklistPanel = lazy(() => import('./GraduationChecklistPanel').then((module) => ({ default: module.GraduationChecklistPanel })));
+const AdaptiveSizingPanel = lazy(() => import('./AdaptiveSizingPanel').then((module) => ({ default: module.AdaptiveSizingPanel })));
+const VixyHedgeSizingPanel = lazy(() => import('./VixyHedgeSizingPanel').then((module) => ({ default: module.VixyHedgeSizingPanel })));
+const HedgeSelectorPanel = lazy(() => import('./HedgeSelectorPanel').then((module) => ({ default: module.HedgeSelectorPanel })));
+const BlackLittermanMapperPanel = lazy(() => import('./BlackLittermanMapperPanel').then((module) => ({ default: module.BlackLittermanMapperPanel })));
+const TurnoverValidatorPanel = lazy(() => import('./TurnoverValidatorPanel').then((module) => ({ default: module.TurnoverValidatorPanel })));
+const RegimeGatePanel = lazy(() => import('./RegimeGatePanel').then((module) => ({ default: module.RegimeGatePanel })));
+const TSMOMPanel = lazy(() => import('./TSMOMPanel').then((module) => ({ default: module.TSMOMPanel })));
+const CrossAssetRVPanel = lazy(() => import('./CrossAssetRVPanel').then((module) => ({ default: module.CrossAssetRVPanel })));
+const ModelValidationPanel = lazy(() => import('./ModelValidationPanel').then((module) => ({ default: module.ModelValidationPanel })));
+const ZeroDTEPanel = lazy(() => import('./ZeroDTEPanel').then((module) => ({ default: module.ZeroDTEPanel })));
+const CollarPanel = lazy(() => import('./CollarPanel').then((module) => ({ default: module.CollarPanel })));
+const ClosingAuctionPanel = lazy(() => import('./ClosingAuctionPanel').then((module) => ({ default: module.ClosingAuctionPanel })));
+const GarchCvarPanel = lazy(() => import('./GarchCvarPanel').then((module) => ({ default: module.GarchCvarPanel })));
+const EntropyPanel = lazy(() => import('./EntropyPanel').then((module) => ({ default: module.EntropyPanel })));
+const VIXTermStructurePanel = lazy(() => import('./VIXTermStructurePanel').then((module) => ({ default: module.VIXTermStructurePanel })));
+const BondMomentumPanel = lazy(() => import('./BondMomentumPanel').then((module) => ({ default: module.BondMomentumPanel })));
+const KurtosisRegimePanel = lazy(() => import('./KurtosisRegimePanel').then((module) => ({ default: module.KurtosisRegimePanel })));
+const VolatilityParityPanel = lazy(() => import('./VolatilityParityPanel').then((module) => ({ default: module.VolatilityParityPanel })));
+const ChatPanel = lazy(() => import('./ChatPanel').then((module) => ({ default: module.ChatPanel })));
+
+function tabLoadingFallback(name: string) {
+  return (
+    <div className="tab-panel lazy-tab-loading" role="status" aria-live="polite">
+      Loading {name}...
+    </div>
+  );
+}
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
@@ -551,6 +562,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         {/* Health Tab */}
         {activeTab === 'health' && (
         <PanelErrorBoundary name="Health">
+          <Suspense fallback={tabLoadingFallback('Health')}>
           <div className="tab-panel health-panel-container">
             <HealthPanel
               health={health}
@@ -558,21 +570,25 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               onToggleExpand={() => setExpandedHealth(!expandedHealth)}
             />
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
 
         {/* History Tab */}
         {activeTab === 'history' && (
         <PanelErrorBoundary name="History">
+          <Suspense fallback={tabLoadingFallback('History')}>
           <div className="tab-panel history-panel">
             <RegimeTimeline history={dashboard?.regimes || []} />
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
 
         {/* Performance Tab */}
         {activeTab === 'performance' && (
         <PanelErrorBoundary name="Performance">
+          <Suspense fallback={tabLoadingFallback('Performance')}>
           <div className="tab-panel performance-panel">
             {/* SPY Comparison Chart */}
             <SPYComparisonChart stats={stats} performance={performance} />
@@ -631,12 +647,14 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               </div>
             )}
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
 
         {/* Rebalance Tab */}
         {activeTab === 'rebalance' && (
         <PanelErrorBoundary name="Rebalance">
+          <Suspense fallback={tabLoadingFallback('Rebalance')}>
           <div className="tab-panel rebalance-panel-container">
             <BrokerPanel data={signals?.broker} />
             <SmartRebalancePanel data={signals?.smart_rebalance} />
@@ -654,12 +672,14 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               }}
             />
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
 
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
         <PanelErrorBoundary name="Analytics">
+          <Suspense fallback={tabLoadingFallback('Analytics')}>
           <div className="tab-panel analytics-panel">
             {analytics?.status === 'success' ? (
               <>
@@ -768,12 +788,14 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
 
         {/* 0DTE Options Tab */}
         {activeTab === 'options' && (
         <PanelErrorBoundary name="0DTE Options">
+          <Suspense fallback={tabLoadingFallback('0DTE Options')}>
           <div className="tab-panel options-panel">
             <ZeroDTEPanel
               positions={signals?.zero_dte?.positions || []}
@@ -789,24 +811,28 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
 
         {/* Closing Auction Tab */}
         {activeTab === 'auction' && (
         <PanelErrorBoundary name="Closing Auction">
+          <Suspense fallback={tabLoadingFallback('Closing Auction')}>
           <div className="tab-panel auction-panel">
             <ClosingAuctionPanel
               signals={signals?.closing_auction?.signals || []}
               isMarketOpen={signals?.closing_auction?.market_open || false}
             />
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
 
         {/* Risk Tab (GARCH-CVaR + Entropy + VIX Term Structure + Bond Momentum) */}
         {activeTab === 'risk' && (
         <PanelErrorBoundary name="Risk">
+          <Suspense fallback={tabLoadingFallback('Risk')}>
           <div className="tab-panel risk-panel">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <GarchCvarPanel data={signals?.garch_cvar as GarchCvarData | null | undefined} />
@@ -832,15 +858,18 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               <VolatilityParityPanel data={(signals?.volatility_parity ?? null) as unknown as VolatilityParityData | null} />
             </div>
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
 
         {/* Chat Tab */}
         {activeTab === 'chat' && (
         <PanelErrorBoundary name="Chat">
+          <Suspense fallback={tabLoadingFallback('Chat')}>
           <div className="tab-panel chat-panel-container">
             <ChatPanel />
           </div>
+          </Suspense>
         </PanelErrorBoundary>
         )}
       </div>
