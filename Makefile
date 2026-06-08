@@ -9,6 +9,7 @@
 #   make research     Run research agent
 #   make wiki-sync    Sync findings to wiki vault
 #   make build        TypeScript check + Vite production build
+#   make perf         Run opt-in critical path performance budgets
 #   make sync              Broker position sync
 #   make overlay-signals    Generate all overlay signals
 #   make overlay-dashboard  Generate overlay dashboard data
@@ -26,6 +27,10 @@ PYTHON_RUNTIME := $(PROJECT_DIR)/scripts/python_runtime.sh
 PYTHONPATH := $(PROJECT_DIR)/src:$(PYTHONPATH)
 export PYTHONPATH
 
+PERF_OUTPUT ?= $(DATA_DIR)/perf/critical_paths_latest.json
+PERF_BASELINE ?= $(DATA_DIR)/perf/critical_paths_baseline.json
+PERF_UPDATE_BASELINE ?= 0
+
 # ── Help ─────────────────────────────────────────────────────────────
 
 .PHONY: help
@@ -42,6 +47,8 @@ help:
 	@echo "  make research     Run research agent + regime analysis"
 	@echo "  make wiki-sync    Sync research findings to wiki vault"
 	@echo "  make build        TypeScript check + Vite production build"
+	@echo "  make perf         Run opt-in critical path performance budgets"
+	@echo "  PERF_UPDATE_BASELINE=1 make perf  Refresh data/perf baseline JSON"
 	@echo "  make sync         Broker position reconciliation"
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
@@ -85,6 +92,18 @@ deploy-production:
 	scripts/deploy-remote.sh $$ARGS
 
 # ── Test Suite ────────────────────────────────────────────────────────
+
+.PHONY: perf
+perf:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Critical Path Benchmarks: $$(date) ==="; \
+	ARGS="--output $(PERF_OUTPUT) --baseline $(PERF_BASELINE)"; \
+	if [ "$(PERF_UPDATE_BASELINE)" = "1" ]; then \
+		ARGS="$$ARGS --update-baseline"; \
+	else \
+		ARGS="$$ARGS --fail-on-regression"; \
+	fi; \
+	PORTFOLIO_LAB_ENABLE_ML=0 $(PYTHON_RUNTIME) scripts/benchmark_critical_paths.py $$ARGS
 
 .PHONY: test
 test:
