@@ -28,6 +28,7 @@ import numpy as np
 import json
 import sqlite3
 import argparse
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -39,7 +40,8 @@ _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
     import torch
 
-from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION, MARKET_DB, sqlite_connect
+from src.paths import PROJECT_ROOT, BASE_ALLOCATION, MARKET_DB, sqlite_connect
+from src.data.price_cache import get_prices_df
 
 from src.agents.agent_graph import AgentGraph
 from src.agents.marl_trainer import MARLTrainer, MarketEnvironment
@@ -58,43 +60,123 @@ except ImportError:
 VERSION = "2.51.0"
 MODELS_DIR = PROJECT_ROOT / "models"
 CHECKPOINT_DIR = MODELS_DIR / "marl_checkpoints"
+SYNTHETIC_PRICE_DAYS = 252 * 20
 
 
-def load_price_data(tickers: List[str] = None) -> Dict[str, np.ndarray]:
+def _stable_ticker_seed(ticker: str, random_state: Optional[int] = None) -> int:
+    """Return a process-stable seed for synthetic fallback data."""
+    seed_material = f"{ticker}:{random_state if random_state is not None else 'default'}"
+    digest = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
+    return int(digest[:16], 16) % 2**32
+
+
+def _synthetic_length(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    default: int = SYNTHETIC_PRICE_DAYS,
+) -> int:
+    """Estimate a deterministic synthetic window length from optional dates."""
+    if start_date and end_date:
+        try:
+            start = np.datetime64(start_date, "D")
+            end = np.datetime64(end_date, "D")
+            if end >= start:
+                return max(2, int(np.busday_count(start, end + np.timedelta64(1, "D"))))
+        except ValueError:
+            logger.warning("Invalid synthetic price date window: %s to %s", start_date, end_date)
+    return default
+
+
+def _generate_synthetic_price_data(
+    tickers: List[str],
+    length: int,
+    random_state: Optional[int] = None,
+) -> Dict[str, np.ndarray]:
+    """Generate deterministic synthetic fallback price data."""
+    prices = {}
+    for ticker in tickers:
+        if ticker == "CASH":
+            prices[ticker] = np.ones(length, dtype=np.float64)
+            continue
+
+        rng = np.random.default_rng(_stable_ticker_seed(ticker, random_state))
+
+        # Simulate correlated returns
+        base_return = 0.0002
+        volatility = 0.015
+
+        if ticker == "GLD":
+            volatility = 0.012
+        elif ticker == "TLT":
+            volatility = 0.018
+
+        returns = rng.normal(base_return, volatility, length)
+        prices[ticker] = 100 * np.cumprod(1 + returns)
+
+    return prices
+
+
+def _load_real_price_data(
+    tickers: List[str],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[Dict[str, np.ndarray]]:
+    """Load aligned real prices from the shared price cache."""
+    real_symbols = [ticker for ticker in tickers if ticker != "CASH"]
+    if not real_symbols:
+        length = _synthetic_length(start_date, end_date)
+        return {"CASH": np.ones(length, dtype=np.float64)}
+
+    try:
+        prices_df = get_prices_df(symbols=real_symbols)
+    except (FileNotFoundError, ImportError, ValueError, KeyError) as exc:
+        logger.warning("Real price cache unavailable for AI controller: %s", exc)
+        return None
+
+    if prices_df.empty:
+        return None
+
+    missing = [symbol for symbol in real_symbols if symbol not in prices_df.columns]
+    if missing:
+        logger.warning("Real price cache missing AI controller symbols: %s", missing)
+        return None
+
+    window = prices_df.loc[start_date:end_date, real_symbols] if start_date or end_date else prices_df[real_symbols]
+    window = window.dropna()
+    if len(window) < 2:
+        return None
+
+    loaded = {
+        symbol: window[symbol].to_numpy(dtype=np.float64)
+        for symbol in real_symbols
+    }
+    if "CASH" in tickers:
+        loaded["CASH"] = np.ones(len(window), dtype=np.float64)
+
+    return {ticker: loaded[ticker] for ticker in tickers}
+
+
+def load_price_data(
+    tickers: List[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    random_state: Optional[int] = None,
+) -> Dict[str, np.ndarray]:
     """
     Load historical price data for training.
-    
+
     In production, connects to live data feed.
     For training, loads from cached historical data.
     """
     if tickers is None:
         tickers = ['SPY', 'GLD', 'TLT', 'CASH']
-    
-    # Try to load from public data
-    DATA_DIR / "prices.json"
-    
-    prices = {}
-    for ticker in tickers:
-        # Placeholder: generate synthetic data for training
-        # In production, load from actual price history
-        np.random.seed(hash(ticker) % 2**32)
-        
-        # Simulate correlated returns
-        base_return = 0.0002
-        volatility = 0.015
-        
-        if ticker == 'GLD':
-            volatility = 0.012
-        elif ticker == 'TLT':
-            volatility = 0.018
-        elif ticker == 'CASH':
-            volatility = 0.0001
-        
-        returns = np.random.normal(base_return, volatility, 252*20)
-        price_series = 100 * np.cumprod(1 + returns)
-        prices[ticker] = price_series
-    
-    return prices
+
+    real_prices = _load_real_price_data(tickers, start_date=start_date, end_date=end_date)
+    if real_prices is not None:
+        return real_prices
+
+    length = _synthetic_length(start_date, end_date)
+    return _generate_synthetic_price_data(tickers, length=length, random_state=random_state)
 
 
 def create_default_portfolio() -> Dict[str, float]:
@@ -359,7 +441,7 @@ class AIController:
     ) -> Dict[str, Any]:
         """Run backtest using trained agents."""
         # Load data
-        prices = load_price_data()
+        prices = load_price_data(start_date=start_date, end_date=end_date)
         
         # Create environment
         env = MarketEnvironment(

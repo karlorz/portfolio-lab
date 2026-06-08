@@ -17,11 +17,13 @@ os.environ["PORTFOLIO_LAB_ENABLE_ML"] = "0"
 
 from src.agents.ai_controller import (
     create_default_portfolio,
+    load_price_data,
     parse_allocation_string,
     AIController,
     VERSION,
     main,
 )
+import src.agents.ai_controller as ai_controller_module
 
 
 class TestCreateDefaultPortfolio:
@@ -62,6 +64,74 @@ class TestParseAllocationString:
         result = parse_allocation_string("0/0/0/100")
         assert result["SPY"] == 0.0
         assert result["CASH"] == 1.0
+
+
+class TestLoadPriceData:
+    def test_loads_aligned_real_prices_from_shared_cache(self, monkeypatch):
+        import pandas as pd
+
+        dates = pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"])
+        df = pd.DataFrame(
+            {
+                "SPY": [100.0, 101.0, 102.0],
+                "GLD": [150.0, 151.0, 152.0],
+                "TLT": [90.0, 91.0, 92.0],
+            },
+            index=dates,
+        )
+        calls = []
+
+        def fake_get_prices_df(symbols=None):
+            calls.append(symbols)
+            return df.copy()
+
+        monkeypatch.setattr(ai_controller_module, "get_prices_df", fake_get_prices_df, raising=False)
+
+        prices = load_price_data(
+            ["SPY", "GLD", "TLT", "CASH"],
+            start_date="2020-01-02",
+            end_date="2020-01-03",
+        )
+
+        assert calls == [["SPY", "GLD", "TLT"]]
+        np.testing.assert_array_equal(prices["SPY"], np.array([101.0, 102.0]))
+        np.testing.assert_array_equal(prices["GLD"], np.array([151.0, 152.0]))
+        np.testing.assert_array_equal(prices["TLT"], np.array([91.0, 92.0]))
+        np.testing.assert_array_equal(prices["CASH"], np.ones(2))
+
+    def test_synthetic_fallback_is_stable_across_python_processes(self):
+        script = (
+            "import json;"
+            "from src.agents.ai_controller import load_price_data;"
+            "series = load_price_data(['__MISSING__'])['__MISSING__'][:8];"
+            "print(json.dumps([round(float(x), 8) for x in series]))"
+        )
+        env = os.environ.copy()
+        env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+        env.pop("PYTHONHASHSEED", None)
+
+        first = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        second = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+
+        assert first.returncode == 0, first.stderr
+        assert second.returncode == 0, second.stderr
+        assert first.stdout == second.stdout
 
 
 class TestAIControllerInit:
@@ -252,6 +322,39 @@ class TestAIControllerTrain:
             ctrl = AIController(use_signal_integrator=False)
             result = ctrl.train(n_episodes=1)
             assert isinstance(result, dict)
+
+
+class TestAIControllerBacktestDateRange:
+    def test_backtest_passes_date_range_to_price_loader(self, monkeypatch):
+        captured = {}
+
+        def fake_load_price_data(tickers=None, start_date=None, end_date=None):
+            captured["tickers"] = tickers
+            captured["start_date"] = start_date
+            captured["end_date"] = end_date
+            return {
+                "SPY": np.linspace(100, 110, 20),
+                "GLD": np.linspace(150, 152, 20),
+                "TLT": np.linspace(90, 91, 20),
+                "CASH": np.ones(20),
+            }
+
+        monkeypatch.setattr(ai_controller_module, "load_price_data", fake_load_price_data)
+
+        with patch("src.agents.ai_controller.AgentGraph") as mock_graph_cls:
+            mock_graph = MagicMock()
+            mock_graph.agents = {}
+            mock_graph.execute_step.return_value = {
+                "controller": MagicMock(metadata={})
+            }
+            mock_graph_cls.return_value = mock_graph
+
+            ctrl = AIController(use_signal_integrator=False)
+            result = ctrl.backtest(start_date="2020-01-02", end_date="2020-01-10")
+
+        assert captured["start_date"] == "2020-01-02"
+        assert captured["end_date"] == "2020-01-10"
+        assert result["steps"] > 0
 
 
 class TestVersion:
