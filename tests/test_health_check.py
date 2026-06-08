@@ -22,13 +22,13 @@ class TestCheckDataFreshness:
 
     def test_missing_prices(self, tmp_path, monkeypatch):
         """Missing prices.json should report missing status."""
-        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
         freshness = _check_data_freshness()
         assert freshness["prices"]["status"] == "missing"
 
     def test_fresh_prices(self, tmp_path, monkeypatch):
         """Recently modified prices.json should report ok."""
-        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
         (tmp_path / "prices.json").write_text("{}")
         freshness = _check_data_freshness()
         assert freshness["prices"]["status"] == "ok"
@@ -36,7 +36,7 @@ class TestCheckDataFreshness:
 
     def test_stale_prices(self, tmp_path, monkeypatch):
         """Old prices.json should report stale."""
-        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
         prices_file = tmp_path / "prices.json"
         prices_file.write_text("{}")
         # Set mtime to 48 hours ago
@@ -48,7 +48,7 @@ class TestCheckDataFreshness:
 
     def test_missing_signals(self, tmp_path, monkeypatch):
         """Missing signals.json should report missing."""
-        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
         freshness = _check_data_freshness()
         assert freshness["signals"]["status"] == "missing"
 

@@ -20,7 +20,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def _check_data_freshness() -> dict:
     now = datetime.now(timezone.utc)
 
     # Price data freshness
-    prices_path = DATA_DIR / "prices.json"
+    prices_path = PUBLIC_DATA_DIR / "prices.json"
     if prices_path.exists():
         mtime = datetime.fromtimestamp(prices_path.stat().st_mtime, tz=timezone.utc)
         age_hours = (now - mtime).total_seconds() / 3600
@@ -48,7 +48,7 @@ def _check_data_freshness() -> dict:
         checks["prices"] = {"status": "missing", "age_hours": None, "last_updated": None}
 
     # Signal data freshness
-    signals_path = DATA_DIR / "signals.json"
+    signals_path = PUBLIC_DATA_DIR / "signals.json"
     if signals_path.exists():
         mtime = datetime.fromtimestamp(signals_path.stat().st_mtime, tz=timezone.utc)
         age_hours = (now - mtime).total_seconds() / 3600
