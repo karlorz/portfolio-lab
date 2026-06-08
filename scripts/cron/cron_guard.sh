@@ -35,8 +35,10 @@ cron_guard_start() {
     start_time=$(date +%s)
 
     # ── Layer 1: Load-based gating ─────────────────────────────────────
-    local load1
-    load1=$(cat /proc/loadavg 2>/dev/null | cut -d' ' -f1 | cut -d. -f1)
+    local load1=""
+    if [ -r /proc/loadavg ]; then
+        load1=$(cut -d' ' -f1 /proc/loadavg | cut -d. -f1)
+    fi
     if [ -n "$load1" ] && [ "$load1" -gt "$GUARD_MAX_LOAD" ]; then
         echo "[$(date -Iseconds)] CRON_GUARD: $job_name DEFERRED (load ${load1} > ${GUARD_MAX_LOAD})"
         exit 75  # TEMPFAIL — caller can retry later
@@ -44,9 +46,18 @@ cron_guard_start() {
 
     # ── Layer 2: Overlap prevention (flock) ────────────────────────────
     exec {lock_fd}>"$lock_file"
-    if ! flock -n "$lock_fd"; then
-        echo "[$(date -Iseconds)] CRON_GUARD: $job_name SKIPPED (previous run still active, lock held)"
-        exit 0  # Not an error — previous cycle still running
+    if command -v flock >/dev/null 2>&1; then
+        if ! flock -n "$lock_fd"; then
+            echo "[$(date -Iseconds)] CRON_GUARD: $job_name SKIPPED (previous run still active, lock held)"
+            exit 0  # Not an error — previous cycle still running
+        fi
+    else
+        local fallback_lock_dir="${lock_file}.d"
+        if ! mkdir "$fallback_lock_dir" 2>/dev/null; then
+            echo "[$(date -Iseconds)] CRON_GUARD: $job_name SKIPPED (previous run still active, lock held)"
+            exit 0  # Not an error — previous cycle still running
+        fi
+        export GUARD_LOCK_FALLBACK_DIR="$fallback_lock_dir"
     fi
 
     # ── Layer 3: Memory limit ──────────────────────────────────────────
@@ -102,6 +113,9 @@ cron_guard_end() {
         if [[ "$GUARD_LOCK_FD" =~ ^[0-9]+$ ]]; then
             eval "exec ${GUARD_LOCK_FD}>&-" 2>/dev/null || true
         fi
+    fi
+    if [ -n "${GUARD_LOCK_FALLBACK_DIR:-}" ]; then
+        rmdir "$GUARD_LOCK_FALLBACK_DIR" 2>/dev/null || true
     fi
 
     if [ "$exit_code" -eq 0 ]; then
