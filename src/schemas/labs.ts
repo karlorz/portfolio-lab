@@ -81,6 +81,10 @@ export const LabsReplaySchema = z.object({
   artifact_path: z.string(),
   status: LabsReplayStatusSchema,
   provenance_status: LabsProvenanceStatusSchema,
+  passed: z.boolean().optional(),
+  command: z.nullable(z.string()).optional(),
+  duration_seconds: z.number().optional(),
+  metric_deltas: MetricMapSchema.optional(),
   metrics: MetricMapSchema,
   baseline_deltas: MetricMapSchema,
 }).strict();

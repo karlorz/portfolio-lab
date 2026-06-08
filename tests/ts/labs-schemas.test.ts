@@ -36,6 +36,21 @@ describe('Labs artifact schemas', () => {
     }
   });
 
+  it('accepts replay smoke status fields used by the experiment replay helper', () => {
+    const replay = {
+      ...loadLabsFixture('valid_replay_pass'),
+      passed: true,
+      command: 'python -m tests.fixtures.labs.fixture_experiment',
+      duration_seconds: 0.12,
+      metric_deltas: {
+        sharpe: 0.006,
+        cagr_pct: 0.05,
+      },
+    };
+
+    expect(LabsReplaySchema.safeParse(replay).success).toBe(true);
+  });
+
   it('builds an empty disabled Labs state when artifacts are absent', () => {
     const empty = buildEmptyLabsDashboardData(['registry', 'scorecards']);
 
