@@ -15,7 +15,7 @@ import { GarchCvarPanel } from './GarchCvarPanel';
 import { EntropyPanel } from './EntropyPanel';
 import { BondMomentumPanel } from './BondMomentumPanel';
 import { VIXTermStructurePanel } from './VIXTermStructurePanel';
-import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData } from '../types/live';
+import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData, HedgeSelectorData } from '../types/live';
 import { RebalanceHealthPanel } from './RebalanceHealthPanel';
 import type { RebalanceHealthData } from './RebalanceHealthPanel';
 import { PortfolioExplainabilityPanel } from './PortfolioExplainabilityPanel';
@@ -43,6 +43,7 @@ import { AdaptiveSizingPanel } from './AdaptiveSizingPanel';
 import type { AdaptiveSizingData } from './AdaptiveSizingPanel';
 import { VixyHedgeSizingPanel } from './VixyHedgeSizingPanel';
 import type { VixyHedgeSizingData } from './VixyHedgeSizingPanel';
+import { HedgeSelectorPanel } from './HedgeSelectorPanel';
 import { BlackLittermanMapperPanel } from './BlackLittermanMapperPanel';
 import type { BlackLittermanMapperData } from './BlackLittermanMapperPanel';
 import { TurnoverValidatorPanel } from './TurnoverValidatorPanel';
@@ -128,6 +129,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [graduationData, setGraduationData] = useState<GraduationChecklistData | null>(null);
   const [adaptiveSizingData, setAdaptiveSizingData] = useState<AdaptiveSizingData | null>(null);
   const [vixyHedgeData, setVixyHedgeData] = useState<VixyHedgeSizingData | null>(null);
+  const [hedgeSelectorData, setHedgeSelectorData] = useState<HedgeSelectorData | null>(null);
   const [blMapperData, setBLMapperData] = useState<BlackLittermanMapperData | null>(null);
   const [turnoverData, setTurnoverData] = useState<TurnoverValidatorData | null>(null);
   const [regimeGateData, setRegimeGateData] = useState<RegimeGateData | null>(null);
@@ -154,6 +156,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         if (validated) {
           setSignals(validated);
           setLastUpdate(new Date(validated.timestamp).toLocaleTimeString());
+          setHedgeSelectorData(validated.hedge_selector ?? null);
         }
       }
       const dashboardRaw = await safeParseJson(dashboardRes, 'dashboard');
@@ -745,6 +748,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               <GraduationChecklistPanel data={graduationData} />
               <AdaptiveSizingPanel data={adaptiveSizingData} />
               <VixyHedgeSizingPanel data={vixyHedgeData} />
+              <HedgeSelectorPanel data={hedgeSelectorData} />
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
               <BlackLittermanMapperPanel data={blMapperData} />

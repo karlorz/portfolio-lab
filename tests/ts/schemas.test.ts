@@ -328,6 +328,8 @@ describe('HedgeSelectorSchema', () => {
     cost_benefit_gate: true,
     kelly_fraction: 0.24,
     confidence_scaled_size: 6.0,
+    min_hold_days: 5,
+    transition_cost_bps: 25,
   });
 
   it('accepts valid hedge selector data', () => {
@@ -343,6 +345,8 @@ describe('HedgeSelectorSchema', () => {
       expect(result.data.regime).toBe('unknown');
       expect(result.data.secondary_hedge).toBeNull();
       expect(result.data.cost_benefit_gate).toBe(false);
+      expect(result.data.min_hold_days).toBe(0);
+      expect(result.data.transition_cost_bps).toBe(0);
     }
   });
 

@@ -15,6 +15,8 @@ export interface HedgeSelectorData {
   cost_benefit_gate: boolean;
   kelly_fraction: number;
   confidence_scaled_size: number;
+  min_hold_days: number;
+  transition_cost_bps: number;
 }
 
 export interface SignalsData {

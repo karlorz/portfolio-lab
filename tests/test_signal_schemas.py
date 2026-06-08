@@ -108,6 +108,8 @@ class TestHedgeSelectorSignal:
             "cost_benefit_gate": True,
             "kelly_fraction": 0.24,
             "confidence_scaled_size": 6.0,
+            "min_hold_days": 5,
+            "transition_cost_bps": 25.0,
         }
 
         model = HedgeSelectorSignal.model_validate(data)
@@ -116,6 +118,8 @@ class TestHedgeSelectorSignal:
         assert model.primary_hedge == "put_spread"
         assert model.secondary_hedge == "vixy"
         assert model.cost_benefit_gate is True
+        assert model.min_hold_days == 5
+        assert model.transition_cost_bps == 25.0
 
     def test_missing_fields_use_defaults(self):
         model = HedgeSelectorSignal.model_validate({})
@@ -126,6 +130,8 @@ class TestHedgeSelectorSignal:
         assert model.primary_hedge == "none"
         assert model.secondary_hedge is None
         assert model.cost_benefit_gate is False
+        assert model.min_hold_days == 0
+        assert model.transition_cost_bps == 0.0
 
     def test_partial_data(self):
         data = {"regime": "crisis", "weighted_consensus": -0.5}

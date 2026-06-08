@@ -254,6 +254,8 @@ class HedgeSelectorSignal(BaseModel):
     expected_cost_bps: float = 0.0
     expected_benefit_bps: float = 0.0
     confidence_scaled_size: float = 0.0
+    min_hold_days: int = 0
+    transition_cost_bps: float = 0.0
 
 
 SIGNAL_MODELS: Dict[str, type[BaseModel]] = {

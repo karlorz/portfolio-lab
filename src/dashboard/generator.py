@@ -1992,6 +1992,8 @@ class DashboardGenerator:
                 "kelly_fraction": rec.kelly_fraction,
                 "expected_cost_bps": rec.expected_cost_bps,
                 "expected_benefit_bps": rec.expected_benefit_bps,
+                "min_hold_days": rec.min_hold_days,
+                "transition_cost_bps": rec.transition_cost_bps,
             }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("hedge_selector", e)

@@ -341,6 +341,8 @@ export const HedgeSelectorSchema = z.object({
   cost_benefit_gate: z.boolean().default(false),
   kelly_fraction: z.number().default(0),
   confidence_scaled_size: z.number().default(0),
+  min_hold_days: z.number().default(0),
+  transition_cost_bps: z.number().default(0),
 }).passthrough();
 
 // ---------------------------------------------------------------------------
