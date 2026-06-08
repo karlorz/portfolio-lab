@@ -40,6 +40,7 @@ import numpy as np
 
 from src.paths import DATA_DIR, PRICES_JSON, RISK_FREE_RATE
 from src.backtest.metrics import compute_metrics, save_results_json
+from src.backtest.rolling_vol import precomputed_rolling_volatility
 from src.strategy.regime_allocation import REGIME_ALLOCATIONS, DEFAULT_ALLOCATION
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,44 @@ def _compute_vol_target_leverage(
     return round(max(1.0 / max_leverage, min(max_leverage, smoothed)), 4)
 
 
+def _normalized_weights(allocation: Dict[str, float]) -> tuple[float, float, float]:
+    """Return normalized SPY/GLD/TLT weights preserving legacy defaults."""
+    w_spy = allocation.get("SPY", 0.46)
+    w_gld = allocation.get("GLD", 0.38)
+    w_tlt = allocation.get("TLT", 0.16)
+    total = w_spy + w_gld + w_tlt
+    if abs(total - 1.0) > 1e-6 and total > 0:
+        w_spy /= total
+        w_gld /= total
+        w_tlt /= total
+    return w_spy, w_gld, w_tlt
+
+
+def _precompute_allocation_realized_vols(
+    spy_ret: np.ndarray,
+    gld_ret: np.ndarray,
+    tlt_ret: np.ndarray,
+    weights: tuple[float, float, float],
+    lookback: int = 63,
+) -> list[float]:
+    """Precompute legacy realized-vol values for one allocation."""
+    w_spy, w_gld, w_tlt = weights
+    port_returns = w_spy * spy_ret + w_gld * gld_ret + w_tlt * tlt_ret
+
+    # The legacy implementation rebuilt a zero-initialized history array and
+    # only populated entries from day 63 onward. Preserve that warmup contract.
+    vol_returns = np.array(port_returns, dtype=float, copy=True)
+    vol_returns[:lookback] = 0.0
+
+    return precomputed_rolling_volatility(
+        vol_returns,
+        window=lookback,
+        fallback_vol=0.15,
+        warmup_std_min_index=lookback,
+        annualization_factor=TRADING_DAYS,
+    )
+
+
 @dataclass
 class CombinedRegimeRow:
     """Single backtest result row."""
@@ -207,6 +246,7 @@ def backtest_strategy(
     regime_sequence = []
     leverage_history = [1.0]
     prev_leverage = 1.0
+    realized_vol_cache: Dict[tuple[float, float, float], list[float]] = {}
 
     for i in range(n):
         # Build return history up to day i for regime classification
@@ -220,14 +260,8 @@ def backtest_strategy(
         else:
             alloc = default_alloc
 
-        w_spy = alloc.get("SPY", 0.46)
-        w_gld = alloc.get("GLD", 0.38)
-        w_tlt = alloc.get("TLT", 0.16)
-        total = w_spy + w_gld + w_tlt
-        if abs(total - 1.0) > 1e-6 and total > 0:
-            w_spy /= total
-            w_gld /= total
-            w_tlt /= total
+        weights = _normalized_weights(alloc)
+        w_spy, w_gld, w_tlt = weights
 
         # Portfolio return (before leverage)
         port_ret = w_spy * spy_ret[i] + w_gld * gld_ret[i] + w_tlt * tlt_ret[i]
@@ -235,13 +269,13 @@ def backtest_strategy(
         # Layer 2: Vol targeting overlay
         if apply_vol_target and vol_target_map is not None and i >= 63:
             # Compute realized vol over 63-day window
-            lookback = 63
-            hist_port_rets = np.zeros(i)
-            for j in range(63, i):
-                r_j = w_spy * spy_ret[j] + w_gld * gld_ret[j] + w_tlt * tlt_ret[j]
-                hist_port_rets[j] = r_j
-            rv_slice = hist_port_rets[i - lookback : i]
-            realized_vol = float(np.std(rv_slice) * np.sqrt(TRADING_DAYS)) if len(rv_slice) > 2 else 0.15
+            realized_vols = realized_vol_cache.get(weights)
+            if realized_vols is None:
+                realized_vols = _precompute_allocation_realized_vols(
+                    spy_ret, gld_ret, tlt_ret, weights,
+                )
+                realized_vol_cache[weights] = realized_vols
+            realized_vol = realized_vols[i] if i < len(realized_vols) else 0.15
 
             # Determine regime-conditional target vol
             target_vol = vol_target_map.get(regime, 0.09)

@@ -243,6 +243,27 @@ class TestBacktestStrategy:
         # Vol targeting should produce non-1.0 leverage in some periods
         assert with_.mean_leverage != 1.0 or with_.max_leverage_reached != 1.0
 
+    def test_vol_target_path_does_not_rebuild_history_arrays(self, monkeypatch):
+        """Vol targeting should not allocate prior-day return arrays inside the daily loop."""
+        spy_prices = np.linspace(100, 200, 500)
+        gld_prices = np.linspace(100, 180, 500)
+        tlt_prices = np.linspace(100, 120, 500)
+        prices = {"SPY": spy_prices, "GLD": gld_prices, "TLT": tlt_prices}
+
+        def fail_zeros(*_args, **_kwargs):
+            raise AssertionError("vol-target hot loop should use precomputed returns, not np.zeros(i)")
+
+        monkeypatch.setattr("src.backtest.combined_regime_alloc_vol_target.np.zeros", fail_zeros)
+
+        row = backtest_strategy(
+            prices, "With VT",
+            allocation_map=REGIME_ALLOCATIONS, default_alloc=DEFAULT_ALLOCATION,
+            vol_target_map=REGIME_VOL_TARGETS, apply_vol_target=True,
+        )
+
+        assert isinstance(row, CombinedRegimeRow)
+        assert row.mean_leverage != 1.0 or row.max_leverage_reached != 1.0
+
     def test_not_enough_data_returns_zero(self):
         """Insufficient data returns zero row."""
         prices = {"SPY": np.array([100.0] * 50), "GLD": np.array([100.0] * 50), "TLT": np.array([100.0] * 50)}
