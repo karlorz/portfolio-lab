@@ -1,0 +1,15 @@
+{
+  "schema_version": "labs-scorecard/v1",
+  "experiment_id": "gold-sweep",
+  "generated_at": "2026-06-08T12:00:00+00:00",
+  "status": "promote",
+  "provenance_status": "present",
+  "metrics": {
+    "sharpe": 0.95,
+    "cagr_pct": 240.0
+  },
+  "baseline_deltas": {
+    "sharpe": 0.04,
+    "max_drawdown_pct": 1.2
+  }
+}

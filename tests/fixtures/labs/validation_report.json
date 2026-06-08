@@ -1,0 +1,13 @@
+{
+  "results": [
+    {
+      "path": "tests/fixtures/labs/invalid_missing_metrics.json",
+      "artifact_type": "registry",
+      "schema_version": "labs-registry/v1",
+      "valid": false,
+      "errors": [
+        "$.experiments[0].metrics: missing required field"
+      ]
+    }
+  ]
+}

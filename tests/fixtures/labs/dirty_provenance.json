@@ -1,0 +1,28 @@
+{
+  "schema_version": "experiment-manifest/v1",
+  "experiment_id": "gold-sweep",
+  "generated_at": "2026-06-08T12:00:00+00:00",
+  "source_artifact_path": "data/gold_allocation_sweep.json",
+  "command": "python -m src.backtest.gold_allocation_sweep",
+  "module": "src.backtest.gold_allocation_sweep",
+  "git": {
+    "commit": "abc123",
+    "branch": "main",
+    "dirty": true
+  },
+  "config_snapshot": {
+    "min_gold_pct": 20
+  },
+  "environment": {
+    "PORTFOLIO_LAB_ENABLE_ML": "0"
+  },
+  "input_file_hashes": {
+    "data/prices.json": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "freeze_manifest": {
+    "timestamp": "2026-06-08T12:00:00+00:00",
+    "config": {},
+    "file_hashes": {},
+    "file_count": 0
+  }
+}

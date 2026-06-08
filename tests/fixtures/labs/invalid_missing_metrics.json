@@ -1,0 +1,16 @@
+{
+  "schema_version": "labs-registry/v1",
+  "generated_at": "2026-06-08T12:00:00+00:00",
+  "experiments": [
+    {
+      "experiment_id": "gold-sweep",
+      "artifact_path": "data/gold_allocation_sweep.json",
+      "status": "validated",
+      "provenance_status": "present",
+      "baseline_deltas": {
+        "sharpe": 0.04,
+        "cagr_pct": 0.8
+      }
+    }
+  ]
+}
