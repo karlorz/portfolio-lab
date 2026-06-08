@@ -192,8 +192,20 @@ class TestBacktestConfig:
 class TestDataLoading:
     def test_load_from_synthetic(self, backtester, synthetic_prices):
         result = backtester.load_data(str(synthetic_prices))
-        # Our synthetic data is only 30 days, start_date filter may exclude all
-        # This just tests the loading path works without crashing
+        assert result is True
+        assert set(backtester.prices_raw) == {"SPY", "GLD", "TLT"}
+        assert len(backtester.data) == 29
+
+    def test_load_data_honors_explicit_data_path(self, backtester, synthetic_prices, tmp_path, monkeypatch):
+        """Explicit data_path should be read even when default PRICES_JSON is absent."""
+        import src.backtest.unified_overlay_backtest as mod
+
+        monkeypatch.setattr(mod, "PRICES_JSON", tmp_path / "missing_default_prices.json")
+
+        assert backtester.load_data(str(synthetic_prices)) is True
+        assert set(backtester.prices_raw) == {"SPY", "GLD", "TLT"}
+        assert backtester.prices_raw["SPY"][0]["p"] == 100.0
+        assert len(backtester.data) == 29
 
     def test_load_missing_file(self, backtester, tmp_path, monkeypatch):
         # Patch PRICES_JSON to a non-existent path and ensure no fallback

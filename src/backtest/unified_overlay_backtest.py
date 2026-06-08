@@ -85,11 +85,11 @@ class UnifiedOverlayBacktester:
     # Data loading
     # ------------------------------------------------------------------
     def load_data(self, data_path: Optional[str] = None) -> bool:
-        """Load price data from PRICES_JSON."""
+        """Load price data from an explicit path or the default PRICES_JSON."""
         try:
-            prices_path = PRICES_JSON
+            prices_path = Path(data_path) if data_path is not None else Path(PRICES_JSON)
             if not prices_path.exists():
-                logger.error("Price data not found")
+                logger.error("Price data not found at %s", prices_path)
                 return False
 
             with open(prices_path) as f:
