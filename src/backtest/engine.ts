@@ -3,6 +3,8 @@
  * Simulates portfolio performance with rebalancing
  */
 
+import { getDefaultRiskFreeRate } from './constants';
+
 export interface AssetAllocation {
   [symbol: string]: number; // percentage (0-1)
 }
@@ -56,6 +58,35 @@ export interface PerformanceMetrics {
   sortinoRatio: number;
   positiveMonths: number;
   totalReturn: number;
+}
+
+function countPositiveMonths(dates: string[], values: number[]): number {
+  const length = Math.min(dates.length, values.length);
+  if (length < 2) return 0;
+
+  let positiveMonths = 0;
+  let currentMonth = dates[0].slice(0, 7);
+  let monthStartValue = values[0];
+  let monthEndValue = values[0];
+
+  const closeMonth = () => {
+    if (monthStartValue > 0 && (monthEndValue - monthStartValue) / monthStartValue > 0) {
+      positiveMonths += 1;
+    }
+  };
+
+  for (let index = 1; index < length; index++) {
+    const month = dates[index].slice(0, 7);
+    if (month !== currentMonth) {
+      closeMonth();
+      currentMonth = month;
+      monthStartValue = values[index];
+    }
+    monthEndValue = values[index];
+  }
+
+  closeMonth();
+  return positiveMonths;
 }
 
 export class BacktestEngine {
@@ -420,7 +451,7 @@ export class BacktestEngine {
     return trades;
   }
 
-  calculateMetrics(result: BacktestResult, riskFreeRate: number = 0.02): PerformanceMetrics {
+  calculateMetrics(result: BacktestResult, riskFreeRate: number = getDefaultRiskFreeRate()): PerformanceMetrics {
     const values = result.portfolioValues;
     const returns = result.returns.slice(1); // Skip first 0 return
     
@@ -461,7 +492,7 @@ export class BacktestEngine {
       ? (cagr - riskFreeRate) / (Math.sqrt(downsideVariance) * Math.sqrt(252))
       : 0;
 
-    const positiveMonths = returns.filter(r => r > 0).length;
+    const positiveMonths = countPositiveMonths(result.dates, values);
 
     return {
       cagr,

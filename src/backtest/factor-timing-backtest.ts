@@ -10,6 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { getDefaultRiskFreeRate } from './constants.js';
 import { BacktestEngine, PortfolioConfig, BacktestResult, PerformanceMetrics } from './engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -332,7 +333,7 @@ function calculatePerformanceMetrics(result: BacktestResult): PerformanceMetrics
   const dailyVol = Math.sqrt(variance);
   const annualVol = dailyVol * Math.sqrt(252);
   
-  const riskFreeRate = 0.02;
+  const riskFreeRate = getDefaultRiskFreeRate();
   const sharpeRatio = annualVol > 0 ? (cagr - riskFreeRate) / annualVol : 0;
   
   // Max drawdown
@@ -511,7 +512,7 @@ export async function runFactorTimingBacktest(
   const variance = strategyReturns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / strategyReturns.length;
   const annualVol = Math.sqrt(variance) * Math.sqrt(252);
   
-  const riskFreeRate = 0.02;
+  const riskFreeRate = getDefaultRiskFreeRate();
   const sharpeRatio = annualVol > 0 ? (cagr - riskFreeRate) / annualVol : 0;
   
   // Max drawdown

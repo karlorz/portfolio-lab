@@ -8,6 +8,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { getDefaultRiskFreeRate } from './constants';
 
 interface PriceData {
   d: string;  // date
@@ -175,7 +176,8 @@ function calculateMetrics(
     if (dd < maxDrawdown) maxDrawdown = dd;
   }
   
-  const sharpe = annualizedVol > 0 ? (cagr - 0.04) / annualizedVol : 0;
+  const riskFreeRate = getDefaultRiskFreeRate();
+  const sharpe = annualizedVol > 0 ? (cagr - riskFreeRate) / annualizedVol : 0;
   const calmar = maxDrawdown < 0 ? cagr / Math.abs(maxDrawdown) : cagr;
   
   // Calculate tracking error vs base (if provided)

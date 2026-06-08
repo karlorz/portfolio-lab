@@ -10,6 +10,7 @@
  */
 
 import { calculateDurationAllocation, classifyRegime, DurationRegime, getExpectedAlpha } from '../utils/duration-signals';
+import { getDefaultRiskFreeRate } from './constants';
 import { BacktestEngine, PortfolioConfig, PriceData, BacktestResult, PerformanceMetrics } from './engine';
 
 interface DurationConfig {
@@ -167,8 +168,8 @@ function calculateMetrics(result: BacktestResult): PerformanceMetrics {
   const variance = dailyReturns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / dailyReturns.length;
   const volatility = Math.sqrt(variance) * Math.sqrt(252);
   
-  // Sharpe (assuming 0% risk-free for simplicity)
-  const sharpeRatio = volatility > 0 ? cagr / volatility : 0;
+  const riskFreeRate = getDefaultRiskFreeRate();
+  const sharpeRatio = volatility > 0 ? (cagr - riskFreeRate) / volatility : 0;
   
   // Max drawdown
   let maxDrawdown = 0;
@@ -188,7 +189,7 @@ function calculateMetrics(result: BacktestResult): PerformanceMetrics {
     ? negativeReturns.reduce((sum, r) => sum + r * r, 0) / negativeReturns.length
     : 0;
   const downsideDev = Math.sqrt(downsideVar) * Math.sqrt(252);
-  const sortinoRatio = downsideDev > 0 ? cagr / downsideDev : 0;
+  const sortinoRatio = downsideDev > 0 ? (cagr - riskFreeRate) / downsideDev : 0;
   
   // Positive months (approximate from daily)
   const monthlyReturns: number[] = [];

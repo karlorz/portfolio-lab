@@ -19,6 +19,7 @@ import {
   getBaseAllocation,
   convertToLeveragedAllocation
 } from '../utils/duration-signals';
+import { getDefaultRiskFreeRate } from './constants';
 
 export interface BacktestResult {
   scenario: string;
@@ -269,7 +270,8 @@ function runScenarioBacktest(
   const variance = dailyReturns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / dailyReturns.length;
   const annualizedVol = Math.sqrt(variance * 252);
   
-  const sharpe = annualizedVol > 0 ? (cagr - 0.04) / annualizedVol : 0;  // 4% risk-free
+  const riskFreeRate = getDefaultRiskFreeRate();
+  const sharpe = annualizedVol > 0 ? (cagr - riskFreeRate) / annualizedVol : 0;
   const calmar = maxDrawdown < 0 ? cagr / Math.abs(maxDrawdown) : cagr;
   
   // Run stress tests
