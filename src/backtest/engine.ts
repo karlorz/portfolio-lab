@@ -61,18 +61,77 @@ export interface PerformanceMetrics {
 export class BacktestEngine {
   priceData: Map<string, Map<string, number>> = new Map();
   private dividendData: Map<string, Map<string, number>> = new Map();
+  private sortedDateCache: Map<string, string[]> = new Map();
+  private dateIndexCache: Map<string, Map<string, number>> = new Map();
+  private pricePrefixSumCache: Map<string, number[]> = new Map();
 
   loadData(prices: PriceData[]) {
+    const touchedSymbols = new Set<string>();
+
     for (const p of prices) {
       if (!this.priceData.has(p.symbol)) {
         this.priceData.set(p.symbol, new Map());
         this.dividendData.set(p.symbol, new Map());
       }
       this.priceData.get(p.symbol)!.set(p.date, p.price);
+      touchedSymbols.add(p.symbol);
       if (p.dividend) {
         this.dividendData.get(p.symbol)!.set(p.date, p.dividend);
       }
     }
+
+    for (const symbol of touchedSymbols) {
+      this.rebuildSymbolCaches(symbol);
+    }
+  }
+
+  private rebuildSymbolCaches(symbol: string): void {
+    const symbolData = this.priceData.get(symbol);
+    if (!symbolData) {
+      this.sortedDateCache.delete(symbol);
+      this.dateIndexCache.delete(symbol);
+      this.pricePrefixSumCache.delete(symbol);
+      return;
+    }
+
+    const dates = Array.from(symbolData.keys()).sort();
+    const dateIndexes = new Map<string, number>();
+    const prefixSums = [0];
+    for (let index = 0; index < dates.length; index++) {
+      const date = dates[index];
+      dateIndexes.set(date, index);
+      prefixSums.push(prefixSums[prefixSums.length - 1] + (symbolData.get(date) || 0));
+    }
+
+    this.sortedDateCache.set(symbol, dates);
+    this.dateIndexCache.set(symbol, dateIndexes);
+    this.pricePrefixSumCache.set(symbol, prefixSums);
+  }
+
+  private getCachedDates(symbol: string): string[] {
+    const cached = this.sortedDateCache.get(symbol);
+    if (cached) return cached;
+
+    this.rebuildSymbolCaches(symbol);
+    return this.sortedDateCache.get(symbol) || [];
+  }
+
+  private findLastDateIndexOnOrBefore(dates: string[], targetDate: string): number {
+    let low = 0;
+    let high = dates.length - 1;
+    let found = -1;
+
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      if (dates[mid] <= targetDate) {
+        found = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    return found;
   }
 
   runBacktest(
@@ -239,13 +298,9 @@ export class BacktestEngine {
     const price = symbolData.get(date);
     if (price !== undefined) return price;
     // Fallback: find closest earlier date (handles missing data for some symbols)
-    const dates = Array.from(symbolData.keys()).sort();
-    let lastPrice = 0;
-    for (const d of dates) {
-      if (d > date) break;
-      lastPrice = symbolData.get(d) || 0;
-    }
-    return lastPrice;
+    const dates = this.getCachedDates(symbol);
+    const dateIndex = this.findLastDateIndexOnOrBefore(dates, date);
+    return dateIndex >= 0 ? symbolData.get(dates[dateIndex]) || 0 : 0;
   }
 
   private shouldRebalance(
@@ -311,15 +366,16 @@ export class BacktestEngine {
   private calculateMovingAverage(symbol: string, date: string, periods: number): number | null {
     const symbolData = this.priceData.get(symbol);
     if (!symbolData) return null;
-    
-    const dates = Array.from(symbolData.keys()).sort();
-    const dateIndex = dates.indexOf(date);
+
+    this.getCachedDates(symbol);
+    const dateIndex = this.dateIndexCache.get(symbol)?.get(date) ?? -1;
     if (dateIndex < periods) return null;
 
-    let sum = 0;
-    for (let i = dateIndex - periods + 1; i <= dateIndex; i++) {
-      sum += this.getPrice(symbol, dates[i]);
-    }
+    const prefixSums = this.pricePrefixSumCache.get(symbol);
+    if (!prefixSums) return null;
+
+    const startIndex = dateIndex - periods + 1;
+    const sum = prefixSums[dateIndex + 1] - prefixSums[startIndex];
     return sum / periods;
   }
 
