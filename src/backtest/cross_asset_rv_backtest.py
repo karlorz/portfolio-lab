@@ -44,6 +44,9 @@ class CrossAssetRVBacktester:
         self.price_data: Dict[str, List[Dict]] = {}
         self.dates: List[str] = []
         self.prices: Dict[str, Dict[str, float]] = {}
+        self._date_to_index: Dict[str, int] = {}
+        self._returns_by_symbol: Dict[str, np.ndarray] = {}
+        self._signal_index_dates: Tuple[str, ...] = ()
 
     def load_data(self, data_path: Optional[str] = None) -> bool:
         path = Path(data_path) if data_path else PRICES_JSON
@@ -71,27 +74,58 @@ class CrossAssetRVBacktester:
                 if date and price and date in self.prices:
                     self.prices[date][symbol] = float(price)
 
+        self._rebuild_signal_indexes()
         logger.info("Loaded %d trading days, %d symbols", len(self.dates), len(self.price_data))
         return True
 
+    def _rebuild_signal_indexes(self) -> None:
+        """Precompute date positions and per-symbol daily returns for signals."""
+        self._date_to_index = {date: idx for idx, date in enumerate(self.dates)}
+        self._returns_by_symbol = {}
+        self._signal_index_dates = tuple(self.dates)
+
+        for sym in ['SPY', 'GLD', 'TLT']:
+            returns = np.full(len(self.dates), np.nan, dtype=float)
+            for idx in range(1, len(self.dates)):
+                d_now = self.dates[idx]
+                d_prev = self.dates[idx - 1]
+                p_now = safe_get(self.prices, d_now, sym)
+                p_prev = safe_get(self.prices, d_prev, sym)
+                if p_now and p_prev and p_prev > 0:
+                    returns[idx] = p_now / p_prev - 1
+            self._returns_by_symbol[sym] = returns
+
+    def _ensure_signal_indexes(self) -> None:
+        """Build signal indexes for tests or callers that assign dates/prices directly."""
+        expected_len = len(self.dates)
+        if len(self._date_to_index) != expected_len or self._signal_index_dates != tuple(self.dates):
+            self._rebuild_signal_indexes()
+            return
+
+        for sym in ['SPY', 'GLD', 'TLT']:
+            returns = self._returns_by_symbol.get(sym)
+            if returns is None or len(returns) != expected_len:
+                self._rebuild_signal_indexes()
+                return
+
     def _get_signal(self, date: str) -> Tuple[str, float]:
         """Compute cross-asset RV signal via z-score of rolling returns."""
-        idx = self.dates.index(date) if date in self.dates else -1
+        self._ensure_signal_indexes()
+        idx = self._date_to_index.get(date, -1)
         if idx < self.config.z_score_window + 1:
             return "neutral", 0.0
 
         # Compute rolling returns for SPY, GLD, TLT
         symbols = ['SPY', 'GLD', 'TLT']
-        returns_window = {sym: [] for sym in symbols}
-
-        for j in range(idx - self.config.z_score_window, idx):
-            d_now = self.dates[j]
-            d_prev = self.dates[j - 1]
-            for sym in symbols:
-                p_now = safe_get(self.prices, d_now, sym)
-                p_prev = safe_get(self.prices, d_prev, sym)
-                if p_now and p_prev and p_prev > 0:
-                    returns_window[sym].append(p_now / p_prev - 1)
+        returns_window = {}
+        start_idx = idx - self.config.z_score_window
+        for sym in symbols:
+            returns = self._returns_by_symbol.get(sym)
+            if returns is None or idx > len(returns):
+                returns_window[sym] = np.array([], dtype=float)
+                continue
+            window = returns[start_idx:idx]
+            returns_window[sym] = window[np.isfinite(window)]
 
         # Check data sufficiency
         if any(len(v) < 20 for v in returns_window.values()):

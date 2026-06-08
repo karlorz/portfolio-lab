@@ -10,6 +10,7 @@ and CLI invocation.
 import json
 import logging
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,6 +22,62 @@ from src.backtest.cross_asset_rv_backtest import (
     CrossAssetRVBacktester,
 )
 from src.backtest.metrics import BacktestResult
+from src.signals.cross_asset_relative_value import CrossAssetRVScanner, ZSCORE_ENTRY
+from src.utils import safe_get
+
+
+def _write_price_fixture(path: Path, n_days: int = 90) -> list[str]:
+    """Write a deterministic SPY/GLD/TLT prices fixture and return its dates."""
+    start = datetime(2020, 1, 1)
+    dates = [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n_days)]
+    payload = {
+        "SPY": [{"d": day, "p": round(100 + i * 0.30, 2)} for i, day in enumerate(dates)],
+        "GLD": [{"d": day, "p": round(100 + i * 0.20, 2)} for i, day in enumerate(dates)],
+        "TLT": [{"d": day, "p": round(100 + i * 0.10, 2)} for i, day in enumerate(dates)],
+    }
+    path.write_text(json.dumps(payload))
+    return dates
+
+
+def _legacy_cross_asset_rv_signal(
+    bt: CrossAssetRVBacktester,
+    date: str,
+) -> tuple[str, float]:
+    """Mirror the legacy per-call date search and dict-walk signal computation."""
+    idx = bt.dates.index(date) if date in bt.dates else -1
+    if idx < bt.config.z_score_window + 1:
+        return "neutral", 0.0
+
+    symbols = ['SPY', 'GLD', 'TLT']
+    returns_window = {sym: [] for sym in symbols}
+
+    for j in range(idx - bt.config.z_score_window, idx):
+        d_now = bt.dates[j]
+        d_prev = bt.dates[j - 1]
+        for sym in symbols:
+            p_now = safe_get(bt.prices, d_now, sym)
+            p_prev = safe_get(bt.prices, d_prev, sym)
+            if p_now and p_prev and p_prev > 0:
+                returns_window[sym].append(p_now / p_prev - 1)
+
+    if any(len(v) < 20 for v in returns_window.values()):
+        return "neutral", 0.0
+
+    scanner = CrossAssetRVScanner()
+    z_scores = {}
+    for sym in symbols:
+        r = np.array(returns_window[sym])
+        z_arr, _, _ = scanner._compute_z_score(r, window=len(r) - 1)
+        z_scores[sym] = z_arr[-1] if not np.isnan(z_arr[-1]) else 0.0
+
+    spy_z = z_scores.get('SPY', 0.0)
+    gld_z = z_scores.get('GLD', 0.0)
+
+    if abs(spy_z) > ZSCORE_ENTRY:
+        return "spy_reversion", -np.sign(spy_z) * min(abs(spy_z) / 5.0, 0.5)
+    if abs(gld_z) > ZSCORE_ENTRY:
+        return "gld_reversion", np.sign(gld_z) * min(abs(gld_z) / 5.0, 0.3)
+    return "neutral", 0.0
 
 
 # ── BacktestConfig Tests ─────────────────────────────────────────────────
@@ -251,6 +308,65 @@ class TestGetSignal:
 
         signal_type, signal_value = backtester._get_signal(backtester.dates[161])
         assert abs(signal_value) <= 0.5
+
+    def test_load_data_precomputes_signal_indexes(self, tmp_path):
+        """load_data should build date indexes and per-symbol return arrays once."""
+        data_path = tmp_path / "prices.json"
+        dates = _write_price_fixture(data_path)
+        bt = CrossAssetRVBacktester(BacktestConfig(z_score_window=30))
+
+        assert bt.load_data(str(data_path)) is True
+
+        assert bt._date_to_index[dates[70]] == 70
+        assert set(bt._returns_by_symbol) == {"SPY", "GLD", "TLT"}
+        assert bt._returns_by_symbol["SPY"].shape == (len(dates),)
+        expected_spy_return = (100.30 / 100.00) - 1
+        assert bt._returns_by_symbol["SPY"][1] == pytest.approx(expected_spy_return)
+
+    def test_get_signal_uses_precomputed_date_index(self, tmp_path):
+        """_get_signal should not linearly search dates for each monthly signal."""
+        data_path = tmp_path / "prices.json"
+        _write_price_fixture(data_path)
+        bt = CrossAssetRVBacktester(BacktestConfig(z_score_window=30))
+        assert bt.load_data(str(data_path)) is True
+
+        class NoLinearIndexDates(list):
+            def index(self, *_args, **_kwargs):
+                raise AssertionError("_get_signal should use _date_to_index, not dates.index")
+
+        bt.dates = NoLinearIndexDates(bt.dates)
+
+        signal_type, signal_value = bt._get_signal(bt.dates[70])
+
+        assert signal_type in {"spy_reversion", "gld_reversion", "neutral"}
+        assert isinstance(signal_value, float)
+
+    def test_indexed_signal_matches_legacy_dict_walk(self):
+        """Indexed signal calculation should preserve legacy signal outputs."""
+        bt = CrossAssetRVBacktester(BacktestConfig(z_score_window=30))
+        bt.dates = [f"2020-01-{day:02d}" for day in range(1, 29)]
+        bt.dates.extend(f"2020-02-{day:02d}" for day in range(1, 29))
+        bt.dates.extend(f"2020-03-{day:02d}" for day in range(1, 29))
+        bt.dates.extend(f"2020-04-{day:02d}" for day in range(1, 29))
+        bt.prices = {}
+        for i, date in enumerate(bt.dates):
+            spy_price = 100.0 + i * 0.03
+            if i == 70:
+                spy_price = 130.0
+            elif i > 70:
+                spy_price = 130.0 + (i - 70) * 0.02
+            bt.prices[date] = {
+                "SPY": spy_price,
+                "GLD": 100.0 + i * 0.11,
+                "TLT": 100.0 + i * 0.07,
+            }
+
+        for date in [bt.dates[45], bt.dates[71], bt.dates[90]]:
+            expected_type, expected_value = _legacy_cross_asset_rv_signal(bt, date)
+            signal_type, signal_value = bt._get_signal(date)
+
+            assert signal_type == expected_type
+            assert signal_value == pytest.approx(expected_value)
 
 
 # ── Run Backtest Tests ──────────────────────────────────────────────────
