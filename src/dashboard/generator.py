@@ -18,6 +18,7 @@ import numpy as np
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
 from src.utils import safe_get, classify_vix_regime
 from src.backtest.metrics import save_results_json
+from src.dashboard.public_data_index import build_public_data_index
 from src.monitor.hermes_cron import (
     combine_scheduler_backends,
     load_hermes_portfolio_cron_jobs,
@@ -84,6 +85,7 @@ def _resolve_hermes_cron_jobs_path() -> Optional[Path]:
         current_data_dir=DATA_DIR,
         default_data_dir=_DEFAULT_DATA_DIR,
     )
+
 
 class DashboardGenerator:
     # SPC monitor instance (class-level to persist across runs)
@@ -2457,11 +2459,9 @@ class DashboardGenerator:
                 if p:
                     logger.info("Generated: %s", p)
 
-            # Create index
-            index = {
-                "files": [str(p.name) for p in paths if p],
-                "generated_at": datetime.now().isoformat()
-            }
+            # Create a versioned public-data manifest while keeping files[] for
+            # existing dashboard consumers.
+            index = build_public_data_index(paths, public_dir=PUBLIC_DIR)
             save_results_json(index, output_path=str(PUBLIC_DIR / "index.json"))
         finally:
             self.close()
