@@ -29,6 +29,9 @@ def _row_count(payload: Any) -> int | None:
             value = payload.get(key)
             if isinstance(value, list):
                 return len(value)
+        list_lengths = [len(value) for value in payload.values() if isinstance(value, list)]
+        if list_lengths:
+            return sum(list_lengths)
     return None
 
 
@@ -40,6 +43,33 @@ def _render_strategy(status: str, requires_pagination: bool, requires_downsampli
     if requires_downsampling:
         return "summarize"
     return "direct"
+
+
+def _int_field(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _truncation_metadata(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        return {}
+    truncation = payload.get("truncation")
+    if not isinstance(truncation, Mapping):
+        return {}
+
+    omitted_row_count = _int_field(truncation.get("omitted_result_count"))
+    omitted_error_count = _int_field(truncation.get("omitted_error_count"))
+    total_row_count = _int_field(truncation.get("total_result_count"))
+    max_results = _int_field(truncation.get("max_results"))
+    max_errors_per_result = _int_field(truncation.get("max_errors_per_result"))
+    truncated = bool((omitted_row_count or 0) > 0 or (omitted_error_count or 0) > 0)
+    return {
+        "truncated": truncated,
+        "total_row_count": total_row_count,
+        "omitted_row_count": omitted_row_count,
+        "omitted_error_count": omitted_error_count,
+        "max_results": max_results,
+        "max_errors_per_result": max_errors_per_result,
+    }
 
 
 def missing_public_data_size_budget() -> dict[str, Any]:
@@ -110,4 +140,5 @@ def measure_public_data_size_budget(
         "requires_downsampling": requires_downsampling,
         "requires_pagination": requires_pagination,
         "render_strategy": _render_strategy(status, requires_pagination, requires_downsampling),
+        **_truncation_metadata(payload),
     }

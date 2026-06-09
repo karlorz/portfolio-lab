@@ -52,6 +52,7 @@ const lazyPanelImports = [
   { name: 'BondMomentumPanel', path: './BondMomentumPanel' },
   { name: 'KurtosisRegimePanel', path: './KurtosisRegimePanel' },
   { name: 'VolatilityParityPanel', path: './VolatilityParityPanel' },
+  { name: 'LabsPanel', path: './LabsPanel' },
   { name: 'ChatPanel', path: './ChatPanel' },
 ];
 
@@ -64,6 +65,7 @@ const lazyTabBoundaries = [
   '0DTE Options',
   'Closing Auction',
   'Risk',
+  'Labs',
   'Chat',
 ];
 
@@ -72,6 +74,14 @@ function hasStaticValueImport(importPath: string, importedName: string): boolean
   const escapedName = importedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const importPattern = new RegExp(`import\\s+(?!type)[^;]*\\b${escapedName}\\b[^;]*from ['"]${escapedPath}['"];`);
   return importPattern.test(source);
+}
+
+function sourceBetween(startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
 }
 
 describe('LiveDashboard lazy tab panel contract', () => {
@@ -102,5 +112,83 @@ describe('LiveDashboard lazy tab panel contract', () => {
       const escapedName = boundaryName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       expect(source).toMatch(new RegExp(`<PanelErrorBoundary name="${escapedName}">\\s*<Suspense fallback=`));
     }
+  });
+
+  it('wires Labs as a lazy tab that delegates endpoint loading to the Labs fetch helper', () => {
+    const labsPanelSource = readFileSync('src/components/LabsPanel.tsx', 'utf8');
+
+    expect(source).toContain("type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'labs' | 'chat'");
+    expect(source).toContain("{ id: 'labs', label: 'Labs'");
+    expect(source).toContain("import('./LabsPanel')");
+    expect(source).toMatch(/activeTab === 'labs'[\s\S]*<LabsPanel \/>/);
+    expect(labsPanelSource).toContain("from '../data/labs'");
+    expect(labsPanelSource).toContain('fetchLabsDashboardData');
+  });
+
+  it('keeps initial dashboard refresh scoped to core always-on endpoints', () => {
+    const coreFetchSource = sourceBetween('const fetchCoreData = async () => {', 'const fetchOptionalDataForTab');
+    const coreEndpoints = [
+      '/data/signals.json',
+      '/data/dashboard.json',
+      '/data/alerts.json',
+      '/data/stats.json',
+      '/data/health.json',
+    ];
+    const optionalEndpoints = [
+      '/data/analytics.json',
+      '/data/rebalance_health.json',
+      '/data/explainability/explainability_latest.json',
+      '/data/graduation.json',
+      '/data/adaptive_sizing.json',
+      '/data/vixy_hedge.json',
+      '/data/black_litterman.json',
+      '/data/turnover_validator.json',
+      '/data/regime_gate.json',
+      '/data/tsmom.json',
+      '/data/cross_asset_rv.json',
+    ];
+
+    for (const endpoint of coreEndpoints) {
+      expect(coreFetchSource).toContain(endpoint);
+    }
+    for (const endpoint of optionalEndpoints) {
+      expect(coreFetchSource).not.toContain(endpoint);
+    }
+  });
+
+  it('loads optional endpoint groups from the active-tab fetch path only', () => {
+    const optionalFetchSource = sourceBetween('const fetchOptionalDataForTab = async (tab: TabType', 'const portfolioValue');
+
+    expect(optionalFetchSource).toContain("if (tab === 'rebalance')");
+    expect(optionalFetchSource).toContain('/data/rebalance_health.json');
+    expect(optionalFetchSource).toContain("if (tab === 'analytics')");
+    expect(optionalFetchSource).toContain('/data/analytics.json');
+    expect(optionalFetchSource).toContain('/data/explainability/explainability_latest.json');
+    expect(optionalFetchSource).toContain('/data/graduation.json');
+    expect(optionalFetchSource).toContain('/data/adaptive_sizing.json');
+    expect(optionalFetchSource).toContain('/data/vixy_hedge.json');
+    expect(optionalFetchSource).toContain('/data/black_litterman.json');
+    expect(optionalFetchSource).toContain('/data/turnover_validator.json');
+    expect(optionalFetchSource).toContain('/data/regime_gate.json');
+    expect(optionalFetchSource).toContain('/data/tsmom.json');
+    expect(optionalFetchSource).toContain('/data/cross_asset_rv.json');
+  });
+
+  it('schedules core refresh separately from active-tab optional refresh', () => {
+    expect(source).toMatch(/useEffect\(\(\) => \{\s*fetchCoreData\(\);[\s\S]*setInterval\(fetchCoreData, refreshInterval \* 1000\)/);
+    expect(source).toMatch(/useEffect\(\(\) => \{\s*fetchOptionalDataForTab\(activeTab\);[\s\S]*setInterval\(\(\) => fetchOptionalDataForTab\(activeTab, true\), refreshInterval \* 1000\)/);
+  });
+
+  it('guards overlapping core and optional refreshes with request generations', () => {
+    const coreFetchSource = sourceBetween('const fetchCoreData = async () => {', 'const shouldFetchOptionalTab');
+    const optionalFetchSource = sourceBetween('const fetchOptionalDataForTab = async (tab: TabType', 'const portfolioValue');
+
+    expect(source).toContain('const coreFetchGeneration = useRef(0);');
+    expect(source).toContain('const optionalFetchGenerations = useRef<Partial<Record<TabType, number>>>({});');
+    expect(coreFetchSource).toContain('const requestGeneration = ++coreFetchGeneration.current;');
+    expect(coreFetchSource).toContain('if (requestGeneration !== coreFetchGeneration.current) return;');
+    expect(coreFetchSource).toContain('if (requestGeneration === coreFetchGeneration.current) setError(');
+    expect(optionalFetchSource).toContain('optionalFetchGenerations.current[tab] = requestGeneration;');
+    expect(optionalFetchSource).toContain('if (optionalFetchGenerations.current[tab] !== requestGeneration) return;');
   });
 });

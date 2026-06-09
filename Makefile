@@ -10,6 +10,8 @@
 #   make wiki-sync    Sync findings to wiki vault
 #   make build        TypeScript check + Vite production build
 #   make perf         Run opt-in critical path performance budgets
+#   make labs-validate  Validate existing Labs artifacts offline
+#   make labs-smoke     Run Labs artifact generation smoke tests
 #   make sync              Broker position sync
 #   make overlay-signals    Generate all overlay signals
 #   make overlay-dashboard  Generate overlay dashboard data
@@ -49,6 +51,8 @@ help:
 	@echo "  make build        TypeScript check + Vite production build"
 	@echo "  make perf         Run opt-in critical path performance budgets"
 	@echo "  PERF_UPDATE_BASELINE=1 make perf  Refresh data/perf baseline JSON"
+	@echo "  make labs-validate  Validate existing Labs artifacts offline"
+	@echo "  make labs-smoke     Run Labs artifact generation smoke tests"
 	@echo "  make sync         Broker position reconciliation"
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
@@ -104,6 +108,18 @@ perf:
 		ARGS="$$ARGS --fail-on-regression"; \
 	fi; \
 	PORTFOLIO_LAB_ENABLE_ML=0 $(PYTHON_RUNTIME) scripts/benchmark_critical_paths.py $$ARGS
+
+.PHONY: labs-validate
+labs-validate:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Labs Artifact Validation: $$(date) ==="; \
+	PORTFOLIO_LAB_ENABLE_ML=0 $(PYTHON_RUNTIME) -m src.research.experiment_artifact_validator --discover-defaults
+
+.PHONY: labs-smoke
+labs-smoke:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Labs Artifact Generation Smoke: $$(date) ==="; \
+	PORTFOLIO_LAB_ENABLE_ML=0 $(PYTHON_RUNTIME) -m pytest tests/test_labs_artifact_generation_smoke.py tests/test_public_data_index.py -q
 
 .PHONY: test
 test:

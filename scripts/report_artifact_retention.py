@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from src.research.artifact_retention import build_retention_report
+from src.research.artifact_retention import build_archive_dry_run_plan, build_retention_report
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -19,6 +19,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--public-data-dir", type=Path, default=None, help="Public data directory to scan")
     parser.add_argument("--project-root", type=Path, default=None, help="Project root used for relative report paths")
     parser.add_argument("--archive-root", type=Path, default=None, help="Archive root to display in the report")
+    parser.add_argument("--archive-plan", action="store_true", help="Emit a report-only archive move plan")
+    parser.add_argument(
+        "--execute-move",
+        action="store_true",
+        help="Reserved explicit opt-in for future move behavior; currently refused",
+    )
     parser.add_argument(
         "--reference-root",
         action="append",
@@ -27,6 +33,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Markdown/text tree to scan for artifact references; may be repeated",
     )
     args = parser.parse_args(argv)
+    if args.execute_move:
+        sys.stderr.write("Move execution is not implemented by this report-only command.\n")
+        return 2
 
     kwargs = {}
     if args.data_dir is not None:
@@ -40,8 +49,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.reference_root is not None:
         kwargs["reference_roots"] = args.reference_root
 
-    report = build_retention_report(**kwargs)
-    sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    payload = build_archive_dry_run_plan(**kwargs) if args.archive_plan else build_retention_report(**kwargs)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return 0
 
 

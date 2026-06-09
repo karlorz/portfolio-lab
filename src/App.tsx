@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, lazy, Suspense } from 'react';
 import { BacktestEngine, PORTFOLIOS } from './backtest/engine';
 import type { BacktestResult, PerformanceMetrics, PriceData } from './backtest/engine';
+import { fetchCompactPriceData, symbolsForPortfolios, toBacktestData } from './backtest/price-loader';
+import type { CompactPriceData } from './backtest/price-loader';
 import { PortfolioSelector } from './components/PortfolioSelector';
 import { MetricsCards } from './components/MetricsCards';
 import { EquityCurve } from './components/EquityCurve';
@@ -24,32 +26,17 @@ interface ResultItem {
 
 const COLORS: string[] = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#a855f7'];
 
-// Convert compact price data to backtest format
-function toBacktestData(prices: Record<string, Array<{ d: string; p: number }>>): PriceData[] {
-  const result: PriceData[] = [];
-  for (const [symbol, entries] of Object.entries(prices)) {
-    for (const { d, p } of entries) {
-      result.push({ date: d, symbol, price: p });
-    }
-  }
-  return result.sort((a, b) => a.date.localeCompare(b.date));
-}
-
 function App() {
   const [selected, setSelected] = useState<string[]>(['SPY (S&P 500)', 'SPY/GLD/TLT 46/38/16 ★★', 'SPY/GLD 55/45']);
-  const [priceData, setPriceData] = useState<PriceData[] | null>(null);
+  const [rawPrices, setRawPrices] = useState<CompactPriceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Load real price data
   useEffect(() => {
-    fetch('/data/prices.json')
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(json => {
-        setPriceData(toBacktestData(json));
+    fetchCompactPriceData()
+      .then(prices => {
+        setRawPrices(prices);
         setLoading(false);
       })
       .catch(err => {
@@ -58,9 +45,19 @@ function App() {
       });
   }, []);
 
+  const selectedPortfolios = useMemo(
+    () => PORTFOLIOS.filter(portfolio => selected.includes(portfolio.name)),
+    [selected],
+  );
+
+  const priceData = useMemo<PriceData[] | null>(() => {
+    if (!rawPrices) return null;
+    return toBacktestData(rawPrices, symbolsForPortfolios(selectedPortfolios));
+  }, [rawPrices, selectedPortfolios]);
+
   // Run backtests
   const results = useMemo<ResultItem[]>(() => {
-    if (!priceData) return [];
+    if (!priceData || selectedPortfolios.length === 0) return [];
 
     const engine = new BacktestEngine();
     engine.loadData(priceData);
@@ -69,8 +66,9 @@ function App() {
     const dates = priceData.map(p => p.date).sort();
     const startDate = dates[0];
     const endDate = dates[dates.length - 1];
+    if (!startDate || !endDate) return [];
 
-    return PORTFOLIOS.map((portfolio, i) => {
+    return selectedPortfolios.map((portfolio, i) => {
       const result = engine.runBacktest(portfolio, startDate, endDate, 10000);
       const metrics = engine.calculateMetrics(result);
       return {
@@ -80,9 +78,9 @@ function App() {
         color: COLORS[i % COLORS.length]!,
       };
     });
-  }, [priceData]);
+  }, [priceData, selectedPortfolios]);
 
-  const filteredResults = results.filter(r => selected.includes(r.name));
+  const filteredResults = results;
 
   const handleToggle = (name: string) => {
     setSelected(prev =>
@@ -165,7 +163,7 @@ function App() {
               <CrisisAnalysis results={filteredResults} />
 
               <RollingWindow
-                portfolios={PORTFOLIOS}
+                portfolios={selectedPortfolios}
                 priceData={priceData!}
                 colors={COLORS}
               />

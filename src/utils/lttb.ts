@@ -48,7 +48,11 @@ function toNumber(v: unknown): number {
   return Number(v);
 }
 
-export function downsampleLTTB<T extends DataPoint>(
+function readPointValue<T>(point: T, key: string): unknown {
+  return (point as Record<string, unknown>)[key];
+}
+
+export function downsampleLTTB<T>(
   data: T[],
   threshold: number,
   xKey: string,
@@ -78,8 +82,8 @@ export function downsampleLTTB<T extends DataPoint>(
     let avgY = 0;
     let count = 0;
     for (let j = avgStart; j < avgEnd && j < data.length; j++) {
-      const x = toNumber(data[j][xKey]);
-      const y = Number(data[j][yKey]);
+      const x = toNumber(readPointValue(data[j], xKey));
+      const y = Number(readPointValue(data[j], yKey));
       if (!isNaN(x) && !isNaN(y)) {
         avgX += x;
         avgY += y;
@@ -95,8 +99,8 @@ export function downsampleLTTB<T extends DataPoint>(
     const bucketEnd = avgStart;
 
     const pointA = {
-      x: toNumber(data[aIndex][xKey]),
-      y: Number(data[aIndex][yKey]),
+      x: toNumber(readPointValue(data[aIndex], xKey)),
+      y: Number(readPointValue(data[aIndex], yKey)),
     };
 
     let maxArea = -1;
@@ -104,8 +108,8 @@ export function downsampleLTTB<T extends DataPoint>(
 
     for (let j = bucketStart; j < bucketEnd && j < data.length; j++) {
       const pointB = {
-        x: toNumber(data[j][xKey]),
-        y: Number(data[j][yKey]),
+        x: toNumber(readPointValue(data[j], xKey)),
+        y: Number(readPointValue(data[j], yKey)),
       };
       const area = triangleArea(pointA, pointB, { x: avgX, y: avgY });
       if (area > maxArea) {
@@ -134,7 +138,7 @@ export function downsampleLTTB<T extends DataPoint>(
  * @param yKey - Key for y-axis values
  * @param minSize - Minimum data size before downsampling (default 1000)
  */
-export function autoDownsample<T extends DataPoint>(
+export function autoDownsample<T>(
   data: T[],
   threshold: number = 500,
   xKey: string = "date",

@@ -26,6 +26,10 @@ DEFAULT_METRIC_TOLERANCES: dict[str, float] = {
     "config_count": 0.0,
 }
 
+ALLOWED_REPLAY_MODULE_PREFIXES = ("src.",)
+ALLOWED_REPLAY_SCRIPT_SUFFIXES = {".py", ".sh"}
+SHELL_CONTROL_FRAGMENTS = ("&&", "||", ";", "|", "&", "`", "$(", "<", ">")
+
 __all__ = [
     "DEFAULT_METRIC_TOLERANCES",
     "ExperimentReplayResult",
@@ -164,6 +168,65 @@ def _command_args(command: Any) -> list[str]:
     raise ValueError("target.command must be a command string or sequence")
 
 
+def _is_python_executable(command: str) -> bool:
+    executable = Path(command).name.lower()
+    return executable in {"python", "python3"} or executable.startswith("python3.")
+
+
+def _is_within_project(path: Path, project_root: Path) -> bool:
+    try:
+        path.resolve().relative_to(project_root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _project_local_path(value: str, project_root: Path) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else project_root / path
+
+
+def _reject_shell_control(command_args: Sequence[str], experiment_id: str) -> None:
+    for part in command_args:
+        if any(fragment in part for fragment in SHELL_CONTROL_FRAGMENTS):
+            raise ReplaySafetyError(f"{experiment_id} replay command contains shell control syntax")
+
+
+def _assert_replay_command_allowed(command_args: Sequence[str], *, project_root: Path, experiment_id: str) -> None:
+    """Fail closed unless the replay command is a narrow project-local target."""
+    if not command_args:
+        raise ValueError("target.command must not be empty")
+
+    _reject_shell_control(command_args, experiment_id)
+    executable = command_args[0]
+    if _is_python_executable(executable):
+        python_args = list(command_args[1:])
+        while python_args and python_args[0] in {"-B", "-u"}:
+            python_args.pop(0)
+
+        if len(python_args) >= 2 and python_args[0] == "-m":
+            module = python_args[1]
+            if module.startswith(ALLOWED_REPLAY_MODULE_PREFIXES):
+                return
+            raise ReplaySafetyError(f"{experiment_id} replay module is not allowlisted: {module}")
+
+        if not python_args or python_args[0].startswith("-"):
+            raise ReplaySafetyError(f"{experiment_id} replay command is not allowlisted")
+
+        script_path = _project_local_path(python_args[0], project_root)
+        if not _is_within_project(script_path, project_root):
+            raise ReplaySafetyError(f"{experiment_id} replay script is outside project root: {python_args[0]}")
+        if script_path.suffix.lower() in ALLOWED_REPLAY_SCRIPT_SUFFIXES:
+            return
+        raise ReplaySafetyError(f"{experiment_id} replay script suffix is not allowlisted: {python_args[0]}")
+
+    executable_path = _project_local_path(executable, project_root)
+    if _is_within_project(executable_path, project_root) and executable_path.suffix.lower() in ALLOWED_REPLAY_SCRIPT_SUFFIXES:
+        return
+
+    raise ReplaySafetyError(f"{experiment_id} replay command is not allowlisted: {executable}")
+
+
 def _parse_stdout_json(stdout: str) -> Mapping[str, Any]:
     lines = [line.strip() for line in stdout.splitlines() if line.strip()]
     for line in reversed(lines):
@@ -239,6 +302,8 @@ def replay_experiment(
     if command is None:
         raise ValueError("target.command is required")
     command_args = _command_args(command)
+    cwd = Path(project_root or PROJECT_ROOT)
+    _assert_replay_command_allowed(command_args, project_root=cwd, experiment_id=experiment_id)
     command_text = " ".join(shlex.quote(part) for part in command_args)
 
     artifact_path = _target_artifact_path(target)
@@ -252,7 +317,6 @@ def replay_experiment(
     env.setdefault("PORTFOLIO_LAB_ENABLE_ML", "0")
     env["PORTFOLIO_LAB_REPLAY_ALLOW_MARKET_DATA_FETCH"] = "1" if allow_market_data_fetch else "0"
 
-    cwd = Path(project_root or PROJECT_ROOT)
     start = time.perf_counter()
     completed = subprocess.run(
         command_args,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import glob
 import hashlib
 import json
 import os
@@ -39,6 +41,7 @@ __all__ = [
     "backfill_experiment_manifests",
     "build_experiment_manifest",
     "file_sha256",
+    "main",
     "manifest_sidecar_path",
     "save_experiment_result_json",
 ]
@@ -188,16 +191,96 @@ def backfill_experiment_manifests(
     command: str | None = None,
 ) -> list[Path]:
     """Write sidecar manifests for existing experiment artifacts."""
-    if artifact_paths is None:
-        paths = list(DEFAULT_EXPERIMENT_ARTIFACTS)
-        paths.extend(sorted(BACKTEST_RESULTS_DIR.glob("*.json")))
-    else:
-        paths = [Path(path) for path in artifact_paths]
+    summary = _backfill_experiment_manifest_summary(
+        artifact_paths,
+        experiment_id_prefix=experiment_id_prefix,
+        command=command,
+        dry_run=False,
+        report_missing=False,
+    )
+    return [Path(path) for path in summary["written"]]
 
-    written: list[Path] = []
-    for path in paths:
-        if not path.exists():
+
+def _default_backfill_artifact_paths() -> list[Path]:
+    paths = list(DEFAULT_EXPERIMENT_ARTIFACTS)
+    paths.extend(sorted(BACKTEST_RESULTS_DIR.glob("*.json")))
+    return paths
+
+
+def _expand_artifact_patterns(patterns: Sequence[str | Path]) -> list[Path]:
+    expanded: list[Path] = []
+    for pattern in patterns:
+        pattern_text = str(pattern)
+        if any(char in pattern_text for char in "*?["):
+            matches = sorted(Path(match) for match in glob.glob(pattern_text))
+            expanded.extend(matches or [Path(pattern_text)])
+        else:
+            expanded.append(Path(pattern))
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for path in expanded:
+        key = path.resolve() if path.exists() else path
+        if key in seen:
             continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
+def _validate_manifest_payload(manifest: Mapping[str, Any], sidecar_path: Path) -> list[str]:
+    from src.research.experiment_artifact_validator import validate_artifact
+
+    validation = validate_artifact(manifest, path=sidecar_path)
+    return validation.error_messages()
+
+
+def _backfill_experiment_manifest_summary(
+    artifact_paths: Sequence[str | Path] | None = None,
+    *,
+    experiment_id_prefix: str = "portfolio-lab",
+    command: str | None = None,
+    dry_run: bool = False,
+    report_missing: bool = False,
+) -> dict[str, Any]:
+    targeted = artifact_paths is not None
+    paths = (
+        _expand_artifact_patterns(artifact_paths)
+        if artifact_paths is not None
+        else _default_backfill_artifact_paths()
+    )
+
+    artifacts: list[dict[str, Any]] = []
+    written: list[str] = []
+    missing = 0
+    invalid = 0
+
+    for path in paths:
+        sidecar_path = manifest_sidecar_path(path)
+        if not path.exists():
+            if report_missing:
+                missing += 1
+                artifacts.append(
+                    {
+                        "artifact_path": str(path),
+                        "sidecar_path": str(sidecar_path),
+                        "status": "missing",
+                        "errors": ["artifact does not exist"],
+                    }
+                )
+            continue
+
+        if dry_run:
+            artifacts.append(
+                {
+                    "artifact_path": str(path),
+                    "sidecar_path": str(sidecar_path),
+                    "status": "dry_run",
+                    "errors": [],
+                }
+            )
+            continue
+
         experiment_id = f"{experiment_id_prefix}:{path.stem}"
         manifest = build_experiment_manifest(
             experiment_id=experiment_id,
@@ -206,21 +289,83 @@ def backfill_experiment_manifests(
             module=__name__,
             input_paths=[path],
         )
-        sidecar_path = manifest_sidecar_path(path)
+        errors = _validate_manifest_payload(manifest, sidecar_path)
+        if errors:
+            invalid += 1
+            artifacts.append(
+                {
+                    "artifact_path": str(path),
+                    "sidecar_path": str(sidecar_path),
+                    "status": "invalid",
+                    "errors": errors,
+                }
+            )
+            continue
+
         with open(sidecar_path, "w") as f:
             json.dump(manifest, f, indent=2, default=_json_serializer)
-        written.append(sidecar_path)
-    return written
+        written.append(str(sidecar_path))
+        artifacts.append(
+            {
+                "artifact_path": str(path),
+                "sidecar_path": str(sidecar_path),
+                "status": "written",
+                "errors": [],
+            }
+        )
+
+    return {
+        "command": "backfill",
+        "dry_run": dry_run,
+        "targeted": targeted,
+        "targets": len(paths),
+        "written": written,
+        "missing": missing,
+        "invalid": invalid,
+        "artifacts": artifacts,
+    }
 
 
-def main() -> int:
+def _build_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Manage Labs experiment provenance manifests")
+    subparsers = parser.add_subparsers(dest="command")
+    backfill_parser = subparsers.add_parser("backfill", help="Backfill sidecar manifests")
+    backfill_parser.add_argument("artifacts", nargs="*", help="Artifact paths or glob patterns")
+    backfill_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List target artifacts and sidecar paths without writing files",
+    )
+    backfill_parser.add_argument(
+        "--experiment-id-prefix",
+        default="portfolio-lab",
+        help="Prefix for generated experiment_id values",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point for sidecar provenance backfill."""
-    if len(sys.argv) > 1 and sys.argv[1] != "backfill":
-        print("Usage: python -m src.research.experiment_manifest [backfill]")
-        return 2
-    written = backfill_experiment_manifests(command="python -m src.research.experiment_manifest backfill")
-    print(json.dumps({"written": [str(path) for path in written]}, indent=2))
-    return 0
+    parser = _build_cli_parser()
+    args = parser.parse_args(argv)
+    if args.command not in (None, "backfill"):
+        parser.error("unsupported command")
+
+    artifact_paths = args.artifacts if args.command == "backfill" and args.artifacts else None
+    dry_run = bool(args.command == "backfill" and args.dry_run)
+    experiment_id_prefix = (
+        args.experiment_id_prefix if args.command == "backfill" else "portfolio-lab"
+    )
+    command = "python -m src.research.experiment_manifest backfill"
+    summary = _backfill_experiment_manifest_summary(
+        artifact_paths,
+        experiment_id_prefix=experiment_id_prefix,
+        command=command,
+        dry_run=dry_run,
+        report_missing=artifact_paths is not None,
+    )
+    sys.stdout.write(json.dumps(summary, indent=2) + "\n")
+    return 0 if summary["missing"] == 0 and summary["invalid"] == 0 else 1
 
 
 if __name__ == "__main__":

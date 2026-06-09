@@ -129,6 +129,49 @@ def test_referenced_registry_and_manifest_artifacts_are_protected(tmp_path: Path
         assert entries[filename]["referenced_by"]
 
 
+def test_text_reference_scan_checks_each_text_file_once_for_many_artifacts(tmp_path: Path, monkeypatch) -> None:
+    from src.research import artifact_retention
+
+    class CountingText(str):
+        contains_calls = 0
+
+        def __contains__(self, item: object) -> bool:
+            CountingText.contains_calls += 1
+            return super().__contains__(item)
+
+    data_dir = tmp_path / "data"
+    public_dir = tmp_path / "public" / "data"
+    target_name = "artifact_042.json"
+    target_reference = f"data/backtest_results/{target_name}"
+    for index in range(80):
+        path = data_dir / "backtest_results" / f"artifact_{index:03d}.json"
+        _write_json(path, {"metric": index})
+        _set_age(path, 365)
+
+    reference_root = tmp_path / "wiki"
+    reference_doc = _write_text(reference_root / "compound.md", f"Reviewed {target_reference}\n")
+    original_read_text = Path.read_text
+
+    def read_counting_text(path: Path, *args, **kwargs) -> str:
+        text = original_read_text(path, *args, **kwargs)
+        if path == reference_doc:
+            return CountingText(text)
+        return text
+
+    monkeypatch.setattr(Path, "read_text", read_counting_text)
+
+    report = artifact_retention.build_retention_report(
+        data_dir=data_dir,
+        public_data_dir=public_dir,
+        project_root=tmp_path,
+        reference_roots=[reference_root],
+    )
+
+    entries = _entries_by_name(report)
+    assert entries[target_name]["referenced_by"] == ["wiki/compound.md"]
+    assert CountingText.contains_calls == 0
+
+
 def test_report_cli_outputs_json_and_stays_report_only(tmp_path: Path, capsys) -> None:
     from scripts.report_artifact_retention import main
 

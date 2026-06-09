@@ -2455,6 +2455,59 @@ class DashboardGenerator:
             if overlay_path:
                 paths.append(overlay_path)
 
+            labs_registry_path = None
+            try:
+                from src.research.experiment_registry import save_labs_registry
+
+                labs_registry_path = save_labs_registry(
+                    data_dirs=(DATA_DIR,),
+                    public_dir=PUBLIC_DIR,
+                    project_root=DATA_DIR.parent if DATA_DIR.name == "data" else DATA_DIR,
+                )
+                if labs_registry_path:
+                    paths.append(labs_registry_path)
+            except (ImportError, ValueError, OSError, TypeError) as e:
+                logger.warning("Labs registry generation skipped: %s", e)
+
+            if labs_registry_path:
+                try:
+                    from src.research.experiment_scorecard import save_labs_scorecards
+
+                    labs_scorecard_path = save_labs_scorecards(
+                        registry_path=labs_registry_path,
+                        public_dir=PUBLIC_DIR,
+                    )
+                    if labs_scorecard_path:
+                        paths.append(labs_scorecard_path)
+                except (ImportError, ValueError, OSError, TypeError) as e:
+                    logger.warning("Labs scorecard generation skipped: %s", e)
+
+            try:
+                from src.research.experiment_replay_batch import publish_labs_replays
+
+                labs_replay_path = publish_labs_replays(
+                    data_dir=DATA_DIR,
+                    public_dir=PUBLIC_DIR,
+                    project_root=DATA_DIR.parent if DATA_DIR.name == "data" else DATA_DIR,
+                )
+                if labs_replay_path:
+                    paths.append(labs_replay_path)
+            except (ImportError, ValueError, OSError, TypeError) as e:
+                logger.warning("Labs replay report generation skipped: %s", e)
+
+            try:
+                from src.research.labs_validation_report import save_labs_validation_report
+
+                labs_validation_path = save_labs_validation_report(
+                    data_dirs=(DATA_DIR,),
+                    public_dir=PUBLIC_DIR,
+                    project_root=DATA_DIR.parent if DATA_DIR.name == "data" else DATA_DIR,
+                )
+                if labs_validation_path:
+                    paths.append(labs_validation_path)
+            except (ImportError, ValueError, OSError, TypeError) as e:
+                logger.warning("Labs validation report generation skipped: %s", e)
+
             for p in paths:
                 if p:
                     logger.info("Generated: %s", p)

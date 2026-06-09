@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
 import DurationOverlayPanel from './DurationOverlayPanel';
@@ -87,6 +87,7 @@ const VIXTermStructurePanel = lazy(() => import('./VIXTermStructurePanel').then(
 const BondMomentumPanel = lazy(() => import('./BondMomentumPanel').then((module) => ({ default: module.BondMomentumPanel })));
 const KurtosisRegimePanel = lazy(() => import('./KurtosisRegimePanel').then((module) => ({ default: module.KurtosisRegimePanel })));
 const VolatilityParityPanel = lazy(() => import('./VolatilityParityPanel').then((module) => ({ default: module.VolatilityParityPanel })));
+const LabsPanel = lazy(() => import('./LabsPanel').then((module) => ({ default: module.LabsPanel })));
 const ChatPanel = lazy(() => import('./ChatPanel').then((module) => ({ default: module.ChatPanel })));
 
 function tabLoadingFallback(name: string) {
@@ -121,7 +122,7 @@ async function safeParseJson(response: Response, endpoint: string): Promise<unkn
   }
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'chat';
+type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'labs' | 'chat';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -146,21 +147,24 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [regimeGateData, setRegimeGateData] = useState<RegimeGateData | null>(null);
   const [tsmomData, setTsmomData] = useState<TSMOMData | null>(null);
   const [crossAssetRVData, setCrossAssetRVData] = useState<CrossAssetRVData | null>(null);
+  const optionalFetchTimestamps = useRef<Partial<Record<TabType, number>>>({});
+  const coreFetchGeneration = useRef(0);
+  const optionalFetchGenerations = useRef<Partial<Record<TabType, number>>>({});
 
-  const fetchData = async () => {
+  const fetchCoreData = async () => {
+    const requestGeneration = ++coreFetchGeneration.current;
     try {
-      const [signalsRes, dashboardRes, alertsRes, statsRes, healthRes, analyticsRes, rhRes, exRes] = await Promise.all([
+      const [signalsRes, dashboardRes, alertsRes, statsRes, healthRes] = await Promise.all([
         fetch('/data/signals.json'),
         fetch('/data/dashboard.json'),
         fetch('/data/alerts.json'),
         fetch('/data/stats.json'),
         fetch('/data/health.json'),
-        fetch('/data/analytics.json'),
-        fetch('/data/rebalance_health.json'),
-        fetch('/data/explainability/explainability_latest.json')
       ]);
+      if (requestGeneration !== coreFetchGeneration.current) return;
 
       const signalsRaw = await safeParseJson(signalsRes, 'signals');
+      if (requestGeneration !== coreFetchGeneration.current) return;
       if (signalsRaw) {
         const raw = signalsRaw;
         const validated = validateSignalsData(raw);
@@ -171,6 +175,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         }
       }
       const dashboardRaw = await safeParseJson(dashboardRes, 'dashboard');
+      if (requestGeneration !== coreFetchGeneration.current) return;
       if (dashboardRaw) {
         const raw = dashboardRaw;
         const validated = validateFetchData(raw, DashboardDataSchema, 'dashboard');
@@ -180,6 +185,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         }
       }
       const alertsRaw = await safeParseJson(alertsRes, 'alerts');
+      if (requestGeneration !== coreFetchGeneration.current) return;
       if (alertsRaw) {
         const raw = alertsRaw;
         const validated = validateFetchData(raw, AlertsDataSchema, 'alerts');
@@ -188,95 +194,145 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         }
       }
       const statsRaw = await safeParseJson(statsRes, 'stats');
+      if (requestGeneration !== coreFetchGeneration.current) return;
       if (statsRaw) {
         const raw = statsRaw;
         const validated = validateFetchData(raw, StatsDataSchema, 'stats');
         if (validated) setStats(validated as StatsData);
       }
       const healthRaw = await safeParseJson(healthRes, 'health');
+      if (requestGeneration !== coreFetchGeneration.current) return;
       if (healthRaw) {
         const raw = healthRaw;
         const validated = validateFetchData(raw, HealthDataSchema, 'health');
         if (validated) setHealth(validated as HealthData);
       }
-      const analyticsRaw = await safeParseJson(analyticsRes, 'analytics');
-      if (analyticsRaw) {
-        const raw = analyticsRaw;
-        const validated = validateFetchData(raw, AnalyticsDataSchema, 'analytics');
-        if (validated) setAnalytics(validated as AnalyticsData);
-      }
-      const rebalanceHealthRaw = await safeParseJson(rhRes, 'rebalance_health');
-      if (rebalanceHealthRaw) {
-        const raw = rebalanceHealthRaw;
-        const validated = validateFetchData(raw, RebalanceHealthSchema, 'rebalance_health');
-        if (validated) setRebalanceHealth(validated as unknown as RebalanceHealthData);
-      }
-      const explainabilityRaw = await safeParseJson(exRes, 'explainability');
-      if (explainabilityRaw) {
-        const raw = explainabilityRaw;
-        const validated = validateFetchData(raw, PassthroughSchema, 'explainability');
-        if (validated) setExplainability(validated as unknown as ExplainabilityData);
-      }
 
-      // Fetch new panel data (non-blocking)
+      if (requestGeneration === coreFetchGeneration.current) setError(null);
+    } catch (err) {
+      if (requestGeneration === coreFetchGeneration.current) setError('Failed to load live data');
+    }
+  };
+
+  const shouldFetchOptionalTab = (tab: TabType, force: boolean) => {
+    if (tab !== 'rebalance' && tab !== 'analytics') {
+      return false;
+    }
+    if (force) {
+      return true;
+    }
+    const lastFetchedAt = optionalFetchTimestamps.current[tab] ?? 0;
+    return Date.now() - lastFetchedAt >= refreshInterval * 1000;
+  };
+
+  const fetchOptionalDataForTab = async (tab: TabType, force = false) => {
+    if (!shouldFetchOptionalTab(tab, force)) {
+      return;
+    }
+    const requestGeneration = (optionalFetchGenerations.current[tab] ?? 0) + 1;
+    optionalFetchGenerations.current[tab] = requestGeneration;
+
+    if (tab === 'rebalance') {
       try {
-        const [gradRes, sizingRes, vixyRes, blRes, turnoverRes] = await Promise.all([
+        const rebalanceHealthRes = await fetch('/data/rebalance_health.json');
+        const rebalanceHealthRaw = await safeParseJson(rebalanceHealthRes, 'rebalance_health');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
+        if (rebalanceHealthRaw) {
+          const raw = rebalanceHealthRaw;
+          const validated = validateFetchData(raw, RebalanceHealthSchema, 'rebalance_health');
+          if (validated) setRebalanceHealth(validated as unknown as RebalanceHealthData);
+        }
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
+        optionalFetchTimestamps.current[tab] = Date.now();
+      } catch { /* panels render gracefully with null data */ }
+    }
+
+    if (tab === 'analytics') {
+      try {
+        const [analyticsRes, exRes, gradRes, sizingRes, vixyRes, blRes, turnoverRes] = await Promise.all([
+          fetch('/data/analytics.json'),
+          fetch('/data/explainability/explainability_latest.json'),
           fetch('/data/graduation.json'),
           fetch('/data/adaptive_sizing.json'),
           fetch('/data/vixy_hedge.json'),
           fetch('/data/black_litterman.json'),
           fetch('/data/turnover_validator.json'),
         ]);
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
+        const analyticsRaw = await safeParseJson(analyticsRes, 'analytics');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
+        if (analyticsRaw) {
+          const raw = analyticsRaw;
+          const validated = validateFetchData(raw, AnalyticsDataSchema, 'analytics');
+          if (validated) setAnalytics(validated as AnalyticsData);
+        }
+        const explainabilityRaw = await safeParseJson(exRes, 'explainability');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
+        if (explainabilityRaw) {
+          const raw = explainabilityRaw;
+          const validated = validateFetchData(raw, PassthroughSchema, 'explainability');
+          if (validated) setExplainability(validated as unknown as ExplainabilityData);
+        }
         const graduationRaw = await safeParseJson(gradRes, 'graduation');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (graduationRaw) {
           const raw = graduationRaw;
           const validated = validateFetchData(raw, GraduationDataSchema, 'graduation');
           if (validated) setGraduationData(validated as unknown as GraduationChecklistData);
         }
         const adaptiveSizingRaw = await safeParseJson(sizingRes, 'adaptive_sizing');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (adaptiveSizingRaw) {
           const raw = adaptiveSizingRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'adaptive_sizing');
           if (validated) setAdaptiveSizingData(validated as unknown as AdaptiveSizingData);
         }
         const vixyRaw = await safeParseJson(vixyRes, 'vixy_hedge');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (vixyRaw) {
           const raw = vixyRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'vixy_hedge');
           if (validated) setVixyHedgeData(validated as unknown as VixyHedgeSizingData);
         }
         const blackLittermanRaw = await safeParseJson(blRes, 'black_litterman');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (blackLittermanRaw) {
           const raw = blackLittermanRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'black_litterman');
           if (validated) setBLMapperData(validated as unknown as BlackLittermanMapperData);
         }
         const turnoverRaw = await safeParseJson(turnoverRes, 'turnover_validator');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (turnoverRaw) {
           const raw = turnoverRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'turnover_validator');
           if (validated) setTurnoverData(validated as unknown as TurnoverValidatorData);
         }
       } catch { /* panels render gracefully with null data */ }
+
       try {
         const [rgRes, tsmomRes, rvRes] = await Promise.all([
           fetch('/data/regime_gate.json'),
           fetch('/data/tsmom.json'),
           fetch('/data/cross_asset_rv.json'),
         ]);
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         const regimeGateRaw = await safeParseJson(rgRes, 'regime_gate');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (regimeGateRaw) {
           const raw = regimeGateRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'regime_gate');
           if (validated) setRegimeGateData(validated as unknown as RegimeGateData);
         }
         const tsmomRaw = await safeParseJson(tsmomRes, 'tsmom');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (tsmomRaw) {
           const raw = tsmomRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'tsmom');
           if (validated) setTsmomData(validated as unknown as TSMOMData);
         }
         const crossAssetRVRaw = await safeParseJson(rvRes, 'cross_asset_rv');
+        if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (crossAssetRVRaw) {
           const raw = crossAssetRVRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'cross_asset_rv');
@@ -284,17 +340,22 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         }
       } catch { /* panels render gracefully with null data */ }
 
-      setError(null);
-    } catch (err) {
-      setError('Failed to load live data');
+      if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
+      optionalFetchTimestamps.current[tab] = Date.now();
     }
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, refreshInterval * 1000);
+    fetchCoreData();
+    const interval = setInterval(fetchCoreData, refreshInterval * 1000);
     return () => clearInterval(interval);
   }, [refreshInterval]);
+
+  useEffect(() => {
+    fetchOptionalDataForTab(activeTab);
+    const interval = setInterval(() => fetchOptionalDataForTab(activeTab, true), refreshInterval * 1000);
+    return () => clearInterval(interval);
+  }, [activeTab, refreshInterval]);
 
   const portfolioValue = useMemo(() => {
     return signals?.total_value || 100000;
@@ -334,6 +395,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'analytics', label: 'Analytics' },
     { id: 'options', label: '0DTE', badge: signals?.zero_dte?.positions?.length || undefined },
     { id: 'auction', label: 'Auction', badge: signals?.closing_auction?.signals?.filter(s => s.should_trade).length || undefined },
+    { id: 'labs', label: 'Labs' },
     { id: 'chat', label: 'Chat' }
   ];
 
@@ -857,6 +919,17 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             <div className="mt-4">
               <VolatilityParityPanel data={(signals?.volatility_parity ?? null) as unknown as VolatilityParityData | null} />
             </div>
+          </div>
+          </Suspense>
+        </PanelErrorBoundary>
+        )}
+
+        {/* Labs Tab */}
+        {activeTab === 'labs' && (
+        <PanelErrorBoundary name="Labs">
+          <Suspense fallback={tabLoadingFallback('Labs')}>
+          <div className="tab-panel labs-panel-container">
+            <LabsPanel />
           </div>
           </Suspense>
         </PanelErrorBoundary>

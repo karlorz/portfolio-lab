@@ -1930,3 +1930,124 @@ footer code {
   color: #64748b;
   font-style: italic;
 }
+
+.labs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.labs-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #334155;
+}
+
+.labs-panel .panel-header h3 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 1.1rem;
+}
+
+.labs-panel .status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.labs-panel .status-healthy {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+.labs-panel .status-warning {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+}
+
+.labs-panel .status-success {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+.labs-panel .status-info {
+  background: rgba(59, 130, 246, 0.16);
+  color: #60a5fa;
+}
+
+.labs-panel .status-danger {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+}
+
+.labs-panel .endpoint-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.labs-panel .endpoint-badge-row .status-pill {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 240px;
+}
+
+.labs-panel .endpoint-badge-row small {
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.66rem;
+  font-weight: 500;
+  opacity: 0.9;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.labs-panel .controls-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.labs-panel .controls-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.labs-panel .controls-row input,
+.labs-panel .controls-row select {
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+}
+
+.labs-panel .positions-table td small {
+  display: block;
+  max-width: 280px;
+  overflow: hidden;
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -51,6 +51,43 @@ def test_public_data_size_budget_classifies_size_and_row_count(tmp_path: Path) -
     assert oversized_budget["requires_pagination"] is True
 
 
+def test_public_data_size_budget_surfaces_validation_truncation_metadata(tmp_path: Path) -> None:
+    from src.dashboard.public_data_size_budget import measure_public_data_size_budget
+
+    validation_report = _write_json(
+        tmp_path / "labs_validation.json",
+        {
+            "schema_version": "labs-validation/v1",
+            "generated_at": "2026-06-08T00:00:00+00:00",
+            "results": [
+                {
+                    "path": "public/data/labs_scorecards.json[0]",
+                    "artifact_type": "scorecard",
+                    "schema_version": "labs-scorecard/v1",
+                    "valid": False,
+                    "errors": ["$.status: unsupported status 'ship'"],
+                }
+            ],
+            "truncation": {
+                "max_results": 1,
+                "max_errors_per_result": 2,
+                "total_result_count": 10,
+                "returned_result_count": 1,
+                "omitted_result_count": 9,
+                "omitted_error_count": 27,
+            },
+        },
+    )
+
+    budget = measure_public_data_size_budget(validation_report)
+
+    assert budget["row_count"] == 1
+    assert budget["truncated"] is True
+    assert budget["total_row_count"] == 10
+    assert budget["omitted_row_count"] == 9
+    assert budget["omitted_error_count"] == 27
+
+
 def test_public_data_index_embeds_labs_size_budget_metadata(tmp_path: Path) -> None:
     registry = _write_json(
         tmp_path / "labs_registry.json",
@@ -100,3 +137,25 @@ def test_public_data_index_embeds_labs_size_budget_metadata(tmp_path: Path) -> N
     assert scorecard_budget["row_count"] == 2
     assert scorecard_budget["status"] == "within_budget"
     assert scorecard_budget["requires_pagination"] is False
+
+
+def test_public_data_index_discovers_heavy_market_data_files_with_fetch_strategy(tmp_path: Path) -> None:
+    prices = _write_json(
+        tmp_path / "prices.json",
+        {
+            "SPY": [{"d": f"2026-01-{(idx % 28) + 1:02d}", "p": 100 + idx} for idx in range(1001)],
+            "GLD": [{"d": "2026-01-01", "p": 200}],
+        },
+    )
+
+    index = build_public_data_index([], public_dir=tmp_path, generated_at="2026-06-08T00:00:00")
+
+    entries = _entries_by_filename(index)
+    price_entry = entries["prices.json"]
+    assert price_entry["category"] == "market_data"
+    assert price_entry["schema_version"] == "prices/compact-v1"
+    assert price_entry["status"] == "present"
+    assert price_entry["size_bytes"] == prices.stat().st_size
+    assert price_entry["size_budget"]["row_count"] == 1002
+    assert price_entry["size_budget"]["status"] == "oversized"
+    assert price_entry["size_budget"]["render_strategy"] == "paginate"

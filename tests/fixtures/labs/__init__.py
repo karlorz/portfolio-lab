@@ -20,6 +20,7 @@ LABS_FIXTURE_NAMES: tuple[str, ...] = (
     "invalid_mixed_units",
     "stale_schema",
     "dirty_provenance",
+    "valid_experiment_diff",
 )
 
 _BUILD_VARIANTS: dict[tuple[str, str], str] = {

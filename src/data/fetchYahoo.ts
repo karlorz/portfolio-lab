@@ -53,8 +53,12 @@ if (import.meta.main) {
     compact[sym] = entries.map(e => ({ d: e.date, p: e.price }));
   }
   const outPath = new URL('../../public/data/prices.json', import.meta.url).pathname;
-  await Bun.write(outPath, JSON.stringify(compact));
+  const compactPath = new URL('../../public/data/prices_compact.json', import.meta.url).pathname;
+  const serialized = JSON.stringify(compact);
+  await Bun.write(outPath, serialized);
+  await Bun.write(compactPath, serialized);
   console.log(`\nCompact data saved to ${outPath}`);
+  console.log(`Compact mirror saved to ${compactPath}`);
   console.log(`Symbols: ${Object.keys(compact).join(', ')}`);
   for (const [k, v] of Object.entries(compact)) {
     console.log(`  ${k}: ${v.length} days (${v[0]?.d} to ${v[v.length-1]?.d})`);

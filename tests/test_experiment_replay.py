@@ -163,3 +163,47 @@ def test_replay_rejects_expensive_target_without_approval(tmp_path: Path) -> Non
 
     assert result.passed is True
     assert marker.read_text() == "ran"
+
+
+def test_replay_rejects_disallowed_binary_even_when_marked_safe(tmp_path: Path) -> None:
+    """Replay-safe metadata should still fail closed for commands outside the allowlist."""
+    target = _registry_target(tmp_path, "echo '{\"metrics\": {}}'")
+
+    with pytest.raises(ReplaySafetyError, match="not allowlisted"):
+        replay_experiment(target, project_root=tmp_path)
+
+
+def test_replay_rejects_shell_control_operators_before_execution(tmp_path: Path) -> None:
+    """Replay commands must not smuggle shell control operators through metadata."""
+    marker = tmp_path / "command-ran.txt"
+    command = f"{_write_fixture_experiment(tmp_path, EXPECTED_METRICS, marker=marker)} && echo hacked"
+    target = _registry_target(tmp_path, command)
+
+    with pytest.raises(ReplaySafetyError, match="shell control"):
+        replay_experiment(target, project_root=tmp_path)
+
+    assert marker.exists() is False
+
+
+def test_replay_rejects_python_script_outside_project_root(tmp_path: Path) -> None:
+    """Python script replays are allowed only for scripts inside the requested project root."""
+    marker = tmp_path / "command-ran.txt"
+    outside_dir = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside_dir.mkdir()
+    outside_script = outside_dir / "outside_replay.py"
+    outside_script.write_text(
+        "\n".join(
+            [
+                "import json",
+                "from pathlib import Path",
+                f"Path({str(marker)!r}).write_text('ran')",
+                f"print(json.dumps({{'metrics': {json.dumps(EXPECTED_METRICS)}}}))",
+            ]
+        )
+    )
+    target = _registry_target(tmp_path, f"{sys.executable} {outside_script}")
+
+    with pytest.raises(ReplaySafetyError, match="outside project root"):
+        replay_experiment(target, project_root=tmp_path)
+
+    assert marker.exists() is False

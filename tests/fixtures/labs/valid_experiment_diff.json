@@ -1,0 +1,45 @@
+{
+  "schema_version": "experiment-diff/v1",
+  "generated_at": "2026-06-08T12:00:00+00:00",
+  "left": {
+    "label": "champion",
+    "experiment_id": "champion",
+    "artifact_path": "data/champion.json",
+    "artifact_type": "registry_row"
+  },
+  "right": {
+    "label": "challenger",
+    "experiment_id": "challenger",
+    "artifact_path": "data/challenger.json",
+    "artifact_type": "registry_row"
+  },
+  "metric_deltas": {
+    "sharpe": {
+      "left": 0.95,
+      "right": 0.99,
+      "delta": 0.04
+    },
+    "max_drawdown_pct": {
+      "left": -27.6,
+      "right": -20.1,
+      "delta": 7.5
+    }
+  },
+  "missing_metrics": [
+    {
+      "metric": "dsr",
+      "missing_from": ["right"]
+    }
+  ],
+  "config_diffs": {
+    "target_vol": {
+      "left": 0.09,
+      "right": 0.11
+    }
+  },
+  "provenance": {
+    "left": "present",
+    "right": "stale",
+    "changed": true
+  }
+}

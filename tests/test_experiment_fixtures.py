@@ -24,6 +24,7 @@ def test_labs_fixture_files_exist_and_stay_small() -> None:
         "invalid_mixed_units",
         "stale_schema",
         "dirty_provenance",
+        "valid_experiment_diff",
     }
 
     assert set(LABS_FIXTURE_NAMES) == expected
