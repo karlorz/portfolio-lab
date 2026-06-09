@@ -136,6 +136,11 @@ dist
 .pnp.*
 
 # Portfolio Lab specific
+# SkillWiki project artifacts live in the external vault returned by
+# `skillwiki path`, not in repo-local duplicate folders.
+/wiki/
+/work/
+
 # Data files
 /data/
 /public/data/

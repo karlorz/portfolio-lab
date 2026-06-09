@@ -11,7 +11,9 @@ Usage:
 """
 
 import os
+import json
 import sqlite3
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Union
@@ -43,8 +45,103 @@ ATTRIBUTION_DIR = DATA_DIR / "attribution"
 
 # External directories (user home-based, configurable via env vars)
 HOME = Path.home()
-WIKI_DIR = Path(os.environ.get("WIKI_DIR", str(HOME / "wiki")))
-WORK_DIR = Path(os.environ.get("WORK_DIR", str(HOME / "projects" / "portfolio-lab" / "work")))
+
+
+def _parse_skillwiki_path_output(stdout: str) -> Optional[Path]:
+    """Parse `skillwiki path` output from either JSON or plain-text CLIs."""
+    text = stdout.strip()
+    if not text:
+        return None
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return Path(text.splitlines()[0]).expanduser()
+
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, dict) and data.get("path"):
+            return Path(str(data["path"])).expanduser()
+        if payload.get("path"):
+            return Path(str(payload["path"])).expanduser()
+
+    return None
+
+
+def _looks_like_skillwiki_vault(path: Path) -> bool:
+    """Return true only for an existing SkillWiki-style vault root."""
+    return path.is_dir() and (path / "SCHEMA.md").is_file() and (path / "projects").is_dir()
+
+
+def _default_skillwiki_vault_path() -> Path:
+    """Return the non-validating fallback path used only for import-time constants."""
+    return Path(os.environ.get("WIKI_DIR", str(HOME / "wiki"))).expanduser()
+
+
+def resolve_skillwiki_vault() -> Path:
+    """Resolve the SkillWiki vault root without silently creating wrong paths.
+
+    Precedence:
+    1. WIKI_DIR environment override.
+    2. `skillwiki path` with a short timeout.
+    3. Validated ~/wiki fallback, requiring SCHEMA.md and projects/.
+    """
+    env_wiki_dir = os.environ.get("WIKI_DIR")
+    if env_wiki_dir:
+        return Path(env_wiki_dir).expanduser()
+
+    try:
+        result = subprocess.run(
+            ["skillwiki", "path"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        result = None
+
+    if result is not None and result.returncode == 0:
+        resolved = _parse_skillwiki_path_output(result.stdout)
+        if resolved is not None:
+            return resolved
+
+    home_wiki = HOME / "wiki"
+    if _looks_like_skillwiki_vault(home_wiki):
+        return home_wiki
+
+    raise RuntimeError("SkillWiki vault could not be resolved. Set WIKI_DIR or configure `skillwiki path`.")
+
+
+def _resolve_skillwiki_vault_for_import() -> Path:
+    """Best-effort SkillWiki path for module constants.
+
+    Many modules import src.paths only for repo-local constants such as DATA_DIR
+    or MARKET_DB. Keep those imports usable on hosts without SkillWiki, while
+    explicit vault writers still call require_project_wiki_dir() before writes.
+    """
+    try:
+        return resolve_skillwiki_vault()
+    except RuntimeError:
+        return _default_skillwiki_vault_path()
+
+
+def require_skillwiki_vault() -> Path:
+    """Resolve and validate the active SkillWiki vault before write operations."""
+    vault = resolve_skillwiki_vault()
+    if not _looks_like_skillwiki_vault(vault):
+        raise RuntimeError(f"Resolved SkillWiki path is not a valid vault root: {vault}")
+    return vault
+
+
+def require_project_wiki_dir() -> Path:
+    """Return the canonical portfolio-lab project workspace in the active vault."""
+    return require_skillwiki_vault() / "projects" / "portfolio-lab"
+
+
+WIKI_DIR = _resolve_skillwiki_vault_for_import()
+PROJECT_WIKI_DIR = WIKI_DIR / "projects" / "portfolio-lab"
+PROJECT_WORK_DIR = PROJECT_WIKI_DIR / "work"
+WORK_DIR = Path(os.environ.get("WORK_DIR", str(PROJECT_WORK_DIR))).expanduser()
 
 # ── Champion allocation ──────────────────────────────────────────────
 # Grid-search winner: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026)

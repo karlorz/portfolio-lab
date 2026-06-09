@@ -5,7 +5,12 @@ Covers: all exported constants resolve to valid Path objects,
 PROJECT_ROOT correctness, BASE_ALLOCATION structure.
 """
 
+import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 from src import paths
 
 
@@ -100,3 +105,104 @@ class TestHomeDirectories:
 
     def test_work_dir(self):
         assert paths.WORK_DIR.name == "work"
+
+    def test_project_wiki_dir(self):
+        assert paths.PROJECT_WIKI_DIR == paths.WIKI_DIR / "projects" / "portfolio-lab"
+
+    def test_work_dir_defaults_to_project_wiki_work_dir(self):
+        assert paths.WORK_DIR == paths.PROJECT_WIKI_DIR / "work"
+
+
+class TestSkillWikiVaultResolver:
+    def test_import_without_configured_vault_still_exposes_non_wiki_paths(self, tmp_path):
+        script = """
+from src import paths
+print(paths.DATA_DIR.name)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=paths.PROJECT_ROOT,
+            env={
+                "HOME": str(tmp_path),
+                "PATH": "/usr/bin:/bin",
+                "PYTHONPATH": str(paths.PROJECT_ROOT),
+            },
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "data"
+
+    def test_work_dir_override_allows_research_agent_import_without_vault(self, tmp_path):
+        work_dir = tmp_path / "custom-work"
+        script = """
+from src.research.agent import ResearchAgent, WORK_DIR
+ResearchAgent()
+print(WORK_DIR.name)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=paths.PROJECT_ROOT,
+            env={
+                "HOME": str(tmp_path),
+                "PATH": "/usr/bin:/bin",
+                "PORTFOLIO_LAB_ENABLE_ML": "0",
+                "PYTHONPATH": str(paths.PROJECT_ROOT),
+                "WORK_DIR": str(work_dir),
+            },
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "custom-work"
+        assert work_dir.is_dir()
+
+    def test_wiki_dir_env_override_wins(self, monkeypatch, tmp_path):
+        override = tmp_path / "custom-wiki"
+        monkeypatch.setenv("WIKI_DIR", str(override))
+
+        assert paths.resolve_skillwiki_vault() == override
+
+    def test_uses_skillwiki_path_when_env_absent(self, monkeypatch, tmp_path):
+        resolved = tmp_path / "skillwiki-vault"
+        monkeypatch.delenv("WIKI_DIR", raising=False)
+
+        def fake_run(*args, **kwargs):
+            assert args[0] == ["skillwiki", "path"]
+            assert kwargs["timeout"] <= 2
+            return SimpleNamespace(returncode=0, stdout=f"{resolved}\n", stderr="")
+
+        monkeypatch.setattr(paths.subprocess, "run", fake_run)
+
+        assert paths.resolve_skillwiki_vault() == resolved
+
+    def test_validated_home_wiki_fallback_when_skillwiki_path_fails(self, monkeypatch, tmp_path):
+        home_wiki = tmp_path / "wiki"
+        (home_wiki / "projects").mkdir(parents=True)
+        (home_wiki / "SCHEMA.md").write_text("# Vault Schema\n")
+        monkeypatch.delenv("WIKI_DIR", raising=False)
+        monkeypatch.setattr(paths, "HOME", tmp_path)
+
+        def fail_run(*args, **kwargs):
+            raise FileNotFoundError("skillwiki")
+
+        monkeypatch.setattr(paths.subprocess, "run", fail_run)
+
+        assert paths.resolve_skillwiki_vault() == home_wiki
+
+    def test_rejects_unvalidated_home_wiki_fallback(self, monkeypatch, tmp_path):
+        (tmp_path / "wiki").mkdir()
+        monkeypatch.delenv("WIKI_DIR", raising=False)
+        monkeypatch.setattr(paths, "HOME", tmp_path)
+
+        def fail_run(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="skillwiki path", timeout=1)
+
+        monkeypatch.setattr(paths.subprocess, "run", fail_run)
+
+        with pytest.raises(RuntimeError, match="SkillWiki vault could not be resolved"):
+            paths.resolve_skillwiki_vault()

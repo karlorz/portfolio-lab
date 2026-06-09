@@ -1,6 +1,6 @@
 ---
 name: Dev loop project config — portfolio-lab
-description: Drives the dev-loop skill for the portfolio-lab repo. PRD via TDD (test-first), knowledge via skillwiki vault at ~/wiki, no publish/deploy (private research project).
+description: Drives the dev-loop skill for the portfolio-lab repo. PRD via TDD (test-first), knowledge via skillwiki path, no publish/deploy (private research project).
 type: config
 ---
 
@@ -14,7 +14,6 @@ type: config
 
 ```yaml
 slug: portfolio-lab
-vault: /root/wiki
 release_branch: main
 ```
 
@@ -59,9 +58,10 @@ prd_disciplines:
 
 ## Knowledge layer
 
-skillwiki vault at `/root/wiki`. Project workspace already exists at
-`/root/wiki/projects/portfolio-lab/` with extensive history (60+ work
-items, 70+ compound entries, ADRs). Continue writing there.
+SkillWiki resolves the active vault via `skillwiki path`. Project workspace
+content lives under `projects/portfolio-lab/` inside that vault, with extensive
+history (60+ work items, 70+ compound entries, ADRs). Continue writing there.
+Do not write specs/plans into repo-local `wiki/` or `work/` directories.
 
 ```yaml
 knowledge_layer: skillwiki
@@ -72,7 +72,7 @@ knowledge_layer: skillwiki
 ```yaml
 knowledge_backends:
   skillwiki:
-    vault: /root/wiki
+    vault: auto
     cli_entry: skillwiki
 ```
 
@@ -147,9 +147,8 @@ Clear, well-scoped tasks skip the interview entirely.
 
 ## Domain glossary
 
-`CONTEXT.md` at repo root (`/root/projects/portfolio-lab/CONTEXT.md`)
-defines key terms: overlay, ensemble voting, regime detection, MARL agents,
-VIX regime, VPIN, drift-based rebalancing, etc.
+`CONTEXT.md` at repo root defines key terms: overlay, ensemble voting, regime
+detection, MARL agents, VIX regime, VPIN, drift-based rebalancing, etc.
 
 Agents dispatched by dev-loop should load CONTEXT.md as a reference before
 writing tests or implementation code. Keep it updated as new concepts land.
@@ -304,7 +303,7 @@ code_review:
 
 ```yaml
 notes:
-  canonical_spec: /root/wiki/projects/portfolio-lab/README.md
+  canonical_spec: projects/portfolio-lab/README.md
   python_runtime: python3 (no venv pinning yet — global interpreter)
   bun_runtime: bun 1.x; scripts in package.json use bunx --bun vite
   data_pipeline: |
@@ -322,6 +321,8 @@ notes:
     - Backtest scripts: test metric computation, data loading, not necessarily TDD for parameter sweeps
   conventions: |
     - Work item slugs follow vXX-<feature> pattern (e.g., v292-etf-premium-monitor)
+    - Specs/plans route through `skillwiki path` under projects/portfolio-lab/work
+    - Repo-local wiki/ and work/ directories are stale legacy copies and must not be recreated
     - Compound pages in vault track every implemented strategy with
       backtest result snapshot (CAGR/Sharpe/MaxDD/crisis years)
     - CLAUDE.md is the canonical implementation status — keep it

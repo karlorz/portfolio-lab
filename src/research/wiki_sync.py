@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Portfolio-Lab Alpha: Wiki Sync
-Crystallizes research findings to ~/wiki/projects/portfolio-lab/ compound pages.
+Crystallizes research findings to the active SkillWiki portfolio-lab project.
 Follows wiki schema: frontmatter, citations, typed knowledge.
 """
 
@@ -13,19 +13,33 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.paths import DATA_DIR as _DATA_DIR, WIKI_DIR as _WIKI_DIR, sqlite_connect, MARKET_DB
+from src.paths import (
+    DATA_DIR as _DATA_DIR,
+    PROJECT_WIKI_DIR as _PROJECT_WIKI_DIR,
+    require_project_wiki_dir as _require_project_wiki_dir,
+    sqlite_connect,
+    MARKET_DB,
+)
 from src.backtest.metrics import save_results_json
 
 logger = logging.getLogger(__name__)
 
 DATA_DIR = _DATA_DIR
-WIKI_DIR = _WIKI_DIR / "projects" / "portfolio-lab"
+WIKI_DIR = _PROJECT_WIKI_DIR
 RAW_DIR = _DATA_DIR.parent / "raw" / "market"
 DB_PATH = MARKET_DB
+
+
+def _ensure_default_wiki_dir_has_vault() -> None:
+    """Default SkillWiki-backed wiki dir must resolve before write operations."""
+    if WIKI_DIR == _PROJECT_WIKI_DIR:
+        _require_project_wiki_dir()
+
 
 class WikiSync:
     def __init__(self):
         RAW_DIR.mkdir(parents=True, exist_ok=True)
+        _ensure_default_wiki_dir_has_vault()
         (WIKI_DIR / "compound").mkdir(parents=True, exist_ok=True)
         self._conn = None
 

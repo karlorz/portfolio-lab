@@ -80,8 +80,10 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
 ## Project Conventions
 
 - **Work item slugs**: `vXX-<feature>` pattern (e.g., `v292-etf-premium-monitor`)
-- **Vault paths**: specs/plans in `/root/wiki/projects/portfolio-lab/work/`,
-  compound pages in `compound/`, ADRs in `architecture/`
+- **Vault paths**: specs/plans go to the active SkillWiki vault returned by
+  `skillwiki path`, under `projects/portfolio-lab/work/`; compound pages go
+  in `projects/portfolio-lab/compound/`, ADRs in `projects/portfolio-lab/architecture/`.
+  Do not use repo-local `wiki/` or `work/` directories.
 - **CLAUDE.md** is canonical implementation status — update after every feature lands
 - **No ML imports without explicit user request** — always default to `PORTFOLIO_LAB_ENABLE_ML=0`
 - **Test safety**: `make test` runs safe suite (ML disabled, 3GB ulimit, ~6000 tests)
