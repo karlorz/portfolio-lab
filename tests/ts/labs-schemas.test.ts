@@ -688,6 +688,87 @@ describe('Labs dashboard data fetch helper', () => {
     expect(data.errors).toEqual([]);
   });
 
+  it('passes an abort signal to indexed Labs index and selected page fetches', async () => {
+    const registryFixture = loadLabsFixture('valid_registry');
+    const registryRow = registryFixture.experiments[0];
+    const firstPagePath = 'labs_registry.page-1.json';
+    const secondPagePath = 'labs_registry.page-2.json';
+    const controller = new AbortController();
+    const secondPagePayload = {
+      ...registryFixture,
+      experiments: [
+        {
+          ...registryRow,
+          experiment_id: 'second-page-experiment',
+          artifact_path: 'data/second_page_experiment.json',
+        },
+      ],
+    };
+    const payloads: Record<string, unknown> = {
+      [PUBLIC_DATA_INDEX_ENDPOINT]: publicIndex([
+        indexEntry('labs_registry.json', {
+          size_bytes: 2_000_000,
+          size_budget: {
+            schema_version: 'public-data-size-budget/v1',
+            status: 'oversized',
+            size_bytes: 2_000_000,
+            row_count: 2000,
+            estimated_parse_ms: 40,
+            warning_bytes: 524288,
+            max_bytes: 1048576,
+            warning_rows: 500,
+            max_rows: 1000,
+            requires_downsampling: true,
+            requires_pagination: true,
+            render_strategy: 'paginate',
+          },
+          pagination: {
+            total_rows: 2000,
+            page_size: 1,
+            page_count: 2,
+            pages: [
+              { page: 1, path: firstPagePath, row_count: 1 },
+              { page: 2, path: secondPagePath, row_count: 1 },
+            ],
+          },
+        }),
+      ]),
+      [`/data/${secondPagePath}`]: secondPagePayload,
+    };
+    const observed: Array<{ url: string; signal: AbortSignal | null }> = [];
+    const fetcher = async (url: string, init?: RequestInit) => {
+      observed.push({ url, signal: init?.signal ?? null });
+      return new Response(JSON.stringify(payloads[url]), { status: 200 });
+    };
+
+    await fetchLabsDashboardDataFromIndex(fetcher, {
+      selectedPages: { registry: 2 },
+      signal: controller.signal,
+    });
+
+    expect(observed).toEqual([
+      { url: PUBLIC_DATA_INDEX_ENDPOINT, signal: controller.signal },
+      { url: `/data/${secondPagePath}`, signal: controller.signal },
+    ]);
+  });
+
+  it('propagates AbortError from indexed Labs fetches as cancellation', async () => {
+    const abortError = Object.assign(new Error('request aborted'), { name: 'AbortError' });
+    const controller = new AbortController();
+    const fetcher = async () => {
+      throw abortError;
+    };
+    let caught: unknown;
+
+    try {
+      await fetchLabsDashboardDataFromIndex(fetcher, { signal: controller.signal });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(abortError);
+  });
+
   it('surfaces missing paginated Labs page shards as endpoint diagnostics', async () => {
     const pagePath = 'labs_registry.page-1.json';
     const payloads: Record<string, unknown> = {

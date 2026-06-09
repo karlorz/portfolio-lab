@@ -39,10 +39,11 @@ const LABS_ENDPOINT_FILENAMES: Record<LabsEndpointKey, string> = {
   validation: 'labs_validation.json',
 };
 
-type LabsFetcher = (url: string) => Promise<Response>;
+type LabsFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface LabsDashboardFetchOptions {
   selectedPages?: Partial<Record<LabsEndpointKey, number>>;
+  signal?: AbortSignal;
 }
 
 interface EndpointResult<T> {
@@ -102,16 +103,33 @@ function hasJsonContentType(response: Response): boolean {
   return contentType.includes('application/json') || contentType.includes('+json');
 }
 
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { name?: unknown }).name === 'AbortError'
+  );
+}
+
+function requestInitFor(options: LabsDashboardFetchOptions = {}): RequestInit | undefined {
+  return options.signal ? { signal: options.signal } : undefined;
+}
+
 async function fetchLabsEndpoint<T>(
   fetcher: LabsFetcher,
   key: LabsEndpointKey | string,
   schema: z.ZodType<T>,
   url: string = LABS_DASHBOARD_ENDPOINTS[key as LabsEndpointKey],
+  options: LabsDashboardFetchOptions = {},
 ): Promise<EndpointResult<T>> {
   let response: Response;
   try {
-    response = await fetcher(url);
+    response = await fetcher(url, requestInitFor(options));
   } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
     return {
       data: null,
       missing: true,
@@ -179,22 +197,31 @@ function buildLabsDashboardData(
   return validated.success ? validated.data : { ...buildEmptyLabsDashboardData(missing), errors, endpoint_status: endpointStatus };
 }
 
-export async function fetchLabsDashboardData(fetcher: LabsFetcher = fetch): Promise<LabsDashboardData> {
+export async function fetchLabsDashboardData(
+  fetcher: LabsFetcher = fetch,
+  options: LabsDashboardFetchOptions = {},
+): Promise<LabsDashboardData> {
   const [registry, scorecards, replays, validation] = await Promise.all([
-    fetchLabsEndpoint(fetcher, 'registry', LabsRegistrySchema),
-    fetchLabsEndpoint(fetcher, 'scorecards', z.array(LabsScorecardSchema)),
-    fetchLabsEndpoint(fetcher, 'replays', z.array(LabsReplaySchema)),
-    fetchLabsEndpoint(fetcher, 'validation', LabsValidationReportSchema),
+    fetchLabsEndpoint(fetcher, 'registry', LabsRegistrySchema, LABS_DASHBOARD_ENDPOINTS.registry, options),
+    fetchLabsEndpoint(fetcher, 'scorecards', z.array(LabsScorecardSchema), LABS_DASHBOARD_ENDPOINTS.scorecards, options),
+    fetchLabsEndpoint(fetcher, 'replays', z.array(LabsReplaySchema), LABS_DASHBOARD_ENDPOINTS.replays, options),
+    fetchLabsEndpoint(fetcher, 'validation', LabsValidationReportSchema, LABS_DASHBOARD_ENDPOINTS.validation, options),
   ]);
 
   return buildLabsDashboardData(registry, scorecards, replays, validation);
 }
 
-async function fetchPublicDataIndex(fetcher: LabsFetcher): Promise<PublicDataIndexData | null> {
+async function fetchPublicDataIndex(
+  fetcher: LabsFetcher,
+  options: LabsDashboardFetchOptions = {},
+): Promise<PublicDataIndexData | null> {
   let response: Response;
   try {
-    response = await fetcher(PUBLIC_DATA_INDEX_ENDPOINT);
-  } catch {
+    response = await fetcher(PUBLIC_DATA_INDEX_ENDPOINT, requestInitFor(options));
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
     return null;
   }
   if (!response.ok) {
@@ -266,6 +293,7 @@ function isExperimentDiffEntry(entry: PublicDataIndexEntry): boolean {
 async function fetchIndexedExperimentDiffs(
   fetcher: LabsFetcher,
   index: PublicDataIndexData,
+  options: LabsDashboardFetchOptions = {},
 ): Promise<EndpointResult<LabsExperimentDiffData[]>> {
   const entries = index.entries.filter(isExperimentDiffEntry);
   if (entries.length === 0) {
@@ -279,6 +307,7 @@ async function fetchIndexedExperimentDiffs(
       `diff:${entry.filename}`,
       LabsExperimentDiffSchema,
       dataUrlForIndexEntry(entry),
+      options,
     ),
   })));
 
@@ -350,7 +379,7 @@ async function fetchIndexedLabsEndpoint<T>(
       : entry.pagination?.pages.find((candidate) => candidate.page === selectedPage);
     status.selected_page = page?.page ?? selectedPage;
     if (page) {
-      const pageResult = await fetchLabsEndpoint(fetcher, key, schema, dataUrlForPath(page.path));
+      const pageResult = await fetchLabsEndpoint(fetcher, key, schema, dataUrlForPath(page.path), options);
       return {
         result: pageResult.missing
           ? skippedEndpoint<T>(
@@ -376,7 +405,7 @@ async function fetchIndexedLabsEndpoint<T>(
   }
 
   return {
-    result: await fetchLabsEndpoint(fetcher, key, schema, dataUrlForIndexEntry(entry)),
+    result: await fetchLabsEndpoint(fetcher, key, schema, dataUrlForIndexEntry(entry), options),
     status,
   };
 }
@@ -385,9 +414,9 @@ export async function fetchLabsDashboardDataFromIndex(
   fetcher: LabsFetcher = fetch,
   options: LabsDashboardFetchOptions = {},
 ): Promise<LabsDashboardData> {
-  const index = await fetchPublicDataIndex(fetcher);
+  const index = await fetchPublicDataIndex(fetcher, options);
   if (!index) {
-    return fetchLabsDashboardData(fetcher);
+    return fetchLabsDashboardData(fetcher, options);
   }
 
   const entriesByFilename = new Map(index.entries.map((entry) => [entry.filename, entry]));
@@ -396,7 +425,7 @@ export async function fetchLabsDashboardDataFromIndex(
     fetchIndexedLabsEndpoint(fetcher, 'scorecards', z.array(LabsScorecardSchema), entriesByFilename, options),
     fetchIndexedLabsEndpoint(fetcher, 'replays', z.array(LabsReplaySchema), entriesByFilename, options),
     fetchIndexedLabsEndpoint(fetcher, 'validation', LabsValidationReportSchema, entriesByFilename, options),
-    fetchIndexedExperimentDiffs(fetcher, index),
+    fetchIndexedExperimentDiffs(fetcher, index, options),
   ]);
 
   const endpointStatus = [registry, scorecards, replays, validation]

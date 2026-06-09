@@ -612,6 +612,15 @@ function formatEndpointStatus(status: LabsEndpointStatus): string {
     : `${status.endpoint}: ${status.render_strategy}`;
 }
 
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { name?: unknown }).name === 'AbortError'
+  );
+}
+
 export function LabsPanel() {
   const [data, setData] = useState<LabsDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -621,9 +630,10 @@ export function LabsPanel() {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setLoading(true);
 
-    fetchLabsDashboardDataFromIndex(fetch, { selectedPages })
+    fetchLabsDashboardDataFromIndex(fetch, { selectedPages, signal: controller.signal })
       .then((nextData) => {
         if (!active) return;
         setData(nextData);
@@ -631,6 +641,7 @@ export function LabsPanel() {
       })
       .catch((error) => {
         if (!active) return;
+        if (isAbortError(error)) return;
         setLoadError(`Labs data unavailable: ${String(error)}`);
       })
       .finally(() => {
@@ -639,6 +650,7 @@ export function LabsPanel() {
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [selectedPages]);
 
