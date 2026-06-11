@@ -4,6 +4,7 @@ __all__ = [
     "behavioral_sentiment_fetcher",
     "factor_data",
     "fred_data",
+    "market_db_sync",
     "reddit_sentiment_fetcher",
     "vix_futures",
 ]

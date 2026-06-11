@@ -609,6 +609,8 @@ const CronJobStatusSchema = z.object({
 const DataFreshnessSchema = z.object({
   last_update: z.string(),
   days_stale: z.number(),
+  market_lag_days: z.optional(z.number()),
+  latest_available_market_date: z.optional(z.nullable(z.string())),
   status: z.enum(['fresh', 'stale', 'critical']),
 });
 
@@ -803,7 +805,7 @@ export function validateSignalsData(raw: unknown): SignalsData | null {
   }
   // Fallback: try to use raw data as-is if it looks like a timestamped object
   if (isPlainRecord(normalized) && typeof normalized.timestamp === 'string') {
-    return normalized as SignalsData;
+    return normalized as unknown as SignalsData;
   }
   return null;
 }

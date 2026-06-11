@@ -161,21 +161,27 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
             <h4>Data Freshness</h4>
             <div className="freshness-grid">
               {Object.entries(health.data_freshness || {})
-                .sort(([, a], [, b]) => (a.days_stale || 0) - (b.days_stale || 0))
-                .map(([symbol, data]) => (
-                  <div 
-                    key={symbol} 
-                    className={`freshness-item status-${data.status}`}
-                  >
-                    <span className="symbol">{symbol}</span>
-                    <span 
-                      className="status-dot"
-                      style={{ backgroundColor: getStatusColor(data.status) }}
-                    ></span>
-                    <span className="days">{data.days_stale}d</span>
-                    <span className="date">{data.last_update}</span>
-                  </div>
+                .sort(([, a], [, b]) => (
+                  (a.market_lag_days ?? a.days_stale ?? 0) - (b.market_lag_days ?? b.days_stale ?? 0)
                 ))
+                .map(([symbol, data]) => {
+                  const lagDays = data.market_lag_days ?? data.days_stale;
+                  return (
+                    <div
+                      key={symbol}
+                      className={`freshness-item status-${data.status}`}
+                      title={`Calendar age: ${data.days_stale}d`}
+                    >
+                      <span className="symbol">{symbol}</span>
+                      <span
+                        className="status-dot"
+                        style={{ backgroundColor: getStatusColor(data.status) }}
+                      ></span>
+                      <span className="days">{lagDays}d lag</span>
+                      <span className="date">{data.last_update}</span>
+                    </div>
+                  );
+                })
               }
             </div>
           </div>

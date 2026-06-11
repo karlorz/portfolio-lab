@@ -24,6 +24,10 @@ async function main() {
   // 1. Fetch price data (Yahoo Finance v8)
   console.log(`Fetching ${SYMBOLS.length} symbols from ${START_DATE} to ${END_DATE}...\n`);
   const priceData = await fetchAllData(SYMBOLS, START_DATE, END_DATE);
+  const missingSymbols = SYMBOLS.filter(symbol => !priceData[symbol]?.length);
+  if (missingSymbols.length > 0) {
+    throw new Error(`No price rows returned for configured symbols: ${missingSymbols.join(', ')}`);
+  }
 
   // Convert to compact format: { symbol: [{d, p}, ...] }
   const compact: Record<string, { d: string; p: number }[]> = {};
@@ -40,16 +44,23 @@ async function main() {
   console.log(`\nSaved ${Object.keys(compact).length} symbols (${totalDays} total data points) → ${pricesPath}`);
   console.log(`Saved compact price mirror → ${pricesCompactPath}`);
 
-  // 2. Fetch yield curve data (FRED)
+  // 2. Sync fetched prices into canonical SQLite store for dashboard freshness checks
+  console.log('\nSyncing fetched prices into market.db...');
+  const { execSync } = await import('child_process');
+  execSync('python3 -m src.data.market_db_sync', {
+    cwd: join(import.meta.dir, '..'),
+    stdio: 'inherit',
+  });
+
+  // 3. Fetch yield curve data (FRED)
   const yieldData = await fetchYieldCurveData(START_DATE, END_DATE);
   const yieldsPath = join(DATA_DIR, 'yields.json');
   await Bun.write(yieldsPath, JSON.stringify(yieldData, null, 2));
   console.log(`Saved ${yieldData.length} yield observations → ${yieldsPath}`);
 
-  // 3. Regenerate dashboard JSON
+  // 4. Regenerate dashboard JSON
   console.log('\nRegenerating dashboard JSON...');
   try {
-    const { execSync } = await import('child_process');
     execSync('python3 -m src.dashboard.generator', {
       cwd: join(import.meta.dir, '..'),
       stdio: 'inherit',

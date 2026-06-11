@@ -105,6 +105,15 @@ def _compact_health_summary(report: Dict) -> Dict:
     return summary
 
 
+def _classify_market_data_freshness(market_lag_days: int) -> str:
+    """Classify a symbol by lag versus the provider's latest available date."""
+    if market_lag_days <= 1:
+        return "fresh"
+    if market_lag_days <= 3:
+        return "stale"
+    return "critical"
+
+
 def _log_signal_error(signal_name: str, exc: Exception) -> None:
     """Log a signal exception at the appropriate level.
 
@@ -1611,6 +1620,19 @@ class DashboardGenerator:
         
         # Get data freshness from SQLite
         cursor = self.conn.cursor()
+        cursor.execute("SELECT MAX(date) FROM prices")
+        latest_market_date = cursor.fetchone()[0]
+        latest_market_dt = None
+        if latest_market_date:
+            try:
+                latest_market_dt = datetime.strptime(latest_market_date, "%Y-%m-%d")
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    "Failed to parse latest market freshness date '%s': %s",
+                    latest_market_date,
+                    e,
+                )
+
         cursor.execute("""
             SELECT symbol, MAX(date) as last_date 
             FROM prices 
@@ -1622,10 +1644,17 @@ class DashboardGenerator:
                 try:
                     last_dt = datetime.strptime(last_date, "%Y-%m-%d")
                     days_stale = (datetime.now() - last_dt).days
+                    market_lag_days = (
+                        max((latest_market_dt - last_dt).days, 0)
+                        if latest_market_dt is not None
+                        else days_stale
+                    )
                     health_data["data_freshness"][sym] = {
                         "last_update": last_date,
                         "days_stale": days_stale,
-                        "status": "fresh" if days_stale <= 1 else "stale" if days_stale <= 3 else "critical"
+                        "market_lag_days": market_lag_days,
+                        "latest_available_market_date": latest_market_date,
+                        "status": _classify_market_data_freshness(market_lag_days)
                     }
                 except (ValueError, TypeError) as e:
                     logger.warning("Failed to parse data freshness date '%s': %s", last_date, e)

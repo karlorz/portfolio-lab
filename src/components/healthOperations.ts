@@ -54,9 +54,15 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
 
   const topCauses = freshnessEntries
     .filter(([, data]) => data.status !== 'fresh')
-    .sort(([, a], [, b]) => (b.days_stale || 0) - (a.days_stale || 0))
+    .sort(([, a], [, b]) => (
+      (b.market_lag_days ?? b.days_stale ?? 0) - (a.market_lag_days ?? a.days_stale ?? 0)
+    ))
     .slice(0, 5)
-    .map(([symbol, data]) => `${symbol} stale ${data.days_stale}d (last update ${data.last_update})`);
+    .map(([symbol, data]) => {
+      const lagDays = data.market_lag_days ?? data.days_stale;
+      const lagLabel = data.market_lag_days === undefined ? 'stale' : 'market lag';
+      return `${symbol} ${lagLabel} ${lagDays}d (last update ${data.last_update})`;
+    });
 
   return {
     headline,

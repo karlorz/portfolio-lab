@@ -13,6 +13,24 @@ describe('dashboard delivery source contracts', () => {
     expect(source).toMatch(/Bun\.write\([^)]*pricesCompactPath/);
   });
 
+  it('syncs fetched prices into market.db before regenerating dashboard health', () => {
+    const source = read('scripts/fetch-data.ts');
+    const syncIndex = source.indexOf('python3 -m src.data.market_db_sync');
+    const generatorIndex = source.indexOf('python3 -m src.dashboard.generator');
+
+    expect(syncIndex).toBeGreaterThan(-1);
+    expect(generatorIndex).toBeGreaterThan(-1);
+    expect(syncIndex).toBeLessThan(generatorIndex);
+  });
+
+  it('fails the data job when any configured price symbol returns no rows', () => {
+    const source = read('scripts/fetch-data.ts');
+
+    expect(source).toContain('missingSymbols');
+    expect(source).toMatch(/SYMBOLS\.filter\([^)]*priceData\[symbol\]/);
+    expect(source).toMatch(/throw new Error\([^)]*missingSymbols/);
+  });
+
   it('keeps mobile portfolio selector children from forcing document-level overflow', () => {
     const css = read('src/App.css');
 

@@ -272,6 +272,8 @@ export interface SchedulerBackendStatus {
 export interface DataFreshness {
   last_update: string;
   days_stale: number;
+  market_lag_days?: number;
+  latest_available_market_date?: string | null;
   status: 'fresh' | 'stale' | 'critical';
 }
 

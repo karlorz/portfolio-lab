@@ -376,6 +376,64 @@ class TestHealthJSON:
         assert "SPY" in data["data_freshness"]
         gen.conn.close()
 
+    def test_provider_latest_date_symbols_are_fresh_even_with_calendar_lag(self, tmp_path):
+        """Freshness status is relative to the provider's latest available date."""
+        db_path = tmp_path / "market.db"
+        provider_latest = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))"
+        )
+        for symbol in ("SPY", "GLD", "TLT"):
+            conn.execute("INSERT INTO prices VALUES (?, ?, ?)", (symbol, provider_latest, 100.0))
+        conn.commit()
+        conn.close()
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        gen.conn = sqlite3.connect(str(db_path))
+        gen.conn.row_factory = sqlite3.Row
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_health_json()
+
+        with open(path) as f:
+            data = json.load(f)
+        assert {item["status"] for item in data["data_freshness"].values()} == {"fresh"}
+        assert data["data_freshness"]["SPY"]["days_stale"] >= 2
+        assert data["data_freshness"]["SPY"]["market_lag_days"] == 0
+        assert data["data_freshness"]["SPY"]["latest_available_market_date"] == provider_latest
+        gen.conn.close()
+
+    def test_symbol_lagging_provider_latest_date_is_critical(self, tmp_path):
+        """A symbol behind the provider's latest date should still be flagged."""
+        db_path = tmp_path / "market.db"
+        provider_latest = datetime.now() - timedelta(days=2)
+        lagging_date = provider_latest - timedelta(days=5)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))"
+        )
+        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", provider_latest.strftime("%Y-%m-%d"), 100.0))
+        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("GLD", lagging_date.strftime("%Y-%m-%d"), 100.0))
+        conn.commit()
+        conn.close()
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        gen.conn = sqlite3.connect(str(db_path))
+        gen.conn.row_factory = sqlite3.Row
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_health_json()
+
+        with open(path) as f:
+            data = json.load(f)
+        assert data["data_freshness"]["SPY"]["status"] == "fresh"
+        assert data["data_freshness"]["GLD"]["status"] == "critical"
+        assert data["data_freshness"]["GLD"]["market_lag_days"] == 5
+        gen.conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Broker data tests

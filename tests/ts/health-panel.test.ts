@@ -33,4 +33,39 @@ describe('HealthPanel operations summary', () => {
       'GLD stale 21d (last update 2026-05-21)',
     ]);
   });
+
+  it('uses market lag in data freshness causes when provided', () => {
+    const summary = summarizeHealthOperations({
+      system_status: 'warning',
+      generated_at: '2026-06-11T11:13:40Z',
+      cron_jobs: [],
+      scheduler_status: {
+        status: 'ok',
+        backends: {
+          local: { backend: 'tasker', status: 'ok', source: 'data/cron_status.json', total_jobs: 15, failed_jobs: 0 },
+        },
+      },
+      data_freshness: {
+        SPY: {
+          last_update: '2026-06-09',
+          days_stale: 2,
+          market_lag_days: 0,
+          latest_available_market_date: '2026-06-09',
+          status: 'fresh',
+        },
+        GLD: {
+          last_update: '2026-06-04',
+          days_stale: 7,
+          market_lag_days: 5,
+          latest_available_market_date: '2026-06-09',
+          status: 'critical',
+        },
+      },
+    } satisfies HealthData);
+
+    expect(summary.dataFreshness.label).toBe('Data freshness critical: 1 critical, 0 stale, 1 fresh');
+    expect(summary.topCauses).toEqual([
+      'GLD market lag 5d (last update 2026-06-04)',
+    ]);
+  });
 });
