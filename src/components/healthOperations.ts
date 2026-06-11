@@ -16,6 +16,11 @@ export interface HealthOperationsSummary {
     critical: number;
     label: string;
   };
+  dataPipelineSlo: {
+    status: string;
+    topDimension: string | null;
+    label: string;
+  } | null;
   topCauses: string[];
 }
 
@@ -42,7 +47,18 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
 
   const schedulerLabel = `Scheduler ${schedulerStatus}: ${totalJobs} scheduled jobs, ${failedJobs} failed`;
   const dataLabel = `Data freshness ${dataStatus}: ${critical} critical, ${stale} stale, ${fresh} fresh`;
-  const primaryCause = dataStatus === 'critical'
+  const slo = health.data_pipeline_slo;
+  const sloStatus = slo?.status ?? null;
+  const sloTopDimension = slo?.top_dimension ?? null;
+  const sloFailingDimensions = Object.entries(slo?.dimensions ?? {})
+    .filter(([, dimension]) => dimension.status !== 'ok')
+    .map(([name, dimension]) => `${name}: ${dimension.message ?? `status ${dimension.status}`}`);
+  const sloLabel = slo
+    ? `Data pipeline SLO ${slo.status}${slo.top_dimension ? `: ${slo.top_dimension}` : ''}`
+    : '';
+  const primaryCause = sloStatus && sloStatus !== 'ok'
+    ? `data pipeline ${sloTopDimension ?? sloStatus}`
+    : dataStatus === 'critical'
     ? 'data freshness critical'
     : dataStatus === 'stale'
       ? 'data freshness stale'
@@ -52,7 +68,7 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
   const headline = `System ${normalizeSystemStatus(health.system_status)}: ${primaryCause}; scheduler ${schedulerStatus}`;
   const headerText = `${headline} (${totalJobs} scheduled jobs, ${failedJobs} failed)`;
 
-  const topCauses = freshnessEntries
+  const freshnessCauses = freshnessEntries
     .filter(([, data]) => data.status !== 'fresh')
     .sort(([, a], [, b]) => (
       (b.market_lag_days ?? b.days_stale ?? 0) - (a.market_lag_days ?? a.days_stale ?? 0)
@@ -63,6 +79,7 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
       const lagLabel = data.market_lag_days === undefined ? 'stale' : 'market lag';
       return `${symbol} ${lagLabel} ${lagDays}d (last update ${data.last_update})`;
     });
+  const topCauses = sloFailingDimensions.length > 0 ? sloFailingDimensions : freshnessCauses;
 
   return {
     headline,
@@ -80,6 +97,11 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
       critical,
       label: dataLabel,
     },
+    dataPipelineSlo: slo ? {
+      status: slo.status,
+      topDimension: slo.top_dimension,
+      label: sloLabel,
+    } : null,
     topCauses,
   };
 }

@@ -639,12 +639,26 @@ const SchedulerStatusSchema = z.object({
   backends: z.record(z.string(), SchedulerBackendSchema),
 }).passthrough();
 
+const DataPipelineSloDimensionSchema = z.object({
+  status: z.enum(['ok', 'warning', 'critical', 'unknown']),
+  message: z.optional(z.string()),
+}).passthrough();
+
+const DataPipelineSloSchema = z.object({
+  schema_version: z.string(),
+  status: z.enum(['ok', 'warning', 'critical', 'unknown']),
+  top_dimension: z.nullable(z.string()),
+  dimensions: z.record(z.string(), DataPipelineSloDimensionSchema),
+  error: z.optional(z.string()),
+}).passthrough();
+
 export const HealthDataSchema = z.object({
   cron_jobs: z.array(CronJobStatusSchema),
   data_freshness: z.record(z.string(), DataFreshnessSchema),
   system_status: z.enum(['healthy', 'warning', 'critical', 'degraded']),
   generated_at: z.string(),
   scheduler_status: z.optional(SchedulerStatusSchema),
+  data_pipeline_slo: z.optional(DataPipelineSloSchema),
   error: z.optional(z.string()),
 }).passthrough();
 

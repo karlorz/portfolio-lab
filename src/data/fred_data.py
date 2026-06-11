@@ -14,6 +14,7 @@ Usage:
 """
 
 import json
+import os
 import sqlite3
 import time
 import logging
@@ -201,6 +202,100 @@ def _set_cached_series(series_id: str, series: pd.Series) -> None:
             )
     except Exception as e:
         logger.warning(f"Failed to cache {series_id}: {e}")
+
+
+def _parse_fred_cache_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def get_fred_md_cache_health(
+    db_path: str | Path = MARKET_DB,
+    *,
+    now: datetime | None = None,
+    ttl_hours: int = FRED_CACHE_TTL_HOURS,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    """Return a read-only FRED-MD cache health summary.
+
+    Status values are intentionally operator-facing:
+    - ``ok``: cache has rows and latest fetch is within TTL
+    - ``stale``: cache has rows but latest fetch is older than TTL
+    - ``empty``: cache table exists but has no rows
+    - ``unavailable``: table/database cannot be read
+    """
+    resolved_now = now or datetime.now(timezone.utc)
+    if resolved_now.tzinfo is None:
+        resolved_now = resolved_now.replace(tzinfo=timezone.utc)
+    resolved_now = resolved_now.astimezone(timezone.utc)
+    api_key_configured = bool(api_key if api_key is not None else os.environ.get("FRED_API_KEY"))
+    base = {
+        "status": "unavailable",
+        "row_count": 0,
+        "latest_fetched_at": None,
+        "age_hours": None,
+        "ttl_hours": ttl_hours,
+        "fredapi_available": FRED_AVAILABLE,
+        "api_key_configured": api_key_configured,
+        "source_mode": "unavailable",
+        "reason": None,
+    }
+
+    try:
+        with sqlite_connect(str(db_path)) as conn:
+            table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (FRED_CACHE_TABLE,),
+            ).fetchone()
+            if table is None:
+                return {**base, "reason": "missing_table"}
+
+            row = conn.execute(
+                f"SELECT COUNT(*) AS row_count, MAX(fetched_at) AS latest_fetched_at FROM {FRED_CACHE_TABLE}",
+            ).fetchone()
+    except sqlite3.Error as exc:
+        return {**base, "reason": f"sqlite_error: {exc}"}
+
+    row_count = int(row[0] or 0) if row else 0
+    latest_raw = row[1] if row else None
+    if row_count == 0:
+        return {
+            **base,
+            "status": "empty",
+            "source_mode": "unavailable",
+            "reason": "empty_cache",
+        }
+
+    latest = _parse_fred_cache_timestamp(latest_raw)
+    if latest is None:
+        return {
+            **base,
+            "row_count": row_count,
+            "latest_fetched_at": latest_raw,
+            "reason": "invalid_latest_fetched_at",
+        }
+
+    age_hours = (resolved_now - latest).total_seconds() / 3600
+    status = "ok" if age_hours <= ttl_hours else "stale"
+    return {
+        **base,
+        "status": status,
+        "row_count": row_count,
+        "latest_fetched_at": latest.isoformat(),
+        "age_hours": round(age_hours, 2),
+        "source_mode": "cached",
+        "reason": None if status == "ok" else "cache_stale",
+    }
 
 
 # ── FRED-MD Fetcher ─────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import sqlite3
 import numpy as np
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -52,6 +52,60 @@ def _make_generator(tmp_path):
     gen.conn = sqlite3.connect(str(db_path))
     gen.conn.row_factory = sqlite3.Row
     return gen, db_path
+
+
+class TestSignalStalenessNormalization:
+    """Signal staleness should distinguish stale from optional unavailable."""
+
+    def test_required_fresh_and_optional_missing_sections_are_not_stale(self, tmp_path):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": fresh},
+        })
+
+        assert result["stale_signals"] == []
+        assert "behavioral_sentiment" in result["unavailable_signals"]
+        assert "two_stage_regime" in result["unavailable_signals"]
+        assert result["signal_timestamps"]["rebalance_health"] == fresh
+        assert result["healthy_count"] == result["required_count"]
+
+    def test_required_stale_signal_remains_stale(self, tmp_path):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+        stale = (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": stale},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": fresh},
+        })
+
+        assert "garch_cvar" in result["stale_signals"]
+        assert result["signal_age_hours"]["garch_cvar"] >= 8
+
+    def test_optional_error_placeholder_is_unavailable_not_stale(self, tmp_path):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": fresh},
+            "two_stage_regime": {"error": "FRED API key unavailable"},
+        })
+
+        assert "two_stage_regime" not in result["stale_signals"]
+        assert "two_stage_regime" in result["unavailable_signals"]
 
 
 # ---------------------------------------------------------------------------

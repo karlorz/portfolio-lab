@@ -130,6 +130,22 @@ def _check_circuit_breaker() -> dict:
         return {"status": "unavailable", "state": None, "fail_count": None, "reset_timeout": None}
 
 
+def _check_fred_md_cache() -> dict:
+    """Check FRED-MD cache availability without making live provider calls."""
+    try:
+        from src.data.fred_data import get_fred_md_cache_health
+
+        return get_fred_md_cache_health()
+    except ImportError as exc:
+        return {
+            "status": "unavailable",
+            "row_count": 0,
+            "latest_fetched_at": None,
+            "age_hours": None,
+            "reason": str(exc),
+        }
+
+
 def _compute_system_status(checks: dict, circuit: dict) -> str:
     """Derive overall system status from component checks."""
     statuses = []
@@ -141,7 +157,13 @@ def _compute_system_status(checks: dict, circuit: dict) -> str:
 
     if "error" in statuses or "missing" in statuses:
         return "degraded"
-    if "stale" in statuses or "degraded" in statuses or "warning" in statuses or "unavailable" in statuses:
+    if (
+        "stale" in statuses
+        or "empty" in statuses
+        or "degraded" in statuses
+        or "warning" in statuses
+        or "unavailable" in statuses
+    ):
         return "warning"
     if all(s == "ok" for s in statuses):
         return "ok"
@@ -152,6 +174,8 @@ def run_health_check() -> dict:
     """Run all health checks and return a structured report."""
     freshness = _check_data_freshness()
     circuit = _check_circuit_breaker()
+    fred_md_cache = _check_fred_md_cache()
+    freshness["fred_md_cache"] = fred_md_cache
     system_status = _compute_system_status(freshness, circuit)
 
     report = {

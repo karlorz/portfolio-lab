@@ -42,6 +42,40 @@ describe('Labs artifact schemas', () => {
     expect(schemas.LabsExperimentDiffSchema.safeParse(loadLabsFixture('valid_experiment_diff')).success).toBe(true);
   });
 
+  it('accepts optional public data source metadata for market artifacts', () => {
+    const result = LabsSchemas.PublicDataIndexSchema.safeParse({
+      schema_version: 'public-data-index/v1',
+      generated_at: '2026-06-11T00:00:00Z',
+      entries: [
+        {
+          filename: 'prices.json',
+          path: 'prices.json',
+          category: 'market_data',
+          schema_version: 'prices/compact-v1',
+          status: 'present',
+          validation_status: 'not_applicable',
+          validation_errors: [],
+          size_bytes: 123,
+          size_budget: { render_strategy: 'direct' },
+          sha256: 'a'.repeat(64),
+          generated_at: '2026-06-11T00:00:00Z',
+          source_manifest_path: 'source_manifest.json',
+          source_metadata: {
+            provider: 'Yahoo Finance',
+            feed: 'chart/v8',
+            source_mode: 'live',
+            status: 'success',
+            fetched_at: '2026-06-11T00:00:00Z',
+            latest_observation: '2026-06-10',
+            row_count: 1,
+          },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it('accepts generated registry metadata without allowing unrelated fields', () => {
     const registry = {
       ...loadLabsFixture('valid_registry'),

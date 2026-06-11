@@ -12,6 +12,7 @@ from src.monitor.health_check import (
     run_health_check,
     _check_data_freshness,
     _check_circuit_breaker,
+    _check_fred_md_cache,
     _compute_system_status,
     HEALTH_PATH,
 )
@@ -158,6 +159,16 @@ class TestComputeSystemStatus:
         circuit = {"status": "ok"}
         assert _compute_system_status(checks, circuit) == "warning"
 
+    def test_empty_cache_component_warns(self):
+        """Empty cache components should produce warning system status."""
+        checks = {
+            "prices": {"status": "ok"},
+            "signals": {"status": "ok"},
+            "fred_md_cache": {"status": "empty"},
+        }
+        circuit = {"status": "ok"}
+        assert _compute_system_status(checks, circuit) == "warning"
+
 
 class TestRunHealthCheck:
     """Test full health check execution."""
@@ -166,6 +177,10 @@ class TestRunHealthCheck:
         """run_health_check should return a structured report."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
+        monkeypatch.setattr(
+            "src.monitor.health_check._check_fred_md_cache",
+            lambda: {"status": "ok", "row_count": 1, "latest_fetched_at": "2026-06-11T00:00:00+00:00"},
+        )
 
         # Create minimal data files
         (tmp_path / "prices.json").write_text("{}")
@@ -178,6 +193,14 @@ class TestRunHealthCheck:
         assert "checks" in report
         assert "service" in report
         assert report["service"] == "portfolio-lab"
+        assert report["checks"]["data_freshness"]["fred_md_cache"]["status"] == "ok"
+
+    def test_fred_md_cache_check_degrades_without_dependency_crash(self):
+        """FRED-MD cache helper should always return a status dictionary."""
+        result = _check_fred_md_cache()
+
+        assert "status" in result
+        assert "row_count" in result
 
     def test_writes_health_json(self, tmp_path, monkeypatch):
         """run_health_check should write health.json to disk."""

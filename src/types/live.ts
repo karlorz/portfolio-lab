@@ -238,7 +238,22 @@ export interface HealthData {
   system_status: 'healthy' | 'warning' | 'critical' | 'degraded';
   generated_at: string;
   scheduler_status?: SchedulerStatus;
+  data_pipeline_slo?: DataPipelineSlo;
   error?: string;
+}
+
+export interface DataPipelineSlo {
+  schema_version: string;
+  status: 'ok' | 'warning' | 'critical' | 'unknown';
+  top_dimension: string | null;
+  dimensions: Record<string, DataPipelineSloDimension>;
+  error?: string;
+}
+
+export interface DataPipelineSloDimension {
+  status: 'ok' | 'warning' | 'critical' | 'unknown';
+  message?: string;
+  [key: string]: unknown;
 }
 
 export interface CronJobStatus {

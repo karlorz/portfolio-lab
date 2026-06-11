@@ -148,7 +148,23 @@ def generate() -> dict[str, Any]:
         },
         "execution_history": execution_times,
         "total_executions": len(history),
+        "market_data_consistency": _generate_market_data_consistency(),
     }
+
+
+def _generate_market_data_consistency() -> dict[str, Any]:
+    """Generate read-only broker/local data consistency diagnostics."""
+    try:
+        from src.monitor.market_data_consistency import broker_market_data_consistency_report
+
+        return broker_market_data_consistency_report()
+    except (ImportError, RuntimeError, OSError, ValueError, TypeError) as exc:
+        return {
+            "status": "unavailable",
+            "reason": str(exc),
+            "rows": [],
+            "warnings": [],
+        }
 
 
 def main():

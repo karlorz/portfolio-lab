@@ -4,6 +4,8 @@
  * FRED API for Treasury yield curve data
  */
 
+import type { MarketDataSourceMode, MarketDataSourceStatus } from './source_manifest';
+
 export interface HistoricalPrice {
   date: string;
   open: number;
@@ -21,6 +23,107 @@ export interface TreasuryYield {
   dgs30: number;  // 30-Year Treasury Yield
   spread2s10s: number;  // 2s10s spread (basis points)
   spread10s30s: number; // 10s30s spread (basis points)
+}
+
+export type YahooFetchFailureReason =
+  | 'rate_limited'
+  | 'timeout'
+  | 'no_data'
+  | 'malformed_payload'
+  | 'network_error'
+  | 'unknown';
+
+export interface YahooFetchOptions {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  maxAttempts?: number;
+  backoffMs?: number;
+}
+
+export interface FetchAllDataOptions extends YahooFetchOptions {
+  delayMs?: number;
+  circuitBreakerFailureThreshold?: number;
+}
+
+export interface SymbolFetchSummary {
+  symbol: string;
+  status: MarketDataSourceStatus;
+  source_mode: MarketDataSourceMode;
+  rows: number;
+  latest_observation: string | null;
+  attempts: number;
+  fetched_at: string;
+  failure_reason?: YahooFetchFailureReason;
+  error?: string;
+}
+
+export interface YahooProviderSummary {
+  provider: 'Yahoo Finance';
+  feed: 'chart/v8';
+  status: MarketDataSourceStatus;
+  source_mode: MarketDataSourceMode;
+  fetched_at: string;
+  symbols: SymbolFetchSummary[];
+  failure_counts: Partial<Record<YahooFetchFailureReason, number>>;
+  circuit_breaker: {
+    opened: boolean;
+    reason: YahooFetchFailureReason | null;
+    skipped_symbols: string[];
+  };
+}
+
+export interface FetchAllDataResult {
+  data: { [symbol: string]: HistoricalPrice[] };
+  summary: YahooProviderSummary;
+}
+
+export type FredFailureReason =
+  | 'missing_api_key'
+  | 'rate_limited'
+  | 'timeout'
+  | 'malformed_payload'
+  | 'network_error'
+  | 'api_error'
+  | 'unknown';
+
+export interface FredFetchOptions {
+  fetchImpl?: typeof fetch;
+}
+
+export interface FredSeriesSummary {
+  series_id: string;
+  status: MarketDataSourceStatus;
+  source_mode: MarketDataSourceMode;
+  rows: number;
+  latest_observation: string | null;
+  fetched_at: string;
+  failure_reason?: FredFailureReason;
+}
+
+export interface FredYieldSummary {
+  provider: 'FRED';
+  feed: 'series/observations';
+  status: MarketDataSourceStatus;
+  source_mode: MarketDataSourceMode;
+  fetched_at: string;
+  series: FredSeriesSummary[];
+}
+
+export interface FetchYieldCurveDataResult {
+  data: TreasuryYield[];
+  summary: FredYieldSummary;
+}
+
+export class YahooFetchError extends Error {
+  reason: YahooFetchFailureReason;
+  attempts: number;
+
+  constructor(reason: YahooFetchFailureReason, message: string, attempts: number = 1) {
+    super(message);
+    this.name = 'YahooFetchError';
+    this.reason = reason;
+    this.attempts = attempts;
+  }
 }
 
 // Core portfolio symbols
@@ -75,32 +178,70 @@ const FRED_SERIES = {
   dgs30: 'DGS30',
 };
 
-/**
- * Fetch historical data from Yahoo Finance v8 chart API
- */
-export async function fetchYahooV8(
-  symbol: string,
-  startDate: string,
-  endDate: string
-): Promise<HistoricalPrice[]> {
-  const period1 = Math.floor(new Date(startDate).getTime() / 1000);
-  const period2 = Math.floor(new Date(endDate).getTime() / 1000);
+function sleep(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
 
-  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`;
+function latestPriceObservation(prices: HistoricalPrice[]): string | null {
+  return prices.length > 0 ? prices[prices.length - 1].date : null;
+}
 
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+function classifyYahooHttpStatus(status: number): YahooFetchFailureReason {
+  if (status === 429) return 'rate_limited';
+  if (status === 404) return 'no_data';
+  return 'unknown';
+}
+
+function classifyYahooThrown(error: unknown): YahooFetchError {
+  if (error instanceof YahooFetchError) {
+    return error;
+  }
+  if (error instanceof Error && error.name === 'AbortError') {
+    return new YahooFetchError('timeout', error.message || 'Yahoo request timed out');
+  }
+  if (error instanceof TypeError) {
+    return new YahooFetchError('network_error', error.message);
+  }
+  if (error instanceof Error) {
+    return new YahooFetchError('unknown', error.message);
+  }
+  return new YahooFetchError('unknown', String(error));
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: YahooFetchOptions,
+): Promise<Response> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function parseYahooChartResponse(response: Response, symbol: string): Promise<HistoricalPrice[]> {
+  let data: { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]; volume?: (number | null)[] }>; adjclose?: Array<{ adjclose?: (number | null)[] }> } }> } };
+  try {
+    data = await response.json() as typeof data;
+  } catch (error) {
+    throw new YahooFetchError('malformed_payload', `Malformed Yahoo payload for ${symbol}: ${error}`);
   }
 
-  const data = await response.json() as { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]; volume?: (number | null)[] }>; adjclose?: Array<{ adjclose?: (number | null)[] }> } }> } };
   const result = data.chart?.result?.[0];
-  if (!result) throw new Error(`No data returned for ${symbol}`);
+  if (!result) throw new YahooFetchError('no_data', `No data returned for ${symbol}`);
 
   const timestamps: number[] = result.timestamp || [];
-  const quote = result.indicators?.quote?.[0] || {};
+  const quote = result.indicators?.quote?.[0];
+  if (!quote) {
+    throw new YahooFetchError('malformed_payload', `Yahoo payload missing quote block for ${symbol}`);
+  }
   const adjclose = result.indicators?.adjclose?.[0]?.adjclose || [];
 
   const prices: HistoricalPrice[] = [];
@@ -121,7 +262,50 @@ export async function fetchYahooV8(
     });
   }
 
+  if (prices.length === 0) {
+    throw new YahooFetchError('no_data', `No usable price rows returned for ${symbol}`);
+  }
   return prices;
+}
+
+/**
+ * Fetch historical data from Yahoo Finance v8 chart API.
+ */
+export async function fetchYahooV8(
+  symbol: string,
+  startDate: string,
+  endDate: string,
+  options: YahooFetchOptions = {},
+): Promise<HistoricalPrice[]> {
+  const period1 = Math.floor(new Date(startDate).getTime() / 1000);
+  const period2 = Math.floor(new Date(endDate).getTime() / 1000);
+
+  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`;
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  const backoffMs = options.backoffMs ?? 500;
+  let lastError: YahooFetchError | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetchWithTimeout(url, options);
+      if (!response.ok) {
+        throw new YahooFetchError(
+          classifyYahooHttpStatus(response.status),
+          `HTTP ${response.status}: ${response.statusText}`,
+          attempt,
+        );
+      }
+      return await parseYahooChartResponse(response, symbol);
+    } catch (error) {
+      lastError = classifyYahooThrown(error);
+      lastError.attempts = attempt;
+      if (attempt < maxAttempts) {
+        await sleep(backoffMs * attempt);
+      }
+    }
+  }
+
+  throw lastError ?? new YahooFetchError('unknown', `Yahoo fetch failed for ${symbol}`, maxAttempts);
 }
 
 /**
@@ -132,23 +316,115 @@ export async function fetchAllData(
   startDate: string = '2005-01-01',
   endDate: string = new Date().toISOString().split('T')[0]
 ): Promise<{ [symbol: string]: HistoricalPrice[] }> {
+  return (await fetchAllDataWithSummary(symbols, startDate, endDate)).data;
+}
+
+/**
+ * Fetch all symbols and return structured provider diagnostics.
+ */
+export async function fetchAllDataWithSummary(
+  symbols: string[] = SYMBOLS,
+  startDate: string = '2005-01-01',
+  endDate: string = new Date().toISOString().split('T')[0],
+  options: FetchAllDataOptions = {},
+): Promise<FetchAllDataResult> {
   const result: { [symbol: string]: HistoricalPrice[] } = {};
+  const summaries: SymbolFetchSummary[] = [];
+  const failureCounts: Partial<Record<YahooFetchFailureReason, number>> = {};
+  const circuitBreakerThreshold = Math.max(1, options.circuitBreakerFailureThreshold ?? 3);
+  const delayMs = options.delayMs ?? 300;
+  let consecutiveRateLimitFailures = 0;
+  let circuitOpened = false;
+  const skippedSymbols: string[] = [];
+  const fetchedAt = new Date().toISOString();
 
   console.log(`Fetching data for ${symbols.length} symbols from Yahoo Finance v8...`);
 
-  for (const symbol of symbols) {
+  for (let idx = 0; idx < symbols.length; idx++) {
+    const symbol = symbols[idx];
+    if (circuitOpened) {
+      skippedSymbols.push(symbol);
+      summaries.push({
+        symbol,
+        status: 'skipped',
+        source_mode: 'live',
+        rows: 0,
+        latest_observation: null,
+        attempts: 0,
+        fetched_at: new Date().toISOString(),
+        failure_reason: 'rate_limited',
+        error: 'Yahoo provider circuit breaker open for this run',
+      });
+      continue;
+    }
+
     try {
       console.log(`  Fetching ${symbol}...`);
-      result[symbol] = await fetchYahooV8(symbol, startDate, endDate);
-      console.log(`  ✓ ${symbol}: ${result[symbol].length} days`);
+      const prices = await fetchYahooV8(symbol, startDate, endDate, options);
+      result[symbol] = prices;
+      summaries.push({
+        symbol,
+        status: 'success',
+        source_mode: 'live',
+        rows: prices.length,
+        latest_observation: latestPriceObservation(prices),
+        attempts: 1,
+        fetched_at: new Date().toISOString(),
+      });
+      consecutiveRateLimitFailures = 0;
+      console.log(`  ✓ ${symbol}: ${prices.length} days`);
       // Rate limit
-      await new Promise(r => setTimeout(r, 300));
+      await sleep(delayMs);
     } catch (error) {
+      const fetchError = classifyYahooThrown(error);
+      failureCounts[fetchError.reason] = (failureCounts[fetchError.reason] ?? 0) + 1;
+      consecutiveRateLimitFailures = fetchError.reason === 'rate_limited'
+        ? consecutiveRateLimitFailures + 1
+        : 0;
+      summaries.push({
+        symbol,
+        status: 'failed',
+        source_mode: 'live',
+        rows: 0,
+        latest_observation: null,
+        attempts: fetchError.attempts,
+        fetched_at: new Date().toISOString(),
+        failure_reason: fetchError.reason,
+        error: fetchError.message,
+      });
       console.error(`  ✗ ${symbol}: ${error}`);
+      if (consecutiveRateLimitFailures >= circuitBreakerThreshold && idx < symbols.length - 1) {
+        circuitOpened = true;
+      }
     }
   }
 
-  return result;
+  const successCount = summaries.filter((summary) => summary.status === 'success').length;
+  const failedCount = summaries.filter((summary) => summary.status === 'failed').length;
+  const skippedCount = summaries.filter((summary) => summary.status === 'skipped').length;
+  const status: MarketDataSourceStatus = failedCount === 0 && skippedCount === 0
+    ? 'success'
+    : successCount > 0
+      ? 'degraded'
+      : 'failed';
+
+  return {
+    data: result,
+    summary: {
+      provider: 'Yahoo Finance',
+      feed: 'chart/v8',
+      status,
+      source_mode: 'live',
+      fetched_at: fetchedAt,
+      symbols: summaries,
+      failure_counts: failureCounts,
+      circuit_breaker: {
+        opened: circuitOpened,
+        reason: circuitOpened ? 'rate_limited' : null,
+        skipped_symbols: skippedSymbols,
+      },
+    },
+  };
 }
 
 /**
@@ -173,43 +449,99 @@ export function convertToBacktestFormat(
 }
 
 /**
- * Fetch Treasury yield data from FRED API
- * FRED API is free, no key required for basic usage
+ * Fetch Treasury yield data from FRED API.
+ * A FRED_API_KEY is required for live FRED observations.
  */
 export async function fetchFredSeries(
   seriesId: string,
   startDate: string,
   endDate: string
 ): Promise<{ date: string; value: number }[]> {
+  return (await fetchFredSeriesWithSummary(seriesId, startDate, endDate)).data;
+}
+
+export async function fetchFredSeriesWithSummary(
+  seriesId: string,
+  startDate: string,
+  endDate: string,
+  options: FredFetchOptions = {},
+): Promise<{ data: { date: string; value: number }[]; summary: FredSeriesSummary }> {
   const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=FRED_API_KEY&file_type=json&observation_start=${startDate}&observation_end=${endDate}`;
 
-  // Note: For demo/development, we'll use cached data or fallback to simulated yields
-  // In production, set FRED_API_KEY environment variable
+  // In production/tasker mode, set FRED_API_KEY for live observations.
   const apiKey = process.env.FRED_API_KEY || '';
+  const fetchedAt = new Date().toISOString();
   if (!apiKey) {
-    console.warn(`FRED_API_KEY not set - using fallback yield data`);
-    return generateFallbackYields(seriesId, startDate, endDate);
+    console.warn(`FRED_API_KEY not set - using deterministic synthetic yield fallback`);
+    const fallback = generateFallbackYields(seriesId, startDate, endDate);
+    return {
+      data: fallback,
+      summary: {
+        series_id: seriesId,
+        status: 'degraded',
+        source_mode: 'synthetic',
+        rows: fallback.length,
+        latest_observation: fallback.length > 0 ? fallback[fallback.length - 1].date : null,
+        fetched_at: fetchedAt,
+        failure_reason: 'missing_api_key',
+      },
+    };
   }
 
   const authUrl = url.replace('FRED_API_KEY', apiKey);
 
   try {
-    const response = await fetch(authUrl);
-    if (!response.ok) throw new Error(`FRED API error: ${response.status}`);
+    const response = await (options.fetchImpl ?? fetch)(authUrl);
+    if (!response.ok) {
+      const reason: FredFailureReason = response.status === 429 ? 'rate_limited' : 'api_error';
+      throw Object.assign(new Error(`FRED API error: ${response.status}`), { reason });
+    }
 
     const data = await response.json() as {
       observations: Array<{ date: string; value: string }>;
     };
 
-    return data.observations
+    if (!Array.isArray(data.observations)) {
+      throw Object.assign(new Error('FRED payload missing observations array'), { reason: 'malformed_payload' });
+    }
+
+    const rows = data.observations
       .filter(obs => obs.value !== '.')
       .map(obs => ({
         date: obs.date,
         value: parseFloat(obs.value),
       }));
+    return {
+      data: rows,
+      summary: {
+        series_id: seriesId,
+        status: 'success',
+        source_mode: 'live',
+        rows: rows.length,
+        latest_observation: rows.length > 0 ? rows[rows.length - 1].date : null,
+        fetched_at: fetchedAt,
+      },
+    };
   } catch (error) {
     console.warn(`FRED fetch failed for ${seriesId}: ${error}`);
-    return generateFallbackYields(seriesId, startDate, endDate);
+    const fallback = generateFallbackYields(seriesId, startDate, endDate);
+    const failureReason = typeof error === 'object' && error !== null && 'reason' in error
+      ? (error as { reason: FredFailureReason }).reason
+      : error instanceof TypeError
+        ? 'network_error'
+        : 'unknown';
+    return {
+      data: fallback,
+      summary: {
+        series_id: seriesId,
+        status: 'degraded',
+        source_mode: 'synthetic',
+        rows: fallback.length,
+        latest_observation: fallback.length > 0 ? fallback[fallback.length - 1].date : null,
+        fetched_at: fetchedAt,
+        failure_reason: failureReason,
+      },
+    };
   }
 }
 
@@ -217,7 +549,7 @@ export async function fetchFredSeries(
  * Generate fallback yield data based on historical averages
  * Used when FRED API is unavailable
  */
-function generateFallbackYields(
+export function generateFallbackYields(
   seriesId: string,
   startDate: string,
   endDate: string
@@ -252,8 +584,7 @@ function generateFallbackYields(
     const year = d.getFullYear().toString();
     const baseYield = historicalYields[seriesId]?.[year] ?? 3.0;
 
-    // Add small random variation
-    const variation = (Math.random() - 0.5) * 0.2;
+    const variation = deterministicYieldVariation(seriesId, d.toISOString().split('T')[0]);
 
     results.push({
       date: d.toISOString().split('T')[0],
@@ -264,6 +595,15 @@ function generateFallbackYields(
   return results;
 }
 
+function deterministicYieldVariation(seriesId: string, date: string): number {
+  const key = `${seriesId}:${date}`;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return ((hash % 2001) / 2000 - 0.5) * 0.2;
+}
+
 /**
  * Fetch and calculate yield curve data for all dates
  */
@@ -271,13 +611,24 @@ export async function fetchYieldCurveData(
   startDate: string,
   endDate: string
 ): Promise<TreasuryYield[]> {
+  return (await fetchYieldCurveDataWithSummary(startDate, endDate)).data;
+}
+
+export async function fetchYieldCurveDataWithSummary(
+  startDate: string,
+  endDate: string,
+  options: FredFetchOptions = {},
+): Promise<FetchYieldCurveDataResult> {
   console.log('Fetching Treasury yield data from FRED...');
 
-  const [dgs2Data, dgs10Data, dgs30Data] = await Promise.all([
-    fetchFredSeries(FRED_SERIES.dgs2, startDate, endDate),
-    fetchFredSeries(FRED_SERIES.dgs10, startDate, endDate),
-    fetchFredSeries(FRED_SERIES.dgs30, startDate, endDate),
+  const [dgs2Result, dgs10Result, dgs30Result] = await Promise.all([
+    fetchFredSeriesWithSummary(FRED_SERIES.dgs2, startDate, endDate, options),
+    fetchFredSeriesWithSummary(FRED_SERIES.dgs10, startDate, endDate, options),
+    fetchFredSeriesWithSummary(FRED_SERIES.dgs30, startDate, endDate, options),
   ]);
+  const dgs2Data = dgs2Result.data;
+  const dgs10Data = dgs10Result.data;
+  const dgs30Data = dgs30Result.data;
 
   // Merge by date
   const dateMap = new Map<string, Partial<TreasuryYield>>();
@@ -309,7 +660,21 @@ export async function fetchYieldCurveData(
   }
 
   console.log(`✓ Yield curve data: ${yields.length} days`);
-  return yields.sort((a, b) => a.date.localeCompare(b.date));
+  const sortedYields = yields.sort((a, b) => a.date.localeCompare(b.date));
+  const series = [dgs2Result.summary, dgs10Result.summary, dgs30Result.summary];
+  const hasSynthetic = series.some((summary) => summary.source_mode === 'synthetic');
+  const hasFailure = series.some((summary) => summary.status !== 'success');
+  return {
+    data: sortedYields,
+    summary: {
+      provider: 'FRED',
+      feed: 'series/observations',
+      status: hasFailure ? 'degraded' : 'success',
+      source_mode: hasSynthetic ? 'synthetic' : 'live',
+      fetched_at: new Date().toISOString(),
+      series,
+    },
+  };
 }
 
 /**

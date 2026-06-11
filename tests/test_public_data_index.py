@@ -209,6 +209,55 @@ def test_public_index_hash_cache_preserves_index_output_semantics(tmp_path: Path
     assert cached == uncached
 
 
+def test_public_index_adds_market_source_metadata_from_manifest(tmp_path: Path) -> None:
+    prices = _write_json(tmp_path / "prices.json", {"SPY": [{"d": "2026-06-10", "p": 600.0}]})
+    _write_json(
+        tmp_path / "source_manifest.json",
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [
+                {
+                    "artifact": "prices.json",
+                    "provider": "Yahoo Finance",
+                    "feed": "chart/v8",
+                    "source_mode": "live",
+                    "status": "success",
+                    "fetched_at": "2026-06-11T00:00:00+00:00",
+                    "latest_observation": "2026-06-10",
+                    "row_count": 1,
+                }
+            ],
+        },
+    )
+
+    index = build_public_data_index([prices], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entries = _entries_by_filename(index)
+    assert entries["prices.json"]["source_manifest_path"] == "source_manifest.json"
+    assert entries["prices.json"]["source_metadata"] == {
+        "provider": "Yahoo Finance",
+        "feed": "chart/v8",
+        "source_mode": "live",
+        "status": "success",
+        "fetched_at": "2026-06-11T00:00:00+00:00",
+        "latest_observation": "2026-06-10",
+        "row_count": 1,
+    }
+    assert entries["source_manifest.json"]["schema_version"] == "market-data-source-manifest/v1"
+    assert entries["source_manifest.json"]["category"] == "market_data"
+
+
+def test_public_index_keeps_source_metadata_optional_for_non_market_entries(tmp_path: Path) -> None:
+    dashboard = _write_json(tmp_path / "dashboard.json", {"generated_at": "2026-06-11T00:00:00+00:00"})
+
+    index = build_public_data_index([dashboard], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entry = _entries_by_filename(index)["dashboard.json"]
+    assert "source_manifest_path" not in entry
+    assert "source_metadata" not in entry
+
+
 def test_public_index_generates_labs_registry_page_shards(tmp_path: Path) -> None:
     registry = _write_json(tmp_path / "labs_registry.json", _registry_payload(1001))
 

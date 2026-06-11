@@ -14,7 +14,7 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from enum import Enum
 
@@ -28,7 +28,8 @@ from src.broker.circuit_breaker import (
 )
 
 
-__all__ = ['OrderRequest', 'Order', 'Position', 'AlpacaClient', 'PaperTradingManager',
+__all__ = ['OrderRequest', 'Order', 'Position', 'MarketQuote', 'QuoteStalenessError',
+           'AlpacaClient', 'PaperTradingManager',
            'check_alpaca_status', 'get_circuit_state', 'RampPhase', 'LiveTransitionManager']
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,25 @@ class Position:
         )
 
 
+@dataclass
+class MarketQuote:
+    """Quote used for order sizing with explicit source and age metadata."""
+    symbol: str
+    price: float
+    timestamp: str
+    source: str
+    feed: str
+    age_seconds: float
+    source_mode: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+class QuoteStalenessError(RuntimeError):
+    """Raised when live order sizing would use stale or prior-close data."""
+
+
 class AlpacaClient:
     """
     Alpaca broker client with paper trading support.
@@ -155,24 +175,99 @@ class AlpacaClient:
         """Check if API credentials are available."""
         return bool(self.api_key and self.api_secret)
 
-    def _fetch_price(self, symbol: str, db_path: str = None) -> float:
-        """Fetch latest price from market.db. Returns 0 if unavailable."""
+    def _fetch_price_quote(
+        self,
+        symbol: str,
+        db_path: str = None,
+        *,
+        now: Optional[datetime] = None,
+    ) -> Optional[MarketQuote]:
+        """Fetch latest local close quote from market.db with timestamp metadata."""
         if db_path is None:
             db_path = str(MARKET_DB)
         try:
             if not os.path.exists(db_path):
-                return 0.0
+                return None
             with sqlite_connect(db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+                    "SELECT close, date FROM prices WHERE symbol = ? ORDER BY date DESC LIMIT 1",
                     (symbol,)
                 )
                 row = cursor.fetchone()
-            return float(row[0]) if row else 0.0
+            if not row:
+                return None
+            resolved_now = now or datetime.now(timezone.utc)
+            if resolved_now.tzinfo is None:
+                resolved_now = resolved_now.replace(tzinfo=timezone.utc)
+            close, date_str = row
+            quote_ts = datetime.fromisoformat(f"{date_str}T21:00:00+00:00")
+            age_seconds = max((resolved_now.astimezone(timezone.utc) - quote_ts).total_seconds(), 0.0)
+            return MarketQuote(
+                symbol=symbol,
+                price=float(close),
+                timestamp=quote_ts.isoformat(),
+                source="market_db",
+                feed="yahoo_close",
+                age_seconds=age_seconds,
+                source_mode="prior_close",
+            )
         except sqlite3.Error:
             logger.warning("Failed to fetch price from market.db for %s", symbol)
-            return 0.0
+            return None
+
+    def _fetch_price(self, symbol: str, db_path: str = None) -> float:
+        """Fetch latest price from market.db. Returns 0 if unavailable."""
+        quote = self._fetch_price_quote(symbol, db_path)
+        return quote.price if quote is not None else 0.0
+
+    def get_latest_quote(self, symbol: str, *, now: Optional[datetime] = None) -> Optional[MarketQuote]:
+        """Fetch latest broker quote when Alpaca market data is available.
+
+        The method is best-effort because the Alpaca data SDK is optional in
+        this project. Tests patch this method directly; production falls back
+        to local prior-close data when broker quotes are unavailable.
+        """
+        try:
+            client = self._get_data_client()
+            getter = getattr(client, "get_stock_latest_quote", None)
+            if getter is None:
+                return None
+            quote = getter(symbol)
+            bid = float(getattr(quote, "bid_price", 0) or 0)
+            ask = float(getattr(quote, "ask_price", 0) or 0)
+            price = ask if ask > 0 else bid
+            if bid > 0 and ask > 0:
+                price = (bid + ask) / 2
+            if price <= 0:
+                return None
+            ts = getattr(quote, "timestamp", None) or datetime.now(timezone.utc)
+            if hasattr(ts, "to_pydatetime"):
+                ts = ts.to_pydatetime()
+            if isinstance(ts, str):
+                quote_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            elif isinstance(ts, datetime):
+                quote_dt = ts
+            else:
+                quote_dt = datetime.now(timezone.utc)
+            if quote_dt.tzinfo is None:
+                quote_dt = quote_dt.replace(tzinfo=timezone.utc)
+            resolved_now = now or datetime.now(timezone.utc)
+            if resolved_now.tzinfo is None:
+                resolved_now = resolved_now.replace(tzinfo=timezone.utc)
+            age_seconds = max((resolved_now.astimezone(timezone.utc) - quote_dt.astimezone(timezone.utc)).total_seconds(), 0.0)
+            return MarketQuote(
+                symbol=symbol,
+                price=price,
+                timestamp=quote_dt.astimezone(timezone.utc).isoformat(),
+                source="alpaca",
+                feed="stock_latest_quote",
+                age_seconds=age_seconds,
+                source_mode="live",
+            )
+        except (ImportError, RuntimeError, OSError, ConnectionError, TimeoutError, ValueError, TypeError) as e:
+            logger.debug("Broker quote unavailable for %s: %s", symbol, e)
+            return None
 
     def is_available(self) -> bool:
         """Check if alpaca-py SDK is installed."""
@@ -404,6 +499,60 @@ class PaperTradingManager:
     def is_ready(self) -> bool:
         """Check if paper trading can be activated."""
         return self.client.is_available() and self.client.is_configured()
+
+    def _max_quote_age_seconds(self) -> int:
+        return int(os.environ.get("BROKER_MAX_QUOTE_AGE_SECONDS", "900"))
+
+    def _is_live_order_mode(self, dry_run: bool) -> bool:
+        paper_mode = os.environ.get("ALPACA_PAPER", "true").lower() not in ("false", "0", "no")
+        return not dry_run and not paper_mode
+
+    def _position_quote(self, position: Position) -> MarketQuote:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        return MarketQuote(
+            symbol=position.symbol,
+            price=position.current_price,
+            timestamp=timestamp,
+            source="alpaca_position",
+            feed="positions",
+            age_seconds=0.0,
+            source_mode="live",
+        )
+
+    def _resolve_order_quote(self, symbol: str, *, dry_run: bool) -> Optional[MarketQuote]:
+        """Resolve quote for order sizing, enforcing freshness for live orders."""
+        max_age = self._max_quote_age_seconds()
+        broker_quote = self.client.get_latest_quote(symbol)
+        if broker_quote is not None:
+            if broker_quote.age_seconds <= max_age:
+                return broker_quote
+            broker_quote.source_mode = "delayed"
+            if self._is_live_order_mode(dry_run):
+                raise QuoteStalenessError(
+                    f"Broker quote for {symbol} is stale: {broker_quote.age_seconds:.0f}s > {max_age}s"
+                )
+            return broker_quote
+
+        local_quote = self.client._fetch_price_quote(symbol)
+        if local_quote is None:
+            legacy_price = self.client._fetch_price(symbol)
+            if legacy_price > 0:
+                local_quote = MarketQuote(
+                    symbol=symbol,
+                    price=legacy_price,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    source="market_db",
+                    feed="legacy_latest_close",
+                    age_seconds=0.0,
+                    source_mode="prior_close",
+                )
+        if local_quote is None:
+            return None
+        if self._is_live_order_mode(dry_run):
+            raise QuoteStalenessError(
+                f"Live order sizing for {symbol} requires a fresh broker quote; only prior close is available"
+            )
+        return local_quote
     
     def sync_positions(self) -> Dict[str, Any]:
         """Sync Alpaca positions with local tracking."""
@@ -467,6 +616,7 @@ class PaperTradingManager:
             
             orders_to_submit = []
             orders_submitted = []
+            quote_sources: Dict[str, Dict[str, Any]] = {}
             
             for symbol, target_pct in target_allocations.items():
                 target_value = total_value * target_pct
@@ -482,14 +632,16 @@ class PaperTradingManager:
                     # Calculate shares to trade (rough estimate using current price)
                     qty = abs(delta) / pos.current_price
                     side = OrderSide.BUY if delta > 0 else OrderSide.SELL
+                    quote_sources[symbol] = self._position_quote(pos).to_dict()
                 else:
                     # New position
                     if target_value < 10:
                         continue
-                    estimated_price = self.client._fetch_price(symbol)
-                    if estimated_price <= 0:
+                    quote = self._resolve_order_quote(symbol, dry_run=dry_run)
+                    if quote is None or quote.price <= 0:
                         continue  # Skip if no price available
-                    qty = target_value / estimated_price
+                    quote_sources[symbol] = quote.to_dict()
+                    qty = target_value / quote.price
                     side = OrderSide.BUY
                 
                 order_req = OrderRequest(
@@ -532,6 +684,7 @@ class PaperTradingManager:
                 "orders_planned": [o.to_dict() for o in orders_to_submit],
                 "orders_submitted": orders_submitted if not dry_run else [],
                 "order_count": len(orders_to_submit),
+                "quote_sources": quote_sources,
             }
             
             # Log to file
@@ -541,6 +694,7 @@ class PaperTradingManager:
                     "timestamp": result["timestamp"],
                     "dry_run": dry_run,
                     "orders": result["orders_planned"],
+                    "quote_sources": quote_sources,
                 }) + "\n")
             
             return result

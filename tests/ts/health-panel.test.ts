@@ -68,4 +68,36 @@ describe('HealthPanel operations summary', () => {
       'GLD market lag 5d (last update 2026-06-04)',
     ]);
   });
+
+  it('prefers explicit data pipeline SLO causes when present', () => {
+    const summary = summarizeHealthOperations({
+      system_status: 'warning',
+      generated_at: '2026-06-11T11:13:40Z',
+      cron_jobs: [],
+      scheduler_status: {
+        status: 'ok',
+        backends: {
+          local: { backend: 'tasker', status: 'ok', source: 'data/cron_status.json', total_jobs: 15, failed_jobs: 0 },
+        },
+      },
+      data_freshness: {
+        SPY: { last_update: '2026-06-11', days_stale: 0, status: 'fresh' },
+      },
+      data_pipeline_slo: {
+        schema_version: 'data-pipeline-slo/v1',
+        status: 'warning',
+        top_dimension: 'provider',
+        dimensions: {
+          provider: { status: 'warning', message: 'provider degraded for prices.json' },
+          scheduler: { status: 'ok', message: 'scheduler ok' },
+          artifact: { status: 'ok', message: 'artifacts fresh' },
+          signal: { status: 'ok', message: 'required signals fresh' },
+        },
+      },
+    } satisfies HealthData);
+
+    expect(summary.headline).toBe('System warning: data pipeline provider; scheduler ok');
+    expect(summary.dataPipelineSlo?.label).toBe('Data pipeline SLO warning: provider');
+    expect(summary.topCauses).toEqual(['provider: provider degraded for prices.json']);
+  });
 });

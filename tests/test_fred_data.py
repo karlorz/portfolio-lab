@@ -31,6 +31,7 @@ from src.data.fred_data import (
     _init_cache_table,
     _get_cached_series,
     _set_cached_series,
+    get_fred_md_cache_health,
 )
 
 
@@ -166,6 +167,53 @@ class TestCacheOperations:
             cached = _get_cached_series("TEST")
         assert cached is not None
         assert float(cached.iloc[-1]) == 200.0
+
+    def test_cache_health_missing_table(self, tmp_path):
+        """Missing fred_cache table should be explicit unavailable state."""
+        db = tmp_path / "market.db"
+        sqlite3.connect(str(db)).close()
+
+        health = get_fred_md_cache_health(db)
+
+        assert health["status"] == "unavailable"
+        assert health["row_count"] == 0
+        assert health["reason"] == "missing_table"
+
+    def test_cache_health_empty_table(self, tmp_cache_db):
+        """Empty fred_cache table should not look like a fresh cache."""
+        health = get_fred_md_cache_health(tmp_cache_db)
+
+        assert health["status"] == "empty"
+        assert health["row_count"] == 0
+        assert health["reason"] == "empty_cache"
+
+    def test_cache_health_fresh_and_stale_rows(self, tmp_cache_db):
+        """Fresh and stale cache rows should be classified by latest fetched_at."""
+        now = datetime(2026, 6, 11, 12, tzinfo=timezone.utc)
+        fresh_ts = (now - timedelta(hours=2)).isoformat()
+        stale_ts = (now - timedelta(hours=30)).isoformat()
+
+        with sqlite3.connect(str(tmp_cache_db)) as conn:
+            conn.execute(
+                f"INSERT OR REPLACE INTO {FRED_CACHE_TABLE} (series_id, json_data, fetched_at) VALUES (?, ?, ?)",
+                ("INDPRO", "{}", fresh_ts),
+            )
+        fresh = get_fred_md_cache_health(tmp_cache_db, now=now, ttl_hours=24, api_key="test")
+
+        with sqlite3.connect(str(tmp_cache_db)) as conn:
+            conn.execute(
+                f"UPDATE {FRED_CACHE_TABLE} SET fetched_at = ? WHERE series_id = ?",
+                (stale_ts, "INDPRO"),
+            )
+        stale = get_fred_md_cache_health(tmp_cache_db, now=now, ttl_hours=24, api_key="test")
+
+        assert fresh["status"] == "ok"
+        assert fresh["row_count"] == 1
+        assert fresh["age_hours"] == 2.0
+        assert fresh["source_mode"] == "cached"
+        assert fresh["api_key_configured"] is True
+        assert stale["status"] == "stale"
+        assert stale["reason"] == "cache_stale"
 
 
 # ── Test: FredMdFetcher Construction ─────────────────────────────────

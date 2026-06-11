@@ -214,6 +214,18 @@ export const PublicDataSizeBudgetSchema = z.object({
   requires_pagination: z.boolean().optional(),
 }).passthrough();
 
+export const PublicDataSourceMetadataSchema = z.object({
+  provider: z.string().optional(),
+  feed: z.string().optional(),
+  source_mode: z.enum(['live', 'last_good', 'cached', 'synthetic']).optional(),
+  status: z.enum(['success', 'degraded', 'failed', 'skipped']).optional(),
+  fetched_at: z.nullable(z.string()).optional(),
+  latest_observation: z.nullable(z.string()).optional(),
+  row_count: z.nullable(z.number()).optional(),
+  failure_reason: z.nullable(z.string()).optional(),
+  fallback_reason: z.nullable(z.string()).optional(),
+}).passthrough();
+
 export const PublicDataIndexEntrySchema = z.object({
   filename: z.string(),
   path: z.string(),
@@ -225,6 +237,8 @@ export const PublicDataIndexEntrySchema = z.object({
   size_bytes: z.nullable(z.number()),
   size_budget: PublicDataSizeBudgetSchema,
   pagination: LabsPaginationSchema.optional(),
+  source_manifest_path: z.string().optional(),
+  source_metadata: PublicDataSourceMetadataSchema.optional(),
   sha256: z.nullable(z.string()).optional(),
   generated_at: z.nullable(z.string()).optional(),
 }).passthrough();

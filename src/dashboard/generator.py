@@ -12,7 +12,7 @@ from collections import deque
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
@@ -1678,10 +1678,33 @@ class DashboardGenerator:
                 "status": "unavailable"
             }
 
+        try:
+            from src.monitor.data_pipeline_slo import (
+                build_data_pipeline_slo,
+                load_public_index,
+                load_signal_staleness,
+                load_source_manifest,
+            )
+
+            health_data["data_pipeline_slo"] = build_data_pipeline_slo(
+                health_data=health_data,
+                source_manifest=load_source_manifest(PUBLIC_DIR),
+                public_index=load_public_index(PUBLIC_DIR),
+                signal_staleness=load_signal_staleness(PUBLIC_DIR),
+            )
+        except (ImportError, OSError, ValueError, TypeError) as e:
+            health_data["data_pipeline_slo"] = {
+                "schema_version": "data-pipeline-slo/v1",
+                "status": "warning",
+                "top_dimension": "unknown",
+                "error": str(e),
+            }
+
         # Overall system health
         stale_count = sum(1 for d in health_data["data_freshness"].values() if d.get("status") != "fresh")
         failed_jobs = sum(1 for j in health_data["cron_jobs"] if j.get("status") == "error")
         scheduler_status = health_data.get("scheduler_status", {}).get("status")
+        slo_status = health_data.get("data_pipeline_slo", {}).get("status")
         backend_error = any(
             backend.get("status") == "error"
             for backend in health_data.get("scheduler_status", {}).get("backends", {}).values()
@@ -1691,9 +1714,14 @@ class DashboardGenerator:
             health_data["system_status"] = "healthy"
         if backend_error:
             health_data["system_status"] = "degraded"
-        elif scheduler_status in {"degraded", "warning", "unavailable"} or failed_jobs > 0 or stale_count > 5:
+        elif (
+            scheduler_status in {"degraded", "warning", "unavailable"}
+            or slo_status == "warning"
+            or failed_jobs > 0
+            or stale_count > 5
+        ):
             health_data["system_status"] = "warning"
-        if failed_jobs > 2 or stale_count > 10:
+        if slo_status == "critical" or failed_jobs > 2 or stale_count > 10:
             health_data["system_status"] = "critical"
         
         out_path = PUBLIC_DIR / "health.json"
@@ -2076,6 +2104,56 @@ class DashboardGenerator:
     # Signal staleness detection (production readiness)
     SIGNAL_STALENESS_TTL_HOURS = int(os.environ.get("SIGNAL_STALENESS_TTL_HOURS", "4"))
     STALENESS_DECAY_TAU_HOURS = float(os.environ.get("STALENESS_DECAY_TAU_HOURS", "2.0"))
+    OPTIONAL_SIGNAL_STALENESS_KEYS = {
+        "behavioral_sentiment",
+        "calendar_seasonality",
+        "crypto_allocation",
+        "factor_rotation",
+        "stacking_ensemble",
+        "convexity_harvest",
+        "llm_sentiment",
+        "sector_rotation",
+        "kurtosis_regime",
+        "volatility_parity",
+        "collar",
+        "bond_momentum",
+        "risk_decomposition",
+        "two_stage_regime",
+        "bocd_regime",
+        "regime_transition",
+        "hedge_selector",
+    }
+
+    @staticmethod
+    def _normalized_signal_timestamp(signal_block: Any, preferred_field: str) -> str | None:
+        """Return the first usable timestamp from a generated signal block."""
+        if not isinstance(signal_block, dict):
+            return None
+        fields = [
+            preferred_field,
+            "generated_at",
+            "timestamp",
+            "generated",
+            "detected",
+            "last_update",
+        ]
+        for field in dict.fromkeys(fields):
+            value = signal_block.get(field)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    @staticmethod
+    def _is_unavailable_signal_block(signal_block: Any) -> bool:
+        """Return true for explicit unavailable/error placeholders."""
+        if signal_block is None:
+            return True
+        if not isinstance(signal_block, dict):
+            return False
+        status = str(signal_block.get("status", "")).lower()
+        if status in {"unavailable", "disabled", "missing"}:
+            return True
+        return "error" in signal_block
 
     def _check_signal_staleness(self, signal_data: Dict) -> Dict:
         """Check staleness of each signal source in signals.json output.
@@ -2103,6 +2181,7 @@ class DashboardGenerator:
         tau_hours = self.STALENESS_DECAY_TAU_HOURS
         now = datetime.now(timezone.utc)
         stale_signals = []
+        unavailable_signals = []
         signal_timestamps = {}
         signal_age_hours = {}
         staleness_decay = {}
@@ -2136,16 +2215,30 @@ class DashboardGenerator:
         for signal_key, (ts_field, _) in timestamped_signals.items():
             signal_block = signal_data.get(signal_key)
             if signal_block is None:
+                if signal_key in self.OPTIONAL_SIGNAL_STALENESS_KEYS:
+                    unavailable_signals.append(signal_key)
+                    signal_timestamps[signal_key] = None
+                    signal_age_hours[signal_key] = None
+                    staleness_decay[signal_key] = 0.0
+                    continue
                 stale_signals.append(signal_key)
                 signal_timestamps[signal_key] = None
                 signal_age_hours[signal_key] = None
                 staleness_decay[signal_key] = 0.0
                 continue
 
-            ts_str = signal_block.get(ts_field) if isinstance(signal_block, dict) else None
+            ts_str = self._normalized_signal_timestamp(signal_block, ts_field)
             signal_timestamps[signal_key] = ts_str
 
             if ts_str is None:
+                if (
+                    signal_key in self.OPTIONAL_SIGNAL_STALENESS_KEYS
+                    and self._is_unavailable_signal_block(signal_block)
+                ):
+                    unavailable_signals.append(signal_key)
+                    signal_age_hours[signal_key] = None
+                    staleness_decay[signal_key] = 0.0
+                    continue
                 stale_signals.append(signal_key)
                 signal_age_hours[signal_key] = None
                 staleness_decay[signal_key] = 0.0
@@ -2172,15 +2265,18 @@ class DashboardGenerator:
                 signal_age_hours[signal_key] = None
                 staleness_decay[signal_key] = 0.0
 
-        healthy_count = len(timestamped_signals) - len(stale_signals)
+        healthy_count = len(timestamped_signals) - len(stale_signals) - len(unavailable_signals)
         return {
             "stale_signals": stale_signals,
+            "unavailable_signals": unavailable_signals,
             "signal_timestamps": signal_timestamps,
             "signal_age_hours": signal_age_hours,
             "staleness_decay": staleness_decay,
             "decay_tau_hours": tau_hours,
             "healthy_count": healthy_count,
             "total_count": len(timestamped_signals),
+            "required_count": len(timestamped_signals) - len(self.OPTIONAL_SIGNAL_STALENESS_KEYS),
+            "optional_count": len(self.OPTIONAL_SIGNAL_STALENESS_KEYS),
             "ttl_hours": self.SIGNAL_STALENESS_TTL_HOURS,
             "checked_at": now.isoformat(),
         }

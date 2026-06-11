@@ -6,15 +6,126 @@
  * Usage: bun run fetch-data
  */
 
-import { fetchAllData, fetchYieldCurveData, SYMBOLS } from '../src/data/fetcher';
+import { fetchAllDataWithSummary, fetchYieldCurveDataWithSummary, SYMBOLS } from '../src/data/fetcher';
+import {
+  MARKET_DATA_SOURCE_MANIFEST_FILENAME,
+  buildMarketDataSourceManifest,
+  type MarketDataSourceRow,
+} from '../src/data/source_manifest';
 import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, renameSync, unlinkSync } from 'fs';
 
 const DATA_DIR = join(import.meta.dir, '..', 'public', 'data');
 const START_DATE = '2005-01-01';
 const END_DATE = new Date().toISOString().split('T')[0];
 
-async function main() {
+export async function writeJsonAtomic(path: string, payload: unknown): Promise<void> {
+  const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await Bun.write(tmpPath, JSON.stringify(payload, null, 2));
+    renameSync(tmpPath, path);
+  } catch (error) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // Best-effort cleanup only.
+    }
+    throw error;
+  }
+}
+
+function latestObservationFromCompact(compact: Record<string, { d: string; p: number }[]>): string | null {
+  let latest: string | null = null;
+  for (const rows of Object.values(compact)) {
+    for (const row of rows) {
+      if (latest === null || row.d > latest) {
+        latest = row.d;
+      }
+    }
+  }
+  return latest;
+}
+
+function buildPriceSourceRows(
+  priceSummary: Awaited<ReturnType<typeof fetchAllDataWithSummary>>['summary'],
+  compact: Record<string, { d: string; p: number }[]>,
+  fetchedAt: string,
+): MarketDataSourceRow[] {
+  const rowCount = Object.values(compact).reduce((sum, rows) => sum + rows.length, 0);
+  const latestObservation = latestObservationFromCompact(compact);
+  const symbols = Object.keys(compact).sort();
+  return ['prices.json', 'prices_compact.json'].map((artifact) => ({
+    artifact,
+    provider: priceSummary.provider,
+    feed: priceSummary.feed,
+    source_mode: priceSummary.source_mode,
+    status: priceSummary.status,
+    fetched_at: fetchedAt,
+    latest_observation: latestObservation,
+    row_count: rowCount,
+    symbols,
+    failure_reason: priceSummary.circuit_breaker.opened ? priceSummary.circuit_breaker.reason : null,
+    notes: priceSummary.circuit_breaker.opened
+      ? [`Skipped symbols after provider circuit breaker opened: ${priceSummary.circuit_breaker.skipped_symbols.join(', ')}`]
+      : [],
+  }));
+}
+
+function buildYieldSourceRow(
+  yieldSummary: Awaited<ReturnType<typeof fetchYieldCurveDataWithSummary>>['summary'],
+  rowCount: number,
+  latestObservation: string | null,
+  fetchedAt: string,
+): MarketDataSourceRow {
+  const failureReason = yieldSummary.series.find((series) => series.failure_reason)?.failure_reason ?? null;
+  return {
+    artifact: 'yields.json',
+    provider: yieldSummary.provider,
+    feed: yieldSummary.feed,
+    source_mode: yieldSummary.source_mode,
+    status: yieldSummary.status,
+    fetched_at: fetchedAt,
+    latest_observation: latestObservation,
+    row_count: rowCount,
+    symbols: yieldSummary.series.map((series) => series.series_id),
+    failure_reason: failureReason,
+    fallback_reason: yieldSummary.source_mode === 'synthetic' ? failureReason : null,
+  };
+}
+
+export function buildLastGoodRetentionManifest(error: unknown, generatedAt = new Date().toISOString()) {
+  const message = error instanceof Error ? error.message : String(error);
+  return buildMarketDataSourceManifest([
+    {
+      artifact: 'prices.json',
+      provider: 'Yahoo Finance',
+      feed: 'chart/v8',
+      source_mode: 'last_good',
+      status: 'failed',
+      fetched_at: generatedAt,
+      latest_observation: null,
+      row_count: 0,
+      failure_reason: 'unknown',
+      fallback_reason: message,
+      notes: ['Current provider run failed; retained previous last-good public price artifact.'],
+    },
+    {
+      artifact: 'prices_compact.json',
+      provider: 'Yahoo Finance',
+      feed: 'chart/v8',
+      source_mode: 'last_good',
+      status: 'failed',
+      fetched_at: generatedAt,
+      latest_observation: null,
+      row_count: 0,
+      failure_reason: 'unknown',
+      fallback_reason: message,
+      notes: ['Current provider run failed; retained previous last-good compact price artifact.'],
+    },
+  ], generatedAt);
+}
+
+export async function main() {
   console.log('=== Portfolio-Lab Data Fetcher ===\n');
 
   if (!existsSync(DATA_DIR)) {
@@ -23,7 +134,8 @@ async function main() {
 
   // 1. Fetch price data (Yahoo Finance v8)
   console.log(`Fetching ${SYMBOLS.length} symbols from ${START_DATE} to ${END_DATE}...\n`);
-  const priceData = await fetchAllData(SYMBOLS, START_DATE, END_DATE);
+  const priceResult = await fetchAllDataWithSummary(SYMBOLS, START_DATE, END_DATE);
+  const priceData = priceResult.data;
   const missingSymbols = SYMBOLS.filter(symbol => !priceData[symbol]?.length);
   if (missingSymbols.length > 0) {
     throw new Error(`No price rows returned for configured symbols: ${missingSymbols.join(', ')}`);
@@ -39,8 +151,8 @@ async function main() {
 
   const pricesPath = join(DATA_DIR, 'prices.json');
   const pricesCompactPath = join(DATA_DIR, 'prices_compact.json');
-  await Bun.write(pricesPath, JSON.stringify(compact, null, 2));
-  await Bun.write(pricesCompactPath, JSON.stringify(compact, null, 2));
+  await writeJsonAtomic(pricesPath, compact);
+  await writeJsonAtomic(pricesCompactPath, compact);
   console.log(`\nSaved ${Object.keys(compact).length} symbols (${totalDays} total data points) → ${pricesPath}`);
   console.log(`Saved compact price mirror → ${pricesCompactPath}`);
 
@@ -53,12 +165,28 @@ async function main() {
   });
 
   // 3. Fetch yield curve data (FRED)
-  const yieldData = await fetchYieldCurveData(START_DATE, END_DATE);
+  const yieldResult = await fetchYieldCurveDataWithSummary(START_DATE, END_DATE);
+  const yieldData = yieldResult.data;
   const yieldsPath = join(DATA_DIR, 'yields.json');
-  await Bun.write(yieldsPath, JSON.stringify(yieldData, null, 2));
+  await writeJsonAtomic(yieldsPath, yieldData);
   console.log(`Saved ${yieldData.length} yield observations → ${yieldsPath}`);
 
-  // 4. Regenerate dashboard JSON
+  // 4. Publish source manifest for market data artifacts.
+  const manifestPath = join(DATA_DIR, MARKET_DATA_SOURCE_MANIFEST_FILENAME);
+  const manifestGeneratedAt = new Date().toISOString();
+  const manifest = buildMarketDataSourceManifest([
+    ...buildPriceSourceRows(priceResult.summary, compact, manifestGeneratedAt),
+    buildYieldSourceRow(
+      yieldResult.summary,
+      yieldData.length,
+      yieldData.length > 0 ? yieldData[yieldData.length - 1].date : null,
+      manifestGeneratedAt,
+    ),
+  ], manifestGeneratedAt);
+  await writeJsonAtomic(manifestPath, manifest);
+  console.log(`Saved market data source manifest → ${manifestPath}`);
+
+  // 5. Regenerate dashboard JSON
   console.log('\nRegenerating dashboard JSON...');
   try {
     execSync('python3 -m src.dashboard.generator', {
@@ -72,7 +200,20 @@ async function main() {
   console.log('\nDone.');
 }
 
-main().catch(err => {
-  console.error('Fetch failed:', err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch(async err => {
+    console.error('Fetch failed:', err);
+    try {
+      if (!existsSync(DATA_DIR)) {
+        mkdirSync(DATA_DIR, { recursive: true });
+      }
+      await writeJsonAtomic(
+        join(DATA_DIR, MARKET_DATA_SOURCE_MANIFEST_FILENAME),
+        buildLastGoodRetentionManifest(err),
+      );
+    } catch (manifestError) {
+      console.error('Failed to write last-good retention manifest:', manifestError);
+    }
+    process.exit(1);
+  });
+}

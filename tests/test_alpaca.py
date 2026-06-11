@@ -9,10 +9,10 @@ import sqlite3
 
 import pytest
 from unittest.mock import patch, MagicMock
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.broker.alpaca import (
-    OrderSide, OrderType, OrderRequest, Order, Position,
+    OrderSide, OrderType, OrderRequest, Order, Position, MarketQuote,
     AlpacaClient, PaperTradingManager, check_alpaca_status,
     ALPACA_AVAILABLE,
 )
@@ -348,6 +348,123 @@ class TestPaperTradingManager:
 
         # Should skip because delta < $10
         assert result['order_count'] == 0
+
+    def test_execute_rebalance_uses_fresh_broker_quote_for_new_position(self, tmp_path):
+        """New positions should size from fresh broker quote objects when available."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            source="alpaca",
+            feed="stock_latest_quote",
+            age_seconds=10,
+            source_mode="live",
+        )
+
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=quote):
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=True)
+
+        assert result["order_count"] == 1
+        assert result["orders_planned"][0]["qty"] == 500.0
+        assert result["quote_sources"]["TLT"]["source"] == "alpaca"
+        assert result["quote_sources"]["TLT"]["source_mode"] == "live"
+
+    def test_execute_rebalance_allows_delayed_quote_in_dry_run(self, tmp_path):
+        """Dry-run can use delayed quotes, but must label them explicitly."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp="2026-06-11T00:00:00+00:00",
+            source="alpaca",
+            feed="stock_latest_quote",
+            age_seconds=3600,
+            source_mode="live",
+        )
+
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=quote):
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=True)
+
+        assert result["order_count"] == 1
+        assert result["quote_sources"]["TLT"]["source_mode"] == "delayed"
+
+    def test_execute_rebalance_labels_prior_close_fallback_in_dry_run(self, tmp_path):
+        """Paper/dry-run fallback to local close should carry prior-close provenance."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp="2026-06-10T21:00:00+00:00",
+            source="market_db",
+            feed="yahoo_close",
+            age_seconds=86400,
+            source_mode="prior_close",
+        )
+
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=None), \
+             patch.object(manager.client, '_fetch_price_quote', return_value=quote):
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=True)
+
+        assert result["order_count"] == 1
+        assert result["quote_sources"]["TLT"]["source"] == "market_db"
+        assert result["quote_sources"]["TLT"]["source_mode"] == "prior_close"
+
+    def test_execute_rebalance_rejects_stale_broker_quote_in_live_mode(self, tmp_path):
+        """Live order mode should reject stale broker quotes."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp="2026-06-11T00:00:00+00:00",
+            source="alpaca",
+            feed="stock_latest_quote",
+            age_seconds=3600,
+            source_mode="live",
+        )
+
+        with patch.dict(os.environ, {"ALPACA_PAPER": "false"}), \
+             patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=quote):
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=False)
+
+        assert result["status"] == "error"
+        assert "stale" in result["message"]
+
+    def test_execute_rebalance_rejects_prior_close_in_live_mode(self, tmp_path):
+        """Live order mode should not silently size from prior-close local data."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp="2026-06-10T21:00:00+00:00",
+            source="market_db",
+            feed="yahoo_close",
+            age_seconds=86400,
+            source_mode="prior_close",
+        )
+
+        with patch.dict(os.environ, {"ALPACA_PAPER": "false"}), \
+             patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=None), \
+             patch.object(manager.client, '_fetch_price_quote', return_value=quote):
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=False)
+
+        assert result["status"] == "error"
+        assert "requires a fresh broker quote" in result["message"]
 
 
 # ---------------------------------------------------------------------------

@@ -49,6 +49,7 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "prices_compact.json": ("market_data", "prices/compact-v1"),
     "historical.json": ("market_data", "historical/v1"),
     "yields.json": ("market_data", "yields/v1"),
+    "source_manifest.json": ("market_data", "market-data-source-manifest/v1"),
     "labs_registry.json": ("labs", LABS_REGISTRY_SCHEMA_VERSION),
     "labs_scorecards.json": ("labs", LABS_SCORECARD_SCHEMA_VERSION),
     "labs_replays.json": ("labs", LABS_REPLAY_SCHEMA_VERSION),
@@ -270,8 +271,58 @@ def _discover_labs_public_paths(public_dir: Path) -> list[Path]:
 
 
 def _discover_market_data_public_paths(public_dir: Path) -> list[Path]:
-    filenames = ("prices.json", "prices_compact.json", "historical.json", "yields.json")
+    filenames = ("prices.json", "prices_compact.json", "historical.json", "yields.json", "source_manifest.json")
     return sorted(path for filename in filenames if (path := public_dir / filename).exists())
+
+
+def _load_source_manifest(public_dir: Path) -> dict[str, Any] | None:
+    manifest_path = public_dir / "source_manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        with open(manifest_path) as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, list):
+        return None
+    return {
+        "path": "source_manifest.json",
+        "artifacts": {
+            str(row.get("artifact")): row
+            for row in artifacts
+            if isinstance(row, dict) and isinstance(row.get("artifact"), str)
+        },
+    }
+
+
+def _source_metadata_for(filename: str, source_manifest: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if filename == "source_manifest.json" or source_manifest is None:
+        return None
+    artifacts = source_manifest.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        return None
+    row = artifacts.get(filename)
+    if not isinstance(row, Mapping):
+        return None
+    return {
+        key: row.get(key)
+        for key in (
+            "provider",
+            "feed",
+            "source_mode",
+            "status",
+            "fetched_at",
+            "latest_observation",
+            "row_count",
+            "failure_reason",
+            "fallback_reason",
+        )
+        if key in row
+    }
 
 
 def _relative_public_path(path: Path, public_dir: Path, fallback: str) -> str:
@@ -403,6 +454,7 @@ def _public_data_entry(
     *,
     hash_cache: dict[str, dict[str, Any]] | None = None,
     hash_cache_updates: dict[str, dict[str, Any]] | None = None,
+    source_manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     category, schema_version = _contract_for_filename(filename)
     if path is None or not path.exists():
@@ -446,6 +498,10 @@ def _public_data_entry(
     }
     if pagination is not None:
         entry["pagination"] = pagination
+    source_metadata = _source_metadata_for(filename, source_manifest)
+    if source_metadata is not None:
+        entry["source_manifest_path"] = source_manifest.get("path", "source_manifest.json")
+        entry["source_metadata"] = source_metadata
     return entry
 
 
@@ -465,6 +521,7 @@ def build_public_data_index(
     )
     hash_cache = _load_hash_cache(resolved_cache_path) if use_hash_cache else None
     hash_cache_updates = dict(hash_cache) if hash_cache is not None else None
+    source_manifest = _load_source_manifest(public_dir)
     path_map: dict[str, Path] = {}
     ordered_filenames: list[str] = []
 
@@ -499,6 +556,7 @@ def build_public_data_index(
             public_dir,
             hash_cache=hash_cache,
             hash_cache_updates=hash_cache_updates,
+            source_manifest=source_manifest,
         )
         for filename in ordered_filenames
     ]
