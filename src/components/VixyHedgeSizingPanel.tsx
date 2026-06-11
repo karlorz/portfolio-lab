@@ -32,6 +32,17 @@ interface VixyHedgeSizingPanelProps {
   data?: VixyHedgeSizingData | null;
 }
 
+type UnknownRecord = Record<string, unknown>;
+type VixZone = VixyHedgeSizingData['vix_zone'];
+
+const DEFAULT_ZONE_THRESHOLDS: Record<string, [number, number]> = {
+  LOW: [0, 15],
+  NORMAL: [15, 20],
+  ELEVATED: [20, 25],
+  HIGH: [25, 35],
+  CRISIS: [35, 60],
+};
+
 // ── Zone Config ────────────────────────────────────────────────────────────
 
 const ZONE_META: Record<string, { color: string; bg: string; border: string; badge: string }> = {
@@ -52,10 +63,120 @@ function formatPctFull(v: number): string {
   return `${(v * 100).toFixed(2)}%`;
 }
 
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asFiniteNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function pctFieldToFraction(value: unknown, fallback = 0): number {
+  const numeric = asFiniteNumber(value, fallback);
+  return Math.abs(numeric) > 1 ? numeric / 100 : numeric;
+}
+
+function bpsFieldToFraction(value: unknown, fallback = 0): number {
+  return asFiniteNumber(value, fallback) / 10000;
+}
+
+function normalizeZone(value: unknown): VixZone {
+  if (typeof value !== 'string') return 'NORMAL';
+  const normalized = value.toUpperCase().replace(/[-\s]/g, '_');
+  if (normalized === 'HIGH_VOL') return 'HIGH';
+  if (normalized === 'LOW_VOL') return 'LOW';
+  return normalized in ZONE_META ? normalized as VixZone : 'NORMAL';
+}
+
+function normalizeThresholds(value: unknown): Record<string, [number, number]> {
+  if (!isRecord(value)) return { ...DEFAULT_ZONE_THRESHOLDS };
+  const thresholds: Record<string, [number, number]> = { ...DEFAULT_ZONE_THRESHOLDS };
+  for (const [zone, range] of Object.entries(value)) {
+    if (!Array.isArray(range) || range.length < 2) continue;
+    const lo = asFiniteNumber(range[0], thresholds[zone]?.[0] ?? 0);
+    const hi = asFiniteNumber(range[1], thresholds[zone]?.[1] ?? 60);
+    thresholds[zone] = [lo, hi];
+  }
+  return thresholds;
+}
+
+function normalizeCosts(value: UnknownRecord): VixyHedgeSizingData['costs'] {
+  if (isRecord(value.costs)) {
+    return {
+      daily_carry: asFiniteNumber(value.costs.daily_carry),
+      roll_cost: asFiniteNumber(value.costs.roll_cost),
+      total_pct: asFiniteNumber(value.costs.total_pct),
+    };
+  }
+
+  return {
+    daily_carry: bpsFieldToFraction(value.daily_carry_bps),
+    roll_cost: bpsFieldToFraction(value.roll_cost_bps),
+    total_pct: bpsFieldToFraction(value.ytd_cost_bps),
+  };
+}
+
+function normalizePerformance(value: unknown): HedgePerformance[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .map((row) => ({
+      period: typeof row.period === 'string' ? row.period : 'Unknown',
+      portfolio_return: asFiniteNumber(row.portfolio_return),
+      hedge_return: asFiniteNumber(row.hedge_return),
+      combined_return: asFiniteNumber(row.combined_return),
+    }));
+}
+
+export function normalizeVixyHedgeSizingData(value: unknown): VixyHedgeSizingData | null {
+  if (!isRecord(value)) return null;
+
+  const hasPanelShape = 'vixy_position' in value || 'hedge_ratio' in value || 'target_volatility' in value;
+  const hasStatusShape = 'current_allocation_pct' in value || 'target_allocation_pct' in value || 'regime' in value;
+  if (!hasPanelShape && !hasStatusShape) return null;
+
+  const vixyPosition = pctFieldToFraction(value.vixy_position ?? value.current_allocation_pct);
+  const recommendationAllocation = pctFieldToFraction(
+    isRecord(value.recommendation) ? value.recommendation.allocation : value.target_allocation_pct,
+    vixyPosition,
+  );
+  const hedgeRatio = asFiniteNumber(
+    value.hedge_ratio,
+    recommendationAllocation > 0 ? vixyPosition / recommendationAllocation : 0,
+  );
+  const vixLevel = asFiniteNumber(value.vix_level);
+  const vixZone = normalizeZone(value.vix_zone ?? value.regime);
+  const recommendation = isRecord(value.recommendation)
+    ? {
+      allocation: asFiniteNumber(value.recommendation.allocation, recommendationAllocation),
+      reasoning: typeof value.recommendation.reasoning === 'string'
+        ? value.recommendation.reasoning
+        : 'Recommendation data is partially available.',
+    }
+    : {
+      allocation: recommendationAllocation,
+      reasoning: `Target allocation from hedge status. Efficiency ${asFiniteNumber(value.hedge_efficiency).toFixed(2)} across ${asFiniteNumber(value.total_signals)} signals.`,
+    };
+
+  return {
+    vixy_position: vixyPosition,
+    hedge_ratio: hedgeRatio,
+    target_volatility: pctFieldToFraction(value.target_volatility, 0.09),
+    vix_level: vixLevel,
+    vix_zone: vixZone,
+    zone_thresholds: normalizeThresholds(value.zone_thresholds),
+    costs: normalizeCosts(value),
+    crisis_performance: normalizePerformance(value.crisis_performance),
+    recommendation,
+  };
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
-  if (!data) {
+  const normalizedData = normalizeVixyHedgeSizingData(data);
+
+  if (!normalizedData) {
     return (
       <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4">
         <div className="flex items-center justify-between mb-2">
@@ -67,6 +188,7 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
     );
   }
 
+  data = normalizedData;
   const zoneMeta = ZONE_META[data.vix_zone] ?? ZONE_META.NORMAL;
   const zoneColor = zoneMeta.color;
 

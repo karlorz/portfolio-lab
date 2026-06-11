@@ -24,6 +24,15 @@ interface AdaptiveSizingPanelProps {
   data: AdaptiveSizingData | null;
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+const DEFAULT_CONSTRAINTS: AdaptiveSizingData['constraints'] = {
+  max_per_signal: 0.5,
+  min_weight: 0,
+  max_leverage: 1,
+  viability_floor: 0.5,
+};
+
 const REGIME_COLORS: Record<string, string> = {
   LOW_VOL: '#10b981',
   NORMAL: '#3b82f6',
@@ -39,6 +48,100 @@ const REGIME_LABELS: Record<string, string> = {
   CRISIS: 'Crisis',
   RECOVERY: 'Recovery',
 };
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asFiniteNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeRegimeName(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) return 'UNKNOWN';
+  return value.replace(/-/g, '_').toUpperCase();
+}
+
+function normalizeConstraints(value: unknown): AdaptiveSizingData['constraints'] {
+  if (!isRecord(value)) return { ...DEFAULT_CONSTRAINTS };
+  return {
+    max_per_signal: asFiniteNumber(value.max_per_signal, DEFAULT_CONSTRAINTS.max_per_signal),
+    min_weight: asFiniteNumber(value.min_weight, DEFAULT_CONSTRAINTS.min_weight),
+    max_leverage: asFiniteNumber(value.max_leverage, DEFAULT_CONSTRAINTS.max_leverage),
+    viability_floor: asFiniteNumber(value.viability_floor, DEFAULT_CONSTRAINTS.viability_floor),
+  };
+}
+
+function normalizeRegimeAdjustments(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, adjustment]) => typeof adjustment === 'number' && Number.isFinite(adjustment)),
+  ) as Record<string, number>;
+}
+
+function normalizeSignalSize(value: unknown, fallbackHealth: number): SignalSize | null {
+  if (!isRecord(value)) return null;
+  const name = typeof value.name === 'string' && value.name.length > 0 ? value.name : null;
+  if (!name) return null;
+
+  return {
+    name,
+    current_weight: asFiniteNumber(value.current_weight),
+    target_weight: asFiniteNumber(value.target_weight),
+    health_score: clamp01(asFiniteNumber(value.health_score, fallbackHealth)),
+    regime_adjusted: normalizeRegimeAdjustments(value.regime_adjusted),
+  };
+}
+
+function normalizeAllocationRows(value: UnknownRecord): SignalSize[] {
+  if (!isRecord(value.adjusted_allocation)) return [];
+
+  const baseAllocation = isRecord(value.base_allocation) ? value.base_allocation : {};
+  const adjustedAllocation = value.adjusted_allocation;
+  const factors = isRecord(value.factors) ? value.factors : {};
+  const healthScore = clamp01(asFiniteNumber(factors.regime_confidence, 1));
+  const assetNames = Object.keys(adjustedAllocation)
+    .filter((asset) => typeof adjustedAllocation[asset] === 'number' && Number.isFinite(adjustedAllocation[asset]));
+
+  return assetNames.map((asset) => ({
+    name: asset,
+    current_weight: asFiniteNumber(baseAllocation[asset], asFiniteNumber(adjustedAllocation[asset])),
+    target_weight: asFiniteNumber(adjustedAllocation[asset]),
+    health_score: healthScore,
+    regime_adjusted: {},
+  }));
+}
+
+export function normalizeAdaptiveSizingData(value: unknown): AdaptiveSizingData | null {
+  if (!isRecord(value)) return null;
+
+  const factors = isRecord(value.factors) ? value.factors : {};
+  const constraints = normalizeConstraints(value.constraints);
+  const signalRows = Array.isArray(value.signals)
+    ? value.signals
+      .map((signal) => normalizeSignalSize(signal, asFiniteNumber(factors.regime_confidence, 1)))
+      .filter((signal): signal is SignalSize => signal !== null)
+    : normalizeAllocationRows(value);
+
+  if (signalRows.length === 0) return null;
+
+  const totalWeight = asFiniteNumber(
+    value.total_weight,
+    signalRows.reduce((sum, signal) => sum + signal.target_weight, 0),
+  );
+
+  return {
+    signals: signalRows,
+    constraints,
+    current_regime: normalizeRegimeName(value.current_regime ?? factors.regime),
+    total_weight: totalWeight,
+  };
+}
 
 function HealthBar({ score, floor }: { score: number; floor: number }) {
   const pct = Math.min(score * 100, 100);
@@ -118,7 +221,9 @@ function RegimeAdjustmentBars({ adjustments }: { adjustments: Record<string, num
 }
 
 export function AdaptiveSizingPanel({ data }: AdaptiveSizingPanelProps) {
-  if (!data) {
+  const normalizedData = normalizeAdaptiveSizingData(data);
+
+  if (!normalizedData) {
     return (
       <div className="panel">
         <h3>Adaptive Sizing</h3>
@@ -127,7 +232,7 @@ export function AdaptiveSizingPanel({ data }: AdaptiveSizingPanelProps) {
     );
   }
 
-  const { signals, constraints, current_regime, total_weight } = data;
+  const { signals, constraints, current_regime, total_weight } = normalizedData;
   const floor = constraints.viability_floor;
   const withinLeverage = total_weight <= constraints.max_leverage;
   const totalWeightColor = total_weight > constraints.max_leverage

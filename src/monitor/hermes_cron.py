@@ -9,6 +9,8 @@ from typing import Any
 
 from src.paths import PROJECT_ROOT
 
+CRON_FIELD_PREVIEW_CHARS = int(os.environ.get("CRON_FIELD_PREVIEW_CHARS", "4096"))
+
 
 def normalize_cron_status(value: Any) -> str:
     """Map scheduler-specific status strings to dashboard status values."""
@@ -37,6 +39,20 @@ def _schedule_display(job: dict[str, Any]) -> str:
     return str(schedule)
 
 
+def _add_bounded_text_field(normalized: dict[str, Any], field: str, value: Any) -> None:
+    if value is None:
+        return
+    text = str(value)
+    if not text:
+        return
+    original_length = len(text)
+    truncated = original_length > CRON_FIELD_PREVIEW_CHARS
+    normalized[field] = text[:CRON_FIELD_PREVIEW_CHARS] if truncated else text
+    if truncated:
+        normalized[f"{field}_truncated"] = True
+        normalized[f"{field}_original_length"] = original_length
+
+
 def normalize_cron_job(job: dict[str, Any], *, backend: str, source: str, index: int = 0) -> dict[str, Any]:
     """Normalize a local or Hermes cron row for dashboard health consumers."""
     name = str(job.get("name") or job.get("id") or f"job-{index}")
@@ -51,9 +67,9 @@ def normalize_cron_job(job: dict[str, Any], *, backend: str, source: str, index:
         "backend": backend,
         "source": source,
     }
-    error = job.get("error") or job.get("last_error")
-    if error:
-        normalized["error"] = str(error)
+    _add_bounded_text_field(normalized, "error", job.get("error") or job.get("last_error"))
+    _add_bounded_text_field(normalized, "stdout", job.get("stdout"))
+    _add_bounded_text_field(normalized, "stderr", job.get("stderr"))
     if "duration_seconds" in job:
         normalized["duration_seconds"] = job["duration_seconds"]
     return normalized
@@ -133,12 +149,15 @@ def load_local_cron_jobs(status_file: Path) -> tuple[list[dict[str, Any]], dict[
             reason=f"failed to read cron_status.json: {exc}",
         )
 
+    file_backend = str(cron_data.get("backend") or "").strip().lower()
+    backend_name = "tasker" if file_backend == "tasker" else "local"
+
     jobs = [
-        normalize_cron_job(job, backend="local", source=source, index=index)
+        normalize_cron_job(job, backend=str(job.get("backend") or backend_name), source=source, index=index)
         for index, job in enumerate(cron_data.get("jobs", []))
         if isinstance(job, dict)
     ]
-    return jobs, summarize_backend(backend="local", source=source, jobs=jobs)
+    return jobs, summarize_backend(backend=backend_name, source=source, jobs=jobs)
 
 
 def load_hermes_portfolio_cron_jobs(

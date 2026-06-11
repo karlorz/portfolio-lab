@@ -50,6 +50,36 @@ const SOURCE_LABELS: Record<string, string> = {
   UNIFIED_OVERLAY: 'Unified',
 };
 
+function safeNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function directionToNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return 0;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'bullish' || normalized === 'buy' || normalized === 'positive') return 1;
+  if (normalized === 'bearish' || normalized === 'sell' || normalized === 'negative') return -1;
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+export function normalizeSourceVote(raw: unknown): SourceVote {
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  return {
+    source: typeof source.source === 'string' && source.source.trim() !== '' ? source.source : 'unknown',
+    direction: directionToNumber(source.direction),
+    strength: safeNumber(source.strength),
+    confidence: safeNumber(source.confidence),
+    weight: safeNumber(source.weight),
+  };
+}
+
+export function formatSourceDirection(value: unknown): string {
+  const direction = directionToNumber(value);
+  return `${direction > 0 ? '+' : ''}${direction.toFixed(0)}`;
+}
+
 function DirectionBar({ value, maxAbs = 1 }: { value: number; maxAbs?: number }) {
   const pct = Math.min(Math.abs(value) / maxAbs * 100, 100);
   const isPositive = value >= 0;
@@ -88,6 +118,9 @@ export function EnsembleVotingPanel({ data }: EnsembleVotingPanelProps) {
   const actionLabel = ACTION_LABELS[data.action] || data.action;
   const consensusColor = data.weighted_consensus > 0.2 ? '#10b981' :
     data.weighted_consensus < -0.2 ? '#ef4444' : '#f59e0b';
+  const sourceBreakdown = Array.isArray(data.source_breakdown)
+    ? data.source_breakdown.map(normalizeSourceVote)
+    : [];
 
   return (
     <div className="panel">
@@ -142,7 +175,7 @@ export function EnsembleVotingPanel({ data }: EnsembleVotingPanelProps) {
       </div>
 
       {/* Per-Source Breakdown */}
-      {data.source_breakdown && data.source_breakdown.length > 0 && (
+      {sourceBreakdown.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <span className="label" style={{ marginBottom: 6, display: 'block' }}>Signal Breakdown</span>
           <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
@@ -156,7 +189,7 @@ export function EnsembleVotingPanel({ data }: EnsembleVotingPanelProps) {
               </tr>
             </thead>
             <tbody>
-              {data.source_breakdown.map((src) => (
+              {sourceBreakdown.map((src) => (
                 <tr key={src.source} style={{ borderBottom: '1px solid #0f172a' }}>
                   <td style={{ padding: '2px 4px', color: '#e2e8f0' }}>
                     {SOURCE_LABELS[src.source] || src.source}
@@ -165,7 +198,7 @@ export function EnsembleVotingPanel({ data }: EnsembleVotingPanelProps) {
                     textAlign: 'center', padding: '2px 4px',
                     color: src.direction > 0 ? '#10b981' : src.direction < 0 ? '#ef4444' : '#94a3b8',
                   }}>
-                    {src.direction > 0 ? '+' : ''}{src.direction.toFixed(0)}
+                    {formatSourceDirection(src.direction)}
                   </td>
                   <td style={{ textAlign: 'center', padding: '2px 4px', color: '#e2e8f0' }}>
                     {(src.strength * 100).toFixed(0)}%

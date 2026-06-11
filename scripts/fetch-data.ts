@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Fetch market data from Yahoo Finance + FRED.
- * Saves prices.json and yields.json to public/data/.
+ * Saves prices.json, prices_compact.json, and yields.json to public/data/.
  *
  * Usage: bun run fetch-data
  */
@@ -34,8 +34,11 @@ async function main() {
   }
 
   const pricesPath = join(DATA_DIR, 'prices.json');
+  const pricesCompactPath = join(DATA_DIR, 'prices_compact.json');
   await Bun.write(pricesPath, JSON.stringify(compact, null, 2));
+  await Bun.write(pricesCompactPath, JSON.stringify(compact, null, 2));
   console.log(`\nSaved ${Object.keys(compact).length} symbols (${totalDays} total data points) → ${pricesPath}`);
+  console.log(`Saved compact price mirror → ${pricesCompactPath}`);
 
   // 2. Fetch yield curve data (FRED)
   const yieldData = await fetchYieldCurveData(START_DATE, END_DATE);

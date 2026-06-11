@@ -67,6 +67,10 @@ function humanizeSignalName(name: string): string {
   return map[name] || name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+export function makeSignalListKey(name: string, index: number): string {
+  return `${name}-${index}`;
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 function RegimeDot({ active, color }: { active: boolean; color: string }) {
@@ -254,9 +258,9 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
               <p className="text-[11px] text-gray-500 italic">No active signals</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
-                {data.active_signals.map((name) => (
+                {data.active_signals.map((name, index) => (
                   <span
-                    key={name}
+                    key={makeSignalListKey(name, index)}
                     className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-900/25 text-emerald-300 border border-emerald-700/30"
                   >
                     {humanizeSignalName(name)}
@@ -278,9 +282,9 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
               <p className="text-[11px] text-gray-500 italic">No inactive signals</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
-                {data.inactive_signals.map((name) => (
+                {data.inactive_signals.map((name, index) => (
                   <span
-                    key={name}
+                    key={makeSignalListKey(name, index)}
                     className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-red-900/25 text-red-300 border border-red-700/30"
                   >
                     {humanizeSignalName(name)}

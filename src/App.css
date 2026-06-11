@@ -34,6 +34,7 @@ header p {
 }
 
 .portfolio-selector {
+  min-width: 0;
   margin-bottom: 20px;
   padding: 20px;
   background: #1e293b;
@@ -49,12 +50,14 @@ header p {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  min-width: 0;
 }
 
 .portfolio-categories {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .portfolio-category {
@@ -62,6 +65,7 @@ header p {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .category-label {
@@ -78,6 +82,7 @@ header p {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   cursor: pointer;
   padding: 8px 12px;
   background: #0f172a;
@@ -90,7 +95,38 @@ header p {
 }
 
 .toggle input {
+  flex: 0 0 auto;
   cursor: pointer;
+}
+
+.toggle span,
+.toggle small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .portfolio-selector {
+    padding: 16px;
+  }
+
+  .portfolio-category {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .category-label {
+    min-width: 0;
+  }
+
+  .portfolio-toggles {
+    flex-direction: column;
+  }
+
+  .toggle {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
 }
 
 .metrics-grid {
@@ -154,6 +190,13 @@ header p {
   font-size: 1.1rem;
 }
 
+.fire-control-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
 .chart-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -179,12 +222,18 @@ header p {
 }
 
 .comparison-table {
+  max-width: 100%;
   overflow-x: auto;
 }
 
 .comparison-table table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.overflow-x-auto {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .comparison-table th,
@@ -247,6 +296,7 @@ footer code {
 
 /* Live Dashboard Styles */
 .live-dashboard {
+  min-width: 0;
   background: #1e293b;
   border-radius: 8px;
   padding: 20px;
@@ -412,9 +462,16 @@ footer code {
 .orders-section,
 .stats-section,
 .performance-section {
+  min-width: 0;
   margin-top: 25px;
   padding-top: 20px;
   border-top: 1px solid #334155;
+}
+
+.positions-section,
+.orders-section {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .positions-section h3,
@@ -428,6 +485,7 @@ footer code {
 
 .positions-table,
 .orders-table {
+  min-width: 520px;
   width: 100%;
   border-collapse: collapse;
 }
@@ -588,6 +646,299 @@ footer code {
 
 .tab-panel {
   animation: fadeIn 0.2s ease-out;
+}
+
+/* ===== Tasker Console ===== */
+.tasks-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tasks-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.tasks-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  gap: 10px;
+  flex: 1;
+}
+
+.task-summary-item {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.task-summary-item label {
+  display: block;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.task-summary-item span {
+  color: #e2e8f0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.tasker-admin-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.tasker-admin-controls input {
+  min-width: 170px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #e2e8f0;
+  padding: 8px 10px;
+}
+
+.tasker-unlock-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.tasker-unlock-state.unlocked {
+  color: #10b981;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: #334155;
+  border: 1px solid #475569;
+  color: #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.tasker-error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fecaca;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.tasks-console-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+}
+
+.tasks-table-wrap {
+  overflow-x: auto;
+}
+
+.tasker-table td small {
+  display: block;
+  color: #64748b;
+  margin-top: 4px;
+  font-size: 0.72rem;
+}
+
+.tasker-table tbody tr {
+  cursor: pointer;
+}
+
+.tasker-selected-row {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.tasker-status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-width: 72px;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: #e2e8f0;
+  background: #475569;
+}
+
+.tasker-status-pill.status-ok,
+.tasker-status-pill.status-success {
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+
+.tasker-status-pill.status-warning,
+.tasker-status-pill.status-cancelled,
+.tasker-status-pill.status-paused {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+}
+
+.tasker-status-pill.status-error,
+.tasker-status-pill.status-timeout {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.tasker-status-pill.status-running,
+.tasker-status-pill.status-pending {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+.tasker-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tasker-side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tasker-detail-block {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.tasker-detail-block h3 {
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  margin: 0 0 12px 0;
+}
+
+.tasker-detail-block dl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.tasker-detail-block dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.7);
+  padding-bottom: 8px;
+}
+
+.tasker-detail-block dl div:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.tasker-detail-block dt {
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+.tasker-detail-block dd {
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  margin: 0;
+  text-align: right;
+  word-break: break-word;
+}
+
+.tasker-run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tasker-run-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.tasker-run-row.active {
+  border-color: #3b82f6;
+}
+
+.tasker-empty-state {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.tasker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 1100px) {
+  .tasks-toolbar,
+  .tasks-console-layout {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .tasks-console-layout {
+    display: flex;
+  }
+
+  .tasker-side-panel {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .tasks-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tasker-admin-controls {
+    flex-wrap: wrap;
+  }
+
+  .tasker-admin-controls input {
+    min-width: 100%;
+  }
 }
 
 @keyframes fadeIn {

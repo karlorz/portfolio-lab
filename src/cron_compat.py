@@ -4,6 +4,7 @@ Cron backend compatibility — feature flag for dual-mode operation.
 portfolio-lab supports three cron backends:
   - hermes   (Hermes Agent cron scheduler, 12 targets registered)
   - crontab  (system crontab, standalone without Hermes)
+  - tasker   (project-local tasker service)
   - manual   (make <target> from terminal or Claude Code)
 
 Set CRON_BACKEND in .env or export it before running Makefile targets.
@@ -18,6 +19,7 @@ from src.paths import DATA_DIR, LOCK_DIR
 BACKEND: str = os.getenv("CRON_BACKEND", "hermes")
 IS_HERMES: bool = BACKEND == "hermes"
 IS_CRONTAB: bool = BACKEND == "crontab"
+IS_TASKER: bool = BACKEND == "tasker"
 IS_MANUAL: bool = BACKEND == "manual" or BACKEND == "claude-code"
 
 # Cron targets that must stay in sync across all backends.

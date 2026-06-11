@@ -10,13 +10,14 @@ FROM oven/bun:1 AS frontend
 WORKDIR /app
 
 # Install frontend dependencies
-COPY package.json bun.lockb ./
+COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 # Copy frontend source and build
 COPY public/ public/
+RUN mkdir -p public/data
 COPY src/  src/
-COPY index.html tsconfig.json vite.config.ts postcss.config.js tailwind.config.js* ./
+COPY index.html tsconfig.json vite.config.ts ./
 RUN bun run build
 
 # ---------- Stage 2: Python runtime ----------
@@ -62,12 +63,12 @@ RUN mkdir -p /app/data /app/public/data /app/data/signals /app/data/cache /app/d
 
 # Environment defaults
 ENV PORTFOLIO_LAB_ENABLE_ML=0
-ENV CRON_BACKEND=crontab
+ENV CRON_BACKEND=tasker
 ENV PYTHONUNBUFFERED=1
 
-# Health check — verify cron is running AND data freshness (signals.json updated within 4h)
+# Health check — verify tasker API is serving task state.
 HEALTHCHECK --interval=5m --timeout=30s --retries=3 --start-period=60s \
-    CMD pgrep -x cron > /dev/null && python -c "import os, time; f='data/signals/signals.json'; assert os.path.exists(f) and time.time()-os.path.getmtime(f)<14400, 'stale data'" || exit 1
+    CMD python -c "import json, urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/tasker/status', timeout=5)); assert data.get('backend') == 'tasker'" || exit 1
 
 EXPOSE 8000
 

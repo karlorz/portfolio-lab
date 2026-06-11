@@ -23,6 +23,8 @@ interface TurnoverValidatorPanelProps {
   data: TurnoverValidatorData | null;
 }
 
+type UnknownRecord = Record<string, unknown>;
+
 const TRIGGER_LABELS: Record<string, string> = {
   drift: 'Drift',
   regime_change: 'Regime Change',
@@ -34,6 +36,64 @@ const TRIGGER_COLORS: Record<string, string> = {
   regime_change: '#8b5cf6',
   scheduled: '#3b82f6',
 };
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeRebalanceEvents(value: unknown): RebalanceEvent[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .map((event) => ({
+      date: typeof event.date === 'string' ? event.date : 'unknown',
+      turnover_pct: finiteNumber(event.turnover_pct) ?? 0,
+      cost_bps: finiteNumber(event.cost_bps) ?? 0,
+      trigger: typeof event.trigger === 'string' ? event.trigger : 'unknown',
+    }));
+}
+
+export function normalizeTurnoverValidatorData(value: unknown): TurnoverValidatorData | null {
+  if (!isRecord(value)) return null;
+
+  const current_turnover_pct = finiteNumber(value.current_turnover_pct);
+  const max_daily_turnover = finiteNumber(value.max_daily_turnover);
+  const max_monthly_turnover = finiteNumber(value.max_monthly_turnover);
+  const max_annual_turnover = finiteNumber(value.max_annual_turnover);
+  const daily_budget_used = finiteNumber(value.daily_budget_used);
+  const monthly_budget_used = finiteNumber(value.monthly_budget_used);
+  const annual_budget_used = finiteNumber(value.annual_budget_used);
+  const cost_drag_bps = finiteNumber(value.cost_drag_bps);
+
+  if (
+    current_turnover_pct === null ||
+    max_daily_turnover === null ||
+    max_monthly_turnover === null ||
+    max_annual_turnover === null ||
+    daily_budget_used === null ||
+    monthly_budget_used === null ||
+    annual_budget_used === null ||
+    cost_drag_bps === null
+  ) {
+    return null;
+  }
+
+  return {
+    current_turnover_pct,
+    max_daily_turnover,
+    max_monthly_turnover,
+    max_annual_turnover,
+    daily_budget_used,
+    monthly_budget_used,
+    annual_budget_used,
+    recent_rebalances: normalizeRebalanceEvents(value.recent_rebalances),
+    cost_drag_bps,
+  };
+}
 
 function GaugeBar({ value, max, label }: { value: number; max: number; label: string }) {
   const pct = Math.min((value / max) * 100, 100);
@@ -91,7 +151,9 @@ function StatusDot({ passed }: { passed: boolean }) {
 }
 
 export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
-  if (!data) {
+  const panelData = normalizeTurnoverValidatorData(data);
+
+  if (!panelData) {
     return (
       <div className="panel">
         <h3>Turnover Validator</h3>
@@ -100,15 +162,15 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
     );
   }
 
-  const dailyOk = data.daily_budget_used < 1;
-  const monthlyOk = data.monthly_budget_used < 1;
-  const annualOk = data.annual_budget_used < 1;
-  const dailyPctFromMax = (data.current_turnover_pct / data.max_daily_turnover) * 100;
-  const turnoverColor = data.current_turnover_pct >= data.max_daily_turnover
-    ? '#ef4444' : data.current_turnover_pct >= data.max_daily_turnover * 0.9
+  const dailyOk = panelData.daily_budget_used < 1;
+  const monthlyOk = panelData.monthly_budget_used < 1;
+  const annualOk = panelData.annual_budget_used < 1;
+  const dailyPctFromMax = (panelData.current_turnover_pct / panelData.max_daily_turnover) * 100;
+  const turnoverColor = panelData.current_turnover_pct >= panelData.max_daily_turnover
+    ? '#ef4444' : panelData.current_turnover_pct >= panelData.max_daily_turnover * 0.9
     ? '#f59e0b' : '#10b981';
-  const costColor = data.cost_drag_bps > 50
-    ? '#ef4444' : data.cost_drag_bps > 25
+  const costColor = panelData.cost_drag_bps > 50
+    ? '#ef4444' : panelData.cost_drag_bps > 25
     ? '#f59e0b' : '#10b981';
 
   return (
@@ -120,20 +182,20 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
         <div className="metric">
           <span className="label">Current Turnover</span>
           <span className="value" style={{ color: turnoverColor }}>
-            {data.current_turnover_pct.toFixed(2)}%
+            {panelData.current_turnover_pct.toFixed(2)}%
           </span>
         </div>
         <div className="metric">
           <span className="label">Daily Max</span>
-          <span className="value">{data.max_daily_turnover.toFixed(2)}%</span>
+          <span className="value">{panelData.max_daily_turnover.toFixed(2)}%</span>
         </div>
         <div className="metric">
           <span className="label">Monthly Max</span>
-          <span className="value">{data.max_monthly_turnover.toFixed(2)}%</span>
+          <span className="value">{panelData.max_monthly_turnover.toFixed(2)}%</span>
         </div>
         <div className="metric">
           <span className="label">Annual Max</span>
-          <span className="value">{data.max_annual_turnover.toFixed(2)}%</span>
+          <span className="value">{panelData.max_annual_turnover.toFixed(2)}%</span>
         </div>
       </div>
 
@@ -146,35 +208,35 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
           position: 'relative', height: 14, background: '#1e293b', borderRadius: 7, overflow: 'hidden',
         }}>
           {/* Daily max threshold line */}
-          <div style={{
-            position: 'absolute', right: 0, top: -2, width: 2, height: 18,
-            background: '#ef4444', opacity: 0.6, zIndex: 1,
-          }} title={`Max: ${data.max_daily_turnover.toFixed(2)}%`} />
-          <div style={{
-            width: `${Math.min(dailyPctFromMax, 100)}%`, height: '100%',
-            background: `linear-gradient(90deg, #10b981, ${turnoverColor})`,
+        <div style={{
+          position: 'absolute', right: 0, top: -2, width: 2, height: 18,
+          background: '#ef4444', opacity: 0.6, zIndex: 1,
+        }} title={`Max: ${panelData.max_daily_turnover.toFixed(2)}%`} />
+        <div style={{
+          width: `${Math.min(dailyPctFromMax, 100)}%`, height: '100%',
+          background: `linear-gradient(90deg, #10b981, ${turnoverColor})`,
             borderRadius: 7, transition: 'width 0.3s ease',
           }} />
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
           <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>
             0%
-          </span>
-          <span style={{ fontSize: 9, color: turnoverColor, fontFamily: 'monospace', fontWeight: 600 }}>
-            {data.current_turnover_pct.toFixed(2)}% used
-          </span>
-          <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>
-            {data.max_daily_turnover.toFixed(1)}% max
-          </span>
-        </div>
+        </span>
+        <span style={{ fontSize: 9, color: turnoverColor, fontFamily: 'monospace', fontWeight: 600 }}>
+          {panelData.current_turnover_pct.toFixed(2)}% used
+        </span>
+        <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>
+          {panelData.max_daily_turnover.toFixed(1)}% max
+        </span>
+      </div>
       </div>
 
       {/* Turnover Budget */}
       <div style={{ marginTop: 12 }}>
         <span className="label" style={{ display: 'block', marginBottom: 6 }}>Turnover Budget</span>
-        <BudgetBar used={data.daily_budget_used} label="Daily" />
-        <BudgetBar used={data.monthly_budget_used} label="Monthly" />
-        <BudgetBar used={data.annual_budget_used} label="Annual" />
+        <BudgetBar used={panelData.daily_budget_used} label="Daily" />
+        <BudgetBar used={panelData.monthly_budget_used} label="Monthly" />
+        <BudgetBar used={panelData.annual_budget_used} label="Annual" />
       </div>
 
       {/* Constraint Status Table */}
@@ -193,13 +255,13 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
             <tr style={{ borderBottom: '1px solid #0f172a' }}>
               <td style={{ padding: '4px 6px', color: '#e2e8f0' }}>Max Daily</td>
               <td style={{ padding: '4px 6px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8' }}>
-                {data.max_daily_turnover.toFixed(2)}%
+                {panelData.max_daily_turnover.toFixed(2)}%
               </td>
               <td style={{
                 padding: '4px 6px', textAlign: 'right', fontFamily: 'monospace',
                 color: dailyOk ? '#10b981' : '#ef4444',
               }}>
-                {(data.daily_budget_used * 100).toFixed(0)}%
+                {(panelData.daily_budget_used * 100).toFixed(0)}%
               </td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }}>
                 <StatusDot passed={dailyOk} />
@@ -211,13 +273,13 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
             <tr style={{ borderBottom: '1px solid #0f172a' }}>
               <td style={{ padding: '4px 6px', color: '#e2e8f0' }}>Max Monthly</td>
               <td style={{ padding: '4px 6px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8' }}>
-                {data.max_monthly_turnover.toFixed(2)}%
+                {panelData.max_monthly_turnover.toFixed(2)}%
               </td>
               <td style={{
                 padding: '4px 6px', textAlign: 'right', fontFamily: 'monospace',
                 color: monthlyOk ? '#10b981' : '#ef4444',
               }}>
-                {(data.monthly_budget_used * 100).toFixed(0)}%
+                {(panelData.monthly_budget_used * 100).toFixed(0)}%
               </td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }}>
                 <StatusDot passed={monthlyOk} />
@@ -229,13 +291,13 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
             <tr>
               <td style={{ padding: '4px 6px', color: '#e2e8f0' }}>Max Annual</td>
               <td style={{ padding: '4px 6px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8' }}>
-                {data.max_annual_turnover.toFixed(2)}%
+                {panelData.max_annual_turnover.toFixed(2)}%
               </td>
               <td style={{
                 padding: '4px 6px', textAlign: 'right', fontFamily: 'monospace',
                 color: annualOk ? '#10b981' : '#ef4444',
               }}>
-                {(data.annual_budget_used * 100).toFixed(0)}%
+                {(panelData.annual_budget_used * 100).toFixed(0)}%
               </td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }}>
                 <StatusDot passed={annualOk} />
@@ -249,12 +311,12 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
       </div>
 
       {/* Recent Rebalancing Events */}
-      {data.recent_rebalances.length > 0 && (
+      {panelData.recent_rebalances.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <span className="label" style={{ display: 'block', marginBottom: 6 }}>
             Recent Rebalancing Events
             <span style={{ color: '#64748b', fontWeight: 400, marginLeft: 6 }}>
-              (last {data.recent_rebalances.length})
+              (last {panelData.recent_rebalances.length})
             </span>
           </span>
           <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
@@ -267,8 +329,8 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
               </tr>
             </thead>
             <tbody>
-              {data.recent_rebalances.slice(0, 5).map((evt, i) => (
-                <tr key={`${evt.date}-${i}`} style={{ borderBottom: i < Math.min(data.recent_rebalances.length, 5) - 1 ? '1px solid #0f172a' : 'none' }}>
+              {panelData.recent_rebalances.slice(0, 5).map((evt, i) => (
+                <tr key={`${evt.date}-${i}`} style={{ borderBottom: i < Math.min(panelData.recent_rebalances.length, 5) - 1 ? '1px solid #0f172a' : 'none' }}>
                   <td style={{ padding: '4px 6px', color: '#e2e8f0', fontFamily: 'monospace' }}>
                     {evt.date}
                   </td>
@@ -301,7 +363,7 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
       )}
 
       {/* No rebalancing events placeholder */}
-      {data.recent_rebalances.length === 0 && (
+      {panelData.recent_rebalances.length === 0 && (
         <div style={{ marginTop: 12 }}>
           <span className="label" style={{ display: 'block', marginBottom: 4 }}>Recent Rebalancing Events</span>
           <p className="muted" style={{ margin: 0, fontSize: 11 }}>No rebalancing events recorded</p>
@@ -327,7 +389,7 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
             <span style={{
               fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color: costColor,
             }}>
-              {data.cost_drag_bps.toFixed(1)}
+              {panelData.cost_drag_bps.toFixed(1)}
             </span>
             <span style={{ fontSize: 11, color: '#64748b', marginLeft: 2 }}>bps</span>
           </div>
@@ -340,14 +402,14 @@ export function TurnoverValidatorPanel({ data }: TurnoverValidatorPanelProps) {
             flex: 1, height: 4, background: '#1e293b', borderRadius: 2, overflow: 'hidden', position: 'relative',
           }}>
             <div style={{
-              width: `${Math.min((data.cost_drag_bps / 75) * 100, 100)}%`, height: '100%',
+              width: `${Math.min((panelData.cost_drag_bps / 75) * 100, 100)}%`, height: '100%',
               background: costColor, borderRadius: 2, transition: 'width 0.3s ease',
             }} />
           </div>
           <span style={{
             fontSize: 9, fontWeight: 600, color: costColor, whiteSpace: 'nowrap',
           }}>
-            {data.cost_drag_bps <= 15 ? 'Low' : data.cost_drag_bps <= 40 ? 'Moderate' : 'High'}
+            {panelData.cost_drag_bps <= 15 ? 'Low' : panelData.cost_drag_bps <= 40 ? 'Moderate' : 'High'}
           </span>
         </div>
       </div>

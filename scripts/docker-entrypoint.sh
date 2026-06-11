@@ -3,7 +3,8 @@ set -e
 
 # ─────────────────────────────────────────────────────────────
 #  Portfolio-Lab Docker Entrypoint
-#  Manages cron-based signal pipeline with graceful shutdown.
+#  Runs the project-local tasker service by default.
+#  Set TASKER_ENTRYPOINT_MODE=cron for legacy crontab fallback.
 # ─────────────────────────────────────────────────────────────
 
 SHUTDOWN_PENDING=0
@@ -19,9 +20,7 @@ cleanup() {
         echo "[entrypoint] PID file removed"
     fi
 
-    # Allow running cron jobs to finish (cron -f will exit on its own
-    # after SIGTERM, but may kill children immediately). Give brief
-    # window for cleanup.
+    # Allow the foreground service or legacy cron mode a brief cleanup window.
     sleep 2
 
     echo "[entrypoint] Shutdown complete"
@@ -33,20 +32,33 @@ cleanup() {
 # Using EXIT ensures cleanup even on unexpected exit paths.
 trap cleanup TERM INT
 
-# ── Setup cron schedule ─────────────────────────────────────
-if [ -f /app/crontab ]; then
-    crontab /app/crontab
-    echo "[entrypoint] Crontab installed"
-else
-    echo "[entrypoint] WARNING: No crontab found at /app/crontab"
-fi
+ENTRYPOINT_MODE="${TASKER_ENTRYPOINT_MODE:-tasker}"
 
 # ── Write PID file for healthcheck ──────────────────────────
 echo $$ > /app/data/pipeline.pid
 echo "[entrypoint] PID $$ written to /app/data/pipeline.pid"
 
-# ── Start cron in foreground ────────────────────────────────
-# Using exec replaces the shell with cron as PID 1 (with tini via init:true)
-# Signals pass through to cron for clean job termination.
-echo "[entrypoint] Starting cron in foreground..."
-exec cron -f
+if [ "$ENTRYPOINT_MODE" = "cron" ]; then
+    # ── Legacy cron fallback ────────────────────────────────
+    if [ -f /app/crontab ]; then
+        crontab /app/crontab
+        echo "[entrypoint] Crontab installed"
+    else
+        echo "[entrypoint] WARNING: No crontab found at /app/crontab"
+    fi
+
+    echo "[entrypoint] Starting legacy cron in foreground (TASKER_ENTRYPOINT_MODE=cron)..."
+    exec cron -f
+fi
+
+if [ "$ENTRYPOINT_MODE" != "tasker" ]; then
+    echo "[entrypoint] ERROR: unsupported TASKER_ENTRYPOINT_MODE=$ENTRYPOINT_MODE" >&2
+    exit 64
+fi
+
+# ── Start tasker in foreground ──────────────────────────────
+export CRON_BACKEND="${CRON_BACKEND:-tasker}"
+export PORTFOLIO_LAB_ENABLE_ML="${PORTFOLIO_LAB_ENABLE_ML:-0}"
+export PORTFOLIO_LAB_PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/app}"
+echo "[entrypoint] Starting tasker service in foreground..."
+exec /app/scripts/python_runtime.sh -m src.tasker.service --host 0.0.0.0 --port "${TASKER_PORT:-8000}"

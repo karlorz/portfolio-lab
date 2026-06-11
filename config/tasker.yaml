@@ -1,0 +1,92 @@
+tasks:
+  - id: portfolio-lab-health
+    label: Health
+    command: make health
+    schedule: "0,30 * * * *"
+    timeout_seconds: 60
+
+  - id: portfolio-lab-data
+    label: Data
+    command: make data
+    schedule: "5 * * * *"
+    timeout_seconds: 300
+
+  - id: portfolio-lab-dashboard
+    label: Dashboard
+    command: make dashboard
+    schedule: "15 * * * *"
+    timeout_seconds: 120
+
+  - id: portfolio-lab-eval
+    label: Evaluator
+    command: make eval
+    schedule: "20 */2 * * *"
+    timeout_seconds: 600
+
+  - id: portfolio-lab-research
+    label: Research
+    command: make research
+    schedule: "25 */2 * * *"
+    timeout_seconds: 300
+
+  - id: portfolio-lab-wiki-sync
+    label: Wiki Sync
+    command: make wiki-sync
+    schedule: "35 */2 * * *"
+    timeout_seconds: 120
+
+  - id: portfolio-lab-overlay-signals
+    label: Overlay Signals
+    command: make overlay-signals
+    schedule: "40 * * * *"
+    timeout_seconds: 600
+
+  - id: portfolio-lab-overlay-dashboard
+    label: Overlay Dashboard
+    command: make overlay-dashboard
+    schedule: "45 * * * *"
+    timeout_seconds: 120
+
+  - id: portfolio-lab-attribution
+    label: Attribution
+    command: make attribution
+    schedule: "47 * * * *"
+    timeout_seconds: 300
+
+  - id: portfolio-lab-unified-dashboard
+    label: Unified Dashboard
+    command: make unified-dashboard
+    schedule: "50 * * * *"
+    timeout_seconds: 120
+
+  - id: portfolio-lab-position-sync
+    label: Position Sync
+    command: make sync
+    schedule: "55 */2 * * *"
+    timeout_seconds: 60
+
+  - id: portfolio-lab-garch-risk
+    label: GARCH Risk
+    command: make garch-risk
+    schedule: "57 * * * *"
+    timeout_seconds: 120
+
+  - id: portfolio-lab-daily-pnl
+    label: Daily P&L
+    command: make daily-pnl
+    schedule: "10,40 * * * *"
+    timeout_seconds: 60
+
+  - id: portfolio-lab-build
+    label: Build
+    command: make build
+    enabled: false
+    manual_only: true
+    timeout_seconds: 600
+
+  - id: portfolio-lab-autonomous-agent
+    label: Hermes Agent Audit Placeholder
+    command: make help
+    enabled: false
+    manual_only: true
+    timeout_seconds: 60

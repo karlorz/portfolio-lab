@@ -36,6 +36,15 @@ HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.js
 _DEFAULT_DATA_DIR = DATA_DIR
 
 
+def _should_include_hermes_audit(local_backend: dict) -> bool:
+    """Return true when Hermes should be surfaced alongside tasker health."""
+    if os.environ.get("TASKER_INCLUDE_HERMES_AUDIT") == "1":
+        return True
+    if local_backend.get("backend") == "tasker" and os.environ.get("CRON_BACKEND") == "tasker":
+        return False
+    return True
+
+
 def _check_data_freshness() -> dict:
     """Check how fresh the price data and signal data are."""
     checks = {}
@@ -70,13 +79,15 @@ def _check_data_freshness() -> dict:
     # Cron status
     cron_path = DATA_DIR / "cron_status.json"
     local_jobs, local_backend = load_local_cron_jobs(cron_path)
-    scheduler_backends = {"local": local_backend}
+    scheduler_backends = {str(local_backend.get("backend", "local")): local_backend}
     jobs = list(local_jobs)
 
-    hermes_path = resolve_hermes_cron_jobs_path(
-        current_data_dir=DATA_DIR,
-        default_data_dir=_DEFAULT_DATA_DIR,
-    )
+    hermes_path = None
+    if _should_include_hermes_audit(local_backend):
+        hermes_path = resolve_hermes_cron_jobs_path(
+            current_data_dir=DATA_DIR,
+            default_data_dir=_DEFAULT_DATA_DIR,
+        )
     if hermes_path is not None:
         hermes_jobs, hermes_backend = load_hermes_portfolio_cron_jobs(hermes_path)
         scheduler_backends["hermes"] = hermes_backend

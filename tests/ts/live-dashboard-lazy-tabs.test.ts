@@ -54,6 +54,7 @@ const lazyPanelImports = [
   { name: 'VolatilityParityPanel', path: './VolatilityParityPanel' },
   { name: 'LabsPanel', path: './LabsPanel' },
   { name: 'ChatPanel', path: './ChatPanel' },
+  { name: 'TasksPanel', path: './TasksPanel' },
 ];
 
 const lazyTabBoundaries = [
@@ -66,6 +67,7 @@ const lazyTabBoundaries = [
   'Closing Auction',
   'Risk',
   'Labs',
+  'Tasks',
   'Chat',
 ];
 
@@ -114,10 +116,27 @@ describe('LiveDashboard lazy tab panel contract', () => {
     }
   });
 
+  it('keeps optional Analytics children isolated behind panel-level boundaries', () => {
+    const analyticsSource = sourceBetween('{/* Analytics Tab */}', '{/* 0DTE Options Tab */}');
+    const expectedBoundaries = [
+      'Analytics/Explainability',
+      'Analytics/Ensemble Voting',
+      'Analytics/Graduation Checklist',
+      'Analytics/Adaptive Sizing',
+      'Analytics/VIXY Hedge Sizing',
+      'Analytics/Black-Litterman',
+      'Analytics/Turnover Validator',
+    ];
+
+    for (const boundaryName of expectedBoundaries) {
+      expect(analyticsSource).toContain(`<PanelErrorBoundary name="${boundaryName}">`);
+    }
+  });
+
   it('wires Labs as a lazy tab that delegates endpoint loading to the Labs fetch helper', () => {
     const labsPanelSource = readFileSync('src/components/LabsPanel.tsx', 'utf8');
 
-    expect(source).toContain("type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'labs' | 'chat'");
+    expect(source).toContain("type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'labs' | 'tasks' | 'chat'");
     expect(source).toContain("{ id: 'labs', label: 'Labs'");
     expect(source).toContain("import('./LabsPanel')");
     expect(source).toMatch(/activeTab === 'labs'[\s\S]*<LabsPanel \/>/);

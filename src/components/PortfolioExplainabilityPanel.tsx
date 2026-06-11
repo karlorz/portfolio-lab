@@ -18,16 +18,14 @@ interface LatestDecision {
     weight: number;
     confidence: number;
   }>;
-  top_drivers: Array<{
-    source: string;
-    contribution: number;
-    direction: string;
-  }>;
-  top_opposers: Array<{
-    source: string;
-    contribution: number;
-    direction: string;
-  }>;
+  top_drivers: Array<ContributionRow | string>;
+  top_opposers: Array<ContributionRow | string>;
+}
+
+export interface ContributionRow {
+  source: string;
+  contribution: number | null;
+  direction: string;
 }
 
 interface SignalDeepDive {
@@ -63,6 +61,41 @@ function formatPct(v: number): string {
 
 function formatConfidence(v: number): string {
   return `${(v * 100).toFixed(0)}%`;
+}
+
+export function formatSourceLabel(source: unknown): string {
+  if (typeof source !== 'string' || source.trim() === '') {
+    return 'Unknown signal';
+  }
+  return source.replace(/_/g, ' ');
+}
+
+export function normalizeContributionRows(rows: unknown, _role: 'driver' | 'opposer'): ContributionRow[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => {
+    if (typeof row === 'string') {
+      return {
+        source: row,
+        contribution: null,
+        direction: 'unknown',
+      };
+    }
+    if (row && typeof row === 'object') {
+      const candidate = row as Record<string, unknown>;
+      return {
+        source: typeof candidate.source === 'string' && candidate.source.trim() !== ''
+          ? candidate.source
+          : 'Unknown signal',
+        contribution: typeof candidate.contribution === 'number' ? candidate.contribution : null,
+        direction: typeof candidate.direction === 'string' ? candidate.direction : 'unknown',
+      };
+    }
+    return {
+      source: 'Unknown signal',
+      contribution: null,
+      direction: 'unknown',
+    };
+  });
 }
 
 function regimeColor(r: string): string {
@@ -104,8 +137,8 @@ export function PortfolioExplainabilityPanel({ data }: Props) {
   }
 
   const ld = data.latest_decision;
-  const drivers = ld.top_drivers ?? [];
-  const opposers = ld.top_opposers ?? [];
+  const drivers = normalizeContributionRows(ld.top_drivers, 'driver');
+  const opposers = normalizeContributionRows(ld.top_opposers, 'opposer');
   const signals = ld.signals ?? [];
 
   return (
@@ -174,7 +207,7 @@ export function PortfolioExplainabilityPanel({ data }: Props) {
           <div className="ex-signal-bars">
             {signals.map((s, i) => (
               <div key={i} className="ex-signal-row">
-                <span className="ex-signal-name">{s.source.replace(/_/g, ' ')}</span>
+                <span className="ex-signal-name">{formatSourceLabel(s.source)}</span>
                 <div className="ex-signal-bar-container">
                   <div
                     className="ex-signal-bar"
@@ -202,10 +235,12 @@ export function PortfolioExplainabilityPanel({ data }: Props) {
             <h4>Top Drivers</h4>
             {drivers.map((d, i) => (
               <div key={i} className="ex-driver-row">
-                <span className="ex-driver-name">{d.source.replace(/_/g, ' ')}</span>
-                <span className="ex-driver-contribution" style={{ color: '#10b981' }}>
-                  +{d.contribution.toFixed(2)}
-                </span>
+                <span className="ex-driver-name">{formatSourceLabel(d.source)}</span>
+                {d.contribution != null && (
+                  <span className="ex-driver-contribution" style={{ color: '#10b981' }}>
+                    +{d.contribution.toFixed(2)}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -215,10 +250,12 @@ export function PortfolioExplainabilityPanel({ data }: Props) {
             <h4>Top Opposers</h4>
             {opposers.map((d, i) => (
               <div key={i} className="ex-opposer-row">
-                <span className="ex-opposer-name">{d.source.replace(/_/g, ' ')}</span>
-                <span className="ex-opposer-contribution" style={{ color: '#ef4444' }}>
-                  {d.contribution.toFixed(2)}
-                </span>
+                <span className="ex-opposer-name">{formatSourceLabel(d.source)}</span>
+                {d.contribution != null && (
+                  <span className="ex-opposer-contribution" style={{ color: '#ef4444' }}>
+                    {d.contribution.toFixed(2)}
+                  </span>
+                )}
               </div>
             ))}
           </div>

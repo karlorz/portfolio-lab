@@ -608,8 +608,17 @@ describe('SignalsDataSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing timestamp', () => {
+  it('accepts generated_at as the timestamp source for production signal artifacts', () => {
     const { timestamp, ...rest } = validSignalsData();
+    const result = SignalsDataSchema.safeParse(rest);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.timestamp).toBe('2026-05-26T12:00:00Z');
+    }
+  });
+
+  it('rejects signal artifacts missing both timestamp and generated_at', () => {
+    const { timestamp, generated_at, ...rest } = validSignalsData();
     const result = SignalsDataSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
@@ -716,7 +725,14 @@ describe('validateSignalsData', () => {
     expect(result!.timestamp).toBe('2026-05-26T12:00:00Z');
   });
 
-  it('fallback is NOT used when object lacks timestamp', () => {
+  it('fallback: returns generated_at-only raw data with normalized timestamp', () => {
+    const partial = { generated_at: '2026-05-26T12:00:00Z', regime: 'invalid-shape' };
+    const result = validateSignalsData(partial);
+    expect(result).not.toBeNull();
+    expect(result!.timestamp).toBe('2026-05-26T12:00:00Z');
+  });
+
+  it('fallback is NOT used when object lacks timestamp and generated_at', () => {
     const partial = { regime: { regime: 'normal' }, no_timestamp: true };
     const result = validateSignalsData(partial);
     expect(result).toBeNull();

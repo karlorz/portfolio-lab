@@ -1,24 +1,36 @@
 # Portfolio-Lab Caddyfile
-# Serves the SPA dashboard with API proxy to Python backend
+# Public DNS name: lab.karldigi.dev
+# Set PORTFOLIO_LAB_SITE_ADDRESS=lab.karldigi.dev for public deployment.
+# Host-native defaults serve the LXC/systemd deployment.
+# Docker Compose can override roots/upstream via environment variables.
 
-:80 {
+{$PORTFOLIO_LAB_SITE_ADDRESS::80} {
 	encode gzip
 
-	# API proxy — route /api/* to the Python pipeline service
+	# API proxy — route /api/* to the Python tasker/API service
 	handle /api/* {
-		reverse_proxy pipeline:8000
+		reverse_proxy {$PORTFOLIO_LAB_TASKER_UPSTREAM:127.0.0.1:8000}
+	}
+
+	# Hashed Vite assets — safe to cache immutably
+	handle /assets/* {
+		root * {$PORTFOLIO_LAB_WEB_ROOT:/var/www/portfolio-lab}
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Data files — serve signals.json and other data before SPA fallback
+	handle /data/* {
+		root * {$PORTFOLIO_LAB_PUBLIC_ROOT:/var/www/portfolio-lab}
+		header Cache-Control "no-cache"
+		file_server
 	}
 
 	# Static SPA — serve frontend with client-side routing fallback
 	handle {
-		root * /srv/app
+		root * {$PORTFOLIO_LAB_WEB_ROOT:/var/www/portfolio-lab}
+		header Cache-Control "no-cache"
 		try_files {path} /index.html
-		file_server
-	}
-
-	# Data files — serve signals.json and other data
-	handle /data/* {
-		root * /srv
 		file_server
 	}
 

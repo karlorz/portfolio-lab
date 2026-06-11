@@ -61,6 +61,7 @@ help:
 	@echo "  make mark-to-market  Update portfolio with current market prices"
 	@echo "  make deploy-preview DEPLOY_HOST=sg02 [DEPLOY_REMOTE_BASE=...] [DEPLOY_PREVIEW_PORT=4173] [DEPLOY_BOOTSTRAP_PREVIEW_DATA=1]"
 	@echo "  make deploy-production DEPLOY_HOST=sg01 [DEPLOY_REMOTE_BASE=...] [DEPLOY_PROD_WEB_ROOT=/var/www/portfolio-lab] [DEPLOY_RELOAD_SERVICE=caddy]"
+	@echo "  make deploy-lab-app [DEPLOY_LAB_ARGS='--dry-run']  Deploy lab.karldigi.dev with systemd + Caddy"
 
 # ── Remote Deploy ─────────────────────────────────────────────────────
 
@@ -72,6 +73,7 @@ DEPLOY_PROD_WEB_ROOT ?=/var/www/portfolio-lab
 DEPLOY_RELOAD_SERVICE ?=
 DEPLOY_HEALTH_URL ?=
 DEPLOY_EXTRA_ARGS ?=
+DEPLOY_LAB_ARGS ?=
 
 .PHONY: deploy-preview
 deploy-preview:
@@ -94,6 +96,10 @@ deploy-production:
 	if [ -n "$(DEPLOY_EXTRA_ARGS)" ]; then ARGS="$$ARGS $(DEPLOY_EXTRA_ARGS)"; fi; \
 	echo "Running: scripts/deploy-remote.sh $$ARGS"; \
 	scripts/deploy-remote.sh $$ARGS
+
+.PHONY: deploy-lab-app
+deploy-lab-app:
+	@scripts/deploy-lab-app.sh $(DEPLOY_LAB_ARGS)
 
 # ── Test Suite ────────────────────────────────────────────────────────
 
@@ -530,6 +536,13 @@ verify-cron-sync:
 	@echo ""
 	@echo "Checking live Hermes/system crontab overlap..."
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/detect_cron_overlap.py
+	@echo ""
+	@echo "Checking SkillWiki/Hermes routing contract..."
+	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/audit_routing_contract.py
+
+.PHONY: audit-routing-contract
+audit-routing-contract:
+	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/audit_routing_contract.py
 
 .PHONY: fetch-trends
 fetch-trends:

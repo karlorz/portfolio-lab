@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'fs';
+
+function read(path: string): string {
+  return readFileSync(path, 'utf8');
+}
+
+describe('dashboard delivery source contracts', () => {
+  it('publishes a prices_compact.json artifact from the canonical fetch script', () => {
+    const source = read('scripts/fetch-data.ts');
+
+    expect(source).toContain("'prices_compact.json'");
+    expect(source).toMatch(/Bun\.write\([^)]*pricesCompactPath/);
+  });
+
+  it('keeps mobile portfolio selector children from forcing document-level overflow', () => {
+    const css = read('src/App.css');
+
+    expect(css).toMatch(/\.portfolio-selector\s*\{[\s\S]*min-width:\s*0;/);
+    expect(css).toMatch(/\.portfolio-categories\s*\{[\s\S]*min-width:\s*0;/);
+    expect(css).toMatch(/\.portfolio-category\s*\{[\s\S]*min-width:\s*0;/);
+    expect(css).toMatch(/\.toggle\s*\{[\s\S]*min-width:\s*0;/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.portfolio-category\s*\{[\s\S]*align-items:\s*stretch;/);
+  });
+
+  it('clips live dashboard tables inside their own scroll containers on mobile', () => {
+    const css = read('src/App.css');
+
+    expect(css).toMatch(/\.live-dashboard\s*\{[\s\S]*min-width:\s*0;/);
+    expect(css).toMatch(/\.positions-section,\s*\.orders-section\s*\{[\s\S]*overflow-x:\s*auto;/);
+    expect(css).toMatch(/\.positions-table,\s*\.orders-table\s*\{[\s\S]*min-width:\s*520px;/);
+  });
+
+  it('contains wide dashboard tables in local scroll wrappers', () => {
+    const css = read('src/App.css');
+
+    expect(css).toMatch(/\.comparison-table\s*\{[\s\S]*max-width:\s*100%;[\s\S]*overflow-x:\s*auto;/);
+    expect(css).toMatch(/\.overflow-x-auto\s*\{[\s\S]*max-width:\s*100%;[\s\S]*overflow-x:\s*auto;/);
+  });
+
+  it('wraps FIRE calculator segmented controls instead of widening mobile pages', () => {
+    const css = read('src/App.css');
+    const source = read('src/components/FIRECalculator.tsx');
+
+    expect(source).toContain('className="fire-control-buttons"');
+    expect(css).toMatch(/\.fire-control-buttons\s*\{[\s\S]*flex-wrap:\s*wrap;/);
+  });
+
+  it('sets separate cache policies for immutable assets and live dashboard data', () => {
+    const caddy = read('Caddyfile');
+
+    expect(caddy).toMatch(/handle\s+\/assets\/\*[\s\S]*Cache-Control\s+"public, max-age=31536000, immutable"/);
+    expect(caddy).toMatch(/handle\s+\/data\/\*[\s\S]*Cache-Control\s+"no-cache"/);
+  });
+});

@@ -61,6 +61,50 @@ MONITOR_EXCEPTIONS = (ImportError, ValueError, OSError, RuntimeError)
 _BUG_EXCEPTIONS = (ValueError, TypeError)
 
 
+def _attach_signal_metadata(output: Dict, *, generated_at: str | None = None) -> Dict:
+    """Attach dashboard-level generation timestamps to a signals payload."""
+    timestamp = generated_at or datetime.now().isoformat()
+    enriched = dict(output)
+    enriched["generated_at"] = timestamp
+    enriched.setdefault("timestamp", timestamp)
+    return enriched
+
+
+def _compact_health_summary(report: Dict) -> Dict:
+    """Build a bounded health summary suitable for embedding in signals.json."""
+    if not isinstance(report, dict):
+        return {"status": "error", "error": "invalid health report"}
+
+    status = report.get("system_status") or report.get("status") or "unknown"
+    summary = {"status": status}
+
+    if report.get("generated_at"):
+        summary["generated_at"] = report.get("generated_at")
+    if report.get("error"):
+        summary["error"] = str(report.get("error"))
+
+    cron_jobs = report.get("cron_jobs")
+    if isinstance(cron_jobs, list):
+        summary["cron_job_count"] = len(cron_jobs)
+        summary["failed_cron_jobs"] = sum(
+            1 for job in cron_jobs if isinstance(job, dict) and job.get("status") == "error"
+        )
+
+    data_freshness = report.get("data_freshness")
+    if isinstance(data_freshness, dict):
+        summary["stale_data_count"] = sum(
+            1
+            for item in data_freshness.values()
+            if isinstance(item, dict) and item.get("status") != "fresh"
+        )
+
+    scheduler_status = report.get("scheduler_status")
+    if isinstance(scheduler_status, dict) and scheduler_status.get("status"):
+        summary["scheduler_status"] = scheduler_status.get("status")
+
+    return summary
+
+
 def _log_signal_error(signal_name: str, exc: Exception) -> None:
     """Log a signal exception at the appropriate level.
 
@@ -799,8 +843,7 @@ class DashboardGenerator:
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("hedge_selector", e)
 
-        output = {
-            "generated_at": datetime.now().isoformat(),
+        output = _attach_signal_metadata({
             "regime": validate_signal("regime", regime_data),
             "target_allocations": target_alloc,
             "current_positions": positions,
@@ -834,7 +877,7 @@ class DashboardGenerator:
             "entropy": entropy_data,
             "bond_momentum": overlay_data.get("bond_momentum", {}),
             "hedge_selector": validate_signal("hedge_selector", hedge_selector_signal),
-        }
+        })
 
         # Rebalance health data
         try:
@@ -936,9 +979,9 @@ class DashboardGenerator:
         # Health check report
         try:
             from src.monitor.health_check import run_health_check
-            output["health"] = run_health_check()
+            output["health"] = _compact_health_summary(run_health_check())
         except Exception as e:
-            output["health"] = {"status": "error", "error": str(e)}
+            output["health"] = _compact_health_summary({"status": "error", "error": str(e)})
 
         # Fire external alerts on staleness state transitions
         try:

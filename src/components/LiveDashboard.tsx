@@ -89,6 +89,7 @@ const KurtosisRegimePanel = lazy(() => import('./KurtosisRegimePanel').then((mod
 const VolatilityParityPanel = lazy(() => import('./VolatilityParityPanel').then((module) => ({ default: module.VolatilityParityPanel })));
 const LabsPanel = lazy(() => import('./LabsPanel').then((module) => ({ default: module.LabsPanel })));
 const ChatPanel = lazy(() => import('./ChatPanel').then((module) => ({ default: module.ChatPanel })));
+const TasksPanel = lazy(() => import('./TasksPanel').then((module) => ({ default: module.TasksPanel })));
 
 function tabLoadingFallback(name: string) {
   return (
@@ -122,7 +123,7 @@ async function safeParseJson(response: Response, endpoint: string): Promise<unkn
   }
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'labs' | 'chat';
+type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'labs' | 'tasks' | 'chat';
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -396,6 +397,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'options', label: '0DTE', badge: signals?.zero_dte?.positions?.length || undefined },
     { id: 'auction', label: 'Auction', badge: signals?.closing_auction?.signals?.filter(s => s.should_trade).length || undefined },
     { id: 'labs', label: 'Labs' },
+    { id: 'tasks', label: 'Tasks' },
     { id: 'chat', label: 'Chat' }
   ];
 
@@ -804,50 +806,90 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                 <small>Data points: {analytics?.data_points || 0}</small>
               </div>
             )}
-            <PortfolioExplainabilityPanel data={explainability} />
+            <PanelErrorBoundary name="Analytics/Explainability">
+              <PortfolioExplainabilityPanel data={explainability} />
+            </PanelErrorBoundary>
 
             {/* Model & Ensemble Panels */}
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <EnsembleVotingPanel data={(signals?.ensemble_voting ?? null) as unknown as EnsembleVotingData | null} />
-              <AlternativeDataPanel data={(signals?.alternative_data ?? null) as unknown as AlternativeData | null} />
+              <PanelErrorBoundary name="Analytics/Ensemble Voting">
+                <EnsembleVotingPanel data={(signals?.ensemble_voting ?? null) as unknown as EnsembleVotingData | null} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/Alternative Data">
+                <AlternativeDataPanel data={(signals?.alternative_data ?? null) as unknown as AlternativeData | null} />
+              </PanelErrorBoundary>
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <FactorRotationPanel data={(signals?.factor_rotation ?? null) as unknown as FactorRotationData | null} />
-              <StackingEnsemblePanel data={(signals?.stacking_ensemble ?? null) as unknown as StackingEnsembleData | null} />
+              <PanelErrorBoundary name="Analytics/Factor Rotation">
+                <FactorRotationPanel data={(signals?.factor_rotation ?? null) as unknown as FactorRotationData | null} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/Stacking Ensemble">
+                <StackingEnsemblePanel data={(signals?.stacking_ensemble ?? null) as unknown as StackingEnsembleData | null} />
+              </PanelErrorBoundary>
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <ConvexityHarvestPanel data={(signals?.convexity_harvest ?? null) as unknown as ConvexityHarvestData | null} />
-              <LLMSentimentPanel data={(signals?.llm_sentiment ?? null) as unknown as LLMSentimentData | null} />
+              <PanelErrorBoundary name="Analytics/Convexity Harvest">
+                <ConvexityHarvestPanel data={(signals?.convexity_harvest ?? null) as unknown as ConvexityHarvestData | null} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/LLM Sentiment">
+                <LLMSentimentPanel data={(signals?.llm_sentiment ?? null) as unknown as LLMSentimentData | null} />
+              </PanelErrorBoundary>
             </div>
             <div className="mt-4">
-              <SectorRotationPanel data={(signals?.sector_rotation ?? null) as unknown as SectorRotationData | null} />
+              <PanelErrorBoundary name="Analytics/Sector Rotation">
+                <SectorRotationPanel data={(signals?.sector_rotation ?? null) as unknown as SectorRotationData | null} />
+              </PanelErrorBoundary>
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <MLSignalsPanel data={(signals?.ml_signals ?? null) as unknown as MLSignalsData | null} />
-              <FactorRotationDashboardPanel data={(signals?.factor_rotation_dashboard ?? null) as unknown as FactorRotationDashboardData | null} />
+              <PanelErrorBoundary name="Analytics/ML Signals">
+                <MLSignalsPanel data={(signals?.ml_signals ?? null) as unknown as MLSignalsData | null} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/Factor Rotation Dashboard">
+                <FactorRotationDashboardPanel data={(signals?.factor_rotation_dashboard ?? null) as unknown as FactorRotationDashboardData | null} />
+              </PanelErrorBoundary>
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <GraduationChecklistPanel data={graduationData} />
-              <AdaptiveSizingPanel data={adaptiveSizingData} />
-              <VixyHedgeSizingPanel data={vixyHedgeData} />
-              <HedgeSelectorPanel data={hedgeSelectorData} />
+              <PanelErrorBoundary name="Analytics/Graduation Checklist">
+                <GraduationChecklistPanel data={graduationData} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/Adaptive Sizing">
+                <AdaptiveSizingPanel data={adaptiveSizingData} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/VIXY Hedge Sizing">
+                <VixyHedgeSizingPanel data={vixyHedgeData} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/Hedge Selector">
+                <HedgeSelectorPanel data={hedgeSelectorData} />
+              </PanelErrorBoundary>
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <BlackLittermanMapperPanel data={blMapperData} />
-              <TurnoverValidatorPanel data={turnoverData} />
+              <PanelErrorBoundary name="Analytics/Black-Litterman">
+                <BlackLittermanMapperPanel data={blMapperData} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/Turnover Validator">
+                <TurnoverValidatorPanel data={turnoverData} />
+              </PanelErrorBoundary>
             </div>
             <div className="mt-4 analytics-panels-row grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <RegimeGatePanel data={regimeGateData} />
-              <TSMOMPanel data={tsmomData} />
-              <CrossAssetRVPanel data={crossAssetRVData} />
+              <PanelErrorBoundary name="Analytics/Regime Gate">
+                <RegimeGatePanel data={regimeGateData} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/TSMOM">
+                <TSMOMPanel data={tsmomData} />
+              </PanelErrorBoundary>
+              <PanelErrorBoundary name="Analytics/Cross Asset RV">
+                <CrossAssetRVPanel data={crossAssetRVData} />
+              </PanelErrorBoundary>
             </div>
             <div className="mt-4">
-              <ModelValidationPanel
-                dsr={null}
-                championSharpe={stats?.paper_portfolio?.sharpe ?? null}
-                blWeights={null}
-                overlayWeights={signals?.target_allocations ?? null}
-              />
+              <PanelErrorBoundary name="Analytics/Model Validation">
+                <ModelValidationPanel
+                  dsr={null}
+                  championSharpe={stats?.paper_portfolio?.sharpe ?? null}
+                  blWeights={null}
+                  overlayWeights={signals?.target_allocations ?? null}
+                />
+              </PanelErrorBoundary>
             </div>
           </div>
           </Suspense>
@@ -930,6 +972,17 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           <Suspense fallback={tabLoadingFallback('Labs')}>
           <div className="tab-panel labs-panel-container">
             <LabsPanel />
+          </div>
+          </Suspense>
+        </PanelErrorBoundary>
+        )}
+
+        {/* Tasks Tab */}
+        {activeTab === 'tasks' && (
+        <PanelErrorBoundary name="Tasks">
+          <Suspense fallback={tabLoadingFallback('Tasks')}>
+          <div className="tab-panel tasks-panel-container">
+            <TasksPanel />
           </div>
           </Suspense>
         </PanelErrorBoundary>

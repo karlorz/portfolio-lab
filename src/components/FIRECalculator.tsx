@@ -165,7 +165,7 @@ export const FIRECalculator: React.FC<FIRECalculatorProps> = ({ results }) => {
           <label style={{ color: '#94a3b8', fontSize: '0.85rem', display: 'block', marginBottom: 5 }}>
             Withdrawal Rate
           </label>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="fire-control-buttons">
             {WITHDRAWAL_RATES.map(rate => (
               <button
                 key={rate}
@@ -190,7 +190,7 @@ export const FIRECalculator: React.FC<FIRECalculatorProps> = ({ results }) => {
           <label style={{ color: '#94a3b8', fontSize: '0.85rem', display: 'block', marginBottom: 5 }}>
             Scenario
           </label>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="fire-control-buttons">
             {([
               { key: 'gfc', label: 'GFC Stress Test' },
               { key: 'full', label: 'Full 2005-2026' },

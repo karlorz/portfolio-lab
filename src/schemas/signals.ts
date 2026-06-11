@@ -413,10 +413,21 @@ export const SignalWFESchema = z.object({
   error: z.optional(z.string()),
 }).passthrough();
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeSignalsTimestamp(raw: unknown): unknown {
+  if (!isPlainRecord(raw)) return raw;
+  if (typeof raw.timestamp === 'string') return raw;
+  if (typeof raw.generated_at !== 'string') return raw;
+  return { ...raw, timestamp: raw.generated_at };
+}
+
 // ---------------------------------------------------------------------------
 // SignalsData — main schema
 // ---------------------------------------------------------------------------
-export const SignalsDataSchema = z.object({
+const SignalsDataObjectSchema = z.object({
   // Required fields
   timestamp: z.string(),
   regime: RegimeSchema,
@@ -503,6 +514,8 @@ export const SignalsDataSchema = z.object({
     implications: z.string(),
   })),
 }).passthrough();
+
+export const SignalsDataSchema = z.preprocess(normalizeSignalsTimestamp, SignalsDataObjectSchema);
 
 // ---------------------------------------------------------------------------
 // DashboardDataSchema — /data/dashboard.json
@@ -779,7 +792,8 @@ export function validateFetchData<T>(
 // validateSignalsData — specific validator for signals.json (retained)
 // ---------------------------------------------------------------------------
 export function validateSignalsData(raw: unknown): SignalsData | null {
-  const result = SignalsDataSchema.safeParse(raw);
+  const normalized = normalizeSignalsTimestamp(raw);
+  const result = SignalsDataSchema.safeParse(normalized);
   if (result.success) {
     return result.data as SignalsData;
   }
@@ -787,9 +801,9 @@ export function validateSignalsData(raw: unknown): SignalsData | null {
   if (import.meta.env.DEV) {
     console.warn('Signal validation failed:', result.error.issues);
   }
-  // Fallback: try to use raw data as-is if it looks like an object
-  if (typeof raw === 'object' && raw !== null && 'timestamp' in raw) {
-    return raw as SignalsData;
+  // Fallback: try to use raw data as-is if it looks like a timestamped object
+  if (isPlainRecord(normalized) && typeof normalized.timestamp === 'string') {
+    return normalized as SignalsData;
   }
   return null;
 }

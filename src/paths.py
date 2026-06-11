@@ -23,15 +23,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Primary data directories
 DATA_DIR = PROJECT_ROOT / "data"
-PUBLIC_DATA_DIR = PROJECT_ROOT / "public" / "data"
+PUBLIC_DATA_DIR = Path(os.environ.get("PUBLIC_DATA_DIR", str(PROJECT_ROOT / "public" / "data"))).expanduser()
 # Common database paths
 MARKET_DB = DATA_DIR / "market.db"
+TASKER_DB = DATA_DIR / "tasker.db"
 
 # Common data files
 PRICES_JSON = PUBLIC_DATA_DIR / "prices.json"
 SIGNALS_JSON = PUBLIC_DATA_DIR / "signals.json"
 HISTORICAL_JSON = PUBLIC_DATA_DIR / "historical.json"
 YIELDS_JSON = PUBLIC_DATA_DIR / "yields.json"
+PUBLIC_TASKER_STATUS_JSON = PUBLIC_DATA_DIR / "tasker_status.json"
+TASKER_STATUS_JSON = DATA_DIR / "tasker_status.json"
 
 # Subdirectories
 SIGNALS_DIR = DATA_DIR / "signals"

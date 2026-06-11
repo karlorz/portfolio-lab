@@ -27,6 +27,54 @@ interface GraduationChecklistPanelProps {
   data: GraduationChecklistData | null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+export function normalizeGraduationChecklistData(data: unknown): GraduationChecklistData | null {
+  if (!isRecord(data) || !Array.isArray(data.criteria) || !isRecord(data.paper_trading)) {
+    return null;
+  }
+
+  const paper = data.paper_trading;
+  if (
+    typeof paper.start_date !== 'string' ||
+    !isFiniteNumber(paper.initial_capital) ||
+    !isFiniteNumber(paper.current_value) ||
+    !isFiniteNumber(paper.days_elapsed) ||
+    !isFiniteNumber(paper.days_required) ||
+    !isFiniteNumber(data.readiness_pct) ||
+    typeof data.eligible !== 'boolean'
+  ) {
+    return null;
+  }
+
+  const criteria = data.criteria.filter(isRecord).map((criterion) => ({
+    id: typeof criterion.id === 'string' ? criterion.id : 'unknown',
+    label: typeof criterion.label === 'string' ? criterion.label : 'Unknown criterion',
+    passed: criterion.passed === true,
+    value: typeof criterion.value === 'string' ? criterion.value : String(criterion.value ?? ''),
+    threshold: typeof criterion.threshold === 'string' ? criterion.threshold : String(criterion.threshold ?? ''),
+  }));
+
+  return {
+    criteria,
+    paper_trading: {
+      start_date: paper.start_date,
+      initial_capital: paper.initial_capital,
+      current_value: paper.current_value,
+      days_elapsed: paper.days_elapsed,
+      days_required: paper.days_required,
+    },
+    readiness_pct: data.readiness_pct,
+    eligible: data.eligible,
+  };
+}
+
 const CRITERIA_ICONS: Record<string, string> = {
   'days_traded': 'D',
   'sharpe': 'S',
@@ -38,7 +86,8 @@ const CRITERIA_ICONS: Record<string, string> = {
 };
 
 export function GraduationChecklistPanel({ data }: GraduationChecklistPanelProps) {
-  if (!data) {
+  const normalized = normalizeGraduationChecklistData(data);
+  if (!normalized) {
     return (
       <div className="panel">
         <h3>Graduation Checklist</h3>
@@ -47,6 +96,7 @@ export function GraduationChecklistPanel({ data }: GraduationChecklistPanelProps
     );
   }
 
+  data = normalized;
   const criteria = data.criteria || [];
   const paper = data.paper_trading;
   const readinessPct = data.readiness_pct;
