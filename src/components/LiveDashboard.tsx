@@ -33,6 +33,14 @@ import type { CollarData } from './CollarPanel';
 import type { KurtosisData } from './KurtosisRegimePanel';
 import type { VolatilityParityData } from './VolatilityParityPanel';
 import { summarizeHealthOperations } from './healthOperations';
+import { IncidentSummary } from './IncidentSummary';
+import {
+  buildDashboardIncidents,
+  getIncidentsForTab,
+  getTabIncidentBadge,
+  type IncidentTab,
+  type TabIncidentBadge,
+} from './dashboardIncidents';
 import {
   validateSignalsData,
   validateFetchData,
@@ -124,7 +132,7 @@ async function safeParseJson(response: Response, endpoint: string): Promise<unkn
   }
 }
 
-type TabType = 'overview' | 'health' | 'history' | 'performance' | 'rebalance' | 'analytics' | 'options' | 'auction' | 'risk' | 'labs' | 'tasks' | 'chat';
+type TabType = IncidentTab;
 
 export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -384,20 +392,38 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
   const formatPct = (v: number) => `${(v * 100).toFixed(1)}%`;
 
-  const criticalAlerts = alerts.filter(a => a.level === 'error' || a.requires_action);
-  const warningAlerts = alerts.filter(a => a.level === 'warning' && !a.requires_action);
   const healthOperationsSummary = health ? summarizeHealthOperations(health) : null;
+  const dashboardIncidents = useMemo(
+    () => buildDashboardIncidents({ alerts, signals, health }),
+    [alerts, signals, health],
+  );
+  const overviewIncidents = useMemo(
+    () => getIncidentsForTab(dashboardIncidents, 'overview'),
+    [dashboardIncidents],
+  );
+  const healthIncidents = useMemo(
+    () => getIncidentsForTab(dashboardIncidents, 'health'),
+    [dashboardIncidents],
+  );
+  const riskIncidents = useMemo(
+    () => getIncidentsForTab(dashboardIncidents, 'risk'),
+    [dashboardIncidents],
+  );
 
-  const tabs: { id: TabType; label: string; badge?: number }[] = [
-    { id: 'overview', label: 'Overview', badge: criticalAlerts.length || undefined },
-    { id: 'health', label: 'Health', badge: health?.system_status === 'critical' ? 1 : undefined },
-    { id: 'risk', label: 'Risk', badge: (signals?.garch_cvar?.cvar_ratio || 0) > 1.5 ? 1 : undefined },
+  const countBadge = (count: number | undefined, severity: TabIncidentBadge['severity']): TabIncidentBadge | undefined => {
+    return count && count > 0 ? { count, severity } : undefined;
+  };
+
+  const tabs: { id: TabType; label: string; badge?: TabIncidentBadge }[] = [
+    { id: 'overview', label: 'Overview', badge: getTabIncidentBadge(dashboardIncidents, 'overview') },
+    { id: 'health', label: 'Health', badge: getTabIncidentBadge(dashboardIncidents, 'health') },
+    { id: 'risk', label: 'Risk', badge: getTabIncidentBadge(dashboardIncidents, 'risk') },
     { id: 'history', label: 'History' },
     { id: 'performance', label: 'Performance' },
     { id: 'rebalance', label: 'Rebalance' },
     { id: 'analytics', label: 'Analytics' },
-    { id: 'options', label: '0DTE', badge: signals?.zero_dte?.positions?.length || undefined },
-    { id: 'auction', label: 'Auction', badge: signals?.closing_auction?.signals?.filter(s => s.should_trade).length || undefined },
+    { id: 'options', label: '0DTE', badge: countBadge(signals?.zero_dte?.positions?.length, 'info') },
+    { id: 'auction', label: 'Auction', badge: countBadge(signals?.closing_auction?.signals?.filter(s => s.should_trade).length, 'warning') },
     { id: 'labs', label: 'Labs' },
     { id: 'tasks', label: 'Tasks' },
     { id: 'chat', label: 'Chat' }
@@ -444,8 +470,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             onClick={() => setActiveTab(tab.id)}
           >
             {tab.label}
-            {tab.badge !== undefined && tab.badge > 0 && (
-              <span className="tab-badge">{tab.badge}</span>
+            {tab.badge !== undefined && tab.badge.count > 0 && (
+              <span className={`tab-badge tab-badge-${tab.badge.severity}`}>{tab.badge.count}</span>
             )}
           </button>
         ))}
@@ -457,35 +483,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         {activeTab === 'overview' && (
         <PanelErrorBoundary name="Overview">
           <div className="tab-panel overview-panel">
-            {/* Critical Alerts */}
-            {criticalAlerts.length > 0 && (
-              <div className="alerts-section critical">
-                {criticalAlerts.slice(0, 3).map((alert, i) => (
-                  <div key={i} className={`alert alert-${alert.level}`}>
-                    <strong>{alert.title}</strong>
-                    <span>{alert.message}</span>
-                    {alert.requires_action && (
-                      <span className="action-required">ACTION REQUIRED</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Warning Alerts */}
-            {warningAlerts.length > 0 && (
-              <div className="alerts-section warnings">
-                <details>
-                  <summary>{warningAlerts.length} warnings</summary>
-                  {warningAlerts.slice(0, 5).map((alert, i) => (
-                    <div key={i} className={`alert alert-${alert.level}`}>
-                      <strong>{alert.title}</strong>
-                      <span>{alert.message}</span>
-                    </div>
-                  ))}
-                </details>
-              </div>
-            )}
+            <IncidentSummary
+              title="Action Center"
+              incidents={overviewIncidents}
+              showTab
+              onIncidentSelect={(incident) => setActiveTab(incident.tab)}
+            />
 
             {/* Portfolio Summary */}
             <div className="metrics-grid">
@@ -629,6 +632,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         <PanelErrorBoundary name="Health">
           <Suspense fallback={tabLoadingFallback('Health')}>
           <div className="tab-panel health-panel-container">
+            <IncidentSummary
+              title="Health Incidents"
+              incidents={healthIncidents}
+            />
             <HealthPanel
               health={health}
               expanded={expandedHealth}
@@ -939,6 +946,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         <PanelErrorBoundary name="Risk">
           <Suspense fallback={tabLoadingFallback('Risk')}>
           <div className="tab-panel risk-panel">
+            <IncidentSummary
+              title="Risk Incidents"
+              incidents={riskIncidents}
+            />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <GarchCvarPanel data={signals?.garch_cvar as GarchCvarData | null | undefined} />
               <EntropyPanel data={signals?.entropy as EntropyData | null | undefined} />
