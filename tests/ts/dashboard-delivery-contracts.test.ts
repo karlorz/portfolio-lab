@@ -64,6 +64,12 @@ describe('dashboard delivery source contracts', () => {
     expect(css).toMatch(/\.fire-control-buttons\s*\{[\s\S]*flex-wrap:\s*wrap;/);
   });
 
+  it('removes hidden Recharts tooltips from layout so they cannot widen mobile pages', () => {
+    const css = read('src/App.css');
+
+    expect(css).toMatch(/\.recharts-tooltip-wrapper\[style\*=["']visibility:\s*hidden["']\]\s*\{[\s\S]*display:\s*none\s*!important;/);
+  });
+
   it('sets separate cache policies for immutable assets and live dashboard data', () => {
     const caddy = read('Caddyfile');
 

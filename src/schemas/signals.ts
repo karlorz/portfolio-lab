@@ -417,6 +417,17 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const OptionalPanelObjectSchema = z.union([
+  z.record(z.string(), z.unknown()),
+  z.null(),
+]);
+
+// Generated optional panels may be disabled as null, emitted as {}, or emitted
+// in a legacy summary shape while their panel code remains defensive.
+const optionalPanel = <T extends z.ZodTypeAny>(schema: T) => (
+  z.optional(z.union([schema, OptionalPanelObjectSchema]))
+);
+
 function normalizeSignalsTimestamp(raw: unknown): unknown {
   if (!isPlainRecord(raw)) return raw;
   if (typeof raw.timestamp === 'string') return raw;
@@ -446,29 +457,29 @@ const SignalsDataObjectSchema = z.object({
   duration_allocation: z.optional(DurationAllocationSchema),
   smart_rebalance: z.optional(SmartRebalanceSchema),
   broker: z.optional(BrokerSchema),
-  closing_auction: z.optional(ClosingAuctionSchema),
-  zero_dte: z.optional(ZeroDTESchema),
+  closing_auction: optionalPanel(ClosingAuctionSchema),
+  zero_dte: optionalPanel(ZeroDTESchema),
   garch_cvar: z.optional(GarchCvarSchema),
   entropy: z.optional(EntropySchema),
-  bond_momentum: z.optional(BondMomentumSchema),
-  vix_term_structure: z.optional(VIXTermStructureSchema),
+  bond_momentum: optionalPanel(BondMomentumSchema),
+  vix_term_structure: optionalPanel(VIXTermStructureSchema),
   vix_overlay: z.optional(VIXOverlaySchema),
-  hedge_selector: z.optional(HedgeSelectorSchema),
+  hedge_selector: z.optional(z.nullable(HedgeSelectorSchema)),
 
-  // Untyped signal panels — use z.unknown() so any shape passes
-  behavioral_sentiment: z.optional(z.record(z.string(), z.unknown())),
-  crypto_allocation: z.optional(z.record(z.string(), z.unknown())),
-  calendar_seasonality: z.optional(z.record(z.string(), z.unknown())),
-  ensemble_voting: z.optional(z.record(z.string(), z.unknown())),
-  alternative_data: z.optional(z.record(z.string(), z.unknown())),
-  factor_rotation: z.optional(z.record(z.string(), z.unknown())),
-  stacking_ensemble: z.optional(z.record(z.string(), z.unknown())),
-  convexity_harvest: z.optional(z.record(z.string(), z.unknown())),
-  llm_sentiment: z.optional(z.record(z.string(), z.unknown())),
-  sector_rotation: z.optional(z.record(z.string(), z.unknown())),
-  factor_rotation_dashboard: z.optional(z.record(z.string(), z.unknown())),
-  collar: z.optional(z.record(z.string(), z.unknown())),
-  kurtosis_regime: z.optional(z.record(z.string(), z.unknown())),
+  // Untyped signal panels can be null when the signal is disabled/unavailable.
+  behavioral_sentiment: z.optional(OptionalPanelObjectSchema),
+  crypto_allocation: z.optional(OptionalPanelObjectSchema),
+  calendar_seasonality: z.optional(OptionalPanelObjectSchema),
+  ensemble_voting: z.optional(OptionalPanelObjectSchema),
+  alternative_data: z.optional(OptionalPanelObjectSchema),
+  factor_rotation: z.optional(OptionalPanelObjectSchema),
+  stacking_ensemble: z.optional(OptionalPanelObjectSchema),
+  convexity_harvest: z.optional(OptionalPanelObjectSchema),
+  llm_sentiment: z.optional(OptionalPanelObjectSchema),
+  sector_rotation: z.optional(OptionalPanelObjectSchema),
+  factor_rotation_dashboard: z.optional(OptionalPanelObjectSchema),
+  collar: z.optional(OptionalPanelObjectSchema),
+  kurtosis_regime: z.optional(OptionalPanelObjectSchema),
   bocd_regime: z.optional(z.object({
     regime: z.number(),
     regime_change_prob: z.number(),
@@ -603,7 +614,7 @@ const CronJobStatusSchema = z.object({
   backend: z.optional(z.string()),
   source: z.optional(z.string()),
   error: z.optional(z.string()),
-  duration_seconds: z.optional(z.number()),
+  duration_seconds: z.optional(z.nullable(z.number())),
 }).passthrough();
 
 const DataFreshnessSchema = z.object({

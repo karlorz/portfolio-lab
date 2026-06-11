@@ -1,6 +1,6 @@
 ---
 name: Dev loop project config — portfolio-lab
-description: Drives the dev-loop skill for the portfolio-lab repo. PRD via TDD (test-first), knowledge via skillwiki path, no publish/deploy (private research project).
+description: Drives the dev-loop skill for the portfolio-lab repo. PRD via TDD (test-first), knowledge via skillwiki path, local lab deploy to lab.karldigi.dev.
 type: config
 ---
 
@@ -8,7 +8,7 @@ type: config
 
 > All-Season Portfolio backtesting + comparison lab.
 > TypeScript/Vite/React dashboard + Python backtest engine + MARL agents.
-> Research project — no public release artifact, no remote deploy.
+> Research project — no package publish; local host-native lab deploy to lab.karldigi.dev.
 
 ## Identity
 
@@ -116,16 +116,21 @@ e2e_scripts: []
 
 ## Release
 
-Private research project. No npm publish, no remote deploy. Git push
-to `origin/main` is the only "release" — and even that is local until
-the user manually pushes.
+Private research project. No npm/package publish or release tag. The DEPLOY
+step updates the local lab host using the canonical host-native deployment
+target for `https://lab.karldigi.dev`. The deploy target runs
+`scripts/deploy-lab-app.sh`, which refreshes data, builds `dist/`, publishes
+the static web root, installs/restarts the tasker systemd service, and writes
+the managed Caddy block. First-time or privileged deploys must run on the lab
+host with the required systemd/Caddy permissions.
 
 ```yaml
 bump_script:
 publish_via: none
-deploy_script:
+deploy_script: make deploy-lab-app
 manifests_count: 0
-remote_hosts: []
+remote_hosts:
+  - lab.karldigi.dev
 ```
 
 ## Interview

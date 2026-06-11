@@ -112,6 +112,23 @@ interface LiveDashboardProps {
   refreshInterval?: number; // seconds
 }
 
+function isBehavioralSentimentData(value: unknown): value is BehavioralSentimentData {
+  if (!value || typeof value !== 'object') return false;
+  const data = value as Record<string, unknown>;
+
+  return (
+    typeof data.active === 'boolean' &&
+    typeof data.composite_score === 'number' &&
+    typeof data.signal_type === 'string' &&
+    typeof data.confidence === 'number' &&
+    typeof data.equity_shift_pct === 'number' &&
+    typeof data.z_score === 'number' &&
+    typeof data.vix === 'number' &&
+    typeof data.regime_suppressed === 'boolean' &&
+    typeof data.signal_count_5d === 'number'
+  );
+}
+
 async function safeParseJson(response: Response, endpoint: string): Promise<unknown | null> {
   if (!response.ok) return null;
 
@@ -391,6 +408,9 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   };
 
   const formatPct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const behavioralSentimentData = isBehavioralSentimentData(signals?.behavioral_sentiment)
+    ? signals.behavioral_sentiment
+    : null;
 
   const healthOperationsSummary = health ? summarizeHealthOperations(health) : null;
   const dashboardIncidents = useMemo(
@@ -610,9 +630,11 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
             {/* Signal Panels */}
             <div className="mt-4 signal-panels-row">
-              <div className="flex-1 min-w-0">
-                <BehavioralSentimentPanel data={(signals?.behavioral_sentiment ?? null) as unknown as BehavioralSentimentData | null} />
-              </div>
+              {behavioralSentimentData && (
+                <div className="flex-1 min-w-0">
+                  <BehavioralSentimentPanel data={behavioralSentimentData} />
+                </div>
+              )}
               <div className="flex-1 min-w-0">
                 <CryptoAllocationPanel
                   data={(signals?.crypto_allocation ?? null) as unknown as CryptoData | null}

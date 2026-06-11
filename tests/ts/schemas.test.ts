@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test';
+import { readFileSync } from 'fs';
 import {
   RegimeSchema,
   YieldCurveSchema,
@@ -657,6 +658,15 @@ describe('SignalsDataSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts null for disabled untyped signal panels', () => {
+    const data = validSignalsData();
+    data.behavioral_sentiment = null;
+    data.crypto_allocation = null;
+    data.calendar_seasonality = null;
+    const result = SignalsDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
   it('passes through arbitrary data for crypto_allocation (z.unknown() record)', () => {
     const data = validSignalsData();
     data.crypto_allocation = { btc: 0.5, eth: 0.3, sol: 0.2 };
@@ -664,9 +674,15 @@ describe('SignalsDataSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects null for a typed record field', () => {
+  it('accepts the current production signals artifact optional panel shapes', () => {
+    const artifact = JSON.parse(readFileSync('public/data/signals.json', 'utf8'));
+    const result = SignalsDataSchema.safeParse(artifact);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid non-null untyped signal panel values', () => {
     const data = validSignalsData();
-    data.crypto_allocation = null;
+    data.crypto_allocation = ['not', 'a', 'record'];
     const result = SignalsDataSchema.safeParse(data);
     expect(result.success).toBe(false);
   });
@@ -1013,6 +1029,15 @@ describe('HealthDataSchema', () => {
 
   it('rejects null last_run', () => {
     const data = { ...validHealth(), cron_jobs: [{ ...validHealth().cron_jobs[0], last_run: null }] };
+    const result = HealthDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts null duration for scheduled jobs that have not recorded runtime', () => {
+    const data = {
+      ...validHealth(),
+      cron_jobs: [{ ...validHealth().cron_jobs[0], duration_seconds: null }],
+    };
     const result = HealthDataSchema.safeParse(data);
     expect(result.success).toBe(true);
   });

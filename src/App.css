@@ -221,6 +221,10 @@ header p {
   font-size: 0.85rem;
 }
 
+.recharts-tooltip-wrapper[style*="visibility: hidden"] {
+  display: none !important;
+}
+
 .comparison-table {
   max-width: 100%;
   overflow-x: auto;

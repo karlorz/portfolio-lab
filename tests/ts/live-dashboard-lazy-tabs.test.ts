@@ -176,6 +176,15 @@ describe('LiveDashboard lazy tab panel contract', () => {
     }
   });
 
+  it('guards the deprecated behavioral sentiment overview card behind complete live data', () => {
+    const overviewSource = sourceBetween('{/* Signal Panels */}', '</div>\n          </div>\n        </PanelErrorBoundary>');
+
+    expect(source).toContain('function isBehavioralSentimentData(value: unknown): value is BehavioralSentimentData');
+    expect(source).toContain('const behavioralSentimentData = isBehavioralSentimentData(signals?.behavioral_sentiment)');
+    expect(overviewSource).toContain('{behavioralSentimentData && (');
+    expect(overviewSource).toContain('<BehavioralSentimentPanel');
+  });
+
   it('loads optional endpoint groups from the active-tab fetch path only', () => {
     const optionalFetchSource = sourceBetween('const fetchOptionalDataForTab = async (tab: TabType', 'const portfolioValue');
 
