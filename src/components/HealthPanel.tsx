@@ -1,5 +1,6 @@
 import React from 'react';
 import type { HealthData, CronJobStatus, DataFreshness } from '../types/live';
+import { summarizeHealthOperations } from './healthOperations';
 
 interface HealthPanelProps {
   health: HealthData | null;
@@ -57,6 +58,7 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
   const criticalAssets = Object.entries(health.data_freshness || {}).filter(
     ([_, d]) => d.status === 'critical'
   );
+  const operationsSummary = summarizeHealthOperations(health);
 
   return (
     <div className="health-panel">
@@ -76,34 +78,61 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
       </div>
 
       {!expanded && (
-        <div className="health-summary">
-          <div className="summary-item">
-            <span className="dot" style={{ backgroundColor: '#10b981' }}></span>
-            <span>{freshAssets.length} fresh</span>
+        <>
+          <div className="health-cause-summary">
+            <strong>{operationsSummary.headline}</strong>
+            {operationsSummary.topCauses.length > 0 && (
+              <span>{operationsSummary.topCauses[0]}</span>
+            )}
           </div>
-          <div className="summary-item">
-            <span className="dot" style={{ backgroundColor: '#f59e0b' }}></span>
-            <span>{staleAssets.length} stale</span>
-          </div>
-          <div className="summary-item">
-            <span className="dot" style={{ backgroundColor: '#ef4444' }}></span>
-            <span>{criticalAssets.length} critical</span>
-          </div>
-          {health.cron_jobs && health.cron_jobs.length > 0 && (
+          <div className="health-summary">
+            <div className="summary-item">
+              <span className="dot" style={{ backgroundColor: '#10b981' }}></span>
+              <span>{freshAssets.length} fresh</span>
+            </div>
+            <div className="summary-item">
+              <span className="dot" style={{ backgroundColor: '#f59e0b' }}></span>
+              <span>{staleAssets.length} stale</span>
+            </div>
+            <div className="summary-item">
+              <span className="dot" style={{ backgroundColor: '#ef4444' }}></span>
+              <span>{criticalAssets.length} critical</span>
+            </div>
             <div className="summary-item">
               <span className="dot" style={{ backgroundColor: '#3b82f6' }}></span>
-              <span>{health.cron_jobs.length} jobs</span>
+              <span>{operationsSummary.scheduler.totalJobs} scheduled jobs, {operationsSummary.scheduler.failedJobs} failed</span>
             </div>
-          )}
-        </div>
+          </div>
+        </>
       )}
 
       {expanded && (
         <div className="health-details">
+          <div className="section operations-summary-section">
+            <h4>Operations Summary</h4>
+            <div className="operations-summary-grid">
+              <div className={`operations-summary-card status-${operationsSummary.dataFreshness.status}`}>
+                <strong>Data Freshness</strong>
+                <span>{operationsSummary.dataFreshness.label}</span>
+              </div>
+              <div className={`operations-summary-card status-${operationsSummary.scheduler.status}`}>
+                <strong>Scheduler</strong>
+                <span>{operationsSummary.scheduler.label}</span>
+              </div>
+            </div>
+            {operationsSummary.topCauses.length > 0 && (
+              <ul className="operations-cause-list">
+                {operationsSummary.topCauses.map((cause) => (
+                  <li key={cause}>{cause}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           {/* Cron Jobs Section */}
           {health.cron_jobs && health.cron_jobs.length > 0 && (
             <div className="section">
-              <h4>Cron Jobs</h4>
+              <h4>Scheduled Jobs ({operationsSummary.scheduler.totalJobs} total, {operationsSummary.scheduler.failedJobs} failed)</h4>
               <div className="cron-jobs-grid">
                 {health.cron_jobs.map((job) => (
                   <div key={job.id} className={`cron-job-card status-${job.status}`}>

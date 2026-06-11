@@ -42,6 +42,56 @@ function taskHealth(task: TaskerTask): 'ok' | 'paused' | 'warning' | 'error' | '
   return 'idle';
 }
 
+interface TaskerRunTrace {
+  label: string;
+  taskId: string;
+  runId: string;
+  command: string;
+  trigger: string;
+  status: TaskerRun['status'];
+  logPath: string;
+}
+
+interface TaskerOperationsSummary {
+  headline: string;
+  scheduledCount: number;
+  manualPausedCount: number;
+  failedCount: number;
+  runningCount: number;
+  failureLabel: string;
+  recentRunTraces: TaskerRunTrace[];
+}
+
+export function summarizeTaskerOperations(
+  status: TaskerStatus | null,
+  tasks: TaskerTask[],
+): TaskerOperationsSummary {
+  const scheduledCount = tasks.filter((task) => task.enabled && !task.manual_only && !task.paused).length;
+  const manualPausedCount = tasks.length - scheduledCount;
+  const failedCount = tasks.filter((task) => task.last_status === 'error' || task.last_status === 'timeout').length;
+  const runningCount = status?.recent_runs.filter((run) => run.status === 'running' || run.status === 'pending').length ?? 0;
+  const taskLabels = new Map(tasks.map((task) => [task.id, task.label]));
+  const recentRunTraces = (status?.recent_runs ?? []).map((run) => ({
+    label: `${taskLabels.get(run.task_id) ?? run.task_id} run ${run.run_id}`,
+    taskId: run.task_id,
+    runId: run.run_id,
+    command: run.command.join(' '),
+    trigger: run.trigger,
+    status: run.status,
+    logPath: run.log_path,
+  }));
+
+  return {
+    headline: `${tasks.length} registered tasks: ${scheduledCount} scheduled, ${manualPausedCount} manual/paused, ${failedCount} failed, ${runningCount} running`,
+    scheduledCount,
+    manualPausedCount,
+    failedCount,
+    runningCount,
+    failureLabel: failedCount > 0 ? `${failedCount} failed tasks need attention` : 'No failed tasks',
+    recentRunTraces,
+  };
+}
+
 export function TasksPanel({ refreshIntervalSeconds = 15 }: TasksPanelProps) {
   const [status, setStatus] = useState<TaskerStatus | null>(null);
   const [tasks, setTasks] = useState<TaskerTask[]>([]);
@@ -152,29 +202,27 @@ export function TasksPanel({ refreshIntervalSeconds = 15 }: TasksPanelProps) {
     }
   };
 
-  const activeRuns = status?.recent_runs.filter((run) => run.status === 'running' || run.status === 'pending') ?? [];
-  const failedTasks = tasks.filter((task) => task.last_status === 'error' || task.last_status === 'timeout');
-  const pausedTasks = tasks.filter((task) => task.paused || task.manual_only || !task.enabled);
+  const operationsSummary = summarizeTaskerOperations(status, tasks);
 
   return (
     <div className="tasks-panel">
       <div className="tasks-toolbar">
         <div className="tasks-summary-grid">
           <div className="task-summary-item">
-            <label>Tasks</label>
+            <label>Registered</label>
             <span>{tasks.length}</span>
           </div>
           <div className="task-summary-item">
-            <label>Active</label>
-            <span>{activeRuns.length}</span>
+            <label>Scheduled</label>
+            <span>{operationsSummary.scheduledCount}</span>
           </div>
           <div className="task-summary-item">
-            <label>Paused</label>
-            <span>{pausedTasks.length}</span>
+            <label>Manual/Paused</label>
+            <span>{operationsSummary.manualPausedCount}</span>
           </div>
           <div className="task-summary-item">
             <label>Failed</label>
-            <span className={failedTasks.length > 0 ? 'negative' : 'positive'}>{failedTasks.length}</span>
+            <span className={operationsSummary.failedCount > 0 ? 'negative' : 'positive'}>{operationsSummary.failedCount}</span>
           </div>
         </div>
 
@@ -197,6 +245,11 @@ export function TasksPanel({ refreshIntervalSeconds = 15 }: TasksPanelProps) {
       </div>
 
       {error && <div className="tasker-error">{error}</div>}
+
+      <div className="tasker-operations-summary">
+        <strong>{operationsSummary.headline}</strong>
+        <span>{operationsSummary.failureLabel}</span>
+      </div>
 
       <div className="tasks-console-layout">
         <div className="tasks-table-wrap">
@@ -292,6 +345,10 @@ export function TasksPanel({ refreshIntervalSeconds = 15 }: TasksPanelProps) {
                 <dd>{selectedTask?.command.join(' ') ?? '-'}</dd>
               </div>
               <div>
+                <dt>Schedule Type</dt>
+                <dd>{selectedTask?.manual_only ? 'Manual only' : selectedTask?.schedule ? 'Scheduled' : 'Unscheduled'}</dd>
+              </div>
+              <div>
                 <dt>Failures</dt>
                 <dd>{selectedTask?.consecutive_failures ?? 0} consecutive</dd>
               </div>
@@ -329,12 +386,28 @@ export function TasksPanel({ refreshIntervalSeconds = 15 }: TasksPanelProps) {
                     <dd>{selectedRun.run_id}</dd>
                   </div>
                   <div>
+                    <dt>Task</dt>
+                    <dd>{selectedRun.task_id}</dd>
+                  </div>
+                  <div>
+                    <dt>Command</dt>
+                    <dd>{selectedRun.command.join(' ')}</dd>
+                  </div>
+                  <div>
+                    <dt>Trigger</dt>
+                    <dd>{selectedRun.trigger}</dd>
+                  </div>
+                  <div>
                     <dt>Started</dt>
                     <dd>{formatTime(selectedRun.started_at)}</dd>
                   </div>
                   <div>
                     <dt>Exit</dt>
                     <dd>{selectedRun.exit_code ?? '-'}</dd>
+                  </div>
+                  <div>
+                    <dt>Log</dt>
+                    <dd>{selectedRun.log_path || '-'}</dd>
                   </div>
                 </dl>
                 <div className="tasker-actions">

@@ -313,6 +313,10 @@ footer code {
   border-bottom: 1px solid #334155;
 }
 
+.header-main {
+  min-width: 0;
+}
+
 .dashboard-header h2 {
   margin: 0;
   color: #e2e8f0;
@@ -322,6 +326,7 @@ footer code {
 .status-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 15px;
 }
 
@@ -579,6 +584,11 @@ footer code {
     align-items: flex-start;
     gap: 10px;
   }
+
+  .header-main,
+  .health-summary-bar {
+    width: 100%;
+  }
   
   .perf-summary {
     grid-template-columns: 1fr;
@@ -752,6 +762,28 @@ footer code {
   color: #fecaca;
   border-radius: 6px;
   padding: 10px 12px;
+}
+
+.tasker-operations-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #162033;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 12px 14px;
+  color: #cbd5e1;
+}
+
+.tasker-operations-summary strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.tasker-operations-summary span {
+  color: #94a3b8;
+  font-size: 0.8rem;
 }
 
 .tasks-console-layout {
@@ -932,6 +964,10 @@ footer code {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .operations-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
   .tasker-admin-controls {
     flex-wrap: wrap;
   }
@@ -951,6 +987,7 @@ footer code {
   display: flex;
   align-items: center;
   gap: 8px;
+  max-width: min(760px, 100%);
   padding: 6px 12px;
   border-radius: 6px;
   font-size: 0.8rem;
@@ -975,6 +1012,12 @@ footer code {
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
+.health-summary-bar.status-degraded {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
 .health-summary-bar.status-critical {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
@@ -987,6 +1030,12 @@ footer code {
   border-radius: 50%;
   background: currentColor;
   animation: pulse 2s infinite;
+}
+
+.health-summary-bar .health-text {
+  min-width: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 @keyframes pulse {
@@ -1035,8 +1084,28 @@ footer code {
 
 .health-panel .health-summary {
   display: flex;
+  flex-wrap: wrap;
   gap: 20px;
   padding: 15px 20px;
+}
+
+.health-cause-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 20px 0;
+}
+
+.health-cause-summary strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.health-cause-summary span {
+  color: #94a3b8;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 
 .health-panel .summary-item {
@@ -1045,6 +1114,11 @@ footer code {
   gap: 6px;
   font-size: 0.85rem;
   color: #94a3b8;
+  min-width: 0;
+}
+
+.health-panel .summary-item span:last-child {
+  overflow-wrap: anywhere;
 }
 
 .health-panel .summary-item .dot {
@@ -1069,6 +1143,75 @@ footer code {
 
 .health-panel .health-details .section:last-child {
   margin-bottom: 0;
+}
+
+.operations-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.operations-summary-card {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-left: 3px solid #64748b;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.operations-summary-card strong,
+.operations-summary-card span {
+  display: block;
+}
+
+.operations-summary-card strong {
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  margin-bottom: 6px;
+}
+
+.operations-summary-card span {
+  color: #94a3b8;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.operations-summary-card.status-fresh,
+.operations-summary-card.status-ok {
+  border-left-color: #10b981;
+}
+
+.operations-summary-card.status-stale,
+.operations-summary-card.status-warning,
+.operations-summary-card.status-degraded,
+.operations-summary-card.status-unknown {
+  border-left-color: #f59e0b;
+}
+
+.operations-summary-card.status-critical,
+.operations-summary-card.status-error,
+.operations-summary-card.status-unavailable {
+  border-left-color: #ef4444;
+}
+
+.operations-cause-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.operations-cause-list li {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.24);
+  border-radius: 6px;
+  color: #fecaca;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
 }
 
 /* ===== Cron Jobs Grid ===== */

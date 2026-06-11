@@ -42,6 +42,25 @@ def test_repo_caddyfile_defaults_to_host_native_paths_with_docker_overrides_avai
     assert "/srv/app" not in source
 
 
+def test_lab_deploy_generated_caddy_block_preserves_cache_policy():
+    source = _read("scripts/deploy-lab-app.sh")
+
+    assert 'handle /assets/*' in source
+    assert 'Cache-Control "public, max-age=31536000, immutable"' in source
+    assert 'handle /data/*' in source
+    assert 'Cache-Control "no-cache"' in source
+
+
+def test_lab_deploy_refreshes_dashboard_data_before_build():
+    source = _read("scripts/deploy-lab-app.sh")
+    main_body = source.split("main() {", 1)[1]
+
+    assert "--skip-data" in source
+    assert "bun run fetch-data" in source
+    assert main_body.index("refresh_dashboard_data") < main_body.index("build_frontend")
+    assert main_body.index("refresh_dashboard_data") < main_body.index("publish_dist")
+
+
 def test_lab_deploy_docs_and_makefile_do_not_present_dns_or_docker_as_default():
     docs = _read("scripts/LAB_APP_DEPLOY.md")
     makefile = _read("Makefile")

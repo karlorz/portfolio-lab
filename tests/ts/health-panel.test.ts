@@ -1,0 +1,36 @@
+import { describe, expect, it } from 'bun:test';
+import { summarizeHealthOperations } from '../../src/components/healthOperations';
+import type { HealthData } from '../../src/types/live';
+
+describe('HealthPanel operations summary', () => {
+  it('separates critical data freshness from healthy scheduler job counts', () => {
+    const summary = summarizeHealthOperations({
+      system_status: 'critical',
+      generated_at: '2026-06-11T11:13:40Z',
+      cron_jobs: [
+        { id: 'portfolio-lab-data', name: 'portfolio-lab-data', schedule: '5 * * * *', last_run: null, next_run: null, status: 'ok', state: 'scheduled' },
+        { id: 'portfolio-lab-dashboard', name: 'portfolio-lab-dashboard', schedule: '15 * * * *', last_run: null, next_run: null, status: 'ok', state: 'scheduled' },
+      ],
+      scheduler_status: {
+        status: 'ok',
+        backends: {
+          local: { backend: 'tasker', status: 'ok', source: 'data/cron_status.json', total_jobs: 15, failed_jobs: 0 },
+        },
+      },
+      data_freshness: {
+        SPY: { last_update: '2026-05-21', days_stale: 21, status: 'critical' },
+        GLD: { last_update: '2026-05-21', days_stale: 21, status: 'critical' },
+        TLT: { last_update: '2026-06-10', days_stale: 1, status: 'fresh' },
+      },
+    } satisfies HealthData);
+
+    expect(summary.headline).toBe('System critical: data freshness critical; scheduler ok');
+    expect(summary.headerText).toBe('System critical: data freshness critical; scheduler ok (15 scheduled jobs, 0 failed)');
+    expect(summary.scheduler.label).toBe('Scheduler ok: 15 scheduled jobs, 0 failed');
+    expect(summary.dataFreshness.label).toBe('Data freshness critical: 2 critical, 0 stale, 1 fresh');
+    expect(summary.topCauses).toEqual([
+      'SPY stale 21d (last update 2026-05-21)',
+      'GLD stale 21d (last update 2026-05-21)',
+    ]);
+  });
+});

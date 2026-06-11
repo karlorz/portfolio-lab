@@ -13,7 +13,7 @@ DNS for `lab.karldigi.dev` is already completed outside this repo. The project d
 The lab app follows the same operational shape as the Proxmox LXC internal update pattern:
 
 - The app runs directly inside the LXC/Linux guest.
-- `scripts/deploy-lab-app.sh` updates the checkout, builds the frontend, publishes `dist/`, installs/restarts the tasker systemd service, and writes a managed Caddy site block.
+- `scripts/deploy-lab-app.sh` updates the checkout, refreshes `public/data` with `bun run fetch-data`, builds the frontend, publishes `dist/`, installs/restarts the tasker systemd service, and writes a managed Caddy site block.
 - `/usr/local/bin/portfolio-lab-update` is installed as the durable in-container update command.
 - Docker remains available for separate container experiments, but it is not the default lab deployment path.
 
@@ -57,13 +57,21 @@ lab.karldigi.dev {
 		reverse_proxy 127.0.0.1:8000
 	}
 
+	handle /assets/* {
+		root * /var/www/portfolio-lab
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
 	handle /data/* {
 		root * /var/www/portfolio-lab
+		header Cache-Control "no-cache"
 		file_server
 	}
 
 	handle {
 		root * /var/www/portfolio-lab
+		header Cache-Control "no-cache"
 		try_files {path} /index.html
 		file_server
 	}

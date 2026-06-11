@@ -32,6 +32,7 @@ import type { FactorRotationDashboardData } from './FactorRotationDashboardPanel
 import type { CollarData } from './CollarPanel';
 import type { KurtosisData } from './KurtosisRegimePanel';
 import type { VolatilityParityData } from './VolatilityParityPanel';
+import { summarizeHealthOperations } from './healthOperations';
 import {
   validateSignalsData,
   validateFetchData,
@@ -138,7 +139,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [explainability, setExplainability] = useState<ExplainabilityData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
-  const [expandedHealth, setExpandedHealth] = useState(false);
+  const [expandedHealth, setExpandedHealth] = useState(true);
   const [graduationData, setGraduationData] = useState<GraduationChecklistData | null>(null);
   const [adaptiveSizingData, setAdaptiveSizingData] = useState<AdaptiveSizingData | null>(null);
   const [vixyHedgeData, setVixyHedgeData] = useState<VixyHedgeSizingData | null>(null);
@@ -385,6 +386,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
   const criticalAlerts = alerts.filter(a => a.level === 'error' || a.requires_action);
   const warningAlerts = alerts.filter(a => a.level === 'warning' && !a.requires_action);
+  const healthOperationsSummary = health ? summarizeHealthOperations(health) : null;
 
   const tabs: { id: TabType; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview', badge: criticalAlerts.length || undefined },
@@ -427,8 +429,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           >
             <span className="health-indicator"></span>
             <span className="health-text">
-              System: {health.system_status}
-              {health.cron_jobs.length > 0 && ` • ${health.cron_jobs.length} jobs`}
+              {healthOperationsSummary?.headerText}
             </span>
           </div>
         )}

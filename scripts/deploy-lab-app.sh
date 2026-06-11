@@ -42,6 +42,7 @@ UPDATE_COMMAND_PATH="${UPDATE_COMMAND_PATH:-/usr/local/bin/portfolio-lab-update}
 
 SKIP_GIT="0"
 SKIP_DEPS="0"
+SKIP_DATA="0"
 SKIP_BUILD="0"
 SKIP_SERVICE="0"
 SKIP_CADDY="0"
@@ -76,6 +77,7 @@ Options:
   --update-command <path>       Update command path (default: ${UPDATE_COMMAND_PATH})
   --skip-git                   Do not run git pull --ff-only
   --skip-deps                  Do not run uv/bun dependency install
+  --skip-data                  Do not refresh public/data via bun run fetch-data
   --skip-build                 Do not build frontend dist/
   --skip-service               Do not install/restart tasker systemd service
   --skip-caddy                 Do not write/reload Caddy config
@@ -143,6 +145,7 @@ while [ $# -gt 0 ]; do
     --update-command) UPDATE_COMMAND_PATH="${2:-}"; shift 2 ;;
     --skip-git) SKIP_GIT="1"; shift ;;
     --skip-deps) SKIP_DEPS="1"; shift ;;
+    --skip-data) SKIP_DATA="1"; shift ;;
     --skip-build) SKIP_BUILD="1"; shift ;;
     --skip-service) SKIP_SERVICE="1"; shift ;;
     --skip-caddy) SKIP_CADDY="1"; shift ;;
@@ -178,13 +181,21 @@ ${APP_HOST} {
 		reverse_proxy ${TASKER_HOST}:${TASKER_PORT}
 	}
 
+	handle /assets/* {
+		root * ${WEB_ROOT}
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
 	handle /data/* {
 		root * ${PUBLIC_ROOT}
+		header Cache-Control "no-cache"
 		file_server
 	}
 
 	handle {
 		root * ${WEB_ROOT}
+		header Cache-Control "no-cache"
 		try_files {path} /index.html
 		file_server
 	}
@@ -233,6 +244,16 @@ build_frontend() {
     run_app_cmd npm run build
   else
     die "Missing frontend package manager: install bun or npm"
+  fi
+}
+
+refresh_dashboard_data() {
+  [ "$SKIP_DATA" = "0" ] || return 0
+  log "Refreshing public dashboard data"
+  if command -v bun >/dev/null 2>&1; then
+    run_app_cmd bun run fetch-data
+  else
+    die "Missing frontend package manager: install bun to refresh dashboard data"
   fi
 }
 
@@ -404,6 +425,7 @@ main() {
   fi
   git_update
   install_dependencies
+  refresh_dashboard_data
   build_frontend
   publish_dist
   install_tasker_service

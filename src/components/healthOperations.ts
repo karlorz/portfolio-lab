@@ -1,0 +1,79 @@
+import type { HealthData } from '../types/live';
+
+export interface HealthOperationsSummary {
+  headline: string;
+  headerText: string;
+  scheduler: {
+    status: string;
+    totalJobs: number;
+    failedJobs: number;
+    label: string;
+  };
+  dataFreshness: {
+    status: 'fresh' | 'stale' | 'critical' | 'unknown';
+    fresh: number;
+    stale: number;
+    critical: number;
+    label: string;
+  };
+  topCauses: string[];
+}
+
+const normalizeSystemStatus = (status: string | undefined): string => (
+  status === 'healthy' ? 'healthy' : status ?? 'unknown'
+);
+
+export function summarizeHealthOperations(health: HealthData): HealthOperationsSummary {
+  const freshnessEntries = Object.entries(health.data_freshness || {});
+  const fresh = freshnessEntries.filter(([, d]) => d.status === 'fresh').length;
+  const stale = freshnessEntries.filter(([, d]) => d.status === 'stale').length;
+  const critical = freshnessEntries.filter(([, d]) => d.status === 'critical').length;
+  const dataStatus: HealthOperationsSummary['dataFreshness']['status'] =
+    critical > 0 ? 'critical' : stale > 0 ? 'stale' : freshnessEntries.length > 0 ? 'fresh' : 'unknown';
+
+  const schedulerBackends = Object.values(health.scheduler_status?.backends ?? {});
+  const totalJobs = schedulerBackends.length > 0
+    ? schedulerBackends.reduce((sum, backend) => sum + backend.total_jobs, 0)
+    : (health.cron_jobs ?? []).length;
+  const failedJobs = schedulerBackends.length > 0
+    ? schedulerBackends.reduce((sum, backend) => sum + backend.failed_jobs, 0)
+    : (health.cron_jobs ?? []).filter((job) => job.status === 'error').length;
+  const schedulerStatus = health.scheduler_status?.status ?? (failedJobs > 0 ? 'warning' : 'unknown');
+
+  const schedulerLabel = `Scheduler ${schedulerStatus}: ${totalJobs} scheduled jobs, ${failedJobs} failed`;
+  const dataLabel = `Data freshness ${dataStatus}: ${critical} critical, ${stale} stale, ${fresh} fresh`;
+  const primaryCause = dataStatus === 'critical'
+    ? 'data freshness critical'
+    : dataStatus === 'stale'
+      ? 'data freshness stale'
+      : failedJobs > 0
+        ? 'scheduler failures'
+        : 'all tracked subsystems nominal';
+  const headline = `System ${normalizeSystemStatus(health.system_status)}: ${primaryCause}; scheduler ${schedulerStatus}`;
+  const headerText = `${headline} (${totalJobs} scheduled jobs, ${failedJobs} failed)`;
+
+  const topCauses = freshnessEntries
+    .filter(([, data]) => data.status !== 'fresh')
+    .sort(([, a], [, b]) => (b.days_stale || 0) - (a.days_stale || 0))
+    .slice(0, 5)
+    .map(([symbol, data]) => `${symbol} stale ${data.days_stale}d (last update ${data.last_update})`);
+
+  return {
+    headline,
+    headerText,
+    scheduler: {
+      status: schedulerStatus,
+      totalJobs,
+      failedJobs,
+      label: schedulerLabel,
+    },
+    dataFreshness: {
+      status: dataStatus,
+      fresh,
+      stale,
+      critical,
+      label: dataLabel,
+    },
+    topCauses,
+  };
+}
