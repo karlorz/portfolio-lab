@@ -3046,6 +3046,16 @@ button.incident-row:hover {
   font-size: 0.85rem;
 }
 
+.labs-panel .labs-table-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.labs-panel .labs-table-scroll .positions-table {
+  min-width: 920px;
+}
+
 .labs-panel .positions-table td small {
   display: block;
   max-width: 280px;

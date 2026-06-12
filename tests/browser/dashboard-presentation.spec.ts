@@ -166,4 +166,25 @@ test.describe('dashboard browser presentation smoke', () => {
 
     expect(consoleMessages).toEqual([]);
   });
+
+  test('keeps loaded Labs experiment table within mobile viewport', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+
+    await openDashboard(page, { width: 390, height: 900 });
+    await dashboardTab(page, 'Labs').click();
+    await expect(page.locator('.labs-panel')).toBeVisible();
+    await expect(page.locator('.labs-panel .positions-table')).toBeVisible();
+
+    const tableMetrics = await page.locator('.labs-panel .positions-table').evaluate((table) => {
+      const panel = table.closest('.labs-panel');
+      return {
+        tableWidth: table.scrollWidth,
+        panelWidth: panel?.clientWidth ?? 0,
+      };
+    });
+    expect(tableMetrics.tableWidth).toBeGreaterThan(tableMetrics.panelWidth);
+    await expectNoDocumentOverflow(page);
+
+    expect(consoleMessages).toEqual([]);
+  });
 });

@@ -922,66 +922,68 @@ export function LabsPanel() {
             </div>
           ) : (
             <div className="stats-section">
-              <table className="positions-table">
-                <thead>
-                  <tr>
-                    <th>Experiment</th>
-                    <th>Status</th>
-                    <th>Sharpe</th>
-                    <th>Max DD</th>
-                    <th>WFE</th>
-                    <th>DSR</th>
-                    <th>Scorecard</th>
-                    <th>Replay</th>
-                    <th>Validation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {view.rows.map((row) => (
-                    <tr key={row.experimentId}>
-                      <td>
-                        <strong>{row.experimentId}</strong>
-                        <small>{row.artifactPath}</small>
-                      </td>
-                      <td>{row.status}</td>
-                      <td>{formatMetric(row.sharpe)}</td>
-                      <td className={(row.maxDrawdownPct ?? 0) < -20 ? 'negative' : ''}>
-                        {formatMetric(row.maxDrawdownPct, '%')}
-                      </td>
-                      <td>
-                        {formatMetric(row.wfe)}
-                        {row.positiveOosRatio !== null && (
-                          <small>OOS {formatRatioPercent(row.positiveOosRatio)}</small>
-                        )}
-                      </td>
-                      <td>
-                        {formatMetric(row.dsr)}
-                        {row.regimeCoverage !== null && (
-                          <small>Regime {formatRatioPercent(row.regimeCoverage)}</small>
-                        )}
-                      </td>
-                      <td>{row.scorecardStatus}</td>
-                      <td>
-                        {row.replayStatus}
-                        {row.replayDiagnostics && (
-                          <small>{row.replayDiagnostics.details.join('; ')}</small>
-                        )}
-                      </td>
-                      <td className={row.validationStatus === 'invalid' ? 'negative' : ''}>
-                        {row.validationStatus}
-                        {row.validationErrorCount > 0 && (
-                          <small>
-                            {row.validationErrors.join('; ')}
-                            {row.omittedValidationErrorCount > 0
-                              ? ` (${row.omittedValidationErrorCount} more omitted)`
-                              : ''}
-                          </small>
-                        )}
-                      </td>
+              <div className="labs-table-scroll">
+                <table className="positions-table">
+                  <thead>
+                    <tr>
+                      <th>Experiment</th>
+                      <th>Status</th>
+                      <th>Sharpe</th>
+                      <th>Max DD</th>
+                      <th>WFE</th>
+                      <th>DSR</th>
+                      <th>Scorecard</th>
+                      <th>Replay</th>
+                      <th>Validation</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {view.rows.map((row) => (
+                      <tr key={row.experimentId}>
+                        <td>
+                          <strong>{row.experimentId}</strong>
+                          <small>{row.artifactPath}</small>
+                        </td>
+                        <td>{row.status}</td>
+                        <td>{formatMetric(row.sharpe)}</td>
+                        <td className={(row.maxDrawdownPct ?? 0) < -20 ? 'negative' : ''}>
+                          {formatMetric(row.maxDrawdownPct, '%')}
+                        </td>
+                        <td>
+                          {formatMetric(row.wfe)}
+                          {row.positiveOosRatio !== null && (
+                            <small>OOS {formatRatioPercent(row.positiveOosRatio)}</small>
+                          )}
+                        </td>
+                        <td>
+                          {formatMetric(row.dsr)}
+                          {row.regimeCoverage !== null && (
+                            <small>Regime {formatRatioPercent(row.regimeCoverage)}</small>
+                          )}
+                        </td>
+                        <td>{row.scorecardStatus}</td>
+                        <td>
+                          {row.replayStatus}
+                          {row.replayDiagnostics && (
+                            <small>{row.replayDiagnostics.details.join('; ')}</small>
+                          )}
+                        </td>
+                        <td className={row.validationStatus === 'invalid' ? 'negative' : ''}>
+                          {row.validationStatus}
+                          {row.validationErrorCount > 0 && (
+                            <small>
+                              {row.validationErrors.join('; ')}
+                              {row.omittedValidationErrorCount > 0
+                                ? ` (${row.omittedValidationErrorCount} more omitted)`
+                                : ''}
+                            </small>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </>
