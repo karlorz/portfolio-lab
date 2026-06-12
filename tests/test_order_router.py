@@ -150,6 +150,67 @@ class TestDryRun:
             assert all(l["status"] == "dry_run" for l in lines)
 
 
+class TestMarketSessionGuard:
+    """Live order submission should respect market-session policy."""
+
+    @patch.object(OrderRouter, 'is_ready', return_value=True)
+    def test_closed_market_blocks_live_orders_before_submit(self, mock_ready):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=False)
+            market_session = {
+                "session_state": "closed",
+                "is_open": False,
+                "timestamp": "2026-06-13T16:00:00+00:00",
+                "next_open": "2026-06-15T13:30:00+00:00",
+                "next_close": "2026-06-12T20:00:00+00:00",
+                "extended_hours_allowed": False,
+                "allow_live_orders": False,
+                "guard_decision": "reject",
+                "reason": "market_closed",
+            }
+            router.client = MagicMock()
+            router.client.get_market_session.return_value = market_session
+
+            orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+            result = router.execute_orders(orders, dry_run=False, kill_switch_check=False)
+
+        assert result["status"] == "blocked"
+        assert "market_closed" in result["message"]
+        assert result["market_session"] == market_session
+        router.client.submit_order.assert_not_called()
+
+    @patch.object(OrderRouter, 'is_ready', return_value=True)
+    def test_extended_hours_allowed_can_submit_live_order(self, mock_ready):
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=False)
+            market_session = {
+                "session_state": "extended_hours",
+                "is_open": False,
+                "timestamp": "2026-06-12T12:30:00+00:00",
+                "next_open": "2026-06-12T13:30:00+00:00",
+                "next_close": "2026-06-12T20:00:00+00:00",
+                "extended_hours_allowed": True,
+                "allow_live_orders": True,
+                "guard_decision": "allow",
+                "reason": None,
+            }
+            submitted = MagicMock()
+            submitted.id = "order-1"
+            submitted.status = "accepted"
+            router.client = MagicMock()
+            router.client.get_market_session.return_value = market_session
+            router.client.submit_order.return_value = submitted
+
+            orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
+            with patch("src.broker.order_router.time.sleep", return_value=None):
+                result = router.execute_orders(orders, dry_run=False, kill_switch_check=False)
+
+        assert result["status"] == "completed"
+        assert result["orders_executed"] == 1
+        assert result["executed"][0]["market_session"] == market_session
+        router.client.submit_order.assert_called_once()
+
+
 class TestLoadSignals:
     """Test signal loading from JSON."""
 

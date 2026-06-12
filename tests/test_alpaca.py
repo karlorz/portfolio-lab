@@ -15,6 +15,8 @@ from src.broker.alpaca import (
     OrderSide, OrderType, OrderRequest, Order, Position, MarketQuote,
     AlpacaClient, PaperTradingManager, check_alpaca_status,
     resolve_alpaca_feed_entitlement,
+    resolve_alpaca_market_session,
+    resolve_unavailable_alpaca_market_session,
     ALPACA_AVAILABLE,
 )
 from src.broker.circuit_breaker import broker_breaker
@@ -318,6 +320,61 @@ class TestAlpacaFeedEntitlement:
         assert metadata["reason"] == "missing_entitlement"
 
 
+class TestAlpacaMarketSessionGuard:
+    """Market-session policy should be deterministic and fail closed for live orders."""
+
+    def test_regular_session_is_allowed(self):
+        session = resolve_alpaca_market_session({
+            "is_open": True,
+            "timestamp": "2026-06-12T15:00:00+00:00",
+            "next_open": "2026-06-15T13:30:00+00:00",
+            "next_close": "2026-06-12T20:00:00+00:00",
+        })
+
+        assert session["session_state"] == "regular"
+        assert session["allow_live_orders"] is True
+        assert session["guard_decision"] == "allow"
+        assert session["reason"] is None
+
+    def test_closed_market_is_rejected_by_default(self):
+        session = resolve_alpaca_market_session({
+            "is_open": False,
+            "timestamp": "2026-06-13T16:00:00+00:00",
+            "next_open": "2026-06-15T13:30:00+00:00",
+            "next_close": "2026-06-12T20:00:00+00:00",
+        })
+
+        assert session["session_state"] == "closed"
+        assert session["allow_live_orders"] is False
+        assert session["guard_decision"] == "reject"
+        assert session["reason"] == "market_closed"
+
+    def test_extended_hours_requires_explicit_allowance(self):
+        blocked = resolve_alpaca_market_session(
+            {"is_open": False, "session_state": "extended_hours"},
+            env={},
+        )
+        allowed = resolve_alpaca_market_session(
+            {"is_open": False, "session_state": "extended_hours"},
+            env={"ALPACA_ALLOW_EXTENDED_HOURS": "true"},
+        )
+
+        assert blocked["guard_decision"] == "reject"
+        assert blocked["reason"] == "extended_hours_not_allowed"
+        assert allowed["guard_decision"] == "allow"
+        assert allowed["allow_live_orders"] is True
+
+    def test_unavailable_session_reports_error_type_without_raw_message(self):
+        session = resolve_unavailable_alpaca_market_session(
+            RuntimeError("credential-like value should not appear")
+        )
+
+        assert session["guard_decision"] == "reject"
+        assert session["reason"] == "market_session_unavailable"
+        assert session["error_type"] == "RuntimeError"
+        assert "credential-like" not in json.dumps(session)
+
+
 # ---------------------------------------------------------------------------
 # PaperTradingManager tests
 # ---------------------------------------------------------------------------
@@ -510,6 +567,40 @@ class TestPaperTradingManager:
         assert result["quote_sources"]["TLT"]["source"] == "market_db"
         assert result["quote_sources"]["TLT"]["source_mode"] == "prior_close"
 
+    def test_execute_rebalance_reports_market_session_diagnostics(self, tmp_path):
+        """Rebalance diagnostics should include market-session state and guard decision."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            source="alpaca",
+            feed="iex",
+            age_seconds=10,
+            source_mode="live",
+        )
+        market_session = {
+            "session_state": "regular",
+            "is_open": True,
+            "timestamp": "2026-06-12T15:00:00+00:00",
+            "next_open": "2026-06-15T13:30:00+00:00",
+            "next_close": "2026-06-12T20:00:00+00:00",
+            "extended_hours_allowed": False,
+            "allow_live_orders": True,
+            "guard_decision": "allow",
+            "reason": None,
+        }
+
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=quote), \
+             patch.object(manager.client, 'get_market_session', return_value=market_session):
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=True)
+
+        assert result["market_session"] == market_session
+        assert result["market_session"]["guard_decision"] == "allow"
+
     def test_execute_rebalance_rejects_stale_broker_quote_in_live_mode(self, tmp_path):
         """Live order mode should reject stale broker quotes."""
         manager = PaperTradingManager(data_dir=str(tmp_path))
@@ -527,7 +618,13 @@ class TestPaperTradingManager:
              patch.object(manager, 'is_ready', return_value=True), \
              patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
              patch.object(manager.client, 'get_positions', return_value=[]), \
-             patch.object(manager.client, 'get_latest_quote', return_value=quote):
+             patch.object(manager.client, 'get_latest_quote', return_value=quote), \
+             patch.object(manager.client, 'get_market_session', return_value={
+                 "session_state": "regular",
+                 "allow_live_orders": True,
+                 "guard_decision": "allow",
+                 "reason": None,
+             }):
             result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=False)
 
         assert result["status"] == "error"
@@ -551,11 +648,65 @@ class TestPaperTradingManager:
              patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
              patch.object(manager.client, 'get_positions', return_value=[]), \
              patch.object(manager.client, 'get_latest_quote', return_value=None), \
-             patch.object(manager.client, '_fetch_price_quote', return_value=quote):
+             patch.object(manager.client, '_fetch_price_quote', return_value=quote), \
+             patch.object(manager.client, 'get_market_session', return_value={
+                 "session_state": "regular",
+                 "allow_live_orders": True,
+                 "guard_decision": "allow",
+                 "reason": None,
+             }):
             result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=False)
 
         assert result["status"] == "error"
         assert "requires a fresh broker quote" in result["message"]
+        assert result["market_session"]["session_state"] == "regular"
+
+    def test_execute_rebalance_rejects_closed_market_in_live_mode(self, tmp_path):
+        """Live order sizing should fail closed when the market clock is closed."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            source="alpaca",
+            feed="iex",
+            age_seconds=5,
+            source_mode="live",
+            feed_entitlement={
+                "configured_feed": "iex",
+                "effective_feed": "iex",
+                "entitlement": "basic",
+                "delayed": False,
+                "acceptable_for_live": True,
+                "policy_decision": "allow",
+                "reason": None,
+            },
+        )
+        market_session = {
+            "session_state": "closed",
+            "is_open": False,
+            "timestamp": "2026-06-13T16:00:00+00:00",
+            "next_open": "2026-06-15T13:30:00+00:00",
+            "next_close": "2026-06-12T20:00:00+00:00",
+            "extended_hours_allowed": False,
+            "allow_live_orders": False,
+            "guard_decision": "reject",
+            "reason": "market_closed",
+        }
+
+        with patch.dict(os.environ, {"ALPACA_PAPER": "false"}), \
+             patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=quote), \
+             patch.object(manager.client, 'get_market_session', return_value=market_session), \
+             patch.object(manager.client, 'submit_order') as submit_order:
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=False)
+
+        assert result["status"] == "error"
+        assert "market_closed" in result["message"]
+        assert result["market_session"] == market_session
+        submit_order.assert_not_called()
 
     def test_execute_rebalance_rejects_unacceptable_feed_in_live_mode(self, tmp_path):
         """Live order sizing should fail closed when feed entitlement is unacceptable."""
@@ -584,6 +735,12 @@ class TestPaperTradingManager:
              patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
              patch.object(manager.client, 'get_positions', return_value=[]), \
              patch.object(manager.client, 'get_latest_quote', return_value=quote), \
+             patch.object(manager.client, 'get_market_session', return_value={
+                 "session_state": "regular",
+                 "allow_live_orders": True,
+                 "guard_decision": "allow",
+                 "reason": None,
+             }), \
              patch.object(manager.client, 'submit_order') as submit_order:
             result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=False)
 
@@ -608,6 +765,12 @@ class TestPaperTradingManager:
              patch.object(manager, 'is_ready', return_value=True), \
              patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
              patch.object(manager.client, 'get_positions', return_value=[mock_position]), \
+             patch.object(manager.client, 'get_market_session', return_value={
+                 "session_state": "regular",
+                 "allow_live_orders": True,
+                 "guard_decision": "allow",
+                 "reason": None,
+             }), \
              patch.object(manager.client, 'submit_order') as submit_order:
             result = manager.execute_rebalance({'SPY': 0.6}, total_value=100000, dry_run=False)
 

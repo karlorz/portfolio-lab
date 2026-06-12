@@ -14,9 +14,10 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Mapping
-from datetime import datetime, timezone
+from datetime import datetime, time as dt_time, timezone
 from dataclasses import dataclass, asdict
 from enum import Enum
+from zoneinfo import ZoneInfo
 
 from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
 from src.broker.circuit_breaker import (
@@ -29,7 +30,9 @@ from src.broker.circuit_breaker import (
 
 
 __all__ = ['OrderRequest', 'Order', 'Position', 'MarketQuote', 'QuoteStalenessError',
-           'resolve_alpaca_feed_entitlement',
+           'MarketSessionGuardError',
+           'resolve_alpaca_feed_entitlement', 'resolve_alpaca_market_session',
+           'resolve_unavailable_alpaca_market_session',
            'AlpacaClient', 'PaperTradingManager',
            'check_alpaca_status', 'get_circuit_state', 'RampPhase', 'LiveTransitionManager']
 
@@ -158,6 +161,14 @@ class QuoteStalenessError(RuntimeError):
     """Raised when live order sizing would use stale or prior-close data."""
 
 
+class MarketSessionGuardError(RuntimeError):
+    """Raised when live order sizing/submission would violate market-session policy."""
+
+    def __init__(self, message: str, market_session: Dict[str, Any]):
+        super().__init__(message)
+        self.market_session = market_session
+
+
 def _normalize_feed_value(value: Optional[str]) -> str:
     normalized = (value or "iex").strip().lower().replace("-", "_")
     aliases = {
@@ -231,6 +242,153 @@ def resolve_alpaca_feed_entitlement(env: Optional[Mapping[str, str]] = None) -> 
         "policy_decision": "allow" if acceptable_for_live else "reject",
         "reason": reason,
     }
+
+
+def _truthy_env(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _normalize_session_state(value: Optional[str]) -> str:
+    normalized = (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "open": "regular",
+        "regular_session": "regular",
+        "market_open": "regular",
+        "extended": "extended_hours",
+        "extended_hour": "extended_hours",
+        "after_hours": "extended_hours",
+        "premarket": "extended_hours",
+        "pre_market": "extended_hours",
+        "market_closed": "closed",
+        "halt": "halted",
+        "halted": "halted",
+    }
+    return aliases.get(normalized, normalized or "unknown")
+
+
+def _clock_value(clock: Mapping[str, Any], key: str) -> Any:
+    if key in clock:
+        return clock[key]
+    return getattr(clock, key, None)
+
+
+def _iso_or_none(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_extended_hours(timestamp: Any) -> bool:
+    parsed = _parse_timestamp(timestamp)
+    if parsed is None:
+        return False
+    eastern = parsed.astimezone(ZoneInfo("America/New_York"))
+    if eastern.weekday() >= 5:
+        return False
+    current = eastern.time()
+    premarket = dt_time(4, 0) <= current < dt_time(9, 30)
+    after_hours = dt_time(16, 0) < current <= dt_time(20, 0)
+    return premarket or after_hours
+
+
+def resolve_alpaca_market_session(
+    clock: Optional[Mapping[str, Any]] = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> Dict[str, Any]:
+    """Return public-safe market-session policy metadata for live order guards."""
+    values = env if env is not None else os.environ
+    extended_hours_allowed = _truthy_env(
+        values.get("ALPACA_ALLOW_EXTENDED_HOURS")
+        or values.get("BROKER_ALLOW_EXTENDED_HOURS")
+    )
+    override_state = _normalize_session_state(
+        values.get("ALPACA_MARKET_SESSION_STATE")
+        or values.get("BROKER_MARKET_SESSION_STATE")
+    )
+
+    timestamp = None
+    next_open = None
+    next_close = None
+    is_open = False
+    source = "env_override" if override_state != "unknown" else "unavailable"
+
+    if clock is not None:
+        timestamp = _clock_value(clock, "timestamp")
+        next_open = _clock_value(clock, "next_open")
+        next_close = _clock_value(clock, "next_close")
+        is_open = bool(_clock_value(clock, "is_open"))
+        source = "broker_clock"
+
+    if override_state != "unknown":
+        session_state = override_state
+    elif clock is None:
+        session_state = "unknown"
+    elif bool(_clock_value(clock, "halted")):
+        session_state = "halted"
+    elif _normalize_session_state(_clock_value(clock, "session_state")) != "unknown":
+        session_state = _normalize_session_state(_clock_value(clock, "session_state"))
+    elif is_open:
+        session_state = "regular"
+    elif _is_extended_hours(timestamp):
+        session_state = "extended_hours"
+    else:
+        session_state = "closed"
+
+    allow_live_orders = False
+    reason: Optional[str] = None
+
+    if session_state == "regular":
+        allow_live_orders = True
+    elif session_state == "extended_hours":
+        allow_live_orders = extended_hours_allowed
+        if not allow_live_orders:
+            reason = "extended_hours_not_allowed"
+    elif session_state == "closed":
+        reason = "market_closed"
+    elif session_state == "halted":
+        reason = "market_halted"
+    else:
+        reason = "market_session_unknown"
+
+    return {
+        "session_state": session_state,
+        "is_open": is_open,
+        "timestamp": _iso_or_none(timestamp),
+        "next_open": _iso_or_none(next_open),
+        "next_close": _iso_or_none(next_close),
+        "extended_hours_allowed": extended_hours_allowed,
+        "allow_live_orders": allow_live_orders,
+        "guard_decision": "allow" if allow_live_orders else "reject",
+        "reason": reason,
+        "source": source,
+    }
+
+
+def resolve_unavailable_alpaca_market_session(error: Optional[BaseException] = None) -> Dict[str, Any]:
+    """Return fail-closed session diagnostics when the broker clock is unavailable."""
+    session = resolve_alpaca_market_session()
+    session["source"] = "unavailable"
+    session["reason"] = "market_session_unavailable"
+    if error is not None:
+        session["error_type"] = type(error).__name__
+    return session
 
 
 class AlpacaClient:
@@ -529,6 +687,24 @@ class AlpacaClient:
             "next_open": clock.next_open.isoformat() if clock.next_open else None,
             "next_close": clock.next_close.isoformat() if clock.next_close else None,
         }
+
+    def get_market_session(self) -> Dict[str, Any]:
+        """Get public-safe market-session guard metadata.
+
+        Environment overrides are honored before broker calls so tests and
+        emergency operator controls can exercise the policy without touching
+        the live Alpaca API.
+        """
+        has_override = any(
+            os.environ.get(key)
+            for key in ("ALPACA_MARKET_SESSION_STATE", "BROKER_MARKET_SESSION_STATE")
+        )
+        if has_override:
+            return resolve_alpaca_market_session()
+        try:
+            return resolve_alpaca_market_session(self.get_clock())
+        except (ImportError, RuntimeError, OSError, ConnectionError, TimeoutError, ValueError, TypeError) as exc:
+            return resolve_unavailable_alpaca_market_session(exc)
     
     def get_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100) -> List[Dict]:
         """Get historical bars."""
@@ -612,6 +788,21 @@ class PaperTradingManager:
         reason = feed_entitlement.get("reason") or "unacceptable_feed"
         raise QuoteStalenessError(
             f"Alpaca feed entitlement rejects live order sizing for {symbol}: {reason}"
+        )
+
+    def _raise_if_live_market_session_rejected(
+        self,
+        dry_run: bool,
+        market_session: Dict[str, Any],
+    ) -> None:
+        if not self._is_live_order_mode(dry_run):
+            return
+        if market_session.get("allow_live_orders", False):
+            return
+        reason = market_session.get("reason") or "market_session_rejected"
+        raise MarketSessionGuardError(
+            f"Market session guard rejects live order sizing: {reason}",
+            market_session,
         )
 
     def _resolve_order_quote(self, symbol: str, *, dry_run: bool) -> Optional[MarketQuote]:
@@ -706,10 +897,12 @@ class PaperTradingManager:
         """
         if not self.is_ready():
             return {"status": "not_configured", "message": "Alpaca API not configured"}
-        
+        market_session: Optional[Dict[str, Any]] = None
         try:
             account = self.client.get_account()
             positions = self.client.get_positions()
+            market_session = self.client.get_market_session()
+            self._raise_if_live_market_session_rejected(dry_run, market_session)
             
             if total_value is None:
                 total_value = account["equity"]
@@ -789,6 +982,7 @@ class PaperTradingManager:
                 "orders_submitted": orders_submitted if not dry_run else [],
                 "order_count": len(orders_to_submit),
                 "quote_sources": quote_sources,
+                "market_session": market_session,
             }
             
             # Log to file
@@ -799,12 +993,18 @@ class PaperTradingManager:
                     "dry_run": dry_run,
                     "orders": result["orders_planned"],
                     "quote_sources": quote_sources,
+                    "market_session": market_session,
                 }) + "\n")
             
             return result
 
+        except MarketSessionGuardError as e:
+            return {"status": "error", "message": str(e), "market_session": e.market_session}
         except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
-            return {"status": "error", "message": str(e)}
+            error: Dict[str, Any] = {"status": "error", "message": str(e)}
+            if market_session is not None:
+                error["market_session"] = market_session
+            return error
 
 
 # Convenience functions for CLI usage

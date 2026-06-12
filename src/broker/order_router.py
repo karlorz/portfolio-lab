@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 from src.broker.alpaca import (
     AlpacaClient, OrderRequest, OrderSide, OrderType,
-    PaperTradingManager
+    PaperTradingManager, resolve_alpaca_market_session,
+    resolve_unavailable_alpaca_market_session
 )
 
 from src.paths import MARKET_DB, SIGNALS_JSON, DATA_DIR, sqlite_connect
@@ -70,6 +71,20 @@ class OrderRouter:
     def is_ready(self) -> bool:
         """Check if router can operate."""
         return self.client.is_ready()
+
+    def _is_live_order_mode(self, dry_run: bool) -> bool:
+        return not dry_run and not self.paper
+
+    def _resolve_market_session(self) -> Dict[str, Any]:
+        getter = getattr(self.client, "get_market_session", None)
+        if callable(getter):
+            try:
+                session = getter()
+                if isinstance(session, dict):
+                    return session
+            except (ImportError, RuntimeError, OSError, ConnectionError, TimeoutError, ValueError, TypeError) as exc:
+                return resolve_unavailable_alpaca_market_session(exc)
+        return resolve_alpaca_market_session()
 
     def _fetch_price(self, symbol: str) -> float:
         """Fetch latest price from market.db. Returns 0 if unavailable."""
@@ -269,7 +284,20 @@ class OrderRouter:
                         "message": f"Kill switch file unreadable - execution blocked for safety: {e}",
                         "timestamp": datetime.now().isoformat(),
                     }
-        
+
+        market_session: Optional[Dict[str, Any]] = None
+        if not dry_run:
+            market_session = self._resolve_market_session()
+            if self._is_live_order_mode(dry_run) and not market_session.get("allow_live_orders", False):
+                reason = market_session.get("reason") or "market_session_rejected"
+                return {
+                    "status": "blocked",
+                    "message": f"Market session guard blocked live order submission: {reason}",
+                    "timestamp": datetime.now().isoformat(),
+                    "paper": self.paper,
+                    "market_session": market_session,
+                }
+
         executed = []
         failed = []
         
@@ -292,6 +320,8 @@ class OrderRouter:
                 "paper": self.paper,
                 "dry_run": dry_run,
             }
+            if market_session is not None:
+                order_dict["market_session"] = market_session
             
             if dry_run:
                 order_dict["status"] = "dry_run"
@@ -344,6 +374,7 @@ class OrderRouter:
             "total_estimated_value": sum(o.estimated_value for o in orders),
             "executed": executed,
             "failed": failed,
+            "market_session": market_session,
         }
     
     def rebalance(self, dry_run: bool = True) -> Dict[str, Any]:
