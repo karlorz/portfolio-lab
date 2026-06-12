@@ -27,13 +27,13 @@ interface RegimeGatePanelProps {
 const ALL_REGIMES = ['CRISIS', 'HIGH_VOL', 'NORMAL', 'LOW_VOL', 'RECOVERY'] as const;
 
 const REGIME_META: Record<string, {
-  color: string; bg: string; border: string; badge: string; headerBg: string; colBg: string
+  color: string; tone: string; chip: string
 }> = {
-  CRISIS:   { color: '#ef4444', bg: 'bg-red-900/20',   border: 'border-red-700/40',  badge: 'bg-red-600/20 text-red-400',    headerBg: 'bg-red-900/30',  colBg: 'bg-red-900/15' },
-  HIGH_VOL: { color: '#f97316', bg: 'bg-orange-900/20', border: 'border-orange-700/40', badge: 'bg-orange-600/20 text-orange-400', headerBg: 'bg-orange-900/30', colBg: 'bg-orange-900/15' },
-  NORMAL:   { color: '#3b82f6', bg: 'bg-blue-900/20',  border: 'border-blue-700/40',  badge: 'bg-blue-600/20 text-blue-400',  headerBg: 'bg-blue-900/30',  colBg: 'bg-blue-900/15' },
-  LOW_VOL:  { color: '#10b981', bg: 'bg-emerald-900/20', border: 'border-emerald-700/40', badge: 'bg-emerald-600/20 text-emerald-400', headerBg: 'bg-emerald-900/30', colBg: 'bg-emerald-900/15' },
-  RECOVERY: { color: '#14b8a6', bg: 'bg-teal-900/20',  border: 'border-teal-700/40',  badge: 'bg-teal-600/20 text-teal-400',  headerBg: 'bg-teal-900/30',  colBg: 'bg-teal-900/15' },
+  CRISIS:   { color: '#ef4444', tone: 'alc-tone-danger', chip: 'alc-chip-danger' },
+  HIGH_VOL: { color: '#f97316', tone: 'alc-tone-warning', chip: 'alc-chip-warning' },
+  NORMAL:   { color: '#3b82f6', tone: 'alc-tone-info', chip: 'alc-chip-info' },
+  LOW_VOL:  { color: '#10b981', tone: 'alc-tone-success', chip: 'alc-chip-success' },
+  RECOVERY: { color: '#14b8a6', tone: 'alc-tone-teal', chip: 'alc-chip-teal' },
 };
 
 const DEFAULT_REGIME_META = REGIME_META.NORMAL;
@@ -76,7 +76,7 @@ export function makeSignalListKey(name: string, index: number): string {
 function RegimeDot({ active, color }: { active: boolean; color: string }) {
   return (
     <span
-      className="inline-block w-2.5 h-2.5 rounded-full"
+      className="alc-dot"
       style={{ backgroundColor: active ? color : '#374151' }}
       title={active ? 'ON' : 'OFF'}
     />
@@ -87,14 +87,14 @@ function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.min(Math.max(value * 100, 0), 100);
   const color = value >= 0.8 ? '#10b981' : value >= 0.5 ? '#f59e0b' : '#ef4444';
   return (
-    <div className="flex items-center gap-2 w-full">
-      <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+    <div className="alc-row">
+      <div className="alc-progress alc-grow">
         <div
-          className="h-full rounded-full transition-all duration-300"
+          className="alc-progress-fill"
           style={{ width: `${pct}%`, backgroundColor: color }}
         />
       </div>
-      <span className="text-xs font-mono text-gray-400 min-w-[40px] text-right shrink-0">
+      <span className="alc-small alc-mono alc-align-right alc-fixed-md">
         {pct.toFixed(0)}%
       </span>
     </div>
@@ -106,9 +106,9 @@ function ConfidenceBar({ value }: { value: number }) {
 export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
   if (!data) {
     return (
-      <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-gray-100 mb-2">Regime Gate (v5.00)</h3>
-        <p className="text-xs text-gray-500">No regime gate data available</p>
+      <div className="alc-panel alc-panel-muted">
+        <h3 className="alc-title">Regime Gate (v5.00)</h3>
+        <p className="alc-muted">No regime gate data available</p>
       </div>
     );
   }
@@ -131,32 +131,32 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
   // ── Rendering ────────────────────────────────────────────────────
 
   return (
-    <div className="bg-gray-900/50 rounded-lg border border-gray-700/50 p-4 space-y-4">
+    <div className="alc-panel alc-panel-muted">
       {/* ── Header ──────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-100">Regime Gate (v5.00)</h3>
+      <div className="alc-header">
+        <h3 className="alc-title">Regime Gate (v5.00)</h3>
         {data.generated_at && (
-          <span className="text-[10px] font-mono text-gray-600 bg-gray-800/60 px-2 py-0.5 rounded">
+          <span className="alc-chip-small alc-chip-neutral alc-mono">
             {new Date(data.generated_at).toLocaleString()}
           </span>
         )}
       </div>
 
       {/* ── Section 1: Current Regime ───────────────────────────── */}
-      <div>
-        <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider mb-2">
+      <div className="alc-section">
+        <h4 className="alc-section-title">
           Current Regime
         </h4>
-        <div className={`${meta.headerBg} ${meta.border} rounded-lg p-3 border`}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-gray-400">Regime</span>
-            <span className={`px-2.5 py-0.5 rounded text-xs font-semibold ${meta.badge}`}>
+        <div className={`alc-card ${meta.tone}`}>
+          <div className="alc-row">
+            <span className="alc-label">Regime</span>
+            <span className={`alc-chip ${meta.chip}`}>
               {regime}
             </span>
           </div>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-gray-400">Confidence</span>
-            <span className="text-sm font-mono font-bold text-gray-100">
+          <div className="alc-row">
+            <span className="alc-label">Confidence</span>
+            <span className="alc-value">
               {(data.regime_confidence * 100).toFixed(0)}%
             </span>
           </div>
@@ -165,38 +165,35 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
       </div>
 
       {/* ── Section 2: Signal Gate Matrix ───────────────────────── */}
-      <div>
-        <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider mb-2">
+      <div className="alc-section">
+        <h4 className="alc-section-title">
           Signal Gate Matrix
         </h4>
-        <div className="overflow-x-auto rounded-lg border border-gray-700/40">
-          <table className="w-full text-xs border-collapse">
+        <div className="alc-table-wrap">
+          <table className="alc-table">
             <thead>
-              <tr className="bg-gray-800/80 text-gray-500">
-                <th className="text-left py-2 px-3 font-medium whitespace-nowrap">Signal</th>
+              <tr>
+                <th>Signal</th>
                 {ALL_REGIMES.map((r) => {
                   const rMeta = REGIME_META[r] || DEFAULT_REGIME_META;
                   const isCurrent = r === regime;
                   return (
                     <th
                       key={r}
-                      className={`text-center py-2 px-2 font-medium whitespace-nowrap transition-colors ${
-                        isCurrent ? rMeta.colBg + ' text-gray-100' : ''
-                      }`}
+                      className={isCurrent ? rMeta.tone : undefined}
                     >
-                      <span className={isCurrent ? 'font-bold' : ''}>{r}</span>
+                      <span className={isCurrent ? 'alc-strong' : undefined}>{r}</span>
                     </th>
                   );
                 })}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-700/30">
+            <tbody>
               {data.gate_rules.map((rule) => (
                 <tr
                   key={rule.signal_name}
-                  className="bg-gray-800/40 hover:bg-gray-700/30 transition-colors"
                 >
-                  <td className="py-2 px-3 text-gray-200 font-medium whitespace-nowrap">
+                  <td className="alc-strong">
                     {humanizeSignalName(rule.signal_name)}
                   </td>
                   {ALL_REGIMES.map((r) => {
@@ -206,11 +203,9 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
                     return (
                       <td
                         key={`${rule.signal_name}-${r}`}
-                        className={`text-center py-2 px-2 ${
-                          isCurrent ? rMeta.colBg + ' rounded-sm' : ''
-                        }`}
+                        className={isCurrent ? rMeta.tone : undefined}
                       >
-                        <div className="flex justify-center">
+                        <div className="alc-cluster">
                           <RegimeDot active={active} color={rMeta.color} />
                         </div>
                       </td>
@@ -222,17 +217,17 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
           </table>
         </div>
         {/* Legend */}
-        <div className="flex items-center gap-4 mt-2 text-[10px] text-gray-500">
-          <div className="flex items-center gap-1.5">
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+        <div className="alc-cluster">
+          <div className="alc-cluster">
+            <span className="alc-swatch" style={{ backgroundColor: '#10b981' }} />
             <span>Active (ON)</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="inline-block w-2 h-2 rounded-full bg-gray-600" />
+          <div className="alc-cluster">
+            <span className="alc-swatch" style={{ backgroundColor: '#475569' }} />
             <span>Inactive (OFF)</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="inline-flex items-center text-[10px] font-bold text-gray-400 bg-gray-800/60 px-1.5 py-0.5 rounded">
+          <div className="alc-cluster">
+            <span className="alc-chip-small alc-chip-neutral">
               {regime}
             </span>
             <span>= Current regime column</span>
@@ -241,27 +236,27 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
       </div>
 
       {/* ── Section 3: Active / Inactive Summary ─────────────────── */}
-      <div>
-        <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider mb-2">
+      <div className="alc-section">
+        <h4 className="alc-section-title">
           Signal Status Summary
         </h4>
-        <div className="space-y-2">
+        <div className="alc-stack-sm">
           {/* Active signals */}
-          <div className="bg-gray-800/40 rounded-lg p-3 border border-gray-700/30">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-emerald-600/20 text-emerald-400 text-[10px] font-bold">
+          <div className="alc-card">
+            <div className="alc-cluster">
+              <span className="alc-chip-small alc-chip-success">
                 {data.active_signals.length}
               </span>
-              <span className="text-xs font-medium text-gray-300">Active Signals</span>
+              <span className="alc-label">Active Signals</span>
             </div>
             {data.active_signals.length === 0 ? (
-              <p className="text-[11px] text-gray-500 italic">No active signals</p>
+              <p className="alc-muted">No active signals</p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="alc-cluster">
                 {data.active_signals.map((name, index) => (
                   <span
                     key={makeSignalListKey(name, index)}
-                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-900/25 text-emerald-300 border border-emerald-700/30"
+                    className="alc-chip-small alc-chip-success"
                   >
                     {humanizeSignalName(name)}
                   </span>
@@ -271,21 +266,21 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
           </div>
 
           {/* Inactive signals */}
-          <div className="bg-gray-800/40 rounded-lg p-3 border border-gray-700/30">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-red-600/20 text-red-400 text-[10px] font-bold">
+          <div className="alc-card">
+            <div className="alc-cluster">
+              <span className="alc-chip-small alc-chip-danger">
                 {data.inactive_signals.length}
               </span>
-              <span className="text-xs font-medium text-gray-300">Inactive Signals</span>
+              <span className="alc-label">Inactive Signals</span>
             </div>
             {data.inactive_signals.length === 0 ? (
-              <p className="text-[11px] text-gray-500 italic">No inactive signals</p>
+              <p className="alc-muted">No inactive signals</p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="alc-cluster">
                 {data.inactive_signals.map((name, index) => (
                   <span
                     key={makeSignalListKey(name, index)}
-                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-red-900/25 text-red-300 border border-red-700/30"
+                    className="alc-chip-small alc-chip-danger"
                   >
                     {humanizeSignalName(name)}
                   </span>
@@ -297,20 +292,22 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
       </div>
 
       {/* ── Section 4: Hysteresis Info ────────────────────────────── */}
-      <div>
-        <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider mb-2">
+      <div className="alc-section">
+        <h4 className="alc-section-title">
           Hysteresis
         </h4>
-        <div className="bg-gray-800/40 rounded-md p-3 border border-gray-700/30 flex items-center gap-3">
-          <span className="text-sm font-mono font-bold text-gray-100 bg-gray-900/60 px-2.5 py-1 rounded">
+        <div className="alc-card">
+          <div className="alc-row-top">
+          <span className="alc-chip alc-chip-neutral alc-mono">
             {data.min_dwell_days}d
           </span>
           <div>
-            <span className="text-xs font-medium text-gray-400">Minimum Dwell Days</span>
-            <p className="text-[10px] text-gray-600 mt-0.5">
+            <span className="alc-label">Minimum Dwell Days</span>
+            <p className="alc-small">
               Signals must remain in the current regime for at least {data.min_dwell_days} day
               {data.min_dwell_days !== 1 ? 's' : ''} before gate transitions take effect.
             </p>
+          </div>
           </div>
         </div>
       </div>

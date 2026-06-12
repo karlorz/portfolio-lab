@@ -122,17 +122,17 @@ export function buildHedgeSelectorDisplay(data?: HedgeSelectorData | null): Hedg
 
 function MetricCard({
   metric,
-  valueClassName = 'text-gray-100',
+  valueClassName = '',
 }: {
   metric: HedgeSelectorMetric;
   valueClassName?: string;
 }) {
   return (
-    <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-      <p className="text-xs text-gray-500 mb-1">{metric.label}</p>
-      <p className={`text-lg font-mono font-bold ${valueClassName}`}>{metric.value}</p>
+    <div className="alc-card">
+      <p className="alc-label">{metric.label}</p>
+      <p className={`alc-value-lg ${valueClassName}`}>{metric.value}</p>
       {metric.detail !== undefined && (
-        <p className="text-xs text-gray-500 mt-1">{metric.detail}</p>
+        <p className="alc-small">{metric.detail}</p>
       )}
     </div>
   );
@@ -143,17 +143,17 @@ export function HedgeSelectorPanel({ data }: HedgeSelectorPanelProps) {
 
   if (!display.available) {
     return (
-      <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-base font-semibold text-gray-100">{display.title}</h3>
+      <div className="alc-panel alc-panel-muted">
+        <div className="alc-header">
+          <h3 className="alc-title">{display.title}</h3>
         </div>
-        <p className="text-sm text-gray-500">{display.emptyMessage}</p>
-        <p className="text-xs text-gray-600 mt-1">{display.emptyDetail}</p>
+        <p className="alc-muted">{display.emptyMessage}</p>
+        <p className="alc-small">{display.emptyDetail}</p>
       </div>
     );
   }
 
-  const netBenefitColor = display.netBenefitBps > 0 ? 'text-emerald-400' : 'text-red-400';
+  const netBenefitColor = display.netBenefitBps > 0 ? 'alc-text-success' : 'alc-text-danger';
   const gaugeWidth = Math.min(Math.max((display.netBenefitBps + 50) / 100, 0), 1) * 100;
   const gaugeColor =
     display.netBenefitBps > 10 ? '#10b981' :
@@ -162,50 +162,50 @@ export function HedgeSelectorPanel({ data }: HedgeSelectorPanelProps) {
     '#ef4444';
 
   return (
-    <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4 space-y-5 text-gray-100">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-semibold">{display.title}</h3>
-        <div className="flex items-center gap-2">
-          <span className={`px-2.5 py-0.5 rounded text-xs font-semibold ${
-            display.gateOpen ? 'bg-emerald-600/20 text-emerald-400' : 'bg-red-600/20 text-red-400'
+    <div className="alc-panel alc-panel-muted">
+      <div className="alc-header">
+        <h3 className="alc-title">{display.title}</h3>
+        <div className="alc-header-actions">
+          <span className={`alc-chip ${
+            display.gateOpen ? 'alc-chip-success' : 'alc-chip-danger'
           }`}>
             {display.gateLabel}
           </span>
-          <span className="px-2.5 py-0.5 rounded text-xs font-semibold bg-blue-600/20 text-blue-400">
+          <span className="alc-chip alc-chip-info">
             {display.regimeLabel}
           </span>
         </div>
       </div>
 
-      <div>
-        <h4 className="text-sm font-medium text-gray-400 mb-3">Current Hedge Allocation</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="alc-section">
+        <h4 className="alc-section-title">Current Hedge Allocation</h4>
+        <div className="alc-grid alc-grid-three">
           <MetricCard metric={display.primaryHedge} />
           <MetricCard metric={display.secondaryHedge} />
           <MetricCard metric={display.regimeConfidence} />
         </div>
       </div>
 
-      <div>
-        <h4 className="text-sm font-medium text-gray-400 mb-3">Cost-Benefit Analysis</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-          <MetricCard metric={display.expectedBenefit} valueClassName="text-emerald-400" />
-          <MetricCard metric={display.expectedCost} valueClassName="text-amber-400" />
+      <div className="alc-section">
+        <h4 className="alc-section-title">Cost-Benefit Analysis</h4>
+        <div className="alc-grid alc-grid-three">
+          <MetricCard metric={display.expectedBenefit} valueClassName="alc-text-success" />
+          <MetricCard metric={display.expectedCost} valueClassName="alc-text-warning" />
           <MetricCard metric={display.netBenefit} valueClassName={netBenefitColor} />
         </div>
 
-        <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-          <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+        <div className="alc-card">
+          <div className="alc-row">
             <span>Net Benefit (bps)</span>
             <span>{display.netBenefit.value}</span>
           </div>
-          <div className="relative h-2 bg-gray-800 rounded-full overflow-hidden">
+          <div className="alc-progress">
             <div
-              className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
+              className="alc-progress-fill"
               style={{ width: `${gaugeWidth}%`, backgroundColor: gaugeColor }}
             />
           </div>
-          <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+          <div className="alc-scale">
             <span>-50 bps</span>
             <span>0</span>
             <span>+50 bps</span>
@@ -213,16 +213,16 @@ export function HedgeSelectorPanel({ data }: HedgeSelectorPanelProps) {
         </div>
       </div>
 
-      <div>
-        <h4 className="text-sm font-medium text-gray-400 mb-3">Sizing Parameters</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="alc-section">
+        <h4 className="alc-section-title">Sizing Parameters</h4>
+        <div className="alc-grid alc-grid-three">
           <MetricCard metric={display.kellyFraction} />
           <MetricCard metric={display.confidenceScaledSize} />
           <MetricCard metric={display.minimumHold} />
         </div>
       </div>
 
-      <div className="text-xs text-gray-500 mt-4">
+      <div className="alc-small">
         <p>Last updated: {display.lastUpdated}</p>
       </div>
     </div>

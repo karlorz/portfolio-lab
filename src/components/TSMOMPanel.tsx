@@ -67,15 +67,15 @@ function positionBadge(
   recommendation: 'long' | 'short' | 'neutral',
   compositeSignal: number,
 ) {
-  const styles: Record<string, { bg: string; text: string; label: string }> = {
-    long: { bg: 'bg-emerald-900/50', text: 'text-emerald-400', label: 'LONG' },
-    short: { bg: 'bg-red-900/50', text: 'text-red-400', label: 'SHORT' },
-    neutral: { bg: 'bg-gray-700/50', text: 'text-gray-400', label: 'NEUTRAL' },
+  const styles: Record<string, { tone: string; label: string }> = {
+    long: { tone: 'alc-chip-success', label: 'LONG' },
+    short: { tone: 'alc-chip-danger', label: 'SHORT' },
+    neutral: { tone: 'alc-chip-neutral', label: 'NEUTRAL' },
   };
   const s = styles[recommendation];
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold tracking-wide ${s.bg} ${s.text}`}
+      className={`alc-chip ${s.tone}`}
     >
       {signalArrow(compositeSignal)} {s.label}
     </span>
@@ -89,11 +89,11 @@ function SignalGauge({ signal }: { signal: number }) {
   const pct = ((signal + 1) / 2) * 100;
 
   return (
-    <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-gray-500 uppercase tracking-wider font-medium">Composite Signal</span>
+    <div className="alc-card">
+      <div className="alc-row">
+        <span className="alc-label">Composite Signal</span>
         <span
-          className="text-2xl font-mono font-bold"
+          className="alc-value-xl"
           style={{ color: signalColor(signal) }}
         >
           {signal >= 0 ? '+' : ''}
@@ -102,30 +102,30 @@ function SignalGauge({ signal }: { signal: number }) {
       </div>
 
       {/* Gauge track */}
-      <div className="relative h-3 bg-gray-800 rounded-full overflow-hidden">
+      <div className="alc-progress-tall">
         {/* Red zone (negative) */}
         <div
-          className="absolute top-0 left-0 h-full"
+          className="alc-progress-segment"
           style={{ width: '50%', background: 'linear-gradient(to right, #ef4444, #fbbf24)' }}
         />
         {/* Green zone (positive) */}
         <div
-          className="absolute top-0 right-0 h-full"
-          style={{ width: '50%', background: 'linear-gradient(to left, #10b981, #34d399)' }}
+          className="alc-progress-segment"
+          style={{ left: '50%', width: '50%', background: 'linear-gradient(to left, #10b981, #34d399)' }}
         />
         {/* Center divider */}
-        <div className="absolute top-0 left-1/2 h-full w-0.5 bg-gray-600 z-10" />
+        <div className="alc-progress-marker" style={{ left: '50%', backgroundColor: '#475569' }} />
         {/* Signal marker */}
         <div
-          className="absolute top-0 h-full w-0.5 bg-white shadow-md z-20 transition-all duration-500"
+          className="alc-progress-marker"
           style={{ left: `calc(${pct}% - 1px)` }}
         />
       </div>
 
       {/* Scale labels */}
-      <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+      <div className="alc-scale">
         <span>-1.0</span>
-        <span className="text-gray-500 font-medium">0.0</span>
+        <span className="alc-strong">0.0</span>
         <span>+1.0</span>
       </div>
     </div>
@@ -133,38 +133,38 @@ function SignalGauge({ signal }: { signal: number }) {
 }
 
 function SpeedCard({ speed }: { speed: TSMOMSpeed }) {
-  const direction = speed.signal > 0 ? 'text-emerald-400' : speed.signal < 0 ? 'text-red-400' : 'text-gray-400';
+  const direction = speed.signal > 0 ? 'alc-text-success' : speed.signal < 0 ? 'alc-text-danger' : 'alc-text-muted';
   const weightPct = `${(speed.weight * 100).toFixed(0)}%`;
   const assetEntries = Object.entries(speed.asset_signals).slice(0, 6);
 
   return (
-    <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40 space-y-2.5">
+    <div className="alc-card alc-stack-sm">
       {/* Header: label + weight */}
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-100">{speed.label}</span>
-        <span className="text-[10px] font-mono text-gray-500 bg-gray-900/60 px-2 py-0.5 rounded">
+      <div className="alc-row">
+        <span className="alc-strong">{speed.label}</span>
+        <span className="alc-chip-small alc-chip-neutral alc-mono">
           {weightPct} weight
         </span>
       </div>
 
       {/* Weight bar */}
       <div>
-        <div className="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
+        <div className="alc-row">
           <span>Weight in composite</span>
           <span>{weightPct}</span>
         </div>
-        <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+        <div className="alc-progress">
           <div
-            className="h-full rounded-full transition-all duration-300"
+            className="alc-progress-fill"
             style={{ width: weightPct, backgroundColor: '#3b82f6' }}
           />
         </div>
       </div>
 
       {/* Signal value with arrow */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-500">Signal</span>
-        <span className={`text-lg font-mono font-bold ${direction}`}>
+      <div className="alc-cluster">
+        <span className="alc-label">Signal</span>
+        <span className={`alc-value-lg ${direction}`}>
           {signalArrow(speed.signal)} {speed.signal >= 0 ? '+' : ''}
           {speed.signal.toFixed(2)}
         </span>
@@ -173,27 +173,27 @@ function SpeedCard({ speed }: { speed: TSMOMSpeed }) {
       {/* Per-asset signals */}
       {assetEntries.length > 0 && (
         <div>
-          <span className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1.5">
+          <span className="alc-label">
             Per-Asset Signals
           </span>
-          <div className="space-y-1">
+          <div className="alc-stack-xs">
             {assetEntries.map(([asset, sig]) => {
               const assetColor = ASSET_COLORS[asset] || DEFAULT_ASSET_COLOR;
               // Normalise -1..+1 to 0..100 for bar width, centre at 50%
               const barPct = ((sig + 1) / 2) * 100;
               return (
-                <div key={asset} className="flex items-center gap-1.5">
+                <div key={asset} className="alc-row">
                   <span
-                    className="text-[10px] font-semibold min-w-[32px] text-right shrink-0"
+                    className="alc-small alc-strong alc-align-right alc-fixed-sm"
                     style={{ color: assetColor }}
                   >
                     {asset}
                   </span>
-                  <div className="flex-1 h-3 bg-gray-800 rounded-full overflow-hidden relative">
+                  <div className="alc-progress-tall alc-grow">
                     {/* Negative fill (left half) */}
                     {sig < 0 && (
                       <div
-                        className="absolute top-0 h-full rounded-l-full"
+                        className="alc-progress-segment"
                         style={{
                           left: `${barPct}%`,
                           width: `${50 - barPct}%`,
@@ -204,7 +204,7 @@ function SpeedCard({ speed }: { speed: TSMOMSpeed }) {
                     {/* Positive fill (right half) */}
                     {sig > 0 && (
                       <div
-                        className="absolute top-0 h-full rounded-r-full"
+                        className="alc-progress-segment"
                         style={{
                           left: '50%',
                           width: `${barPct - 50}%`,
@@ -213,9 +213,9 @@ function SpeedCard({ speed }: { speed: TSMOMSpeed }) {
                       />
                     )}
                     {/* Center line */}
-                    <div className="absolute top-0 left-1/2 h-full w-0.5 bg-gray-600 z-10" />
+                    <div className="alc-progress-marker" style={{ left: '50%', backgroundColor: '#475569' }} />
                   </div>
-                  <span className="text-[10px] font-mono text-gray-400 min-w-[32px] text-right shrink-0">
+                  <span className="alc-small alc-mono alc-align-right alc-fixed-sm">
                     {sig >= 0 ? '+' : ''}
                     {sig.toFixed(2)}
                   </span>
@@ -242,40 +242,39 @@ function HealthGatingCard({
   const belowFloor = healthScore < viabilityFloor;
 
   return (
-    <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40 space-y-3">
-      <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider">
+    <div className="alc-card alc-stack">
+      <h4 className="alc-section-title">
         Health &amp; Gating
       </h4>
 
       {/* Health score bar */}
       <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-gray-500">Health Score</span>
-          <span className="text-sm font-mono font-bold" style={{ color }}>
+        <div className="alc-row">
+          <span className="alc-label">Health Score</span>
+          <span className="alc-value" style={{ color }}>
             {healthScore.toFixed(2)}
           </span>
         </div>
-        <div className="relative h-3 bg-gray-800 rounded-full overflow-hidden">
+        <div className="alc-progress-tall">
           {/* Viability floor line */}
           <div
-            className="absolute top-0 w-0.5 bg-red-500 z-10 transition-all"
+            className="alc-progress-marker alc-progress-marker-danger"
             style={{
               left: `${viabilityFloor * 100}%`,
-              height: '100%',
               opacity: 0.8,
             }}
             title={`Viability floor: ${(viabilityFloor * 100).toFixed(0)}%`}
           />
           {/* Score bar */}
           <div
-            className="h-full rounded-full transition-all duration-300"
+            className="alc-progress-fill"
             style={{ width: `${pct}%`, backgroundColor: color }}
           />
         </div>
-        <span className="text-[10px] text-gray-600 mt-0.5 block">
+        <span className="alc-small">
           Viability floor: {(viabilityFloor * 100).toFixed(0)}%
           {belowFloor && (
-            <span className="text-red-400 ml-1 font-semibold">
+            <span className="alc-text-danger alc-strong">
               &mdash; Below floor
             </span>
           )}
@@ -284,22 +283,22 @@ function HealthGatingCard({
 
       {/* Gate status */}
       <div>
-        <span className="text-xs text-gray-500 block mb-1">Gate Status</span>
+        <span className="alc-label">Gate Status</span>
         {isGatedOff ? (
-          <div className="bg-red-900/20 border border-red-700/40 rounded-md px-3 py-2">
-            <span className="text-xs font-semibold text-red-400">
+          <div className="alc-note alc-tone-danger">
+            <span className="alc-strong">
               GATED OFF in HIGH_VOL / CRISIS
             </span>
-            <p className="text-[10px] text-gray-500 mt-0.5">
+            <p className="alc-small">
               TSMOM disabled in high volatility and crisis regimes via RegimeGate.
             </p>
           </div>
         ) : (
-          <div className="bg-emerald-900/20 border border-emerald-700/40 rounded-md px-3 py-2">
-            <span className="text-xs font-semibold text-emerald-400">
+          <div className="alc-note alc-tone-success">
+            <span className="alc-strong">
               ACTIVE
             </span>
-            <p className="text-[10px] text-gray-500 mt-0.5">
+            <p className="alc-small">
               Signal operational under current regime conditions.
             </p>
           </div>
@@ -331,25 +330,25 @@ function PerformanceRow({
       : 'Slightly degraded';
 
   return (
-    <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-      <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider mb-3">
+    <div className="alc-card">
+      <h4 className="alc-section-title">
         Performance Comparison
       </h4>
 
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <div className="bg-gray-900/60 rounded-md p-2.5 border border-gray-700/30">
-          <span className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
+      <div className="alc-grid">
+        <div className="alc-card alc-card-compact alc-card-accent">
+          <span className="alc-label">
             Standalone Sharpe
           </span>
-          <span className="text-lg font-mono font-bold text-emerald-400">
+          <span className="alc-value-lg alc-text-success">
             {standaloneSharpe.toFixed(2)}
           </span>
         </div>
-        <div className="bg-gray-900/60 rounded-md p-2.5 border border-gray-700/30">
-          <span className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
+        <div className="alc-card alc-card-compact alc-card-accent">
+          <span className="alc-label">
             Overlay Sharpe
           </span>
-          <span className="text-lg font-mono font-bold" style={{ color: overlayColor }}>
+          <span className="alc-value-lg" style={{ color: overlayColor }}>
             {overlaySharpe.toFixed(2)}
           </span>
         </div>
@@ -357,25 +356,25 @@ function PerformanceRow({
 
       {/* Net impact badge */}
       <div
-        className={`rounded-md px-3 py-2 border ${
+        className={`alc-note ${
           isNetNegative
-            ? 'bg-red-900/20 border-red-700/40'
+            ? 'alc-tone-danger'
             : overlaySharpe >= standaloneSharpe
-              ? 'bg-emerald-900/20 border-emerald-700/40'
-              : 'bg-amber-900/20 border-amber-700/40'
+              ? 'alc-tone-success'
+              : 'alc-tone-warning'
         }`}
       >
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-400">Net Impact vs Baseline ({BASELINE_SHARPE.toFixed(2)})</span>
+        <div className="alc-row">
+          <span className="alc-label">Net Impact vs Baseline ({BASELINE_SHARPE.toFixed(2)})</span>
           <span
-            className={`text-xs font-semibold ${
-              isNetNegative ? 'text-red-400' : overlaySharpe >= standaloneSharpe ? 'text-emerald-400' : 'text-amber-400'
+            className={`alc-strong ${
+              isNetNegative ? 'alc-text-danger' : overlaySharpe >= standaloneSharpe ? 'alc-text-success' : 'alc-text-warning'
             }`}
           >
             {netImpactLabel}
           </span>
         </div>
-        <p className="text-[10px] text-gray-500 mt-0.5">
+        <p className="alc-small">
           {isNetNegative
             ? 'Signal conflicts erode alpha when used as overlay — standalone use preferred.'
             : 'Overlay integration does not materially degrade standalone performance.'}
@@ -390,9 +389,9 @@ function PerformanceRow({
 export function TSMOMPanel({ data }: TSMOMPanelProps) {
   if (!data) {
     return (
-      <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-gray-100 mb-2">TSMOM Overlay</h3>
-        <p className="text-sm text-gray-500">No TSMOM data available</p>
+      <div className="alc-panel alc-panel-muted">
+        <h3 className="alc-title">TSMOM Overlay</h3>
+        <p className="alc-muted">No TSMOM data available</p>
       </div>
     );
   }
@@ -410,18 +409,18 @@ export function TSMOMPanel({ data }: TSMOMPanelProps) {
   } = data;
 
   return (
-    <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4 space-y-4 text-gray-100">
+    <div className="alc-panel alc-panel-muted">
       {/* ── Header ─────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
+      <div className="alc-header">
         <div>
-          <h3 className="text-sm font-semibold">TSMOM Overlay</h3>
-          <p className="text-[10px] text-gray-600 mt-0.5">
+          <h3 className="alc-title">TSMOM Overlay</h3>
+          <p className="alc-subtitle">
             Time-Series Momentum &middot; Generated {generated_at}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="alc-header-actions">
           {positionBadge(position_recommendation, composite_signal)}
-          <span className="text-[10px] font-mono text-gray-500 bg-gray-800/60 px-2 py-0.5 rounded">
+          <span className="alc-chip-small alc-chip-neutral alc-mono">
             {(confidence * 100).toFixed(0)}% conf
           </span>
         </div>
@@ -433,14 +432,14 @@ export function TSMOMPanel({ data }: TSMOMPanelProps) {
       </div>
 
       {/* ── Section 2: Speed Breakdown ─────────────────────── */}
-      <div>
-        <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider mb-2">
+      <div className="alc-section">
+        <h4 className="alc-section-title">
           Speed Breakdown ({speed_breakdown.length})
         </h4>
         {speed_breakdown.length === 0 ? (
-          <p className="text-xs text-gray-500 italic">No speed breakdown available</p>
+          <p className="alc-muted">No speed breakdown available</p>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="alc-grid alc-grid-three">
             {speed_breakdown.map((speed) => (
               <SpeedCard key={speed.label} speed={speed} />
             ))}

@@ -45,12 +45,12 @@ const DEFAULT_ZONE_THRESHOLDS: Record<string, [number, number]> = {
 
 // ── Zone Config ────────────────────────────────────────────────────────────
 
-const ZONE_META: Record<string, { color: string; bg: string; border: string; badge: string }> = {
-  LOW:      { color: '#10b981', bg: 'bg-emerald-900/30',    border: 'border-emerald-700/40', badge: 'bg-emerald-600/20 text-emerald-400' },
-  NORMAL:   { color: '#3b82f6', bg: 'bg-blue-900/30',       border: 'border-blue-700/40',    badge: 'bg-blue-600/20 text-blue-400' },
-  ELEVATED: { color: '#f59e0b', bg: 'bg-amber-900/30',      border: 'border-amber-700/40',   badge: 'bg-amber-600/20 text-amber-400' },
-  HIGH:     { color: '#f97316', bg: 'bg-orange-900/30',     border: 'border-orange-700/40',  badge: 'bg-orange-600/20 text-orange-400' },
-  CRISIS:   { color: '#ef4444', bg: 'bg-red-900/30',        border: 'border-red-700/40',     badge: 'bg-red-600/20 text-red-400' },
+const ZONE_META: Record<string, { color: string; tone: string; chip: string }> = {
+  LOW:      { color: '#10b981', tone: 'alc-tone-success', chip: 'alc-chip-success' },
+  NORMAL:   { color: '#3b82f6', tone: 'alc-tone-info', chip: 'alc-chip-info' },
+  ELEVATED: { color: '#f59e0b', tone: 'alc-tone-warning', chip: 'alc-chip-warning' },
+  HIGH:     { color: '#f97316', tone: 'alc-tone-warning', chip: 'alc-chip-warning' },
+  CRISIS:   { color: '#ef4444', tone: 'alc-tone-danger', chip: 'alc-chip-danger' },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -178,12 +178,12 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
 
   if (!normalizedData) {
     return (
-      <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-base font-semibold text-gray-100">VIXY Hedge Sizing</h3>
+      <div className="alc-panel alc-panel-muted">
+        <div className="alc-header">
+          <h3 className="alc-title">VIXY Hedge Sizing</h3>
         </div>
-        <p className="text-sm text-gray-500">Hedge sizing data not available</p>
-        <p className="text-xs text-gray-600 mt-1">Run VIXY hedge sizing exporter to populate</p>
+        <p className="alc-muted">Hedge sizing data not available</p>
+        <p className="alc-small">Run VIXY hedge sizing exporter to populate</p>
       </div>
     );
   }
@@ -191,37 +191,51 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
   data = normalizedData;
   const zoneMeta = ZONE_META[data.vix_zone] ?? ZONE_META.NORMAL;
   const zoneColor = zoneMeta.color;
+  const costTone =
+    data.costs.total_pct > 0.08 ? 'alc-text-danger' :
+    data.costs.total_pct > 0.05 ? 'alc-text-warning' :
+    'alc-text-success';
+  const recommendationTone =
+    data.recommendation.allocation > 0.08 ? 'alc-tone-danger' :
+    data.recommendation.allocation > 0.05 ? 'alc-tone-warning' :
+    data.recommendation.allocation > 0.02 ? 'alc-tone-info' :
+    'alc-tone-success';
+  const recommendationText =
+    data.recommendation.allocation > 0.08 ? 'alc-text-danger' :
+    data.recommendation.allocation > 0.05 ? 'alc-text-warning' :
+    data.recommendation.allocation > 0.02 ? 'alc-text-info' :
+    'alc-text-success';
 
   return (
-    <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4 space-y-5 text-gray-100">
+    <div className="alc-panel alc-panel-muted">
 
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold">VIXY Hedge Sizing</h3>
-        <span className={`px-2.5 py-0.5 rounded text-xs font-semibold ${zoneMeta.badge}`}>
+      <div className="alc-header">
+        <h3 className="alc-title">VIXY Hedge Sizing</h3>
+        <span className={`alc-chip ${zoneMeta.chip}`}>
           {data.vix_zone}
         </span>
       </div>
 
       {/* ── Section 1: Current Hedge Allocation ───────────────── */}
-      <div>
-        <h4 className="text-sm font-medium text-gray-400 mb-3">Current Hedge Allocation</h4>
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-            <p className="text-xs text-gray-500 mb-1">VIXY Position</p>
-            <p className="text-lg font-mono font-bold text-gray-100">
+      <div className="alc-section">
+        <h4 className="alc-section-title">Current Hedge Allocation</h4>
+        <div className="alc-grid alc-grid-three">
+          <div className="alc-card">
+            <p className="alc-label">VIXY Position</p>
+            <p className="alc-value-lg">
               {formatPct(data.vixy_position)}
             </p>
           </div>
-          <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-            <p className="text-xs text-gray-500 mb-1">Hedge Ratio</p>
-            <p className="text-lg font-mono font-bold text-gray-100">
+          <div className="alc-card">
+            <p className="alc-label">Hedge Ratio</p>
+            <p className="alc-value-lg">
               {data.hedge_ratio.toFixed(2)}x
             </p>
           </div>
-          <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-            <p className="text-xs text-gray-500 mb-1">Target Volatility</p>
-            <p className="text-lg font-mono font-bold text-gray-100">
+          <div className="alc-card">
+            <p className="alc-label">Target Volatility</p>
+            <p className="alc-value-lg">
               {formatPct(data.target_volatility)}
             </p>
           </div>
@@ -229,27 +243,27 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
       </div>
 
       {/* ── Section 2: VIX Regime Zone ─────────────────────────── */}
-      <div>
-        <h4 className="text-sm font-medium text-gray-400 mb-3">VIX Regime Zone</h4>
-        <div className={`${zoneMeta.bg} ${zoneMeta.border} rounded-lg p-3 border`}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-gray-400">Current VIX Level</span>
-            <span className="text-2xl font-mono font-bold" style={{ color: zoneColor }}>
+      <div className="alc-section">
+        <h4 className="alc-section-title">VIX Regime Zone</h4>
+        <div className={`alc-card ${zoneMeta.tone}`}>
+          <div className="alc-row">
+            <span className="alc-label">Current VIX Level</span>
+            <span className="alc-value-xl" style={{ color: zoneColor }}>
               {data.vix_level.toFixed(2)}
             </span>
           </div>
-          <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>Zone: <span className="font-semibold" style={{ color: zoneColor }}>{data.vix_zone}</span></span>
+          <div className="alc-row">
+            <span className="alc-small">Zone: <span className="alc-strong" style={{ color: zoneColor }}>{data.vix_zone}</span></span>
           </div>
         </div>
 
         {/* Zone threshold bar */}
-        <div className="mt-2">
+        <div className="alc-stack-xs">
           {(() => {
             const totalRange = 60; // visual max scale
             return (
               <div>
-                <div className="relative h-2 bg-gray-800 rounded-full overflow-hidden">
+                <div className="alc-progress">
                   {/* Colored segments for each zone */}
                   {(['LOW', 'NORMAL', 'ELEVATED', 'HIGH', 'CRISIS'] as const).map((z) => {
                     const meta = ZONE_META[z];
@@ -264,11 +278,12 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
                     return (
                       <div
                         key={z}
-                        className={`absolute top-0 h-full transition-all duration-300 ${isActive ? 'opacity-100' : 'opacity-30'}`}
+                        className="alc-progress-segment"
                         style={{
                           left: `${Math.max(0, left)}%`,
                           width: `${Math.max(2, width)}%`,
                           backgroundColor: meta.color,
+                          opacity: isActive ? 1 : 0.3,
                         }}
                         title={`${z}: ${lo}-${hi}`}
                       />
@@ -276,13 +291,13 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
                   })}
                   {/* VIX marker */}
                   <div
-                    className="absolute top-0 h-full w-0.5 bg-white shadow-md z-10"
+                    className="alc-progress-marker"
                     style={{
                       left: `${Math.min((data.vix_level / totalRange) * 100, 97)}%`,
                     }}
                   />
                 </div>
-                <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+                <div className="alc-scale">
                   <span>0</span>
                   <span>LOW</span>
                   <span>NORMAL</span>
@@ -297,7 +312,7 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
         </div>
 
         {/* Zone threshold detail */}
-        <div className="grid grid-cols-5 gap-1 mt-2">
+        <div className="alc-grid alc-grid-five">
           {(['LOW', 'NORMAL', 'ELEVATED', 'HIGH', 'CRISIS'] as const).map((z) => {
             const meta = ZONE_META[z];
             const t = data.zone_thresholds[z];
@@ -311,12 +326,11 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
             return (
               <div
                 key={z}
-                className={`text-center rounded py-1 px-0.5 transition-all ${
-                  isActive ? `${meta.bg} ${meta.border} border` : 'opacity-40'
-                }`}
+                className={`alc-card alc-card-compact ${isActive ? meta.tone : 'alc-tone-neutral'}`}
+                style={{ opacity: isActive ? 1 : 0.45 }}
               >
-                <p className="text-[10px] font-semibold" style={{ color: meta.color }}>{z}</p>
-                <p className="text-[10px] text-gray-500">{label}</p>
+                <p className="alc-small alc-strong" style={{ color: meta.color }}>{z}</p>
+                <p className="alc-small">{label}</p>
               </div>
             );
           })}
@@ -324,41 +338,37 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
       </div>
 
       {/* ── Section 3: Hedge Cost Analysis ─────────────────────── */}
-      <div>
-        <h4 className="text-sm font-medium text-gray-400 mb-3">Hedge Cost Analysis</h4>
-        <div className="grid grid-cols-3 gap-3 mb-2">
-          <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-            <p className="text-xs text-gray-500 mb-1">Daily Carry</p>
-            <p className="text-lg font-mono font-bold text-amber-400">
+      <div className="alc-section">
+        <h4 className="alc-section-title">Hedge Cost Analysis</h4>
+        <div className="alc-grid alc-grid-three">
+          <div className="alc-card">
+            <p className="alc-label">Daily Carry</p>
+            <p className="alc-value-lg alc-text-warning">
               {formatPctFull(data.costs.daily_carry)}
             </p>
           </div>
-          <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-            <p className="text-xs text-gray-500 mb-1">Roll Cost</p>
-            <p className="text-lg font-mono font-bold text-orange-400">
+          <div className="alc-card">
+            <p className="alc-label">Roll Cost</p>
+            <p className="alc-value-lg alc-text-warning">
               {formatPctFull(data.costs.roll_cost)}
             </p>
           </div>
-          <div className="bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-            <p className="text-xs text-gray-500 mb-1">Total Cost</p>
-            <p className={`text-lg font-mono font-bold ${
-              data.costs.total_pct > 0.08 ? 'text-red-400' :
-              data.costs.total_pct > 0.05 ? 'text-amber-400' :
-              'text-emerald-400'
-            }`}>
+          <div className="alc-card">
+            <p className="alc-label">Total Cost</p>
+            <p className={`alc-value-lg ${costTone}`}>
               {formatPctFull(data.costs.total_pct)}
             </p>
           </div>
         </div>
         {/* Cost gauge bar */}
-        <div className="bg-gray-800/60 rounded-lg p-2 border border-gray-700/40">
-          <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+        <div className="alc-card alc-card-compact">
+          <div className="alc-row">
             <span>% of portfolio</span>
             <span>{formatPctFull(data.costs.total_pct)}</span>
           </div>
-          <div className="relative h-2 bg-gray-800 rounded-full overflow-hidden">
+          <div className="alc-progress">
             <div
-              className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
+              className="alc-progress-fill"
               style={{
                 width: `${Math.min((data.costs.total_pct / 0.20) * 100, 100)}%`,
                 backgroundColor:
@@ -369,7 +379,7 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
               }}
             />
           </div>
-          <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+          <div className="alc-scale">
             <span>0%</span>
             <span>3%</span>
             <span>5%</span>
@@ -380,37 +390,37 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
       </div>
 
       {/* ── Section 4: Historical Crisis Performance ───────────── */}
-      <div>
-        <h4 className="text-sm font-medium text-gray-400 mb-3">Crisis Performance</h4>
+      <div className="alc-section">
+        <h4 className="alc-section-title">Crisis Performance</h4>
         {data.crisis_performance.length === 0 ? (
-          <p className="text-xs text-gray-500">No crisis performance data available</p>
+          <p className="alc-muted">No crisis performance data available</p>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-gray-700/40">
-            <table className="w-full text-xs">
+          <div className="alc-table-wrap">
+            <table className="alc-table">
               <thead>
-                <tr className="bg-gray-800/80 text-gray-500">
-                  <th className="text-left py-2 px-3 font-medium">Period</th>
-                  <th className="text-right py-2 px-3 font-medium">Portfolio</th>
-                  <th className="text-right py-2 px-3 font-medium">Hedge (VIXY)</th>
-                  <th className="text-right py-2 px-3 font-medium">Combined</th>
+                <tr>
+                  <th>Period</th>
+                  <th className="alc-cell-right">Portfolio</th>
+                  <th className="alc-cell-right">Hedge (VIXY)</th>
+                  <th className="alc-cell-right">Combined</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-700/30">
+              <tbody>
                 {data.crisis_performance.map((cp, i) => (
-                  <tr key={i} className="bg-gray-800/40 hover:bg-gray-700/30 transition-colors">
-                    <td className="py-2 px-3 text-gray-300 font-medium">{cp.period}</td>
-                    <td className={`py-2 px-3 text-right font-mono font-semibold ${
-                      cp.portfolio_return < 0 ? 'text-red-400' : 'text-emerald-400'
+                  <tr key={i}>
+                    <td className="alc-strong">{cp.period}</td>
+                    <td className={`alc-cell-right alc-mono alc-strong ${
+                      cp.portfolio_return < 0 ? 'alc-text-danger' : 'alc-text-success'
                     }`}>
                       {formatPctFull(cp.portfolio_return)}
                     </td>
-                    <td className={`py-2 px-3 text-right font-mono font-semibold ${
-                      cp.hedge_return < 0 ? 'text-red-400' : 'text-emerald-400'
+                    <td className={`alc-cell-right alc-mono alc-strong ${
+                      cp.hedge_return < 0 ? 'alc-text-danger' : 'alc-text-success'
                     }`}>
                       {formatPctFull(cp.hedge_return)}
                     </td>
-                    <td className={`py-2 px-3 text-right font-mono font-semibold ${
-                      cp.combined_return < 0 ? 'text-red-400' : 'text-emerald-400'
+                    <td className={`alc-cell-right alc-mono alc-strong ${
+                      cp.combined_return < 0 ? 'alc-text-danger' : 'alc-text-success'
                     }`}>
                       {formatPctFull(cp.combined_return)}
                     </td>
@@ -423,42 +433,33 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
       </div>
 
       {/* ── Section 5: Sizing Recommendation ───────────────────── */}
-      <div>
-        <h4 className="text-sm font-medium text-gray-400 mb-3">Sizing Recommendation</h4>
-        <div className={`rounded-lg p-4 border ${
-          data.recommendation.allocation > 0.08 ? 'bg-red-900/20 border-red-700/40' :
-          data.recommendation.allocation > 0.05 ? 'bg-amber-900/20 border-amber-700/40' :
-          data.recommendation.allocation > 0.02 ? 'bg-blue-900/20 border-blue-700/40' :
-          'bg-emerald-900/20 border-emerald-700/40'
-        }`}>
-          <div className="flex items-baseline justify-between mb-3">
-            <span className="text-xs text-gray-400">Recommended VIXY Allocation</span>
-            <span className={`text-2xl font-mono font-bold ${
-              data.recommendation.allocation > 0.08 ? 'text-red-400' :
-              data.recommendation.allocation > 0.05 ? 'text-amber-400' :
-              data.recommendation.allocation > 0.02 ? 'text-blue-400' :
-              'text-emerald-400'
-            }`}>
+      <div className="alc-section">
+        <h4 className="alc-section-title">Sizing Recommendation</h4>
+        <div className={`alc-note ${recommendationTone}`}>
+          <div className="alc-row-baseline">
+            <span className="alc-label">Recommended VIXY Allocation</span>
+            <span className={`alc-value-xl ${recommendationText}`}>
               {formatPct(data.recommendation.allocation)}
             </span>
           </div>
-          <p className="text-sm text-gray-300 leading-relaxed">
+          <p className="alc-muted alc-break-anywhere">
             {data.recommendation.reasoning}
           </p>
         </div>
         {/* Visual sizing gauge */}
         {data.recommendation.allocation > 0 && (
-          <div className="mt-2 bg-gray-800/60 rounded-lg p-3 border border-gray-700/40">
-            <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+          <div className="alc-card">
+            <div className="alc-row">
               <span>Allocation gauge</span>
               <span>Current: {formatPct(data.vixy_position)}</span>
             </div>
-            <div className="relative h-3 bg-gray-800 rounded-full overflow-hidden">
+            <div className="alc-progress-tall">
               {/* Recommended allocation fill */}
               <div
-                className="absolute top-0 left-0 h-full rounded-full opacity-60 transition-all duration-500"
+                className="alc-progress-fill"
                 style={{
                   width: `${Math.min(data.recommendation.allocation * 100, 100)}%`,
+                  opacity: 0.6,
                   backgroundColor:
                     data.recommendation.allocation > 0.08 ? '#ef4444' :
                     data.recommendation.allocation > 0.05 ? '#f59e0b' :
@@ -468,22 +469,22 @@ export function VixyHedgeSizingPanel({ data }: VixyHedgeSizingPanelProps) {
               />
               {/* Current position marker */}
               <div
-                className="absolute top-0 h-full w-0.5 bg-white shadow-md z-10"
+                className="alc-progress-marker"
                 style={{
                   left: `${Math.min(data.vixy_position * 100, 100)}%`,
                 }}
               />
             </div>
-            <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+            <div className="alc-scale">
               <span>0%</span>
               <span>5%</span>
               <span>10%</span>
               <span>15%+</span>
             </div>
-            <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500">
-              <span className="inline-block w-2 h-2 rounded-full bg-white/80" />
+            <div className="alc-cluster">
+              <span className="alc-swatch" style={{ backgroundColor: 'rgba(248, 250, 252, 0.8)' }} />
               <span>Current position</span>
-              <span className="inline-block w-2 h-2 rounded-full bg-gray-500/60 ml-2" />
+              <span className="alc-swatch" style={{ backgroundColor: 'rgba(100, 116, 139, 0.6)' }} />
               <span>Recommended</span>
             </div>
           </div>

@@ -150,4 +150,20 @@ test.describe('dashboard browser presentation smoke', () => {
 
     expect(consoleMessages).toEqual([]);
   });
+
+  test('keeps loaded Analytics child panels within mobile viewport', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+
+    await openDashboard(page, { width: 390, height: 900 });
+    await dashboardTab(page, 'Analytics').click();
+    await expect(page.locator('.analytics-summary')).toBeVisible();
+    await expect(page.getByText('VIXY Hedge Sizing').first()).toBeVisible();
+    await expect(page.getByText('Hedge Selector').first()).toBeVisible();
+    await expect(page.getByText('Black-Litterman Mapper').first()).toBeVisible();
+    await expect(page.getByText('Regime Gate (v5.00)').first()).toBeVisible();
+    await expect(page.getByText('TSMOM Overlay').first()).toBeVisible();
+    await expectNoDocumentOverflow(page);
+
+    expect(consoleMessages).toEqual([]);
+  });
 });
