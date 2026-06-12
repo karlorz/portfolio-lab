@@ -13,7 +13,7 @@ import os
 import json
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Mapping
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -29,6 +29,7 @@ from src.broker.circuit_breaker import (
 
 
 __all__ = ['OrderRequest', 'Order', 'Position', 'MarketQuote', 'QuoteStalenessError',
+           'resolve_alpaca_feed_entitlement',
            'AlpacaClient', 'PaperTradingManager',
            'check_alpaca_status', 'get_circuit_state', 'RampPhase', 'LiveTransitionManager']
 
@@ -147,6 +148,7 @@ class MarketQuote:
     feed: str
     age_seconds: float
     source_mode: str
+    feed_entitlement: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -154,6 +156,81 @@ class MarketQuote:
 
 class QuoteStalenessError(RuntimeError):
     """Raised when live order sizing would use stale or prior-close data."""
+
+
+def _normalize_feed_value(value: Optional[str]) -> str:
+    normalized = (value or "iex").strip().lower().replace("-", "_")
+    aliases = {
+        "basic": "iex",
+        "alpaca_basic": "iex",
+        "delayed": "delayed_sip",
+        "delayed_sip": "delayed_sip",
+        "sip_delayed": "delayed_sip",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _normalize_entitlement_value(value: Optional[str]) -> str:
+    normalized = (value or "").strip().lower().replace("-", "_")
+    if not normalized:
+        return "unknown"
+    aliases = {
+        "iex": "basic",
+        "alpaca_basic": "basic",
+        "delayed": "delayed_sip",
+        "sip_delayed": "delayed_sip",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def resolve_alpaca_feed_entitlement(env: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
+    """Return public-safe Alpaca market-data feed entitlement metadata.
+
+    The output intentionally records only feed class and entitlement policy,
+    never account identifiers, API keys, or credential values.
+    """
+    values = env if env is not None else os.environ
+    configured_feed = _normalize_feed_value(
+        values.get("ALPACA_DATA_FEED")
+        or values.get("ALPACA_MARKET_DATA_FEED")
+        or values.get("ALPACA_FEED")
+    )
+    entitlement = _normalize_entitlement_value(
+        values.get("ALPACA_FEED_ENTITLEMENT")
+        or values.get("ALPACA_MARKET_DATA_ENTITLEMENT")
+        or values.get("ALPACA_DATA_ENTITLEMENT")
+    )
+
+    known_feeds = {"iex", "sip", "delayed_sip", "websocket", "historical_bars"}
+    effective_feed = configured_feed if configured_feed in known_feeds else "unknown"
+    delayed = effective_feed == "delayed_sip" or entitlement == "delayed_sip"
+    acceptable_for_live = False
+    reason: Optional[str] = None
+
+    if effective_feed == "unknown":
+        reason = "unknown_feed"
+    elif entitlement == "unknown":
+        reason = "missing_entitlement"
+    elif delayed:
+        reason = "delayed_feed"
+    elif effective_feed == "sip" and entitlement != "sip":
+        reason = "insufficient_entitlement"
+    elif effective_feed in {"iex", "websocket", "historical_bars"} and entitlement in {"basic", "sip"}:
+        acceptable_for_live = True
+    elif effective_feed == "sip" and entitlement == "sip":
+        acceptable_for_live = True
+    else:
+        reason = "insufficient_entitlement"
+
+    return {
+        "configured_feed": configured_feed,
+        "effective_feed": effective_feed,
+        "entitlement": entitlement,
+        "delayed": delayed,
+        "acceptable_for_live": acceptable_for_live,
+        "policy_decision": "allow" if acceptable_for_live else "reject",
+        "reason": reason,
+    }
 
 
 class AlpacaClient:
@@ -229,6 +306,7 @@ class AlpacaClient:
         to local prior-close data when broker quotes are unavailable.
         """
         try:
+            feed_entitlement = resolve_alpaca_feed_entitlement()
             client = self._get_data_client()
             getter = getattr(client, "get_stock_latest_quote", None)
             if getter is None:
@@ -261,9 +339,10 @@ class AlpacaClient:
                 price=price,
                 timestamp=quote_dt.astimezone(timezone.utc).isoformat(),
                 source="alpaca",
-                feed="stock_latest_quote",
+                feed=feed_entitlement["effective_feed"],
                 age_seconds=age_seconds,
-                source_mode="live",
+                source_mode="delayed" if feed_entitlement["delayed"] else "live",
+                feed_entitlement=feed_entitlement,
             )
         except (ImportError, RuntimeError, OSError, ConnectionError, TimeoutError, ValueError, TypeError) as e:
             logger.debug("Broker quote unavailable for %s: %s", symbol, e)
@@ -517,6 +596,22 @@ class PaperTradingManager:
             feed="positions",
             age_seconds=0.0,
             source_mode="live",
+            feed_entitlement=resolve_alpaca_feed_entitlement(),
+        )
+
+    def _raise_if_live_feed_unacceptable(
+        self,
+        symbol: str,
+        dry_run: bool,
+        feed_entitlement: Optional[Dict[str, Any]],
+    ) -> None:
+        if not self._is_live_order_mode(dry_run):
+            return
+        if feed_entitlement is None or feed_entitlement.get("acceptable_for_live", False):
+            return
+        reason = feed_entitlement.get("reason") or "unacceptable_feed"
+        raise QuoteStalenessError(
+            f"Alpaca feed entitlement rejects live order sizing for {symbol}: {reason}"
         )
 
     def _resolve_order_quote(self, symbol: str, *, dry_run: bool) -> Optional[MarketQuote]:
@@ -524,8 +619,15 @@ class PaperTradingManager:
         max_age = self._max_quote_age_seconds()
         broker_quote = self.client.get_latest_quote(symbol)
         if broker_quote is not None:
+            feed_entitlement = broker_quote.feed_entitlement or resolve_alpaca_feed_entitlement()
+            broker_quote.feed_entitlement = feed_entitlement
+            if feed_entitlement.get("delayed"):
+                broker_quote.source_mode = "delayed"
+
             if broker_quote.age_seconds <= max_age:
+                self._raise_if_live_feed_unacceptable(symbol, dry_run, feed_entitlement)
                 return broker_quote
+
             broker_quote.source_mode = "delayed"
             if self._is_live_order_mode(dry_run):
                 raise QuoteStalenessError(
@@ -632,7 +734,9 @@ class PaperTradingManager:
                     # Calculate shares to trade (rough estimate using current price)
                     qty = abs(delta) / pos.current_price
                     side = OrderSide.BUY if delta > 0 else OrderSide.SELL
-                    quote_sources[symbol] = self._position_quote(pos).to_dict()
+                    position_quote = self._position_quote(pos)
+                    self._raise_if_live_feed_unacceptable(symbol, dry_run, position_quote.feed_entitlement)
+                    quote_sources[symbol] = position_quote.to_dict()
                 else:
                     # New position
                     if target_value < 10:
@@ -740,6 +844,8 @@ def check_alpaca_status() -> Dict[str, Any]:
             status["error"] = "alpaca-py SDK not installed"
         elif not client.is_configured():
             status["error"] = "ALPACA_API_KEY and ALPACA_API_SECRET not set"
+
+    status["feed_entitlement"] = resolve_alpaca_feed_entitlement()
 
     return status
 

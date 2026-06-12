@@ -247,6 +247,30 @@ class TestGenerateExtended:
         assert result["schedule_compliance"]["delayed"] == 1
         assert result["schedule_compliance"]["on_time"] == 0
 
+    def test_generate_includes_alpaca_feed_entitlement_diagnostics(self):
+        """Rebalance health should expose public-safe Alpaca feed policy metadata."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d, patch.dict(
+                "os.environ",
+                {"ALPACA_DATA_FEED": "sip", "ALPACA_FEED_ENTITLEMENT": "delayed_sip"},
+            ):
+                rh.ORDERS_DIR = Path(d)
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+
+        assert result["alpaca_feed_entitlement"] == {
+            "configured_feed": "sip",
+            "effective_feed": "sip",
+            "entitlement": "delayed_sip",
+            "delayed": True,
+            "acceptable_for_live": False,
+            "policy_decision": "reject",
+            "reason": "delayed_feed",
+        }
+
     def test_next_rebalance_30_days_after_last(self):
         """Next rebalance should be ~30 days after the last execution."""
         import src.monitor.rebalance_health as rh
@@ -865,4 +889,3 @@ class TestMain:
         with open(output_path) as f:
             data = json.load(f)
         assert data["total_executions"] == 0
-

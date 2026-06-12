@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from src.broker.alpaca import (
     OrderSide, OrderType, OrderRequest, Order, Position, MarketQuote,
     AlpacaClient, PaperTradingManager, check_alpaca_status,
+    resolve_alpaca_feed_entitlement,
     ALPACA_AVAILABLE,
 )
 from src.broker.circuit_breaker import broker_breaker
@@ -257,6 +258,66 @@ class TestAlpacaClient:
         assert price == 0.0
 
 
+class TestAlpacaFeedEntitlement:
+    """Configured feed and entitlement policy should be public-safe and fail closed."""
+
+    def test_iex_basic_feed_is_explicitly_classified(self):
+        metadata = resolve_alpaca_feed_entitlement({
+            "ALPACA_DATA_FEED": "iex",
+            "ALPACA_FEED_ENTITLEMENT": "basic",
+        })
+
+        assert metadata["configured_feed"] == "iex"
+        assert metadata["effective_feed"] == "iex"
+        assert metadata["entitlement"] == "basic"
+        assert metadata["delayed"] is False
+        assert metadata["acceptable_for_live"] is True
+        assert metadata["policy_decision"] == "allow"
+        assert metadata["reason"] is None
+
+    def test_sip_feed_requires_sip_entitlement(self):
+        metadata = resolve_alpaca_feed_entitlement({
+            "ALPACA_DATA_FEED": "sip",
+            "ALPACA_FEED_ENTITLEMENT": "sip",
+        })
+
+        assert metadata["effective_feed"] == "sip"
+        assert metadata["entitlement"] == "sip"
+        assert metadata["acceptable_for_live"] is True
+
+    def test_delayed_sip_feed_is_not_acceptable_for_live(self):
+        metadata = resolve_alpaca_feed_entitlement({
+            "ALPACA_DATA_FEED": "sip",
+            "ALPACA_FEED_ENTITLEMENT": "delayed_sip",
+        })
+
+        assert metadata["effective_feed"] == "sip"
+        assert metadata["entitlement"] == "delayed_sip"
+        assert metadata["delayed"] is True
+        assert metadata["acceptable_for_live"] is False
+        assert metadata["policy_decision"] == "reject"
+        assert metadata["reason"] == "delayed_feed"
+
+    def test_unknown_feed_is_not_acceptable_for_live(self):
+        metadata = resolve_alpaca_feed_entitlement({
+            "ALPACA_DATA_FEED": "mystery",
+            "ALPACA_FEED_ENTITLEMENT": "sip",
+        })
+
+        assert metadata["effective_feed"] == "unknown"
+        assert metadata["acceptable_for_live"] is False
+        assert metadata["policy_decision"] == "reject"
+        assert metadata["reason"] == "unknown_feed"
+
+    def test_missing_entitlement_fails_closed(self):
+        metadata = resolve_alpaca_feed_entitlement({"ALPACA_DATA_FEED": "iex"})
+
+        assert metadata["entitlement"] == "unknown"
+        assert metadata["acceptable_for_live"] is False
+        assert metadata["policy_decision"] == "reject"
+        assert metadata["reason"] == "missing_entitlement"
+
+
 # ---------------------------------------------------------------------------
 # PaperTradingManager tests
 # ---------------------------------------------------------------------------
@@ -373,6 +434,36 @@ class TestPaperTradingManager:
         assert result["quote_sources"]["TLT"]["source"] == "alpaca"
         assert result["quote_sources"]["TLT"]["source_mode"] == "live"
 
+    def test_execute_rebalance_reports_feed_entitlement_in_quote_sources(self, tmp_path):
+        """Quote source diagnostics should include public-safe Alpaca feed policy."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            source="alpaca",
+            feed="iex",
+            age_seconds=10,
+            source_mode="live",
+        )
+        quote.feed_entitlement = {
+            "configured_feed": "iex",
+            "effective_feed": "iex",
+            "entitlement": "basic",
+            "delayed": False,
+            "acceptable_for_live": True,
+            "policy_decision": "allow",
+            "reason": None,
+        }
+
+        with patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=quote):
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=True)
+
+        assert result["quote_sources"]["TLT"]["feed_entitlement"] == quote.feed_entitlement
+
     def test_execute_rebalance_allows_delayed_quote_in_dry_run(self, tmp_path):
         """Dry-run can use delayed quotes, but must label them explicitly."""
         manager = PaperTradingManager(data_dir=str(tmp_path))
@@ -465,6 +556,65 @@ class TestPaperTradingManager:
 
         assert result["status"] == "error"
         assert "requires a fresh broker quote" in result["message"]
+
+    def test_execute_rebalance_rejects_unacceptable_feed_in_live_mode(self, tmp_path):
+        """Live order sizing should fail closed when feed entitlement is unacceptable."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        quote = MarketQuote(
+            symbol="TLT",
+            price=100.0,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            source="alpaca",
+            feed="sip",
+            age_seconds=5,
+            source_mode="delayed",
+        )
+        quote.feed_entitlement = {
+            "configured_feed": "sip",
+            "effective_feed": "sip",
+            "entitlement": "delayed_sip",
+            "delayed": True,
+            "acceptable_for_live": False,
+            "policy_decision": "reject",
+            "reason": "delayed_feed",
+        }
+
+        with patch.dict(os.environ, {"ALPACA_PAPER": "false"}), \
+             patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[]), \
+             patch.object(manager.client, 'get_latest_quote', return_value=quote), \
+             patch.object(manager.client, 'submit_order') as submit_order:
+            result = manager.execute_rebalance({'TLT': 0.5}, total_value=100000, dry_run=False)
+
+        assert result["status"] == "error"
+        assert "Alpaca feed entitlement" in result["message"]
+        assert "delayed_feed" in result["message"]
+        submit_order.assert_not_called()
+
+    def test_execute_rebalance_rejects_unacceptable_feed_for_existing_position_in_live_mode(self, tmp_path):
+        """Live sizing from existing-position prices should use the same feed policy gate."""
+        manager = PaperTradingManager(data_dir=str(tmp_path))
+        mock_position = Position("SPY", 10, 500.0, 585.0, 5850.0, 850.0, 0.17)
+
+        with patch.dict(
+            os.environ,
+            {
+                "ALPACA_PAPER": "false",
+                "ALPACA_DATA_FEED": "sip",
+                "ALPACA_FEED_ENTITLEMENT": "delayed_sip",
+            },
+        ), \
+             patch.object(manager, 'is_ready', return_value=True), \
+             patch.object(manager.client, 'get_account', return_value={'equity': 100000.0}), \
+             patch.object(manager.client, 'get_positions', return_value=[mock_position]), \
+             patch.object(manager.client, 'submit_order') as submit_order:
+            result = manager.execute_rebalance({'SPY': 0.6}, total_value=100000, dry_run=False)
+
+        assert result["status"] == "error"
+        assert "Alpaca feed entitlement" in result["message"]
+        assert "delayed_feed" in result["message"]
+        submit_order.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1300,6 +1450,38 @@ class TestAlpacaClientMarketData:
         assert clock['is_open'] is True
         assert clock['timestamp'] == '2026-05-24T12:00:00'
         assert clock['next_close'] == '2026-05-24T16:00:00'
+
+    def test_get_latest_quote_includes_feed_entitlement_metadata(self):
+        client = AlpacaClient()
+        client.api_key = 'key'
+        client.api_secret = 'secret'
+
+        mock_quote = MagicMock()
+        mock_quote.bid_price = 99.0
+        mock_quote.ask_price = 101.0
+        mock_quote.timestamp = datetime(2026, 6, 12, 13, 30, tzinfo=timezone.utc)
+        mock_data = MagicMock()
+        mock_data.get_stock_latest_quote.return_value = mock_quote
+
+        with patch.dict(os.environ, {"ALPACA_DATA_FEED": "iex", "ALPACA_FEED_ENTITLEMENT": "basic"}), \
+             patch.object(client, '_get_data_client', return_value=mock_data):
+            quote = client.get_latest_quote(
+                "TLT",
+                now=datetime(2026, 6, 12, 13, 31, tzinfo=timezone.utc),
+            )
+
+        assert quote is not None
+        assert quote.feed == "iex"
+        assert quote.age_seconds == 60
+        assert quote.to_dict()["feed_entitlement"] == {
+            "configured_feed": "iex",
+            "effective_feed": "iex",
+            "entitlement": "basic",
+            "delayed": False,
+            "acceptable_for_live": True,
+            "policy_decision": "allow",
+            "reason": None,
+        }
 
     def test_get_bars_default(self):
         client = AlpacaClient()

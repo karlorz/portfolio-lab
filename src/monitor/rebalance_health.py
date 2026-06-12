@@ -149,6 +149,7 @@ def generate() -> dict[str, Any]:
         "execution_history": execution_times,
         "total_executions": len(history),
         "market_data_consistency": _generate_market_data_consistency(),
+        "alpaca_feed_entitlement": _generate_alpaca_feed_entitlement(),
     }
 
 
@@ -164,6 +165,24 @@ def _generate_market_data_consistency() -> dict[str, Any]:
             "reason": str(exc),
             "rows": [],
             "warnings": [],
+        }
+
+
+def _generate_alpaca_feed_entitlement() -> dict[str, Any]:
+    """Generate public-safe Alpaca feed entitlement diagnostics."""
+    try:
+        from src.broker.alpaca import resolve_alpaca_feed_entitlement
+
+        return resolve_alpaca_feed_entitlement()
+    except (ImportError, RuntimeError, OSError, ValueError, TypeError) as exc:
+        return {
+            "configured_feed": "unknown",
+            "effective_feed": "unknown",
+            "entitlement": "unknown",
+            "delayed": True,
+            "acceptable_for_live": False,
+            "policy_decision": "reject",
+            "reason": str(exc),
         }
 
 
