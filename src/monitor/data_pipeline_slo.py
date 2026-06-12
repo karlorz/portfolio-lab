@@ -144,6 +144,31 @@ def _signal_dimension(signal_staleness: Mapping[str, Any] | None) -> dict[str, A
     }
 
 
+def _provider_reconciliation_dimension(provider_reconciliation: Mapping[str, Any]) -> dict[str, Any]:
+    reconciliation_status = str(provider_reconciliation.get("status", "unknown"))
+    failure_type = provider_reconciliation.get("failure_type")
+    if failure_type == "provider_outage" or reconciliation_status in {"critical", "unavailable"}:
+        status = "critical"
+    elif reconciliation_status in {"warning", "degraded"} or failure_type == "provider_divergence":
+        status = "warning"
+    elif reconciliation_status == "ok":
+        status = "ok"
+    else:
+        status = "unknown"
+
+    offenders = provider_reconciliation.get("top_offenders")
+    top_offenders = [item for item in offenders if isinstance(item, Mapping)] if isinstance(offenders, list) else []
+    issue_counts = provider_reconciliation.get("issue_counts")
+    return {
+        "status": status,
+        "failure_type": failure_type,
+        "outage_provider": provider_reconciliation.get("outage_provider"),
+        "issue_counts": issue_counts if isinstance(issue_counts, Mapping) else {},
+        "top_offenders": top_offenders[:5],
+        "message": provider_reconciliation.get("message", "provider reconciliation unavailable"),
+    }
+
+
 def _overall_status(dimensions: Mapping[str, Mapping[str, Any]]) -> str:
     ranked = sorted(
         (str(row.get("status", "unknown")) for row in dimensions.values()),
@@ -170,6 +195,7 @@ def build_data_pipeline_slo(
     source_manifest: Mapping[str, Any] | None = None,
     public_index: Mapping[str, Any] | None = None,
     signal_staleness: Mapping[str, Any] | None = None,
+    provider_reconciliation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a compact SLO summary from already-generated dashboard artifacts."""
     dimensions = {
@@ -178,6 +204,12 @@ def build_data_pipeline_slo(
         "artifact": _artifact_dimension(health_data, public_index),
         "signal": _signal_dimension(signal_staleness),
     }
+    reconciliation = provider_reconciliation
+    if reconciliation is None:
+        health_reconciliation = health_data.get("provider_reconciliation")
+        reconciliation = health_reconciliation if isinstance(health_reconciliation, Mapping) else None
+    if isinstance(reconciliation, Mapping):
+        dimensions["provider_reconciliation"] = _provider_reconciliation_dimension(reconciliation)
     return {
         "schema_version": DATA_PIPELINE_SLO_SCHEMA_VERSION,
         "status": _overall_status(dimensions),

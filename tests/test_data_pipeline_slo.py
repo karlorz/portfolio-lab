@@ -94,3 +94,49 @@ def test_slo_warns_on_stale_required_signals_without_penalizing_unavailable_opti
     assert slo["top_dimension"] == "signal"
     assert slo["dimensions"]["signal"]["stale_count"] == 1
     assert slo["dimensions"]["signal"]["unavailable_count"] == 1
+
+
+def test_slo_distinguishes_provider_reconciliation_divergence_from_outage() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        provider_reconciliation={
+            "status": "warning",
+            "failure_type": "provider_divergence",
+            "issue_counts": {"adjusted_close_divergence": 1},
+            "message": "1 provider divergence detected",
+            "top_offenders": [{"symbol": "SPY", "issue": "adjusted_close_divergence"}],
+        },
+    )
+
+    assert slo["status"] == "warning"
+    assert slo["top_dimension"] == "provider_reconciliation"
+    assert slo["dimensions"]["provider_reconciliation"]["failure_type"] == "provider_divergence"
+    assert slo["dimensions"]["provider_reconciliation"]["outage_provider"] is None
+    assert slo["dimensions"]["provider_reconciliation"]["top_offenders"] == [
+        {"symbol": "SPY", "issue": "adjusted_close_divergence"}
+    ]
+
+
+def test_slo_classifies_provider_reconciliation_outage_as_critical() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        provider_reconciliation={
+            "status": "unavailable",
+            "failure_type": "provider_outage",
+            "outage_provider": "Yahoo Fixture",
+            "issue_counts": {"provider_outage": 1},
+            "message": "Yahoo Fixture returned no rows",
+            "top_offenders": [],
+        },
+    )
+
+    assert slo["status"] == "critical"
+    assert slo["top_dimension"] == "provider_reconciliation"
+    assert slo["dimensions"]["provider_reconciliation"]["failure_type"] == "provider_outage"
+    assert slo["dimensions"]["provider_reconciliation"]["outage_provider"] == "Yahoo Fixture"

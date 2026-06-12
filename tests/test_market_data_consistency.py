@@ -6,7 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.broker.alpaca import Position
-from src.monitor.market_data_consistency import broker_market_data_consistency_report
+from src.monitor.market_data_consistency import (
+    broker_market_data_consistency_report,
+    reconcile_price_providers,
+)
 
 
 def _price_db(path: Path, rows: list[tuple[str, str, float]]) -> Path:
@@ -80,3 +83,97 @@ def test_consistency_report_degrades_without_broker_credentials() -> None:
     assert report["status"] == "unavailable"
     assert report["reason"] == "alpaca_not_configured"
     assert report["rows"] == []
+
+
+def test_provider_reconciliation_passes_for_matching_adjusted_close_rows() -> None:
+    primary_rows = [
+        {"symbol": "SPY", "date": "2026-06-11", "adj_close": 600.0},
+        {"symbol": "GLD", "date": "2026-06-11", "adj_close": 310.0},
+    ]
+    secondary_rows = [
+        {"symbol": "SPY", "date": "2026-06-11", "adjusted_close": 600.05},
+        {"symbol": "GLD", "date": "2026-06-11", "adjusted_close": 310.02},
+    ]
+
+    report = reconcile_price_providers(
+        primary_rows,
+        secondary_rows,
+        primary_provider="Licensed Fixture",
+        secondary_provider="Yahoo Fixture",
+        required_symbols=["SPY", "GLD"],
+        adjusted_close_tolerance_pct=0.05,
+        max_latest_lag_days=0,
+    )
+
+    assert report["status"] == "ok"
+    assert report["failure_type"] is None
+    assert report["symbols_checked"] == 2
+    assert report["issue_counts"] == {}
+    assert report["top_offenders"] == []
+
+
+def test_provider_reconciliation_flags_adjusted_close_divergence_above_tolerance() -> None:
+    primary_rows = [{"symbol": "SPY", "date": "2026-06-11", "adj_close": 612.0}]
+    secondary_rows = [{"symbol": "SPY", "date": "2026-06-11", "adj_close": 600.0}]
+
+    report = reconcile_price_providers(
+        primary_rows,
+        secondary_rows,
+        primary_provider="Licensed Fixture",
+        secondary_provider="Yahoo Fixture",
+        required_symbols=["SPY"],
+        adjusted_close_tolerance_pct=1.0,
+    )
+
+    assert report["status"] == "warning"
+    assert report["failure_type"] == "provider_divergence"
+    assert report["issue_counts"] == {"adjusted_close_divergence": 1}
+    assert report["top_offenders"][0]["symbol"] == "SPY"
+    assert report["top_offenders"][0]["issue"] == "adjusted_close_divergence"
+    assert report["top_offenders"][0]["difference_pct"] == 2.0
+
+
+def test_provider_reconciliation_flags_missing_symbols_and_stale_latest_dates() -> None:
+    primary_rows = [
+        {"symbol": "SPY", "date": "2026-06-11", "adj_close": 600.0},
+        {"symbol": "GLD", "date": "2026-06-10", "adj_close": 310.0},
+    ]
+    secondary_rows = [
+        {"symbol": "SPY", "date": "2026-06-10", "adj_close": 600.0},
+    ]
+
+    report = reconcile_price_providers(
+        primary_rows,
+        secondary_rows,
+        primary_provider="Licensed Fixture",
+        secondary_provider="Yahoo Fixture",
+        required_symbols=["SPY", "GLD"],
+        max_latest_lag_days=0,
+    )
+
+    assert report["status"] == "warning"
+    assert report["failure_type"] == "provider_divergence"
+    assert report["issue_counts"] == {
+        "missing_symbol": 1,
+        "stale_latest_date": 2,
+    }
+    assert {offender["issue"] for offender in report["top_offenders"]} == {
+        "missing_symbol",
+        "stale_latest_date",
+    }
+    assert "Yahoo Fixture missing GLD" in report["message"]
+
+
+def test_provider_reconciliation_classifies_empty_provider_as_outage() -> None:
+    report = reconcile_price_providers(
+        [{"symbol": "SPY", "date": "2026-06-11", "adj_close": 600.0}],
+        [],
+        primary_provider="Licensed Fixture",
+        secondary_provider="Yahoo Fixture",
+        required_symbols=["SPY"],
+    )
+
+    assert report["status"] == "unavailable"
+    assert report["failure_type"] == "provider_outage"
+    assert report["outage_provider"] == "Yahoo Fixture"
+    assert report["issue_counts"] == {"provider_outage": 1}

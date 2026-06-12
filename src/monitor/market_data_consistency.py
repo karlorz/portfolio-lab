@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections import Counter
+from datetime import date
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping, Sequence
 
 from src.paths import MARKET_DB, sqlite_connect
+
+
+DEFAULT_PROVIDER_ADJ_CLOSE_TOLERANCE_PCT = float(
+    os.getenv("MARKET_DATA_RECON_ADJ_CLOSE_TOLERANCE_PCT", "0.5")
+)
+DEFAULT_PROVIDER_MAX_LATEST_LAG_DAYS = int(
+    os.getenv("MARKET_DATA_RECON_MAX_LATEST_LAG_DAYS", "1")
+)
+DEFAULT_PROVIDER_MAX_OFFENDERS = int(os.getenv("MARKET_DATA_RECON_MAX_OFFENDERS", "5"))
 
 
 def _position_value(position: Any, key: str, default: Any = None) -> Any:
@@ -24,6 +35,227 @@ def _parse_market_date(value: str | None) -> datetime | None:
         return datetime.fromisoformat(f"{value}T21:00:00+00:00")
     except ValueError:
         return None
+
+
+def _parse_price_row_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.fromisoformat(str(value)).date()
+    except ValueError:
+        return None
+
+
+def _price_row_value(row: Mapping[str, Any], keys: Sequence[str]) -> Any:
+    for key in keys:
+        if key in row:
+            return row[key]
+    return None
+
+
+def _row_adjusted_close(row: Mapping[str, Any]) -> float | None:
+    value = _price_row_value(row, ("adj_close", "adjusted_close", "adjClose", "close"))
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_rows_by_symbol(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        symbol = str(row.get("symbol", "")).strip().upper()
+        row_date = _parse_price_row_date(row.get("date"))
+        if not symbol or row_date is None:
+            continue
+        current = latest.get(symbol)
+        if current is None or row_date > current["date"]:
+            latest[symbol] = {
+                "symbol": symbol,
+                "date": row_date,
+                "date_raw": row.get("date"),
+                "adjusted_close": _row_adjusted_close(row),
+            }
+    return latest
+
+
+def _append_missing_issue(
+    issues: list[dict[str, Any]],
+    *,
+    provider: str,
+    symbol: str,
+) -> None:
+    issues.append(
+        {
+            "issue": "missing_symbol",
+            "provider": provider,
+            "symbol": symbol,
+            "message": f"{provider} missing {symbol}",
+        }
+    )
+
+
+def _append_stale_issue(
+    issues: list[dict[str, Any]],
+    *,
+    provider: str,
+    symbol: str,
+    row_date: date,
+    expected_latest_date: date,
+    lag_days: int,
+) -> None:
+    issues.append(
+        {
+            "issue": "stale_latest_date",
+            "provider": provider,
+            "symbol": symbol,
+            "latest_date": row_date.isoformat(),
+            "expected_latest_date": expected_latest_date.isoformat(),
+            "lag_days": lag_days,
+            "message": (
+                f"{provider} {symbol} latest date {row_date.isoformat()} "
+                f"lags {expected_latest_date.isoformat()} by {lag_days}d"
+            ),
+        }
+    )
+
+
+def _append_adjusted_close_issue(
+    issues: list[dict[str, Any]],
+    *,
+    symbol: str,
+    primary_provider: str,
+    secondary_provider: str,
+    primary_price: float,
+    secondary_price: float,
+    difference_pct: float,
+    tolerance_pct: float,
+) -> None:
+    issues.append(
+        {
+            "issue": "adjusted_close_divergence",
+            "symbol": symbol,
+            "primary_provider": primary_provider,
+            "secondary_provider": secondary_provider,
+            "primary_adjusted_close": primary_price,
+            "secondary_adjusted_close": secondary_price,
+            "difference_pct": round(difference_pct, 4),
+            "tolerance_pct": tolerance_pct,
+            "message": (
+                f"{symbol} adjusted close differs by {difference_pct:.2f}% "
+                f"between {primary_provider} and {secondary_provider}"
+            ),
+        }
+    )
+
+
+def reconcile_price_providers(
+    primary_rows: Iterable[Mapping[str, Any]],
+    secondary_rows: Iterable[Mapping[str, Any]],
+    *,
+    primary_provider: str = "primary",
+    secondary_provider: str = "secondary",
+    required_symbols: Sequence[str] | None = None,
+    adjusted_close_tolerance_pct: float = DEFAULT_PROVIDER_ADJ_CLOSE_TOLERANCE_PCT,
+    max_latest_lag_days: int = DEFAULT_PROVIDER_MAX_LATEST_LAG_DAYS,
+    max_offenders: int = DEFAULT_PROVIDER_MAX_OFFENDERS,
+) -> dict[str, Any]:
+    """Compare normalized adjusted-close rows from two historical providers."""
+    primary_latest = _latest_rows_by_symbol(primary_rows)
+    secondary_latest = _latest_rows_by_symbol(secondary_rows)
+
+    if not primary_latest or not secondary_latest:
+        outage_provider = primary_provider if not primary_latest else secondary_provider
+        return {
+            "status": "unavailable",
+            "failure_type": "provider_outage",
+            "primary_provider": primary_provider,
+            "secondary_provider": secondary_provider,
+            "outage_provider": outage_provider,
+            "symbols_checked": 0,
+            "issue_counts": {"provider_outage": 1},
+            "top_offenders": [],
+            "message": f"{outage_provider} returned no comparable price rows",
+        }
+
+    symbols = (
+        [str(symbol).strip().upper() for symbol in required_symbols if str(symbol).strip()]
+        if required_symbols is not None
+        else sorted(set(primary_latest) | set(secondary_latest))
+    )
+    expected_latest_date = max(
+        row["date"]
+        for symbol in symbols
+        for row in (primary_latest.get(symbol), secondary_latest.get(symbol))
+        if row is not None
+    )
+
+    issues: list[dict[str, Any]] = []
+    for symbol in symbols:
+        primary = primary_latest.get(symbol)
+        secondary = secondary_latest.get(symbol)
+
+        if primary is None:
+            _append_missing_issue(issues, provider=primary_provider, symbol=symbol)
+        if secondary is None:
+            _append_missing_issue(issues, provider=secondary_provider, symbol=symbol)
+
+        for provider, row in ((primary_provider, primary), (secondary_provider, secondary)):
+            if row is None:
+                continue
+            lag_days = (expected_latest_date - row["date"]).days
+            if lag_days > max_latest_lag_days:
+                _append_stale_issue(
+                    issues,
+                    provider=provider,
+                    symbol=symbol,
+                    row_date=row["date"],
+                    expected_latest_date=expected_latest_date,
+                    lag_days=lag_days,
+                )
+
+        if primary is None or secondary is None:
+            continue
+        primary_price = primary["adjusted_close"]
+        secondary_price = secondary["adjusted_close"]
+        if primary_price is None or secondary_price is None or secondary_price <= 0:
+            continue
+        difference_pct = (primary_price - secondary_price) / secondary_price * 100
+        if abs(difference_pct) > adjusted_close_tolerance_pct:
+            _append_adjusted_close_issue(
+                issues,
+                symbol=symbol,
+                primary_provider=primary_provider,
+                secondary_provider=secondary_provider,
+                primary_price=primary_price,
+                secondary_price=secondary_price,
+                difference_pct=difference_pct,
+                tolerance_pct=adjusted_close_tolerance_pct,
+            )
+
+    issue_counts = dict(Counter(str(issue["issue"]) for issue in issues))
+    message = "providers reconciled"
+    if issues:
+        message = "; ".join(str(issue["message"]) for issue in issues[:max_offenders])
+
+    return {
+        "status": "warning" if issues else "ok",
+        "failure_type": "provider_divergence" if issues else None,
+        "primary_provider": primary_provider,
+        "secondary_provider": secondary_provider,
+        "outage_provider": None,
+        "symbols_checked": len(symbols),
+        "expected_latest_date": expected_latest_date.isoformat(),
+        "adjusted_close_tolerance_pct": adjusted_close_tolerance_pct,
+        "max_latest_lag_days": max_latest_lag_days,
+        "issue_counts": issue_counts,
+        "top_offenders": issues[:max_offenders],
+        "message": message,
+    }
 
 
 def _latest_local_price(db_path: str | Path, symbol: str) -> dict[str, Any] | None:
