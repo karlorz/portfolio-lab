@@ -1015,19 +1015,25 @@ button.incident-row:hover {
   font-size: 0.75rem;
 }
 
-.perf-summary {
+.perf-summary,
+.performance-summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
+  min-width: 0;
 }
 
-.perf-item {
+.perf-item,
+.perf-card {
   background: #0f172a;
   padding: 15px;
+  border: 1px solid #1e293b;
   border-radius: 6px;
+  min-width: 0;
 }
 
-.perf-item label {
+.perf-item label,
+.perf-card label {
   display: block;
   color: #64748b;
   font-size: 0.75rem;
@@ -1035,11 +1041,13 @@ button.incident-row:hover {
   margin-bottom: 5px;
 }
 
-.perf-item .value-display {
+.perf-item .value-display,
+.perf-card .value-display {
   display: block;
   font-size: 1.2rem;
   font-weight: 600;
   color: #e2e8f0;
+  min-width: 0;
 }
 
 @media (max-width: 768px) {
@@ -1054,7 +1062,8 @@ button.incident-row:hover {
     width: 100%;
   }
   
-  .perf-summary {
+  .perf-summary,
+  .performance-summary {
     grid-template-columns: 1fr;
   }
   

@@ -58,6 +58,23 @@ async function expectCardSurface(page: Page, selector: string) {
   expect(paddingTop).toBeGreaterThan(0);
 }
 
+async function expectStyledSurface(page: Page, selector: string) {
+  const card = page.locator(selector).first();
+  await expect(card).toBeVisible();
+  const style = await card.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    return {
+      backgroundColor: computed.backgroundColor,
+      borderRadius: parseFloat(computed.borderTopLeftRadius),
+      paddingTop: parseFloat(computed.paddingTop),
+    };
+  });
+
+  expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  expect(style.borderRadius).toBeGreaterThan(0);
+  expect(style.paddingTop).toBeGreaterThan(0);
+}
+
 function dashboardTab(page: Page, label: string) {
   return page
     .locator('.dashboard-tabs')
@@ -100,6 +117,12 @@ test.describe('dashboard browser presentation smoke', () => {
     const consoleMessages = collectPresentationConsoleFailures(page);
 
     await openDashboard(page, { width: 1200, height: 900 });
+
+    await dashboardTab(page, 'Performance').click();
+    await expect(page.locator('.performance-summary')).toBeVisible();
+    await expectGridColumns(page, '.performance-summary', 3);
+    await expectStyledSurface(page, '.perf-card');
+    await expectNoDocumentOverflow(page);
 
     await dashboardTab(page, 'Risk').click();
     await expectGridColumns(page, '.risk-primary-grid', 2);

@@ -94,6 +94,31 @@ describe('dashboard presentation source contracts', () => {
     ]);
   });
 
+  it('defines the rendered Performance summary and card class contract', () => {
+    expect(liveDashboard).toContain('className="performance-summary"');
+    expect(liveDashboard).toContain('className="perf-card"');
+    expectRuleContains(css, '.performance-summary', [
+      /display:\s*grid;/,
+      /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
+      /gap:\s*20px;/,
+    ]);
+    expectRuleContains(css, '.perf-card', [
+      /background:\s*#0f172a;/,
+      /padding:\s*15px;/,
+      /border-radius:\s*6px;/,
+      /min-width:\s*0;/,
+    ]);
+    expectRuleContains(css, '.perf-card label', [
+      /display:\s*block;/,
+      /text-transform:\s*uppercase;/,
+    ]);
+    expectRuleContains(css, '.perf-card .value-display', [
+      /display:\s*block;/,
+      /font-weight:\s*600;/,
+    ]);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*\.performance-summary\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
+  });
+
   it('moves risk presentation panels onto local dashboard CSS classes', () => {
     expectNoUtilityClassTokens('src/components/GarchCvarPanel.tsx');
     expectNoUtilityClassTokens('src/components/EntropyPanel.tsx');
