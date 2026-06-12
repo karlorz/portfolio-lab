@@ -155,7 +155,7 @@ def _compute_system_status(checks: dict, circuit: dict) -> str:
 
     statuses.append(circuit.get("status", "unknown"))
 
-    if "error" in statuses or "missing" in statuses:
+    if "critical" in statuses or "error" in statuses or "missing" in statuses:
         return "degraded"
     if (
         "stale" in statuses
@@ -176,6 +176,20 @@ def run_health_check() -> dict:
     circuit = _check_circuit_breaker()
     fred_md_cache = _check_fred_md_cache()
     freshness["fred_md_cache"] = fred_md_cache
+    try:
+        from src.monitor.fred_readiness import assess_fred_readiness
+
+        freshness["fred_readiness"] = assess_fred_readiness(fred_md_cache)
+    except ImportError as exc:
+        freshness["fred_readiness"] = {
+            "status": "warning",
+            "readiness": "unknown",
+            "ready": True,
+            "blocking": False,
+            "reason": "readiness_check_unavailable",
+            "message": f"FRED readiness check unavailable: {exc}",
+            "remediation": "Verify src.monitor.fred_readiness is importable.",
+        }
     system_status = _compute_system_status(freshness, circuit)
 
     report = {

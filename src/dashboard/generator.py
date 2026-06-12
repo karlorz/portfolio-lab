@@ -1679,6 +1679,23 @@ class DashboardGenerator:
             }
 
         try:
+            from src.data.fred_data import get_fred_md_cache_health
+            from src.monitor.fred_readiness import assess_fred_readiness
+
+            health_data["fred_readiness"] = assess_fred_readiness(get_fred_md_cache_health())
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("fred_readiness", e)
+            health_data["fred_readiness"] = {
+                "status": "warning",
+                "readiness": "unknown",
+                "ready": True,
+                "blocking": False,
+                "reason": "readiness_check_unavailable",
+                "message": f"FRED readiness check unavailable: {str(e)}",
+                "remediation": "Verify fredapi availability and FRED readiness dependencies.",
+            }
+
+        try:
             from src.monitor.data_pipeline_slo import (
                 build_data_pipeline_slo,
                 load_public_index,

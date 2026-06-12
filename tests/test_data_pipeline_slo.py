@@ -140,3 +140,44 @@ def test_slo_classifies_provider_reconciliation_outage_as_critical() -> None:
     assert slo["top_dimension"] == "provider_reconciliation"
     assert slo["dimensions"]["provider_reconciliation"]["failure_type"] == "provider_outage"
     assert slo["dimensions"]["provider_reconciliation"]["outage_provider"] == "Yahoo Fixture"
+
+
+def test_slo_surfaces_fred_readiness_warning_from_health_data() -> None:
+    health = _health()
+    health["data_freshness"]["fred_readiness"] = {
+        "status": "warning",
+        "readiness": "warn",
+        "reason": "missing_fred_api_key",
+        "remediation": "Set FRED_API_KEY for lab/paper/live operation.",
+    }
+
+    slo = build_data_pipeline_slo(
+        health_data=health,
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "warning"
+    assert slo["top_dimension"] == "fred_readiness"
+    assert slo["dimensions"]["fred_readiness"]["reason"] == "missing_fred_api_key"
+    assert "FRED_API_KEY" in slo["dimensions"]["fred_readiness"]["message"]
+
+
+def test_slo_classifies_live_fred_readiness_failure_as_critical() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        fred_readiness={
+            "status": "critical",
+            "readiness": "fail",
+            "reason": "missing_fred_api_key",
+            "remediation": "Set FRED_API_KEY before live operation.",
+        },
+    )
+
+    assert slo["status"] == "critical"
+    assert slo["top_dimension"] == "fred_readiness"
+    assert slo["dimensions"]["fred_readiness"]["status"] == "critical"

@@ -430,6 +430,38 @@ class TestHealthJSON:
         assert "SPY" in data["data_freshness"]
         gen.conn.close()
 
+    def test_fred_readiness_populates_health_and_slo(self, tmp_path):
+        """FRED readiness should be included in dashboard health and SLO output."""
+        gen, _ = _make_generator(tmp_path)
+        readiness = {
+            "status": "warning",
+            "readiness": "warn",
+            "mode": "lab",
+            "ready": True,
+            "blocking": False,
+            "reason": "missing_fred_api_key",
+            "source_mode": "synthetic",
+            "remediation": "Set FRED_API_KEY for lab/paper/live operation.",
+        }
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch(
+                    "src.data.fred_data.get_fred_md_cache_health",
+                    return_value={
+                        "status": "unavailable",
+                        "source_mode": "synthetic",
+                        "api_key_configured": False,
+                    },
+                ):
+                    with patch("src.monitor.fred_readiness.assess_fred_readiness", return_value=readiness):
+                        path = gen.generate_health_json()
+        with open(path) as f:
+            data = json.load(f)
+
+        assert data["fred_readiness"]["reason"] == "missing_fred_api_key"
+        assert data["data_pipeline_slo"]["dimensions"]["fred_readiness"]["status"] == "warning"
+        gen.conn.close()
+
     def test_provider_latest_date_symbols_are_fresh_even_with_calendar_lag(self, tmp_path):
         """Freshness status is relative to the provider's latest available date."""
         db_path = tmp_path / "market.db"

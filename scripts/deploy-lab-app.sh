@@ -257,6 +257,14 @@ refresh_dashboard_data() {
   fi
 }
 
+check_fred_readiness() {
+  [ "$SKIP_DATA" = "0" ] || return 0
+  log "Checking FRED readiness before refreshing public data"
+  local readiness_mode
+  readiness_mode="${PORTFOLIO_LAB_MODE:-lab}"
+  run_app_cmd env PORTFOLIO_LAB_MODE="$readiness_mode" CRON_BACKEND="${CRON_BACKEND:-tasker}" ./scripts/python_runtime.sh -m src.monitor.fred_readiness --mode "$readiness_mode"
+}
+
 publish_dist() {
   if [ "$DRY_RUN" != "1" ] && [ ! -d "${APP_DIR}/dist" ]; then
     die "Missing ${APP_DIR}/dist; run without --skip-build or build first"
@@ -298,6 +306,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=${APP_DIR}
 Environment=PORTFOLIO_LAB_ENABLE_ML=0
+Environment=PORTFOLIO_LAB_MODE=lab
 Environment=CRON_BACKEND=tasker
 Environment=PORTFOLIO_LAB_PROJECT_DIR=${APP_DIR}
 Environment=PUBLIC_DATA_DIR=${WEB_ROOT}/data
@@ -425,6 +434,7 @@ main() {
   fi
   git_update
   install_dependencies
+  check_fred_readiness
   refresh_dashboard_data
   build_frontend
   publish_dist

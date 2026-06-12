@@ -16,6 +16,7 @@ from src.monitor.health_check import (
     _compute_system_status,
     HEALTH_PATH,
 )
+from src.monitor.fred_readiness import assess_fred_readiness, resolve_fred_operating_mode
 
 
 class TestCheckDataFreshness:
@@ -216,3 +217,113 @@ class TestRunHealthCheck:
         assert health_path.exists()
         data = json.loads(health_path.read_text())
         assert "status" in data
+
+    def test_fred_readiness_reports_live_failure_without_leaking_secret(self, tmp_path, monkeypatch):
+        """Live health should fail readiness when FRED is synthetic without exposing key values."""
+        monkeypatch.setenv("PORTFOLIO_LAB_MODE", "live")
+        monkeypatch.setenv("FRED_API_KEY", "super-secret-fred-key")
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
+        monkeypatch.setattr(
+            "src.monitor.health_check._check_fred_md_cache",
+            lambda: {
+                "status": "unavailable",
+                "source_mode": "synthetic",
+                "api_key_configured": False,
+                "reason": "missing_fred_api_key",
+            },
+        )
+
+        report = run_health_check()
+
+        readiness = report["checks"]["data_freshness"]["fred_readiness"]
+        assert readiness["status"] == "critical"
+        assert readiness["ready"] is False
+        assert readiness["mode"] == "live"
+        assert readiness["reason"] == "missing_fred_api_key"
+        assert "FRED_API_KEY" in readiness["remediation"]
+        assert "super-secret-fred-key" not in json.dumps(report)
+
+
+class TestFredReadiness:
+    """Test FRED credential readiness policy without live provider calls."""
+
+    def test_resolves_local_mode_as_default_when_no_runtime_mode_is_configured(self, monkeypatch):
+        monkeypatch.delenv("PORTFOLIO_LAB_MODE", raising=False)
+        monkeypatch.delenv("ALPHALAB_MODE", raising=False)
+        monkeypatch.delenv("APP_MODE", raising=False)
+        monkeypatch.delenv("CRON_BACKEND", raising=False)
+
+        assert resolve_fred_operating_mode() == "local"
+
+    @pytest.mark.parametrize("mode", ["local", "test"])
+    def test_missing_key_is_permissive_degraded_in_local_and_test_modes(self, mode):
+        readiness = assess_fred_readiness(
+            {"source_mode": "synthetic", "api_key_configured": False, "status": "unavailable"},
+            mode=mode,
+        )
+
+        assert readiness["status"] == "warning"
+        assert readiness["readiness"] == "pass"
+        assert readiness["ready"] is True
+        assert readiness["enforcement"] == "permissive"
+        assert readiness["reason"] == "missing_fred_api_key"
+
+    @pytest.mark.parametrize("mode", ["lab", "paper"])
+    def test_missing_key_warns_in_lab_and_paper_modes(self, mode):
+        readiness = assess_fred_readiness(
+            {"source_mode": "cached", "api_key_configured": False, "status": "ok"},
+            mode=mode,
+        )
+
+        assert readiness["status"] == "warning"
+        assert readiness["readiness"] == "warn"
+        assert readiness["ready"] is True
+        assert readiness["blocking"] is False
+        assert readiness["reason"] == "missing_fred_api_key"
+
+    def test_missing_key_fails_live_mode(self):
+        readiness = assess_fred_readiness(
+            {"source_mode": "cached", "api_key_configured": False, "status": "ok"},
+            mode="live",
+        )
+
+        assert readiness["status"] == "critical"
+        assert readiness["readiness"] == "fail"
+        assert readiness["ready"] is False
+        assert readiness["blocking"] is True
+        assert readiness["reason"] == "missing_fred_api_key"
+
+    def test_invalid_configured_key_fails_live_mode_without_leaking_secret(self):
+        readiness = assess_fred_readiness(
+            {
+                "source_mode": "synthetic",
+                "api_key_configured": True,
+                "status": "unavailable",
+                "reason": "bad_credentials",
+            },
+            mode="live",
+            env={"FRED_API_KEY": "super-secret-fred-key"},
+        )
+
+        assert readiness["status"] == "critical"
+        assert readiness["readiness"] == "fail"
+        assert readiness["ready"] is False
+        assert readiness["reason"] == "invalid_fred_api_key"
+        assert "super-secret-fred-key" not in json.dumps(readiness)
+
+    def test_ready_state_redacts_configured_key_value(self):
+        readiness = assess_fred_readiness(
+            {
+                "source_mode": "cached",
+                "api_key_configured": True,
+                "status": "ok",
+                "latest_fetched_at": "2026-06-12T00:00:00+00:00",
+            },
+            mode="paper",
+            env={"FRED_API_KEY": "super-secret-fred-key"},
+        )
+
+        assert readiness["status"] == "ok"
+        assert readiness["ready"] is True
+        assert "super-secret-fred-key" not in json.dumps(readiness)

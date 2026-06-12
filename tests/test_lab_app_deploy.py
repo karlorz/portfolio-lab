@@ -61,6 +61,16 @@ def test_lab_deploy_refreshes_dashboard_data_before_build():
     assert main_body.index("refresh_dashboard_data") < main_body.index("publish_dist")
 
 
+def test_lab_deploy_runs_fred_readiness_precheck_before_refreshing_data():
+    source = _read("scripts/deploy-lab-app.sh")
+    main_body = source.split("main() {", 1)[1]
+
+    assert "check_fred_readiness" in source
+    assert "PORTFOLIO_LAB_MODE=lab" in source
+    assert "python_runtime.sh -m src.monitor.fred_readiness" in source
+    assert main_body.index("check_fred_readiness") < main_body.index("refresh_dashboard_data")
+
+
 def test_lab_deploy_docs_and_makefile_do_not_present_dns_or_docker_as_default():
     docs = _read("scripts/LAB_APP_DEPLOY.md")
     makefile = _read("Makefile")

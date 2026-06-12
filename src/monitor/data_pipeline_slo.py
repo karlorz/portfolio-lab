@@ -169,6 +169,37 @@ def _provider_reconciliation_dimension(provider_reconciliation: Mapping[str, Any
     }
 
 
+def _fred_readiness_dimension(fred_readiness: Mapping[str, Any]) -> dict[str, Any]:
+    readiness_status = str(fred_readiness.get("status", "unknown"))
+    readiness = str(fred_readiness.get("readiness", "unknown"))
+    if readiness == "fail":
+        status = "critical"
+    elif readiness == "warn":
+        status = "warning"
+    elif readiness == "pass":
+        status = "ok"
+    elif readiness_status == "critical":
+        status = "critical"
+    elif readiness_status in {"warning", "degraded"}:
+        status = "warning"
+    elif readiness_status == "ok":
+        status = "ok"
+    else:
+        status = "unknown"
+
+    message = fred_readiness.get("remediation") or fred_readiness.get("message") or "FRED readiness unavailable"
+    return {
+        "status": status,
+        "readiness": fred_readiness.get("readiness"),
+        "mode": fred_readiness.get("mode"),
+        "ready": fred_readiness.get("ready"),
+        "blocking": fred_readiness.get("blocking"),
+        "reason": fred_readiness.get("reason"),
+        "source_mode": fred_readiness.get("source_mode"),
+        "message": str(message),
+    }
+
+
 def _overall_status(dimensions: Mapping[str, Mapping[str, Any]]) -> str:
     ranked = sorted(
         (str(row.get("status", "unknown")) for row in dimensions.values()),
@@ -196,6 +227,7 @@ def build_data_pipeline_slo(
     public_index: Mapping[str, Any] | None = None,
     signal_staleness: Mapping[str, Any] | None = None,
     provider_reconciliation: Mapping[str, Any] | None = None,
+    fred_readiness: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a compact SLO summary from already-generated dashboard artifacts."""
     dimensions = {
@@ -210,6 +242,16 @@ def build_data_pipeline_slo(
         reconciliation = health_reconciliation if isinstance(health_reconciliation, Mapping) else None
     if isinstance(reconciliation, Mapping):
         dimensions["provider_reconciliation"] = _provider_reconciliation_dimension(reconciliation)
+    readiness = fred_readiness
+    if readiness is None:
+        health_readiness = health_data.get("fred_readiness")
+        if not isinstance(health_readiness, Mapping):
+            data_freshness = health_data.get("data_freshness")
+            if isinstance(data_freshness, Mapping):
+                health_readiness = data_freshness.get("fred_readiness")
+        readiness = health_readiness if isinstance(health_readiness, Mapping) else None
+    if isinstance(readiness, Mapping):
+        dimensions["fred_readiness"] = _fred_readiness_dimension(readiness)
     return {
         "schema_version": DATA_PIPELINE_SLO_SCHEMA_VERSION,
         "status": _overall_status(dimensions),
