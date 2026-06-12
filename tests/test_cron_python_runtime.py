@@ -34,6 +34,16 @@ HERMES_CRON_SCRIPT_NAMES = [
 ]
 
 
+def _read_optional_host_script(script_path: Path) -> str:
+    """Read host-installed wrapper scripts only when this runner can access them."""
+    try:
+        if not script_path.exists():
+            pytest.skip(f"{script_path} is not present on this host")
+        return script_path.read_text()
+    except PermissionError:
+        pytest.skip(f"{script_path} is not readable on this host")
+
+
 def test_makefile_cron_targets_use_project_runtime_launcher() -> None:
     """Makefile cron targets should not run project Python through bare python3."""
     text = MAKEFILE.read_text()
@@ -58,10 +68,7 @@ def test_repo_cron_wrappers_use_project_runtime_launcher(script_path: Path) -> N
 def test_hermes_cron_wrappers_use_project_runtime_launcher(script_name: str) -> None:
     """Hermes cron wrappers should not bypass the project dependency environment."""
     script_path = HERMES_SCRIPTS_DIR / script_name
-    if not script_path.exists():
-        pytest.skip(f"{script_path} is not present on this host")
-
-    text = script_path.read_text()
+    text = _read_optional_host_script(script_path)
 
     assert "PYTHON_RUNTIME=" in text
     assert "python3 src/" not in text

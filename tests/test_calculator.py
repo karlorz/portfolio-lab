@@ -869,9 +869,9 @@ class TestCrisisPeriods:
 class TestMainCLI:
     """Tests for the ``main()`` CLI entry point using argv patching."""
 
-    def test_no_args_runs_report(self, tmp_path, caplog):
+    def test_no_args_runs_report(self, tmp_path, caplog, monkeypatch):
         """No CLI args should run full report."""
-        calc = AnalyticsCalculator(data_dir=str(tmp_path))
+        monkeypatch.setattr("src.analytics.calculator.DATA_DIR", tmp_path)
         data = _make_perf_data(n_days=50)
         f = tmp_path / "performance.jsonl"
         with open(f, "w") as fh:
@@ -884,9 +884,9 @@ class TestMainCLI:
                 main()
             assert '"status": "success"' in caplog.text
 
-    def test_drawdown_command(self, tmp_path, caplog):
+    def test_drawdown_command(self, tmp_path, caplog, monkeypatch):
         """``drawdown`` subcommand prints max drawdown stats."""
-        calc = AnalyticsCalculator(data_dir=str(tmp_path))
+        monkeypatch.setattr("src.analytics.calculator.DATA_DIR", tmp_path)
         data = _make_perf_data(n_days=50)
         f = tmp_path / "performance.jsonl"
         with open(f, "w") as fh:
@@ -899,9 +899,9 @@ class TestMainCLI:
                 main()
             assert "max_drawdown" in caplog.text
 
-    def test_rolling_command(self, tmp_path, caplog):
+    def test_rolling_command(self, tmp_path, caplog, monkeypatch):
         """``rolling`` subcommand prints latest rolling Sharpe."""
-        calc = AnalyticsCalculator(data_dir=str(tmp_path))
+        monkeypatch.setattr("src.analytics.calculator.DATA_DIR", tmp_path)
         data = _make_perf_data(n_days=300)
         f = tmp_path / "performance.jsonl"
         with open(f, "w") as fh:
@@ -914,9 +914,9 @@ class TestMainCLI:
                 main()
             assert "Sharpe" in caplog.text
 
-    def test_report_command(self, tmp_path, caplog):
+    def test_report_command(self, tmp_path, caplog, monkeypatch):
         """``report`` subcommand prints full JSON report."""
-        calc = AnalyticsCalculator(data_dir=str(tmp_path))
+        monkeypatch.setattr("src.analytics.calculator.DATA_DIR", tmp_path)
         data = _make_perf_data(n_days=50)
         f = tmp_path / "performance.jsonl"
         with open(f, "w") as fh:

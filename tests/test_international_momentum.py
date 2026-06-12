@@ -5,6 +5,7 @@ Tests for International Momentum Signal Generator
 import unittest
 import tempfile
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -344,9 +345,10 @@ class TestInternationalMomentumGenerator(unittest.TestCase):
 
     def test_signal_statistics(self):
         """Test signal statistics calculation"""
+        start = datetime.now() - timedelta(days=4)
         for i in range(5):
             data = {
-                'timestamp': f'2026-05-{10+i}T10:00:00',
+                'timestamp': (start + timedelta(days=i)).strftime('%Y-%m-%dT10:00:00'),
                 'data_fresh': True,
                 'relative': {
                     'efa_momentum_6m': 0.20,

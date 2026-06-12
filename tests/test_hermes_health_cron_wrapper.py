@@ -22,10 +22,13 @@ def _write_executable(path: Path, content: str) -> None:
 
 
 def _wrapper_with_stubbed_guard(tmp_path: Path) -> Path:
-    if not HERMES_HEALTH_WRAPPER.exists():
-        pytest.skip(f"{HERMES_HEALTH_WRAPPER} is not present on this host")
+    try:
+        if not HERMES_HEALTH_WRAPPER.exists():
+            pytest.skip(f"{HERMES_HEALTH_WRAPPER} is not present on this host")
+        wrapper_text = HERMES_HEALTH_WRAPPER.read_text()
+    except PermissionError:
+        pytest.skip(f"{HERMES_HEALTH_WRAPPER} is not readable on this host")
 
-    wrapper_text = HERMES_HEALTH_WRAPPER.read_text()
     assert PROJECT_DIR_LINE in wrapper_text
 
     project = tmp_path / "project"

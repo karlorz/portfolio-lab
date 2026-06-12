@@ -4,10 +4,11 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.monitor.hermes_cron import load_hermes_portfolio_cron_jobs
 from src.monitor.health_check import (
     run_health_check,
     _check_data_freshness,
@@ -98,6 +99,18 @@ class TestCheckDataFreshness:
         assert freshness["cron"]["status"] == "warning"
         assert freshness["cron"]["backends"]["hermes"]["status"] == "unavailable"
         assert "missing-jobs.json" in freshness["cron"]["backends"]["hermes"]["source"]
+
+    def test_unreadable_hermes_cron_state_warns_without_crashing(self):
+        """Permission-denied Hermes state should degrade health, not crash CI."""
+        unreadable = MagicMock(spec=Path)
+        unreadable.__str__.return_value = "/root/.hermes/cron/jobs.json"
+        unreadable.exists.side_effect = PermissionError("denied")
+
+        jobs, backend = load_hermes_portfolio_cron_jobs(unreadable)
+
+        assert jobs == []
+        assert backend["status"] == "unavailable"
+        assert "not readable" in backend["reason"]
 
 
 class TestCheckCircuitBreaker:

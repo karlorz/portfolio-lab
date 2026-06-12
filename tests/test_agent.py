@@ -124,13 +124,17 @@ def seeded_db(tmp_path):
 class TestResearchAgentConstruction:
     """Test that ResearchAgent initializes correctly."""
 
-    def test_construct_with_real_db(self, tmp_path):
+    def test_construct_with_real_db(self, tmp_path, monkeypatch):
         db_path = tmp_path / "data" / "market.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(db_path)
         conn.execute("CREATE TABLE IF NOT EXISTS prices (symbol TEXT, date TEXT, close REAL)")
         conn.commit()
         conn.close()
+
+        monkeypatch.setattr(agent_module, "WORK_DIR", tmp_path / "work")
+        monkeypatch.setattr(agent_module, "DB_PATH", db_path)
+        monkeypatch.setattr(agent_module, "DATA_DIR", tmp_path / "data")
 
         agent = ResearchAgent()
         assert agent.conn is not None

@@ -167,7 +167,18 @@ def load_hermes_portfolio_cron_jobs(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Read Hermes cron jobs.json and return active portfolio-lab jobs."""
     source = str(jobs_path)
-    if not jobs_path.exists():
+    try:
+        path_exists = jobs_path.exists()
+    except PermissionError as exc:
+        return [], summarize_backend(
+            backend="hermes",
+            source=source,
+            jobs=[],
+            status="unavailable",
+            reason=f"Hermes cron jobs file is not readable: {exc}",
+        )
+
+    if not path_exists:
         return [], summarize_backend(
             backend="hermes",
             source=source,
@@ -179,6 +190,14 @@ def load_hermes_portfolio_cron_jobs(
     try:
         with jobs_path.open(encoding="utf-8") as handle:
             data = json.load(handle)
+    except PermissionError as exc:
+        return [], summarize_backend(
+            backend="hermes",
+            source=source,
+            jobs=[],
+            status="unavailable",
+            reason=f"Hermes cron jobs file is not readable: {exc}",
+        )
     except (json.JSONDecodeError, OSError) as exc:
         return [], summarize_backend(
             backend="hermes",

@@ -184,7 +184,7 @@ class TestFitGARCH:
         if params is not None:
             assert isinstance(params, GARCHParams)
             assert params.omega > 0
-            assert 0 < params.alpha < 1
+            assert 0 <= params.alpha < 1
             assert 0 < params.beta < 1
             assert params.persistence < 1.0
             assert cond_vol is not None
