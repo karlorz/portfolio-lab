@@ -119,6 +119,12 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
                 <strong>Scheduler</strong>
                 <span>{operationsSummary.scheduler.label}</span>
               </div>
+              {operationsSummary.dataPipelineSlo?.runbook?.topCause && (
+                <div className={`operations-summary-card status-${operationsSummary.dataPipelineSlo.runbook.topCause.severity}`}>
+                  <strong>Runbook</strong>
+                  <span>{operationsSummary.dataPipelineSlo.runbook.topCause.label}</span>
+                </div>
+              )}
             </div>
             {operationsSummary.topCauses.length > 0 && (
               <ul className="operations-cause-list">

@@ -4,7 +4,8 @@
 # Usage:
 #   make data         Fetch Yahoo Finance data
 #   make dashboard    Regenerate dashboard JSON
-#   make health       Run system health checks
+#   make health       Generate system health.json
+#   make rebalance-health Generate rebalance_health.json
 #   make eval         Run strategy evaluator
 #   make research     Run research agent
 #   make wiki-sync    Sync findings to wiki vault
@@ -44,7 +45,8 @@ help:
 	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"
 	@echo "  make data         Fetch Yahoo Finance market data"
 	@echo "  make dashboard    Regenerate dashboard JSON files"
-	@echo "  make health       Run system health monitor"
+	@echo "  make health       Generate public/data/health.json system health monitor"
+	@echo "  make rebalance-health  Generate public/data/rebalance_health.json diagnostics"
 	@echo "  make eval         Run strategy evaluator (paper trading)"
 	@echo "  make research     Run research agent + regime analysis"
 	@echo "  make wiki-sync    Sync research findings to wiki vault"
@@ -53,6 +55,7 @@ help:
 	@echo "  PERF_UPDATE_BASELINE=1 make perf  Refresh data/perf baseline JSON"
 	@echo "  make labs-validate  Validate existing Labs artifacts offline"
 	@echo "  make labs-smoke     Run Labs artifact generation smoke tests"
+	@echo "  make data-quality   Audit public/data/prices.json offline"
 	@echo "  make sync         Broker position reconciliation"
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
@@ -239,6 +242,12 @@ data:
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
 	echo "Data pipeline done ($$STATUS, $${DUR}s)"
 
+.PHONY: data-quality
+data-quality:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Public Data Quality Audit: $$(date) ==="; \
+	$(PYTHON_RUNTIME) scripts/check_public_data_quality.py --app-dir $(PROJECT_DIR) $(DATA_QUALITY_ARGS)
+
 # ── Dashboard ────────────────────────────────────────────────────────
 
 .PHONY: dashboard
@@ -380,7 +389,7 @@ overlay-dashboard:
 health:
 	@echo "=== Health Monitor: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.monitor.rebalance_health 2>&1; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.monitor.health_check 2>&1; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -389,6 +398,20 @@ health:
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR
+
+.PHONY: rebalance-health
+rebalance-health:
+	@echo "=== Rebalance Health Export: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.monitor.rebalance_health 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-rebalance-health $$STATUS $$DUR
 
 # ── GARCH-CVaR Risk Metrics ────────────────────────────────────────────
 

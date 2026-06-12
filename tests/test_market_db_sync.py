@@ -4,6 +4,12 @@ import sqlite3
 import pytest
 
 from src.data.market_db_sync import sync_prices_json_to_market_db
+from tests.fixtures.compact_prices import (
+    adjusted_close_proxy_prices,
+    duplicate_date_prices,
+    split_like_return_prices,
+    zero_price_prices,
+)
 
 
 def write_prices_json(path, payload):
@@ -19,6 +25,66 @@ def fetch_rows(db_path):
             ORDER BY symbol, date
             """
         ).fetchall()
+
+
+def test_sync_marks_compact_rows_as_adjusted_close_ohlc_proxies(tmp_path):
+    prices_path = tmp_path / "prices.json"
+    db_path = tmp_path / "market.db"
+    write_prices_json(prices_path, adjusted_close_proxy_prices())
+
+    sync_prices_json_to_market_db(prices_path=prices_path, db_path=db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info('prices')")}
+        assert {
+            "data_source",
+            "price_semantics",
+            "is_adjusted_close_proxy",
+        }.issubset(columns)
+        rows = conn.execute(
+            """
+            SELECT
+                symbol,
+                date,
+                data_source,
+                price_semantics,
+                is_adjusted_close_proxy,
+                open,
+                high,
+                low,
+                close,
+                volume
+            FROM prices
+            ORDER BY symbol
+            """
+        ).fetchall()
+
+    assert rows == [
+        (
+            "SPY",
+            "2026-06-10",
+            "public/data/prices.json",
+            "adjusted_close_proxy_ohlc",
+            1,
+            612.34,
+            612.34,
+            612.34,
+            612.34,
+            0,
+        ),
+        (
+            "TLT",
+            "2026-06-10",
+            "public/data/prices.json",
+            "adjusted_close_proxy_ohlc",
+            1,
+            88.75,
+            88.75,
+            88.75,
+            88.75,
+            0,
+        ),
+    ]
 
 
 def test_sync_updates_stale_market_db_from_prices_json(tmp_path):
@@ -59,6 +125,10 @@ def test_sync_updates_stale_market_db_from_prices_json(tmp_path):
     assert summary.symbols_read == 2
     assert summary.rows_read == 2
     assert summary.rows_upserted == 2
+    assert summary.quality_status == "ok"
+    assert summary.quality_blocking is False
+    assert summary.quality_issue_counts["total"] == 0
+    assert summary.quality_report["symbols_checked"] == 2
     with sqlite3.connect(db_path) as conn:
         latest = dict(
             conn.execute("SELECT symbol, MAX(date) FROM prices GROUP BY symbol").fetchall()
@@ -104,6 +174,78 @@ def test_sync_is_idempotent_for_same_symbol_date_rows(tmp_path):
     with sqlite3.connect(db_path) as conn:
         count = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
     assert count == 1
+
+
+def test_sync_surfaces_warning_quality_issues_without_blocking_when_configured(tmp_path):
+    prices_path = tmp_path / "prices.json"
+    db_path = tmp_path / "market.db"
+    payload = split_like_return_prices()
+    write_prices_json(prices_path, payload)
+
+    summary = sync_prices_json_to_market_db(
+        prices_path=prices_path,
+        db_path=db_path,
+        block_on_quality_warnings=False,
+    )
+
+    assert summary.quality_status == "warn"
+    assert summary.quality_blocking is False
+    assert summary.quality_issue_counts["split_like_returns"] == 1
+    assert summary.quality_issue_counts["total"] == 1
+    assert summary.quality_report["symbols"][0]["status"] == "warn"
+    assert summary.rows_upserted == 2
+    assert fetch_rows(db_path) == [
+        ("SPY", row["d"], float(row["p"]), float(row["p"]), float(row["p"]), float(row["p"]), 0)
+        for row in payload["SPY"]
+    ]
+
+
+def test_sync_blocks_failed_quality_audit_before_sqlite_mutation(tmp_path):
+    prices_path = tmp_path / "prices.json"
+    db_path = tmp_path / "market.db"
+    write_prices_json(prices_path, zero_price_prices())
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE prices (
+                symbol TEXT,
+                date TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                updated_at TEXT,
+                PRIMARY KEY (symbol, date)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO prices (symbol, date, open, high, low, close, volume, updated_at)
+            VALUES ('SPY', '2026-06-09', 612.0, 612.0, 612.0, 612.0, 0, 'old')
+            """
+        )
+
+    with pytest.raises(ValueError, match="Blocking price quality audit failed"):
+        sync_prices_json_to_market_db(prices_path=prices_path, db_path=db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT symbol, date, close, updated_at FROM prices ORDER BY symbol, date"
+        ).fetchall()
+    assert rows == [("SPY", "2026-06-09", 612.0, "old")]
+
+
+def test_sync_rejects_duplicate_symbol_date_rows_before_db_write(tmp_path):
+    prices_path = tmp_path / "prices.json"
+    db_path = tmp_path / "market.db"
+    write_prices_json(prices_path, duplicate_date_prices())
+
+    with pytest.raises(ValueError, match="Duplicate price date for SPY: 2026-06-10"):
+        sync_prices_json_to_market_db(prices_path=prices_path, db_path=db_path)
+
+    assert db_path.exists() is False
 
 
 def test_sync_prunes_symbols_absent_from_canonical_prices_json(tmp_path):

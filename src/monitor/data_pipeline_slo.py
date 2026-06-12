@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -10,6 +11,33 @@ from typing import Any, Mapping
 DATA_PIPELINE_SLO_SCHEMA_VERSION = "data-pipeline-slo/v1"
 _STATUS_RANK = {"ok": 0, "unknown": 1, "warning": 2, "critical": 3}
 _SAFE_REASON_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+_DATA_QUALITY_ISSUE_KEYS = (
+    "duplicate_dates",
+    "empty_symbols",
+    "extreme_returns",
+    "internal_gaps",
+    "invalid_dates",
+    "invalid_prices",
+    "missing_required_keys",
+    "non_monotonic_rows",
+    "non_object_records",
+    "split_like_returns",
+    "stale_latest_dates",
+    "total",
+)
+_DATA_QUALITY_ISSUE_PRIORITY = (
+    "duplicate_dates",
+    "invalid_prices",
+    "invalid_dates",
+    "missing_required_keys",
+    "non_monotonic_rows",
+    "non_object_records",
+    "empty_symbols",
+    "stale_latest_dates",
+    "internal_gaps",
+    "extreme_returns",
+    "split_like_returns",
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -33,6 +61,10 @@ def load_signal_staleness(public_dir: Path) -> dict[str, Any]:
     signals = _load_json(public_dir / "signals.json")
     staleness = signals.get("staleness")
     return staleness if isinstance(staleness, dict) else {}
+
+
+def load_rebalance_health(public_dir: Path) -> dict[str, Any]:
+    return _load_json(public_dir / "rebalance_health.json")
 
 
 def _scheduler_dimension(health_data: Mapping[str, Any]) -> dict[str, Any]:
@@ -111,9 +143,62 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
     }
 
 
+def _parse_generated_at(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _source_manifest_index_freshness(
+    source_manifest: Mapping[str, Any] | None,
+    public_index: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    source_generated = source_manifest.get("generated_at") if isinstance(source_manifest, Mapping) else None
+    index_generated = public_index.get("generated_at") if isinstance(public_index, Mapping) else None
+    if not source_generated and not index_generated:
+        return {
+            "status": "ok",
+            "source_manifest_index_status": "not_checked",
+            "message": "source manifest/index freshness not checked",
+        }
+
+    source_dt = _parse_generated_at(source_generated)
+    index_dt = _parse_generated_at(index_generated)
+    if source_dt is None or index_dt is None:
+        return {
+            "status": "warning",
+            "source_manifest_index_status": "unknown_timestamp",
+            "source_manifest_generated_at": source_generated,
+            "index_generated_at": index_generated,
+            "message": "could not compare source_manifest.json and index.json generated_at timestamps",
+        }
+    if source_dt > index_dt:
+        return {
+            "status": "warning",
+            "source_manifest_index_status": "stale_index",
+            "source_manifest_generated_at": source_generated,
+            "index_generated_at": index_generated,
+            "message": "index.json is older than source_manifest.json",
+        }
+    return {
+        "status": "ok",
+        "source_manifest_index_status": "ok",
+        "source_manifest_generated_at": source_generated,
+        "index_generated_at": index_generated,
+        "message": "index.json is current with source_manifest.json",
+    }
+
+
 def _artifact_dimension(
     health_data: Mapping[str, Any],
     public_index: Mapping[str, Any] | None,
+    source_manifest: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     data_freshness = health_data.get("data_freshness")
     freshness = data_freshness if isinstance(data_freshness, Mapping) else {}
@@ -129,25 +214,32 @@ def _artifact_dimension(
         and entry.get("status") == "missing"
     ] if isinstance(entries, list) else []
 
+    source_index_freshness = _source_manifest_index_freshness(source_manifest, public_index)
+    source_index_status = source_index_freshness.get("status")
+
     if len(critical) > 10 or missing_market_entries:
         status = "critical"
-    elif stale:
+    elif stale or source_index_status == "warning":
         status = "warning"
     elif critical:
         status = "warning"
     else:
         status = "ok"
+    message = (
+        source_index_freshness["message"]
+        if source_index_status == "warning"
+        else f"{len(critical)} critical, {len(stale)} stale artifacts"
+        if critical or stale
+        else "artifacts fresh"
+    )
     return {
+        **source_index_freshness,
         "status": status,
         "critical_count": len(critical),
         "stale_count": len(stale),
         "stale_artifacts": stale[:10],
         "missing_market_entries": missing_market_entries,
-        "message": (
-            f"{len(critical)} critical, {len(stale)} stale artifacts"
-            if critical or stale
-            else "artifacts fresh"
-        ),
+        "message": message,
     }
 
 
@@ -167,6 +259,114 @@ def _signal_dimension(signal_staleness: Mapping[str, Any] | None) -> dict[str, A
             if stale_signals
             else "required signals fresh"
         ),
+    }
+
+
+def _price_manifest_rows(source_manifest: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
+    artifacts = source_manifest.get("artifacts") if isinstance(source_manifest, Mapping) else None
+    rows = [row for row in artifacts if isinstance(row, Mapping)] if isinstance(artifacts, list) else []
+    price_rows = [row for row in rows if str(row.get("artifact", "")).startswith("prices")]
+    return price_rows or rows
+
+
+def _select_data_quality_row(source_manifest: Mapping[str, Any] | None) -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None]:
+    rows = _price_manifest_rows(source_manifest)
+    preferred_row: Mapping[str, Any] | None = None
+    for artifact_name in ("prices.json", "prices_compact.json"):
+        for row in rows:
+            if row.get("artifact") != artifact_name:
+                continue
+            preferred_row = preferred_row or row
+            quality = row.get("data_quality")
+            if isinstance(quality, Mapping):
+                return row, quality
+    for row in rows:
+        quality = row.get("data_quality")
+        if isinstance(quality, Mapping):
+            return row, quality
+    return (preferred_row or rows[0], None) if rows else (None, None)
+
+
+def _data_quality_status(quality_status: str) -> str:
+    if quality_status == "ok":
+        return "ok"
+    if quality_status in {"warn", "warning"}:
+        return "warning"
+    if quality_status in {"fail", "failed", "critical"}:
+        return "critical"
+    if quality_status in {"missing", "unavailable"}:
+        return "warning"
+    return "unknown"
+
+
+def _data_quality_issue_counts(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    counts = {
+        key: count
+        for key in _DATA_QUALITY_ISSUE_KEYS
+        if isinstance((count := value.get(key)), int) and not isinstance(count, bool) and count >= 0
+    }
+    if counts and "total" not in counts:
+        counts["total"] = sum(count for key, count in counts.items() if key != "total")
+    return counts
+
+
+def _top_data_quality_issue(issue_counts: Mapping[str, int]) -> str | None:
+    for issue in _DATA_QUALITY_ISSUE_PRIORITY:
+        if issue_counts.get(issue, 0) > 0:
+            return issue
+    for issue, count in issue_counts.items():
+        if issue != "total" and count > 0:
+            return issue
+    return None
+
+
+def _manifest_symbol_count(row: Mapping[str, Any] | None) -> int:
+    symbols = row.get("symbols") if isinstance(row, Mapping) else None
+    if isinstance(symbols, list):
+        return len([symbol for symbol in symbols if isinstance(symbol, str) and symbol])
+    return 0
+
+
+def _data_quality_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, Any]:
+    row, quality = _select_data_quality_row(source_manifest)
+    quality_status = str(quality.get("status", "missing")).lower() if isinstance(quality, Mapping) else "missing"
+    status = _data_quality_status(quality_status)
+    issue_counts = _data_quality_issue_counts(quality.get("issue_counts") if isinstance(quality, Mapping) else None)
+    top_issue = _top_data_quality_issue(issue_counts)
+    affected_issue_count = issue_counts.get(top_issue, 0) if top_issue else 0
+    affected_symbol_count = _manifest_symbol_count(row) if status != "ok" else 0
+    artifact = quality.get("artifact") if isinstance(quality, Mapping) else None
+    artifact_name = str(artifact or "data_quality.json")
+    source_artifact = row.get("artifact") if isinstance(row, Mapping) else None
+
+    if quality_status == "missing":
+        message = f"price data quality report missing for {affected_symbol_count} tracked symbol(s)"
+    elif quality_status == "unavailable":
+        message = f"price data quality report unavailable for {affected_symbol_count} tracked symbol(s)"
+    elif status == "ok":
+        message = "price data quality ok"
+    elif top_issue:
+        message = (
+            f"price data quality {quality_status}: {top_issue}={affected_issue_count} "
+            f"across {affected_symbol_count} tracked symbol(s)"
+        )
+    else:
+        message = f"price data quality {quality_status}"
+
+    return {
+        "status": status,
+        "quality_status": quality_status,
+        "artifact": artifact_name,
+        "source_artifact": str(source_artifact) if source_artifact else None,
+        "schema_version": quality.get("schema_version") if isinstance(quality, Mapping) else None,
+        "generated_at": quality.get("generated_at") if isinstance(quality, Mapping) else None,
+        "issue_counts": issue_counts,
+        "top_issue": top_issue,
+        "affected_issue_count": affected_issue_count,
+        "affected_symbol_count": affected_symbol_count,
+        "message": message,
     }
 
 
@@ -223,6 +423,70 @@ def _fred_readiness_dimension(fred_readiness: Mapping[str, Any]) -> dict[str, An
         "reason": fred_readiness.get("reason"),
         "source_mode": fred_readiness.get("source_mode"),
         "message": str(message),
+    }
+
+
+def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> dict[str, Any]:
+    policy_decision = str(feed_entitlement.get("policy_decision", "unknown"))
+    acceptable_for_live = feed_entitlement.get("acceptable_for_live")
+    delayed = bool(feed_entitlement.get("delayed", False))
+    reason = feed_entitlement.get("reason")
+    if policy_decision == "accept" or acceptable_for_live is True:
+        status = "ok"
+    elif policy_decision == "reject" or acceptable_for_live is False or delayed:
+        status = "critical"
+    elif policy_decision in {"warn", "warning"}:
+        status = "warning"
+    else:
+        status = "unknown"
+
+    safe_reason = _safe_reason(reason)
+    return {
+        "status": status,
+        "configured_feed": feed_entitlement.get("configured_feed"),
+        "effective_feed": feed_entitlement.get("effective_feed"),
+        "entitlement": feed_entitlement.get("entitlement"),
+        "delayed": delayed,
+        "acceptable_for_live": acceptable_for_live,
+        "policy_decision": policy_decision,
+        "reason": safe_reason,
+        "message": (
+            "Alpaca feed entitlement acceptable for live operation"
+            if status == "ok"
+            else f"Alpaca feed entitlement {policy_decision}: {safe_reason or 'review required'}"
+        ),
+    }
+
+
+def _market_data_consistency_dimension(market_data_consistency: Mapping[str, Any]) -> dict[str, Any]:
+    consistency_status = str(market_data_consistency.get("status", "unknown"))
+    if consistency_status in {"critical", "error", "failed"}:
+        status = "critical"
+    elif consistency_status in {"warning", "degraded", "unavailable"}:
+        status = "warning"
+    elif consistency_status == "ok":
+        status = "ok"
+    else:
+        status = "unknown"
+
+    warnings = market_data_consistency.get("warnings")
+    warning_rows = [str(item) for item in warnings] if isinstance(warnings, list) else []
+    rows = market_data_consistency.get("rows")
+    checked_rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
+    reason = market_data_consistency.get("reason")
+    safe_reason = _safe_reason(reason)
+    return {
+        "status": status,
+        "consistency_status": consistency_status,
+        "reason": safe_reason,
+        "checked_at": market_data_consistency.get("checked_at"),
+        "row_count": len(checked_rows),
+        "warning_count": len(warning_rows),
+        "message": (
+            "broker/local market data consistency ok"
+            if status == "ok"
+            else f"broker/local market data consistency {consistency_status}: {safe_reason or 'review required'}"
+        ),
     }
 
 
@@ -347,6 +611,24 @@ def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dic
 
 def _artifact_runbook_entries(artifact_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(artifact_dimension.get("status", "unknown"))
+    if artifact_dimension.get("source_manifest_index_status") == "stale_index":
+        return [_runbook_entry(
+            dimension="artifact",
+            code="stale_public_data_index",
+            severity=severity,
+            action="Regenerate public/data/index.json after source_manifest.json changes, then verify generated_at ordering before publishing.",
+            artifact="index.json",
+            reason="stale_index",
+        )]
+    if artifact_dimension.get("source_manifest_index_status") == "unknown_timestamp":
+        return [_runbook_entry(
+            dimension="artifact",
+            code="public_data_timestamp_unparseable",
+            severity=severity,
+            action="Regenerate source_manifest.json and public/data/index.json so generated_at timestamps are parseable before publishing.",
+            artifact="index.json",
+            reason="unknown_timestamp",
+        )]
     if artifact_dimension.get("stale_count", 0):
         return [_runbook_entry(
             dimension="artifact",
@@ -416,6 +698,97 @@ def _fred_readiness_runbook_entries(fred_dimension: Mapping[str, Any]) -> list[d
     )]
 
 
+def _alpaca_feed_entitlement_runbook_entries(feed_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
+    severity = str(feed_dimension.get("status", "unknown"))
+    if severity == "ok":
+        return []
+    return [_runbook_entry(
+        dimension="alpaca_feed_entitlement",
+        code="alpaca_feed_entitlement_rejected",
+        severity=severity,
+        action="Verify Alpaca market-data feed entitlement, confirm delayed feeds are not used for live order sizing, and rerun rebalance health before trading.",
+        provider="Alpaca",
+        reason=feed_dimension.get("reason") or feed_dimension.get("policy_decision"),
+    )]
+
+
+def _market_data_consistency_runbook_entries(consistency_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
+    severity = str(consistency_dimension.get("status", "unknown"))
+    if severity == "ok":
+        return []
+    code = (
+        "market_data_consistency_unavailable"
+        if consistency_dimension.get("consistency_status") == "unavailable"
+        else "market_data_consistency_degraded"
+    )
+    return [_runbook_entry(
+        dimension="market_data_consistency",
+        code=code,
+        severity=severity,
+        action="Run rebalance health after broker data access is configured; compare broker quotes against local market data before live order sizing.",
+        provider="Alpaca",
+        reason=consistency_dimension.get("reason") or consistency_dimension.get("consistency_status"),
+    )]
+
+
+def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
+    severity = str(data_quality_dimension.get("status", "unknown"))
+    if severity == "ok":
+        return []
+
+    top_issue = data_quality_dimension.get("top_issue")
+    quality_status = data_quality_dimension.get("quality_status")
+    artifact = data_quality_dimension.get("artifact") or "data_quality.json"
+    issue_count = data_quality_dimension.get("affected_issue_count")
+    symbol_count = data_quality_dimension.get("affected_symbol_count")
+
+    if quality_status in {"missing", "unavailable"}:
+        code = "price_quality_report_missing"
+        action = "Regenerate data_quality.json from the public price artifacts and keep the SLO warning until the quality report is available in source_manifest.json."
+        reason = quality_status
+    elif top_issue == "duplicate_dates":
+        code = "price_quality_duplicate_dates"
+        action = f"Reject duplicate price dates, rerun the market-data fetch, and verify data_quality.json before promotion ({issue_count} duplicate date issue(s), {symbol_count} tracked symbol(s))."
+        reason = top_issue
+    elif top_issue == "stale_latest_dates":
+        code = "price_quality_stale_cross_section"
+        action = f"Refresh the stale cross-section, verify every tracked symbol has the latest market date, and regenerate data_quality.json ({issue_count} stale symbol issue(s))."
+        reason = top_issue
+    elif top_issue == "internal_gaps":
+        code = "price_quality_internal_gaps"
+        action = f"Inspect missing trading dates against the reference calendar, refill or document source gaps, and rerun the quality audit ({issue_count} gap issue(s))."
+        reason = top_issue
+    elif top_issue in {"extreme_returns", "split_like_returns"}:
+        code = "price_quality_anomalous_returns"
+        action = f"Verify split-like or extreme return observations against corporate actions before publishing price artifacts ({issue_count} anomaly issue(s))."
+        reason = top_issue
+    elif top_issue in {
+        "empty_symbols",
+        "invalid_dates",
+        "invalid_prices",
+        "missing_required_keys",
+        "non_monotonic_rows",
+        "non_object_records",
+    }:
+        code = "price_quality_invalid_rows"
+        action = f"Block promotion, repair malformed price rows, and rerun data_quality.json before the dashboard consumes the artifacts ({issue_count} row issue(s))."
+        reason = top_issue
+    else:
+        code = "price_quality_degraded"
+        action = "Inspect data_quality.json issue_counts, repair the public price artifact, and rerun the market-data fetch before promotion."
+        reason = quality_status or top_issue
+
+    return [_runbook_entry(
+        dimension="data_quality",
+        code=code,
+        severity=severity,
+        action=action,
+        artifact=artifact,
+        provider="Yahoo Finance",
+        reason=reason,
+    )]
+
+
 def _build_runbook(dimensions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     actions: list[dict[str, Any]] = []
     provider = dimensions.get("provider")
@@ -424,12 +797,21 @@ def _build_runbook(dimensions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any
     artifact = dimensions.get("artifact")
     if isinstance(artifact, Mapping):
         actions.extend(_artifact_runbook_entries(artifact))
+    data_quality = dimensions.get("data_quality")
+    if isinstance(data_quality, Mapping):
+        actions.extend(_data_quality_runbook_entries(data_quality))
     reconciliation = dimensions.get("provider_reconciliation")
     if isinstance(reconciliation, Mapping):
         actions.extend(_provider_reconciliation_runbook_entries(reconciliation))
     fred_readiness = dimensions.get("fred_readiness")
     if isinstance(fred_readiness, Mapping):
         actions.extend(_fred_readiness_runbook_entries(fred_readiness))
+    feed_entitlement = dimensions.get("alpaca_feed_entitlement")
+    if isinstance(feed_entitlement, Mapping):
+        actions.extend(_alpaca_feed_entitlement_runbook_entries(feed_entitlement))
+    market_consistency = dimensions.get("market_data_consistency")
+    if isinstance(market_consistency, Mapping):
+        actions.extend(_market_data_consistency_runbook_entries(market_consistency))
 
     active_actions = [action for action in actions if action.get("severity") not in {"ok", None}]
     top_cause = None
@@ -454,13 +836,16 @@ def build_data_pipeline_slo(
     signal_staleness: Mapping[str, Any] | None = None,
     provider_reconciliation: Mapping[str, Any] | None = None,
     fred_readiness: Mapping[str, Any] | None = None,
+    alpaca_feed_entitlement: Mapping[str, Any] | None = None,
+    market_data_consistency: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a compact SLO summary from already-generated dashboard artifacts."""
     dimensions = {
         "scheduler": _scheduler_dimension(health_data),
         "provider": _provider_dimension(source_manifest),
-        "artifact": _artifact_dimension(health_data, public_index),
+        "artifact": _artifact_dimension(health_data, public_index, source_manifest),
         "signal": _signal_dimension(signal_staleness),
+        "data_quality": _data_quality_dimension(source_manifest),
     }
     reconciliation = provider_reconciliation
     if reconciliation is None:
@@ -478,6 +863,18 @@ def build_data_pipeline_slo(
         readiness = health_readiness if isinstance(health_readiness, Mapping) else None
     if isinstance(readiness, Mapping):
         dimensions["fred_readiness"] = _fred_readiness_dimension(readiness)
+    feed_entitlement = alpaca_feed_entitlement
+    if feed_entitlement is None:
+        health_feed_entitlement = health_data.get("alpaca_feed_entitlement")
+        feed_entitlement = health_feed_entitlement if isinstance(health_feed_entitlement, Mapping) else None
+    if isinstance(feed_entitlement, Mapping):
+        dimensions["alpaca_feed_entitlement"] = _alpaca_feed_entitlement_dimension(feed_entitlement)
+    consistency = market_data_consistency
+    if consistency is None:
+        health_consistency = health_data.get("market_data_consistency")
+        consistency = health_consistency if isinstance(health_consistency, Mapping) else None
+    if isinstance(consistency, Mapping):
+        dimensions["market_data_consistency"] = _market_data_consistency_dimension(consistency)
     return {
         "schema_version": DATA_PIPELINE_SLO_SCHEMA_VERSION,
         "status": _overall_status(dimensions),

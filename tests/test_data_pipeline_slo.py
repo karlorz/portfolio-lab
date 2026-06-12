@@ -1,5 +1,7 @@
 """Tests for data pipeline SLO summary derivation."""
 
+import pytest
+
 from src.monitor.data_pipeline_slo import build_data_pipeline_slo
 
 
@@ -13,16 +15,60 @@ def _health(status: str = "fresh") -> dict:
     }
 
 
-def _source_manifest(source_mode: str = "live", status: str = "success") -> dict:
+_QUALITY_ISSUE_KEYS = (
+    "duplicate_dates",
+    "empty_symbols",
+    "extreme_returns",
+    "internal_gaps",
+    "invalid_dates",
+    "invalid_prices",
+    "missing_required_keys",
+    "non_monotonic_rows",
+    "non_object_records",
+    "split_like_returns",
+    "stale_latest_dates",
+)
+
+
+def _quality_counts(**overrides: int) -> dict:
+    counts = {key: 0 for key in _QUALITY_ISSUE_KEYS}
+    counts.update(overrides)
+    counts["total"] = overrides.get(
+        "total",
+        sum(value for key, value in counts.items() if key != "total"),
+    )
+    return counts
+
+
+def _quality_summary(status: str = "ok", **issue_counts: int) -> dict:
+    return {
+        "artifact": "data_quality.json",
+        "schema_version": "price-data-quality/v1",
+        "generated_at": "2026-06-12T09:00:00Z",
+        "status": status,
+        "issue_counts": _quality_counts(**issue_counts),
+    }
+
+
+def _source_manifest(
+    source_mode: str = "live",
+    status: str = "success",
+    data_quality: dict | None = None,
+    include_data_quality: bool = True,
+) -> dict:
+    row = {
+        "artifact": "prices.json",
+        "provider": "Yahoo Finance",
+        "feed": "chart/v8",
+        "source_mode": source_mode,
+        "status": status,
+        "symbols": ["SPY", "GLD", "TLT"],
+    }
+    if include_data_quality:
+        row["data_quality"] = data_quality or _quality_summary()
     return {
         "artifacts": [
-            {
-                "artifact": "prices.json",
-                "provider": "Yahoo Finance",
-                "feed": "chart/v8",
-                "source_mode": source_mode,
-                "status": status,
-            }
+            row
         ]
     }
 
@@ -37,6 +83,99 @@ def test_slo_healthy_when_all_dimensions_ok() -> None:
 
     assert slo["status"] == "ok"
     assert slo["top_dimension"] is None
+
+
+def test_slo_includes_data_quality_ok_dimension() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "ok"
+    assert slo["dimensions"]["data_quality"]["status"] == "ok"
+    assert slo["dimensions"]["data_quality"]["quality_status"] == "ok"
+    assert slo["dimensions"]["data_quality"]["artifact"] == "data_quality.json"
+    assert slo["dimensions"]["data_quality"]["issue_counts"]["total"] == 0
+
+
+def test_slo_warns_on_data_quality_anomalous_returns() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(
+            data_quality=_quality_summary("warn", split_like_returns=2),
+        ),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "warning"
+    assert slo["top_dimension"] == "data_quality"
+    assert slo["dimensions"]["data_quality"]["top_issue"] == "split_like_returns"
+    assert slo["dimensions"]["data_quality"]["affected_issue_count"] == 2
+    assert slo["dimensions"]["data_quality"]["affected_symbol_count"] == 3
+    assert slo["runbook"]["top_cause"]["code"] == "price_quality_anomalous_returns"
+    assert "split-like or extreme return" in slo["runbook"]["top_cause"]["action"]
+
+
+def test_slo_classifies_data_quality_duplicate_dates_as_critical() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(
+            data_quality=_quality_summary("fail", duplicate_dates=1),
+        ),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "critical"
+    assert slo["top_dimension"] == "data_quality"
+    assert slo["dimensions"]["data_quality"]["status"] == "critical"
+    assert slo["dimensions"]["data_quality"]["top_issue"] == "duplicate_dates"
+    assert slo["runbook"]["top_cause"]["code"] == "price_quality_duplicate_dates"
+    assert "duplicate" in slo["runbook"]["top_cause"]["action"]
+
+
+def test_slo_warns_when_data_quality_report_is_missing() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(include_data_quality=False),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "warning"
+    assert slo["top_dimension"] == "data_quality"
+    assert slo["dimensions"]["data_quality"]["status"] == "warning"
+    assert slo["dimensions"]["data_quality"]["quality_status"] == "missing"
+    assert slo["runbook"]["top_cause"]["code"] == "price_quality_report_missing"
+
+
+@pytest.mark.parametrize(
+    ("issue_counts", "expected_code", "expected_action"),
+    [
+        ({"stale_latest_dates": 2}, "price_quality_stale_cross_section", "stale cross-section"),
+        ({"internal_gaps": 3}, "price_quality_internal_gaps", "missing trading dates"),
+        ({"extreme_returns": 1}, "price_quality_anomalous_returns", "split-like or extreme return"),
+    ],
+)
+def test_slo_runbook_maps_data_quality_issue_actions(
+    issue_counts: dict[str, int],
+    expected_code: str,
+    expected_action: str,
+) -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(
+            data_quality=_quality_summary("warn", **issue_counts),
+        ),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["runbook"]["top_cause"]["code"] == expected_code
+    assert expected_action in slo["runbook"]["top_cause"]["action"]
 
 
 def test_slo_warns_on_provider_fallback() -> None:
@@ -111,6 +250,74 @@ def test_slo_warns_on_artifact_staleness() -> None:
 
     assert slo["status"] == "warning"
     assert slo["top_dimension"] == "artifact"
+
+
+def test_slo_warns_when_source_manifest_is_newer_than_public_index() -> None:
+    source_manifest = {
+        **_source_manifest(),
+        "generated_at": "2026-06-12T09:05:25.028Z",
+    }
+    public_index = {
+        "generated_at": "2026-06-12T03:12:34.220521+00:00",
+        "entries": [],
+    }
+
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=source_manifest,
+        public_index=public_index,
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "warning"
+    assert slo["top_dimension"] == "artifact"
+    assert slo["dimensions"]["artifact"]["source_manifest_index_status"] == "stale_index"
+    assert "index.json" in slo["dimensions"]["artifact"]["message"]
+    assert slo["runbook"]["top_cause"]["code"] == "stale_public_data_index"
+
+
+def test_slo_accepts_public_index_at_least_as_new_as_source_manifest() -> None:
+    source_manifest = {
+        **_source_manifest(),
+        "generated_at": "2026-06-12T09:05:25.028Z",
+    }
+    public_index = {
+        "generated_at": "2026-06-12T09:06:00+00:00",
+        "entries": [],
+    }
+
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=source_manifest,
+        public_index=public_index,
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "ok"
+    assert slo["dimensions"]["artifact"]["source_manifest_index_status"] == "ok"
+
+
+def test_slo_warns_without_crashing_on_malformed_index_timestamps() -> None:
+    source_manifest = {
+        **_source_manifest(),
+        "generated_at": "not-a-date",
+    }
+    public_index = {
+        "generated_at": "2026-06-12T09:06:00+00:00",
+        "entries": [],
+    }
+
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=source_manifest,
+        public_index=public_index,
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "warning"
+    assert slo["top_dimension"] == "artifact"
+    assert slo["dimensions"]["artifact"]["source_manifest_index_status"] == "unknown_timestamp"
+    assert slo["runbook"]["top_cause"]["code"] == "public_data_timestamp_unparseable"
 
 
 def test_slo_warns_on_stale_required_signals_without_penalizing_unavailable_optional() -> None:
@@ -215,6 +422,79 @@ def test_slo_classifies_live_fred_readiness_failure_as_critical() -> None:
     assert slo["status"] == "critical"
     assert slo["top_dimension"] == "fred_readiness"
     assert slo["dimensions"]["fred_readiness"]["status"] == "critical"
+
+
+def test_slo_classifies_rejected_alpaca_feed_entitlement_as_critical() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        alpaca_feed_entitlement={
+            "configured_feed": "iex",
+            "effective_feed": "iex",
+            "entitlement": "unknown",
+            "delayed": False,
+            "acceptable_for_live": False,
+            "policy_decision": "reject",
+            "reason": "missing_entitlement",
+        },
+    )
+
+    assert slo["status"] == "critical"
+    assert slo["top_dimension"] == "alpaca_feed_entitlement"
+    assert slo["dimensions"]["alpaca_feed_entitlement"]["acceptable_for_live"] is False
+    assert slo["dimensions"]["alpaca_feed_entitlement"]["reason"] == "missing_entitlement"
+    assert slo["runbook"]["top_cause"]["code"] == "alpaca_feed_entitlement_rejected"
+    assert "entitlement" in slo["runbook"]["top_cause"]["action"]
+
+
+def test_slo_warns_on_unavailable_market_data_consistency() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        market_data_consistency={
+            "status": "unavailable",
+            "reason": "alpaca_not_configured",
+            "checked_at": "2026-06-12T08:43:07.177011+00:00",
+            "rows": [],
+            "warnings": [],
+        },
+    )
+
+    assert slo["status"] == "warning"
+    assert slo["top_dimension"] == "market_data_consistency"
+    assert slo["dimensions"]["market_data_consistency"]["status"] == "warning"
+    assert slo["dimensions"]["market_data_consistency"]["reason"] == "alpaca_not_configured"
+    assert slo["runbook"]["top_cause"]["code"] == "market_data_consistency_unavailable"
+
+
+def test_slo_accepts_live_diagnostics_ok_cases() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        alpaca_feed_entitlement={
+            "configured_feed": "sip",
+            "effective_feed": "sip",
+            "entitlement": "sip",
+            "delayed": False,
+            "acceptable_for_live": True,
+            "policy_decision": "accept",
+        },
+        market_data_consistency={
+            "status": "ok",
+            "rows": [{"symbol": "SPY", "status": "ok"}],
+            "warnings": [],
+        },
+    )
+
+    assert slo["status"] == "ok"
+    assert slo["dimensions"]["alpaca_feed_entitlement"]["status"] == "ok"
+    assert slo["dimensions"]["market_data_consistency"]["status"] == "ok"
 
 
 def test_slo_runbook_maps_yahoo_provider_failure_without_leaking_fallback_details() -> None:

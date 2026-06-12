@@ -247,7 +247,25 @@ export interface DataPipelineSlo {
   status: 'ok' | 'warning' | 'critical' | 'unknown';
   top_dimension: string | null;
   dimensions: Record<string, DataPipelineSloDimension>;
+  runbook?: DataPipelineRunbook;
   error?: string;
+}
+
+export interface DataPipelineRunbook {
+  status: 'ok' | 'warning' | 'critical' | 'unknown';
+  top_cause: DataPipelineRunbookAction | null;
+  actions: DataPipelineRunbookAction[];
+}
+
+export interface DataPipelineRunbookAction {
+  dimension: string;
+  code: string;
+  severity: 'ok' | 'warning' | 'critical' | 'unknown';
+  action: string;
+  artifact?: string;
+  provider?: string;
+  reason?: string;
+  [key: string]: unknown;
 }
 
 export interface DataPipelineSloDimension {

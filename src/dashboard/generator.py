@@ -1699,15 +1699,19 @@ class DashboardGenerator:
             from src.monitor.data_pipeline_slo import (
                 build_data_pipeline_slo,
                 load_public_index,
+                load_rebalance_health,
                 load_signal_staleness,
                 load_source_manifest,
             )
+            rebalance_health = load_rebalance_health(PUBLIC_DIR)
 
             health_data["data_pipeline_slo"] = build_data_pipeline_slo(
                 health_data=health_data,
                 source_manifest=load_source_manifest(PUBLIC_DIR),
                 public_index=load_public_index(PUBLIC_DIR),
                 signal_staleness=load_signal_staleness(PUBLIC_DIR),
+                alpaca_feed_entitlement=rebalance_health.get("alpaca_feed_entitlement"),
+                market_data_consistency=rebalance_health.get("market_data_consistency"),
             )
         except (ImportError, OSError, ValueError, TypeError) as e:
             health_data["data_pipeline_slo"] = {

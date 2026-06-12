@@ -19,6 +19,11 @@ import {
   buildMarketDataSourceManifest,
   type MarketDataSourceRow,
 } from '../src/data/source_manifest';
+import {
+  PRICE_DATA_QUALITY_FILENAME,
+  buildPriceDataQualityReport,
+  type PriceDataQualityReport,
+} from '../src/data/price_quality';
 import { dirname, join } from 'path';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from 'fs';
 
@@ -63,10 +68,30 @@ function firstFailureReason(
   return Object.keys(failureCounts)[0] ?? null;
 }
 
+function priceQualitySourceSummary(
+  report: PriceDataQualityReport,
+): NonNullable<MarketDataSourceRow['data_quality']> {
+  return {
+    artifact: PRICE_DATA_QUALITY_FILENAME,
+    schema_version: report.schema_version,
+    generated_at: report.generated_at,
+    status: report.overall_status,
+    issue_counts: report.issue_counts,
+  };
+}
+
+function unavailablePriceQualitySourceSummary(): NonNullable<MarketDataSourceRow['data_quality']> {
+  return {
+    artifact: PRICE_DATA_QUALITY_FILENAME,
+    status: 'unavailable',
+  };
+}
+
 export function buildPriceSourceRows(
   priceSummary: Awaited<ReturnType<typeof fetchAllDataWithSummary>>['summary'],
   compact: Record<string, { d: string; p: number }[]>,
   fetchedAt: string,
+  qualityReport?: PriceDataQualityReport,
 ): MarketDataSourceRow[] {
   const rowCount = Object.values(compact).reduce((sum, rows) => sum + rows.length, 0);
   const latestObservation = latestObservationFromCompact(compact);
@@ -74,6 +99,7 @@ export function buildPriceSourceRows(
   const failureReason = priceSummary.circuit_breaker.opened
     ? priceSummary.circuit_breaker.reason
     : firstFailureReason(priceSummary.failure_counts);
+  const dataQuality = qualityReport === undefined ? undefined : priceQualitySourceSummary(qualityReport);
   return ['prices.json', 'prices_compact.json'].map((artifact) => ({
     artifact,
     provider: priceSummary.provider,
@@ -88,6 +114,7 @@ export function buildPriceSourceRows(
     row_count: rowCount,
     symbols,
     failure_reason: failureReason,
+    ...(dataQuality === undefined ? {} : { data_quality: dataQuality }),
     notes: priceSummary.circuit_breaker.opened
       ? [`Skipped symbols after provider circuit breaker opened: ${priceSummary.circuit_breaker.skipped_symbols.join(', ')}`]
       : [],
@@ -187,6 +214,7 @@ export function buildLastGoodRetentionManifest(error: unknown, generatedAt = new
       row_count: 0,
       failure_reason: 'unknown',
       fallback_reason: message,
+      data_quality: unavailablePriceQualitySourceSummary(),
       notes: ['Current provider run failed; retained previous last-good public price artifact.'],
     },
     {
@@ -203,9 +231,25 @@ export function buildLastGoodRetentionManifest(error: unknown, generatedAt = new
       row_count: 0,
       failure_reason: 'unknown',
       fallback_reason: message,
+      data_quality: unavailablePriceQualitySourceSummary(),
       notes: ['Current provider run failed; retained previous last-good compact price artifact.'],
     },
   ], generatedAt);
+}
+
+export class DashboardGenerationError extends Error {
+  readonly preserveSourceManifest = true;
+
+  constructor(cause: unknown) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`Dashboard generation failed after market data refresh: ${message}`);
+    this.name = 'DashboardGenerationError';
+    this.cause = cause;
+  }
+}
+
+export function shouldWriteLastGoodRetentionManifest(error: unknown): boolean {
+  return !(error instanceof DashboardGenerationError);
 }
 
 async function runPythonModule(moduleName: string): Promise<void> {
@@ -214,6 +258,16 @@ async function runPythonModule(moduleName: string): Promise<void> {
     cwd: PROJECT_ROOT,
     stdio: 'inherit',
   });
+}
+
+export async function runDashboardGeneration(
+  runModule: (moduleName: string) => Promise<void> = runPythonModule,
+): Promise<void> {
+  try {
+    await runModule('src.dashboard.generator');
+  } catch (error) {
+    throw new DashboardGenerationError(error);
+  }
 }
 
 export async function main() {
@@ -242,10 +296,14 @@ export async function main() {
 
   const pricesPath = join(DATA_DIR, 'prices.json');
   const pricesCompactPath = join(DATA_DIR, 'prices_compact.json');
+  const priceQualityPath = join(DATA_DIR, PRICE_DATA_QUALITY_FILENAME);
+  const priceQualityReport = buildPriceDataQualityReport(compact);
   await writeJsonAtomic(pricesPath, compact);
   await writeJsonAtomic(pricesCompactPath, compact);
+  await writeJsonAtomic(priceQualityPath, priceQualityReport);
   console.log(`\nSaved ${Object.keys(compact).length} symbols (${totalDays} total data points) → ${pricesPath}`);
   console.log(`Saved compact price mirror → ${pricesCompactPath}`);
+  console.log(`Saved price data quality audit → ${priceQualityPath}`);
 
   // 2. Sync fetched prices into canonical SQLite store for dashboard freshness checks
   console.log('\nSyncing fetched prices into market.db...');
@@ -265,7 +323,7 @@ export async function main() {
   const manifestPath = join(DATA_DIR, MARKET_DATA_SOURCE_MANIFEST_FILENAME);
   const manifestGeneratedAt = new Date().toISOString();
   const manifest = buildMarketDataSourceManifest([
-    ...buildPriceSourceRows(priceResult.summary, compact, manifestGeneratedAt),
+    ...buildPriceSourceRows(priceResult.summary, compact, manifestGeneratedAt, priceQualityReport),
     buildYieldSourceRow(
       yieldResult.summary,
       yieldData.length,
@@ -278,11 +336,7 @@ export async function main() {
 
   // 5. Regenerate dashboard JSON
   console.log('\nRegenerating dashboard JSON...');
-  try {
-    await runPythonModule('src.dashboard.generator');
-  } catch (e) {
-    console.warn('Dashboard generator failed (Python runtime may not be available):', e);
-  }
+  await runDashboardGeneration();
 
   console.log('\nDone.');
 }
@@ -291,13 +345,15 @@ if (import.meta.main) {
   main().catch(async err => {
     console.error('Fetch failed:', err);
     try {
-      if (!existsSync(DATA_DIR)) {
-        mkdirSync(DATA_DIR, { recursive: true });
+      if (shouldWriteLastGoodRetentionManifest(err)) {
+        if (!existsSync(DATA_DIR)) {
+          mkdirSync(DATA_DIR, { recursive: true });
+        }
+        await writeJsonAtomic(
+          join(DATA_DIR, MARKET_DATA_SOURCE_MANIFEST_FILENAME),
+          buildLastGoodRetentionManifest(err),
+        );
       }
-      await writeJsonAtomic(
-        join(DATA_DIR, MARKET_DATA_SOURCE_MANIFEST_FILENAME),
-        buildLastGoodRetentionManifest(err),
-      );
     } catch (manifestError) {
       console.error('Failed to write last-good retention manifest:', manifestError);
     }

@@ -1118,9 +1118,24 @@ describe('RebalanceHealthSchema', () => {
     cost_drag_bps: 45,
   });
 
+  const generatedRH = () => JSON.parse(
+    readFileSync('public/data/rebalance_health.json', 'utf-8')
+  ) as Record<string, unknown>;
+
   it('accepts valid rebalance health data', () => {
     const result = RebalanceHealthSchema.safeParse(validRH());
     expect(result.success).toBe(true);
+  });
+
+  it('accepts the generated rebalance health artifact with live diagnostics', () => {
+    const result = RebalanceHealthSchema.safeParse(generatedRH());
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data.market_data_consistency?.status).toBe('unavailable');
+    expect(result.data.alpaca_feed_entitlement?.policy_decision).toBe('reject');
+    expect(result.data.alpaca_feed_entitlement?.acceptable_for_live).toBe(false);
   });
 
   it('accepts empty recent_rebalances', () => {

@@ -226,6 +226,26 @@ def test_public_index_adds_market_source_metadata_from_manifest(tmp_path: Path) 
                     "fetched_at": "2026-06-11T00:00:00+00:00",
                     "latest_observation": "2026-06-10",
                     "row_count": 1,
+                    "data_quality": {
+                        "artifact": "data_quality.json",
+                        "schema_version": "price-data-quality/v1",
+                        "generated_at": "2026-06-11T00:00:00+00:00",
+                        "status": "ok",
+                        "issue_counts": {
+                            "duplicate_dates": 0,
+                            "empty_symbols": 0,
+                            "extreme_returns": 0,
+                            "internal_gaps": 0,
+                            "invalid_dates": 0,
+                            "invalid_prices": 0,
+                            "missing_required_keys": 0,
+                            "non_monotonic_rows": 0,
+                            "non_object_records": 0,
+                            "split_like_returns": 0,
+                            "stale_latest_dates": 0,
+                            "total": 0,
+                        },
+                    },
                 }
             ],
         },
@@ -243,9 +263,93 @@ def test_public_index_adds_market_source_metadata_from_manifest(tmp_path: Path) 
         "fetched_at": "2026-06-11T00:00:00+00:00",
         "latest_observation": "2026-06-10",
         "row_count": 1,
+        "data_quality": {
+            "artifact": "data_quality.json",
+            "schema_version": "price-data-quality/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "status": "ok",
+            "issue_counts": {
+                "duplicate_dates": 0,
+                "empty_symbols": 0,
+                "extreme_returns": 0,
+                "internal_gaps": 0,
+                "invalid_dates": 0,
+                "invalid_prices": 0,
+                "missing_required_keys": 0,
+                "non_monotonic_rows": 0,
+                "non_object_records": 0,
+                "split_like_returns": 0,
+                "stale_latest_dates": 0,
+                "total": 0,
+            },
+        },
     }
     assert entries["source_manifest.json"]["schema_version"] == "market-data-source-manifest/v1"
     assert entries["source_manifest.json"]["category"] == "market_data"
+
+
+def test_public_index_adds_top_level_source_manifest_identity(tmp_path: Path) -> None:
+    prices = _write_json(tmp_path / "prices.json", {"SPY": [{"d": "2026-06-10", "p": 600.0}]})
+    _write_json(
+        tmp_path / "source_manifest.json",
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [{"artifact": "prices.json", "provider": "Yahoo Finance", "status": "success"}],
+        },
+    )
+
+    index = build_public_data_index([prices], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+    entries = _entries_by_filename(index)
+
+    assert index["source_manifest"] == {
+        "path": "source_manifest.json",
+        "schema_version": "market-data-source-manifest/v1",
+        "generated_at": "2026-06-11T00:00:00+00:00",
+        "sha256": entries["source_manifest.json"]["sha256"],
+    }
+
+
+def test_public_index_source_manifest_identity_hash_changes_with_manifest_content(tmp_path: Path) -> None:
+    prices = _write_json(tmp_path / "prices.json", {"SPY": [{"d": "2026-06-10", "p": 600.0}]})
+    manifest = tmp_path / "source_manifest.json"
+    _write_json(
+        manifest,
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [{"artifact": "prices.json", "provider": "Yahoo Finance", "status": "success"}],
+        },
+    )
+    first = build_public_data_index(
+        [prices],
+        public_dir=tmp_path,
+        generated_at="2026-06-11T00:00:00+00:00",
+        use_hash_cache=False,
+    )
+
+    _write_json(
+        manifest,
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [
+                {
+                    "artifact": "prices.json",
+                    "provider": "Licensed Feed",
+                    "status": "success",
+                }
+            ],
+        },
+    )
+    second = build_public_data_index(
+        [prices],
+        public_dir=tmp_path,
+        generated_at="2026-06-11T00:00:00+00:00",
+        use_hash_cache=False,
+    )
+
+    assert first["source_manifest"]["sha256"] != second["source_manifest"]["sha256"]
 
 
 def test_public_index_marks_project_generated_artifacts_public_safe(tmp_path: Path) -> None:

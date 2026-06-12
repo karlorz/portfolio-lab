@@ -1,8 +1,23 @@
 from datetime import datetime, timezone
+from pathlib import Path
+import subprocess
 
 import pytest
 
 from src.tasker.registry import load_task_registry
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _run_make(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["make", *args],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
 
 def test_default_registry_loads_expected_portfolio_lab_tasks():
@@ -33,6 +48,32 @@ def test_default_registry_loads_expected_portfolio_lab_tasks():
     assert registry.get("portfolio-lab-build").manual_only is True
     assert registry.get("portfolio-lab-autonomous-agent").enabled is False
     assert registry.get("portfolio-lab-autonomous-agent").manual_only is True
+
+
+def test_make_health_target_runs_system_health_check_module():
+    result = _run_make("-n", "health")
+
+    assert result.returncode == 0, result.stderr
+    assert "src.monitor.health_check" in result.stdout
+    assert "src.monitor.rebalance_health" not in result.stdout
+
+
+def test_make_rebalance_health_target_runs_rebalance_health_exporter():
+    result = _run_make("-n", "rebalance-health")
+
+    assert result.returncode == 0, result.stderr
+    assert "src.monitor.rebalance_health" in result.stdout
+    assert "portfolio-lab-rebalance-health" in result.stdout
+
+
+def test_make_help_describes_system_and_rebalance_health_targets():
+    result = _run_make("help")
+
+    assert result.returncode == 0, result.stderr
+    assert "make health" in result.stdout
+    assert "health.json" in result.stdout
+    assert "make rebalance-health" in result.stdout
+    assert "rebalance_health.json" in result.stdout
 
 
 def test_registry_rejects_non_make_commands(tmp_path):

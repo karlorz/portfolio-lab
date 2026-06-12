@@ -68,6 +68,26 @@ describe('Labs artifact schemas', () => {
             fetched_at: '2026-06-11T00:00:00Z',
             latest_observation: '2026-06-10',
             row_count: 1,
+            data_quality: {
+              artifact: 'data_quality.json',
+              schema_version: 'price-data-quality/v1',
+              generated_at: '2026-06-11T00:00:00Z',
+              status: 'ok',
+              issue_counts: {
+                duplicate_dates: 0,
+                empty_symbols: 0,
+                extreme_returns: 0,
+                internal_gaps: 0,
+                invalid_dates: 0,
+                invalid_prices: 0,
+                missing_required_keys: 0,
+                non_monotonic_rows: 0,
+                non_object_records: 0,
+                split_like_returns: 0,
+                stale_latest_dates: 0,
+                total: 0,
+              },
+            },
           },
         },
         {
@@ -99,6 +119,52 @@ describe('Labs artifact schemas', () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it('rejects malformed public data quality source metadata', () => {
+    const result = LabsSchemas.PublicDataSourceMetadataSchema.safeParse({
+      provider: 'Yahoo Finance',
+      feed: 'chart/v8',
+      source_mode: 'live',
+      status: 'success',
+      data_quality: {
+        artifact: 'data_quality.json',
+        schema_version: 'price-data-quality/v1',
+        generated_at: '2026-06-11T00:00:00Z',
+        status: 'unknown',
+        issue_counts: { total: 0 },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('validates optional top-level source manifest identity metadata', () => {
+    const valid = LabsSchemas.PublicDataIndexSchema.safeParse({
+      schema_version: 'public-data-index/v1',
+      generated_at: '2026-06-11T00:00:00Z',
+      source_manifest: {
+        path: 'source_manifest.json',
+        schema_version: 'market-data-source-manifest/v1',
+        generated_at: '2026-06-11T00:00:00Z',
+        sha256: 'a'.repeat(64),
+      },
+      entries: [],
+    });
+    const invalidHash = LabsSchemas.PublicDataIndexSchema.safeParse({
+      schema_version: 'public-data-index/v1',
+      generated_at: '2026-06-11T00:00:00Z',
+      source_manifest: {
+        path: 'source_manifest.json',
+        schema_version: 'market-data-source-manifest/v1',
+        generated_at: '2026-06-11T00:00:00Z',
+        sha256: 'not-a-sha',
+      },
+      entries: [],
+    });
+
+    expect(valid.success).toBe(true);
+    expect(invalidHash.success).toBe(false);
   });
 
   it('accepts generated registry metadata without allowing unrelated fields', () => {

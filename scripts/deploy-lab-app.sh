@@ -265,6 +265,14 @@ check_fred_readiness() {
   run_app_cmd env PORTFOLIO_LAB_MODE="$readiness_mode" CRON_BACKEND="${CRON_BACKEND:-tasker}" ./scripts/python_runtime.sh -m src.monitor.fred_readiness --mode "$readiness_mode"
 }
 
+check_public_data_consistency() {
+  log "Checking public data consistency before publish"
+  if [ "$SKIP_DATA" = "1" ]; then
+    warn "--skip-data set; validating existing public/data and dist/data artifacts"
+  fi
+  run_app_cmd ./scripts/python_runtime.sh scripts/check_public_data_consistency.py --app-dir "$APP_DIR"
+}
+
 publish_dist() {
   if [ "$DRY_RUN" != "1" ] && [ ! -d "${APP_DIR}/dist" ]; then
     die "Missing ${APP_DIR}/dist; run without --skip-build or build first"
@@ -437,6 +445,7 @@ main() {
   check_fred_readiness
   refresh_dashboard_data
   build_frontend
+  check_public_data_consistency
   publish_dist
   install_tasker_service
   write_caddy_config

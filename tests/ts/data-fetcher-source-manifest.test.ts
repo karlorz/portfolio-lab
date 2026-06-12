@@ -11,15 +11,31 @@ import {
   generateFallbackYields,
   type HistoricalPrice,
   type MarketDataProvider,
+  type MarketDataProviderSummary,
 } from '../../src/data/fetcher';
 import {
+  DashboardGenerationError,
   buildLastGoodRetentionManifest,
   buildPriceSourceRows,
   buildYieldSourceRow,
   createFredDiskCache,
+  runDashboardGeneration,
+  shouldWriteLastGoodRetentionManifest,
 } from '../../scripts/fetch-data';
 import { SYMBOL_UNIVERSE_METADATA } from '../../src/data/symbol_universe';
 import { buildMarketDataSourceManifest } from '../../src/data/source_manifest';
+import {
+  PRICE_DATA_QUALITY_FILENAME,
+  PRICE_DATA_QUALITY_SCHEMA_VERSION,
+  buildPriceDataQualityReport,
+} from '../../src/data/price_quality';
+import {
+  cleanCompactPrices,
+  extremeReturnCompactPrices,
+  internalGapCompactPrices,
+  splitLikeReturnCompactPrices,
+  staleLatestCompactPrices,
+} from './compact-price-fixtures';
 
 function yahooPayload(close = 100) {
   return {
@@ -109,6 +125,27 @@ describe('market data fetcher source provenance', () => {
       feed: 'adjusted-eod-fixture',
       sourceMode: 'live',
       fetchSymbol,
+    };
+  }
+
+  function priceProviderSummary(overrides: Partial<MarketDataProviderSummary> = {}): MarketDataProviderSummary {
+    return {
+      provider: 'Yahoo Finance',
+      feed: 'chart/v8',
+      provider_chain: ['Yahoo Finance'],
+      primary_provider: 'Yahoo Finance',
+      fallback_provider: null,
+      status: 'success',
+      source_mode: 'live',
+      fetched_at: '2026-06-12T00:00:00Z',
+      symbols: [],
+      failure_counts: {},
+      circuit_breaker: {
+        opened: false,
+        reason: null,
+        skipped_symbols: [],
+      },
+      ...overrides,
     };
   }
 
@@ -265,6 +302,378 @@ describe('market data fetcher source provenance', () => {
       symbols: ['SPY'],
     });
     expect(JSON.stringify(manifestRows)).not.toContain('query2.finance.yahoo.com');
+  });
+
+  it('builds an ok price data quality report for clean compact prices', () => {
+    const report = buildPriceDataQualityReport(
+      cleanCompactPrices(),
+      '2026-06-12T00:00:00Z',
+      { maxLatestLagDays: Number.POSITIVE_INFINITY },
+    );
+
+    expect(PRICE_DATA_QUALITY_FILENAME).toBe('data_quality.json');
+    expect(report).toEqual({
+      schema_version: PRICE_DATA_QUALITY_SCHEMA_VERSION,
+      generated_at: '2026-06-12T00:00:00Z',
+      overall_status: 'ok',
+      issue_counts: {
+        duplicate_dates: 0,
+        empty_symbols: 0,
+        extreme_returns: 0,
+        internal_gaps: 0,
+        invalid_dates: 0,
+        invalid_prices: 0,
+        missing_required_keys: 0,
+        non_monotonic_rows: 0,
+        non_object_records: 0,
+        split_like_returns: 0,
+        stale_latest_dates: 0,
+        total: 0,
+      },
+      symbols: [
+        {
+          symbol: 'GLD',
+          status: 'ok',
+          row_count: 1,
+          first_date: '2026-06-11',
+          latest_date: '2026-06-11',
+          duplicate_date_count: 0,
+          duplicate_dates: [],
+          internal_gaps: [],
+          invalid_dates: [],
+          invalid_prices: [],
+          latest_lag_days: 0,
+          missing_required_keys: [],
+          non_monotonic_rows: [],
+          non_object_records: [],
+          return_anomaly_count: 0,
+          return_anomalies: [],
+          stale_latest_date: null,
+        },
+        {
+          symbol: 'SPY',
+          status: 'ok',
+          row_count: 2,
+          first_date: '2026-06-10',
+          latest_date: '2026-06-11',
+          duplicate_date_count: 0,
+          duplicate_dates: [],
+          internal_gaps: [],
+          invalid_dates: [],
+          invalid_prices: [],
+          latest_lag_days: 0,
+          missing_required_keys: [],
+          non_monotonic_rows: [],
+          non_object_records: [],
+          return_anomaly_count: 0,
+          return_anomalies: [],
+          stale_latest_date: null,
+        },
+      ],
+    });
+  });
+
+  it('keeps aligned cross-sections ok and does not treat weekends as missing trading days', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-06-12', p: 612.34 },
+          { d: '2026-06-15', p: 614.25 },
+        ],
+        GLD: [
+          { d: '2026-06-12', p: 318.12 },
+          { d: '2026-06-15', p: 319.2 },
+        ],
+        TLT: [
+          { d: '2026-06-12', p: 88.75 },
+          { d: '2026-06-15', p: 89.01 },
+        ],
+      },
+      '2026-06-16T00:00:00Z',
+    );
+
+    expect(report.overall_status).toBe('ok');
+    expect(report.issue_counts.internal_gaps).toBe(0);
+    expect(report.issue_counts.stale_latest_dates).toBe(0);
+    expect(report.symbols.every((symbol) => symbol.internal_gaps.length === 0)).toBe(true);
+    expect(report.symbols.every((symbol) => symbol.latest_lag_days === 0)).toBe(true);
+  });
+
+  it('flags symbols whose latest date lags the reference calendar beyond threshold', () => {
+    const report = buildPriceDataQualityReport(
+      staleLatestCompactPrices(),
+      '2026-06-13T00:00:00Z',
+      { maxLatestLagDays: 0 },
+    );
+
+    const gld = report.symbols.find((symbol) => symbol.symbol === 'GLD');
+    expect(report.overall_status).toBe('fail');
+    expect(report.issue_counts.stale_latest_dates).toBe(1);
+    expect(gld).toMatchObject({
+      status: 'fail',
+      latest_lag_days: 1,
+      stale_latest_date: {
+        reference_date: '2026-06-12',
+        latest_date: '2026-06-11',
+      },
+    });
+  });
+
+  it('flags bounded samples of internal reference-calendar gaps', () => {
+    const report = buildPriceDataQualityReport(
+      internalGapCompactPrices(),
+      '2026-06-13T00:00:00Z',
+      { maxMissingDateSamples: 2 },
+    );
+
+    const tlt = report.symbols.find((symbol) => symbol.symbol === 'TLT');
+    expect(report.overall_status).toBe('fail');
+    expect(report.issue_counts.internal_gaps).toBe(1);
+    expect(tlt).toMatchObject({
+      status: 'fail',
+      internal_gaps: [
+        {
+          missing_count: 1,
+          sample_missing_dates: ['2026-06-11'],
+        },
+      ],
+    });
+  });
+
+  it('flags invalid prices, non-monotonic rows, missing keys, duplicate dates, and bad dates', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-06-11', p: 612.34 },
+          { d: '2026-06-10', p: 613.5 },
+          { d: '2026-06-12', p: 0 },
+          { d: '2026-06-13' },
+          { d: 'not-a-date', p: 614 },
+          { d: '2026-06-14', p: -1 },
+        ],
+        GLD: [
+          { d: '2026-06-10', p: 318.12 },
+          { d: '2026-06-10', p: 319.01 },
+        ],
+      },
+      '2026-06-12T00:00:00Z',
+      { maxLatestLagDays: Number.POSITIVE_INFINITY },
+    );
+
+    expect(report.overall_status).toBe('fail');
+    expect(report.issue_counts).toEqual({
+      duplicate_dates: 1,
+      empty_symbols: 0,
+      extreme_returns: 0,
+      internal_gaps: 0,
+      invalid_dates: 1,
+      invalid_prices: 2,
+      missing_required_keys: 1,
+      non_monotonic_rows: 1,
+      non_object_records: 0,
+      split_like_returns: 0,
+      stale_latest_dates: 0,
+      total: 6,
+    });
+    expect(report.symbols.find((symbol) => symbol.symbol === 'GLD')).toMatchObject({
+      status: 'fail',
+      duplicate_dates: ['2026-06-10'],
+    });
+    expect(report.symbols.find((symbol) => symbol.symbol === 'SPY')).toMatchObject({
+      status: 'fail',
+      invalid_dates: [{ index: 4 }],
+      invalid_prices: [
+        { index: 2, date: '2026-06-12' },
+        { index: 5, date: '2026-06-14' },
+      ],
+      missing_required_keys: [{ index: 3, missing_keys: ['p'] }],
+      non_monotonic_rows: [{ index: 1, previous_date: '2026-06-11', date: '2026-06-10' }],
+    });
+  });
+
+  it('bounds duplicate date samples while preserving duplicate issue counts', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-06-10', p: 612.34 },
+          { d: '2026-06-10', p: 612.35 },
+          { d: '2026-06-11', p: 613.1 },
+          { d: '2026-06-11', p: 613.2 },
+          { d: '2026-06-12', p: 614.1 },
+          { d: '2026-06-12', p: 614.2 },
+        ],
+      },
+      '2026-06-12T00:00:00Z',
+      {
+        maxDuplicateDateSamples: 2,
+        maxLatestLagDays: Number.POSITIVE_INFINITY,
+      },
+    );
+
+    expect(report.issue_counts.duplicate_dates).toBe(3);
+    expect(report.issue_counts.total).toBe(3);
+    expect(report.symbols[0]).toMatchObject({
+      symbol: 'SPY',
+      status: 'fail',
+      duplicate_date_count: 3,
+      duplicate_dates: ['2026-06-10', '2026-06-11'],
+    });
+  });
+
+  it('reports split-like return jumps as warning-level bounded offender samples', () => {
+    const report = buildPriceDataQualityReport(
+      splitLikeReturnCompactPrices(),
+      '2026-06-13T00:00:00Z',
+      {
+        criticalReturnPct: 125,
+        maxLatestLagDays: Number.POSITIVE_INFINITY,
+        maxReturnAnomalySamples: 1,
+        splitLikeReturnPct: 40,
+      },
+    );
+
+    expect(report.overall_status).toBe('warn');
+    expect(report.issue_counts.split_like_returns).toBe(1);
+    expect(report.issue_counts.extreme_returns).toBe(0);
+    expect(report.issue_counts.total).toBe(1);
+    expect(report.symbols[0]).toMatchObject({
+      symbol: 'SPY',
+      status: 'warn',
+      return_anomaly_count: 1,
+      return_anomalies: [
+        {
+          type: 'split_like_return',
+          severity: 'warning',
+          symbol: 'SPY',
+          date: '2026-06-11',
+          previous_date: '2026-06-10',
+          previous_price: 100,
+          current_price: 45,
+          return_pct: -55,
+        },
+      ],
+    });
+  });
+
+  it('reports critical extreme returns as blocking failures with return context', () => {
+    const report = buildPriceDataQualityReport(
+      extremeReturnCompactPrices(),
+      '2026-06-12T00:00:00Z',
+      {
+        criticalReturnPct: 90,
+        maxLatestLagDays: Number.POSITIVE_INFINITY,
+        splitLikeReturnPct: 40,
+      },
+    );
+
+    expect(report.overall_status).toBe('fail');
+    expect(report.issue_counts.extreme_returns).toBe(1);
+    expect(report.issue_counts.split_like_returns).toBe(0);
+    expect(report.symbols[0]).toMatchObject({
+      symbol: 'SPY',
+      status: 'fail',
+      return_anomaly_count: 1,
+      return_anomalies: [
+        {
+          type: 'extreme_return',
+          severity: 'critical',
+          symbol: 'SPY',
+          date: '2026-06-11',
+          previous_date: '2026-06-10',
+          previous_price: 100,
+          current_price: 250,
+          return_pct: 150,
+        },
+      ],
+    });
+  });
+
+  it('keeps plausible high-volatility returns below configured thresholds clean', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-06-10', p: 100 },
+          { d: '2026-06-11', p: 125 },
+        ],
+      },
+      '2026-06-12T00:00:00Z',
+      {
+        criticalReturnPct: 90,
+        maxLatestLagDays: Number.POSITIVE_INFINITY,
+        splitLikeReturnPct: 40,
+      },
+    );
+
+    expect(report.overall_status).toBe('ok');
+    expect(report.issue_counts.extreme_returns).toBe(0);
+    expect(report.issue_counts.split_like_returns).toBe(0);
+    expect(report.symbols[0]).toMatchObject({
+      status: 'ok',
+      return_anomaly_count: 0,
+      return_anomalies: [],
+    });
+  });
+
+  it('keeps price data quality reports deterministic and compact', () => {
+    const payload = {
+      TLT: [{ d: '2026-06-11', p: 88.75 }],
+      SPY: [{ d: '2026-06-10', p: 612.34 }],
+    };
+
+    const first = JSON.stringify(buildPriceDataQualityReport(payload, '2026-06-12T00:00:00Z'));
+    const second = JSON.stringify(buildPriceDataQualityReport(payload, '2026-06-12T00:00:00Z'));
+
+    expect(first).toBe(second);
+    expect(first).toContain('"symbols":[{"symbol":"SPY"');
+    expect(first).toContain('"symbol":"TLT"');
+    expect(first).not.toContain('undefined');
+    expect(first.length).toBeLessThan(1600);
+  });
+
+  it('attaches compact price data quality summaries to price source manifest rows', () => {
+    const compact = {
+      SPY: [
+        { d: '2026-06-10', p: 100 },
+        { d: '2026-06-11', p: 45 },
+      ],
+    };
+    const qualityReport = buildPriceDataQualityReport(
+      compact,
+      '2026-06-12T00:00:00Z',
+      { maxLatestLagDays: Number.POSITIVE_INFINITY },
+    );
+
+    const rows = buildPriceSourceRows(
+      priceProviderSummary({ status: 'degraded' }),
+      compact,
+      '2026-06-12T00:00:00Z',
+      qualityReport,
+    );
+
+    expect(rows.map((row) => row.artifact)).toEqual(['prices.json', 'prices_compact.json']);
+    expect(rows.every((row) => row.data_quality?.artifact === PRICE_DATA_QUALITY_FILENAME)).toBe(true);
+    expect(rows[0].data_quality).toEqual({
+      artifact: PRICE_DATA_QUALITY_FILENAME,
+      schema_version: PRICE_DATA_QUALITY_SCHEMA_VERSION,
+      generated_at: '2026-06-12T00:00:00Z',
+      status: 'warn',
+      issue_counts: {
+        duplicate_dates: 0,
+        empty_symbols: 0,
+        extreme_returns: 0,
+        internal_gaps: 0,
+        invalid_dates: 0,
+        invalid_prices: 0,
+        missing_required_keys: 0,
+        non_monotonic_rows: 0,
+        non_object_records: 0,
+        split_like_returns: 1,
+        stale_latest_dates: 0,
+        total: 1,
+      },
+    });
+    expect(JSON.stringify(rows[0].data_quality)).not.toContain('"symbols"');
+    expect(JSON.stringify(rows[0].data_quality)).not.toContain('return_anomalies');
   });
 
   it('records structured failure state when every price provider fails', async () => {
@@ -556,7 +965,22 @@ describe('market data fetcher source provenance', () => {
       status: 'failed',
       fallback_reason: 'HTTP 429',
     });
+    expect(manifest.artifacts.every((row) => row.data_quality?.status === 'unavailable')).toBe(true);
+    expect(manifest.artifacts.every((row) => row.data_quality?.artifact === PRICE_DATA_QUALITY_FILENAME)).toBe(true);
     expect(JSON.stringify(manifest)).not.toContain('query2.finance.yahoo.com');
+  });
+
+  it('fails dashboard generation as a post-fetch artifact error', async () => {
+    await expect(runDashboardGeneration(async () => {
+      throw new Error('dashboard generator exploded');
+    })).rejects.toThrow('Dashboard generation failed after market data refresh');
+  });
+
+  it('does not rewrite provider retention manifest for dashboard generation failures', () => {
+    const error = new DashboardGenerationError(new Error('dashboard generator exploded'));
+
+    expect(shouldWriteLastGoodRetentionManifest(error)).toBe(false);
+    expect(shouldWriteLastGoodRetentionManifest(new Error('provider failed'))).toBe(true);
   });
 
   it('attaches symbol-universe metadata to source manifests', () => {

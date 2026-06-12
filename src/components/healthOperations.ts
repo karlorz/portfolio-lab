@@ -1,4 +1,15 @@
-import type { HealthData } from '../types/live';
+import type { DataPipelineRunbookAction, HealthData } from '../types/live';
+
+export interface HealthOperationsRunbookAction {
+  dimension: string;
+  code: string;
+  severity: 'ok' | 'warning' | 'critical' | 'unknown';
+  action: string;
+  label: string;
+  artifact?: string;
+  provider?: string;
+  reason?: string;
+}
 
 export interface HealthOperationsSummary {
   headline: string;
@@ -20,6 +31,11 @@ export interface HealthOperationsSummary {
     status: string;
     topDimension: string | null;
     label: string;
+    runbook: {
+      status: string;
+      topCause: HealthOperationsRunbookAction | null;
+      actions: HealthOperationsRunbookAction[];
+    } | null;
   } | null;
   topCauses: string[];
 }
@@ -27,6 +43,29 @@ export interface HealthOperationsSummary {
 const normalizeSystemStatus = (status: string | undefined): string => (
   status === 'healthy' ? 'healthy' : status ?? 'unknown'
 );
+
+const runbookScopeLabel = (action: DataPipelineRunbookAction): string => {
+  if (action.artifact) return `${action.dimension}/${action.artifact}`;
+  if (action.provider) return `${action.dimension}/${action.provider}`;
+  return action.dimension;
+};
+
+const normalizeRunbookAction = (
+  action: DataPipelineRunbookAction | null | undefined,
+): HealthOperationsRunbookAction | null => {
+  if (!action) return null;
+  const scope = runbookScopeLabel(action);
+  return {
+    dimension: action.dimension,
+    code: action.code,
+    severity: action.severity,
+    action: action.action,
+    label: `${scope}: ${action.action}`,
+    artifact: action.artifact,
+    provider: action.provider,
+    reason: action.reason,
+  };
+};
 
 export function summarizeHealthOperations(health: HealthData): HealthOperationsSummary {
   const freshnessEntries = Object.entries(health.data_freshness || {});
@@ -50,6 +89,18 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
   const slo = health.data_pipeline_slo;
   const sloStatus = slo?.status ?? null;
   const sloTopDimension = slo?.top_dimension ?? null;
+  const runbookActions = (slo?.runbook?.actions ?? [])
+    .map(normalizeRunbookAction)
+    .filter((action): action is HealthOperationsRunbookAction => action !== null)
+    .slice(0, 6);
+  const runbookTopCause = normalizeRunbookAction(slo?.runbook?.top_cause) ?? runbookActions[0] ?? null;
+  const runbook = slo?.runbook
+    ? {
+      status: slo.runbook.status,
+      topCause: runbookTopCause,
+      actions: runbookActions,
+    }
+    : null;
   const sloFailingDimensions = Object.entries(slo?.dimensions ?? {})
     .filter(([, dimension]) => dimension.status !== 'ok')
     .map(([name, dimension]) => `${name}: ${dimension.message ?? `status ${dimension.status}`}`);
@@ -79,7 +130,11 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
       const lagLabel = data.market_lag_days === undefined ? 'stale' : 'market lag';
       return `${symbol} ${lagLabel} ${lagDays}d (last update ${data.last_update})`;
     });
-  const topCauses = sloFailingDimensions.length > 0 ? sloFailingDimensions : freshnessCauses;
+  const topCauses = runbookTopCause
+    ? [runbookTopCause.label]
+    : sloFailingDimensions.length > 0
+      ? sloFailingDimensions
+      : freshnessCauses;
 
   return {
     headline,
@@ -101,6 +156,7 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
       status: slo.status,
       topDimension: slo.top_dimension,
       label: sloLabel,
+      runbook,
     } : null,
     topCauses,
   };

@@ -1,13 +1,19 @@
 """Tests for broker/local market data consistency reporting."""
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from src.broker.alpaca import Position
+from src.data.market_db_sync import sync_prices_json_to_market_db
 from src.monitor.market_data_consistency import (
+    MarketDataSemanticsError,
     broker_market_data_consistency_report,
+    require_true_ohlc_price_rows,
     reconcile_price_providers,
 )
 
@@ -26,6 +32,67 @@ def _price_db(path: Path, rows: list[tuple[str, str, float]]) -> Path:
         )
         conn.executemany("INSERT INTO prices (symbol, date, close) VALUES (?, ?, ?)", rows)
     return path
+
+
+def _write_prices_json(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_true_ohlc_guard_rejects_adjusted_close_proxy_rows() -> None:
+    rows = [
+        {
+            "symbol": "SPY",
+            "date": "2026-06-11",
+            "open": 612.34,
+            "high": 612.34,
+            "low": 612.34,
+            "close": 612.34,
+            "volume": 0,
+            "price_semantics": "adjusted_close_proxy_ohlc",
+            "is_adjusted_close_proxy": 1,
+        }
+    ]
+
+    with pytest.raises(MarketDataSemanticsError, match="requires true OHLC.*adjusted-close proxy"):
+        require_true_ohlc_price_rows(rows, consumer="bayesian_vol")
+
+
+def test_true_ohlc_guard_allows_true_ohlc_rows() -> None:
+    rows = [
+        {
+            "symbol": "SPY",
+            "date": "2026-06-11",
+            "open": 610.0,
+            "high": 615.0,
+            "low": 609.0,
+            "close": 612.34,
+            "volume": 12_000_000,
+            "price_semantics": "true_ohlcv",
+            "is_adjusted_close_proxy": 0,
+        }
+    ]
+
+    assert require_true_ohlc_price_rows(rows, consumer="bayesian_vol") == rows
+
+
+def test_consistency_report_accepts_synced_proxy_rows_for_latest_close(tmp_path: Path) -> None:
+    prices_path = tmp_path / "prices.json"
+    db_path = tmp_path / "market.db"
+    _write_prices_json(prices_path, {"SPY": [{"d": "2026-06-11", "p": 612.34}]})
+    sync_prices_json_to_market_db(prices_path=prices_path, db_path=db_path)
+    positions = [Position("SPY", 10, 500.0, 612.95, 6129.5, 1129.5, 0.226)]
+
+    report = broker_market_data_consistency_report(
+        positions,
+        db_path=db_path,
+        warn_threshold_pct=1.0,
+        now=datetime(2026, 6, 11, 22, tzinfo=timezone.utc),
+    )
+
+    assert report["status"] == "ok"
+    assert report["rows"][0]["local_source"] == "market_db"
+    assert report["rows"][0]["local_price"] == 612.34
+    assert report["rows"][0]["status"] == "ok"
 
 
 def test_consistency_report_ok_for_matching_prices(tmp_path: Path) -> None:

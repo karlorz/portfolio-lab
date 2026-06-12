@@ -4,31 +4,62 @@ import type { SmartRebalanceData } from '../types/live';
 // ── Rebalance Health Types ────────────────────────────────────────────
 
 export interface RebalanceHealthData {
-  generated: string;
-  next_rebalance: {
+  generated?: string;
+  next_rebalance?: {
     date: string;
     days_until: number;
     frequency: string;
   };
-  schedule_compliance: {
+  schedule_compliance?: {
     on_time: number;
     delayed: number;
     total: number;
     compliance_pct: number;
   };
-  execution_history: Array<{
+  execution_history?: Array<{
     date: string;
     time: string;
     orders: number;
     total_value: number;
     symbols: string[];
   }>;
-  total_executions: number;
+  total_executions?: number;
+  market_data_consistency?: {
+    status: string;
+    reason?: string;
+    checked_at?: string;
+    rows?: Array<Record<string, unknown>>;
+    warnings?: string[];
+  };
+  alpaca_feed_entitlement?: {
+    configured_feed: string;
+    effective_feed: string;
+    entitlement: string;
+    delayed: boolean;
+    acceptable_for_live: boolean;
+    policy_decision: string;
+    reason?: string;
+  };
 }
 
 interface RebalanceHealthPanelProps {
   rebalanceData: SmartRebalanceData | null | undefined;
   healthData: RebalanceHealthData | null | undefined;
+}
+
+export interface RebalanceLiveDiagnosticSummary {
+  hasDiagnostics: boolean;
+  feedEntitlement: {
+    status: string;
+    label: string;
+    detail: string;
+    acceptableForLive: boolean;
+  } | null;
+  marketDataConsistency: {
+    status: string;
+    label: string;
+    detail: string;
+  } | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -52,6 +83,47 @@ function complianceColor(pct: number): string {
   return '#ef4444';
 }
 
+function formatStatus(status: string): string {
+  return status.replace(/_/g, ' ');
+}
+
+function diagnosticUrgency(status: string, ok: boolean): 'low' | 'moderate' | 'high' {
+  if (ok || status === 'ok' || status === 'accept') return 'low';
+  if (status === 'unavailable' || status === 'warning') return 'moderate';
+  return 'high';
+}
+
+export function summarizeRebalanceLiveDiagnostics(
+  healthData: RebalanceHealthData | null | undefined
+): RebalanceLiveDiagnosticSummary {
+  const feed = healthData?.alpaca_feed_entitlement
+    ? {
+        status: healthData.alpaca_feed_entitlement.policy_decision,
+        label: `Feed ${healthData.alpaca_feed_entitlement.policy_decision}: `
+          + `${healthData.alpaca_feed_entitlement.effective_feed} / `
+          + `${healthData.alpaca_feed_entitlement.entitlement}`,
+        detail: healthData.alpaca_feed_entitlement.reason
+          ?? (healthData.alpaca_feed_entitlement.acceptable_for_live ? 'live acceptable' : 'not live acceptable'),
+        acceptableForLive: healthData.alpaca_feed_entitlement.acceptable_for_live,
+      }
+    : null;
+
+  const consistency = healthData?.market_data_consistency
+    ? {
+        status: healthData.market_data_consistency.status,
+        label: `Market data ${formatStatus(healthData.market_data_consistency.status)}`,
+        detail: healthData.market_data_consistency.reason
+          ?? (healthData.market_data_consistency.warnings?.[0] || 'no consistency warnings'),
+      }
+    : null;
+
+  return {
+    hasDiagnostics: Boolean(feed || consistency),
+    feedEntitlement: feed,
+    marketDataConsistency: consistency,
+  };
+}
+
 // ── Component ─────────────────────────────────────────────────────────
 
 export function RebalanceHealthPanel({ rebalanceData, healthData }: RebalanceHealthPanelProps) {
@@ -61,6 +133,10 @@ export function RebalanceHealthPanel({ rebalanceData, healthData }: RebalanceHea
     }
     return null;
   }, [healthData]);
+  const liveDiagnostics = useMemo(
+    () => summarizeRebalanceLiveDiagnostics(healthData),
+    [healthData]
+  );
 
   if (!rebalanceData && !healthData) {
     return (
@@ -137,6 +213,45 @@ export function RebalanceHealthPanel({ rebalanceData, healthData }: RebalanceHea
                 {healthData.schedule_compliance.delayed} delayed
               </span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Live Data Diagnostics ───────────────────────────────── */}
+      {liveDiagnostics.hasDiagnostics && (
+        <div className="rh-state-section">
+          <h4>Live Data Diagnostics</h4>
+          <div className="rh-state-grid">
+            {liveDiagnostics.feedEntitlement && (
+              <div className="rh-state-item">
+                <label>Feed Policy</label>
+                <span
+                  className={`rh-badge rh-urgency-${diagnosticUrgency(
+                    liveDiagnostics.feedEntitlement.status,
+                    liveDiagnostics.feedEntitlement.acceptableForLive
+                  )}`}
+                >
+                  {liveDiagnostics.feedEntitlement.status.toUpperCase()}
+                </span>
+                <small>{liveDiagnostics.feedEntitlement.label}</small>
+                <small>{liveDiagnostics.feedEntitlement.detail}</small>
+              </div>
+            )}
+            {liveDiagnostics.marketDataConsistency && (
+              <div className="rh-state-item">
+                <label>Market Data</label>
+                <span
+                  className={`rh-badge rh-urgency-${diagnosticUrgency(
+                    liveDiagnostics.marketDataConsistency.status,
+                    liveDiagnostics.marketDataConsistency.status === 'ok'
+                  )}`}
+                >
+                  {liveDiagnostics.marketDataConsistency.status.toUpperCase()}
+                </span>
+                <small>{liveDiagnostics.marketDataConsistency.label}</small>
+                <small>{liveDiagnostics.marketDataConsistency.detail}</small>
+              </div>
+            )}
           </div>
         </div>
       )}

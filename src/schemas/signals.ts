@@ -644,11 +644,28 @@ const DataPipelineSloDimensionSchema = z.object({
   message: z.optional(z.string()),
 }).passthrough();
 
+const DataPipelineRunbookActionSchema = z.object({
+  dimension: z.string(),
+  code: z.string(),
+  severity: z.enum(['ok', 'warning', 'critical', 'unknown']),
+  action: z.string(),
+  artifact: z.optional(z.string()),
+  provider: z.optional(z.string()),
+  reason: z.optional(z.string()),
+}).passthrough();
+
+const DataPipelineRunbookSchema = z.object({
+  status: z.enum(['ok', 'warning', 'critical', 'unknown']),
+  top_cause: z.nullable(DataPipelineRunbookActionSchema),
+  actions: z.array(DataPipelineRunbookActionSchema),
+}).passthrough();
+
 const DataPipelineSloSchema = z.object({
   schema_version: z.string(),
   status: z.enum(['ok', 'warning', 'critical', 'unknown']),
   top_dimension: z.nullable(z.string()),
   dimensions: z.record(z.string(), DataPipelineSloDimensionSchema),
+  runbook: z.optional(DataPipelineRunbookSchema),
   error: z.optional(z.string()),
 }).passthrough();
 
@@ -738,22 +755,90 @@ export const AnalyticsDataSchema = z.object({
 // ---------------------------------------------------------------------------
 // RebalanceHealthSchema — /data/rebalance_health.json
 // ---------------------------------------------------------------------------
+const RebalanceExecutionSchema = z.object({
+  date: z.string(),
+  time: z.string(),
+  orders: z.number(),
+  total_value: z.number(),
+  symbols: z.array(z.string()),
+}).passthrough();
+
+const MarketDataConsistencySchema = z.object({
+  status: z.string(),
+  reason: z.optional(z.string()),
+  checked_at: z.optional(z.string()),
+  rows: z.optional(z.array(z.record(z.string(), z.unknown()))),
+  warnings: z.optional(z.array(z.string())),
+}).passthrough();
+
+const AlpacaFeedEntitlementSchema = z.object({
+  configured_feed: z.string(),
+  effective_feed: z.string(),
+  entitlement: z.string(),
+  delayed: z.boolean(),
+  acceptable_for_live: z.boolean(),
+  policy_decision: z.string(),
+  reason: z.optional(z.string()),
+}).passthrough();
+
 export const RebalanceHealthSchema = z.object({
-  current_turnover_pct: z.number(),
-  max_daily_turnover: z.number(),
-  max_monthly_turnover: z.number(),
-  max_annual_turnover: z.number(),
-  daily_budget_used: z.number(),
-  monthly_budget_used: z.number(),
-  annual_budget_used: z.number(),
-  recent_rebalances: z.array(z.object({
+  generated: z.optional(z.string()),
+  next_rebalance: z.optional(z.object({
+    date: z.string(),
+    days_until: z.number(),
+    frequency: z.string(),
+  }).passthrough()),
+  schedule_compliance: z.optional(z.object({
+    on_time: z.number(),
+    delayed: z.number(),
+    total: z.number(),
+    compliance_pct: z.number(),
+  }).passthrough()),
+  execution_history: z.optional(z.array(RebalanceExecutionSchema)),
+  total_executions: z.optional(z.number()),
+  market_data_consistency: z.optional(MarketDataConsistencySchema),
+  alpaca_feed_entitlement: z.optional(AlpacaFeedEntitlementSchema),
+  current_turnover_pct: z.optional(z.number()),
+  max_daily_turnover: z.optional(z.number()),
+  max_monthly_turnover: z.optional(z.number()),
+  max_annual_turnover: z.optional(z.number()),
+  daily_budget_used: z.optional(z.number()),
+  monthly_budget_used: z.optional(z.number()),
+  annual_budget_used: z.optional(z.number()),
+  recent_rebalances: z.optional(z.array(z.object({
     date: z.string(),
     turnover_pct: z.number(),
     cost_bps: z.number(),
     trigger: z.string(),
-  })),
-  cost_drag_bps: z.number(),
-}).passthrough();
+  }).passthrough())),
+  cost_drag_bps: z.optional(z.number()),
+}).passthrough().superRefine((data, ctx) => {
+  const hasGeneratedContract = Boolean(
+    data.generated
+    && data.next_rebalance
+    && data.schedule_compliance
+    && data.execution_history
+    && typeof data.total_executions === 'number'
+  );
+  const hasLegacyTurnoverContract = Boolean(
+    typeof data.current_turnover_pct === 'number'
+    && typeof data.max_daily_turnover === 'number'
+    && typeof data.max_monthly_turnover === 'number'
+    && typeof data.max_annual_turnover === 'number'
+    && typeof data.daily_budget_used === 'number'
+    && typeof data.monthly_budget_used === 'number'
+    && typeof data.annual_budget_used === 'number'
+    && data.recent_rebalances
+    && typeof data.cost_drag_bps === 'number'
+  );
+
+  if (!hasGeneratedContract && !hasLegacyTurnoverContract) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Expected generated schedule contract or legacy turnover contract',
+    });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // FredMacroSchema — FRED-MD macro regime signal

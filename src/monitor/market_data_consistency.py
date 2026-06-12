@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from src.data.market_db_sync import ADJUSTED_CLOSE_PROXY_SEMANTICS
 from src.paths import MARKET_DB, sqlite_connect
 
 
@@ -20,6 +21,10 @@ DEFAULT_PROVIDER_MAX_LATEST_LAG_DAYS = int(
     os.getenv("MARKET_DATA_RECON_MAX_LATEST_LAG_DAYS", "1")
 )
 DEFAULT_PROVIDER_MAX_OFFENDERS = int(os.getenv("MARKET_DATA_RECON_MAX_OFFENDERS", "5"))
+
+
+class MarketDataSemanticsError(ValueError):
+    """Raised when a consumer requests true OHLC bars from proxy-only rows."""
 
 
 def _position_value(position: Any, key: str, default: Any = None) -> Any:
@@ -63,6 +68,60 @@ def _row_adjusted_close(row: Mapping[str, Any]) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _mapping_value(row: Mapping[str, Any], key: str, default: Any = None) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(key, default)
+    try:
+        return row[key]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
+def is_adjusted_close_proxy_price_row(row: Mapping[str, Any]) -> bool:
+    """Return true when row metadata says OHLC fields are adjusted-close proxies."""
+    proxy_flag = _mapping_value(row, "is_adjusted_close_proxy")
+    if isinstance(proxy_flag, bool):
+        return proxy_flag
+    if isinstance(proxy_flag, int | float):
+        return int(proxy_flag) == 1
+    if isinstance(proxy_flag, str):
+        normalized_flag = proxy_flag.strip().lower()
+        if normalized_flag in {"1", "true", "yes", "y"}:
+            return True
+        if normalized_flag in {"0", "false", "no", "n", ""}:
+            return False
+
+    semantics = str(_mapping_value(row, "price_semantics", "") or "").strip().lower()
+    return semantics == ADJUSTED_CLOSE_PROXY_SEMANTICS
+
+
+def require_true_ohlc_price_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    consumer: str = "consumer",
+) -> list[Mapping[str, Any]]:
+    """Validate that rows are safe for consumers requiring true OHLC bars.
+
+    Rows synced from compact public prices carry adjusted-close proxy metadata:
+    open/high/low/close are all the adjusted close, and volume is zero. Latest
+    close and freshness consumers may use those rows, but realized-volatility,
+    intraday-range, execution-price, or volume-sensitive consumers should call
+    this guard before interpreting OHLC fields.
+    """
+    checked_rows = list(rows)
+    proxy_rows = [row for row in checked_rows if is_adjusted_close_proxy_price_row(row)]
+    if proxy_rows:
+        first = proxy_rows[0]
+        symbol = _mapping_value(first, "symbol", "unknown")
+        row_date = _mapping_value(first, "date", "unknown")
+        raise MarketDataSemanticsError(
+            f"{consumer} requires true OHLC bars but received adjusted-close proxy "
+            f"rows; first proxy row: {symbol} {row_date}. Use adjusted-close or "
+            "close-only data instead."
+        )
+    return checked_rows
 
 
 def _latest_rows_by_symbol(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:

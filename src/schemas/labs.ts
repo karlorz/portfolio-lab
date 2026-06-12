@@ -214,6 +214,29 @@ export const PublicDataSizeBudgetSchema = z.object({
   requires_pagination: z.boolean().optional(),
 }).passthrough();
 
+export const PublicDataQualityIssueCountsSchema = z.object({
+  duplicate_dates: NonNegativeIntegerSchema,
+  empty_symbols: NonNegativeIntegerSchema,
+  extreme_returns: NonNegativeIntegerSchema,
+  internal_gaps: NonNegativeIntegerSchema,
+  invalid_dates: NonNegativeIntegerSchema,
+  invalid_prices: NonNegativeIntegerSchema,
+  missing_required_keys: NonNegativeIntegerSchema,
+  non_monotonic_rows: NonNegativeIntegerSchema,
+  non_object_records: NonNegativeIntegerSchema,
+  split_like_returns: NonNegativeIntegerSchema,
+  stale_latest_dates: NonNegativeIntegerSchema,
+  total: NonNegativeIntegerSchema,
+}).strict();
+
+export const PublicDataQualitySummarySchema = z.object({
+  artifact: z.string(),
+  schema_version: z.string().optional(),
+  generated_at: z.string().optional(),
+  status: z.enum(['ok', 'warn', 'fail', 'unavailable']),
+  issue_counts: PublicDataQualityIssueCountsSchema.optional(),
+}).strict();
+
 export const PublicDataSourceMetadataSchema = z.object({
   provider: z.string().optional(),
   feed: z.string().optional(),
@@ -224,6 +247,7 @@ export const PublicDataSourceMetadataSchema = z.object({
   row_count: z.nullable(z.number()).optional(),
   failure_reason: z.nullable(z.string()).optional(),
   fallback_reason: z.nullable(z.string()).optional(),
+  data_quality: PublicDataQualitySummarySchema.optional(),
 }).passthrough();
 
 export const PublicDataIndexEntrySchema = z.object({
@@ -243,10 +267,18 @@ export const PublicDataIndexEntrySchema = z.object({
   generated_at: z.nullable(z.string()).optional(),
 }).passthrough();
 
+export const PublicDataIndexSourceManifestSchema = z.object({
+  path: z.string(),
+  schema_version: z.string(),
+  generated_at: z.string(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
 export const PublicDataIndexSchema = z.object({
   schema_version: z.string(),
   entries: z.array(PublicDataIndexEntrySchema),
   generated_at: z.string().optional(),
+  source_manifest: PublicDataIndexSourceManifestSchema.optional(),
 }).passthrough();
 
 export const LabsEndpointStatusSchema = z.object({

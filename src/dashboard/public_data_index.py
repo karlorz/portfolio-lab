@@ -294,12 +294,52 @@ def _load_source_manifest(public_dir: Path) -> dict[str, Any] | None:
         return None
     return {
         "path": "source_manifest.json",
+        "schema_version": payload.get("schema_version"),
+        "generated_at": payload.get("generated_at"),
         "artifacts": {
             str(row.get("artifact")): row
             for row in artifacts
             if isinstance(row, dict) and isinstance(row.get("artifact"), str)
         },
     }
+
+
+_QUALITY_ISSUE_COUNT_KEYS = (
+    "duplicate_dates",
+    "empty_symbols",
+    "extreme_returns",
+    "internal_gaps",
+    "invalid_dates",
+    "invalid_prices",
+    "missing_required_keys",
+    "non_monotonic_rows",
+    "non_object_records",
+    "split_like_returns",
+    "stale_latest_dates",
+    "total",
+)
+
+
+def _source_quality_metadata(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    quality = row.get("data_quality")
+    if not isinstance(quality, Mapping):
+        return None
+
+    metadata = {
+        key: quality.get(key)
+        for key in ("artifact", "schema_version", "generated_at", "status")
+        if key in quality
+    }
+    issue_counts = quality.get("issue_counts")
+    if isinstance(issue_counts, Mapping):
+        counts = {
+            key: value
+            for key in _QUALITY_ISSUE_COUNT_KEYS
+            if isinstance((value := issue_counts.get(key)), int) and not isinstance(value, bool)
+        }
+        if counts:
+            metadata["issue_counts"] = counts
+    return metadata or None
 
 
 def _source_metadata_for(filename: str, source_manifest: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -311,7 +351,7 @@ def _source_metadata_for(filename: str, source_manifest: Mapping[str, Any] | Non
     row = artifacts.get(filename)
     if not isinstance(row, Mapping):
         return None
-    return {
+    metadata = {
         key: row.get(key)
         for key in (
             "provider",
@@ -326,6 +366,10 @@ def _source_metadata_for(filename: str, source_manifest: Mapping[str, Any] | Non
         )
         if key in row
     }
+    data_quality = _source_quality_metadata(row)
+    if data_quality is not None:
+        metadata["data_quality"] = data_quality
+    return metadata
 
 
 def _source_manifest_row_for(filename: str, source_manifest: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
@@ -336,6 +380,33 @@ def _source_manifest_row_for(filename: str, source_manifest: Mapping[str, Any] |
         return None
     row = artifacts.get(filename)
     return row if isinstance(row, Mapping) else None
+
+
+def _source_manifest_identity(
+    source_manifest: Mapping[str, Any] | None,
+    entries: list[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if source_manifest is None:
+        return None
+    source_entry = next(
+        (
+            entry
+            for entry in entries
+            if entry.get("filename") == "source_manifest.json" and entry.get("status") == "present"
+        ),
+        None,
+    )
+    if source_entry is None:
+        return None
+    sha256 = source_entry.get("sha256")
+    if not isinstance(sha256, str):
+        return None
+    return {
+        "path": source_entry.get("path", source_manifest.get("path", "source_manifest.json")),
+        "schema_version": source_manifest.get("schema_version") or source_entry.get("schema_version"),
+        "generated_at": source_manifest.get("generated_at") or source_entry.get("generated_at"),
+        "sha256": sha256,
+    }
 
 
 def _policy_value(row: Mapping[str, Any] | None, key: str, allowed: set[str], default: str) -> str:
@@ -624,9 +695,13 @@ def build_public_data_index(
     ]
     _write_hash_cache(resolved_cache_path if use_hash_cache else None, hash_cache_updates)
 
-    return {
+    index = {
         "schema_version": PUBLIC_DATA_INDEX_SCHEMA_VERSION,
         "files": [entry["filename"] for entry in entries if entry["status"] == "present"],
         "entries": entries,
         "generated_at": generated_at,
     }
+    source_manifest_identity = _source_manifest_identity(source_manifest, entries)
+    if source_manifest_identity is not None:
+        index["source_manifest"] = source_manifest_identity
+    return index

@@ -54,6 +54,27 @@ def _make_generator(tmp_path):
     return gen, db_path
 
 
+def _write_ok_source_manifest(public_dir: Path) -> None:
+    """Write a compact live source manifest for healthy health-json fixtures."""
+    (public_dir / "source_manifest.json").write_text(json.dumps({
+        "artifacts": [
+            {
+                "artifact": "prices.json",
+                "provider": "Yahoo Finance",
+                "feed": "chart/v8",
+                "source_mode": "live",
+                "status": "success",
+                "data_quality": {
+                    "artifact": "data_quality.json",
+                    "schema_version": "price-data-quality/v1",
+                    "status": "ok",
+                    "issue_counts": {"total": 0},
+                },
+            },
+        ],
+    }))
+
+
 class TestSignalStalenessNormalization:
     """Signal staleness should distinguish stale from optional unavailable."""
 
@@ -460,6 +481,40 @@ class TestHealthJSON:
 
         assert data["fred_readiness"]["reason"] == "missing_fred_api_key"
         assert data["data_pipeline_slo"]["dimensions"]["fred_readiness"]["status"] == "warning"
+        gen.conn.close()
+
+    def test_rebalance_live_diagnostics_populate_health_slo(self, tmp_path):
+        """Rebalance live diagnostics should be included in dashboard health SLO output."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / "rebalance_health.json").write_text(json.dumps({
+            "generated": "2026-06-12T16:43:07.176691",
+            "market_data_consistency": {
+                "status": "unavailable",
+                "reason": "alpaca_not_configured",
+                "checked_at": "2026-06-12T08:43:07.177011+00:00",
+                "rows": [],
+                "warnings": [],
+            },
+            "alpaca_feed_entitlement": {
+                "configured_feed": "iex",
+                "effective_feed": "iex",
+                "entitlement": "unknown",
+                "delayed": False,
+                "acceptable_for_live": False,
+                "policy_decision": "reject",
+                "reason": "missing_entitlement",
+            },
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_health_json()
+        with open(path) as f:
+            data = json.load(f)
+
+        assert data["data_pipeline_slo"]["top_dimension"] == "alpaca_feed_entitlement"
+        assert data["data_pipeline_slo"]["dimensions"]["alpaca_feed_entitlement"]["status"] == "critical"
+        assert data["data_pipeline_slo"]["dimensions"]["market_data_consistency"]["status"] == "warning"
         gen.conn.close()
 
     def test_provider_latest_date_symbols_are_fresh_even_with_calendar_lag(self, tmp_path):
@@ -1369,6 +1424,7 @@ class TestHealthJSONEdgeCases:
         """Fresh data and no cron errors gives healthy status."""
         gen, _ = _make_generator(tmp_path)
         (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+        _write_ok_source_manifest(tmp_path)
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 path = gen.generate_health_json()

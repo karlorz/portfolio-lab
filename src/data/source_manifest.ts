@@ -1,10 +1,23 @@
 import { SYMBOL_UNIVERSE_METADATA } from './symbol_universe';
+import type {
+  PriceDataQualityStatus,
+  PriceIssueCounts,
+} from './price_quality';
 
 export const MARKET_DATA_SOURCE_MANIFEST_SCHEMA_VERSION = 'market-data-source-manifest/v1';
 export const MARKET_DATA_SOURCE_MANIFEST_FILENAME = 'source_manifest.json';
 
 export type MarketDataSourceMode = 'live' | 'last_good' | 'cached' | 'stale_cached' | 'synthetic';
 export type MarketDataSourceStatus = 'success' | 'degraded' | 'failed' | 'skipped';
+export type MarketDataQualityStatus = PriceDataQualityStatus | 'unavailable';
+
+export interface MarketDataQualitySummary {
+  artifact: string;
+  schema_version?: string;
+  generated_at?: string;
+  status: MarketDataQualityStatus;
+  issue_counts?: PriceIssueCounts;
+}
 
 export interface MarketDataSourceRow {
   artifact: string;
@@ -21,6 +34,7 @@ export interface MarketDataSourceRow {
   symbols?: string[];
   failure_reason?: string | null;
   fallback_reason?: string | null;
+  data_quality?: MarketDataQualitySummary;
   notes?: string[];
 }
 
