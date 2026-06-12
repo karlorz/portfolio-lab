@@ -32,10 +32,15 @@ const WINDOW_LABELS: Record<string, string> = {
   options_expiry: 'OPEX',
 };
 
+export function formatCalendarWindow(nextWindow: string, daysToNext: number): string {
+  const label = WINDOW_LABELS[nextWindow] || nextWindow;
+  return `${label} in ${daysToNext}d`;
+}
+
 export function CalendarSeasonalityPanel({ data }: CalendarSeasonalityPanelProps) {
   if (!data || !data.active) {
     return (
-      <div className="panel">
+      <div className="panel signal-card calendar-seasonality-card">
         <h3>Calendar Seasonality (v3.50)</h3>
         <p className="muted">Market closed or no data</p>
       </div>
@@ -46,19 +51,27 @@ export function CalendarSeasonalityPanel({ data }: CalendarSeasonalityPanelProps
   const modifierPct = (data.modifier * 100).toFixed(0);
 
   return (
-    <div className="panel">
-      <h3>Calendar Seasonality (v3.50)</h3>
-      <div className="panel-grid">
+    <div className="panel signal-card calendar-seasonality-card">
+      <div className="signal-card-header">
+        <h3>Calendar Seasonality (v3.50)</h3>
+        <span className="signal-status-pill signal-status-info">Execution Timing</span>
+      </div>
+
+      <div className="signal-card-hero compact">
+        <div className="signal-hero-summary">
+          <span className="label">Recommendation</span>
+          <span className="value hero-value" style={{ color: effectColor }}>
+            {data.recommendation.toUpperCase()}
+          </span>
+          <span className="subtext">{data.effect.toLowerCase()} execution effect</span>
+        </div>
+      </div>
+
+      <div className="panel-grid signal-kpi-grid">
         <div className="metric">
-          <span className="label">Urgency Modifier</span>
+          <span className="label">Urgency</span>
           <span className="value" style={{ color: effectColor }}>
             {data.modifier.toFixed(2)}x ({modifierPct}%)
-          </span>
-        </div>
-        <div className="metric">
-          <span className="label">Recommendation</span>
-          <span className="value" style={{ color: effectColor }}>
-            {data.recommendation.toUpperCase()}
           </span>
         </div>
         <div className="metric">
@@ -68,9 +81,9 @@ export function CalendarSeasonalityPanel({ data }: CalendarSeasonalityPanelProps
           </span>
         </div>
         <div className="metric">
-          <span className="label">Next Window</span>
+          <span className="label">Execution Window</span>
           <span className="value">
-            {WINDOW_LABELS[data.next_window] || data.next_window} ({data.days_to_next}d)
+            {formatCalendarWindow(data.next_window, data.days_to_next)}
           </span>
         </div>
       </div>

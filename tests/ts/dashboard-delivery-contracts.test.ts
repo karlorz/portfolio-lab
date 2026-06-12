@@ -15,12 +15,16 @@ describe('dashboard delivery source contracts', () => {
 
   it('syncs fetched prices into market.db before regenerating dashboard health', () => {
     const source = read('scripts/fetch-data.ts');
-    const syncIndex = source.indexOf('python3 -m src.data.market_db_sync');
-    const generatorIndex = source.indexOf('python3 -m src.dashboard.generator');
+    const syncIndex = source.indexOf("runPythonModule('src.data.market_db_sync')");
+    const generatorIndex = source.indexOf("runPythonModule('src.dashboard.generator')");
 
     expect(syncIndex).toBeGreaterThan(-1);
     expect(generatorIndex).toBeGreaterThan(-1);
     expect(syncIndex).toBeLessThan(generatorIndex);
+    expect(source).toContain("const PYTHON_RUNTIME = join(PROJECT_ROOT, 'scripts', 'python_runtime.sh');");
+    expect(source).toContain("execFileSync(PYTHON_RUNTIME, ['-m', moduleName]");
+    expect(source).not.toContain('python3 -m src.data.market_db_sync');
+    expect(source).not.toContain('python3 -m src.dashboard.generator');
   });
 
   it('fails the data job when any configured price symbol returns no rows', () => {

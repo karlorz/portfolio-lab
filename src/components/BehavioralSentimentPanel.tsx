@@ -55,6 +55,8 @@ const SIGNAL_COLORS: Record<string, string> = {
   neutral: '#6b7280',
 };
 
+const signalLabelFor = (signalType: string) => signalType.replace(/_/g, ' ');
+
 function Gauge({ value }: { value: number }) {
   // Map -3..+3 → 0..100%
   const clamped = Math.max(-3, Math.min(3, value));
@@ -114,14 +116,14 @@ function SignalBadge({ signalType, regimeSuppressed }: {
 export function BehavioralSentimentPanel({ data }: BehavioralSentimentPanelProps) {
   if (!data) {
     return (
-      <div className="panel">
+      <div className="panel signal-card behavioral-sentiment-card">
         <h3>Behavioral Sentiment (v2.70)</h3>
         <p className="muted">No behavioral sentiment data available</p>
       </div>
     );
   }
 
-  const signalLabel = data.signal_type.replace(/_/g, ' ');
+  const signalLabel = signalLabelFor(data.signal_type);
   const shiftDirection = data.equity_shift_pct > 0 ? '+' : '';
   const shiftColor = data.equity_shift_pct > 0
     ? '#22c55e'
@@ -130,15 +132,23 @@ export function BehavioralSentimentPanel({ data }: BehavioralSentimentPanelProps
       : '#6b7280';
 
   return (
-    <div className="panel">
-      <h3>Behavioral Sentiment (v2.70)</h3>
+    <div className="panel signal-card behavioral-sentiment-card">
+      <div className="signal-card-header">
+        <h3>Behavioral Sentiment (v2.70)</h3>
+        <span className="signal-status-pill signal-status-muted">Diagnostic only</span>
+      </div>
 
       {/* Fear / Greed gauge */}
-      <div className="panel-section">
+      <div className="signal-card-hero">
         <Gauge value={data.composite_score} />
-        <div className="metric-row center">
+        <div className="signal-hero-summary">
+          <span className="label">Decision</span>
+          <SignalBadge
+            signalType={data.signal_type}
+            regimeSuppressed={data.regime_suppressed}
+          />
           <span className="label">Composite Score</span>
-          <span className="value large">
+          <span className="value hero-value">
             {data.composite_score >= 0 ? '+' : ''}{data.composite_score.toFixed(2)}
           </span>
           <span className="subtext">({signalLabel})</span>
@@ -146,14 +156,7 @@ export function BehavioralSentimentPanel({ data }: BehavioralSentimentPanelProps
       </div>
 
       {/* Signal status */}
-      <div className="panel-grid">
-        <div className="metric">
-          <span className="label">Signal</span>
-          <SignalBadge
-            signalType={data.signal_type}
-            regimeSuppressed={data.regime_suppressed}
-          />
-        </div>
+      <div className="panel-grid signal-kpi-grid">
         <div className="metric">
           <span className="label">Confidence</span>
           <span className="value">{(data.confidence * 100).toFixed(0)}%</span>
@@ -186,7 +189,7 @@ export function BehavioralSentimentPanel({ data }: BehavioralSentimentPanelProps
 
       {/* Options market sentiment */}
       {data.options && (
-        <div className="panel-section">
+        <div className="panel-section signal-card-section">
           <h4>Options Market</h4>
           <div className="panel-grid">
             <div className="metric">
@@ -214,7 +217,7 @@ export function BehavioralSentimentPanel({ data }: BehavioralSentimentPanelProps
 
       {/* Retail flow */}
       {data.retail && (
-        <div className="panel-section">
+        <div className="panel-section signal-card-section">
           <h4>Retail Flow</h4>
           <div className="panel-grid">
             <div className="metric">
@@ -236,7 +239,7 @@ export function BehavioralSentimentPanel({ data }: BehavioralSentimentPanelProps
 
       {/* Social sentiment */}
       {data.social && (
-        <div className="panel-section">
+        <div className="panel-section signal-card-section">
           <h4>Social Sentiment</h4>
           <div className="panel-grid">
             <div className="metric">
@@ -258,7 +261,7 @@ export function BehavioralSentimentPanel({ data }: BehavioralSentimentPanelProps
 
       {/* Backtest finding */}
       {data.backtest_finding && (
-        <div className="panel-section">
+        <div className="panel-section signal-card-section finding-callout">
           <h4>Backtest Finding (Phase 4)</h4>
           <p className="muted small">{data.backtest_finding}</p>
         </div>

@@ -354,6 +354,290 @@ footer code {
   font-size: 0.85rem;
 }
 
+.signal-panels-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.signal-card {
+  min-width: 0;
+  height: 100%;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: #0f172a;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.signal-card-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.signal-card h3 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.signal-card h4 {
+  margin: 0 0 8px;
+  color: #cbd5e1;
+  font-size: 0.84rem;
+  line-height: 1.25;
+}
+
+.signal-status-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.signal-status-muted {
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+}
+
+.signal-status-info {
+  background: rgba(59, 130, 246, 0.16);
+  color: #bfdbfe;
+}
+
+.signal-status-warning {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fde68a;
+}
+
+.signal-card-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(120px, 0.8fr);
+  gap: 14px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.signal-card-hero.compact {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+}
+
+.signal-hero-summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.signal-card .label {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.signal-card .value {
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.94rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.signal-card .hero-value {
+  font-size: 1.5rem;
+}
+
+.signal-card .subtext,
+.signal-card .muted {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.signal-card .small {
+  font-size: 0.78rem;
+}
+
+.signal-card .badge {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.signal-card .badge-suppressed {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+}
+
+.signal-kpi-grid,
+.signal-card .panel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.signal-card .metric {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.signal-card-section {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.finding-callout {
+  padding: 10px 12px;
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.finding-callout p {
+  margin: 0;
+}
+
+.fear-greed-gauge {
+  min-width: 0;
+}
+
+.gauge-bar {
+  position: relative;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #1e293b;
+}
+
+.gauge-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.gauge-needle {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  border-radius: 999px;
+  background: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.7);
+}
+
+.gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.signal-asset-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signal-asset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.signal-asset-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.asset-symbol {
+  display: block;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.asset-values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.windows-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.window-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.window-tag {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 1180px) {
+  .signal-panels-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .signal-card-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .signal-kpi-grid,
+  .signal-card .panel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .alerts-section {
   margin-bottom: 20px;
 }

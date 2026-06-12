@@ -15,7 +15,9 @@ import {
 import { join } from 'path';
 import { existsSync, mkdirSync, renameSync, unlinkSync } from 'fs';
 
+const PROJECT_ROOT = join(import.meta.dir, '..');
 const DATA_DIR = join(import.meta.dir, '..', 'public', 'data');
+const PYTHON_RUNTIME = join(PROJECT_ROOT, 'scripts', 'python_runtime.sh');
 const START_DATE = '2005-01-01';
 const END_DATE = new Date().toISOString().split('T')[0];
 
@@ -125,6 +127,14 @@ export function buildLastGoodRetentionManifest(error: unknown, generatedAt = new
   ], generatedAt);
 }
 
+async function runPythonModule(moduleName: string): Promise<void> {
+  const { execFileSync } = await import('child_process');
+  execFileSync(PYTHON_RUNTIME, ['-m', moduleName], {
+    cwd: PROJECT_ROOT,
+    stdio: 'inherit',
+  });
+}
+
 export async function main() {
   console.log('=== Portfolio-Lab Data Fetcher ===\n');
 
@@ -158,11 +168,7 @@ export async function main() {
 
   // 2. Sync fetched prices into canonical SQLite store for dashboard freshness checks
   console.log('\nSyncing fetched prices into market.db...');
-  const { execSync } = await import('child_process');
-  execSync('python3 -m src.data.market_db_sync', {
-    cwd: join(import.meta.dir, '..'),
-    stdio: 'inherit',
-  });
+  await runPythonModule('src.data.market_db_sync');
 
   // 3. Fetch yield curve data (FRED)
   const yieldResult = await fetchYieldCurveDataWithSummary(START_DATE, END_DATE);
@@ -189,12 +195,9 @@ export async function main() {
   // 5. Regenerate dashboard JSON
   console.log('\nRegenerating dashboard JSON...');
   try {
-    execSync('python3 -m src.dashboard.generator', {
-      cwd: join(import.meta.dir, '..'),
-      stdio: 'inherit',
-    });
+    await runPythonModule('src.dashboard.generator');
   } catch (e) {
-    console.warn('Dashboard generator failed (Python may not be available):', e);
+    console.warn('Dashboard generator failed (Python runtime may not be available):', e);
   }
 
   console.log('\nDone.');
