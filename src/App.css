@@ -3084,6 +3084,377 @@ button.incident-row:hover {
   min-width: 0;
 }
 
+/* ===== Analytics Dashboard Cards ===== */
+.underwater-chart {
+  background: #1e293b;
+  padding: 16px;
+  border-radius: 8px;
+  min-width: 0;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.rolling-metrics-chart {
+  background: #1e293b;
+  padding: 16px;
+  border-radius: 8px;
+  min-width: 0;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.crisis-overlay {
+  background: #1e293b;
+  padding: 16px;
+  border-radius: 8px;
+  min-width: 0;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.underwater-header,
+.rolling-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.underwater-title,
+.rolling-title,
+.crisis-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.underwater-metrics,
+.rolling-legend,
+.underwater-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.underwater-chart .metric-card {
+  min-width: 120px;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  border-left: 1px solid #334155;
+  background: #0f172a;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.underwater-chart .metric-card.good {
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.underwater-chart .metric-card.warning {
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+
+.underwater-chart .metric-card.danger {
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.underwater-chart .metric-label {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.underwater-chart .metric-value {
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.underwater-chart .recharts-responsive-container,
+.rolling-metrics-chart .recharts-responsive-container {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.underwater-chart .legend-item,
+.rolling-metrics-chart .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.underwater-chart .legend-color,
+.rolling-metrics-chart .legend-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.underwater-chart .chart-tooltip,
+.rolling-metrics-chart .chart-tooltip {
+  min-width: 180px;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.35);
+}
+
+.underwater-chart .tooltip-date,
+.rolling-metrics-chart .tooltip-date {
+  margin-bottom: 6px;
+  color: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.underwater-chart .tooltip-row,
+.rolling-metrics-chart .tooltip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.underwater-chart .tooltip-row.recovery,
+.rolling-metrics-chart .tooltip-row.recovery {
+  justify-content: flex-start;
+  color: #34d399;
+}
+
+.underwater-chart .tooltip-label,
+.rolling-metrics-chart .tooltip-label {
+  color: #94a3b8;
+}
+
+.underwater-chart .tooltip-value,
+.rolling-metrics-chart .tooltip-value {
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+}
+
+.underwater-chart .tooltip-value.positive,
+.rolling-metrics-chart .tooltip-value.positive,
+.crisis-overlay .return-value.positive,
+.crisis-overlay .outperformance.positive {
+  color: #34d399;
+}
+
+.underwater-chart .tooltip-value.negative,
+.rolling-metrics-chart .tooltip-value.negative,
+.crisis-overlay .return-value.negative,
+.crisis-overlay .outperformance.negative {
+  color: #f87171;
+}
+
+.crisis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.crisis-card {
+  background: #0f172a;
+  padding: 14px;
+  min-width: 0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.crisis-header,
+.crisis-overlay .return-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.crisis-name {
+  color: #f8fafc;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.crisis-period,
+.crisis-overlay .return-label {
+  color: #94a3b8;
+  font-size: 0.76rem;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.crisis-description {
+  color: #cbd5e1;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.crisis-returns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.crisis-overlay .return-value {
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.crisis-overlay .return-value.na {
+  color: #64748b;
+}
+
+.crisis-outperformance {
+  padding-top: 10px;
+  border-top: 1px solid #1e293b;
+  min-width: 0;
+}
+
+.crisis-overlay .outperformance {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.analytics-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.analytics-card {
+  background: #0f172a;
+  padding: 15px;
+  border-radius: 6px;
+  min-width: 0;
+  border: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.analytics-card label {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.analytics-card span {
+  color: #e2e8f0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.analytics-card span.positive {
+  color: #34d399;
+}
+
+.analytics-card span.negative {
+  color: #f87171;
+}
+
+.analytics-card span.warning {
+  color: #fbbf24;
+}
+
+.analytics-empty {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.analytics-empty p,
+.analytics-empty small {
+  margin: 0;
+}
+
+.analytics-empty small {
+  display: block;
+  margin-top: 6px;
+  color: #94a3b8;
+}
+
+@media (max-width: 768px) {
+  .underwater-header,
+  .rolling-header {
+    flex-direction: column;
+  }
+
+  .underwater-metrics,
+  .rolling-legend,
+  .underwater-legend {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .analytics-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .crisis-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .signal-panel-slot {
   min-width: 0;
 }
@@ -3106,9 +3477,14 @@ button.incident-row:hover {
   .dashboard-grid,
   .dashboard-grid.dashboard-grid-two,
   .dashboard-grid.dashboard-grid-three,
+  .crisis-grid,
   .risk-primary-grid,
   .signal-panels-row {
     grid-template-columns: 1fr;
+  }
+
+  .analytics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

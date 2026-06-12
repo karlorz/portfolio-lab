@@ -129,7 +129,13 @@ test.describe('dashboard browser presentation smoke', () => {
     await expectCardSurface(page, '.risk-card');
 
     await dashboardTab(page, 'Analytics').click();
+    await expect(page.locator('.analytics-summary')).toBeVisible();
+    await expectStyledSurface(page, '.underwater-chart');
+    await expectStyledSurface(page, '.rolling-metrics-chart');
+    await expectStyledSurface(page, '.crisis-overlay');
+    await expectStyledSurface(page, '.analytics-card');
     await expectGridColumns(page, '.dashboard-grid.dashboard-grid-two.analytics-panel-group', 2);
+    await expectNoDocumentOverflow(page);
 
     await dashboardTab(page, 'Rebalance').click();
     await expectCardSurface(page, '.rebalance-health-panel');

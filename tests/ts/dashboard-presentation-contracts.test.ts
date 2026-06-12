@@ -119,6 +119,53 @@ describe('dashboard presentation source contracts', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*\.performance-summary\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
   });
 
+  it('defines loaded Analytics chart shell and summary class contracts', () => {
+    const analyticsCharts = read('src/components/AnalyticsCharts.tsx');
+
+    for (const className of [
+      'underwater-chart',
+      'rolling-metrics-chart',
+      'crisis-overlay',
+      'crisis-grid',
+      'crisis-card',
+    ]) {
+      expect(analyticsCharts).toContain(`className="${className}`);
+    }
+    expect(liveDashboard).toContain('className="analytics-summary"');
+    expect(liveDashboard).toContain('className="analytics-card"');
+    expect(liveDashboard).toContain('className="analytics-empty"');
+
+    for (const selector of ['.underwater-chart', '.rolling-metrics-chart', '.crisis-overlay']) {
+      expectRuleContains(css, selector, [
+        /background:\s*#1e293b;/,
+        /padding:\s*16px;/,
+        /border-radius:\s*8px;/,
+        /min-width:\s*0;/,
+      ]);
+    }
+    expectRuleContains(css, '.analytics-summary', [
+      /display:\s*grid;/,
+      /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/,
+      /gap:\s*16px;/,
+    ]);
+    expectRuleContains(css, '.analytics-card', [
+      /background:\s*#0f172a;/,
+      /padding:\s*15px;/,
+      /border-radius:\s*6px;/,
+      /min-width:\s*0;/,
+    ]);
+    expectRuleContains(css, '.crisis-grid', [
+      /display:\s*grid;/,
+      /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
+    ]);
+    expectRuleContains(css, '.crisis-card', [
+      /background:\s*#0f172a;/,
+      /padding:\s*14px;/,
+      /min-width:\s*0;/,
+    ]);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*\.analytics-summary\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
+  });
+
   it('moves risk presentation panels onto local dashboard CSS classes', () => {
     expectNoUtilityClassTokens('src/components/GarchCvarPanel.tsx');
     expectNoUtilityClassTokens('src/components/EntropyPanel.tsx');
