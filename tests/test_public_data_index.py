@@ -248,6 +248,59 @@ def test_public_index_adds_market_source_metadata_from_manifest(tmp_path: Path) 
     assert entries["source_manifest.json"]["category"] == "market_data"
 
 
+def test_public_index_marks_project_generated_artifacts_public_safe(tmp_path: Path) -> None:
+    dashboard = _write_json(tmp_path / "dashboard.json", {"generated_at": "2026-06-11T00:00:00+00:00"})
+
+    index = build_public_data_index([dashboard], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entry = _entries_by_filename(index)["dashboard.json"]
+    assert entry["redistribution_mode"] == "public_summary"
+    assert entry["license_scope"] == "project_generated"
+    assert entry["public_safe"] is True
+    assert "licensing_notes" in entry
+
+
+def test_public_index_applies_restricted_provider_artifact_policy_without_secrets(tmp_path: Path) -> None:
+    prices = _write_json(tmp_path / "prices.json", {"SPY": [{"d": "2026-06-10", "p": 600.0}]})
+    _write_json(
+        tmp_path / "source_manifest.json",
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [
+                {
+                    "artifact": "prices.json",
+                    "provider": "Licensed Fixture",
+                    "feed": "eod",
+                    "source_mode": "live",
+                    "status": "success",
+                    "fetched_at": "2026-06-11T00:00:00+00:00",
+                    "latest_observation": "2026-06-10",
+                    "row_count": 1,
+                    "redistribution_mode": "restricted",
+                    "license_scope": "licensed_provider",
+                    "public_safe": False,
+                    "provider_account_id": "acct-secret",
+                    "authorization_header": "Bearer secret-token",
+                    "signed_url": "https://provider.example/download?sig=secret",
+                }
+            ],
+        },
+    )
+
+    index = build_public_data_index([prices], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entry = _entries_by_filename(index)["prices.json"]
+    assert entry["redistribution_mode"] == "restricted"
+    assert entry["license_scope"] == "licensed_provider"
+    assert entry["public_safe"] is False
+    assert entry["source_metadata"]["provider"] == "Licensed Fixture"
+    serialized_entry = json.dumps(entry)
+    assert "acct-secret" not in serialized_entry
+    assert "secret-token" not in serialized_entry
+    assert "sig=secret" not in serialized_entry
+
+
 def test_public_index_keeps_source_metadata_optional_for_non_market_entries(tmp_path: Path) -> None:
     dashboard = _write_json(tmp_path / "dashboard.json", {"generated_at": "2026-06-11T00:00:00+00:00"})
 

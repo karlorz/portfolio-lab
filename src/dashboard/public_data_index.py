@@ -72,6 +72,9 @@ _LABS_LIST_PAGINATION_FILES = {
     "labs_replays.json",
 }
 _DEFAULT_LABS_PAGE_SIZE = 1000
+_REDISTRIBUTION_MODES = {"public_summary", "provider_derived", "restricted", "internal_only"}
+_LICENSE_SCOPES = {"project_generated", "public_domain", "provider_terms", "licensed_provider", "internal"}
+_PROVIDER_DERIVED_MARKET_FILES = {"prices.json", "prices_compact.json", "historical.json"}
 
 
 def _sha256_file(path: Path) -> str:
@@ -325,6 +328,63 @@ def _source_metadata_for(filename: str, source_manifest: Mapping[str, Any] | Non
     }
 
 
+def _source_manifest_row_for(filename: str, source_manifest: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if filename == "source_manifest.json" or source_manifest is None:
+        return None
+    artifacts = source_manifest.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        return None
+    row = artifacts.get(filename)
+    return row if isinstance(row, Mapping) else None
+
+
+def _policy_value(row: Mapping[str, Any] | None, key: str, allowed: set[str], default: str) -> str:
+    value = row.get(key) if row is not None else None
+    if isinstance(value, str) and value in allowed:
+        return value
+    return default
+
+
+def _public_safe_value(row: Mapping[str, Any] | None, default: bool) -> bool:
+    value = row.get("public_safe") if row is not None else None
+    return value if isinstance(value, bool) else default
+
+
+def _public_data_policy_for(filename: str, category: str, row: Mapping[str, Any] | None) -> dict[str, Any]:
+    provider = str(row.get("provider", "")).lower() if row is not None else ""
+    if filename == "yields.json" or provider == "fred":
+        default_mode = "public_summary"
+        default_scope = "public_domain"
+        default_safe = True
+        default_notes = "Public macro data or derived summary suitable for dashboard publication."
+    elif filename in _PROVIDER_DERIVED_MARKET_FILES:
+        default_mode = "provider_derived"
+        default_scope = "provider_terms"
+        default_safe = True
+        default_notes = "Provider-derived market data; redistribution depends on provider terms."
+    elif category == "unknown":
+        default_mode = "internal_only"
+        default_scope = "internal"
+        default_safe = False
+        default_notes = "Unknown artifact contract; treat as internal until classified."
+    else:
+        default_mode = "public_summary"
+        default_scope = "project_generated"
+        default_safe = True
+        default_notes = "Project-generated summary artifact suitable for dashboard publication."
+
+    redistribution_mode = _policy_value(row, "redistribution_mode", _REDISTRIBUTION_MODES, default_mode)
+    license_scope = _policy_value(row, "license_scope", _LICENSE_SCOPES, default_scope)
+    public_safe = _public_safe_value(row, default_safe and redistribution_mode not in {"restricted", "internal_only"})
+
+    return {
+        "redistribution_mode": redistribution_mode,
+        "license_scope": license_scope,
+        "public_safe": public_safe,
+        "licensing_notes": default_notes,
+    }
+
+
 def _relative_public_path(path: Path, public_dir: Path, fallback: str) -> str:
     try:
         return path.relative_to(public_dir).as_posix()
@@ -477,6 +537,7 @@ def _public_data_entry(
     relative_path = _relative_public_path(path, public_dir, filename)
     size_budget = measure_public_data_size_budget(path)
     pagination = _write_labs_pagination_shards(path, filename, public_dir, size_budget, validation_status)
+    source_manifest_row = _source_manifest_row_for(filename, source_manifest)
 
     entry = {
         "filename": filename,
@@ -495,6 +556,7 @@ def _public_data_entry(
             hash_cache_updates=hash_cache_updates,
         ),
         "generated_at": _generated_at_for_file(path, generated_at),
+        **_public_data_policy_for(filename, category, source_manifest_row),
     }
     if pagination is not None:
         entry["pagination"] = pagination
