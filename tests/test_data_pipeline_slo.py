@@ -215,3 +215,150 @@ def test_slo_classifies_live_fred_readiness_failure_as_critical() -> None:
     assert slo["status"] == "critical"
     assert slo["top_dimension"] == "fred_readiness"
     assert slo["dimensions"]["fred_readiness"]["status"] == "critical"
+
+
+def test_slo_runbook_maps_yahoo_provider_failure_without_leaking_fallback_details() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest={
+            "artifacts": [
+                {
+                    "artifact": "prices.json",
+                    "provider": "Yahoo Finance",
+                    "source_mode": "last_good",
+                    "status": "failed",
+                    "failure_reason": "rate_limited",
+                    "fallback_reason": "https://query.example.test/?token=super-secret-token",
+                }
+            ]
+        },
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    runbook = slo["runbook"]
+
+    assert runbook["top_cause"]["code"] == "yahoo_provider_failure"
+    assert runbook["top_cause"]["dimension"] == "provider"
+    assert runbook["top_cause"]["artifact"] == "prices.json"
+    assert "Yahoo" in runbook["top_cause"]["action"]
+    assert "super-secret-token" not in str(runbook)
+
+
+def test_slo_runbook_maps_fred_missing_key_readiness() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        fred_readiness={
+            "status": "critical",
+            "readiness": "fail",
+            "reason": "missing_fred_api_key",
+            "remediation": "Set FRED_API_KEY before live operation; current secret is super-secret-fred-key.",
+        },
+    )
+
+    runbook = slo["runbook"]
+
+    assert runbook["top_cause"]["code"] == "fred_missing_api_key"
+    assert "FRED_API_KEY" in runbook["top_cause"]["action"]
+    assert "super-secret-fred-key" not in str(runbook)
+
+
+def test_slo_runbook_maps_synthetic_fred_fallback() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest={
+            "artifacts": [
+                {
+                    "artifact": "yields.json",
+                    "provider": "FRED",
+                    "source_mode": "synthetic",
+                    "status": "degraded",
+                    "failure_reason": "missing_api_key",
+                    "fallback_reason": "missing_api_key",
+                }
+            ]
+        },
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["runbook"]["top_cause"]["code"] == "fred_synthetic_fallback"
+    assert "synthetic" in slo["runbook"]["top_cause"]["action"]
+
+
+def test_slo_runbook_maps_stale_quote_artifact() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(status="stale"),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["runbook"]["top_cause"]["code"] == "stale_quote"
+    assert slo["runbook"]["top_cause"]["dimension"] == "artifact"
+    assert "prices" in slo["runbook"]["top_cause"]["action"]
+
+
+def test_slo_runbook_maps_provider_divergence() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        provider_reconciliation={
+            "status": "warning",
+            "failure_type": "provider_divergence",
+            "issue_counts": {"adjusted_close_divergence": 1},
+            "message": "1 provider divergence detected",
+            "top_offenders": [{"symbol": "SPY", "issue": "adjusted_close_divergence"}],
+        },
+    )
+
+    assert slo["runbook"]["top_cause"]["code"] == "provider_divergence"
+    assert "SPY" in slo["runbook"]["top_cause"]["action"]
+
+
+def test_slo_runbook_maps_stale_source_manifest() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest={
+            "status": "stale",
+            "failure_reason": "stale_manifest",
+            "artifacts": [
+                {
+                    "artifact": "prices.json",
+                    "provider": "Yahoo Finance",
+                    "source_mode": "live",
+                    "status": "success",
+                }
+            ],
+        },
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["runbook"]["top_cause"]["code"] == "stale_source_manifest"
+    assert "source_manifest.json" in slo["runbook"]["top_cause"]["action"]
+
+
+def test_slo_runbook_top_cause_prefers_critical_over_warning() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(status="stale"),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        provider_reconciliation={
+            "status": "unavailable",
+            "failure_type": "provider_outage",
+            "outage_provider": "Yahoo Finance",
+            "issue_counts": {"provider_outage": 1},
+            "message": "Yahoo Finance returned no rows",
+            "top_offenders": [],
+        },
+    )
+
+    assert slo["runbook"]["top_cause"]["code"] == "provider_outage"
+    assert slo["runbook"]["top_cause"]["severity"] == "critical"

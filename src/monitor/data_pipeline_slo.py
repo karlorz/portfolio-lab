@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 DATA_PIPELINE_SLO_SCHEMA_VERSION = "data-pipeline-slo/v1"
 _STATUS_RANK = {"ok": 0, "unknown": 1, "warning": 2, "critical": 3}
+_SAFE_REASON_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -63,11 +64,16 @@ def _scheduler_dimension(health_data: Mapping[str, Any]) -> dict[str, Any]:
 def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, Any]:
     artifacts = source_manifest.get("artifacts") if isinstance(source_manifest, Mapping) else None
     rows = [row for row in artifacts if isinstance(row, Mapping)] if isinstance(artifacts, list) else []
+    manifest_status = str(source_manifest.get("status", "ok")) if isinstance(source_manifest, Mapping) else "unknown"
+    manifest_failure_reason = source_manifest.get("failure_reason") if isinstance(source_manifest, Mapping) else None
+    manifest_degraded = manifest_status in {"stale", "degraded", "failed", "error"} or manifest_failure_reason == "stale_manifest"
     if not rows:
         return {
-            "status": "unknown",
+            "status": "warning" if manifest_degraded else "unknown",
+            "manifest_status": manifest_status,
+            "manifest_failure_reason": manifest_failure_reason,
             "degraded_artifacts": [],
-            "message": "source manifest missing or empty",
+            "message": "source manifest stale" if manifest_degraded else "source manifest missing or empty",
         }
     degraded_rows = [
         row for row in rows
@@ -87,12 +93,17 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
         f"{artifact}: {details.get('failure_reason') or details.get('fallback_reason') or details.get('source_mode')}"
         for artifact, details in degraded_reasons.items()
     ]
-    status = "warning" if degraded else "ok"
+    status = "warning" if degraded or manifest_degraded else "ok"
     return {
         "status": status,
+        "manifest_status": manifest_status,
+        "manifest_failure_reason": manifest_failure_reason,
         "degraded_artifacts": degraded,
         "degraded_reasons": degraded_reasons,
         "message": (
+            "source manifest stale"
+            if manifest_degraded and not degraded
+            else
             f"provider degraded for {', '.join(degraded)} ({'; '.join(reason_parts)})"
             if degraded
             else "providers live"
@@ -130,6 +141,7 @@ def _artifact_dimension(
         "status": status,
         "critical_count": len(critical),
         "stale_count": len(stale),
+        "stale_artifacts": stale[:10],
         "missing_market_entries": missing_market_entries,
         "message": (
             f"{len(critical)} critical, {len(stale)} stale artifacts"
@@ -234,6 +246,206 @@ def _top_dimension(dimensions: Mapping[str, Mapping[str, Any]]) -> str | None:
     return sorted(failing, key=lambda item: _STATUS_RANK.get(item[1], 1), reverse=True)[0][0]
 
 
+def _safe_reason(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    if len(value) > 80 or "://" in value or "=" in value:
+        return "redacted"
+    return value if all(char in _SAFE_REASON_CHARS for char in value) else "redacted"
+
+
+def _known_provider_label(value: Any) -> str:
+    provider = str(value or "").lower()
+    if "yahoo" in provider:
+        return "Yahoo Finance"
+    if "fred" in provider:
+        return "FRED"
+    return "market data provider"
+
+
+def _runbook_entry(
+    *,
+    dimension: str,
+    code: str,
+    severity: str,
+    action: str,
+    artifact: Any = None,
+    provider: Any = None,
+    reason: Any = None,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "dimension": dimension,
+        "code": code,
+        "severity": severity if severity in _STATUS_RANK else "unknown",
+        "action": action,
+    }
+    if artifact:
+        entry["artifact"] = str(artifact)
+    if provider:
+        entry["provider"] = _known_provider_label(provider)
+    safe_reason = _safe_reason(reason)
+    if safe_reason:
+        entry["reason"] = safe_reason
+    return entry
+
+
+def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
+    severity = str(provider_dimension.get("status", "unknown"))
+    entries: list[dict[str, Any]] = []
+    if provider_dimension.get("manifest_failure_reason") == "stale_manifest" or provider_dimension.get("manifest_status") == "stale":
+        entries.append(_runbook_entry(
+            dimension="provider",
+            code="stale_source_manifest",
+            severity=severity,
+            action="Regenerate public/data/source_manifest.json by rerunning the market-data fetch; verify generated_at and latest_observation before promotion.",
+            artifact="source_manifest.json",
+            reason=provider_dimension.get("manifest_failure_reason") or provider_dimension.get("manifest_status"),
+        ))
+
+    degraded_reasons = provider_dimension.get("degraded_reasons")
+    if not isinstance(degraded_reasons, Mapping):
+        return entries
+    for artifact, details in degraded_reasons.items():
+        if not isinstance(details, Mapping):
+            continue
+        source_mode = details.get("source_mode")
+        failure_reason = details.get("failure_reason")
+        fallback_reason = details.get("fallback_reason")
+        reason = failure_reason or fallback_reason or source_mode
+        artifact_name = str(artifact)
+        if artifact_name == "yields.json" and source_mode == "synthetic":
+            entries.append(_runbook_entry(
+                dimension="provider",
+                code="fred_synthetic_fallback",
+                severity=severity,
+                action="Set or verify FRED_API_KEY, rerun the data fetch, and treat yield data as synthetic until FRED returns live or cached observations.",
+                artifact=artifact_name,
+                provider="FRED",
+                reason=reason,
+            ))
+        elif artifact_name.startswith("prices"):
+            entries.append(_runbook_entry(
+                dimension="provider",
+                code="yahoo_provider_failure",
+                severity=severity,
+                action="Check Yahoo Finance reachability and rate limits, rerun fetch-data, and keep last-good price artifacts until live rows return.",
+                artifact=artifact_name,
+                provider="Yahoo Finance",
+                reason=reason,
+            ))
+        else:
+            entries.append(_runbook_entry(
+                dimension="provider",
+                code="provider_fallback",
+                severity=severity,
+                action="Inspect source_manifest.json for the degraded artifact, rerun the provider fetch, and keep last-good data until source_mode returns to live.",
+                artifact=artifact_name,
+                reason=reason,
+            ))
+    return entries
+
+
+def _artifact_runbook_entries(artifact_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
+    severity = str(artifact_dimension.get("status", "unknown"))
+    if artifact_dimension.get("stale_count", 0):
+        return [_runbook_entry(
+            dimension="artifact",
+            code="stale_quote",
+            severity=severity,
+            action="Run the market-data fetch and verify public price artifacts before order sizing; check scheduler health if prices remain stale.",
+            artifact="prices.json",
+            reason="stale",
+        )]
+    if artifact_dimension.get("missing_market_entries"):
+        return [_runbook_entry(
+            dimension="artifact",
+            code="missing_market_artifact",
+            severity=severity,
+            action="Regenerate public market-data artifacts and public/data/index.json before publishing the dashboard.",
+            artifact="public/data/index.json",
+            reason="missing",
+        )]
+    return []
+
+
+def _provider_reconciliation_runbook_entries(reconciliation_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
+    severity = str(reconciliation_dimension.get("status", "unknown"))
+    failure_type = reconciliation_dimension.get("failure_type")
+    if failure_type == "provider_outage":
+        provider = reconciliation_dimension.get("outage_provider")
+        return [_runbook_entry(
+            dimension="provider_reconciliation",
+            code="provider_outage",
+            severity=severity,
+            action=f"Check {_known_provider_label(provider)} availability, credentials, and rate limits; keep last-good artifacts until provider rows recover.",
+            provider=provider,
+            reason=failure_type,
+        )]
+    if failure_type == "provider_divergence":
+        offenders = reconciliation_dimension.get("top_offenders")
+        top_offenders = [row for row in offenders if isinstance(row, Mapping)] if isinstance(offenders, list) else []
+        offender = top_offenders[0] if top_offenders else {}
+        symbol = _safe_reason(offender.get("symbol")) or "top offender"
+        issue = _safe_reason(offender.get("issue")) or "price divergence"
+        return [_runbook_entry(
+            dimension="provider_reconciliation",
+            code="provider_divergence",
+            severity=severity,
+            action=f"Inspect reconciliation top offender {symbol} ({issue}); hold promotion until provider prices converge or the trusted source is explicitly selected.",
+            reason=failure_type,
+        )]
+    return []
+
+
+def _fred_readiness_runbook_entries(fred_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
+    severity = str(fred_dimension.get("status", "unknown"))
+    reason = fred_dimension.get("reason")
+    if reason == "missing_fred_api_key":
+        code = "fred_missing_api_key"
+        action = "Set FRED_API_KEY in the deployment environment, rerun the data fetch, and confirm FRED readiness returns pass before paper or live operation."
+    else:
+        code = "fred_readiness_failure"
+        action = "Verify fredapi availability, FRED_API_KEY validity, and the local FRED cache before relying on macro or yield signals."
+    return [_runbook_entry(
+        dimension="fred_readiness",
+        code=code,
+        severity=severity,
+        action=action,
+        provider="FRED",
+        reason=reason,
+    )]
+
+
+def _build_runbook(dimensions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    actions: list[dict[str, Any]] = []
+    provider = dimensions.get("provider")
+    if isinstance(provider, Mapping):
+        actions.extend(_provider_runbook_entries(provider))
+    artifact = dimensions.get("artifact")
+    if isinstance(artifact, Mapping):
+        actions.extend(_artifact_runbook_entries(artifact))
+    reconciliation = dimensions.get("provider_reconciliation")
+    if isinstance(reconciliation, Mapping):
+        actions.extend(_provider_reconciliation_runbook_entries(reconciliation))
+    fred_readiness = dimensions.get("fred_readiness")
+    if isinstance(fred_readiness, Mapping):
+        actions.extend(_fred_readiness_runbook_entries(fred_readiness))
+
+    active_actions = [action for action in actions if action.get("severity") not in {"ok", None}]
+    top_cause = None
+    if active_actions:
+        top_cause = sorted(
+            active_actions,
+            key=lambda action: _STATUS_RANK.get(str(action.get("severity", "unknown")), 1),
+            reverse=True,
+        )[0]
+    return {
+        "status": str(top_cause.get("severity")) if isinstance(top_cause, Mapping) else "ok",
+        "top_cause": top_cause,
+        "actions": active_actions[:6],
+    }
+
+
 def build_data_pipeline_slo(
     *,
     health_data: Mapping[str, Any],
@@ -271,4 +483,5 @@ def build_data_pipeline_slo(
         "status": _overall_status(dimensions),
         "top_dimension": _top_dimension(dimensions),
         "dimensions": dimensions,
+        "runbook": _build_runbook(dimensions),
     }
