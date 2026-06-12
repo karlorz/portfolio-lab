@@ -1126,18 +1126,24 @@ describe('RebalanceHealthSchema', () => {
     cost_drag_bps: 45,
   });
 
-  const generatedRH = () => readJsonOrFallback('public/data/rebalance_health.json', {
+  const fallbackGeneratedRH = () => ({
     ...validRH(),
     market_data_consistency: {
       status: 'unavailable',
       reason: 'fixture_missing_in_clean_checkout',
     },
     alpaca_feed_entitlement: {
+      configured_feed: 'iex',
+      effective_feed: 'iex',
+      entitlement: 'unavailable',
+      delayed: true,
       policy_decision: 'reject',
       acceptable_for_live: false,
       reason: 'fixture_missing_in_clean_checkout',
     },
   });
+
+  const generatedRH = () => readJsonOrFallback('public/data/rebalance_health.json', fallbackGeneratedRH());
 
   it('accepts valid rebalance health data', () => {
     const result = RebalanceHealthSchema.safeParse(validRH());
@@ -1153,6 +1159,12 @@ describe('RebalanceHealthSchema', () => {
     expect(result.data.market_data_consistency?.status).toBe('unavailable');
     expect(result.data.alpaca_feed_entitlement?.policy_decision).toBe('reject');
     expect(result.data.alpaca_feed_entitlement?.acceptable_for_live).toBe(false);
+  });
+
+  it('accepts the fallback rebalance health fixture used in clean checkouts', () => {
+    const result = RebalanceHealthSchema.safeParse(fallbackGeneratedRH());
+
+    expect(result.success).toBe(true);
   });
 
   it('accepts empty recent_rebalances', () => {
