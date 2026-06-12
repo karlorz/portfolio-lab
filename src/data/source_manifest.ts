@@ -1,7 +1,7 @@
 export const MARKET_DATA_SOURCE_MANIFEST_SCHEMA_VERSION = 'market-data-source-manifest/v1';
 export const MARKET_DATA_SOURCE_MANIFEST_FILENAME = 'source_manifest.json';
 
-export type MarketDataSourceMode = 'live' | 'last_good' | 'cached' | 'synthetic';
+export type MarketDataSourceMode = 'live' | 'last_good' | 'cached' | 'stale_cached' | 'synthetic';
 export type MarketDataSourceStatus = 'success' | 'degraded' | 'failed' | 'skipped';
 
 export interface MarketDataSourceRow {

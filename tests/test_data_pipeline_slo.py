@@ -52,6 +52,40 @@ def test_slo_warns_on_provider_fallback() -> None:
     assert slo["dimensions"]["provider"]["degraded_artifacts"] == ["prices.json"]
 
 
+def test_slo_surfaces_fred_source_manifest_failure_reasons() -> None:
+    source_manifest = {
+        "artifacts": [
+            {
+                "artifact": "yields.json",
+                "provider": "FRED",
+                "feed": "series/observations",
+                "source_mode": "stale_cached",
+                "status": "degraded",
+                "failure_reason": "cache_stale",
+                "fallback_reason": "rate_limited",
+            }
+        ]
+    }
+
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=source_manifest,
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    assert slo["status"] == "warning"
+    assert slo["top_dimension"] == "provider"
+    assert slo["dimensions"]["provider"]["degraded_artifacts"] == ["yields.json"]
+    assert slo["dimensions"]["provider"]["degraded_reasons"]["yields.json"] == {
+        "source_mode": "stale_cached",
+        "status": "degraded",
+        "failure_reason": "cache_stale",
+        "fallback_reason": "rate_limited",
+    }
+    assert "cache_stale" in slo["dimensions"]["provider"]["message"]
+
+
 def test_slo_reports_scheduler_failure_as_top_dimension() -> None:
     health = _health()
     health["cron_jobs"] = [{"id": "data", "status": "error"}]

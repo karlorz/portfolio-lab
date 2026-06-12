@@ -6,23 +6,32 @@
  * Usage: bun run fetch-data
  */
 
-import { fetchAllDataWithSummary, fetchYieldCurveDataWithSummary, SYMBOLS } from '../src/data/fetcher';
+import {
+  fetchAllDataWithSummary,
+  fetchYieldCurveDataWithSummary,
+  SYMBOLS,
+  type FredCacheKey,
+  type FredCacheRecord,
+  type FredSeriesCache,
+} from '../src/data/fetcher';
 import {
   MARKET_DATA_SOURCE_MANIFEST_FILENAME,
   buildMarketDataSourceManifest,
   type MarketDataSourceRow,
 } from '../src/data/source_manifest';
-import { join } from 'path';
-import { existsSync, mkdirSync, renameSync, unlinkSync } from 'fs';
+import { dirname, join } from 'path';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from 'fs';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const DATA_DIR = join(import.meta.dir, '..', 'public', 'data');
 const PYTHON_RUNTIME = join(PROJECT_ROOT, 'scripts', 'python_runtime.sh');
+const FRED_CACHE_PATH = join(PROJECT_ROOT, 'data', 'fred_series_cache.json');
 const START_DATE = '2005-01-01';
 const END_DATE = new Date().toISOString().split('T')[0];
+let atomicWriteCounter = 0;
 
 export async function writeJsonAtomic(path: string, payload: unknown): Promise<void> {
-  const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const tmpPath = `${path}.${process.pid}.${Date.now()}.${atomicWriteCounter++}.tmp`;
   try {
     await Bun.write(tmpPath, JSON.stringify(payload, null, 2));
     renameSync(tmpPath, path);
@@ -85,13 +94,67 @@ export function buildPriceSourceRows(
   }));
 }
 
-function buildYieldSourceRow(
+function fredCacheKey(key: FredCacheKey): string {
+  return `${key.seriesId}:${key.startDate}:${key.endDate}`;
+}
+
+function readFredCacheRecords(cachePath: string): Record<string, FredCacheRecord & {
+  series_id?: string;
+  start_date?: string;
+  end_date?: string;
+}> {
+  if (!existsSync(cachePath)) return {};
+  try {
+    const payload = JSON.parse(readFileSync(cachePath, 'utf8'));
+    return payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, FredCacheRecord>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function createFredDiskCache(cachePath: string = FRED_CACHE_PATH): FredSeriesCache {
+  let writeQueue: Promise<void> = Promise.resolve();
+  return {
+    get: async (key) => {
+      const record = readFredCacheRecords(cachePath)[fredCacheKey(key)];
+      if (!record || !Array.isArray(record.observations) || typeof record.fetched_at !== 'string') {
+        return null;
+      }
+      return {
+        fetched_at: record.fetched_at,
+        observations: record.observations,
+      };
+    },
+    set: async (key, record) => {
+      const writeRecord = async () => {
+        mkdirSync(dirname(cachePath), { recursive: true });
+        const records = readFredCacheRecords(cachePath);
+        records[fredCacheKey(key)] = {
+          series_id: key.seriesId,
+          start_date: key.startDate,
+          end_date: key.endDate,
+          fetched_at: record.fetched_at,
+          observations: record.observations,
+        };
+        await writeJsonAtomic(cachePath, records);
+      };
+      writeQueue = writeQueue.then(writeRecord, writeRecord);
+      await writeQueue;
+    },
+  };
+}
+
+export function buildYieldSourceRow(
   yieldSummary: Awaited<ReturnType<typeof fetchYieldCurveDataWithSummary>>['summary'],
   rowCount: number,
   latestObservation: string | null,
   fetchedAt: string,
 ): MarketDataSourceRow {
   const failureReason = yieldSummary.series.find((series) => series.failure_reason)?.failure_reason ?? null;
+  const fallbackReason = yieldSummary.series.find((series) => series.fallback_reason)?.fallback_reason
+    ?? (yieldSummary.source_mode === 'synthetic' ? failureReason : null);
   return {
     artifact: 'yields.json',
     provider: yieldSummary.provider,
@@ -103,7 +166,7 @@ function buildYieldSourceRow(
     row_count: rowCount,
     symbols: yieldSummary.series.map((series) => series.series_id),
     failure_reason: failureReason,
-    fallback_reason: yieldSummary.source_mode === 'synthetic' ? failureReason : null,
+    fallback_reason: fallbackReason,
   };
 }
 
@@ -189,7 +252,10 @@ export async function main() {
   await runPythonModule('src.data.market_db_sync');
 
   // 3. Fetch yield curve data (FRED)
-  const yieldResult = await fetchYieldCurveDataWithSummary(START_DATE, END_DATE);
+  const yieldResult = await fetchYieldCurveDataWithSummary(START_DATE, END_DATE, {
+    cache: createFredDiskCache(),
+    cacheTtlMs: 24 * 60 * 60 * 1000,
+  });
   const yieldData = yieldResult.data;
   const yieldsPath = join(DATA_DIR, 'yields.json');
   await writeJsonAtomic(yieldsPath, yieldData);

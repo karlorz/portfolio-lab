@@ -69,17 +69,31 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
             "degraded_artifacts": [],
             "message": "source manifest missing or empty",
         }
-    degraded = [
-        str(row.get("artifact"))
-        for row in rows
+    degraded_rows = [
+        row for row in rows
         if row.get("status") != "success" or row.get("source_mode") != "live"
+    ]
+    degraded = [str(row.get("artifact")) for row in degraded_rows]
+    degraded_reasons = {
+        str(row.get("artifact")): {
+            "source_mode": row.get("source_mode"),
+            "status": row.get("status"),
+            "failure_reason": row.get("failure_reason"),
+            "fallback_reason": row.get("fallback_reason"),
+        }
+        for row in degraded_rows
+    }
+    reason_parts = [
+        f"{artifact}: {details.get('failure_reason') or details.get('fallback_reason') or details.get('source_mode')}"
+        for artifact, details in degraded_reasons.items()
     ]
     status = "warning" if degraded else "ok"
     return {
         "status": status,
         "degraded_artifacts": degraded,
+        "degraded_reasons": degraded_reasons,
         "message": (
-            f"provider degraded for {', '.join(degraded)}"
+            f"provider degraded for {', '.join(degraded)} ({'; '.join(reason_parts)})"
             if degraded
             else "providers live"
         ),

@@ -108,10 +108,33 @@ export type FredFailureReason =
   | 'malformed_payload'
   | 'network_error'
   | 'api_error'
+  | 'cache_stale'
   | 'unknown';
+
+export interface FredCacheKey {
+  seriesId: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface FredCacheRecord {
+  fetched_at: string;
+  observations: { date: string; value: number }[];
+}
+
+export interface FredSeriesCache {
+  get: (key: FredCacheKey) => Promise<FredCacheRecord | null>;
+  set: (key: FredCacheKey, record: FredCacheRecord) => Promise<void>;
+}
 
 export interface FredFetchOptions {
   fetchImpl?: typeof fetch;
+  cache?: FredSeriesCache;
+  cacheTtlMs?: number;
+  allowStaleCache?: boolean;
+  now?: () => Date;
+  maxAttempts?: number;
+  backoffMs?: number;
 }
 
 export interface FredSeriesSummary {
@@ -122,6 +145,9 @@ export interface FredSeriesSummary {
   latest_observation: string | null;
   fetched_at: string;
   failure_reason?: FredFailureReason;
+  fallback_reason?: FredFailureReason;
+  cache_age_hours?: number;
+  attempts?: number;
 }
 
 export interface FredYieldSummary {
@@ -157,6 +183,18 @@ export class MarketDataProviderError extends Error {
   constructor(reason: MarketDataFetchFailureReason, message: string, attempts: number = 1) {
     super(message);
     this.name = 'MarketDataProviderError';
+    this.reason = reason;
+    this.attempts = attempts;
+  }
+}
+
+class FredFetchError extends Error {
+  reason: FredFailureReason;
+  attempts: number;
+
+  constructor(reason: FredFailureReason, message: string, attempts: number = 1) {
+    super(message);
+    this.name = 'FredFetchError';
     this.reason = reason;
     this.attempts = attempts;
   }
@@ -262,6 +300,156 @@ function classifyMarketDataProviderThrown(error: unknown): MarketDataProviderErr
   }
   const yahooError = classifyYahooThrown(error);
   return new MarketDataProviderError(yahooError.reason, yahooError.message, yahooError.attempts);
+}
+
+function classifyFredHttpStatus(status: number): FredFailureReason {
+  if (status === 429) return 'rate_limited';
+  return 'api_error';
+}
+
+function classifyFredThrown(error: unknown): FredFetchError {
+  if (error instanceof FredFetchError) {
+    return error;
+  }
+  if (error instanceof Error && error.name === 'AbortError') {
+    return new FredFetchError('timeout', error.message || 'FRED request timed out');
+  }
+  if (error instanceof TypeError) {
+    return new FredFetchError('network_error', error.message);
+  }
+  if (typeof error === 'object' && error !== null && 'reason' in error) {
+    const reason = String((error as { reason: unknown }).reason) as FredFailureReason;
+    const message = error instanceof Error ? error.message : String(error);
+    return new FredFetchError(reason, message);
+  }
+  if (error instanceof SyntaxError) {
+    return new FredFetchError('malformed_payload', error.message);
+  }
+  if (error instanceof Error) {
+    return new FredFetchError('unknown', error.message);
+  }
+  return new FredFetchError('unknown', String(error));
+}
+
+function latestFredObservation(rows: { date: string; value: number }[]): string | null {
+  return rows.length > 0 ? rows[rows.length - 1].date : null;
+}
+
+function fredCacheAgeHours(record: FredCacheRecord, now: Date): number | null {
+  const fetchedAt = new Date(record.fetched_at);
+  if (Number.isNaN(fetchedAt.getTime())) {
+    return null;
+  }
+  return (now.getTime() - fetchedAt.getTime()) / (60 * 60 * 1000);
+}
+
+async function readFredCache(
+  cache: FredSeriesCache | undefined,
+  key: FredCacheKey,
+): Promise<FredCacheRecord | null> {
+  if (!cache) return null;
+  try {
+    return await cache.get(key);
+  } catch (error) {
+    console.warn(`FRED cache read failed for ${key.seriesId}: ${error}`);
+    return null;
+  }
+}
+
+async function writeFredCache(
+  cache: FredSeriesCache | undefined,
+  key: FredCacheKey,
+  record: FredCacheRecord,
+): Promise<void> {
+  if (!cache) return;
+  try {
+    await cache.set(key, record);
+  } catch (error) {
+    console.warn(`FRED cache write failed for ${key.seriesId}: ${error}`);
+  }
+}
+
+function fredSummaryFromRows(
+  seriesId: string,
+  rows: { date: string; value: number }[],
+  fetchedAt: string,
+  status: MarketDataSourceStatus,
+  sourceMode: MarketDataSourceMode,
+  extras: {
+    failureReason?: FredFailureReason;
+    fallbackReason?: FredFailureReason;
+    cacheAgeHours?: number;
+    attempts?: number;
+  } = {},
+): FredSeriesSummary {
+  return {
+    series_id: seriesId,
+    status,
+    source_mode: sourceMode,
+    rows: rows.length,
+    latest_observation: latestFredObservation(rows),
+    fetched_at: fetchedAt,
+    failure_reason: extras.failureReason,
+    fallback_reason: extras.fallbackReason,
+    cache_age_hours: extras.cacheAgeHours,
+    attempts: extras.attempts,
+  };
+}
+
+async function parseFredObservations(response: Response, seriesId: string): Promise<{ date: string; value: number }[]> {
+  let data: { observations?: Array<{ date?: string; value?: string }> };
+  try {
+    data = await response.json() as typeof data;
+  } catch (error) {
+    throw new FredFetchError('malformed_payload', `Malformed FRED payload for ${seriesId}: ${error}`);
+  }
+
+  if (!Array.isArray(data.observations)) {
+    throw new FredFetchError('malformed_payload', 'FRED payload missing observations array');
+  }
+
+  return data.observations
+    .filter((obs): obs is { date: string; value: string } =>
+      typeof obs.date === 'string' && typeof obs.value === 'string' && obs.value !== '.',
+    )
+    .map((obs) => ({ date: obs.date, value: parseFloat(obs.value) }))
+    .filter((obs) => Number.isFinite(obs.value));
+}
+
+async function fetchFredLiveRows(
+  url: string,
+  seriesId: string,
+  options: FredFetchOptions,
+): Promise<{ rows: { date: string; value: number }[]; attempts: number }> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  const backoffMs = options.backoffMs ?? 500;
+  let lastError: FredFetchError | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetchImpl(url);
+      if (!response.ok) {
+        throw new FredFetchError(
+          classifyFredHttpStatus(response.status),
+          `FRED API error: ${response.status}`,
+          attempt,
+        );
+      }
+      return {
+        rows: await parseFredObservations(response, seriesId),
+        attempts: attempt,
+      };
+    } catch (error) {
+      lastError = classifyFredThrown(error);
+      lastError.attempts = attempt;
+      if (attempt < maxAttempts) {
+        await sleep(backoffMs * attempt);
+      }
+    }
+  }
+
+  throw lastError ?? new FredFetchError('unknown', `FRED fetch failed for ${seriesId}`, maxAttempts);
 }
 
 async function fetchWithTimeout(
@@ -618,77 +806,102 @@ export async function fetchFredSeriesWithSummary(
 
   // In production/tasker mode, set FRED_API_KEY for live observations.
   const apiKey = process.env.FRED_API_KEY || '';
-  const fetchedAt = new Date().toISOString();
+  const now = options.now?.() ?? new Date();
+  const fetchedAt = now.toISOString();
+  const cacheTtlMs = options.cacheTtlMs ?? 24 * 60 * 60 * 1000;
+  const cacheKey = { seriesId, startDate, endDate };
+  const cached = await readFredCache(options.cache, cacheKey);
+  const cacheAgeHours = cached ? fredCacheAgeHours(cached, now) : null;
+  const isFreshCache = cached !== null
+    && cacheAgeHours !== null
+    && cacheAgeHours * 60 * 60 * 1000 <= cacheTtlMs;
+  const allowStaleCache = options.allowStaleCache ?? true;
+  const hasStaleCache = cached !== null && allowStaleCache && cached.observations.length > 0;
+
+  if (cached && isFreshCache) {
+    return {
+      data: cached.observations,
+      summary: fredSummaryFromRows(
+        seriesId,
+        cached.observations,
+        cached.fetched_at,
+        'success',
+        'cached',
+        { cacheAgeHours: cacheAgeHours ?? undefined },
+      ),
+    };
+  }
+
   if (!apiKey) {
+    if (hasStaleCache && cached) {
+      return {
+        data: cached.observations,
+        summary: fredSummaryFromRows(
+          seriesId,
+          cached.observations,
+          cached.fetched_at,
+          'degraded',
+          'stale_cached',
+          {
+            failureReason: 'cache_stale',
+            fallbackReason: 'missing_api_key',
+            cacheAgeHours: cacheAgeHours ?? undefined,
+          },
+        ),
+      };
+    }
+
     console.warn(`FRED_API_KEY not set - using deterministic synthetic yield fallback`);
     const fallback = generateFallbackYields(seriesId, startDate, endDate);
     return {
       data: fallback,
-      summary: {
-        series_id: seriesId,
-        status: 'degraded',
-        source_mode: 'synthetic',
-        rows: fallback.length,
-        latest_observation: fallback.length > 0 ? fallback[fallback.length - 1].date : null,
-        fetched_at: fetchedAt,
-        failure_reason: 'missing_api_key',
-      },
+      summary: fredSummaryFromRows(seriesId, fallback, fetchedAt, 'degraded', 'synthetic', {
+        failureReason: 'missing_api_key',
+      }),
     };
   }
 
   const authUrl = url.replace('FRED_API_KEY', apiKey);
 
   try {
-    const response = await (options.fetchImpl ?? fetch)(authUrl);
-    if (!response.ok) {
-      const reason: FredFailureReason = response.status === 429 ? 'rate_limited' : 'api_error';
-      throw Object.assign(new Error(`FRED API error: ${response.status}`), { reason });
-    }
-
-    const data = await response.json() as {
-      observations: Array<{ date: string; value: string }>;
-    };
-
-    if (!Array.isArray(data.observations)) {
-      throw Object.assign(new Error('FRED payload missing observations array'), { reason: 'malformed_payload' });
-    }
-
-    const rows = data.observations
-      .filter(obs => obs.value !== '.')
-      .map(obs => ({
-        date: obs.date,
-        value: parseFloat(obs.value),
-      }));
+    const { rows, attempts } = await fetchFredLiveRows(authUrl, seriesId, options);
+    await writeFredCache(options.cache, cacheKey, {
+      fetched_at: fetchedAt,
+      observations: rows,
+    });
     return {
       data: rows,
-      summary: {
-        series_id: seriesId,
-        status: 'success',
-        source_mode: 'live',
-        rows: rows.length,
-        latest_observation: rows.length > 0 ? rows[rows.length - 1].date : null,
-        fetched_at: fetchedAt,
-      },
+      summary: fredSummaryFromRows(seriesId, rows, fetchedAt, 'success', 'live', { attempts }),
     };
   } catch (error) {
     console.warn(`FRED fetch failed for ${seriesId}: ${error}`);
+    const fetchError = classifyFredThrown(error);
+    if (hasStaleCache && cached) {
+      return {
+        data: cached.observations,
+        summary: fredSummaryFromRows(
+          seriesId,
+          cached.observations,
+          cached.fetched_at,
+          'degraded',
+          'stale_cached',
+          {
+            failureReason: 'cache_stale',
+            fallbackReason: fetchError.reason,
+            cacheAgeHours: cacheAgeHours ?? undefined,
+            attempts: fetchError.attempts,
+          },
+        ),
+      };
+    }
+
     const fallback = generateFallbackYields(seriesId, startDate, endDate);
-    const failureReason = typeof error === 'object' && error !== null && 'reason' in error
-      ? (error as { reason: FredFailureReason }).reason
-      : error instanceof TypeError
-        ? 'network_error'
-        : 'unknown';
     return {
       data: fallback,
-      summary: {
-        series_id: seriesId,
-        status: 'degraded',
-        source_mode: 'synthetic',
-        rows: fallback.length,
-        latest_observation: fallback.length > 0 ? fallback[fallback.length - 1].date : null,
-        fetched_at: fetchedAt,
-        failure_reason: failureReason,
-      },
+      summary: fredSummaryFromRows(seriesId, fallback, fetchedAt, 'degraded', 'synthetic', {
+        failureReason: fetchError.reason,
+        attempts: fetchError.attempts,
+      }),
     };
   }
 }
@@ -752,6 +965,13 @@ function deterministicYieldVariation(seriesId: string, date: string): number {
   return ((hash % 2001) / 2000 - 0.5) * 0.2;
 }
 
+function aggregateFredSourceMode(series: FredSeriesSummary[]): MarketDataSourceMode {
+  if (series.some((summary) => summary.source_mode === 'synthetic')) return 'synthetic';
+  if (series.some((summary) => summary.source_mode === 'stale_cached')) return 'stale_cached';
+  if (series.some((summary) => summary.source_mode === 'cached')) return 'cached';
+  return 'live';
+}
+
 /**
  * Fetch and calculate yield curve data for all dates
  */
@@ -810,7 +1030,6 @@ export async function fetchYieldCurveDataWithSummary(
   console.log(`✓ Yield curve data: ${yields.length} days`);
   const sortedYields = yields.sort((a, b) => a.date.localeCompare(b.date));
   const series = [dgs2Result.summary, dgs10Result.summary, dgs30Result.summary];
-  const hasSynthetic = series.some((summary) => summary.source_mode === 'synthetic');
   const hasFailure = series.some((summary) => summary.status !== 'success');
   return {
     data: sortedYields,
@@ -818,7 +1037,7 @@ export async function fetchYieldCurveDataWithSummary(
       provider: 'FRED',
       feed: 'series/observations',
       status: hasFailure ? 'degraded' : 'success',
-      source_mode: hasSynthetic ? 'synthetic' : 'live',
+      source_mode: aggregateFredSourceMode(series),
       fetched_at: new Date().toISOString(),
       series,
     },

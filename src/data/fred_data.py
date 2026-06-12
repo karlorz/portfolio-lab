@@ -293,7 +293,7 @@ def get_fred_md_cache_health(
         "row_count": row_count,
         "latest_fetched_at": latest.isoformat(),
         "age_hours": round(age_hours, 2),
-        "source_mode": "cached",
+        "source_mode": "cached" if status == "ok" else "stale_cached",
         "reason": None if status == "ok" else "cache_stale",
     }
 

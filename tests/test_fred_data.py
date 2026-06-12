@@ -213,6 +213,7 @@ class TestCacheOperations:
         assert fresh["source_mode"] == "cached"
         assert fresh["api_key_configured"] is True
         assert stale["status"] == "stale"
+        assert stale["source_mode"] == "stale_cached"
         assert stale["reason"] == "cache_stale"
 
 

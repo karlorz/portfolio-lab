@@ -217,7 +217,7 @@ export const PublicDataSizeBudgetSchema = z.object({
 export const PublicDataSourceMetadataSchema = z.object({
   provider: z.string().optional(),
   feed: z.string().optional(),
-  source_mode: z.enum(['live', 'last_good', 'cached', 'synthetic']).optional(),
+  source_mode: z.enum(['live', 'last_good', 'cached', 'stale_cached', 'synthetic']).optional(),
   status: z.enum(['success', 'degraded', 'failed', 'skipped']).optional(),
   fetched_at: z.nullable(z.string()).optional(),
   latest_observation: z.nullable(z.string()).optional(),
