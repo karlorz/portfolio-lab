@@ -16,6 +16,8 @@ from src.backtest.metrics import (
     BacktestMetrics, OverlayMetrics, CrisisReturns,
     compute_metrics, compute_crisis_returns,
     compute_deflated_sharpe_ratio,
+    build_data_snapshot_provenance,
+    require_data_snapshot_provenance,
     print_metrics_report, save_results_json,
 )
 
@@ -496,6 +498,93 @@ class TestSaveResultsJson:
             loaded = json.load(f)
         assert loaded == {"cagr": 8.5}
 
+    def test_data_snapshot_opt_in_preserves_metrics_and_attaches_provenance(self, tmp_path):
+        """Backtest outputs can carry data snapshot provenance without changing metrics."""
+        path = tmp_path / "with_snapshot.json"
+        snapshot = {
+            "schema_version": "data-snapshot/v1",
+            "snapshot_id": "data-snapshot-test",
+            "price_snapshot_hash": "a" * 64,
+            "source_manifest_hash": "b" * 64,
+            "symbol_universe": ["GLD", "SPY"],
+            "row_count": 2,
+            "date_range": {"start": "2026-01-02", "end": "2026-01-03"},
+        }
+
+        save_results_json({"cagr": 8.5, "sharpe": 0.95}, output_path=str(path), data_snapshot=snapshot)
+
+        with open(path) as f:
+            loaded = json.load(f)
+        assert loaded["cagr"] == 8.5
+        assert loaded["sharpe"] == 0.95
+        assert loaded["_data_snapshot"] == snapshot
+
+
+class TestDataSnapshotProvenance:
+    def test_build_data_snapshot_provenance_is_deterministic(self, tmp_path):
+        """Snapshot IDs should be stable and derived from exact price/manifest inputs."""
+        prices = tmp_path / "prices.json"
+        prices.write_text(json.dumps({
+            "SPY": [{"d": "2026-01-02", "p": 600.0}, {"d": "2026-01-03", "p": 601.0}],
+            "GLD": [{"d": "2026-01-02", "p": 220.0}],
+        }))
+        manifest = tmp_path / "source_manifest.json"
+        manifest.write_text(json.dumps({
+            "schema_version": "market-data-source-manifest/v1",
+            "artifacts": [
+                {
+                    "artifact": "prices.json",
+                    "provider": "Yahoo Finance",
+                    "symbols": ["SPY", "GLD"],
+                    "row_count": 3,
+                }
+            ],
+        }))
+
+        first = build_data_snapshot_provenance(prices, source_manifest_path=manifest)
+        second = build_data_snapshot_provenance(prices, source_manifest_path=manifest)
+
+        assert first == second
+        assert first["schema_version"] == "data-snapshot/v1"
+        assert first["snapshot_id"].startswith("data-snapshot:")
+        assert len(first["price_snapshot_hash"]) == 64
+        assert len(first["source_manifest_hash"]) == 64
+        assert first["row_count"] == 3
+        assert first["date_range"] == {"start": "2026-01-02", "end": "2026-01-03"}
+        assert first["symbol_universe"] == ["GLD", "SPY"]
+
+    def test_require_data_snapshot_provenance_warns_or_fails_when_missing(self, caplog):
+        """Missing snapshot provenance should be diagnosable without changing default writes."""
+        with caplog.at_level(logging.WARNING, logger="src.backtest.metrics"):
+            warnings = require_data_snapshot_provenance({"cagr": 8.5})
+
+        assert warnings == ["missing _data_snapshot provenance"]
+        assert "missing _data_snapshot provenance" in caplog.text
+
+        with pytest.raises(ValueError, match="missing _data_snapshot provenance"):
+            require_data_snapshot_provenance({"cagr": 8.5}, strict=True)
+
+    def test_build_data_snapshot_provenance_uses_manifest_dates_when_prices_have_none(self, tmp_path):
+        """Manifest dates keep compact artifacts reproducible when row-level dates are unavailable."""
+        prices = tmp_path / "prices_compact.json"
+        prices.write_text(json.dumps({"SPY": [[600.0], [601.0]]}))
+        manifest = tmp_path / "source_manifest.json"
+        manifest.write_text(json.dumps({
+            "artifacts": [
+                {
+                    "artifact": "prices_compact.json",
+                    "symbols": ["SPY"],
+                    "row_count": 2,
+                    "first_observation": "2026-01-02T00:00:00Z",
+                    "latest_observation": "2026-01-03T00:00:00Z",
+                }
+            ],
+        }))
+
+        snapshot = build_data_snapshot_provenance(prices, source_manifest_path=manifest)
+
+        assert snapshot["date_range"] == {"start": "2026-01-02", "end": "2026-01-03"}
+
 
 # ---------------------------------------------------------------------------
 # compute_deflated_sharpe_ratio
@@ -585,7 +674,21 @@ class TestAllExports:
         from src.backtest import metrics as m
         exports = m.__all__
         assert isinstance(exports, list)
-        assert len(exports) == 11
+        assert {
+            "BacktestConfig",
+            "DailyPrices",
+            "BacktestResult",
+            "BacktestMetrics",
+            "OverlayMetrics",
+            "CrisisReturns",
+            "compute_metrics",
+            "compute_crisis_returns",
+            "print_metrics_report",
+            "compute_deflated_sharpe_ratio",
+            "build_data_snapshot_provenance",
+            "require_data_snapshot_provenance",
+            "save_results_json",
+        }.issubset(set(exports))
 
     def test_all_exported_names_exist(self):
         """Every name in __all__ must be accessible on the module."""

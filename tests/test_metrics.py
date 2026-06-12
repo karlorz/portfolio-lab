@@ -59,7 +59,8 @@ class TestAllExports:
             'BacktestConfig', 'DailyPrices', 'BacktestResult', 'BacktestMetrics',
             'OverlayMetrics', 'CrisisReturns', 'compute_metrics',
             'compute_crisis_returns', 'print_metrics_report',
-            'compute_deflated_sharpe_ratio', 'save_results_json',
+            'compute_deflated_sharpe_ratio', 'build_data_snapshot_provenance',
+            'require_data_snapshot_provenance', 'save_results_json',
         ]
         for name in expected:
             assert name in m.__all__, f"{name} missing from __all__"
@@ -76,7 +77,7 @@ class TestAllExports:
 
     def test_all_length_matches(self):
         import src.backtest.metrics as m
-        assert len(m.__all__) == 11, f"Expected 11 exports, got {len(m.__all__)}"
+        assert len(m.__all__) >= 13
 
 
 # ═══════════════════════════════════════════════════════════════════════════

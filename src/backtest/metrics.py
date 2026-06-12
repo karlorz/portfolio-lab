@@ -6,12 +6,13 @@ functions that were previously copy-pasted across 11+ backtest files.
 """
 
 import json
+import hashlib
 import logging
 import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
 from scipy import stats as sp_stats
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from src.paths import BASE_ALLOCATION
 
@@ -19,13 +20,14 @@ logger = logging.getLogger(__name__)
 from src.costs.etf_cost_table import ETF_COST_BPS as _ETF_COST_BPS
 
 
-__all__ = ['BacktestConfig', 'DailyPrices', 'BacktestResult', 'BacktestMetrics', 'OverlayMetrics', 'CrisisReturns', 'compute_metrics', 'compute_crisis_returns', 'print_metrics_report', 'compute_deflated_sharpe_ratio', 'save_results_json']
+__all__ = ['BacktestConfig', 'DailyPrices', 'BacktestResult', 'BacktestMetrics', 'OverlayMetrics', 'CrisisReturns', 'compute_metrics', 'compute_crisis_returns', 'print_metrics_report', 'compute_deflated_sharpe_ratio', 'build_data_snapshot_provenance', 'require_data_snapshot_provenance', 'save_results_json']
 
 # ── Module-level constants ──────────────────────────────────────────
 TRADING_DAYS_PER_YEAR: int = 252
 DEFAULT_CRISIS_YEARS: List[str] = ['2008', '2020', '2022']
 REBALANCE_FREQUENCY_DAYS: int = 21   # Monthly (~21 trading days)
 DEFAULT_TRANSACTION_COST_BPS: float = 10.0
+DATA_SNAPSHOT_SCHEMA_VERSION: str = "data-snapshot/v1"
 
 # ── Shared Dataclass Consolidation (v953) ───────────────────────────
 # These replace duplicated definitions across 14+ backtest files.
@@ -472,12 +474,172 @@ def compute_deflated_sharpe_ratio(
     return round(dsr, 4)
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _date_value(row: Any) -> Optional[str]:
+    if isinstance(row, Mapping):
+        value = row.get("d") or row.get("date") or row.get("timestamp")
+    elif isinstance(row, Sequence) and not isinstance(row, (str, bytes)) and row:
+        value = row[0]
+    else:
+        value = None
+    if not isinstance(value, str) or not value:
+        return None
+    return value[:10]
+
+
+def _price_payload_stats(payload: Any) -> tuple[int, list[str], dict[str, Optional[str]]]:
+    symbols: set[str] = set()
+    dates: list[str] = []
+    row_count = 0
+
+    if isinstance(payload, Mapping):
+        for symbol, series in payload.items():
+            if not isinstance(symbol, str) or not isinstance(series, list):
+                continue
+            symbols.add(symbol)
+            for row in series:
+                row_count += 1
+                date = _date_value(row)
+                if date is not None:
+                    dates.append(date)
+    elif isinstance(payload, list):
+        for row in payload:
+            if not isinstance(row, Mapping):
+                continue
+            row_count += 1
+            symbol = row.get("symbol")
+            if isinstance(symbol, str):
+                symbols.add(symbol)
+            date = _date_value(row)
+            if date is not None:
+                dates.append(date)
+
+    date_range: dict[str, Optional[str]] = {
+        "start": min(dates) if dates else None,
+        "end": max(dates) if dates else None,
+    }
+    return row_count, sorted(symbols), date_range
+
+
+def _source_manifest_artifact(path: Path, artifact_name: str) -> Mapping[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    artifacts = payload.get("artifacts") if isinstance(payload, Mapping) else None
+    if not isinstance(artifacts, list):
+        return None
+    for row in artifacts:
+        if isinstance(row, Mapping) and row.get("artifact") == artifact_name:
+            return row
+    return None
+
+
+def _manifest_date_range(row: Mapping[str, Any] | None) -> dict[str, Optional[str]]:
+    if row is None:
+        return {"start": None, "end": None}
+
+    range_value = row.get("date_range")
+    if isinstance(range_value, Mapping):
+        start = range_value.get("start")
+        end = range_value.get("end")
+    elif isinstance(range_value, Sequence) and not isinstance(range_value, (str, bytes)) and len(range_value) >= 2:
+        start, end = range_value[0], range_value[1]
+    else:
+        start = row.get("first_observation") or row.get("start_date") or row.get("start")
+        end = row.get("latest_observation") or row.get("end_date") or row.get("end")
+
+    return {
+        "start": str(start)[:10] if start else None,
+        "end": str(end)[:10] if end else None,
+    }
+
+
+def build_data_snapshot_provenance(
+    price_artifact_path: str | Path,
+    *,
+    source_manifest_path: str | Path | None = None,
+    symbol_universe: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Build deterministic, public-safe provenance for historical data inputs."""
+    price_path = Path(price_artifact_path)
+    with open(price_path) as f:
+        price_payload = json.load(f)
+
+    row_count, inferred_symbols, date_range = _price_payload_stats(price_payload)
+    source_path = Path(source_manifest_path) if source_manifest_path is not None else None
+    source_row = _source_manifest_artifact(source_path, price_path.name) if source_path is not None else None
+
+    manifest_symbols = source_row.get("symbols") if source_row is not None else None
+    if symbol_universe is not None:
+        resolved_symbols = sorted({str(symbol) for symbol in symbol_universe})
+    elif inferred_symbols:
+        resolved_symbols = inferred_symbols
+    elif isinstance(manifest_symbols, list):
+        resolved_symbols = sorted(str(symbol) for symbol in manifest_symbols)
+    else:
+        resolved_symbols = []
+
+    if row_count == 0 and source_row is not None and isinstance(source_row.get("row_count"), int):
+        row_count = int(source_row["row_count"])
+    if date_range == {"start": None, "end": None}:
+        date_range = _manifest_date_range(source_row)
+
+    price_hash = _sha256_file(price_path)
+    source_hash = _sha256_file(source_path) if source_path is not None and source_path.exists() else None
+    fingerprint = {
+        "schema_version": DATA_SNAPSHOT_SCHEMA_VERSION,
+        "price_snapshot_hash": price_hash,
+        "source_manifest_hash": source_hash,
+        "row_count": row_count,
+        "date_range": date_range,
+        "symbol_universe": resolved_symbols,
+    }
+    snapshot_hash = hashlib.sha256(
+        json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    return {
+        "schema_version": DATA_SNAPSHOT_SCHEMA_VERSION,
+        "snapshot_id": f"data-snapshot:{snapshot_hash[:16]}",
+        "snapshot_hash": snapshot_hash,
+        "price_artifact_path": price_path.name,
+        "source_manifest_path": source_path.name if source_path is not None else None,
+        **fingerprint,
+    }
+
+
+def require_data_snapshot_provenance(data: Mapping[str, Any], *, strict: bool = False) -> list[str]:
+    """Warn or fail when a result artifact lacks required data snapshot provenance."""
+    warnings: list[str] = []
+    snapshot = data.get("_data_snapshot")
+    if not isinstance(snapshot, Mapping):
+        warnings.append("missing _data_snapshot provenance")
+
+    for warning in warnings:
+        logger.warning(warning)
+    if strict and warnings:
+        raise ValueError("; ".join(warnings))
+    return warnings
+
+
 def save_results_json(
     data: dict,
     output_path: str = None,
     default_dir: Path = None,
     validator: Callable[[dict], dict] = None,
     experiment_manifest: Optional[Dict[str, Any]] = None,
+    data_snapshot: Optional[Mapping[str, Any]] = None,
 ):
     """Save results dict to JSON file.
 
@@ -493,7 +655,14 @@ def save_results_json(
             include ``manifest_mode`` (embedded or sidecar), command, module,
             config_snapshot, env_keys, and input_paths. Normal JSON writes are
             unchanged when omitted.
+        data_snapshot: Optional historical data snapshot provenance to embed
+            under ``_data_snapshot``. Normal JSON writes are unchanged when
+            omitted.
     """
+    if data_snapshot is not None:
+        data = dict(data)
+        data["_data_snapshot"] = dict(data_snapshot)
+
     if validator is not None:
         try:
             data = validator(data)
