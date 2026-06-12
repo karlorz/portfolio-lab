@@ -8,6 +8,9 @@ export interface MarketDataSourceRow {
   artifact: string;
   provider: string;
   feed: string;
+  provider_chain?: string[];
+  primary_provider?: string | null;
+  fallback_provider?: string | null;
   source_mode: MarketDataSourceMode;
   status: MarketDataSourceStatus;
   fetched_at: string;

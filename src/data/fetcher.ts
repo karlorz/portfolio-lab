@@ -33,6 +33,11 @@ export type YahooFetchFailureReason =
   | 'network_error'
   | 'unknown';
 
+export type MarketDataFetchFailureReason =
+  | YahooFetchFailureReason
+  | 'provider_unavailable'
+  | 'not_configured';
+
 export interface YahooFetchOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -40,41 +45,60 @@ export interface YahooFetchOptions {
   backoffMs?: number;
 }
 
+export interface MarketDataProvider {
+  name: string;
+  feed: string;
+  sourceMode?: MarketDataSourceMode;
+  fetchSymbol: (symbol: string, startDate: string, endDate: string) => Promise<HistoricalPrice[]>;
+}
+
 export interface FetchAllDataOptions extends YahooFetchOptions {
   delayMs?: number;
   circuitBreakerFailureThreshold?: number;
+  providers?: MarketDataProvider[];
 }
 
 export interface SymbolFetchSummary {
   symbol: string;
+  provider: string | null;
+  feed: string | null;
+  provider_chain: string[];
+  primary_provider: string | null;
+  fallback_provider: string | null;
   status: MarketDataSourceStatus;
   source_mode: MarketDataSourceMode;
   rows: number;
   latest_observation: string | null;
   attempts: number;
   fetched_at: string;
-  failure_reason?: YahooFetchFailureReason;
+  failure_reason?: MarketDataFetchFailureReason;
+  fallback_reason?: MarketDataFetchFailureReason;
   error?: string;
 }
 
-export interface YahooProviderSummary {
-  provider: 'Yahoo Finance';
-  feed: 'chart/v8';
+export interface MarketDataProviderSummary {
+  provider: string;
+  feed: string;
+  provider_chain: string[];
+  primary_provider: string | null;
+  fallback_provider: string | null;
   status: MarketDataSourceStatus;
   source_mode: MarketDataSourceMode;
   fetched_at: string;
   symbols: SymbolFetchSummary[];
-  failure_counts: Partial<Record<YahooFetchFailureReason, number>>;
+  failure_counts: Partial<Record<MarketDataFetchFailureReason, number>>;
   circuit_breaker: {
     opened: boolean;
-    reason: YahooFetchFailureReason | null;
+    reason: MarketDataFetchFailureReason | null;
     skipped_symbols: string[];
   };
 }
 
+export type YahooProviderSummary = MarketDataProviderSummary;
+
 export interface FetchAllDataResult {
   data: { [symbol: string]: HistoricalPrice[] };
-  summary: YahooProviderSummary;
+  summary: MarketDataProviderSummary;
 }
 
 export type FredFailureReason =
@@ -121,6 +145,18 @@ export class YahooFetchError extends Error {
   constructor(reason: YahooFetchFailureReason, message: string, attempts: number = 1) {
     super(message);
     this.name = 'YahooFetchError';
+    this.reason = reason;
+    this.attempts = attempts;
+  }
+}
+
+export class MarketDataProviderError extends Error {
+  reason: MarketDataFetchFailureReason;
+  attempts: number;
+
+  constructor(reason: MarketDataFetchFailureReason, message: string, attempts: number = 1) {
+    super(message);
+    this.name = 'MarketDataProviderError';
     this.reason = reason;
     this.attempts = attempts;
   }
@@ -206,6 +242,26 @@ function classifyYahooThrown(error: unknown): YahooFetchError {
     return new YahooFetchError('unknown', error.message);
   }
   return new YahooFetchError('unknown', String(error));
+}
+
+function classifyMarketDataProviderThrown(error: unknown): MarketDataProviderError {
+  if (error instanceof MarketDataProviderError) {
+    return error;
+  }
+  if (error instanceof YahooFetchError) {
+    return new MarketDataProviderError(error.reason, error.message, error.attempts);
+  }
+  if (typeof error === 'object' && error !== null && 'reason' in error) {
+    const reasonedError = error as { reason: unknown; attempts?: unknown };
+    const reason = String(reasonedError.reason) as MarketDataFetchFailureReason;
+    const message = error instanceof Error ? error.message : String(error);
+    const attempts = typeof reasonedError.attempts === 'number'
+      ? reasonedError.attempts
+      : 1;
+    return new MarketDataProviderError(reason, message, attempts);
+  }
+  const yahooError = classifyYahooThrown(error);
+  return new MarketDataProviderError(yahooError.reason, yahooError.message, yahooError.attempts);
 }
 
 async function fetchWithTimeout(
@@ -308,6 +364,46 @@ export async function fetchYahooV8(
   throw lastError ?? new YahooFetchError('unknown', `Yahoo fetch failed for ${symbol}`, maxAttempts);
 }
 
+export function createYahooFinanceProvider(options: YahooFetchOptions = {}): MarketDataProvider {
+  return {
+    name: 'Yahoo Finance',
+    feed: 'chart/v8',
+    sourceMode: 'live',
+    fetchSymbol: (symbol, startDate, endDate) => fetchYahooV8(symbol, startDate, endDate, options),
+  };
+}
+
+function createConfiguredProviderPlaceholder(providerName: string): MarketDataProvider {
+  return {
+    name: providerName,
+    feed: 'configured-provider',
+    sourceMode: 'live',
+    fetchSymbol: async () => {
+      throw new MarketDataProviderError(
+        'not_configured',
+        `${providerName} is selected as MARKET_DATA_PRIMARY_PROVIDER but no adapter is configured in this build`,
+      );
+    },
+  };
+}
+
+export function resolveMarketDataProviders(options: FetchAllDataOptions = {}): MarketDataProvider[] {
+  if (options.providers && options.providers.length > 0) {
+    return options.providers;
+  }
+
+  const configuredPrimary = process.env.MARKET_DATA_PRIMARY_PROVIDER?.trim();
+  const providers: MarketDataProvider[] = [];
+  if (
+    configuredPrimary
+    && !['yahoo', 'yahoo finance'].includes(configuredPrimary.toLowerCase())
+  ) {
+    providers.push(createConfiguredProviderPlaceholder(configuredPrimary));
+  }
+  providers.push(createYahooFinanceProvider(options));
+  return providers;
+}
+
 /**
  * Fetch all symbols for backtesting
  */
@@ -328,9 +424,12 @@ export async function fetchAllDataWithSummary(
   endDate: string = new Date().toISOString().split('T')[0],
   options: FetchAllDataOptions = {},
 ): Promise<FetchAllDataResult> {
+  const providers = resolveMarketDataProviders(options);
+  const providerChain = providers.map((provider) => provider.name);
+  const primaryProvider = providers[0]?.name ?? null;
   const result: { [symbol: string]: HistoricalPrice[] } = {};
   const summaries: SymbolFetchSummary[] = [];
-  const failureCounts: Partial<Record<YahooFetchFailureReason, number>> = {};
+  const failureCounts: Partial<Record<MarketDataFetchFailureReason, number>> = {};
   const circuitBreakerThreshold = Math.max(1, options.circuitBreakerFailureThreshold ?? 3);
   const delayMs = options.delayMs ?? 300;
   let consecutiveRateLimitFailures = 0;
@@ -338,7 +437,7 @@ export async function fetchAllDataWithSummary(
   const skippedSymbols: string[] = [];
   const fetchedAt = new Date().toISOString();
 
-  console.log(`Fetching data for ${symbols.length} symbols from Yahoo Finance v8...`);
+  console.log(`Fetching data for ${symbols.length} symbols from ${providerChain.join(' -> ')}...`);
 
   for (let idx = 0; idx < symbols.length; idx++) {
     const symbol = symbols[idx];
@@ -346,6 +445,11 @@ export async function fetchAllDataWithSummary(
       skippedSymbols.push(symbol);
       summaries.push({
         symbol,
+        provider: null,
+        feed: null,
+        provider_chain: providerChain,
+        primary_provider: primaryProvider,
+        fallback_provider: null,
         status: 'skipped',
         source_mode: 'live',
         rows: 0,
@@ -358,61 +462,105 @@ export async function fetchAllDataWithSummary(
       continue;
     }
 
-    try {
-      console.log(`  Fetching ${symbol}...`);
-      const prices = await fetchYahooV8(symbol, startDate, endDate, options);
-      result[symbol] = prices;
-      summaries.push({
-        symbol,
-        status: 'success',
-        source_mode: 'live',
-        rows: prices.length,
-        latest_observation: latestPriceObservation(prices),
-        attempts: 1,
-        fetched_at: new Date().toISOString(),
-      });
-      consecutiveRateLimitFailures = 0;
-      console.log(`  ✓ ${symbol}: ${prices.length} days`);
-      // Rate limit
-      await sleep(delayMs);
-    } catch (error) {
-      const fetchError = classifyYahooThrown(error);
-      failureCounts[fetchError.reason] = (failureCounts[fetchError.reason] ?? 0) + 1;
-      consecutiveRateLimitFailures = fetchError.reason === 'rate_limited'
+    console.log(`  Fetching ${symbol}...`);
+    const providerFailures: MarketDataProviderError[] = [];
+    let symbolFetched = false;
+
+    for (const provider of providers) {
+      try {
+        const prices = await provider.fetchSymbol(symbol, startDate, endDate);
+        result[symbol] = prices;
+        const fallbackReason = providerFailures[0]?.reason;
+        const fallbackProvider = provider.name !== primaryProvider ? provider.name : null;
+        summaries.push({
+          symbol,
+          provider: provider.name,
+          feed: provider.feed,
+          provider_chain: providerChain,
+          primary_provider: primaryProvider,
+          fallback_provider: fallbackProvider,
+          status: fallbackProvider ? 'degraded' : 'success',
+          source_mode: provider.sourceMode ?? 'live',
+          rows: prices.length,
+          latest_observation: latestPriceObservation(prices),
+          attempts: providerFailures.length + 1,
+          fetched_at: new Date().toISOString(),
+          fallback_reason: fallbackReason,
+        });
+        consecutiveRateLimitFailures = 0;
+        symbolFetched = true;
+        console.log(`  ✓ ${symbol}: ${prices.length} days from ${provider.name}`);
+        await sleep(delayMs);
+        break;
+      } catch (error) {
+        const fetchError = classifyMarketDataProviderThrown(error);
+        providerFailures.push(fetchError);
+        failureCounts[fetchError.reason] = (failureCounts[fetchError.reason] ?? 0) + 1;
+        console.warn(`  ${provider.name} failed for ${symbol}: ${fetchError.message}`);
+      }
+    }
+
+    if (!symbolFetched) {
+      const lastError = providerFailures[providerFailures.length - 1]
+        ?? new MarketDataProviderError('provider_unavailable', `No price providers configured for ${symbol}`, 0);
+      consecutiveRateLimitFailures = lastError.reason === 'rate_limited'
         ? consecutiveRateLimitFailures + 1
         : 0;
       summaries.push({
         symbol,
+        provider: null,
+        feed: null,
+        provider_chain: providerChain,
+        primary_provider: primaryProvider,
+        fallback_provider: null,
         status: 'failed',
         source_mode: 'live',
         rows: 0,
         latest_observation: null,
-        attempts: fetchError.attempts,
+        attempts: providerFailures.reduce((sum, failure) => sum + Math.max(1, failure.attempts), 0),
         fetched_at: new Date().toISOString(),
-        failure_reason: fetchError.reason,
-        error: fetchError.message,
+        failure_reason: lastError.reason,
+        error: `All price providers failed for ${symbol}: ${lastError.message}`,
       });
-      console.error(`  ✗ ${symbol}: ${error}`);
+      console.error(`  ✗ ${symbol}: ${lastError.message}`);
       if (consecutiveRateLimitFailures >= circuitBreakerThreshold && idx < symbols.length - 1) {
         circuitOpened = true;
       }
     }
   }
 
-  const successCount = summaries.filter((summary) => summary.status === 'success').length;
+  const successCount = summaries.filter((summary) => summary.status === 'success' || summary.status === 'degraded').length;
   const failedCount = summaries.filter((summary) => summary.status === 'failed').length;
   const skippedCount = summaries.filter((summary) => summary.status === 'skipped').length;
-  const status: MarketDataSourceStatus = failedCount === 0 && skippedCount === 0
+  const usedFallback = summaries.some((summary) => summary.fallback_provider !== null);
+  const status: MarketDataSourceStatus = failedCount === 0 && skippedCount === 0 && !usedFallback
     ? 'success'
     : successCount > 0
       ? 'degraded'
       : 'failed';
+  const successfulSummaries = summaries.filter((summary) => summary.provider !== null);
+  const successfulProviders = Array.from(new Set(successfulSummaries.map((summary) => summary.provider as string)));
+  const successfulFeeds = Array.from(new Set(successfulSummaries.map((summary) => summary.feed as string)));
+  const actualProvider = successfulProviders.length === 0
+    ? 'none'
+    : successfulProviders.length === 1
+      ? successfulProviders[0]
+      : 'Mixed';
+  const actualFeed = successfulFeeds.length === 0
+    ? 'none'
+    : successfulFeeds.length === 1
+      ? successfulFeeds[0]
+      : 'mixed';
+  const fallbackProvider = successfulSummaries.find((summary) => summary.provider !== primaryProvider)?.provider ?? null;
 
   return {
     data: result,
     summary: {
-      provider: 'Yahoo Finance',
-      feed: 'chart/v8',
+      provider: actualProvider,
+      feed: actualFeed,
+      provider_chain: providerChain,
+      primary_provider: primaryProvider,
+      fallback_provider: fallbackProvider,
       status,
       source_mode: 'live',
       fetched_at: fetchedAt,

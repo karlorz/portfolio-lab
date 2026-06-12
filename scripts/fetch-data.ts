@@ -48,7 +48,13 @@ function latestObservationFromCompact(compact: Record<string, { d: string; p: nu
   return latest;
 }
 
-function buildPriceSourceRows(
+function firstFailureReason(
+  failureCounts: Awaited<ReturnType<typeof fetchAllDataWithSummary>>['summary']['failure_counts'],
+): string | null {
+  return Object.keys(failureCounts)[0] ?? null;
+}
+
+export function buildPriceSourceRows(
   priceSummary: Awaited<ReturnType<typeof fetchAllDataWithSummary>>['summary'],
   compact: Record<string, { d: string; p: number }[]>,
   fetchedAt: string,
@@ -56,17 +62,23 @@ function buildPriceSourceRows(
   const rowCount = Object.values(compact).reduce((sum, rows) => sum + rows.length, 0);
   const latestObservation = latestObservationFromCompact(compact);
   const symbols = Object.keys(compact).sort();
+  const failureReason = priceSummary.circuit_breaker.opened
+    ? priceSummary.circuit_breaker.reason
+    : firstFailureReason(priceSummary.failure_counts);
   return ['prices.json', 'prices_compact.json'].map((artifact) => ({
     artifact,
     provider: priceSummary.provider,
     feed: priceSummary.feed,
+    provider_chain: priceSummary.provider_chain,
+    primary_provider: priceSummary.primary_provider,
+    fallback_provider: priceSummary.fallback_provider,
     source_mode: priceSummary.source_mode,
     status: priceSummary.status,
     fetched_at: fetchedAt,
     latest_observation: latestObservation,
     row_count: rowCount,
     symbols,
-    failure_reason: priceSummary.circuit_breaker.opened ? priceSummary.circuit_breaker.reason : null,
+    failure_reason: failureReason,
     notes: priceSummary.circuit_breaker.opened
       ? [`Skipped symbols after provider circuit breaker opened: ${priceSummary.circuit_breaker.skipped_symbols.join(', ')}`]
       : [],
@@ -102,6 +114,9 @@ export function buildLastGoodRetentionManifest(error: unknown, generatedAt = new
       artifact: 'prices.json',
       provider: 'Yahoo Finance',
       feed: 'chart/v8',
+      provider_chain: ['Yahoo Finance'],
+      primary_provider: 'Yahoo Finance',
+      fallback_provider: null,
       source_mode: 'last_good',
       status: 'failed',
       fetched_at: generatedAt,
@@ -115,6 +130,9 @@ export function buildLastGoodRetentionManifest(error: unknown, generatedAt = new
       artifact: 'prices_compact.json',
       provider: 'Yahoo Finance',
       feed: 'chart/v8',
+      provider_chain: ['Yahoo Finance'],
+      primary_provider: 'Yahoo Finance',
+      fallback_provider: null,
       source_mode: 'last_good',
       status: 'failed',
       fetched_at: generatedAt,

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  createYahooFinanceProvider,
   fetchAllDataWithSummary,
   fetchYahooV8,
   fetchYieldCurveDataWithSummary,
   generateFallbackYields,
+  type HistoricalPrice,
+  type MarketDataProvider,
 } from '../../src/data/fetcher';
-import { buildLastGoodRetentionManifest } from '../../scripts/fetch-data';
+import { buildLastGoodRetentionManifest, buildPriceSourceRows } from '../../scripts/fetch-data';
 
 function yahooPayload(close = 100) {
   return {
@@ -32,6 +35,30 @@ function yahooPayload(close = 100) {
 }
 
 describe('market data fetcher source provenance', () => {
+  const licensedRows: HistoricalPrice[] = [
+    {
+      date: '2024-01-01',
+      open: 100,
+      high: 102,
+      low: 99,
+      close: 101,
+      adjClose: 101,
+      volume: 1_000,
+    },
+  ];
+
+  function stubProvider(
+    name: string,
+    fetchSymbol: MarketDataProvider['fetchSymbol'],
+  ): MarketDataProvider {
+    return {
+      name,
+      feed: 'adjusted-eod-fixture',
+      sourceMode: 'live',
+      fetchSymbol,
+    };
+  }
+
   it('retries Yahoo 429 responses and returns eventual success', async () => {
     let calls = 0;
     const fetchImpl = async () => {
@@ -97,6 +124,131 @@ describe('market data fetcher source provenance', () => {
       skipped_symbols: ['TLT', 'IEF'],
     });
     expect(result.summary.symbols.map((symbol) => symbol.status)).toEqual(['failed', 'failed', 'skipped', 'skipped']);
+  });
+
+  it('uses a configured licensed provider before Yahoo and records provider-chain success metadata', async () => {
+    const provider = stubProvider('Licensed Fixture', async () => licensedRows);
+
+    const result = await fetchAllDataWithSummary(['SPY'], '2024-01-01', '2024-01-02', {
+      providers: [provider],
+      delayMs: 0,
+    });
+
+    expect(result.data.SPY).toEqual(licensedRows);
+    expect(result.summary).toMatchObject({
+      provider: 'Licensed Fixture',
+      feed: 'adjusted-eod-fixture',
+      status: 'success',
+      source_mode: 'live',
+      provider_chain: ['Licensed Fixture'],
+      primary_provider: 'Licensed Fixture',
+      fallback_provider: null,
+    });
+    expect(result.summary.symbols[0]).toMatchObject({
+      symbol: 'SPY',
+      provider: 'Licensed Fixture',
+      feed: 'adjusted-eod-fixture',
+      status: 'success',
+      source_mode: 'live',
+      rows: 1,
+      latest_observation: '2024-01-01',
+      provider_chain: ['Licensed Fixture'],
+      primary_provider: 'Licensed Fixture',
+      fallback_provider: null,
+    });
+  });
+
+  it('falls back from a licensed provider to Yahoo without changing compact price shape', async () => {
+    const primary = stubProvider('Licensed Fixture', async () => {
+      throw Object.assign(new Error('licensed provider unavailable'), { reason: 'network_error' });
+    });
+    const yahoo = createYahooFinanceProvider({
+      fetchImpl: async () => new Response(JSON.stringify(yahooPayload(402)), { status: 200 }),
+      maxAttempts: 1,
+      backoffMs: 0,
+    });
+
+    const result = await fetchAllDataWithSummary(['SPY'], '2024-01-01', '2024-01-02', {
+      providers: [primary, yahoo],
+      delayMs: 0,
+    });
+    const compact = Object.fromEntries(
+      Object.entries(result.data).map(([symbol, prices]) => [
+        symbol,
+        prices.map((price) => ({ d: price.date, p: price.adjClose })),
+      ]),
+    );
+    const manifestRows = buildPriceSourceRows(result.summary, compact, '2026-06-12T00:00:00Z');
+
+    expect(compact).toEqual({ SPY: [{ d: '2024-01-01', p: 402 }] });
+    expect(result.summary).toMatchObject({
+      provider: 'Yahoo Finance',
+      feed: 'chart/v8',
+      status: 'degraded',
+      provider_chain: ['Licensed Fixture', 'Yahoo Finance'],
+      primary_provider: 'Licensed Fixture',
+      fallback_provider: 'Yahoo Finance',
+    });
+    expect(result.summary.failure_counts.network_error).toBe(1);
+    expect(result.summary.symbols[0]).toMatchObject({
+      symbol: 'SPY',
+      provider: 'Yahoo Finance',
+      feed: 'chart/v8',
+      status: 'degraded',
+      fallback_reason: 'network_error',
+      provider_chain: ['Licensed Fixture', 'Yahoo Finance'],
+      primary_provider: 'Licensed Fixture',
+      fallback_provider: 'Yahoo Finance',
+    });
+    expect(manifestRows[0]).toMatchObject({
+      artifact: 'prices.json',
+      provider: 'Yahoo Finance',
+      provider_chain: ['Licensed Fixture', 'Yahoo Finance'],
+      primary_provider: 'Licensed Fixture',
+      fallback_provider: 'Yahoo Finance',
+      failure_reason: 'network_error',
+      source_mode: 'live',
+      row_count: 1,
+      symbols: ['SPY'],
+    });
+    expect(JSON.stringify(manifestRows)).not.toContain('query2.finance.yahoo.com');
+  });
+
+  it('records structured failure state when every price provider fails', async () => {
+    const primary = stubProvider('Licensed Fixture', async () => {
+      throw Object.assign(new Error('licensed timeout'), { reason: 'timeout' });
+    });
+    const fallback = stubProvider('Yahoo Fixture', async () => {
+      throw Object.assign(new Error('yahoo returned no rows'), { reason: 'no_data' });
+    });
+
+    const result = await fetchAllDataWithSummary(['SPY'], '2024-01-01', '2024-01-02', {
+      providers: [primary, fallback],
+      delayMs: 0,
+    });
+
+    expect(result.data).toEqual({});
+    expect(result.summary).toMatchObject({
+      provider: 'none',
+      feed: 'none',
+      status: 'failed',
+      provider_chain: ['Licensed Fixture', 'Yahoo Fixture'],
+      primary_provider: 'Licensed Fixture',
+      fallback_provider: null,
+    });
+    expect(result.summary.failure_counts.timeout).toBe(1);
+    expect(result.summary.failure_counts.no_data).toBe(1);
+    expect(result.summary.symbols[0]).toMatchObject({
+      symbol: 'SPY',
+      provider: null,
+      feed: null,
+      status: 'failed',
+      failure_reason: 'no_data',
+      provider_chain: ['Licensed Fixture', 'Yahoo Fixture'],
+      primary_provider: 'Licensed Fixture',
+      fallback_provider: null,
+    });
+    expect(result.summary.symbols[0].error).toContain('All price providers failed for SPY');
   });
 
   it('makes FRED fallback deterministic and labels synthetic source mode', async () => {
