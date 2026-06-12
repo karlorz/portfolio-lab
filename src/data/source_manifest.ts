@@ -1,3 +1,5 @@
+import { SYMBOL_UNIVERSE_METADATA } from './symbol_universe';
+
 export const MARKET_DATA_SOURCE_MANIFEST_SCHEMA_VERSION = 'market-data-source-manifest/v1';
 export const MARKET_DATA_SOURCE_MANIFEST_FILENAME = 'source_manifest.json';
 
@@ -25,6 +27,7 @@ export interface MarketDataSourceRow {
 export interface MarketDataSourceManifest {
   schema_version: typeof MARKET_DATA_SOURCE_MANIFEST_SCHEMA_VERSION;
   generated_at: string;
+  symbol_universe: typeof SYMBOL_UNIVERSE_METADATA;
   artifacts: MarketDataSourceRow[];
 }
 
@@ -35,6 +38,7 @@ export function buildMarketDataSourceManifest(
   return {
     schema_version: MARKET_DATA_SOURCE_MANIFEST_SCHEMA_VERSION,
     generated_at: generatedAt,
+    symbol_universe: SYMBOL_UNIVERSE_METADATA,
     artifacts,
   };
 }

@@ -9,11 +9,11 @@
 import {
   fetchAllDataWithSummary,
   fetchYieldCurveDataWithSummary,
-  SYMBOLS,
   type FredCacheKey,
   type FredCacheRecord,
   type FredSeriesCache,
 } from '../src/data/fetcher';
+import { MARKET_DATA_SYMBOLS as SYMBOLS } from '../src/data/symbol_universe';
 import {
   MARKET_DATA_SOURCE_MANIFEST_FILENAME,
   buildMarketDataSourceManifest,

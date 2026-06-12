@@ -5,6 +5,14 @@
  */
 
 import type { MarketDataSourceMode, MarketDataSourceStatus } from './source_manifest';
+import {
+  CORE_SYMBOLS,
+  FACTOR_ETFS,
+  FRED_SERIES,
+  FX_SYMBOLS,
+  MARKET_DATA_SYMBOLS,
+  SECTOR_ETFS,
+} from './symbol_universe';
 
 export interface HistoricalPrice {
   date: string;
@@ -200,57 +208,8 @@ class FredFetchError extends Error {
   }
 }
 
-// Core portfolio symbols
-const CORE_SYMBOLS = ['SPY', 'QQQ', 'VTI', 'VBR', 'TLT', 'IEF', 'SHY', 'GLD', 'AGG', 'DBC', 'EFA', 'VXUS', '^VIX3M'];
-
-// Factor ETFs for alternative risk premia harvesting (v4.10)
-const FACTOR_ETFS = [
-  'MTUM',  // iShares MSCI USA Momentum Factor ETF
-  'VLUE',  // iShares MSCI USA Value Factor ETF
-  'USMV',  // iShares MSCI USA Min Vol Factor ETF
-  'QUAL',  // iShares MSCI USA Quality Factor ETF
-];
-
-// Sector ETF symbols (v2.40 - Sector Rotation Momentum)
-const SECTOR_ETFS = [
-  'XLK',   // Technology
-  'XLV',   // Healthcare  
-  'XLF',   // Financials
-  'XLY',   // Consumer Discretionary
-  'XLI',   // Industrials
-  'XLE',   // Energy
-  'XLP',   // Consumer Staples
-  'XLU',   // Utilities
-  'XLB',   // Materials
-  'XLRE',  // Real Estate
-  'XLC',   // Communication Services
-];
-
-// Leveraged Treasury ETFs (v2.35 Capital Efficiency)
-const LEVERAGED_TREASURY_ETFS = [
-  'UBT',   // ProShares Ultra 20+ Year Treasury (2x TLT)
-  'TMF',   // Direxion Daily 20+ Year Treasury Bull 3X (3x TLT)
-];
-
-// FX Currency ETFs (v3.15, v3.19 ML FX Carry Infrastructure)
-const FX_SYMBOLS = [
-  'UUP',   // Invesco DB US Dollar Index Bullish Fund
-  'UDN',   // Invesco DB US Dollar Index Bearish Fund
-  'FXE',   // Invesco CurrencyShares Euro Trust
-  'FXY',   // Invesco CurrencyShares Japanese Yen Trust
-  'FXB',   // Invesco CurrencyShares British Pound Sterling Trust
-  'FXA',   // Invesco CurrencyShares Australian Dollar Trust
-  'FXC',   // Invesco CurrencyShares Canadian Dollar Trust
-  'FXF',   // Invesco CurrencyShares Swiss Franc Trust
-];
-
-// Combined symbol list for backward compatibility
-const SYMBOLS = [...CORE_SYMBOLS, ...SECTOR_ETFS, ...LEVERAGED_TREASURY_ETFS, ...FX_SYMBOLS, ...FACTOR_ETFS];
-const FRED_SERIES = {
-  dgs2: 'DGS2',
-  dgs10: 'DGS10',
-  dgs30: 'DGS30',
-};
+// Combined symbol list for backward compatibility.
+const SYMBOLS = MARKET_DATA_SYMBOLS;
 
 function sleep(ms: number): Promise<void> {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();

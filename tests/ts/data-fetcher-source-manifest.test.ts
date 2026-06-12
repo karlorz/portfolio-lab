@@ -18,6 +18,8 @@ import {
   buildYieldSourceRow,
   createFredDiskCache,
 } from '../../scripts/fetch-data';
+import { SYMBOL_UNIVERSE_METADATA } from '../../src/data/symbol_universe';
+import { buildMarketDataSourceManifest } from '../../src/data/source_manifest';
 
 function yahooPayload(close = 100) {
   return {
@@ -555,5 +557,11 @@ describe('market data fetcher source provenance', () => {
       fallback_reason: 'HTTP 429',
     });
     expect(JSON.stringify(manifest)).not.toContain('query2.finance.yahoo.com');
+  });
+
+  it('attaches symbol-universe metadata to source manifests', () => {
+    const manifest = buildMarketDataSourceManifest([], '2026-06-12T00:00:00Z');
+
+    expect(manifest.symbol_universe).toEqual(SYMBOL_UNIVERSE_METADATA);
   });
 });
