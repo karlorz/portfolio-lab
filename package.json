@@ -7,6 +7,7 @@
     "dev": "bunx --bun vite",
     "build": "bunx --bun vite build",
     "preview": "vite preview",
+    "test:dashboard-browser": "playwright test --config playwright.config.ts",
     "fetch-data": "bun run scripts/fetch-data.ts",
     "backtest": "python3 -m src.backtest.engine",
     "agent-train": "python3 -m src.agents.marl_trainer",
@@ -20,6 +21,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/react": "^18.2.56",
     "@types/react-dom": "^18.2.19",
     "@vitejs/plugin-react": "4",
