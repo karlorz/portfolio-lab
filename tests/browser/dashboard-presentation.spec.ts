@@ -22,6 +22,23 @@ const VIEWPORTS = [
   { width: 390, height: 900 },
 ] as const;
 
+type DashboardTabLabel = (typeof TAB_LABELS)[number];
+
+const LOADED_TAB_SELECTORS: Record<DashboardTabLabel, readonly string[]> = {
+  'Overview': ['.overview-panel .metrics-grid'],
+  'Health': ['.health-panel-container'],
+  'Risk': ['.risk-primary-grid'],
+  'History': ['.history-panel'],
+  'Performance': ['.performance-summary'],
+  'Rebalance': ['.rebalance-health-panel'],
+  'Analytics': ['.analytics-summary', '.analytics-empty'],
+  '0DTE': ['.zero-dte-panel'],
+  'Auction': ['.closing-auction-panel'],
+  'Labs': ['.labs-panel .positions-table', '.labs-panel .analytics-empty:not([role="status"])'],
+  'Tasks': ['.tasks-panel-container'],
+  'Chat': ['.chat-panel-container'],
+} as const;
+
 async function openDashboard(page: Page, viewport = { width: 1200, height: 900 }) {
   await page.setViewportSize(viewport);
   await page.goto('/');
@@ -81,6 +98,11 @@ function dashboardTab(page: Page, label: string) {
     .getByRole('button', { name: new RegExp(`^${label}(?:\\s+\\d+)?$`) });
 }
 
+async function waitForLoadedDashboardTab(page: Page, label: DashboardTabLabel) {
+  const selectors = LOADED_TAB_SELECTORS[label];
+  await expect(page.locator(selectors.join(', ')).first()).toBeVisible();
+}
+
 function collectPresentationConsoleFailures(page: Page): string[] {
   const consoleMessages: string[] = [];
   page.on('console', (message) => {
@@ -106,6 +128,7 @@ test.describe('dashboard browser presentation smoke', () => {
         await expect(tab).toBeVisible();
         await tab.click();
         await expect(tab).toHaveClass(/active/);
+        await waitForLoadedDashboardTab(page, label);
         await expectNoDocumentOverflow(page);
       }
 

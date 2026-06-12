@@ -138,6 +138,21 @@ describe('dashboard presentation source contracts', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*1100px\)[\s\S]*\.dashboard-tabs \.tab\s*\{[\s\S]*flex-basis:\s*calc\(25% - 4px\);/);
   });
 
+  it('waits for loaded dashboard content before browser overflow assertions', () => {
+    const browserSmoke = read('tests/browser/dashboard-presentation.spec.ts');
+
+    expect(browserSmoke).toContain('async function waitForLoadedDashboardTab');
+    expect(browserSmoke).toContain("'Performance': ['.performance-summary']");
+    expect(browserSmoke).toContain("'Analytics': ['.analytics-summary'");
+    expect(browserSmoke).toContain("'Labs': ['.labs-panel .positions-table'");
+    expect(browserSmoke).toMatch(
+      /await tab\.click\(\);\s*await expect\(tab\)\.toHaveClass\(/,
+    );
+    expect(browserSmoke).toMatch(
+      /await expect\(tab\)\.toHaveClass\([^)]+\);\s*await waitForLoadedDashboardTab\(page, label\);\s*await expectNoDocumentOverflow\(page\);/,
+    );
+  });
+
   it('defines real responsive dashboard grids for analytics and risk tabs', () => {
     expectRuleContains(css, '.dashboard-section-stack', [
       /display:\s*flex;/,
