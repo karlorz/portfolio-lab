@@ -31,7 +31,7 @@ const LOADED_TAB_SELECTORS: Record<DashboardTabLabel, readonly string[]> = {
   'History': ['.history-panel'],
   'Performance': ['.performance-summary'],
   'Rebalance': ['.rebalance-health-panel'],
-  'Analytics': ['.analytics-summary', '.analytics-empty'],
+  'Analytics': ['.analytics-summary', '.analytics-empty', '.explainability-panel'],
   '0DTE': ['.zero-dte-panel'],
   'Auction': ['.closing-auction-panel'],
   'Labs': ['.labs-panel .positions-table', '.labs-panel .analytics-empty:not([role="status"])'],
@@ -90,6 +90,31 @@ async function expectStyledSurface(page: Page, selector: string) {
   expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
   expect(style.borderRadius).toBeGreaterThan(0);
   expect(style.paddingTop).toBeGreaterThan(0);
+}
+
+async function expectExplainabilityPanelStyles(page: Page, expectedProvenanceColumns: number) {
+  await expectStyledSurface(page, '.explainability-panel');
+  await expectStyledSurface(page, '.ex-decision-card');
+  await expectGridColumns(page, '.ex-provenance-grid', expectedProvenanceColumns);
+
+  const signalRow = page.locator('.ex-signal-row').first();
+  await expect(signalRow).toBeVisible();
+  await expect(signalRow).toHaveCSS('display', 'grid');
+
+  const barMetrics = await page.locator('.ex-signal-bar-container').first().evaluate((container) => {
+    const bar = container.querySelector('.ex-signal-bar');
+    const containerBox = container.getBoundingClientRect();
+    const barBox = bar?.getBoundingClientRect();
+    const computed = getComputedStyle(container);
+    return {
+      overflow: computed.overflow,
+      containerWidth: containerBox.width,
+      barWidth: barBox?.width ?? 0,
+    };
+  });
+
+  expect(barMetrics.overflow).toBe('hidden');
+  expect(barMetrics.barWidth).toBeLessThanOrEqual(barMetrics.containerWidth + 1);
 }
 
 function dashboardTab(page: Page, label: string) {
@@ -157,6 +182,7 @@ test.describe('dashboard browser presentation smoke', () => {
     await expectStyledSurface(page, '.rolling-metrics-chart');
     await expectStyledSurface(page, '.crisis-overlay');
     await expectStyledSurface(page, '.analytics-card');
+    await expectExplainabilityPanelStyles(page, 4);
     await expectGridColumns(page, '.dashboard-grid.dashboard-grid-two.analytics-panel-group', 2);
     await expectNoDocumentOverflow(page);
 
@@ -180,6 +206,8 @@ test.describe('dashboard browser presentation smoke', () => {
     await openDashboard(page, { width: 390, height: 900 });
     await dashboardTab(page, 'Analytics').click();
     await expect(page.locator('.analytics-summary')).toBeVisible();
+    await expect(page.locator('.explainability-panel')).toBeVisible();
+    await expectExplainabilityPanelStyles(page, 1);
     await expect(page.getByText('VIXY Hedge Sizing').first()).toBeVisible();
     await expect(page.getByText('Hedge Selector').first()).toBeVisible();
     await expect(page.getByText('Black-Litterman Mapper').first()).toBeVisible();

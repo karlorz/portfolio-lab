@@ -144,6 +144,7 @@ describe('dashboard presentation source contracts', () => {
     expect(browserSmoke).toContain('async function waitForLoadedDashboardTab');
     expect(browserSmoke).toContain("'Performance': ['.performance-summary']");
     expect(browserSmoke).toContain("'Analytics': ['.analytics-summary'");
+    expect(browserSmoke).toContain("'.explainability-panel'");
     expect(browserSmoke).toContain("'Labs': ['.labs-panel .positions-table'");
     expect(browserSmoke).toMatch(
       /await tab\.click\(\);\s*await expect\(tab\)\.toHaveClass\(/,
@@ -244,6 +245,76 @@ describe('dashboard presentation source contracts', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*\.analytics-summary\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
   });
 
+  it('defines Portfolio Explainability v8.07 panel presentation contracts', () => {
+    const explainabilityPanel = read('src/components/PortfolioExplainabilityPanel.tsx');
+
+    for (const className of [
+      'explainability-panel',
+      'ex-header',
+      'ex-version',
+      'ex-decision-card',
+      'ex-decision-meta',
+      'ex-provenance-grid',
+      'ex-prov-item',
+      'ex-signal-row',
+      'ex-signal-bar-container',
+      'ex-signal-bar',
+      'ex-drivers-opposers',
+      'ex-deepdive-row',
+      'ex-footer',
+    ]) {
+      expect(explainabilityPanel).toContain(className);
+    }
+
+    expectRuleContains(css, '.explainability-panel', [
+      /background:\s*#1e293b;/,
+      /border:\s*1px solid #334155;/,
+      /border-radius:\s*8px;/,
+      /padding:\s*16px;/,
+      /max-width:\s*100%;/,
+      /min-width:\s*0;/,
+    ]);
+    expectRuleContains(css, '.ex-header', [
+      /display:\s*flex;/,
+      /flex-wrap:\s*wrap;/,
+      /gap:\s*10px;/,
+    ]);
+    expectRuleContains(css, '.ex-decision-card', [
+      /background:\s*#0f172a;/,
+      /border-left:\s*4px solid #334155;/,
+      /border-radius:\s*6px;/,
+      /padding:\s*14px;/,
+    ]);
+    expectRuleContains(css, '.ex-provenance-grid', [
+      /display:\s*grid;/,
+      /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/,
+    ]);
+    expectRuleContains(css, '.ex-signal-row', [
+      /display:\s*grid;/,
+      /grid-template-columns:\s*minmax\(120px,\s*1fr\) minmax\(120px,\s*2fr\) auto auto;/,
+      /min-width:\s*0;/,
+    ]);
+    expectRuleContains(css, '.ex-signal-bar-container', [
+      /overflow:\s*hidden;/,
+      /min-width:\s*0;/,
+    ]);
+    expectRuleContains(css, '.ex-signal-bar', [
+      /max-width:\s*100%;/,
+      /height:\s*100%;/,
+    ]);
+    expectRuleContains(css, '.ex-drivers-opposers', [
+      /display:\s*grid;/,
+      /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/,
+    ]);
+    expectRuleContains(css, '.ex-deepdive-row', [
+      /display:\s*grid;/,
+      /grid-template-columns:\s*minmax\(0,\s*1\.2fr\) minmax\(0,\s*2fr\);/,
+    ]);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*\.ex-provenance-grid\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*\.ex-drivers-opposers\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*\.ex-signal-row\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
+  });
+
   it('removes unsupported utility classes from active Analytics child panels', () => {
     for (const path of [
       'src/components/BlackLittermanMapperPanel.tsx',
@@ -251,6 +322,7 @@ describe('dashboard presentation source contracts', () => {
       'src/components/TSMOMPanel.tsx',
       'src/components/VixyHedgeSizingPanel.tsx',
       'src/components/HedgeSelectorPanel.tsx',
+      'src/components/PortfolioExplainabilityPanel.tsx',
     ]) {
       expectNoUtilityClassTokens(path);
     }
