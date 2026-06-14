@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from typing import Any, Mapping, Sequence
 
 
 FRED_READINESS_SCHEMA_VERSION = "fred-readiness/v1"
+logger = logging.getLogger(__name__)
 
 _MODE_ALIASES = {
     "ci": "test",
@@ -143,7 +145,7 @@ def assess_fred_readiness(
         message = f"FRED data is unavailable in {resolved_mode} mode."
         remediation = "Verify fredapi availability, FRED_API_KEY, and the local FRED cache."
 
-    return {
+    payload = {
         "schema_version": FRED_READINESS_SCHEMA_VERSION,
         "status": status,
         "readiness": readiness,
@@ -158,6 +160,14 @@ def assess_fred_readiness(
         "message": message,
         "remediation": remediation,
     }
+    if resolved_mode in _WARNING_MODES:
+        logger.warning(
+            "FRED readiness warning in %s mode: %s - %s",
+            resolved_mode,
+            issue,
+            message,
+        )
+    return payload
 
 
 def main(argv: Sequence[str] | None = None) -> int:
