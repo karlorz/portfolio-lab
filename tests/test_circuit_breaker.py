@@ -4,6 +4,7 @@ Tests for the broker circuit breaker wrapper (``src.broker.circuit_breaker``).
 pybreaker is mocked so the tests are fully hermetic and do not require the
 real library to be installed.
 """
+import logging
 import time
 from unittest.mock import MagicMock, patch, ANY
 
@@ -224,6 +225,25 @@ class TestBrokerCircuitBreaker:
                 return "hello"
 
             assert my_func() == "hello"
+
+    def test_reset_logs_warning_when_close_fails(
+        self, cb: BrokerCircuitBreaker, mock_pybreaker, caplog
+    ):
+        """reset() keeps teardown safe but warns when breaker.close() fails."""
+        _, fake_breaker = mock_pybreaker
+        fake_breaker.close.side_effect = RuntimeError("close failed")
+        cb._our_failure_count = 2
+
+        with caplog.at_level(
+            logging.WARNING,
+            logger="src.broker.circuit_breaker",
+        ):
+            cb.reset()
+
+        assert cb._our_failure_count == 0
+        fake_breaker.close.assert_called_once_with()
+        assert "Failed to close broker circuit breaker during reset" in caplog.text
+        assert "close failed" in caplog.text
 
 
 class TestBrokerCircuitBreakerSingleton:

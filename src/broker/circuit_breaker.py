@@ -236,9 +236,13 @@ class BrokerCircuitBreaker:
         if PYBREAKER_AVAILABLE and self._breaker is not None:
             try:
                 self._breaker.close()
-            except Exception:
+            except Exception as exc:
                 # close() may fail in edge cases; reset anyway
-                pass
+                logger.warning(
+                    "Failed to close broker circuit breaker during reset: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
 
 
 # ---------------------------------------------------------------------------
