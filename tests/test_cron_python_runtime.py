@@ -34,6 +34,17 @@ HERMES_CRON_SCRIPT_NAMES = [
 ]
 
 
+def _script_files():
+    scripts_dir = PROJECT_ROOT / "scripts"
+    return sorted(
+        path
+        for path in scripts_dir.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix != ".pyc"
+    )
+
+
 def _read_optional_host_script(script_path: Path) -> str:
     """Read host-installed wrapper scripts only when this runner can access them."""
     try:
@@ -52,6 +63,21 @@ def test_makefile_cron_targets_use_project_runtime_launcher() -> None:
     assert "python3 -m src." not in text
     assert "python3 scripts/" not in text
     assert "python3 $(CRON_UPDATE)" not in text
+
+
+def test_scripts_keep_sg01_project_path_only_as_env_fallback() -> None:
+    """Hardcoded sg01 repo paths in scripts must be overrideable."""
+    violations = []
+    for script_path in _script_files():
+        text = script_path.read_text(errors="ignore")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if (
+                "/root/projects/portfolio-lab" in line
+                and ":-/root/projects/portfolio-lab" not in line
+            ):
+                violations.append(f"{script_path.relative_to(PROJECT_ROOT)}:{line_number}")
+
+    assert violations == []
 
 
 @pytest.mark.parametrize("script_path", REPO_CRON_SCRIPTS)

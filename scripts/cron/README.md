@@ -77,7 +77,7 @@ When adding new cron jobs or modifying existing ones:
 | Backend | Env Var | How |
 |---------|---------|-----|
 | Hermes | `CRON_BACKEND=hermes` (default) | Jobs managed via `hermes cron` CLI |
-| System crontab | `CRON_BACKEND=crontab` | `crontab /root/projects/portfolio-lab/crontab` |
+| System crontab | `CRON_BACKEND=crontab` | `crontab "${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}/crontab"` |
 | Manual | `CRON_BACKEND=manual` | `make <target>` from terminal |
 
 ## Related Docs

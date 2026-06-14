@@ -27,7 +27,7 @@ This project now ships with `scripts/deploy-remote.sh` for resilient remote depl
 scripts/deploy-remote.sh \
   --host sg02 \
   --mode preview \
-  --remote-base /root/projects/portfolio-lab-preview \
+  --remote-base "${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab-preview}" \
   --preview-port 4173 \
   --preview-host 127.0.0.1 \
   --preview-service portfolio-lab-preview \
@@ -37,7 +37,7 @@ scripts/deploy-remote.sh \
 Or via Makefile:
 
 ```bash
-make deploy-preview DEPLOY_HOST=sg02 DEPLOY_REMOTE_BASE=/root/projects/portfolio-lab-preview
+make deploy-preview DEPLOY_HOST=sg02 DEPLOY_REMOTE_BASE="${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab-preview}"
 ```
 
 ### Production deploy
@@ -46,7 +46,7 @@ make deploy-preview DEPLOY_HOST=sg02 DEPLOY_REMOTE_BASE=/root/projects/portfolio
 scripts/deploy-remote.sh \
   --host sg01 \
   --mode production \
-  --remote-base /root/projects/portfolio-lab \
+  --remote-base "${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab}" \
   --prod-web-root /var/www/portfolio-lab \
   --reload-service caddy \
   --health-url http://127.0.0.1/
@@ -55,7 +55,7 @@ scripts/deploy-remote.sh \
 Or via Makefile:
 
 ```bash
-make deploy-production DEPLOY_HOST=sg01 DEPLOY_REMOTE_BASE=/root/projects/portfolio-lab DEPLOY_RELOAD_SERVICE=caddy
+make deploy-production DEPLOY_HOST=sg01 DEPLOY_REMOTE_BASE="${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab}" DEPLOY_RELOAD_SERVICE=caddy
 ```
 
 ## Useful Flags
@@ -141,7 +141,7 @@ systemctl status portfolio-lab-preview --no-pager -l
 journalctl -u portfolio-lab-preview -n 120 --no-pager
 ss -ltnp | grep 4173
 ps -ef | grep "vite preview" | grep -v grep
-tail -n 80 /root/projects/portfolio-lab-preview/current/preview.log
+tail -n 80 "${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab-preview}/current/preview.log"
 curl -I http://127.0.0.1:4173/
 ```
 

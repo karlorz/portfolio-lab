@@ -21,6 +21,7 @@ DENY_LIST=(
 )
 
 REQUIRED_MARKER="portfolio-lab"
+EXPECTED_PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}"
 
 guard_ensure_portfolio_lab() {
     local cwd
@@ -31,7 +32,7 @@ guard_ensure_portfolio_lab() {
         if [[ "$cwd" == "$deny" || "$cwd" == "$deny"/* ]]; then
             echo "FATAL: test-repo-guard — refusing to run tests in $cwd" >&2
             echo "  This directory matches deny-list entry: $deny" >&2
-            echo "  Tests must be run from /root/projects/portfolio-lab" >&2
+            echo "  Tests must be run from $EXPECTED_PROJECT_DIR" >&2
             exit 78  # EX_CONFIG — configuration error
         fi
     done

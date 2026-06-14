@@ -84,12 +84,12 @@ Health/options:
 Examples:
   # Private preview deploy on sg02
   ${SCRIPT_NAME} --host sg02 --mode preview \
-    --remote-base /root/projects/portfolio-lab-preview \
+    --remote-base \${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab-preview} \
     --preview-port 4173 --health-url http://127.0.0.1:4173/
 
   # Production deploy with static web root + Caddy reload
   ${SCRIPT_NAME} --host sg01 --mode production \
-    --remote-base /root/projects/portfolio-lab \
+    --remote-base \${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab} \
     --prod-web-root /var/www/portfolio-lab \
     --reload-service caddy --health-url http://127.0.0.1/
 USAGE
@@ -163,9 +163,9 @@ is_integer "$KEEP_RELEASES" || die "--keep-releases must be an integer"
 
 if [ -z "$REMOTE_BASE" ]; then
   if [ "$MODE" = "preview" ]; then
-    REMOTE_BASE="/root/projects/portfolio-lab-preview"
+    REMOTE_BASE="${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab-preview}"
   else
-    REMOTE_BASE="/root/projects/portfolio-lab"
+    REMOTE_BASE="${DEPLOY_REMOTE_BASE:-/root/projects/portfolio-lab}"
   fi
 fi
 

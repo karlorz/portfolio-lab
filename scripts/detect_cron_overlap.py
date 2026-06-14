@@ -34,7 +34,7 @@ def crontab_jobs_from_text(text: str) -> set[str]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        match = re.search(r"make -C /root/projects/portfolio-lab (\w[\w-]*)", line)
+        match = re.search(r"\bmake\s+-C\s+\S+\s+(\w[\w-]*)", line)
         if match and match.group(1) in MAKE_TO_JOB:
             jobs.add(MAKE_TO_JOB[match.group(1)])
     return jobs

@@ -90,7 +90,7 @@ Defaults live in `config/lab-app.env`:
 
 ```text
 PORTFOLIO_LAB_SITE_ADDRESS=lab.karldigi.dev
-PORTFOLIO_LAB_APP_DIR=/root/projects/portfolio-lab
+PORTFOLIO_LAB_APP_DIR=${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}
 PORTFOLIO_LAB_WEB_ROOT=/var/www/portfolio-lab
 PORTFOLIO_LAB_PUBLIC_ROOT=/var/www/portfolio-lab
 PUBLIC_DATA_DIR=/var/www/portfolio-lab/data

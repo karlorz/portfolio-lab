@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 
+PROJECT_ROOT = Path(
+    os.environ.get("PORTFOLIO_LAB_PROJECT_DIR", Path(__file__).resolve().parents[1])
+)
+
+
 def run_pytest_with_timing(test_path: str = "tests/", timeout: int = 600) -> Dict:
     """Run pytest and capture timing information."""
     print(f"Running pytest on {test_path} with timeout {timeout}s...")
@@ -39,7 +44,7 @@ def run_pytest_with_timing(test_path: str = "tests/", timeout: int = 600) -> Dic
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd="/root/projects/portfolio-lab",
+            cwd=str(PROJECT_ROOT),
             env={**os.environ, "PORTFOLIO_LAB_ENABLE_ML": "0"}
         )
         
@@ -149,7 +154,7 @@ def validate_test_fast_target() -> Dict:
             capture_output=True,
             text=True,
             timeout=180,  # 3 minutes max for test-fast
-            cwd="/root/projects/portfolio-lab"
+            cwd=str(PROJECT_ROOT)
         )
         
         end_time = time.time()
@@ -187,7 +192,7 @@ def analyze_test_segmentation() -> Dict:
     
     # Find test files and estimate sizes
     test_files = []
-    tests_dir = Path("/root/projects/portfolio-lab/tests")
+    tests_dir = PROJECT_ROOT / "tests"
     
     if tests_dir.exists():
         for py_file in tests_dir.rglob("test_*.py"):
@@ -310,7 +315,8 @@ def main():
     
     # Save results if requested
     if args.save_results:
-        output_file = "/root/projects/portfolio-lab/data/test_segmentation_results.json"
+        output_file = PROJECT_ROOT / "data" / "test_segmentation_results.json"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, "w") as f:
             json.dump(results, f, indent=2)
         print(f"\nResults saved to {output_file}")
