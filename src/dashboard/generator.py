@@ -452,10 +452,10 @@ class DashboardGenerator:
 
         return bocd_data
 
-    def generate_signals_json(self) -> Path:
-        """Generate current signals and allocations."""
+    def _load_signal_generation_context(self) -> Dict[str, Any]:
+        """Load DB, portfolio, and regime context for signals.json."""
         cursor = self.conn.cursor()
-        
+
         # Get latest VIX level directly from prices table
         cursor.execute("""
             SELECT close FROM prices 
@@ -532,6 +532,34 @@ class DashboardGenerator:
                         })
                     except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                         logger.warning("Failed to parse order log entry: %s", e)
+
+        return {
+            "cursor": cursor,
+            "vix_level": vix_level,
+            "trend_regime": trend_regime,
+            "trend_detected": trend_detected,
+            "current_regime": current_regime,
+            "regime_data": regime_data,
+            "latest": latest,
+            "positions": positions,
+            "cash": cash,
+            "total_value": total_value,
+            "target_alloc": target_alloc,
+            "orders": orders,
+        }
+
+    def _build_base_signal_sections(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Build the core signal sections before dashboard-level metadata."""
+        vix_level = context["vix_level"]
+        trend_regime = context["trend_regime"]
+        current_regime = context["current_regime"]
+        regime_data = context["regime_data"]
+        latest = context["latest"]
+        positions = context["positions"]
+        cash = context["cash"]
+        total_value = context["total_value"]
+        target_alloc = context["target_alloc"]
+        orders = context["orders"]
 
         # Add factor rotation signals if engine available
         factor_rotation_signal = None
@@ -852,7 +880,7 @@ class DashboardGenerator:
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("hedge_selector", e)
 
-        output = _attach_signal_metadata({
+        return {
             "regime": validate_signal("regime", regime_data),
             "target_allocations": target_alloc,
             "current_positions": positions,
@@ -886,8 +914,14 @@ class DashboardGenerator:
             "entropy": entropy_data,
             "bond_momentum": overlay_data.get("bond_momentum", {}),
             "hedge_selector": validate_signal("hedge_selector", hedge_selector_signal),
-        })
+        }
 
+    def _build_optional_signal_sections(
+        self,
+        output: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Append optional operational sections that precede staleness checks."""
         # Rebalance health data
         try:
             from src.monitor.rebalance_health import generate as gen_rebalance_health
@@ -902,6 +936,17 @@ class DashboardGenerator:
             output["broker_circuit_breaker"] = get_circuit_state()
         except ImportError:
             pass  # circuit_breaker module not available
+
+        return output
+
+    def _apply_signal_postprocessors(
+        self,
+        output: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Apply staleness, monitoring, alerting, and final signal appenders."""
+        cursor = context["cursor"]
+        current_regime = context["current_regime"]
 
         # Signal staleness detection (production readiness)
         output["staleness"] = self._check_signal_staleness(output)
@@ -1055,6 +1100,15 @@ class DashboardGenerator:
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("ramp_status", e)
             output["ramp"] = {"error": str(e)}
+
+        return output
+
+    def generate_signals_json(self) -> Path:
+        """Generate current signals and allocations."""
+        context = self._load_signal_generation_context()
+        output = _attach_signal_metadata(self._build_base_signal_sections(context))
+        output = self._build_optional_signal_sections(output, context)
+        output = self._apply_signal_postprocessors(output, context)
 
         out_path = PUBLIC_DIR / "signals.json"
         save_results_json(output, output_path=str(out_path), validator=validate_all_signals)

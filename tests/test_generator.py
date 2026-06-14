@@ -4,6 +4,7 @@ Tests for dashboard generator — VIX regime detection, data freshness,
 health status, alerts, broker data, and stats calculation.
 """
 import json
+import inspect
 import sqlite3
 import numpy as np
 
@@ -1299,6 +1300,25 @@ class TestPerformanceJSONEdgeCases:
 
 class TestSignalsJSONEdgeCases:
     """Test generate_signals_json edge cases."""
+
+    def test_generate_signals_json_is_thin_coordinator(self):
+        """generate_signals_json delegates section work to focused helpers."""
+        source = inspect.getsource(DashboardGenerator.generate_signals_json)
+        body_lines = [
+            line
+            for line in source.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+        assert len(body_lines) <= 100
+        for helper_name in (
+            "_load_signal_generation_context",
+            "_build_base_signal_sections",
+            "_build_optional_signal_sections",
+            "_apply_signal_postprocessors",
+        ):
+            assert helper_name in source
+            assert hasattr(DashboardGenerator, helper_name)
 
     def test_missing_vix_handled(self, tmp_path):
         """Missing VIX symbol defaults vix to None and falls back to trend."""
