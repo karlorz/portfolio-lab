@@ -518,20 +518,37 @@ def load_historical_bars(symbol: str, days: int = 5) -> pd.DataFrame:
         with sqlite_connect(str(db_path)) as conn:
             try:
                 df = pd.read_sql_query(
-                    "SELECT date, open, high, low, close, volume FROM prices "
+                    "SELECT date, open, high, low, close, volume, "
+                    "price_semantics, is_adjusted_close_proxy FROM prices "
                     "WHERE symbol = ? ORDER BY date DESC LIMIT ?",
                     conn, params=(symbol, days),
                 )
                 if not df.empty:
                     df['date'] = pd.to_datetime(df['date'])
                     df = df.set_index('date').sort_index()
-                    # Check if OHLC is populated
-                    if df['open'].notna().sum() > len(df) * 0.5:
-                        for col in ['open', 'high', 'low']:
-                            df[col] = df[col].fillna(df['close'])
-                        df = df.dropna(subset=['close', 'volume'])
-                        df['volume'] = df['volume'].fillna(0)
-                        result_df = df[['open', 'high', 'low', 'close', 'volume']]
+                    proxy_rows = (
+                        df.get('is_adjusted_close_proxy', 0).fillna(0).astype(int).eq(1)
+                        | df.get('price_semantics', '').fillna('').eq('adjusted_close_proxy_ohlc')
+                    )
+                    flat_proxy_rows = (
+                        df['open'].eq(df['high'])
+                        & df['high'].eq(df['low'])
+                        & df['low'].eq(df['close'])
+                        & df['volume'].fillna(0).eq(0)
+                    )
+                    if (proxy_rows | flat_proxy_rows).all():
+                        logger.info(
+                            "Skipping adjusted-close proxy OHLC rows for %s; falling back to Yahoo",
+                            symbol,
+                        )
+                    else:
+                        # Check if OHLC is populated
+                        if df['open'].notna().sum() > len(df) * 0.5:
+                            for col in ['open', 'high', 'low']:
+                                df[col] = df[col].fillna(df['close'])
+                            df = df.dropna(subset=['close', 'volume'])
+                            df['volume'] = df['volume'].fillna(0)
+                            result_df = df[['open', 'high', 'low', 'close', 'volume']]
             except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
                 logger.warning("Failed to fetch OHLCV for %s from DB: %s", symbol, e)
 

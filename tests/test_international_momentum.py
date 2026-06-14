@@ -786,7 +786,7 @@ class TestInternationalMomentumGeneratorExtended(unittest.TestCase):
     def test_get_signal_statistics_single_signal(self):
         """Single signal statistics should work."""
         data = {
-            'timestamp': '2026-05-14T10:00:00',
+            'timestamp': datetime.now().isoformat(),
             'data_fresh': True,
             'relative': {
                 'efa_momentum_6m': 0.20,
@@ -908,7 +908,7 @@ class TestInternationalMomentumGeneratorAdvanced(unittest.TestCase):
     def test_save_and_get_signal_history(self):
         """Test saving signal and retrieving history."""
         data = {
-            'timestamp': '2026-05-14T10:00:00',
+            'timestamp': datetime.now().isoformat(),
             'data_fresh': True,
             'relative': {
                 'efa_momentum_6m': 0.20,

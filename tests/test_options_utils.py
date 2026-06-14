@@ -1282,10 +1282,10 @@ class TestOptionsChainFetcherMore:
         """Quotes closer to ATM should have tighter spreads."""
         fetcher = OptionsChainFetcher()
         chain = asyncio.run(fetcher._generate_simulated_chain("SPY"))
-        quotes_sorted = sorted(chain.quotes, key=lambda q: abs(q.strike - 550.0))
-        # ATM quote should have the smallest spread
-        atm_spread = quotes_sorted[0].bid_ask_spread_pct
-        otm_spread = quotes_sorted[-1].bid_ask_spread_pct
+        quotes_by_liquidity = sorted(chain.quotes, key=lambda q: q.volume, reverse=True)
+        # The simulated generator makes near-ATM quotes most liquid and tightest.
+        atm_spread = quotes_by_liquidity[0].bid_ask_spread_pct
+        otm_spread = quotes_by_liquidity[-1].bid_ask_spread_pct
         assert atm_spread <= otm_spread
 
     def test_fetch_0dte_chain_simulation_paper_mode(self):
