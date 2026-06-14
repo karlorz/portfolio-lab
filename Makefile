@@ -542,17 +542,7 @@ verify-cron-sync:
 	@$(PYTHON_RUNTIME) -c "from cron_compat import active_backend; print(f'Active backend: {active_backend()}')"
 	@echo ""
 	@echo "Checking Makefile target coverage vs crontab..."
-	@MISSING=0; \
-	TARGETS="data dashboard health eval research wiki-sync build sync attribution"; \
-	for t in $$TARGETS; do \
-		if grep -q "make.*$$t" $(PROJECT_DIR)/crontab 2>/dev/null; then \
-			echo "  ✓ $$t (in crontab)"; \
-		else \
-			echo "  ✗ $$t MISSING from crontab"; \
-			MISSING=$$((MISSING + 1)); \
-		fi; \
-	done; \
-	if [ $$MISSING -eq 0 ]; then echo "OK: All targets synced"; else echo "FAIL: $$MISSING targets missing from crontab"; exit 1; fi
+	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/cron_verify.py --crontab $(PROJECT_DIR)/crontab
 	@echo ""
 	@echo "Checking cron_status.json integrity..."
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/cron_verify.py

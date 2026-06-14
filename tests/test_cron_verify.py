@@ -58,3 +58,65 @@ def test_verify_fails_when_expected_tasker_job_missing(tmp_path, capsys) -> None
 
     assert module.verify_status(status_file) == 1
     assert "FAIL: Missing jobs" in capsys.readouterr().out
+
+
+def test_crontab_make_targets_are_derived_from_cron_targets() -> None:
+    module = _load_module()
+
+    assert module.expected_crontab_make_targets(
+        [
+            "portfolio-lab-data",
+            "portfolio-lab-overlay-signals",
+            "portfolio-lab-position-sync",
+            "portfolio-lab-mark-to-market",
+        ]
+    ) == {"data", "overlay-signals", "sync"}
+
+
+def test_verify_crontab_targets_fails_when_cron_target_missing(
+    tmp_path,
+    capsys,
+    monkeypatch,
+) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "CRON_TARGETS",
+        ["portfolio-lab-data", "portfolio-lab-overlay-signals"],
+    )
+    crontab_file = tmp_path / "crontab"
+    crontab_file.write_text(
+        "5 * * * * CRON_BACKEND=crontab make -C /repo data\n",
+        encoding="utf-8",
+    )
+
+    assert module.verify_crontab_targets(crontab_file) == 1
+    output = capsys.readouterr().out
+    assert "overlay-signals" in output
+    assert "build" not in output
+
+
+def test_verify_crontab_targets_accepts_targets_from_cron_targets(
+    tmp_path,
+    capsys,
+    monkeypatch,
+) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "CRON_TARGETS",
+        ["portfolio-lab-data", "portfolio-lab-overlay-signals"],
+    )
+    crontab_file = tmp_path / "crontab"
+    crontab_file.write_text(
+        "\n".join(
+            [
+                "5 * * * * CRON_BACKEND=crontab make -C /repo data",
+                "3,23,43 * * * * CRON_BACKEND=crontab make -C /repo overlay-signals",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert module.verify_crontab_targets(crontab_file) == 0
+    assert "expected crontab targets present" in capsys.readouterr().out
