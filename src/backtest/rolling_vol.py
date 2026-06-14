@@ -27,10 +27,17 @@ def precomputed_rolling_volatility(
 
     prefix_sum = [0.0]
     prefix_sum_sq = [0.0]
+    prefix_nan_count = [0]
     for value in returns:
         value_f = float(value)
-        prefix_sum.append(prefix_sum[-1] + value_f)
-        prefix_sum_sq.append(prefix_sum_sq[-1] + value_f * value_f)
+        if math.isnan(value_f):
+            prefix_sum.append(prefix_sum[-1])
+            prefix_sum_sq.append(prefix_sum_sq[-1])
+            prefix_nan_count.append(prefix_nan_count[-1] + 1)
+        else:
+            prefix_sum.append(prefix_sum[-1] + value_f)
+            prefix_sum_sq.append(prefix_sum_sq[-1] + value_f * value_f)
+            prefix_nan_count.append(prefix_nan_count[-1])
 
     annualizer = math.sqrt(annualization_factor)
 
@@ -38,6 +45,8 @@ def precomputed_rolling_volatility(
         count = end - start
         if count <= 0:
             return 0.0
+        if prefix_nan_count[end] - prefix_nan_count[start] > 0:
+            return math.nan
         total = prefix_sum[end] - prefix_sum[start]
         total_sq = prefix_sum_sq[end] - prefix_sum_sq[start]
         mean = total / count
