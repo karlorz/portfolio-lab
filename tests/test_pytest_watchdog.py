@@ -105,20 +105,61 @@ def test_pytest_xdist_worker_with_pytest_ancestor_is_selected() -> None:
     assert any(decision.process == worker and decision.role == "worker" for decision in decisions)
 
 
-def test_stale_pytest_parent_is_selected_for_kill() -> None:
-    """Long-running pytest parents should be selected even before inode cleanup is needed."""
+def test_portfolio_lab_pytest_parent_is_not_killed_for_normal_full_suite_runtime() -> None:
+    """Long portfolio-lab test runs are bounded by make test's own timeout."""
     wd = _load_watchdog()
     parent = wd.ProcessInfo(
         pid=100,
         ppid=1,
-        etime=301,
-        cpu=4.0,
+        etime=900,
+        cpu=80.0,
         rss_kb=120_000,
         args="/repo/.venv/bin/python -m pytest tests/",
+        cwd="/root/projects/portfolio-lab",
+    )
+
+    decisions = wd.select_runaway_processes([parent], max_run_sec=300, cpu_threshold=30, rss_threshold_kb=500_000)
+
+    assert decisions == []
+
+
+def test_wrong_repo_pytest_parent_is_selected_when_cpu_heavy() -> None:
+    """Wrong-repo pytest parents should still be killable when they burn CPU."""
+    wd = _load_watchdog()
+    parent = wd.ProcessInfo(
+        pid=100,
+        ppid=1,
+        etime=901,
+        cpu=80.0,
+        rss_kb=120_000,
+        args="/root/.hermes/hermes-agent/.venv/bin/python -m pytest tests/",
+        cwd="/root/.hermes/hermes-agent",
     )
 
     decisions = wd.select_runaway_processes([parent], max_run_sec=300, cpu_threshold=30, rss_threshold_kb=500_000)
 
     assert len(decisions) == 1
     assert decisions[0].process == parent
-    assert "runtime 301s" in decisions[0].reason
+    assert decisions[0].role == "parent"
+    assert "runtime 901s + 80% CPU" in decisions[0].reason
+
+
+def test_wrong_repo_pytest_parent_is_selected_when_memory_heavy() -> None:
+    """Wrong-repo pytest parents should still be killable when they exceed RSS limits."""
+    wd = _load_watchdog()
+    parent = wd.ProcessInfo(
+        pid=100,
+        ppid=1,
+        etime=901,
+        cpu=4.0,
+        rss_kb=600_000,
+        args="/root/.hermes/hermes-agent/.venv/bin/python -m pytest tests/",
+        cwd="/root/.hermes/hermes-agent",
+    )
+
+    decisions = wd.select_runaway_processes([parent], max_run_sec=300, cpu_threshold=30, rss_threshold_kb=500_000)
+
+    assert len(decisions) == 1
+    assert decisions[0].process == parent
+    assert decisions[0].role == "parent"
+    assert "600000KB RSS > 500000KB" in decisions[0].reason

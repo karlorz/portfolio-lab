@@ -27,6 +27,9 @@ DEFAULT_INODE_PRESSURE_PCT = 80
 DEFAULT_STALE_TMP_SECONDS = 3600
 DEFAULT_LOG_PATH = Path("/root/.hermes/logs/python-monitor.log")
 DEFAULT_LOG_MAX_BYTES = 5_000_000
+DEFAULT_ALLOWED_PARENT_CWD_PREFIXES = (
+    os.environ.get("PORTFOLIO_LAB_PROJECT_DIR", str(Path.home() / "projects" / "portfolio-lab")),
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class ProcessInfo:
     cpu: float
     rss_kb: int
     args: str
+    cwd: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,9 +71,31 @@ def env_int(name: str, default: int) -> int:
     return parsed if parsed >= 0 else default
 
 
+def env_bool(name: str, default: bool) -> bool:
+    """Read a boolean env var with a safe fallback."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def env_path_prefixes(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """Read OS-path-separated prefixes from the environment."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    prefixes = tuple(prefix.strip().rstrip("/") for prefix in value.split(os.pathsep) if prefix.strip())
+    return prefixes
+
+
 def is_pytest_parent(process: ProcessInfo) -> bool:
     """Return True for normal pytest parent commands."""
-    args = f" {process.args} "
+    return is_pytest_parent_args(process.args)
+
+
+def is_pytest_parent_args(args: str) -> bool:
+    """Return True for normal pytest parent command arguments."""
+    args = f" {args} "
     return " -m pytest " in args or "/pytest " in args or " pytest " in args
 
 
@@ -94,26 +120,70 @@ def has_pytest_ancestor(process: ProcessInfo, process_map: dict[int, ProcessInfo
     return False
 
 
+def path_matches_prefix(path: str | None, prefix: str) -> bool:
+    """Return True when path is equal to or below prefix."""
+    if not path or not prefix:
+        return False
+    normalized_path = path.rstrip("/")
+    normalized_prefix = prefix.rstrip("/")
+    return normalized_path == normalized_prefix or normalized_path.startswith(f"{normalized_prefix}/")
+
+
+def args_contain_path_prefix(args: str, prefix: str) -> bool:
+    """Return True when process args include an exact path prefix."""
+    if not prefix:
+        return False
+    normalized_prefix = prefix.rstrip("/")
+    padded_args = f" {args} "
+    return (
+        f" {normalized_prefix} " in padded_args
+        or f" {normalized_prefix}/" in padded_args
+        or args.startswith(f"{normalized_prefix}/")
+    )
+
+
+def is_protected_pytest_parent(
+    process: ProcessInfo,
+    *,
+    allowed_cwd_prefixes: tuple[str, ...] = DEFAULT_ALLOWED_PARENT_CWD_PREFIXES,
+) -> bool:
+    """Return True when a pytest parent belongs to an allowed dev project."""
+    return any(
+        path_matches_prefix(process.cwd, prefix) or args_contain_path_prefix(process.args, prefix)
+        for prefix in allowed_cwd_prefixes
+    )
+
+
 def select_runaway_processes(
     processes: list[ProcessInfo],
     *,
     max_run_sec: int = DEFAULT_MAX_RUN_SEC,
     cpu_threshold: float = DEFAULT_CPU_THRESHOLD,
     rss_threshold_kb: int = DEFAULT_RSS_THRESHOLD_KB,
+    protect_parent_cwd: bool = True,
+    allowed_parent_cwd_prefixes: tuple[str, ...] = DEFAULT_ALLOWED_PARENT_CWD_PREFIXES,
 ) -> list[KillDecision]:
     """Choose pytest-related processes that exceed runtime/resource limits."""
     process_map = {process.pid: process for process in processes}
     decisions: list[KillDecision] = []
 
     for process in processes:
-        if is_pytest_parent(process) and process.etime > max_run_sec:
-            decisions.append(
-                KillDecision(
-                    process=process,
-                    role="parent",
-                    reason=f"runtime {process.etime}s > {max_run_sec}s",
-                )
-            )
+        if is_pytest_parent(process):
+            if protect_parent_cwd and is_protected_pytest_parent(
+                process,
+                allowed_cwd_prefixes=allowed_parent_cwd_prefixes,
+            ):
+                continue
+            if process.etime <= max_run_sec:
+                continue
+
+            reason = ""
+            if process.cpu > cpu_threshold:
+                reason = f"runtime {process.etime}s + {process.cpu:.0f}% CPU"
+            elif process.rss_kb > rss_threshold_kb:
+                reason = f"{process.rss_kb}KB RSS > {rss_threshold_kb}KB"
+            if reason:
+                decisions.append(KillDecision(process=process, role="parent", reason=reason))
             continue
 
         if not is_xdist_like_worker(process):
@@ -148,18 +218,29 @@ def read_processes() -> list[ProcessInfo]:
             continue
         pid_s, ppid_s, etime_s, cpu_s, rss_s, args = parts
         try:
+            pid = int(pid_s)
+            cwd = read_process_cwd(pid) if is_pytest_parent_args(args) else None
             process = ProcessInfo(
-                pid=int(pid_s),
+                pid=pid,
                 ppid=int(ppid_s),
                 etime=int(float(etime_s)),
                 cpu=float(cpu_s),
                 rss_kb=int(float(rss_s)),
                 args=args,
+                cwd=cwd,
             )
         except ValueError:
             continue
         processes.append(process)
     return processes
+
+
+def read_process_cwd(pid: int) -> str | None:
+    """Return a process cwd from procfs when available."""
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
 
 
 def rotate_log(log_path: Path, max_bytes: int = DEFAULT_LOG_MAX_BYTES) -> None:
@@ -379,6 +460,11 @@ def main(argv: list[str] | None = None) -> int:
         max_run_sec=env_int("PYTEST_WATCHDOG_MAX_RUN_SEC", DEFAULT_MAX_RUN_SEC),
         cpu_threshold=float(env_int("PYTEST_WATCHDOG_CPU_THRESHOLD", int(DEFAULT_CPU_THRESHOLD))),
         rss_threshold_kb=env_int("PYTEST_WATCHDOG_RSS_THRESHOLD_KB", DEFAULT_RSS_THRESHOLD_KB),
+        protect_parent_cwd=env_bool("PYTEST_WATCHDOG_PROTECT_PARENT_CWD", True),
+        allowed_parent_cwd_prefixes=env_path_prefixes(
+            "PYTEST_WATCHDOG_ALLOWED_PARENT_CWD_PREFIXES",
+            DEFAULT_ALLOWED_PARENT_CWD_PREFIXES,
+        ),
     )
     killed = terminate_processes(decisions, dry_run=dry_run)
     cleanup = cleanup_pytest_tmp(
