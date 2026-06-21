@@ -3,7 +3,7 @@
 ## Status
 - Research: **Complete** (11 wiki compound pages + grid search + rolling-window + Monte Carlo)
 - Build: **Complete** — real Yahoo Finance data, working backtest engine + FIRE calculator
-- **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.79 (2005-2026, 94-config grid search)
+- **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.95 (2005-2026, base grid 0.79 + regime-conditional allocation + vol targeting overlays; see Status lines below)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
 - Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
 | - Test count: **13759 safe** (13446 Python + 313 TypeScript + 30 integration, ~33 skipped, 0 failures)
@@ -153,7 +153,7 @@ Max per-signal cap: 50%
 - **SPY/GLD 55/45** — meets target (>=90% SPY return, <=70% vol)
 - **SPY/GLD/TLT 58/32/10**, **50/35/15**, **50/40/10** — meet target
 - **SPY/GLD/IEF 50/35/15** — best 2022 resilience with IEF
-- **SPY/GLD/TLT 46/38/16** — Sharpe 0.79, fine-sweep champion
+- **SPY/GLD/TLT 46/38/16** — base grid Sharpe 0.79, production Sharpe 0.95 (with overlays), fine-sweep champion
 - SPY/EFA/GLD/TLT 36/10/38/16 — international tactical hedge
 
 ## Grid Search Results (2005-2026, 94 configs)
