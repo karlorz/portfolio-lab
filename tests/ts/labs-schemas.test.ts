@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import * as LabsSchemas from '../../src/schemas/labs';
 import {
   LABS_DASHBOARD_ENDPOINTS,
+  MAX_INDEXED_DIFF_FETCHES,
   PUBLIC_DATA_INDEX_ENDPOINT,
   buildEmptyLabsDashboardData,
   fetchLabsDashboardData,
@@ -961,6 +962,43 @@ describe('Labs dashboard data fetch helper', () => {
     expect(requested).toEqual([PUBLIC_DATA_INDEX_ENDPOINT, `/data/${diffPath}`]);
     expect(data.diffs?.[0].metric_deltas.sharpe.delta).toBe(0.04);
     expect(data.errors).toEqual([]);
+  });
+
+  it('caps indexed experiment-diff fetches at maxIndexedDiffFetches and surfaces skipped count', async () => {
+    const diffPathA = 'experiment_diff_a.json';
+    const diffPathB = 'experiment_diff_b.json';
+    const payloads: Record<string, unknown> = {
+      [PUBLIC_DATA_INDEX_ENDPOINT]: publicIndex([
+        indexEntry(diffPathA, {
+          category: 'labs',
+          schema_version: 'experiment-diff/v1',
+        }),
+        indexEntry(diffPathB, {
+          category: 'labs',
+          schema_version: 'experiment-diff/v1',
+        }),
+      ]),
+      [`/data/${diffPathA}`]: loadLabsFixture('valid_experiment_diff'),
+      [`/data/${diffPathB}`]: loadLabsFixture('valid_experiment_diff'),
+    };
+    const requested: string[] = [];
+    const fetcher = async (url: string) => {
+      requested.push(url);
+      return new Response(JSON.stringify(payloads[url]), { status: 200 });
+    };
+
+    const data = await fetchLabsDashboardDataFromIndex(fetcher, { maxIndexedDiffFetches: 1 });
+
+    expect(requested).toEqual([PUBLIC_DATA_INDEX_ENDPOINT, `/data/${diffPathA}`]);
+    expect(data.diffs?.length).toBe(1);
+    expect(data.errors).toEqual([
+      'diff:budget: skipped 1 of 2 experiment-diff artifacts (limit 1)',
+    ]);
+  });
+
+  it('exposes MAX_INDEXED_DIFF_FETCHES as a stable default', () => {
+    expect(MAX_INDEXED_DIFF_FETCHES).toBeGreaterThan(0);
+    expect(typeof MAX_INDEXED_DIFF_FETCHES).toBe('number');
   });
 
   it('falls back to direct Labs endpoints when the public index is missing or legacy-only', async () => {

@@ -41,9 +41,13 @@ const LABS_ENDPOINT_FILENAMES: Record<LabsEndpointKey, string> = {
 
 type LabsFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
+export const MAX_INDEXED_DIFF_FETCHES = 8;
+
 export interface LabsDashboardFetchOptions {
   selectedPages?: Partial<Record<LabsEndpointKey, number>>;
   signal?: AbortSignal;
+  /** Cap on indexed experiment-diff artifacts fetched on dashboard load. Defaults to `MAX_INDEXED_DIFF_FETCHES`. */
+  maxIndexedDiffFetches?: number;
 }
 
 interface EndpointResult<T> {
@@ -300,7 +304,11 @@ async function fetchIndexedExperimentDiffs(
     return { data: [], missing: false, errors: [] };
   }
 
-  const results = await Promise.all(entries.map(async (entry) => ({
+  const limit = options.maxIndexedDiffFetches ?? MAX_INDEXED_DIFF_FETCHES;
+  const selected = entries.slice(0, limit);
+  const skipped = entries.length - selected.length;
+
+  const results = await Promise.all(selected.map(async (entry) => ({
     entry,
     result: await fetchLabsEndpoint(
       fetcher,
@@ -311,17 +319,25 @@ async function fetchIndexedExperimentDiffs(
     ),
   })));
 
+  const errors = results.flatMap(({ entry, result }) => {
+    if (!result.missing) {
+      return result.errors;
+    }
+    return result.errors.length > 0
+      ? result.errors
+      : [`diff:${entry.filename}: missing static experiment diff artifact`];
+  });
+
+  if (skipped > 0) {
+    errors.push(
+      `diff:budget: skipped ${skipped} of ${entries.length} experiment-diff artifacts (limit ${limit})`,
+    );
+  }
+
   return {
     data: results.flatMap(({ result }) => (result.data ? [result.data] : [])),
     missing: false,
-    errors: results.flatMap(({ entry, result }) => {
-      if (!result.missing) {
-        return result.errors;
-      }
-      return result.errors.length > 0
-        ? result.errors
-        : [`diff:${entry.filename}: missing static experiment diff artifact`];
-    }),
+    errors,
   };
 }
 
