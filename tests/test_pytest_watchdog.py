@@ -118,7 +118,15 @@ def test_portfolio_lab_pytest_parent_is_not_killed_for_normal_full_suite_runtime
         cwd="/root/projects/portfolio-lab",
     )
 
-    decisions = wd.select_runaway_processes([parent], max_run_sec=300, cpu_threshold=30, rss_threshold_kb=500_000)
+    # Pass explicit allowed prefix so the test is independent of $HOME
+    # (CI runs as the runner user; local runs as root).
+    decisions = wd.select_runaway_processes(
+        [parent],
+        max_run_sec=300,
+        cpu_threshold=30,
+        rss_threshold_kb=500_000,
+        allowed_parent_cwd_prefixes=("/root/projects/portfolio-lab",),
+    )
 
     assert decisions == []
 

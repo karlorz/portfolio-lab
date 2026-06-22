@@ -13,7 +13,7 @@ dependencies = [
     # Data & Scientific
     "numpy>=2.0",
     "pandas>=2.0",
-    "scipy>=1.15",
+    "scipy>=1.15,<1.18",
     "scikit-learn>=1.6",
     # Finance & Data Fetching
     "yfinance>=0.2",

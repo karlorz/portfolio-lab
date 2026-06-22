@@ -3492,16 +3492,21 @@ class TestGetSignalHistoryEdgeCases:
 
     def test_get_signal_history_multiple_signals_same_ticker(self, tmp_path):
         """Multiple signals for same ticker returned in order."""
+        from datetime import timedelta
         integrator = _make_integrator(tmp_path)
         conn = sqlite3.connect(str(integrator.db_path))
+        now = datetime.now()
         for i in range(3):
+            # Use relative timestamps so the test is not time-bombed when
+            # hardcoded dates drift outside the get_signal_history(days=30) window.
+            ts = (now - timedelta(days=i + 1)).strftime("%Y-%m-%dT12:00:00")
             conn.execute("""
                 INSERT INTO composite_signals
                 (ticker, timestamp, composite_score, composite_confidence,
                  detected_regime, weights_used, primary_drivers,
                  signal_agreement, expected_accuracy)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, ("SPY", f"2026-05-{24-i:02d}T12:00:00", 0.3 + i * 0.1,
+            """, ("SPY", ts, 0.3 + i * 0.1,
                   0.7, "neutral", "{}", "[]", "mixed", None))
         conn.commit()
         conn.close()
