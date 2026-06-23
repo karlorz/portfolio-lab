@@ -56,3 +56,6 @@
 
 # GARCH-CVaR risk — hourly at :51 (crontab-only)
 51 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab garch-risk >> /root/projects/portfolio-lab/data/garch.log 2>&1
+
+# Log pruning — daily at 03:03 (DISABLED: owned by tasker portfolio-lab-prune-logs)
+# 3 3 * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab prune-logs >> /root/projects/portfolio-lab/data/prune_logs.log 2>&1

@@ -37,6 +37,7 @@ def test_default_registry_loads_expected_portfolio_lab_tasks():
         "portfolio-lab-position-sync",
         "portfolio-lab-garch-risk",
         "portfolio-lab-daily-pnl",
+        "portfolio-lab-prune-logs",
         "portfolio-lab-build",
         "portfolio-lab-autonomous-agent",
     }

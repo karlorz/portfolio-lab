@@ -513,6 +513,26 @@ ask:
 all: data dashboard health eval research wiki-sync sync build overlay-signals overlay-dashboard garch-risk daily-pnl attribution unified-dashboard
 	@echo "=== All tasks complete: $$(date) ==="
 
+# ── Log Retention ─────────────────────────────────────────────────────
+
+.PHONY: prune-logs
+prune-logs:
+	@echo "=== Prune tasker_logs: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/prune_logs.py --keep 20 --delete-dead-health-log 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs $$STATUS $$DUR
+
+.PHONY: prune-logs-dry-run
+prune-logs-dry-run:
+	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/prune_logs.py --keep 20 --delete-dead-health-log --dry-run
+
 # ── Cron Status Management ───────────────────────────────────────────
 
 .PHONY: cron-reset
@@ -532,6 +552,7 @@ cron-reset:
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 
 # ── Verification ─────────────────────────────────────────────────────

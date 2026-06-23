@@ -161,6 +161,74 @@ class TaskerStore:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
         return "\n".join(lines[-max(1, min(int(tail), 5000)):])
 
+    def prune_runs(self, keep_per_task: int = 20, dry_run: bool = False) -> dict[str, Any]:
+        """Bound run-log growth: keep the newest ``keep_per_task`` runs per task.
+
+        Deletes older per-run ``.log`` files and their ``task_runs`` rows in
+        lockstep, so ``list_runs()`` never returns dangling references. Orphan
+        rows (file already missing) are dropped and reported in ``errors``.
+        Hygiene, not a release gate — pruning never raises on a missing file.
+
+        Returns a summary dict:
+            deleted_files, deleted_rows, kept_files, bytes_freed, errors, plan.
+        ``plan`` is populated only when ``dry_run=True`` (run_ids that would be
+        deleted); a real run leaves ``plan`` empty.
+        """
+        keep = max(0, int(keep_per_task))
+        summary: dict[str, Any] = {
+            "deleted_files": 0,
+            "deleted_rows": 0,
+            "kept_files": 0,
+            "bytes_freed": 0,
+            "errors": [],
+            "plan": [],
+        }
+        with self._connect() as conn:
+            total_before = conn.execute("SELECT COUNT(*) FROM task_runs").fetchone()[0]
+            # run_ids older than the keep window, per task (newest first)
+            prune_rows = conn.execute(
+                """
+                SELECT run_id, task_id, log_path
+                FROM (
+                    SELECT run_id, task_id, log_path, created_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY task_id ORDER BY created_at DESC
+                           ) AS rn
+                    FROM task_runs
+                ) WHERE rn > ?
+                ORDER BY created_at ASC
+                """,
+                (keep,),
+            ).fetchall()
+            ids_to_delete: list[str] = []
+            for row in prune_rows:
+                run_id = row["run_id"]
+                log_path = Path(row["log_path"])
+                try:
+                    size = log_path.stat().st_size
+                except FileNotFoundError:
+                    size = 0
+                    summary["errors"].append({"run_id": run_id, "reason": "log file missing"})
+                summary["bytes_freed"] += size
+                if dry_run:
+                    summary["plan"].append(
+                        {"run_id": run_id, "task_id": row["task_id"], "log_path": str(log_path), "bytes": size}
+                    )
+                    continue
+                if size:
+                    log_path.unlink(missing_ok=True)
+                    summary["deleted_files"] += 1
+                ids_to_delete.append(run_id)
+            if ids_to_delete and not dry_run:
+                placeholders = ",".join("?" for _ in ids_to_delete)
+                conn.execute(
+                    f"DELETE FROM task_runs WHERE run_id IN ({placeholders})",
+                    ids_to_delete,
+                )
+                summary["deleted_rows"] = len(ids_to_delete)
+            summary["kept_files"] = total_before - summary["deleted_rows"]
+        return summary
+
     def status_payload(self, registry: TaskRegistry) -> dict[str, Any]:
         tasks = self.list_tasks(registry)
         return {

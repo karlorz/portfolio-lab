@@ -64,9 +64,9 @@ class TestCRONTargets:
         from src.cron_compat import CRON_TARGETS
         assert isinstance(CRON_TARGETS, list)
 
-    def test_fourteen_default_targets(self):
+    def test_fifteen_default_targets(self):
         from src.cron_compat import CRON_TARGETS
-        assert len(CRON_TARGETS) == 14
+        assert len(CRON_TARGETS) == 15
 
     def test_all_targets_have_prefix(self):
         from src.cron_compat import CRON_TARGETS

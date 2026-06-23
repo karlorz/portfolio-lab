@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from src.tasker.models import TaskDefinition
 from src.tasker.registry import TaskRegistry
@@ -125,3 +126,169 @@ def test_store_writes_tasker_and_cron_compatibility_mirrors(tmp_path):
     assert tasker_status["service"] == "portfolio-lab-tasker"
     assert cron_status["jobs"][0]["name"] == "portfolio-lab-health"
     assert cron_status["jobs"][0]["backend"] == "tasker"
+
+
+# ── prune_runs() — per-task run-log retention ─────────────────────────
+
+
+def _seed_runs(store, task_id, n, *, write_log_bytes=128):
+    """Create n finished runs for task_id, each with a real .log file on disk."""
+    run_ids = []
+    for _ in range(n):
+        run = store.create_run(task_id, ["make", task_id.split("-")[-1]], trigger="manual")
+        store.finish_run(run["run_id"], status="success", exit_code=0, duration_seconds=0.1)
+        # write real bytes so bytes_freed and unlink are exercised
+        Path(run["log_path"]).write_bytes(b"x" * write_log_bytes)
+        run_ids.append(run["run_id"])
+    return run_ids
+
+
+def test_prune_runs_keeps_last_n_per_task(tmp_path):
+    store = _store(tmp_path)
+    registry = _registry()
+    store.sync_registry(registry)
+
+    run_ids = _seed_runs(store, "portfolio-lab-health", 30)
+
+    summary = store.prune_runs(keep_per_task=20)
+
+    remaining_files = list((tmp_path / "logs").glob("*.log"))
+    assert len(remaining_files) == 20
+    remaining_rows = store.list_runs("portfolio-lab-health", limit=500)
+    assert [r["run_id"] for r in remaining_rows] == list(reversed(run_ids[-20:]))
+    assert summary["deleted_files"] == 10
+    assert summary["deleted_rows"] == 10
+    assert summary["kept_files"] == 20
+
+
+def test_prune_runs_preserves_newest(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+
+    run_ids = _seed_runs(store, "portfolio-lab-health", 25)
+
+    store.prune_runs(keep_per_task=20)
+
+    remaining = [r["run_id"] for r in store.list_runs("portfolio-lab-health", limit=500)]
+    # newest 20 = last 20 created, in DESC order
+    assert remaining == list(reversed(run_ids[-20:]))
+    # oldest 5 are gone (files)
+    for old_id in run_ids[:5]:
+        assert not (store.log_dir / f"{old_id}.log").exists()
+
+
+def test_prune_runs_respects_keep_per_task_boundary(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+
+    # 25 runs, keep 20 -> 20 remain
+    _seed_runs(store, "portfolio-lab-health", 25)
+    store.prune_runs(keep_per_task=20)
+    assert len(list((tmp_path / "logs").glob("*.log"))) == 20
+    assert len(store.list_runs("portfolio-lab-health", limit=500)) == 20
+
+    # fresh store with 15 runs, keep 20 -> 15 remain (no over-deletion)
+    store2 = _store(tmp_path / "second")
+    store2.sync_registry(_registry())
+    _seed_runs(store2, "portfolio-lab-health", 15)
+    summary = store2.prune_runs(keep_per_task=20)
+    assert len(list((tmp_path / "second" / "logs").glob("*.log"))) == 15
+    assert summary["deleted_files"] == 0
+    assert summary["kept_files"] == 15
+
+
+def test_prune_runs_across_multiple_tasks(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+
+    _seed_runs(store, "portfolio-lab-health", 30)
+    _seed_runs(store, "portfolio-lab-build", 10)
+
+    store.prune_runs(keep_per_task=20)
+
+    # per-task, not global: health keeps 20, build keeps all 10
+    assert len(store.list_runs("portfolio-lab-health", limit=500)) == 20
+    assert len(store.list_runs("portfolio-lab-build", limit=500)) == 10
+    assert len(list((tmp_path / "logs").glob("*.log"))) == 30
+
+
+def test_prune_run_skips_missing_log_file(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+
+    run_ids = _seed_runs(store, "portfolio-lab-health", 25)
+    # delete one log file manually to create an orphan DB row
+    orphan_id = run_ids[0]
+    Path(store.log_dir / f"{orphan_id}.log").unlink()
+
+    summary = store.prune_runs(keep_per_task=20)
+
+    # must not raise; orphan row deleted and reported in errors
+    assert orphan_id not in [r["run_id"] for r in store.list_runs("portfolio-lab-health", limit=500)]
+    assert summary["deleted_rows"] == 5  # 4 normal + 1 orphan
+    assert summary["deleted_files"] == 4  # orphan file already gone
+    assert len(summary["errors"]) == 1
+    assert orphan_id in summary["errors"][0]["run_id"]
+
+
+def test_prune_runs_dry_run_deletes_nothing(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+
+    _seed_runs(store, "portfolio-lab-health", 30)
+
+    summary = store.prune_runs(keep_per_task=20, dry_run=True)
+
+    # plan returned, but nothing touched
+    assert len(list((tmp_path / "logs").glob("*.log"))) == 30
+    assert len(store.list_runs("portfolio-lab-health", limit=500)) == 30
+    assert summary["deleted_files"] == 0
+    assert summary["deleted_rows"] == 0
+    assert summary["kept_files"] == 30
+    assert len(summary["plan"]) == 10  # the 10 that WOULD be deleted
+    assert summary["bytes_freed"] > 0
+
+
+def test_prune_runs_returns_summary(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+
+    _seed_runs(store, "portfolio-lab-health", 25, write_log_bytes=256)
+
+    summary = store.prune_runs(keep_per_task=20)
+
+    assert set(summary.keys()) == {
+        "deleted_files",
+        "deleted_rows",
+        "kept_files",
+        "bytes_freed",
+        "errors",
+        "plan",
+    }
+    assert summary["deleted_files"] == 5
+    assert summary["deleted_rows"] == 5
+    assert summary["kept_files"] == 20
+    assert summary["bytes_freed"] == 5 * 256
+    assert summary["errors"] == []
+    assert summary["plan"] == []  # real run, not dry-run -> no plan entries
+
+
+def test_prune_runs_never_touches_state_files(tmp_path):
+    store = _store(tmp_path)
+    registry = _registry()
+    store.sync_registry(registry)
+
+    _seed_runs(store, "portfolio-lab-health", 25)
+    # write the state mirrors so they exist on disk
+    store.write_status_mirrors(registry)
+    cron_before = (tmp_path / "data" / "cron_status.json").read_bytes()
+    status_before = (tmp_path / "public" / "tasker_status.json").read_bytes()
+
+    store.prune_runs(keep_per_task=20)
+
+    # cron_status.json + tasker_status.json untouched by pruning
+    assert (tmp_path / "data" / "cron_status.json").read_bytes() == cron_before
+    assert (tmp_path / "public" / "tasker_status.json").read_bytes() == status_before
+    # no json/jsonl anywhere in logs dir
+    assert list((tmp_path / "logs").glob("*.json")) == []
+    assert list((tmp_path / "logs").glob("*.jsonl")) == []

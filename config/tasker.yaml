@@ -77,6 +77,12 @@ tasks:
     schedule: "10,40 * * * *"
     timeout_seconds: 60
 
+  - id: portfolio-lab-prune-logs
+    label: Log Pruning
+    command: make prune-logs
+    schedule: "3 3 * * *"
+    timeout_seconds: 120
+
   - id: portfolio-lab-build
     label: Build
     command: make build

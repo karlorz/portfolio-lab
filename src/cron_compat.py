@@ -41,6 +41,7 @@ CRON_TARGETS = [
     "portfolio-lab-attribution",
     "portfolio-lab-unified-dashboard",
     "portfolio-lab-health",
+    "portfolio-lab-prune-logs",
 ]
 
 # Expected max duration per job (seconds). Exceeding 2x this triggers alerts.
@@ -59,6 +60,7 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-attribution": 300,  # 5 min — attribution + adaptive weights
     "portfolio-lab-unified-dashboard": 120,  # 2 min — JSON serialization
     "portfolio-lab-health": 30,  # 30 sec — rebalance health check
+    "portfolio-lab-prune-logs": 60,  # 1 min — bound tasker_logs growth + dead-log removal
 }
 
 # Guard configuration (applied by scripts/cron_guard.sh)
