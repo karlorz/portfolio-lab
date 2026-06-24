@@ -3456,15 +3456,19 @@ class TestGetSignalHistoryEdgeCases:
 
     def test_get_signal_history_with_null_sql_fields(self, tmp_path):
         """Some SQL fields (weights_used, primary_drivers) can be NULL/NONE."""
+        from datetime import timedelta
         integrator = _make_integrator(tmp_path)
         conn = sqlite3.connect(str(integrator.db_path))
+        # Use a relative timestamp so the test is not time-bombed when
+        # hardcoded dates drift outside the get_signal_history(days=30) window.
+        ts = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT12:00:00")
         conn.execute("""
             INSERT INTO composite_signals
             (ticker, timestamp, composite_score, composite_confidence,
              detected_regime, weights_used, primary_drivers,
              signal_agreement, expected_accuracy)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, ("SPY", "2026-05-24T12:00:00", 0.35, 0.72,
+        """, ("SPY", ts, 0.35, 0.72,
               "neutral", None, None, "aligned_bullish", 0.68))
         conn.commit()
         conn.close()
@@ -3475,15 +3479,19 @@ class TestGetSignalHistoryEdgeCases:
 
     def test_get_signal_history_empty_json_fields(self, tmp_path):
         """Empty JSON arrays/dicts stored as '[]'/'{}' parse correctly."""
+        from datetime import timedelta
         integrator = _make_integrator(tmp_path)
         conn = sqlite3.connect(str(integrator.db_path))
+        # Use a relative timestamp so the test is not time-bombed when
+        # hardcoded dates drift outside the get_signal_history(days=30) window.
+        ts = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT12:00:00")
         conn.execute("""
             INSERT INTO composite_signals
             (ticker, timestamp, composite_score, composite_confidence,
              detected_regime, weights_used, primary_drivers,
              signal_agreement, expected_accuracy)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, ("SPY", "2026-05-24T12:00:00", 0.35, 0.72,
+        """, ("SPY", ts, 0.35, 0.72,
               "neutral", json.dumps({}), json.dumps([]), "mixed", None))
         conn.commit()
         conn.close()
