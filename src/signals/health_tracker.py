@@ -413,14 +413,16 @@ class SignalHealthTracker:
         
             for source in SignalSource:
                 # Get health score history for this source
-                start_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-            
                 cursor.execute("""
                     SELECT timestamp, health_score
                     FROM signal_health_scores
-                    WHERE source = ? AND date(timestamp) >= date(?)
+                    WHERE source = ?
+                      AND date(timestamp) >= date(
+                          (SELECT MAX(timestamp) FROM signal_health_scores WHERE source = ?),
+                          ?
+                      )
                     ORDER BY timestamp ASC
-                """, (source.value, start_date))
+                """, (source.value, source.value, f"-{lookback_days} days"))
             
                 rows = cursor.fetchall()
             

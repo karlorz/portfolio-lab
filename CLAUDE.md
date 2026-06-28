@@ -5,8 +5,8 @@
 - Build: **Complete** — real Yahoo Finance data, working backtest engine + FIRE calculator
 - **Champion**: SPY/GLD/TLT 46/38/16, Sharpe 0.95 (2005-2026, base grid 0.79 + regime-conditional allocation + vol targeting overlays; see Status lines below)
 - **Drift rebalancing**: 10% drift beats annual — Sharpe 0.83 vs 0.79
-- Data: 5371 trading days (2005-01-03 to 2026-05-08), 15 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
-| - Test count: **13759 safe** (13446 Python + 313 TypeScript + 30 integration, ~33 skipped, 0 failures)
+- Data: 5404 trading days (2005-01-03 to 2026-06-26), 38 symbols incl. EFA/VXUS/MTUM/VLUE/USMV
+| - Test count: **13910 Python safe** (`make test`, 29 skipped, 0 failures; TypeScript strict suite previously clean)
 |- **Signal snapshot coverage: 19/19** — all signal modules have get_signal_snapshot() for typed pipeline
 |- **Gold allocation sweep**: 109 configs tested (GLD 20-55%) — champion 46/38/16 remains optimal; BofA/Goldman "more gold" thesis doesn't improve risk-adjusted returns
 |- **Gold allocation sweep v2 (256 configs)**: GLD 18-40% × SPY variants × TLT/IEF — 38% GLD holds up; TLT 20% beats 16% across all GLD levels (top config: 44/36/20 Sharpe 0.96 vs champion 46/38/16 Sharpe 0.95); IEF is durable but inferior TLT substitute
@@ -102,6 +102,7 @@
 |- **Ensemble voter decomposition Phase 14**: compute_vote() already well-decomposed (~50 lines); extracted _extract_signal_values (static), _apply_basis_pursuit, _apply_regret_weighting, _compute_asset_biases (static), _determine_action (static) from _apply_turnover_validation and _compute_consensus
 |- **Evaluator logger format fix**: logger.info("$%,.2f", val) → logger.info("$%.2f", val) — Python % formatting doesn't support , thousands separator; fixed 6 kill_switch test failures in full suite
 |- **Backtest print→logger bulk migration**: 245 print() calls in 13 backtest files converted to logger.info/warning/error; test_backtest_metrics.py capsys→caplog for 4 tests
+|- **Signal health decay de-time-bomb**: detect_decay_alerts() now windows from each source's latest stored health timestamp instead of wall-clock now; fixes stale fixture/calendar drift in TestDecayDetection. Full safe suite: 13910 passed, 29 skipped.
 
 ### Key Findings
 |- **TSMOM standalone (Sharpe 0.96) beats combined signal overlay (0.93)** — signal conflicts erode alpha

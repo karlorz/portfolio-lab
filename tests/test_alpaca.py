@@ -1116,6 +1116,11 @@ class TestAlpacaClientAccount:
         mock_account.initial_margin = 50000.0
         mock_account.daytrade_count = 0
         mock_account.last_equity = 95000.0
+        mock_account.trading_blocked = True
+        mock_account.transfers_blocked = True
+        mock_account.account_blocked = False
+        mock_account.trade_suspended_by_user = True
+        mock_account.shorting_enabled = False
 
         mock_trading = MagicMock()
         mock_trading.get_account.return_value = mock_account
@@ -1132,6 +1137,11 @@ class TestAlpacaClientAccount:
         assert result['daytrade_count'] == 0
         assert result['paper'] is True
         assert result['last_equity'] == 95000.0
+        assert result['trading_blocked'] is True
+        assert result['transfers_blocked'] is True
+        assert result['account_blocked'] is False
+        assert result['trade_suspended_by_user'] is True
+        assert result['shorting_enabled'] is False
 
     def test_get_account_last_equity_none(self):
         """get_account handles None last_equity."""
@@ -1999,6 +2009,36 @@ class TestCheckAlpacaStatusExtended:
         assert status['account_status'] == 'ACTIVE'
         assert status['equity'] == 100000.0
         assert status['cash'] == 50000.0
+
+    def test_live_status_preserves_account_restriction_flags(self):
+        """Live status should expose broker account restriction flags."""
+        mock_account = {
+            'status': 'ACTIVE',
+            'equity': 100000.0,
+            'cash': 50000.0,
+            'trading_blocked': True,
+            'transfers_blocked': True,
+            'account_blocked': False,
+            'trade_suspended_by_user': True,
+            'shorting_enabled': False,
+        }
+
+        with patch('src.broker.alpaca.ALPACA_AVAILABLE', True), \
+             patch.dict(os.environ, {
+                 'ALPACA_API_KEY': 'k',
+                 'ALPACA_API_SECRET': 's',
+                 'ALPACA_PAPER': 'false',
+             }, clear=True), \
+             patch('src.broker.alpaca.AlpacaClient.get_account', return_value=mock_account):
+            status = check_alpaca_status()
+
+        assert status['connected'] is True
+        assert status['paper'] is False
+        assert status['trading_blocked'] is True
+        assert status['transfers_blocked'] is True
+        assert status['account_blocked'] is False
+        assert status['trade_suspended_by_user'] is True
+        assert status['shorting_enabled'] is False
 
     def test_connected_error(self):
         """check_alpaca_status returns error details when get_account fails."""

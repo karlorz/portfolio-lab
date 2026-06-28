@@ -308,6 +308,29 @@ def _is_extended_hours(timestamp: Any) -> bool:
     return premarket or after_hours
 
 
+def _optional_account_attr(account: Any, name: str, default: Any = None) -> Any:
+    """Read optional SDK account fields without creating MagicMock attributes in tests."""
+    try:
+        return object.__getattribute__(account, name)
+    except AttributeError:
+        return default
+
+
+def _optional_account_bool(account: Any, name: str, default: bool = False) -> bool:
+    value = _optional_account_attr(account, name, default)
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
+ACCOUNT_RESTRICTION_FLAGS = (
+    "trading_blocked",
+    "account_blocked",
+    "trade_suspended_by_user",
+    "transfers_blocked",
+)
+
+
 def resolve_alpaca_market_session(
     clock: Optional[Mapping[str, Any]] = None,
     env: Optional[Mapping[str, str]] = None,
@@ -557,6 +580,11 @@ class AlpacaClient:
             "initial_margin": float(account.initial_margin),
             "daytrade_count": account.daytrade_count,
             "last_equity": float(account.last_equity) if account.last_equity else None,
+            "trading_blocked": _optional_account_bool(account, "trading_blocked"),
+            "transfers_blocked": _optional_account_bool(account, "transfers_blocked"),
+            "account_blocked": _optional_account_bool(account, "account_blocked"),
+            "trade_suspended_by_user": _optional_account_bool(account, "trade_suspended_by_user"),
+            "shorting_enabled": _optional_account_bool(account, "shorting_enabled"),
             "paper": self.paper,
         }
     
@@ -1034,6 +1062,7 @@ def check_alpaca_status() -> Dict[str, Any]:
                 status["trading_blocked"] = account.get("trading_blocked", False)
                 status["transfers_blocked"] = account.get("transfers_blocked", False)
                 status["account_blocked"] = account.get("account_blocked", False)
+                status["trade_suspended_by_user"] = account.get("trade_suspended_by_user", False)
                 status["shorting_enabled"] = account.get("shorting_enabled", False)
         except (OSError, ConnectionError, TimeoutError, KeyError, ValueError, TypeError, RuntimeError) as e:
             status["connected"] = False
@@ -1178,6 +1207,37 @@ class LiveTransitionManager:
     def max_drawdown_pct(self) -> float:
         return self._state.get("max_drawdown_pct", 0.0)
 
+    @staticmethod
+    def _alpaca_has_account_restrictions(alpaca_status: Mapping[str, Any]) -> bool:
+        return any(bool(alpaca_status.get(flag, False)) for flag in ACCOUNT_RESTRICTION_FLAGS)
+
+    def _paper_live_gate_passed(self) -> bool:
+        """Fail-closed PAPER -> live ramp gate for checklist, approval, and live data readiness."""
+        try:
+            from src.strategy.graduation_checklist import GraduationChecklist
+            from src.data.fred_data import get_fred_md_cache_health
+            from src.monitor.fred_readiness import assess_fred_readiness
+
+            checklist = GraduationChecklist()
+            results = checklist.check()
+            if not checklist.is_graduation_ready(results):
+                return False
+
+            manual_approval = results.get("manual_approval")
+            if manual_approval is None or not manual_approval.passed:
+                return False
+
+            fred_readiness = assess_fred_readiness(get_fred_md_cache_health(), mode="live")
+            if not fred_readiness.get("ready", False):
+                return False
+            if fred_readiness.get("blocking", False):
+                return False
+
+            return True
+        except (ImportError, OSError, ValueError, TypeError, RuntimeError) as exc:
+            logger.warning("Paper-to-live graduation gate unavailable: %s", exc)
+            return False
+
     def get_status(self) -> Dict[str, Any]:
         """Get full ramp status for dashboard integration."""
         return {
@@ -1219,12 +1279,16 @@ class LiveTransitionManager:
         if not alpaca.get("connected", False):
             return False
 
-        # Check live account is not blocked (for phases beyond PAPER)
-        if self.phase != RampPhase.PAPER:
-            if alpaca.get("trading_blocked", False):
-                return False
-            if alpaca.get("account_blocked", False):
-                return False
+        if alpaca.get("paper", True):
+            return False
+
+        # Check live account is not blocked before any live allocation.
+        if self._alpaca_has_account_restrictions(alpaca):
+            return False
+
+        # PAPER -> PHASE_1 starts real-capital exposure, so require the full graduation gate.
+        if self.phase == RampPhase.PAPER and not self._paper_live_gate_passed():
+            return False
 
         return True
 

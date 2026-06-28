@@ -2558,23 +2558,22 @@ class DashboardGenerator:
                     "description": result.description,
                 })
 
-            # Estimate trading days
-            portfolio = state.get("portfolio", {})
-            history = portfolio.get("history", [])
-            unique_dates = set()
-            for entry in history:
-                ts = entry.get("timestamp", "")
-                date_key = ts[:10] if len(ts) >= 10 else ts
-                unique_dates.add(date_key)
-            n_days = len(unique_dates)
+            trading_days_result = results.get("min_trading_days")
+            n_days = trading_days_result.value if trading_days_result is not None else 0
+            min_trading_days = (
+                trading_days_result.required
+                if trading_days_result is not None
+                else checklist.criteria["min_trading_days"]["value"]
+            )
+            manual_approval = results.get("manual_approval")
 
             graduation_data = {
                 "readiness_score": score,
                 "is_graduation_ready": is_ready,
                 "manual_approval_required": True,
-                "manual_approval_pending": True,  # Always pending unless approval file exists
+                "manual_approval_pending": not bool(manual_approval and manual_approval.passed),
                 "trading_days": n_days,
-                "min_trading_days": GraduationChecklist.MIN_OBSERVATION_DAYS,
+                "min_trading_days": min_trading_days,
                 "criteria_met": sum(1 for n, r in results.items() if n != "manual_approval" and r.passed),
                 "criteria_total": sum(1 for n in results if n != "manual_approval"),
                 "criteria": criteria_progress,

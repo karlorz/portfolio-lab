@@ -1813,6 +1813,47 @@ class TestGenerateGraduationJSON:
             assert "description" in criterion
         gen.conn.close()
 
+    def test_graduation_json_matches_checklist_thresholds_and_summary_metrics(self, tmp_path):
+        """Dashboard graduation data should mirror GraduationChecklist results."""
+        from src.strategy.graduation_checklist import GraduationChecklist
+
+        (tmp_path / "paper-trading-performance-2026-06-28.json").write_text(json.dumps({
+            "date": "2026-06-28",
+            "performance": {
+                "days_tracked": 49,
+                "sharpe": 3.3769,
+                "max_drawdown": 0.0627,
+            },
+            "daily_returns_distribution": {
+                "win_rate": 0.2041,
+            },
+        }))
+
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path), \
+             patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+            path = gen.generate_graduation_json()
+
+            checklist = GraduationChecklist()
+            results = checklist.check(checklist._load_state())
+            expected_score = checklist.readiness_score(results)
+            expected_ready = checklist.is_graduation_ready(results)
+
+        with open(path) as f:
+            data = json.load(f)
+
+        criteria = {item["name"]: item for item in data["criteria"]}
+        assert data["readiness_score"] == expected_score
+        assert data["is_graduation_ready"] == expected_ready
+        assert data["min_trading_days"] == criteria["min_trading_days"]["required"]
+        assert data["min_trading_days"] == GraduationChecklist.DEFAULT_CRITERIA["min_trading_days"]["value"]
+        assert data["trading_days"] == criteria["min_trading_days"]["value"]
+        assert data["trading_days"] == 49
+        assert criteria["min_sharpe"]["value"] == 0.0
+        assert criteria["min_sharpe"]["passed"] is False
+        gen.conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Overlay JSON tests
