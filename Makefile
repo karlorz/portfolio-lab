@@ -540,9 +540,11 @@ cron-reset:
 	@mkdir -p $(DATA_DIR)
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health pending 0 manual
 
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-eval pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-research pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-autonomous-agent pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-build pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-position-sync pending 0 manual
@@ -561,18 +563,33 @@ cron-reset:
 verify-cron-sync:
 	@echo "=== Cron Backend Sync Check ==="
 	@$(PYTHON_RUNTIME) -c "from cron_compat import active_backend; print(f'Active backend: {active_backend()}')"
+ifeq ($(CI),true)
+	@echo ""
+	@echo "Preparing synthetic cron_status.json for CI..."
+	@$(MAKE) --no-print-directory cron-reset
+endif
 	@echo ""
 	@echo "Checking Makefile target coverage vs crontab..."
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/cron_verify.py --crontab $(PROJECT_DIR)/crontab
 	@echo ""
 	@echo "Checking cron_status.json integrity..."
+ifeq ($(CI),true)
+	@cd $(PROJECT_DIR) && CRON_BACKEND=tasker $(PYTHON_RUNTIME) scripts/cron_verify.py
+else
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/cron_verify.py
+endif
+ifeq ($(CI),true)
+	@echo ""
+	@echo "CI mode: skipping live Hermes/system crontab overlap check"
+	@echo "CI mode: skipping host-local SkillWiki/Hermes routing contract"
+else
 	@echo ""
 	@echo "Checking live Hermes/system crontab overlap..."
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/detect_cron_overlap.py
 	@echo ""
 	@echo "Checking SkillWiki/Hermes routing contract..."
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/audit_routing_contract.py
+endif
 
 .PHONY: audit-routing-contract
 audit-routing-contract:

@@ -28,6 +28,9 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check src/ tests/
 
+      - name: Cron sync gate
+        run: CI=true make verify-cron-sync
+
       - name: Test (safe suite, ML disabled)
         env:
           PORTFOLIO_LAB_ENABLE_ML: "0"

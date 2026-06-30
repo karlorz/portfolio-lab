@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CRON_VERIFY_SCRIPT = PROJECT_ROOT / "scripts" / "cron_verify.py"
+CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def _load_module():
@@ -120,3 +122,50 @@ def test_verify_crontab_targets_accepts_targets_from_cron_targets(
 
     assert module.verify_crontab_targets(crontab_file) == 0
     assert "expected crontab targets present" in capsys.readouterr().out
+
+
+def test_ci_workflow_runs_cron_sync_gate() -> None:
+    """CI must fail when cron target/status contracts drift."""
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "CI=true make verify-cron-sync" in workflow
+
+
+def test_verify_cron_sync_ci_mode_skips_host_local_checks() -> None:
+    """The cron sync gate wired into CI should avoid host-only Hermes/wiki checks."""
+    result = subprocess.run(
+        ["make", "--dry-run", "--no-print-directory", "verify-cron-sync", "CI=true"],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    dry_run = result.stdout
+    assert "scripts/cron_verify.py --crontab" in dry_run
+    assert "scripts/cron_verify.py" in dry_run
+    assert "CRON_BACKEND=tasker" in dry_run
+    assert "scripts/detect_cron_overlap.py" not in dry_run
+    assert "scripts/audit_routing_contract.py" not in dry_run
+
+
+def test_cron_reset_covers_all_tasker_registry_jobs() -> None:
+    """CI-mode cron reset should synthesize every tasker registry row."""
+    from src.tasker.registry import load_task_registry
+
+    expected = {task.id for task in load_task_registry().tasks}
+    result = subprocess.run(
+        ["make", "--dry-run", "--no-print-directory", "cron-reset"],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    dry_run = result.stdout
+    missing = [job_id for job_id in sorted(expected) if job_id not in dry_run]
+    assert missing == []
