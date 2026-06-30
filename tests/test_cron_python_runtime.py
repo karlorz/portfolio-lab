@@ -65,6 +65,14 @@ def test_makefile_cron_targets_use_project_runtime_launcher() -> None:
     assert "python3 $(CRON_UPDATE)" not in text
 
 
+def test_makefile_exports_project_dir_for_runtime_launcher() -> None:
+    """Makefile callers should set the runtime launcher project directory."""
+    text = MAKEFILE.read_text()
+
+    assert "PORTFOLIO_LAB_PROJECT_DIR ?= $(PROJECT_DIR)" in text
+    assert "export PORTFOLIO_LAB_PROJECT_DIR" in text
+
+
 def test_scripts_keep_sg01_project_path_only_as_env_fallback() -> None:
     """Hardcoded sg01 repo paths in scripts must be overrideable."""
     violations = []

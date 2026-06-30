@@ -24,10 +24,12 @@
 
 SHELL := /bin/bash
 PROJECT_DIR := $(shell pwd)
+PORTFOLIO_LAB_PROJECT_DIR ?= $(PROJECT_DIR)
 DATA_DIR := $(PROJECT_DIR)/data
 CRON_UPDATE := $(PROJECT_DIR)/scripts/cron_update.py
 PYTHON_RUNTIME := $(PROJECT_DIR)/scripts/python_runtime.sh
 PYTHONPATH := $(PROJECT_DIR)/src:$(PYTHONPATH)
+export PORTFOLIO_LAB_PROJECT_DIR
 export PYTHONPATH
 
 PERF_OUTPUT ?= $(DATA_DIR)/perf/critical_paths_latest.json
