@@ -11,12 +11,14 @@ import pytest
 from src.monitor.hermes_cron import load_hermes_portfolio_cron_jobs
 from src.monitor.health_check import (
     run_health_check,
+    check_scheduler_drift,
     _check_data_freshness,
     _check_circuit_breaker,
     _check_fred_md_cache,
     _compute_system_status,
     HEALTH_PATH,
 )
+from src.monitor.alerting import AlertChannel, AlertLevel
 from src.monitor.fred_readiness import assess_fred_readiness, resolve_fred_operating_mode
 
 
@@ -111,6 +113,103 @@ class TestCheckDataFreshness:
         assert jobs == []
         assert backend["status"] == "unavailable"
         assert "not readable" in backend["reason"]
+
+    def test_scheduler_drift_single_mismatch_warns_without_alert(self, tmp_path):
+        """One backend disagreement should persist drift state without paging yet."""
+        backends = {
+            "tasker": {"status": "ok", "backend": "tasker"},
+            "hermes": {"status": "error", "backend": "hermes"},
+        }
+
+        with patch("src.monitor.health_check.send_alert") as mock_send:
+            drift = check_scheduler_drift(
+                backends,
+                state_path=tmp_path / "scheduler_drift_state.json",
+            )
+
+        assert drift["status"] == "warning"
+        assert drift["mismatch"] is True
+        assert drift["consecutive_mismatches"] == 1
+        assert drift["threshold"] == 2
+        assert drift["backend_statuses"] == {"tasker": "ok", "hermes": "error"}
+        mock_send.assert_not_called()
+
+    def test_scheduler_drift_second_consecutive_mismatch_sends_halt(self, tmp_path):
+        """Two consecutive backend disagreements should fire a CRON_FAILURE HALT."""
+        state_path = tmp_path / "scheduler_drift_state.json"
+        backends = {
+            "tasker": {"status": "ok", "backend": "tasker"},
+            "hermes": {"status": "degraded", "backend": "hermes"},
+        }
+
+        check_scheduler_drift(backends, state_path=state_path)
+        with patch("src.monitor.health_check.send_alert") as mock_send:
+            drift = check_scheduler_drift(backends, state_path=state_path)
+
+        assert drift["status"] == "critical"
+        assert drift["consecutive_mismatches"] == 2
+        mock_send.assert_called_once()
+        assert mock_send.call_args.args[0] == AlertChannel.CRON_FAILURE
+        assert mock_send.call_args.args[1] == AlertLevel.HALT
+        assert "Scheduler backend drift" in mock_send.call_args.args[2]
+        assert mock_send.call_args.kwargs["details"]["consecutive_mismatches"] == 2
+        assert mock_send.call_args.kwargs["details"]["backend_statuses"] == {
+            "tasker": "ok",
+            "hermes": "degraded",
+        }
+
+    def test_scheduler_drift_agreement_resets_state_and_sends_pass(self, tmp_path):
+        """Resolved backend disagreement should reset count and close the incident."""
+        state_path = tmp_path / "scheduler_drift_state.json"
+        mismatch = {
+            "tasker": {"status": "ok", "backend": "tasker"},
+            "hermes": {"status": "error", "backend": "hermes"},
+        }
+        recovered = {
+            "tasker": {"status": "ok", "backend": "tasker"},
+            "hermes": {"status": "ok", "backend": "hermes"},
+        }
+
+        check_scheduler_drift(mismatch, state_path=state_path)
+        with patch("src.monitor.health_check.send_alert") as mock_send:
+            drift = check_scheduler_drift(recovered, state_path=state_path)
+
+        assert drift["status"] == "ok"
+        assert drift["mismatch"] is False
+        assert drift["consecutive_mismatches"] == 0
+        mock_send.assert_called_once()
+        assert mock_send.call_args.args[0] == AlertChannel.CRON_FAILURE
+        assert mock_send.call_args.args[1] == AlertLevel.PASS
+        assert "Scheduler backends agree" in mock_send.call_args.args[2]
+
+    def test_data_freshness_includes_scheduler_drift_summary(self, tmp_path, monkeypatch):
+        """Cron health output should expose scheduler drift metadata for dashboards."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "backend": "tasker",
+            "jobs": [{"name": "portfolio-lab-data", "status": "ok"}],
+        }))
+        hermes_jobs = tmp_path / "hermes_jobs.json"
+        hermes_jobs.write_text(json.dumps({
+            "jobs": [
+                {
+                    "id": "bad-job",
+                    "name": "portfolio-lab-data",
+                    "last_status": "error",
+                    "state": "scheduled",
+                    "enabled": True,
+                }
+            ]
+        }))
+        monkeypatch.setenv("HERMES_CRON_JOBS_PATH", str(hermes_jobs))
+
+        freshness = _check_data_freshness()
+
+        drift = freshness["cron"]["scheduler_drift"]
+        assert drift["status"] == "warning"
+        assert drift["consecutive_mismatches"] == 1
+        assert drift["backend_statuses"] == {"tasker": "ok", "hermes": "degraded"}
 
 
 class TestCheckCircuitBreaker:

@@ -19,8 +19,10 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+from src.monitor.alerting import AlertChannel, AlertLevel, send_alert
 from src.monitor.hermes_cron import (
     combine_scheduler_backends,
     load_hermes_portfolio_cron_jobs,
@@ -30,10 +32,11 @@ from src.monitor.hermes_cron import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_health_check"]
+__all__ = ["run_health_check", "check_scheduler_drift"]
 
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
 _DEFAULT_DATA_DIR = DATA_DIR
+SCHEDULER_DRIFT_THRESHOLD = 2
 
 
 def _should_include_hermes_audit(local_backend: dict) -> bool:
@@ -43,6 +46,87 @@ def _should_include_hermes_audit(local_backend: dict) -> bool:
     if local_backend.get("backend") == "tasker" and os.environ.get("CRON_BACKEND") == "tasker":
         return False
     return True
+
+
+def _scheduler_drift_state_path() -> Path:
+    """Resolve scheduler drift state relative to the active data directory."""
+    return DATA_DIR / "scheduler_drift_state.json"
+
+
+def _load_scheduler_drift_state(path: Path) -> dict[str, Any]:
+    """Load prior scheduler drift state, tolerating missing or malformed state."""
+    try:
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to read scheduler drift state: %s", exc)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_scheduler_drift_state(path: Path, state: dict[str, Any]) -> None:
+    """Persist scheduler drift state without blocking health report generation."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(state, handle, indent=2, sort_keys=True)
+    except OSError as exc:
+        logger.warning("Failed to write scheduler drift state: %s", exc)
+
+
+def check_scheduler_drift(
+    backends: dict[str, dict[str, Any]],
+    *,
+    state_path: Path | None = None,
+    threshold: int = SCHEDULER_DRIFT_THRESHOLD,
+) -> dict[str, Any]:
+    """Detect persistent disagreement between scheduler backend health states."""
+    path = state_path or _scheduler_drift_state_path()
+    backend_statuses = {
+        str(name): str(backend.get("status", "unknown"))
+        for name, backend in backends.items()
+        if isinstance(backend, dict)
+    }
+    mismatch = len(backend_statuses) >= 2 and len(set(backend_statuses.values())) > 1
+    previous_state = _load_scheduler_drift_state(path)
+    previous_count = int(previous_state.get("consecutive_mismatches") or 0)
+    consecutive_mismatches = previous_count + 1 if mismatch else 0
+    status = "critical" if mismatch and consecutive_mismatches >= threshold else "warning" if mismatch else "ok"
+    details = {
+        "status": status,
+        "mismatch": mismatch,
+        "consecutive_mismatches": consecutive_mismatches,
+        "threshold": threshold,
+        "backend_statuses": backend_statuses,
+    }
+
+    if mismatch and consecutive_mismatches >= threshold:
+        send_alert(
+            AlertChannel.CRON_FAILURE,
+            AlertLevel.HALT,
+            f"Scheduler backend drift persisted for {consecutive_mismatches} checks",
+            details=details,
+        )
+    elif not mismatch and previous_count > 0:
+        send_alert(
+            AlertChannel.CRON_FAILURE,
+            AlertLevel.PASS,
+            "Scheduler backends agree after drift",
+            details=details,
+        )
+
+    if mismatch or previous_count > 0:
+        _save_scheduler_drift_state(
+            path,
+            {
+                **details,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    return details
 
 
 def _check_data_freshness() -> dict:
@@ -94,9 +178,12 @@ def _check_data_freshness() -> dict:
         jobs.extend(hermes_jobs)
 
     scheduler_status = combine_scheduler_backends(scheduler_backends)
+    scheduler_drift = check_scheduler_drift(scheduler_status["backends"])
     failed = [job for job in jobs if job.get("status") == "error"]
     backend_error = any(backend.get("status") == "error" for backend in scheduler_backends.values())
-    if backend_error:
+    if scheduler_drift["status"] == "critical":
+        cron_status = "error"
+    elif backend_error:
         cron_status = "error"
     elif local_backend.get("status") == "unavailable" and len(scheduler_backends) == 1:
         cron_status = "missing"
@@ -110,6 +197,7 @@ def _check_data_freshness() -> dict:
         "failed_jobs": len(failed),
         "backends": scheduler_status["backends"],
         "jobs": jobs,
+        "scheduler_drift": scheduler_drift,
     }
 
     return checks
