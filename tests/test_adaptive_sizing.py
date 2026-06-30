@@ -163,6 +163,21 @@ class TestAdaptiveSizerInit:
         sizer = AdaptiveSizer(data_dir=data_dir)
         assert sizer.last_allocation == BASE_ALLOCATION
 
+    def test_load_ensemble_signal_uses_env_override(self, temp_data_dir, monkeypatch, tmp_path):
+        """ENSEMBLE_WEIGHTS_FILE should override the default data_dir path."""
+        weights_path = tmp_path / "custom_ensemble_weights.json"
+        weights_path.write_text(json.dumps({
+            "weighted_consensus": 0.42,
+            "agreement_ratio": 0.73,
+        }))
+        monkeypatch.setenv("ENSEMBLE_WEIGHTS_FILE", str(weights_path))
+
+        sizer = AdaptiveSizer(data_dir=temp_data_dir)
+        signal, agreement = sizer._load_ensemble_signal()
+
+        assert signal == 0.42
+        assert agreement == 0.73
+
 
 # ---------------------------------------------------------------------------
 # Test: Regime-Based Adjustments

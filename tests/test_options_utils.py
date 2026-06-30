@@ -383,12 +383,25 @@ class TestOptionsChainFetcher:
             fetcher = OptionsChainFetcher()
             assert fetcher.has_api_access is False
 
+    def test_init_uses_canonical_api_secret_env_var(self):
+        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s"}, clear=True):
+            fetcher = OptionsChainFetcher()
+            assert fetcher.secret_key == "s"
+            assert fetcher.has_api_access is True
+
+    def test_init_warns_for_legacy_secret_key_env_var(self):
+        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_SECRET_KEY": "legacy"}, clear=True):
+            with pytest.warns(DeprecationWarning, match="ALPACA_API_SECRET"):
+                fetcher = OptionsChainFetcher()
+            assert fetcher.secret_key == "legacy"
+            assert fetcher.has_api_access is True
+
     def test_init_with_credentials(self):
         fetcher = OptionsChainFetcher(api_key="test_key", secret_key="test_secret")
         assert fetcher.has_api_access is True
 
     def test_init_paper_mode_default(self):
-        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_SECRET_KEY": "s", "ALPACA_PAPER": "true"}):
+        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s", "ALPACA_PAPER": "true"}):
             fetcher = OptionsChainFetcher()
             assert fetcher.paper_mode is True
 
@@ -1513,7 +1526,7 @@ class TestRemainingEdgeCases:
     """Corner cases not covered by other classes."""
 
     def test_fetcher_paper_mode_false(self):
-        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_SECRET_KEY": "s", "ALPACA_PAPER": "false"}):
+        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s", "ALPACA_PAPER": "false"}):
             fetcher = OptionsChainFetcher(api_key="k", secret_key="s")
             assert fetcher.paper_mode is False
 

@@ -16,6 +16,7 @@ Usage:
 import os
 import logging
 import asyncio
+import warnings
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime, date
@@ -32,6 +33,24 @@ __all__ = ['OptionType', 'OptionStatus', 'OptionQuote', 'OptionsChain', 'Options
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+def _get_alpaca_secret_key() -> Optional[str]:
+    """Resolve the canonical Alpaca secret env var with legacy fallback."""
+    canonical_secret = os.getenv("ALPACA_API_SECRET")
+    if canonical_secret:
+        return canonical_secret
+
+    legacy_secret = os.getenv("ALPACA_SECRET_KEY")
+    if legacy_secret:
+        warnings.warn(
+            "ALPACA_SECRET_KEY is deprecated; use ALPACA_API_SECRET instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return legacy_secret
+
+    return None
 
 
 class OptionType(Enum):
@@ -202,7 +221,7 @@ class OptionsChainFetcher:
     
     def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
-        self.secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY")
+        self.secret_key = secret_key or _get_alpaca_secret_key()
         self.paper_mode = os.getenv("ALPACA_PAPER", "true").lower() == "true"
         self.cache_dir = OPTIONS_CACHE_DIR
         self.cache_dir.mkdir(parents=True, exist_ok=True)

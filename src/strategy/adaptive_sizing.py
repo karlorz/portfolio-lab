@@ -25,6 +25,7 @@ Usage:
 
 import json
 import logging
+import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -196,7 +197,10 @@ class AdaptiveSizer:
 
     def _load_ensemble_signal(self) -> Tuple[float, float]:
         """Load latest ensemble signal value and agreement."""
-        ev_path = self.data_dir / "ensemble_weights.json"
+        ev_path = Path(os.environ.get(
+            "ENSEMBLE_WEIGHTS_FILE",
+            str(self.data_dir / "ensemble_weights.json"),
+        )).expanduser()
         try:
             if ev_path.exists():
                 state = json.loads(ev_path.read_text())

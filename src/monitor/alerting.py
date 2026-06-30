@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional
 
+from src.monitor.incident_manager import IncidentManager
+
 logger = logging.getLogger(__name__)
 
 ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
@@ -47,6 +49,33 @@ class AlertChannel(str, Enum):
 
 # Track last alert time per (channel, level) to enforce dedup interval
 _last_alert_time: Dict[str, datetime] = {}
+_incident_manager: Optional[IncidentManager] = None
+
+
+def get_incident_manager() -> IncidentManager:
+    """Return the process-local incident manager."""
+    global _incident_manager
+    if _incident_manager is None:
+        _incident_manager = IncidentManager()
+    return _incident_manager
+
+
+def _record_incident_transition(
+    channel: AlertChannel,
+    level: AlertLevel,
+    message: str,
+    details: Optional[Dict],
+) -> None:
+    """Persist alert lifecycle state without blocking webhook delivery."""
+    try:
+        get_incident_manager().record_alert(
+            channel=channel,
+            level=level,
+            message=message,
+            details=details or {},
+        )
+    except (OSError, ValueError, TypeError) as e:
+        logger.warning("Incident lifecycle record failed: %s", e)
 
 
 def _should_suppress(key: str) -> bool:
@@ -80,6 +109,8 @@ def send_alert(
     Returns:
         True if alert was sent (or alerting is disabled), False on send failure.
     """
+    _record_incident_transition(channel, level, message, details)
+
     if not ALERT_WEBHOOK_URL:
         logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
         return True

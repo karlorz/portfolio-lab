@@ -19,6 +19,19 @@ from src.monitor.alerting import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_incident_manager(tmp_path):
+    """Keep send_alert incident side effects out of repo data/ during tests."""
+    from src.monitor.incident_manager import IncidentManager
+
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+    )
+    with patch("src.monitor.alerting.get_incident_manager", return_value=manager):
+        yield manager
+
+
 class TestAlertLevel:
     def test_levels_exist(self):
         assert AlertLevel.PASS == "pass"
@@ -45,6 +58,57 @@ class TestSendAlert:
                 "test message",
             )
         assert result is True  # Silently succeeds (no-op)
+
+    def test_disabled_webhook_still_records_incident(self, tmp_path):
+        """Dashboard-only alerting should still persist incident lifecycle state."""
+        from src.monitor.incident_manager import IncidentManager
+
+        manager = IncidentManager(
+            log_path=tmp_path / "incidents.jsonl",
+            summary_path=tmp_path / "incidents.json",
+        )
+
+        with patch("src.monitor.alerting.ALERT_WEBHOOK_URL", ""), \
+             patch("src.monitor.alerting.get_incident_manager", return_value=manager):
+            result = send_alert(
+                AlertChannel.PORTFOLIO_DRIFT,
+                AlertLevel.WARN,
+                "Portfolio drift exceeding 5%",
+                details={"drift_pct": 7.5},
+            )
+
+        assert result is True
+        lines = (tmp_path / "incidents.jsonl").read_text().splitlines()
+        assert len(lines) == 1
+        event = json.loads(lines[0])
+        assert event["event"] == "opened"
+        assert event["channel"] == "portfolio_drift"
+        assert event["severity"] == "p2"
+
+    @patch("src.monitor.alerting.urllib.request.urlopen")
+    @patch("src.monitor.alerting.ALERT_WEBHOOK_URL", "https://hooks.example.com/test")
+    def test_dedup_suppressed_alert_still_updates_incident(self, mock_urlopen, tmp_path):
+        from src.monitor.incident_manager import IncidentManager
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        _last_alert_time.clear()
+        manager = IncidentManager(
+            log_path=tmp_path / "incidents.jsonl",
+            summary_path=tmp_path / "incidents.json",
+        )
+
+        with patch("src.monitor.alerting.get_incident_manager", return_value=manager):
+            assert send_alert(AlertChannel.IC_DECAY, AlertLevel.WARN, "IC warning") is True
+            assert send_alert(AlertChannel.IC_DECAY, AlertLevel.WARN, "IC warning updated") is True
+
+        assert mock_urlopen.call_count == 1
+        events = [json.loads(line) for line in (tmp_path / "incidents.jsonl").read_text().splitlines()]
+        assert [event["event"] for event in events] == ["opened", "updated"]
+        assert events[1]["message"] == "IC warning updated"
 
     @patch("src.monitor.alerting.urllib.request.urlopen")
     @patch("src.monitor.alerting.ALERT_WEBHOOK_URL", "https://hooks.example.com/test")
