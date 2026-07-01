@@ -7,7 +7,9 @@ No ML dependencies — safe to run anytime.
 
 import json
 import tempfile
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -18,6 +20,15 @@ from src.strategy.crypto_staking import (
     StakingSource,
     STATE_FILE,
 )
+
+
+class _FixedQ2Datetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        value = cls(2026, 5, 16, 12, 0, 0)
+        if tz is not None:
+            return value.replace(tzinfo=tz)
+        return value
 
 
 class TestStakingSource:
@@ -69,7 +80,8 @@ class TestETHStakingModel:
 
     def test_default_estimate(self):
         model = ETHStakingModel()
-        metrics = model.estimate_yield()
+        with patch("src.strategy.crypto_staking.datetime", _FixedQ2Datetime):
+            metrics = model.estimate_yield()
         assert 0.01 <= metrics.annual_yield <= 0.08
         assert metrics.staking_ratio == 0.28  # Default Q2 2026
         assert metrics.source == StakingSource.ESTIMATED
@@ -98,7 +110,8 @@ class TestETHStakingModel:
     def test_q2_ratio(self):
         """Q2 2026 should use 0.28 ratio."""
         model = ETHStakingModel()
-        metrics = model.estimate_yield()
+        with patch("src.strategy.crypto_staking.datetime", _FixedQ2Datetime):
+            metrics = model.estimate_yield()
         # Default auto-detect should use Q2 2026 ratio (0.28)
         assert metrics.staking_ratio == 0.28
 

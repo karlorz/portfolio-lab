@@ -145,7 +145,7 @@ def test_cli_refuses_live_health_log(tmp_path, capsys):
     # health.log with a recent mtime -> must NOT be deleted
     health = tmp_path / "health.log"
     health.write_bytes(b"x" * 2048)
-    recent_mtime = datetime(2026, 6, 24, tzinfo=timezone.utc).timestamp()
+    recent_mtime = (datetime.now(timezone.utc) - timedelta(days=prune_logs.STALE_DAYS - 1)).timestamp()
     import os
     os.utime(health, (recent_mtime, recent_mtime))
 
