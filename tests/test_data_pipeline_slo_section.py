@@ -1,0 +1,65 @@
+"""Tests for data_pipeline_slo_section builder."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import patch
+
+from src.dashboard.data_pipeline_slo_section import (
+    build_data_pipeline_slo_section,
+    data_pipeline_slo_unavailable_payload,
+)
+
+
+def test_data_pipeline_slo_unavailable_payload_shape() -> None:
+    payload = data_pipeline_slo_unavailable_payload(ImportError("boom"))
+    assert payload["status"] == "warning"
+    assert payload["top_dimension"] == "unknown"
+    assert payload["schema_version"] == "data-pipeline-slo/v1"
+    assert "boom" in payload["error"]
+
+
+def test_build_data_pipeline_slo_section_success(tmp_path: Path) -> None:
+    expected = {"schema_version": "data-pipeline-slo/v1", "status": "ok", "top_dimension": "scheduler"}
+    with patch("src.monitor.data_pipeline_slo.load_rebalance_health", return_value={}) as rebal:
+        with patch("src.monitor.data_pipeline_slo.load_source_manifest", return_value={}) as sm:
+            with patch("src.monitor.data_pipeline_slo.load_public_index", return_value={}) as pi:
+                with patch("src.monitor.data_pipeline_slo.load_signal_staleness", return_value={}) as ss:
+                    with patch("src.monitor.data_pipeline_slo.build_data_pipeline_slo", return_value=expected) as build:
+                        out = build_data_pipeline_slo_section(
+                            health_data={"data_freshness": {}}, public_dir=tmp_path
+                        )
+    assert out is expected
+    rebal.assert_called_once_with(tmp_path)
+    sm.assert_called_once_with(tmp_path)
+    pi.assert_called_once_with(tmp_path)
+    ss.assert_called_once_with(tmp_path)
+    build.assert_called_once()
+    # rebalance_health-derived kwargs flow through
+    _, kwargs = build.call_args
+    assert kwargs["alpaca_feed_entitlement"] is None
+    assert kwargs["market_data_consistency"] is None
+
+
+def test_build_data_pipeline_slo_section_failure(tmp_path: Path) -> None:
+    with patch("src.monitor.data_pipeline_slo.load_rebalance_health", side_effect=ImportError("no module")):
+        out = build_data_pipeline_slo_section(health_data={}, public_dir=tmp_path)
+    assert out["status"] == "warning"
+    assert out["top_dimension"] == "unknown"
+    assert "no module" in out["error"]
+
+
+def test_build_data_pipeline_slo_section_log_error_invoked(tmp_path: Path) -> None:
+    calls: list[tuple[str, Exception]] = []
+
+    def log_error(name: str, exc: Exception) -> None:
+        calls.append((name, exc))
+
+    with patch("src.monitor.data_pipeline_slo.load_rebalance_health", side_effect=OSError("io fail")):
+        out = build_data_pipeline_slo_section(
+            health_data={}, public_dir=tmp_path, log_error=log_error
+        )
+    assert out["status"] == "warning"
+    assert len(calls) == 1
+    assert calls[0][0] == "data_pipeline_slo"
+    assert isinstance(calls[0][1], OSError)
