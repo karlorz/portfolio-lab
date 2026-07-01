@@ -413,6 +413,21 @@ export const SignalWFESchema = z.object({
   error: z.optional(z.string()),
 }).passthrough();
 
+// ---------------------------------------------------------------------------
+// FredMacroSchema — FRED-MD macro regime signal (before SignalsDataObjectSchema)
+// ---------------------------------------------------------------------------
+export const FredMacroSchema = z.object({
+  regime: z.string(),
+  confidence: z.number(),
+  recession_probability: z.number(),
+  inflation_pressure: z.number(),
+  monetary_stance: z.string(),
+  manufacturing_health: z.number(),
+  credit_conditions: z.string(),
+  indicators: z.record(z.string(), z.number()),
+  timestamp: z.string(),
+}).passthrough();
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -503,6 +518,7 @@ const SignalsDataObjectSchema = z.object({
   staleness: z.optional(z.record(z.string(), z.unknown())),
   ic_decay: z.optional(IcDecaySchema),
   signal_wfe: z.optional(SignalWFESchema),
+  fred_macro: z.optional(FredMacroSchema),
   ramp: z.optional(z.object({
     phase: z.string(),
     allocation_pct: z.number(),
@@ -870,21 +886,6 @@ export const RebalanceHealthSchema = z.object({
     });
   }
 });
-
-// ---------------------------------------------------------------------------
-// FredMacroSchema — FRED-MD macro regime signal
-// ---------------------------------------------------------------------------
-export const FredMacroSchema = z.object({
-  regime: z.string(),
-  confidence: z.number(),
-  recession_probability: z.number(),
-  inflation_pressure: z.number(),
-  monetary_stance: z.string(),
-  manufacturing_health: z.number(),
-  credit_conditions: z.string(),
-  indicators: z.record(z.string(), z.number()),
-  timestamp: z.string(),
-}).passthrough();
 
 // ---------------------------------------------------------------------------
 // GraduationDataSchema — /data/graduation.json

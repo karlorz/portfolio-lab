@@ -1124,54 +1124,9 @@ class DashboardGenerator:
 
     def _load_broker_data(self) -> Dict:
         """Load broker position sync and order data for dashboard."""
-        broker = {
-            "connected": False,
-            "positions": [],
-            "drift": [],
-            "recent_orders": [],
-            "last_sync": None,
-            "kill_switch": False,
-        }
+        from src.dashboard.broker_data_loader import BrokerDataLoader
 
-        # Check position sync log (tail read only)
-        sync_log = DATA_DIR / "position_sync.jsonl"
-        if sync_log.exists():
-            try:
-                with open(sync_log) as f:
-                    tail = deque(f, maxlen=1)
-                if tail:
-                    last = json.loads(tail[0])
-                    broker["connected"] = True
-                    broker["last_sync"] = last.get("timestamp")
-                    broker["positions"] = last.get("broker_positions", [])
-                    broker["drift"] = last.get("drift", [])
-            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-                logger.warning("Failed to load position sync log: %s", e)
-
-        # Check broker orders log (tail read only)
-        orders_log = DATA_DIR / "broker_orders.jsonl"
-        if orders_log.exists():
-            try:
-                with open(orders_log) as f:
-                    recent = []
-                    for line in deque(f, maxlen=10):
-                        if line.strip():
-                            recent.append(json.loads(line))
-                    broker["recent_orders"] = list(reversed(recent))
-            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-                logger.warning("Failed to load broker orders log: %s", e)
-
-        # Check kill switch
-        kill_file = DATA_DIR / "kill_switch.json"
-        if kill_file.exists():
-            try:
-                with open(kill_file) as f:
-                    ks = json.load(f)
-                broker["kill_switch"] = ks.get("enabled", False)
-            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-                logger.warning("Failed to load kill switch state: %s", e)
-
-        return broker
+        return BrokerDataLoader(data_dir=DATA_DIR).load()
 
     def _load_garch_cvar_data(self) -> Dict:
         """Load GARCH-filtered CVaR metrics for dashboard (v3.21).
