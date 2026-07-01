@@ -31,6 +31,10 @@ from src.dashboard.health_report import (
     derive_system_status,
     summarize_stale_symbol_count,
 )
+from src.dashboard.signal_health_section import (
+    build_fred_readiness_section,
+    build_signal_health_section,
+)
 
 __all__ = [
     "DashboardGenerator",
@@ -1670,41 +1674,8 @@ class DashboardGenerator:
                 except (ValueError, TypeError) as e:
                     logger.warning("Failed to parse data freshness date '%s': %s", last_date, e)
 
-        # Get signal health from SignalHealthTracker
-        try:
-            from src.signals.health_tracker import SignalHealthTracker
-            tracker = SignalHealthTracker()
-            signal_health_report = tracker.get_health_report()
-            health_data["signal_health"] = {
-                "timestamp": signal_health_report.get("timestamp"),
-                "summary": signal_health_report.get("summary", {}),
-                "scores": signal_health_report.get("scores", {}),
-                "alerts": signal_health_report.get("alerts", []),
-                "overall_health": signal_health_report.get("overall_health", "unknown")
-            }
-        except SIGNAL_EXCEPTIONS as e:
-            _log_signal_error("signal_health", e)
-            health_data["signal_health"] = {
-                "error": f"Failed to get signal health: {str(e)}",
-                "status": "unavailable"
-            }
-
-        try:
-            from src.data.fred_data import get_fred_md_cache_health
-            from src.monitor.fred_readiness import assess_fred_readiness
-
-            health_data["fred_readiness"] = assess_fred_readiness(get_fred_md_cache_health())
-        except SIGNAL_EXCEPTIONS as e:
-            _log_signal_error("fred_readiness", e)
-            health_data["fred_readiness"] = {
-                "status": "warning",
-                "readiness": "unknown",
-                "ready": True,
-                "blocking": False,
-                "reason": "readiness_check_unavailable",
-                "message": f"FRED readiness check unavailable: {str(e)}",
-                "remediation": "Verify fredapi availability and FRED readiness dependencies.",
-            }
+        health_data["signal_health"] = build_signal_health_section(log_error=_log_signal_error)
+        health_data["fred_readiness"] = build_fred_readiness_section(log_error=_log_signal_error)
 
         try:
             from src.monitor.data_pipeline_slo import (

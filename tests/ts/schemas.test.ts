@@ -1051,6 +1051,39 @@ describe('HealthDataSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts signal_health and fred_readiness sections from generator', () => {
+    const data = {
+      ...validHealth(),
+      signal_health: {
+        timestamp: '2026-07-01T12:00:00Z',
+        summary: { active: 8 },
+        scores: { msm: 0.55 },
+        alerts: [],
+        overall_health: 'degraded',
+      },
+      fred_readiness: {
+        schema_version: 'fred-readiness/v1',
+        status: 'ok',
+        readiness: 'pass',
+        ready: true,
+        blocking: false,
+        message: 'FRED credential readiness ok for local mode.',
+      },
+    };
+    const result = HealthDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+    expect(result.data?.signal_health?.overall_health).toBe('degraded');
+    expect(result.data?.fred_readiness?.ready).toBe(true);
+  });
+
+  it('accepts unavailable signal_health fallback', () => {
+    const data = {
+      ...validHealth(),
+      signal_health: { status: 'unavailable', error: 'Failed to get signal health: x' },
+    };
+    expect(HealthDataSchema.safeParse(data).success).toBe(true);
+  });
+
   it('rejects missing cron_jobs', () => {
     const { cron_jobs, ...rest } = validHealth();
     const result = HealthDataSchema.safeParse(rest);

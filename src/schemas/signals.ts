@@ -685,6 +685,27 @@ const DataPipelineSloSchema = z.object({
   error: z.optional(z.string()),
 }).passthrough();
 
+const SignalHealthSectionSchema = z.object({
+  timestamp: z.optional(z.string()),
+  summary: z.optional(z.record(z.string(), z.unknown())),
+  scores: z.optional(z.record(z.string(), z.number())),
+  alerts: z.optional(z.array(z.unknown())),
+  overall_health: z.optional(z.string()),
+  error: z.optional(z.string()),
+  status: z.optional(z.string()),
+}).passthrough();
+
+const FredReadinessSectionSchema = z.object({
+  schema_version: z.optional(z.string()),
+  status: z.enum(['ok', 'warning', 'critical', 'unknown']).optional(),
+  readiness: z.optional(z.string()),
+  ready: z.optional(z.boolean()),
+  blocking: z.optional(z.boolean()),
+  reason: z.optional(z.string().nullable()),
+  message: z.optional(z.string()),
+  remediation: z.optional(z.string().nullable()),
+}).passthrough();
+
 export const HealthDataSchema = z.object({
   cron_jobs: z.array(CronJobStatusSchema),
   data_freshness: z.record(z.string(), DataFreshnessSchema),
@@ -692,6 +713,8 @@ export const HealthDataSchema = z.object({
   generated_at: z.string(),
   scheduler_status: z.optional(SchedulerStatusSchema),
   data_pipeline_slo: z.optional(DataPipelineSloSchema),
+  signal_health: z.optional(SignalHealthSectionSchema),
+  fred_readiness: z.optional(FredReadinessSectionSchema),
   error: z.optional(z.string()),
 }).passthrough();
 

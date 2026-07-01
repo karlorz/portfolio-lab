@@ -8,6 +8,7 @@ __all__ = [
     "classify_market_data_freshness",
     "derive_system_status",
     "summarize_stale_symbol_count",
+    "build_symbol_freshness_entry",
 ]
 
 
