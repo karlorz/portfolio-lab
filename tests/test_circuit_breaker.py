@@ -15,6 +15,7 @@ from src.broker.circuit_breaker import (
     BrokerCircuitBreaker,
     BrokerError,
     CircuitBreakerError,
+    _StateChangeListener,
     broker_breaker,
     get_circuit_state,
     fallback_positions,
@@ -244,6 +245,60 @@ class TestBrokerCircuitBreaker:
         fake_breaker.close.assert_called_once_with()
         assert "Failed to close broker circuit breaker during reset" in caplog.text
         assert "close failed" in caplog.text
+
+
+class TestStateChangeListenerRollback:
+    """Tests for live-ramp rollback on broker circuit breaker open transitions."""
+
+    @staticmethod
+    def _state(name: str):
+        state = MagicMock()
+        state.name = name
+        return state
+
+    def test_open_transition_triggers_live_ramp_rollback(self):
+        listener = _StateChangeListener()
+
+        with patch(
+            "src.broker.circuit_breaker._rollback_live_ramp_for_open_circuit",
+            return_value={"success": True, "new_phase": "phase_1"},
+        ) as rollback:
+            listener.state_change(
+                cb=MagicMock(),
+                old_state=self._state("closed"),
+                new_state=self._state("open"),
+            )
+
+        rollback.assert_called_once_with("closed", "open")
+
+    def test_non_open_transition_does_not_trigger_rollback(self):
+        listener = _StateChangeListener()
+
+        with patch("src.broker.circuit_breaker._rollback_live_ramp_for_open_circuit") as rollback:
+            listener.state_change(
+                cb=MagicMock(),
+                old_state=self._state("open"),
+                new_state=self._state("half-open"),
+            )
+
+        rollback.assert_not_called()
+
+    def test_rollback_failure_is_logged_without_raising(self, caplog):
+        listener = _StateChangeListener()
+
+        with patch(
+            "src.broker.circuit_breaker._rollback_live_ramp_for_open_circuit",
+            side_effect=RuntimeError("rollback unavailable"),
+        ):
+            with caplog.at_level(logging.WARNING, logger="src.broker.circuit_breaker"):
+                listener.state_change(
+                    cb=MagicMock(),
+                    old_state=self._state("closed"),
+                    new_state=self._state("open"),
+                )
+
+        assert "Broker circuit breaker rollback hook failed" in caplog.text
+        assert "rollback unavailable" in caplog.text
 
 
 class TestBrokerCircuitBreakerSingleton:

@@ -54,6 +54,35 @@ class BrokerError(Exception):
     """
 
 
+def _state_name(state: Any) -> str:
+    """Return a normalized pybreaker state name for logging and branching."""
+    return str(state.name if hasattr(state, "name") else state).lower()
+
+
+def _rollback_live_ramp_for_open_circuit(old_state: str, new_state: str) -> Optional[Dict[str, Any]]:
+    """Roll back live-ramp exposure when the broker circuit opens.
+
+    The import is intentionally lazy because ``alpaca.py`` imports this module.
+    """
+    try:
+        from src.broker.alpaca import LiveTransitionManager
+
+        manager = LiveTransitionManager()
+        result = manager.rollback(f"broker circuit breaker opened: {old_state} -> {new_state}")
+    except (ImportError, OSError, ValueError, TypeError, RuntimeError) as exc:
+        logger.warning("Broker circuit breaker rollback hook failed: %s", exc)
+        return None
+
+    if result.get("success"):
+        logger.warning("Live ramp rollback triggered by broker circuit breaker open: %s", result)
+    else:
+        logger.info(
+            "Live ramp rollback skipped after broker circuit breaker open: %s",
+            result.get("reason"),
+        )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # State-change listener
 # ---------------------------------------------------------------------------
@@ -80,11 +109,19 @@ class _StateChangeListener:
         old_state: Any,
         new_state: Any,
     ) -> None:
+        old_name = _state_name(old_state)
+        new_name = _state_name(new_state)
         logger.info(
             "Broker circuit breaker state change: %s -> %s",
-            old_state.name if hasattr(old_state, "name") else old_state,
-            new_state.name if hasattr(new_state, "name") else new_state,
+            old_name,
+            new_name,
         )
+        if new_name != "open" or old_name == "open":
+            return
+        try:
+            _rollback_live_ramp_for_open_circuit(old_name, new_name)
+        except Exception as exc:
+            logger.warning("Broker circuit breaker rollback hook failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
