@@ -153,6 +153,7 @@ describe('LiveDashboard lazy tab panel contract', () => {
       '/data/alerts.json',
       '/data/stats.json',
       '/data/health.json',
+      '/data/incidents.json',
     ];
     const optionalEndpoints = [
       '/data/analytics.json',

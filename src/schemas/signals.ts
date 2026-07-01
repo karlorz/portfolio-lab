@@ -680,6 +680,37 @@ export const HealthDataSchema = z.object({
 }).passthrough();
 
 // ---------------------------------------------------------------------------
+// IncidentLifecycleSummarySchema — /data/incidents.json
+// ---------------------------------------------------------------------------
+const IncidentLifecycleIncidentSchema = z.object({
+  incident_id: z.string(),
+  channel: z.string(),
+  severity: z.string(),
+  state: z.enum(['firing', 'acknowledged', 'resolving', 'resolved']),
+  message: z.string(),
+  details: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+  updated_at: z.string(),
+  resolved_at: z.nullable(z.string()),
+  resolution_notes: z.nullable(z.string()),
+  mttr_seconds: z.nullable(z.number()),
+}).passthrough();
+
+const IncidentLifecycleMetricsSchema = z.object({
+  incident_frequency: z.number(),
+  open_count: z.number(),
+  resolved_count: z.number(),
+  mean_mttr_seconds: z.nullable(z.number()),
+}).passthrough();
+
+export const IncidentLifecycleSummarySchema = z.object({
+  generated_at: z.string(),
+  open_count: z.number(),
+  incidents: z.array(IncidentLifecycleIncidentSchema),
+  metrics: IncidentLifecycleMetricsSchema,
+}).passthrough();
+
+// ---------------------------------------------------------------------------
 // AnalyticsDataSchema — /data/analytics.json
 // ---------------------------------------------------------------------------
 const DrawdownPointSchema = z.object({

@@ -226,6 +226,36 @@ export interface Alert {
   requires_action: boolean;
 }
 
+export type IncidentLifecycleState = 'firing' | 'acknowledged' | 'resolving' | 'resolved';
+
+export interface IncidentLifecycleIncident {
+  incident_id: string;
+  channel: string;
+  severity: string;
+  state: IncidentLifecycleState;
+  message: string;
+  details: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  resolution_notes: string | null;
+  mttr_seconds: number | null;
+}
+
+export interface IncidentLifecycleMetrics {
+  incident_frequency: number;
+  open_count: number;
+  resolved_count: number;
+  mean_mttr_seconds: number | null;
+}
+
+export interface IncidentLifecycleSummary {
+  generated_at: string;
+  open_count: number;
+  incidents: IncidentLifecycleIncident[];
+  metrics: IncidentLifecycleMetrics;
+}
+
 export interface AssetStat {
   '30d_return': number;
   volatility: number;

@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'rea
 import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
 import DurationOverlayPanel from './DurationOverlayPanel';
-import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData, HedgeSelectorData } from '../types/live';
+import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData, HedgeSelectorData, IncidentLifecycleSummary } from '../types/live';
 import type { RebalanceHealthData } from './RebalanceHealthPanel';
 import type { ExplainabilityData } from './PortfolioExplainabilityPanel';
 import { BehavioralSentimentPanel } from './BehavioralSentimentPanel';
@@ -48,6 +48,7 @@ import {
   AlertsDataSchema,
   StatsDataSchema,
   HealthDataSchema,
+  IncidentLifecycleSummarySchema,
   AnalyticsDataSchema,
   RebalanceHealthSchema,
   GraduationDataSchema,
@@ -159,6 +160,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
+  const [incidentSummary, setIncidentSummary] = useState<IncidentLifecycleSummary | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [rebalanceHealth, setRebalanceHealth] = useState<RebalanceHealthData | null>(null);
   const [explainability, setExplainability] = useState<ExplainabilityData | null>(null);
@@ -181,12 +183,13 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const fetchCoreData = async () => {
     const requestGeneration = ++coreFetchGeneration.current;
     try {
-      const [signalsRes, dashboardRes, alertsRes, statsRes, healthRes] = await Promise.all([
+      const [signalsRes, dashboardRes, alertsRes, statsRes, healthRes, incidentsRes] = await Promise.all([
         fetch('/data/signals.json'),
         fetch('/data/dashboard.json'),
         fetch('/data/alerts.json'),
         fetch('/data/stats.json'),
         fetch('/data/health.json'),
+        fetch('/data/incidents.json'),
       ]);
       if (requestGeneration !== coreFetchGeneration.current) return;
 
@@ -233,6 +236,13 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         const raw = healthRaw;
         const validated = validateFetchData(raw, HealthDataSchema, 'health');
         if (validated) setHealth(validated as HealthData);
+      }
+      const incidentsRaw = await safeParseJson(incidentsRes, 'incidents');
+      if (requestGeneration !== coreFetchGeneration.current) return;
+      if (incidentsRaw) {
+        const raw = incidentsRaw;
+        const validated = validateFetchData(raw, IncidentLifecycleSummarySchema, 'incidents');
+        if (validated) setIncidentSummary(validated as IncidentLifecycleSummary);
       }
 
       if (requestGeneration === coreFetchGeneration.current) setError(null);
@@ -414,8 +424,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
   const healthOperationsSummary = health ? summarizeHealthOperations(health) : null;
   const dashboardIncidents = useMemo(
-    () => buildDashboardIncidents({ alerts, signals, health }),
-    [alerts, signals, health],
+    () => buildDashboardIncidents({ alerts, signals, health, incidentSummary }),
+    [alerts, signals, health, incidentSummary],
   );
   const overviewIncidents = useMemo(
     () => getIncidentsForTab(dashboardIncidents, 'overview'),

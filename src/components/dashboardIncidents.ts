@@ -1,4 +1,10 @@
-import type { Alert, HealthData, SignalsData } from '../types/live';
+import type {
+  Alert,
+  HealthData,
+  IncidentLifecycleIncident,
+  IncidentLifecycleSummary,
+  SignalsData,
+} from '../types/live';
 
 export type IncidentSeverity = 'critical' | 'warning' | 'info' | 'success';
 
@@ -33,6 +39,7 @@ export interface DashboardIncidentInputs {
   alerts: Alert[];
   signals: SignalsData | null;
   health: HealthData | null;
+  incidentSummary?: IncidentLifecycleSummary | null;
 }
 
 export interface TabIncidentBadge {
@@ -132,6 +139,60 @@ function mapAlertToIncident(alert: Alert): DashboardIncident | null {
   };
 }
 
+function incidentSeverity(severity: string): IncidentSeverity {
+  if (severity === 'p0') return 'critical';
+  if (severity === 'p1' || severity === 'p2') return 'warning';
+  return 'info';
+}
+
+function incidentTitle(channel: string): string {
+  return `${formatAlertSource(channel)
+    .split(' ')
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ')} Incident`;
+}
+
+function persistedIncidentNextAction(incident: IncidentLifecycleIncident): string {
+  if (
+    incident.channel === 'cron_failure'
+    || incident.channel === 'evaluator_error'
+    || incident.channel === 'signal_staleness'
+  ) {
+    return 'Open Health and inspect scheduler status, data freshness, and incident details.';
+  }
+  if (incident.channel === 'portfolio_drift') {
+    return 'Open Rebalance and inspect drift details before placing new orders.';
+  }
+  if (incident.channel === 'ic_decay') {
+    return 'Open Analytics and inspect signal quality before trusting new ensemble votes.';
+  }
+  return 'Review the incident lifecycle record before the next paper-trading decision.';
+}
+
+function mapPersistedIncidentToDashboard(incident: IncidentLifecycleIncident): DashboardIncident | null {
+  if (incident.state === 'resolved') return null;
+
+  return {
+    id: `persisted:${incident.channel}:${incident.incident_id}`,
+    tab: 'health',
+    severity: incidentSeverity(incident.severity),
+    title: incidentTitle(incident.channel),
+    source: 'Incident lifecycle',
+    currentValue: `State: ${incident.state}`,
+    threshold: `Severity: ${incident.severity}`,
+    message: incident.message,
+    nextAction: persistedIncidentNextAction(incident),
+    timestamp: incident.updated_at || incident.created_at,
+  };
+}
+
+function buildPersistedIncidents(summary: IncidentLifecycleSummary | null | undefined): DashboardIncident[] {
+  if (!summary) return [];
+  return summary.incidents
+    .map(mapPersistedIncidentToDashboard)
+    .filter((incident): incident is DashboardIncident => incident !== null);
+}
+
 export function buildRiskIncidents(signals: SignalsData | null): DashboardIncident[] {
   const cvarRatio = signals?.garch_cvar?.cvar_ratio;
   if (cvarRatio === undefined || cvarRatio < RISK_WARNING_CVAR_RATIO) {
@@ -189,6 +250,7 @@ function sortIncidents(incidents: DashboardIncident[]): DashboardIncident[] {
 
 export function buildDashboardIncidents(inputs: DashboardIncidentInputs): DashboardIncident[] {
   return sortIncidents([
+    ...buildPersistedIncidents(inputs.incidentSummary),
     ...inputs.alerts.map(mapAlertToIncident).filter((incident): incident is DashboardIncident => incident !== null),
     ...buildRiskIncidents(inputs.signals),
     ...buildHealthIncidents(inputs.health),

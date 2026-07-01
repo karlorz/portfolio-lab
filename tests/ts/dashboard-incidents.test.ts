@@ -5,7 +5,7 @@ import {
   getIncidentsForTab,
   getTabIncidentBadge,
 } from '../../src/components/dashboardIncidents';
-import type { Alert, HealthData, SignalsData } from '../../src/types/live';
+import type { Alert, HealthData, IncidentLifecycleSummary, SignalsData } from '../../src/types/live';
 
 function signalsWithCvar(cvarRatio: number): SignalsData {
   return {
@@ -45,6 +45,35 @@ function health(status: HealthData['system_status']): HealthData {
     generated_at: '2026-06-11T12:32:14.473414',
     cron_jobs: [],
     data_freshness: {},
+  };
+}
+
+function incidentSummary(overrides: Partial<IncidentLifecycleSummary> = {}): IncidentLifecycleSummary {
+  return {
+    generated_at: '2026-06-11T12:35:00+00:00',
+    open_count: 1,
+    metrics: {
+      incident_frequency: 2,
+      open_count: 1,
+      resolved_count: 1,
+      mean_mttr_seconds: 1800,
+    },
+    incidents: [
+      {
+        incident_id: 'inc-001',
+        channel: 'cron_failure',
+        severity: 'p0',
+        state: 'firing',
+        message: 'Scheduler backends disagree for 2 consecutive checks',
+        details: { consecutive_mismatches: 2 },
+        created_at: '2026-06-11T12:30:00+00:00',
+        updated_at: '2026-06-11T12:34:00+00:00',
+        resolved_at: null,
+        resolution_notes: null,
+        mttr_seconds: null,
+      },
+    ],
+    ...overrides,
   };
 }
 
@@ -185,5 +214,30 @@ describe('dashboard incident derivation', () => {
       severity: 'critical',
       source: 'Health check',
     });
+  });
+
+  it('renders persisted open incident lifecycle records as dashboard incidents', () => {
+    const incidents = buildDashboardIncidents({
+      alerts: [],
+      signals: null,
+      health: null,
+      incidentSummary: incidentSummary(),
+    });
+
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      id: 'persisted:cron_failure:inc-001',
+      tab: 'health',
+      severity: 'critical',
+      title: 'Cron Failure Incident',
+      source: 'Incident lifecycle',
+      currentValue: 'State: firing',
+      threshold: 'Severity: p0',
+      message: 'Scheduler backends disagree for 2 consecutive checks',
+      timestamp: '2026-06-11T12:34:00+00:00',
+    });
+    expect(incidents[0]?.nextAction).toContain('Health');
+    expect(getTabIncidentBadge(incidents, 'overview')).toEqual({ count: 1, severity: 'critical' });
+    expect(getTabIncidentBadge(incidents, 'health')).toEqual({ count: 1, severity: 'critical' });
   });
 });

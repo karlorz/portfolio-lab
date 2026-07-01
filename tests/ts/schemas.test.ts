@@ -22,6 +22,7 @@ import {
   AlertsDataSchema,
   StatsDataSchema,
   HealthDataSchema,
+  IncidentLifecycleSummarySchema,
   AnalyticsDataSchema,
   RebalanceHealthSchema,
   GraduationDataSchema,
@@ -1053,6 +1054,51 @@ describe('HealthDataSchema', () => {
   it('rejects missing cron_jobs', () => {
     const { cron_jobs, ...rest } = validHealth();
     const result = HealthDataSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+});
+
+// ===========================================================================
+// IncidentLifecycleSummarySchema
+// ===========================================================================
+
+describe('IncidentLifecycleSummarySchema', () => {
+  const validIncidentSummary = () => ({
+    generated_at: '2026-06-11T12:35:00+00:00',
+    open_count: 1,
+    incidents: [{
+      incident_id: 'inc-001',
+      channel: 'cron_failure',
+      severity: 'p0',
+      state: 'firing' as const,
+      message: 'Scheduler backends disagree for 2 consecutive checks',
+      details: { consecutive_mismatches: 2 },
+      created_at: '2026-06-11T12:30:00+00:00',
+      updated_at: '2026-06-11T12:34:00+00:00',
+      resolved_at: null,
+      resolution_notes: null,
+      mttr_seconds: null,
+    }],
+    metrics: {
+      incident_frequency: 2,
+      open_count: 1,
+      resolved_count: 1,
+      mean_mttr_seconds: 1800,
+    },
+  });
+
+  it('accepts valid incident lifecycle summaries', () => {
+    const result = IncidentLifecycleSummarySchema.safeParse(validIncidentSummary());
+    expect(result.success).toBe(true);
+    expect(result.data?.incidents[0].details.consecutive_mismatches).toBe(2);
+  });
+
+  it('rejects invalid incident lifecycle states', () => {
+    const data = {
+      ...validIncidentSummary(),
+      incidents: [{ ...validIncidentSummary().incidents[0], state: 'stuck' }],
+    };
+    const result = IncidentLifecycleSummarySchema.safeParse(data);
     expect(result.success).toBe(false);
   });
 });
