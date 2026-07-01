@@ -611,6 +611,21 @@ def main():
     if kill_reason:
         kill_level = classify_kill_level(kill_reason)
         logger.critical("KILL SWITCH TRIGGERED: level=%s reason=%s", kill_level.value, kill_reason)
+        try:
+            from src.monitor.decision_registry import record_evaluator_cycle_decision
+
+            record_evaluator_cycle_decision(
+                mode=mode,
+                regime=regime,
+                target_alloc=REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION,
+                prices=prices,
+                portfolio_value=portfolio.total_value(prices),
+                current_weights=portfolio.current_weights(prices),
+                orders=None,
+                kill_reason=kill_reason,
+            )
+        except (ImportError, ValueError, OSError, TypeError) as e:
+            logger.warning("Evaluator decision registry (kill) skipped: %s", e)
         # Write kill_switch.json with graduated level (read by order_router and dashboard)
         save_results_json({
             "enabled": True,
@@ -655,7 +670,23 @@ def main():
         logger.info("Executed %d orders", len(executed))
     else:
         logger.info("No rebalancing needed")
-    
+
+    try:
+        from src.monitor.decision_registry import record_evaluator_cycle_decision
+
+        record_evaluator_cycle_decision(
+            mode=mode,
+            regime=regime,
+            target_alloc=target_alloc,
+            prices=prices,
+            portfolio_value=portfolio.total_value(prices),
+            current_weights=portfolio.current_weights(prices),
+            orders=orders if orders else None,
+            kill_reason=None,
+        )
+    except (ImportError, ValueError, OSError, TypeError) as e:
+        logger.warning("Evaluator decision registry record skipped: %s", e)
+
     # Update and save state
     perf = calculate_performance(portfolio, prices)
     portfolio.history.append(perf)
@@ -780,7 +811,27 @@ def check_graduation_criteria(portfolio: Portfolio):
         
         trigger_path = DATA_DIR / ".promote_to_live"
         save_results_json(trigger, output_path=str(trigger_path))
-        
+
+        try:
+            from src.monitor.decision_registry import record_backtest_experiment
+
+            record_backtest_experiment(
+                {
+                    "metrics": trigger["metrics"],
+                    "sharpe": sharpe,
+                    "max_drawdown_pct": round(max_dd * 100, 4),
+                    "win_rate": win_rate,
+                    "dsr": dsr,
+                },
+                experiment_id=f"paper-graduation-{datetime.now().strftime('%Y%m%d')}",
+                output_path=trigger_path,
+                name="paper_trading_graduation",
+                hypothesis="paper_mode_graduation_criteria_met",
+                tags=["evaluator", "graduation", "shadow"],
+            )
+        except (ImportError, ValueError, OSError, TypeError) as e:
+            logger.warning("Graduation experiment registry skipped: %s", e)
+
         logger.info("Created promotion trigger: %s", trigger_path)
 
 if __name__ == "__main__":

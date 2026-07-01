@@ -98,6 +98,9 @@ const BondMomentumPanel = lazy(() => import('./BondMomentumPanel').then((module)
 const KurtosisRegimePanel = lazy(() => import('./KurtosisRegimePanel').then((module) => ({ default: module.KurtosisRegimePanel })));
 const VolatilityParityPanel = lazy(() => import('./VolatilityParityPanel').then((module) => ({ default: module.VolatilityParityPanel })));
 const LabsPanel = lazy(() => import('./LabsPanel').then((module) => ({ default: module.LabsPanel })));
+const DecisionReplayPanel = lazy(() =>
+  import('./DecisionReplayPanel').then((module) => ({ default: module.DecisionReplayPanel })),
+);
 const ChatPanel = lazy(() => import('./ChatPanel').then((module) => ({ default: module.ChatPanel })));
 const TasksPanel = lazy(() => import('./TasksPanel').then((module) => ({ default: module.TasksPanel })));
 
@@ -455,6 +458,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'options', label: '0DTE', badge: countBadge(signals?.zero_dte?.positions?.length, 'info') },
     { id: 'auction', label: 'Auction', badge: countBadge(signals?.closing_auction?.signals?.filter(s => s.should_trade).length, 'warning') },
     { id: 'labs', label: 'Labs' },
+    { id: 'decisions', label: 'Decisions' },
     { id: 'tasks', label: 'Tasks' },
     { id: 'chat', label: 'Chat' }
   ];
@@ -1018,6 +1022,17 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           <Suspense fallback={tabLoadingFallback('Labs')}>
           <div className="tab-panel labs-panel-container">
             <LabsPanel />
+          </div>
+          </Suspense>
+        </PanelErrorBoundary>
+        )}
+
+        {/* Decision Replay Tab */}
+        {activeTab === 'decisions' && (
+        <PanelErrorBoundary name="Decisions">
+          <Suspense fallback={tabLoadingFallback('Decisions')}>
+          <div className="tab-panel decisions-panel-container">
+            <DecisionReplayPanel />
           </div>
           </Suspense>
         </PanelErrorBoundary>

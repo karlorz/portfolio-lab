@@ -1110,6 +1110,13 @@ class DashboardGenerator:
         output = self._build_optional_signal_sections(output, context)
         output = self._apply_signal_postprocessors(output, context)
 
+        try:
+            from src.monitor.decision_registry import record_dashboard_cycle_decision
+
+            record_dashboard_cycle_decision(output, context=context)
+        except (ImportError, ValueError, OSError, TypeError) as e:
+            logger.warning("Decision registry record skipped: %s", e)
+
         out_path = PUBLIC_DIR / "signals.json"
         save_results_json(output, output_path=str(out_path), validator=validate_all_signals)
 
@@ -2749,6 +2756,21 @@ class DashboardGenerator:
                     paths.append(labs_validation_path)
             except (ImportError, ValueError, OSError, TypeError) as e:
                 logger.warning("Labs validation report generation skipped: %s", e)
+
+            try:
+                from src.monitor.decision_registry import (
+                    publish_decision_registry_json,
+                    sync_labs_registry_experiments,
+                )
+                from src.research.experiment_registry import LABS_REGISTRY_FILENAME
+
+                labs_json = PUBLIC_DIR / LABS_REGISTRY_FILENAME
+                if labs_json.exists():
+                    sync_labs_registry_experiments(labs_json)
+                decision_registry_path = publish_decision_registry_json(public_dir=PUBLIC_DIR)
+                paths.append(decision_registry_path)
+            except (ImportError, ValueError, OSError, TypeError) as e:
+                logger.warning("Decision registry JSON generation skipped: %s", e)
 
             for p in paths:
                 if p:

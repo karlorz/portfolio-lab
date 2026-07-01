@@ -19,6 +19,7 @@ export type IncidentTab =
   | 'auction'
   | 'risk'
   | 'labs'
+  | 'decisions'
   | 'tasks'
   | 'chat';
 

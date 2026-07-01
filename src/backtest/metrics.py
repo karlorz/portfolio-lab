@@ -683,6 +683,7 @@ def save_results_json(
         manifest_config = dict(experiment_manifest)
         experiment_id = manifest_config.pop("experiment_id")
         save_experiment_result_json(data, path, experiment_id=experiment_id, **manifest_config)
+        _maybe_record_backtest_experiment(data, path, experiment_manifest)
         return
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -692,6 +693,34 @@ def save_results_json(
     except (OSError, TypeError) as e:
         logger.error("Failed to save results to %s: %s", path, e)
         raise
+
+    _maybe_record_backtest_experiment(data, path, experiment_manifest)
+
+
+def _maybe_record_backtest_experiment(
+    data: dict,
+    path: Path,
+    experiment_manifest: Optional[Dict[str, Any]],
+) -> None:
+    """Append experiment row to decision registry when saving result JSON."""
+    if experiment_manifest is None:
+        return
+    experiment_id = experiment_manifest.get("experiment_id")
+    if not experiment_id:
+        return
+    try:
+        from src.monitor.decision_registry import record_backtest_experiment
+
+        record_backtest_experiment(
+            data,
+            experiment_id=str(experiment_id),
+            output_path=path,
+            name=str(experiment_manifest.get("name") or experiment_id),
+            hypothesis=str(experiment_manifest.get("hypothesis") or ""),
+            tags=["experiment_manifest"],
+        )
+    except (ImportError, ValueError, OSError, TypeError) as e:
+        logger.warning("Decision registry backtest record skipped: %s", e)
 
 
 def _json_serializer(obj):

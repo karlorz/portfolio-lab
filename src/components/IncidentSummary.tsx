@@ -27,6 +27,7 @@ const tabLabels: Record<IncidentTab, string> = {
   auction: 'Auction',
   risk: 'Risk',
   labs: 'Labs',
+  decisions: 'Decisions',
   tasks: 'Tasks',
   chat: 'Chat',
 };
