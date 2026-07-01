@@ -120,3 +120,208 @@ def test_malformed_incident_event_is_skipped_when_replaying(tmp_path):
     assert incident is not None
     assert incident.channel == "cron_failure"
     assert manager.open_incidents() == [incident]
+
+
+def test_unresolved_alerts_escalate_kill_switch_by_cycle_threshold(tmp_path):
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=tmp_path / "kill_switch.json",
+        escalation_cycles=2,
+    )
+
+    first = manager.record_alert(
+        channel="signal_staleness",
+        level="warn",
+        message="signals stale",
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    assert first is not None
+    assert first.alert_count == 1
+    assert not (tmp_path / "kill_switch.json").exists()
+
+    second = manager.record_alert(
+        channel="signal_staleness",
+        level="warn",
+        message="signals still stale",
+        now=datetime(2026, 7, 1, 0, 5, tzinfo=timezone.utc),
+    )
+    assert second is not None
+    warning = json.loads((tmp_path / "kill_switch.json").read_text())
+    assert warning["enabled"] is True
+    assert warning["level"] == "warning"
+    assert warning["position_reduction"] == 0.25
+    assert warning["source"] == "incident_lifecycle"
+    assert warning["incident_id"] == second.incident_id
+    assert warning["incident_alert_count"] == 2
+
+    fourth = None
+    for minute in (10, 15):
+        fourth = manager.record_alert(
+            channel="signal_staleness",
+            level="warn",
+            message="signals still stale",
+            now=datetime(2026, 7, 1, 0, minute, tzinfo=timezone.utc),
+        )
+
+    assert fourth is not None
+    restrict = json.loads((tmp_path / "kill_switch.json").read_text())
+    assert restrict["level"] == "restrict"
+    assert restrict["position_reduction"] == 0.5
+    assert restrict["incident_alert_count"] == 4
+
+    sixth = None
+    for minute in (20, 25):
+        sixth = manager.record_alert(
+            channel="signal_staleness",
+            level="halt",
+            message="all signals stale",
+            now=datetime(2026, 7, 1, 0, minute, tzinfo=timezone.utc),
+        )
+
+    assert sixth is not None
+    halt = json.loads((tmp_path / "kill_switch.json").read_text())
+    assert halt["level"] == "halt"
+    assert halt["position_reduction"] == 1.0
+    assert halt["incident_alert_count"] == 6
+    assert halt["reason"] == "unresolved_incident:signal_staleness"
+
+
+def test_incident_escalation_does_not_downgrade_existing_stronger_kill_switch(tmp_path):
+    kill_switch_path = tmp_path / "kill_switch.json"
+    kill_switch_path.write_text(json.dumps({
+        "enabled": True,
+        "level": "liquidate",
+        "reason": "max_drawdown_-30.0%",
+        "source": "risk_limits",
+        "position_reduction": 1.0,
+    }))
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=kill_switch_path,
+        escalation_cycles=1,
+    )
+
+    manager.record_alert(
+        channel="ic_decay",
+        level="warn",
+        message="IC warning",
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+
+    data = json.loads(kill_switch_path.read_text())
+    assert data["level"] == "liquidate"
+    assert data["reason"] == "max_drawdown_-30.0%"
+    assert data["source"] == "risk_limits"
+
+
+def test_incident_escalation_preserves_same_rank_non_incident_kill_switch(tmp_path):
+    kill_switch_path = tmp_path / "kill_switch.json"
+    kill_switch_path.write_text(json.dumps({
+        "enabled": True,
+        "level": "warning",
+        "reason": "max_drawdown_-12.0%",
+        "source": "risk_limits",
+        "position_reduction": 0.25,
+    }))
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=kill_switch_path,
+        escalation_cycles=1,
+    )
+
+    manager.record_alert(
+        channel="ic_decay",
+        level="warn",
+        message="IC warning",
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+
+    data = json.loads(kill_switch_path.read_text())
+    assert data["level"] == "warning"
+    assert data["reason"] == "max_drawdown_-12.0%"
+    assert data["source"] == "risk_limits"
+
+
+def test_pass_alert_clears_matching_incident_owned_kill_switch(tmp_path):
+    kill_switch_path = tmp_path / "kill_switch.json"
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=kill_switch_path,
+        escalation_cycles=1,
+    )
+
+    opened = manager.record_alert(
+        channel="portfolio_drift",
+        level="halt",
+        message="critical drift",
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    assert opened is not None
+    assert kill_switch_path.exists()
+
+    manager.record_alert(
+        channel="portfolio_drift",
+        level="pass",
+        message="drift recovered",
+        now=datetime(2026, 7, 1, 0, 5, tzinfo=timezone.utc),
+    )
+
+    assert not kill_switch_path.exists()
+
+
+def test_pass_alert_does_not_clear_non_incident_kill_switch(tmp_path):
+    kill_switch_path = tmp_path / "kill_switch.json"
+    kill_switch_path.write_text(json.dumps({
+        "enabled": True,
+        "level": "halt",
+        "reason": "max_drawdown_-22.0%",
+        "source": "risk_limits",
+        "position_reduction": 1.0,
+    }))
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=kill_switch_path,
+        escalation_cycles=1,
+    )
+
+    manager.record_alert(
+        channel="cron_failure",
+        level="halt",
+        message="cron failed",
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    manager.record_alert(
+        channel="cron_failure",
+        level="pass",
+        message="cron recovered",
+        now=datetime(2026, 7, 1, 0, 5, tzinfo=timezone.utc),
+    )
+
+    data = json.loads(kill_switch_path.read_text())
+    assert data["source"] == "risk_limits"
+    assert data["reason"] == "max_drawdown_-22.0%"
+
+
+def test_disabled_incident_escalation_does_not_write_kill_switch(tmp_path):
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=tmp_path / "kill_switch.json",
+        escalation_cycles=1,
+        escalation_enabled=False,
+    )
+
+    incident = manager.record_alert(
+        channel="ic_decay",
+        level="halt",
+        message="critical IC decay",
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert incident is not None
+    assert not (tmp_path / "kill_switch.json").exists()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -17,6 +18,20 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_INCIDENT_LOG_PATH = DATA_DIR / "incidents.jsonl"
 DEFAULT_INCIDENT_SUMMARY_PATH = DATA_DIR / "incidents.json"
+DEFAULT_KILL_SWITCH_PATH = DATA_DIR / "kill_switch.json"
+
+_KILL_SWITCH_LEVEL_RANK = {
+    "none": 0,
+    "warning": 1,
+    "restrict": 2,
+    "halt": 3,
+    "liquidate": 4,
+}
+_KILL_SWITCH_REDUCTION = {
+    "warning": 0.25,
+    "restrict": 0.50,
+    "halt": 1.0,
+}
 
 
 class IncidentState(str, Enum):
@@ -43,6 +58,8 @@ class Incident:
     resolved_at: str | None = None
     resolution_notes: str | None = None
     mttr_seconds: float | None = None
+    alert_count: int = 1
+    kill_switch_level: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -76,6 +93,20 @@ def _normalise(value: Any) -> str:
     return str(getattr(value, "value", value))
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
 class IncidentManager:
     """Append-only incident event log plus queryable summary writer."""
 
@@ -83,9 +114,26 @@ class IncidentManager:
         self,
         log_path: str | Path = DEFAULT_INCIDENT_LOG_PATH,
         summary_path: str | Path = DEFAULT_INCIDENT_SUMMARY_PATH,
+        kill_switch_path: str | Path | None = None,
+        escalation_cycles: int | None = None,
+        escalation_enabled: bool | None = None,
     ):
         self.log_path = Path(log_path)
         self.summary_path = Path(summary_path)
+        self.kill_switch_path = (
+            Path(kill_switch_path)
+            if kill_switch_path is not None
+            else self.log_path.parent / DEFAULT_KILL_SWITCH_PATH.name
+        )
+        cycles = escalation_cycles
+        if cycles is None:
+            cycles = _env_int("INCIDENT_KILL_SWITCH_ESCALATION_CYCLES", 3)
+        self.escalation_cycles = max(1, cycles)
+        self.escalation_enabled = (
+            _env_bool("INCIDENT_KILL_SWITCH_ESCALATION_ENABLED", True)
+            if escalation_enabled is None
+            else escalation_enabled
+        )
 
     def record_alert(
         self,
@@ -103,6 +151,8 @@ class IncidentManager:
 
         if level_value == "pass":
             incident = self._resolve(channel_value, message, event_time)
+            if incident is not None:
+                self._clear_matching_incident_kill_switch(incident)
         else:
             severity = _severity_for_level(level_value)
             if severity is None:
@@ -114,6 +164,7 @@ class IncidentManager:
                 details=details or {},
                 now=event_time,
             )
+            self._write_incident_kill_switch(incident)
 
         self.write_summary()
         return incident
@@ -183,6 +234,7 @@ class IncidentManager:
                 created_at=timestamp,
                 updated_at=timestamp,
             )
+            incident.kill_switch_level = self._kill_switch_level_for_count(incident.alert_count)
             self._append_event("opened", incident)
             return incident
 
@@ -195,7 +247,9 @@ class IncidentManager:
             details=details,
             created_at=existing.created_at,
             updated_at=timestamp,
+            alert_count=existing.alert_count + 1,
         )
+        incident.kill_switch_level = self._kill_switch_level_for_count(incident.alert_count)
         self._append_event("updated", incident)
         return incident
 
@@ -219,9 +273,86 @@ class IncidentManager:
             resolved_at=resolved_at,
             resolution_notes=message,
             mttr_seconds=mttr_seconds,
+            alert_count=existing.alert_count,
+            kill_switch_level=existing.kill_switch_level,
         )
         self._append_event("resolved", incident)
         return incident
+
+    def _kill_switch_level_for_count(self, alert_count: int) -> str | None:
+        if not self.escalation_enabled:
+            return None
+        if alert_count < self.escalation_cycles:
+            return None
+        stage = min(alert_count // self.escalation_cycles, 3)
+        return {
+            1: "warning",
+            2: "restrict",
+            3: "halt",
+        }[stage]
+
+    def _write_incident_kill_switch(self, incident: Incident) -> None:
+        level = incident.kill_switch_level
+        if level is None:
+            return
+        if not self._should_write_incident_kill_switch(level):
+            return
+
+        payload = {
+            "enabled": True,
+            "level": level,
+            "reason": f"unresolved_incident:{incident.channel}",
+            "mode": os.environ.get("ALPHALAB_MODE", "paper"),
+            "timestamp": incident.updated_at,
+            "position_reduction": _KILL_SWITCH_REDUCTION[level],
+            "source": "incident_lifecycle",
+            "incident_id": incident.incident_id,
+            "incident_channel": incident.channel,
+            "incident_severity": incident.severity,
+            "incident_alert_count": incident.alert_count,
+            "message": incident.message,
+        }
+        try:
+            self.kill_switch_path.parent.mkdir(parents=True, exist_ok=True)
+            self.kill_switch_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Failed to write incident kill switch: %s", exc)
+
+    def _should_write_incident_kill_switch(self, level: str) -> bool:
+        new_rank = _KILL_SWITCH_LEVEL_RANK[level]
+        try:
+            payload = json.loads(self.kill_switch_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return True
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Existing kill switch is unreadable; preserving it for safety: %s", exc)
+            return False
+
+        existing_level = str(payload.get("level", "none")).lower()
+        existing_rank = _KILL_SWITCH_LEVEL_RANK.get(existing_level, _KILL_SWITCH_LEVEL_RANK["halt"])
+        if existing_rank > new_rank:
+            return False
+        if existing_rank == new_rank and payload.get("source") != "incident_lifecycle":
+            return False
+        return True
+
+    def _clear_matching_incident_kill_switch(self, incident: Incident) -> None:
+        try:
+            payload = json.loads(self.kill_switch_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Existing kill switch is unreadable; preserving it for safety: %s", exc)
+            return
+
+        if (
+            payload.get("source") == "incident_lifecycle"
+            and payload.get("incident_id") == incident.incident_id
+        ):
+            try:
+                self.kill_switch_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Failed to clear resolved incident kill switch: %s", exc)
 
     def _find_open_by_channel(self, channel: str) -> Incident | None:
         candidates = [
