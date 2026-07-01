@@ -19,13 +19,9 @@ from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, M
 from src.utils import safe_get, classify_vix_regime
 from src.backtest.metrics import save_results_json
 from src.dashboard.public_data_index import build_public_data_index
-from src.monitor.hermes_cron import (
-    combine_scheduler_backends,
-    load_hermes_portfolio_cron_jobs,
-    load_local_cron_jobs,
-    resolve_hermes_cron_jobs_path,
-)
+from src.monitor.hermes_cron import resolve_hermes_cron_jobs_path
 from src.monitor.signal_schemas import validate_all_signals, validate_signal
+from src.dashboard.cron_scheduler_section import build_cron_scheduler_section
 from src.dashboard.health_report import (
     build_symbol_freshness_entry,
     derive_system_status,
@@ -1620,20 +1616,14 @@ class DashboardGenerator:
             "generated_at": datetime.now().isoformat()
         }
         
-        # Get cron job status from project-local status file and Hermes, when available.
-        scheduler_backends = {}
-        cron_status_file = DATA_DIR / "cron_status.json"
-        local_jobs, local_backend = load_local_cron_jobs(cron_status_file)
-        health_data["cron_jobs"].extend(local_jobs)
-        scheduler_backends["local"] = local_backend
-
-        hermes_jobs_path = _resolve_hermes_cron_jobs_path()
-        if hermes_jobs_path is not None:
-            hermes_jobs, hermes_backend = load_hermes_portfolio_cron_jobs(hermes_jobs_path)
-            health_data["cron_jobs"].extend(hermes_jobs)
-            scheduler_backends["hermes"] = hermes_backend
-
-        health_data["scheduler_status"] = combine_scheduler_backends(scheduler_backends)
+        # Cron job status from project-local status file and Hermes, when available.
+        cron_section = build_cron_scheduler_section(
+            cron_status_file=DATA_DIR / "cron_status.json",
+            resolve_hermes_path=_resolve_hermes_cron_jobs_path,
+            log_error=_log_signal_error,
+        )
+        health_data["cron_jobs"] = cron_section["cron_jobs"]
+        health_data["scheduler_status"] = cron_section["scheduler_status"]
         
         # Get data freshness from SQLite
         cursor = self.conn.cursor()
