@@ -22,8 +22,8 @@ from src.dashboard.public_data_index import build_public_data_index
 from src.monitor.hermes_cron import resolve_hermes_cron_jobs_path
 from src.monitor.signal_schemas import validate_all_signals, validate_signal
 from src.dashboard.cron_scheduler_section import build_cron_scheduler_section
+from src.dashboard.data_freshness_section import build_data_freshness_section
 from src.dashboard.health_report import (
-    build_symbol_freshness_entry,
     derive_system_status,
     summarize_stale_symbol_count,
 )
@@ -1625,45 +1625,9 @@ class DashboardGenerator:
         health_data["cron_jobs"] = cron_section["cron_jobs"]
         health_data["scheduler_status"] = cron_section["scheduler_status"]
         
-        # Get data freshness from SQLite
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT MAX(date) FROM prices")
-        latest_market_date = cursor.fetchone()[0]
-        latest_market_dt = None
-        if latest_market_date:
-            try:
-                latest_market_dt = datetime.strptime(latest_market_date, "%Y-%m-%d")
-            except (ValueError, TypeError) as e:
-                logger.warning(
-                    "Failed to parse latest market freshness date '%s': %s",
-                    latest_market_date,
-                    e,
-                )
-
-        cursor.execute("""
-            SELECT symbol, MAX(date) as last_date 
-            FROM prices 
-            GROUP BY symbol
-        """)
-        for row in cursor.fetchall():
-            sym, last_date = row
-            if last_date:
-                try:
-                    last_dt = datetime.strptime(last_date, "%Y-%m-%d")
-                    days_stale = (datetime.now() - last_dt).days
-                    market_lag_days = (
-                        max((latest_market_dt - last_dt).days, 0)
-                        if latest_market_dt is not None
-                        else days_stale
-                    )
-                    health_data["data_freshness"][sym] = build_symbol_freshness_entry(
-                        last_date=last_date,
-                        days_stale=days_stale,
-                        market_lag_days=market_lag_days,
-                        latest_available_market_date=latest_market_date,
-                    )
-                except (ValueError, TypeError) as e:
-                    logger.warning("Failed to parse data freshness date '%s': %s", last_date, e)
+        # Per-symbol data freshness from SQLite
+        freshness_section = build_data_freshness_section(conn=self.conn)
+        health_data["data_freshness"] = freshness_section["data_freshness"]
 
         health_data["signal_health"] = build_signal_health_section(log_error=_log_signal_error)
         health_data["fred_readiness"] = build_fred_readiness_section(log_error=_log_signal_error)
