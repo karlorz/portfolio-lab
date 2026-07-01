@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   buildDashboardIncidents,
+  buildDecisionIncidents,
   buildRiskIncidents,
   getIncidentsForTab,
   getTabIncidentBadge,
@@ -239,5 +240,23 @@ describe('dashboard incident derivation', () => {
     expect(incidents[0]?.nextAction).toContain('Health');
     expect(getTabIncidentBadge(incidents, 'overview')).toEqual({ count: 1, severity: 'critical' });
     expect(getTabIncidentBadge(incidents, 'health')).toEqual({ count: 1, severity: 'critical' });
+  });
+
+  it('derives Decisions-tab incidents from staleness and smart rebalance hold', () => {
+    const signals = {
+      timestamp: '2026-07-01T12:00:00Z',
+      staleness: { stale_signals: ['fred_macro', 'ensemble_voting'] },
+      smart_rebalance: {
+        decision: 'defer',
+        reason: 'vpin_high',
+        should_execute: false,
+      },
+    } as SignalsData;
+
+    const incidents = buildDecisionIncidents(signals);
+    expect(incidents).toHaveLength(2);
+    expect(incidents[0]?.tab).toBe('decisions');
+    expect(getIncidentsForTab(incidents, 'decisions')).toHaveLength(2);
+    expect(getTabIncidentBadge(incidents, 'decisions')).toEqual({ count: 2, severity: 'warning' });
   });
 });

@@ -249,12 +249,60 @@ function sortIncidents(incidents: DashboardIncident[]): DashboardIncident[] {
   });
 }
 
+export function buildDecisionIncidents(signals: SignalsData | null): DashboardIncident[] {
+  if (!signals) return [];
+
+  const incidents: DashboardIncident[] = [];
+  const staleness = signals.staleness as
+    | { stale_signals?: string[]; stale?: string[] }
+    | undefined;
+  const staleList = staleness?.stale_signals ?? staleness?.stale;
+  if (Array.isArray(staleList) && staleList.length > 0) {
+    incidents.push({
+      id: 'decisions:staleness',
+      tab: 'decisions',
+      severity: 'warning',
+      title: 'Stale signals in last cycle',
+      source: 'Decision replay',
+      currentValue: `${staleList.length} stale`,
+      message: `Signals past TTL may have degraded ensemble weights: ${staleList.slice(0, 5).join(', ')}${
+        staleList.length > 5 ? '…' : ''
+      }`,
+      nextAction: 'Open Decisions and compare gates on the latest recorded decision.',
+      timestamp: signals.timestamp,
+    });
+  }
+
+  const smart = signals.smart_rebalance;
+  if (
+    smart &&
+    smart.should_execute === false &&
+    smart.decision &&
+    !['observe', 'no_positions'].includes(String(smart.decision))
+  ) {
+    incidents.push({
+      id: 'decisions:smart-rebalance-hold',
+      tab: 'decisions',
+      severity: 'info',
+      title: 'Rebalance held',
+      source: 'Smart rebalance',
+      currentValue: String(smart.decision),
+      message: smart.reason ? String(smart.reason) : 'Smart rebalance did not execute this cycle.',
+      nextAction: 'Review replay detail for gates and weight deltas.',
+      timestamp: signals.timestamp,
+    });
+  }
+
+  return incidents;
+}
+
 export function buildDashboardIncidents(inputs: DashboardIncidentInputs): DashboardIncident[] {
   return sortIncidents([
     ...buildPersistedIncidents(inputs.incidentSummary),
     ...inputs.alerts.map(mapAlertToIncident).filter((incident): incident is DashboardIncident => incident !== null),
     ...buildRiskIncidents(inputs.signals),
     ...buildHealthIncidents(inputs.health),
+    ...buildDecisionIncidents(inputs.signals),
   ]);
 }
 

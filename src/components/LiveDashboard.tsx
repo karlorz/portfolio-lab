@@ -458,7 +458,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     { id: 'options', label: '0DTE', badge: countBadge(signals?.zero_dte?.positions?.length, 'info') },
     { id: 'auction', label: 'Auction', badge: countBadge(signals?.closing_auction?.signals?.filter(s => s.should_trade).length, 'warning') },
     { id: 'labs', label: 'Labs' },
-    { id: 'decisions', label: 'Decisions' },
+    { id: 'decisions', label: 'Decisions', badge: getTabIncidentBadge(dashboardIncidents, 'decisions') },
     { id: 'tasks', label: 'Tasks' },
     { id: 'chat', label: 'Chat' }
   ];
