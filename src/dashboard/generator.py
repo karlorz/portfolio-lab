@@ -26,6 +26,11 @@ from src.monitor.hermes_cron import (
     resolve_hermes_cron_jobs_path,
 )
 from src.monitor.signal_schemas import validate_all_signals, validate_signal
+from src.dashboard.health_report import (
+    build_symbol_freshness_entry,
+    derive_system_status,
+    summarize_stale_symbol_count,
+)
 
 __all__ = [
     "DashboardGenerator",
@@ -103,15 +108,6 @@ def _compact_health_summary(report: Dict) -> Dict:
         summary["scheduler_status"] = scheduler_status.get("status")
 
     return summary
-
-
-def _classify_market_data_freshness(market_lag_days: int) -> str:
-    """Classify a symbol by lag versus the provider's latest available date."""
-    if market_lag_days <= 1:
-        return "fresh"
-    if market_lag_days <= 3:
-        return "stale"
-    return "critical"
 
 
 def _log_signal_error(signal_name: str, exc: Exception) -> None:
@@ -1665,13 +1661,12 @@ class DashboardGenerator:
                         if latest_market_dt is not None
                         else days_stale
                     )
-                    health_data["data_freshness"][sym] = {
-                        "last_update": last_date,
-                        "days_stale": days_stale,
-                        "market_lag_days": market_lag_days,
-                        "latest_available_market_date": latest_market_date,
-                        "status": _classify_market_data_freshness(market_lag_days)
-                    }
+                    health_data["data_freshness"][sym] = build_symbol_freshness_entry(
+                        last_date=last_date,
+                        days_stale=days_stale,
+                        market_lag_days=market_lag_days,
+                        latest_available_market_date=latest_market_date,
+                    )
                 except (ValueError, TypeError) as e:
                     logger.warning("Failed to parse data freshness date '%s': %s", last_date, e)
 
@@ -1738,7 +1733,7 @@ class DashboardGenerator:
             }
 
         # Overall system health
-        stale_count = sum(1 for d in health_data["data_freshness"].values() if d.get("status") != "fresh")
+        stale_count = summarize_stale_symbol_count(health_data["data_freshness"])
         failed_jobs = sum(1 for j in health_data["cron_jobs"] if j.get("status") == "error")
         scheduler_status = health_data.get("scheduler_status", {}).get("status")
         slo_status = health_data.get("data_pipeline_slo", {}).get("status")
@@ -1746,20 +1741,15 @@ class DashboardGenerator:
             backend.get("status") == "error"
             for backend in health_data.get("scheduler_status", {}).get("backends", {}).values()
         )
-        
-        if health_data["system_status"] not in {"warning", "critical", "degraded"}:
-            health_data["system_status"] = "healthy"
-        if backend_error:
-            health_data["system_status"] = "degraded"
-        elif (
-            scheduler_status in {"degraded", "warning", "unavailable"}
-            or slo_status == "warning"
-            or failed_jobs > 0
-            or stale_count > 5
-        ):
-            health_data["system_status"] = "warning"
-        if slo_status == "critical" or failed_jobs > 2 or stale_count > 10:
-            health_data["system_status"] = "critical"
+
+        health_data["system_status"] = derive_system_status(
+            current=health_data.get("system_status", "healthy"),
+            backend_error=backend_error,
+            scheduler_status=scheduler_status,
+            slo_status=slo_status,
+            failed_jobs=failed_jobs,
+            stale_count=stale_count,
+        )
         
         out_path = PUBLIC_DIR / "health.json"
         save_results_json(health_data, output_path=str(out_path))

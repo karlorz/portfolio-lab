@@ -154,6 +154,19 @@ describe('BacktestEngine metric semantics', () => {
 
     expect(engine.calculateMetrics(result).positiveMonths).toBe(1);
   });
+
+  it('computes max drawdown as minimum of drawdown series', () => {
+    const engine = new BacktestEngine();
+    const result = makeBacktestResult(
+      ['2026-01-02', '2026-01-05', '2026-01-06'],
+      [100, 80, 90],
+    );
+
+    const metrics = engine.calculateMetrics(result);
+    expect(metrics.maxDrawdown).toBeCloseTo(-0.2, 8);
+    expect(metrics.cagr).toBeGreaterThan(-1);
+    expect(Number.isFinite(metrics.volatility)).toBe(true);
+  });
 });
 
 describe('App backtest price loader', () => {
