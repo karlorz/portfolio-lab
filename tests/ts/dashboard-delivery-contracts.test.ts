@@ -82,4 +82,18 @@ describe('dashboard delivery source contracts', () => {
     expect(caddy).toMatch(/handle\s+\/assets\/\*[\s\S]*Cache-Control\s+"public, max-age=31536000, immutable"/);
     expect(caddy).toMatch(/handle\s+\/data\/\*[\s\S]*Cache-Control\s+"no-cache"/);
   });
+
+  it('registers decision_registry.json in the public data index contract', () => {
+    const source = read('src/dashboard/public_data_index.py');
+
+    expect(source).toContain('"decision_registry.json"');
+    expect(source).toContain('DECISION_REGISTRY_SCHEMA_VERSION');
+  });
+
+  it('publishes decision_registry.json from dashboard generator run', () => {
+    const source = read('src/dashboard/generator.py');
+
+    expect(source).toContain('publish_decision_registry_json');
+    expect(source).toContain('record_dashboard_cycle_decision');
+  });
 });

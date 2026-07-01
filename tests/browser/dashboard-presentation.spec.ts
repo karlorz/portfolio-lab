@@ -11,6 +11,7 @@ const TAB_LABELS = [
   '0DTE',
   'Auction',
   'Labs',
+  'Decisions',
   'Tasks',
   'Chat',
 ] as const;
@@ -35,6 +36,7 @@ const LOADED_TAB_SELECTORS: Record<DashboardTabLabel, readonly string[]> = {
   '0DTE': ['.zero-dte-panel'],
   'Auction': ['.closing-auction-panel'],
   'Labs': ['.labs-panel .positions-table', '.labs-panel .analytics-empty:not([role="status"])'],
+  'Decisions': ['.decision-replay-panel', '.decision-replay-panel .analytics-empty'],
   'Tasks': ['.tasks-panel-container'],
   'Chat': ['.chat-panel-container'],
 } as const;

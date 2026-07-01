@@ -115,6 +115,17 @@ describe('dashboard presentation source contracts', () => {
   const css = read('src/App.css');
   const liveDashboard = read('src/components/LiveDashboard.tsx');
 
+  it('styles the decision replay panel for scroll and row selection', () => {
+    expectRuleContains(css, '.decision-replay-panel .labs-table-scroll', [
+      /overflow-x:\s*auto;/,
+      /max-width:\s*100%;/,
+    ]);
+    expectRuleContains(css, '.decision-replay-panel .positions-table tbody tr.selected-row', [
+      /background:/,
+    ]);
+    expectNoUtilityClassTokens('src/components/DecisionReplayPanel.tsx');
+  });
+
   it('uses supported local layout classes for dashboard tab groups', () => {
     expect(liveDashboard).toContain('className="dashboard-grid dashboard-grid-two analytics-panel-group"');
     expect(liveDashboard).toContain('className="dashboard-grid dashboard-grid-three analytics-panel-group"');
@@ -146,6 +157,7 @@ describe('dashboard presentation source contracts', () => {
     expect(browserSmoke).toContain("'Analytics': ['.analytics-summary'");
     expect(browserSmoke).toContain("'.explainability-panel'");
     expect(browserSmoke).toContain("'Labs': ['.labs-panel .positions-table'");
+    expect(browserSmoke).toContain("'Decisions': ['.decision-replay-panel'");
     expect(browserSmoke).toMatch(
       /await tab\.click\(\);\s*await expect\(tab\)\.toHaveClass\(/,
     );

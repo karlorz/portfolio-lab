@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from src.paths import PUBLIC_DATA_DIR
+from src.monitor.decision_registry import DECISION_REGISTRY_SCHEMA_VERSION
 from src.dashboard.public_data_size_budget import (
     measure_public_data_size_budget,
     missing_public_data_size_budget,
@@ -54,6 +55,7 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "labs_scorecards.json": ("labs", LABS_SCORECARD_SCHEMA_VERSION),
     "labs_replays.json": ("labs", LABS_REPLAY_SCHEMA_VERSION),
     "labs_validation.json": ("labs", LABS_VALIDATION_SCHEMA_VERSION),
+    "decision_registry.json": ("monitoring", DECISION_REGISTRY_SCHEMA_VERSION),
 }
 
 _OPTIONAL_PUBLIC_DATA_FILES = (
@@ -61,6 +63,7 @@ _OPTIONAL_PUBLIC_DATA_FILES = (
     "labs_scorecards.json",
     "labs_replays.json",
     "labs_validation.json",
+    "decision_registry.json",
 )
 
 _LABS_OBJECT_PAGINATION_ROW_KEYS = {

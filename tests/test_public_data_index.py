@@ -708,3 +708,32 @@ def test_dashboard_run_publishes_labs_registry_when_experiment_artifacts_exist(t
     assert validation_report["schema_version"] == "labs-validation/v1"
     assert validation_report["results"][0]["path"] == "labs_registry.json"
     assert validation_report["results"][0]["valid"] is True
+
+
+def test_build_public_data_index_includes_decision_registry_contract(tmp_path: Path) -> None:
+    from src.monitor.decision_registry import (
+        DECISION_REGISTRY_SCHEMA_VERSION,
+        DecisionRecord,
+        DecisionRegistry,
+        publish_decision_registry_json,
+    )
+
+    reg = DecisionRegistry(db_path=tmp_path / "decision_registry.db")
+    reg.record_decision(
+        DecisionRecord(
+            decision_id="idx-dec",
+            timestamp_utc="2026-07-01T12:00:00+00:00",
+            run_id="idx-run",
+            action="hold",
+        )
+    )
+    publish_decision_registry_json(public_dir=tmp_path, registry=reg)
+    index = build_public_data_index(
+        [tmp_path / "decision_registry.json"],
+        public_dir=tmp_path,
+        generated_at="2026-07-01T12:00:00+00:00",
+    )
+    entry = _entries_by_filename(index)["decision_registry.json"]
+    assert entry["status"] == "present"
+    assert entry["schema_version"] == DECISION_REGISTRY_SCHEMA_VERSION
+    assert "decision_registry.json" in index["files"]
