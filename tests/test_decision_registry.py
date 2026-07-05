@@ -201,6 +201,35 @@ def test_build_snapshot_limits(tmp_path: Path) -> None:
     assert snap["counts"]["decisions"] == 2
 
 
+def test_snapshot_evaluates_every_surfaced_recent_experiment(tmp_path: Path) -> None:
+    reg = DecisionRegistry(db_path=tmp_path / "registry.db")
+    for i in range(12):
+        reg.record_experiment(
+            ExperimentRecord(
+                experiment_id=f"exp-{i}",
+                timestamp_utc=f"2026-07-{i + 1:02d}T12:00:00+00:00",
+                name=f"experiment {i}",
+                metrics={"sharpe": 1.0 + (i / 100)},
+                benchmark_metrics={"sharpe": 0.95},
+            )
+        )
+
+    snap = build_decision_registry_snapshot(reg, experiment_limit=12)
+
+    recent_ids = [row["experiment_id"] for row in snap["recent_experiments"]]
+    promotion_ids = [row["experiment_id"] for row in snap["promotion_evaluations"]]
+    assert len(promotion_ids) == len(recent_ids) == 12
+    assert set(promotion_ids) == set(recent_ids)
+    assert snap["promotion_coverage"] == {
+        "scope": "recent_experiments",
+        "recent_experiment_count": 12,
+        "evaluated_experiment_count": 12,
+        "unmatched_experiment_count": 0,
+        "unmatched_experiment_ids": [],
+        "disclosure": "complete_promotion_evaluation_coverage",
+    }
+
+
 def test_evaluator_cycle_recording(tmp_path: Path) -> None:
     reg = DecisionRegistry(db_path=tmp_path / "registry.db")
     recorded = record_evaluator_cycle_decision(

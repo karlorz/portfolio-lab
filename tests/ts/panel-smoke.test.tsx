@@ -82,6 +82,14 @@ function decisionRegistry(): DecisionRegistryData {
       },
     ],
     promotion_evaluations: [],
+    promotion_coverage: {
+      scope: 'recent_experiments',
+      recent_experiment_count: 0,
+      evaluated_experiment_count: 0,
+      unmatched_experiment_count: 0,
+      unmatched_experiment_ids: [],
+      disclosure: 'complete_promotion_evaluation_coverage',
+    },
     counts: { decisions: 1, experiments: 0 },
   };
 }
@@ -112,5 +120,37 @@ describe('panel smoke rendering', () => {
     expect(html).toContain('dashboard-cycle');
     expect(html).not.toContain('Select a decision row.');
     expect(html).not.toContain('panel-error-boundary');
+  });
+
+  it('renders unmatched promotion rows with explicit fallback text', () => {
+    const registry = decisionRegistry();
+    registry.recent_experiments = [
+      {
+        experiment_id: 'unmatched-exp',
+        timestamp_utc: '2026-07-04T12:01:00Z',
+        name: 'Unmatched experiment',
+        metrics: { sharpe: 1.05 },
+        benchmark_metrics: { sharpe: 0.95 },
+        promotion_status: 'candidate',
+      },
+    ];
+    registry.promotion_coverage = {
+      scope: 'recent_experiments',
+      recent_experiment_count: 1,
+      evaluated_experiment_count: 0,
+      unmatched_experiment_count: 1,
+      unmatched_experiment_ids: ['unmatched-exp'],
+      disclosure: 'partial_promotion_evaluation_coverage',
+    };
+    registry.counts.experiments = 1;
+
+    const html = renderPanel(
+      'Decisions',
+      <DecisionReplayPanel initialData={registry} />,
+    );
+
+    expect(html).toContain('unmatched-exp');
+    expect(html).toContain('Not evaluated');
+    expect(html).toContain('Promotion evaluation not published');
   });
 });

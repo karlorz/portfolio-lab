@@ -203,6 +203,13 @@ export function DecisionReplayPanel({ initialData }: DecisionReplayPanelProps) {
       {data.recent_experiments.length > 0 && (
         <div className="stats-section">
           <h4>Recent experiments (registry)</h4>
+          {data.promotion_coverage.unmatched_experiment_count > 0 && (
+            <p className="muted">
+              Promotion coverage is partial: {data.promotion_coverage.evaluated_experiment_count}{' '}
+              of {data.promotion_coverage.recent_experiment_count} surfaced experiments have
+              published promotion evaluations.
+            </p>
+          )}
           <div className="labs-table-scroll">
             <table className="positions-table">
               <thead>
@@ -227,9 +234,15 @@ export function DecisionReplayPanel({ initialData }: DecisionReplayPanelProps) {
                       <td>{exp.promotion_status ?? 'candidate'}</td>
                       <td>{sharpe != null ? sharpe.toFixed(2) : '—'}</td>
                       <td>
-                        {promo
-                          ? `${promo.recommended_status}${promo.pass ? ' ✓' : ''}`
-                          : '—'}
+                        {promo ? (
+                          `${promo.recommended_status}${promo.pass ? ' ✓' : ''}`
+                        ) : (
+                          <span>
+                            <strong>Not evaluated</strong>
+                            <br />
+                            <small>Promotion evaluation not published</small>
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );

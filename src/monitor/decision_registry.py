@@ -352,7 +352,12 @@ def build_decision_registry_snapshot(
     experiments = reg.list_experiments()[:experiment_limit]
 
     replay_summaries = [reg.replay_decision(dec.decision_id) for dec in decisions[:5]]
-    promotion_rows = [evaluate_promotion_candidate(exp) for exp in experiments[:10]]
+    promotion_rows = [evaluate_promotion_candidate(exp) for exp in experiments]
+    recent_experiment_ids = [exp.experiment_id for exp in experiments]
+    evaluated_experiment_ids = {row["experiment_id"] for row in promotion_rows}
+    unmatched_experiment_ids = [
+        exp_id for exp_id in recent_experiment_ids if exp_id not in evaluated_experiment_ids
+    ]
 
     return {
         "schema_version": DECISION_REGISTRY_SCHEMA_VERSION,
@@ -361,6 +366,18 @@ def build_decision_registry_snapshot(
         "recent_experiments": [e.model_dump(mode="json") for e in experiments],
         "replay_summaries": replay_summaries,
         "promotion_evaluations": promotion_rows,
+        "promotion_coverage": {
+            "scope": "recent_experiments",
+            "recent_experiment_count": len(experiments),
+            "evaluated_experiment_count": len(promotion_rows),
+            "unmatched_experiment_count": len(unmatched_experiment_ids),
+            "unmatched_experiment_ids": unmatched_experiment_ids,
+            "disclosure": (
+                "complete_promotion_evaluation_coverage"
+                if not unmatched_experiment_ids
+                else "partial_promotion_evaluation_coverage"
+            ),
+        },
         "counts": {
             "decisions": len(decisions),
             "experiments": len(experiments),

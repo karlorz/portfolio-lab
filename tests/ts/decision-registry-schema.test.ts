@@ -25,6 +25,14 @@ describe('decision_registry.json schema', () => {
         { decision_id: 'dec-1', found: true, replay: { summary: 'Action hold', action: 'hold' } },
       ],
       promotion_evaluations: [],
+      promotion_coverage: {
+        scope: 'recent_experiments',
+        recent_experiment_count: 0,
+        evaluated_experiment_count: 0,
+        unmatched_experiment_count: 0,
+        unmatched_experiment_ids: [],
+        disclosure: 'complete_promotion_evaluation_coverage',
+      },
       counts: { decisions: 1, experiments: 0 },
     };
 
@@ -46,5 +54,19 @@ describe('decision_registry.json schema', () => {
         counts: { decisions: 0, experiments: 0 },
       }),
     ).toBeNull();
+  });
+
+  it('requires explicit promotion coverage metadata', () => {
+    const payloadWithoutCoverage = {
+      schema_version: DECISION_REGISTRY_SCHEMA_VERSION,
+      generated_at: '2026-07-01T12:00:00+00:00',
+      recent_decisions: [],
+      recent_experiments: [],
+      replay_summaries: [],
+      promotion_evaluations: [],
+      counts: { decisions: 0, experiments: 0 },
+    };
+
+    expect(DecisionRegistrySchema.safeParse(payloadWithoutCoverage).success).toBe(false);
   });
 });

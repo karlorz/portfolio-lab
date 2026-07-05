@@ -78,6 +78,18 @@ export const PromotionEvaluationSchema = z.object({
   thresholds: z.record(z.string(), z.union([z.number(), z.boolean()])).optional(),
 });
 
+export const PromotionCoverageSchema = z.object({
+  scope: z.literal('recent_experiments'),
+  recent_experiment_count: z.number().int().nonnegative(),
+  evaluated_experiment_count: z.number().int().nonnegative(),
+  unmatched_experiment_count: z.number().int().nonnegative(),
+  unmatched_experiment_ids: z.array(z.string()),
+  disclosure: z.enum([
+    'complete_promotion_evaluation_coverage',
+    'partial_promotion_evaluation_coverage',
+  ]),
+});
+
 export const DecisionRegistrySchema = z.object({
   schema_version: z.literal(DECISION_REGISTRY_SCHEMA_VERSION),
   generated_at: z.string(),
@@ -85,6 +97,7 @@ export const DecisionRegistrySchema = z.object({
   recent_experiments: z.array(ExperimentRecordSchema),
   replay_summaries: z.array(ReplaySummarySchema),
   promotion_evaluations: z.array(PromotionEvaluationSchema),
+  promotion_coverage: PromotionCoverageSchema,
   counts: z.object({
     decisions: z.number().int().nonnegative(),
     experiments: z.number().int().nonnegative(),
