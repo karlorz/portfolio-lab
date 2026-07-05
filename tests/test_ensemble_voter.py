@@ -17,7 +17,7 @@ from unittest.mock import patch, MagicMock
 
 from src.strategy.ensemble_voter import (
     Regime, SignalSource, SignalReading, EnsembleVote, BanditWeighter,
-    REGIME_WEIGHTS, REGIME_CONDITIONAL_WEIGHTS, EnsembleVoter,
+    REGIME_WEIGHTS, REGIME_CONDITIONAL_WEIGHTS, SignalAggregator, EnsembleVoter,
 )
 
 
@@ -3145,18 +3145,18 @@ class TestCollectSignalsEdgeCases:
         assert SignalSource.INTERNATIONAL_MOMENTUM not in active_sources_set
         assert voter._should_skip(SignalSource.INTERNATIONAL_MOMENTUM, active_sources_set, Regime.CRISIS)
 
-    def test_collect_signals_in_collect_msm(self, tmp_path):
-        """_collect_msm_signal should not crash."""
-        voter = _make_voter(tmp_path)
+    def test_signal_aggregator_collect_msm_does_not_crash(self):
+        """SignalAggregator._collect_msm_signal should not crash."""
+        aggregator = SignalAggregator(load_price_data=lambda: None, regime_weights=REGIME_WEIGHTS)
         readings = {}
-        voter._collect_msm_signal(readings, active_sources=None, regime=None, date=None)
+        aggregator._collect_msm_signal(readings, active_sources=None, regime=None, date=None)
         assert isinstance(readings, dict)
 
-    def test_collect_signals_in_collect_cross_asset_rv(self, tmp_path):
-        """_collect_cross_asset_rv_signal should not crash."""
-        voter = _make_voter(tmp_path)
+    def test_signal_aggregator_collect_cross_asset_rv_does_not_crash(self):
+        """SignalAggregator._collect_cross_asset_rv_signal should not crash."""
+        aggregator = SignalAggregator(load_price_data=lambda: None, regime_weights=REGIME_WEIGHTS)
         readings = {}
-        voter._collect_cross_asset_rv_signal(readings, active_sources=None, regime=None)
+        aggregator._collect_cross_asset_rv_signal(readings, active_sources=None, regime=None)
         assert isinstance(readings, dict)
 
 
