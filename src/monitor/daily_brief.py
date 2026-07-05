@@ -16,6 +16,7 @@ import logging
 import os
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.paths import DATA_DIR
@@ -23,7 +24,17 @@ from src.utils import safe_get
 from src.backtest.metrics import save_results_json
 
 
-__all__ = ['SEVERITY_THRESHOLDS', 'BriefSection', 'generate_brief_sections', 'render_brief_text', 'generate_narrative', 'generate_daily_brief']
+__all__ = [
+    "SEVERITY_THRESHOLDS",
+    "MODEL_VALIDATION_BENCHMARK_PATH",
+    "BriefSection",
+    "ModelValidationBenchmark",
+    "load_model_validation_benchmark",
+    "generate_brief_sections",
+    "render_brief_text",
+    "generate_narrative",
+    "generate_daily_brief",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +53,8 @@ SEVERITY_THRESHOLDS = {
     "slippage_alert_bps": 15.0,
 }
 
+MODEL_VALIDATION_BENCHMARK_PATH = DATA_DIR / "daily_brief_model_validation_benchmark.json"
+
 
 @dataclass
 class BriefSection:
@@ -50,6 +63,40 @@ class BriefSection:
     severity: str  # normal, warning, alert
     data_text: str
     recommendation: str = ""
+
+
+@dataclass(frozen=True)
+class ModelValidationBenchmark:
+    benchmark_id: str
+    description: str
+    sharpe_ratio: float
+    n_trials: int
+    n_observations: int
+    date_range: Dict[str, str]
+    provenance: str
+    observation_semantics: str
+
+
+def load_model_validation_benchmark(
+    path: str | Path | None = None,
+) -> ModelValidationBenchmark:
+    """Load the frozen benchmark tuple used for daily-brief DSR reporting."""
+    benchmark_path = Path(path) if path is not None else MODEL_VALIDATION_BENCHMARK_PATH
+    payload = json.loads(benchmark_path.read_text())
+    date_range = payload["date_range"]
+    if not isinstance(date_range, dict):
+        raise ValueError("model validation benchmark date_range must be an object")
+
+    return ModelValidationBenchmark(
+        benchmark_id=str(payload["benchmark_id"]),
+        description=str(payload["description"]),
+        sharpe_ratio=float(payload["sharpe_ratio"]),
+        n_trials=int(payload["n_trials"]),
+        n_observations=int(payload["n_observations"]),
+        date_range={str(k): str(v) for k, v in date_range.items()},
+        provenance=str(payload["provenance"]),
+        observation_semantics=str(payload["observation_semantics"]),
+    )
 
 
 def generate_brief_sections(dashboard: Dict[str, Any]) -> List[BriefSection]:
@@ -152,13 +199,31 @@ def generate_brief_sections(dashboard: Dict[str, Any]) -> List[BriefSection]:
     # Deflated Sharpe Ratio — validates champion against multiple testing
     try:
         from src.backtest.metrics import compute_deflated_sharpe_ratio
+        benchmark = load_model_validation_benchmark()
         dsr = compute_deflated_sharpe_ratio(
-            sharpe_ratio=0.79, n_trials=94, n_observations=5371,
+            sharpe_ratio=benchmark.sharpe_ratio,
+            n_trials=benchmark.n_trials,
+            n_observations=benchmark.n_observations,
         )
-        model_text_parts.append(f"DSR={dsr:.2f} (94 configs)")
+        start = benchmark.date_range.get("start")
+        end = benchmark.date_range.get("end")
+        date_text = f", {start} to {end}" if start and end else ""
+        model_text_parts.append(
+            f"DSR={dsr:.2f} ({benchmark.n_trials} configs, "
+            f"{benchmark.benchmark_id}{date_text})"
+        )
         if dsr < 0.50:
             model_severity = "warning"
-    except (ImportError, ValueError, ZeroDivisionError, OverflowError):
+    except (
+        ImportError,
+        OSError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        ZeroDivisionError,
+        OverflowError,
+    ):
         model_text_parts.append("DSR: unavailable")
 
     # Black-Litterman posterior — shows BL weight perspective

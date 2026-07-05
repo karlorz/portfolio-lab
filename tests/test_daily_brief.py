@@ -10,6 +10,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 
+from src.monitor import daily_brief
 from src.monitor.daily_brief import (
     generate_brief_sections,
     render_brief_text,
@@ -77,6 +78,22 @@ def sample_dashboard():
             "errors": 0,
         },
     }
+
+
+def _write_model_validation_benchmark_manifest(path: Path, **overrides):
+    payload = {
+        "benchmark_id": "test-benchmark",
+        "description": "Test benchmark",
+        "sharpe_ratio": 1.23,
+        "n_trials": 7,
+        "n_observations": 4321,
+        "date_range": {"start": "2010-01-04", "end": "2020-12-31"},
+        "provenance": "tests",
+        "observation_semantics": "frozen_benchmark_not_live_snapshot",
+    }
+    payload.update(overrides)
+    path.write_text(json.dumps(payload))
+    return path
 
 
 class TestBriefSections:
@@ -272,6 +289,58 @@ class TestGenerateDailyBrief:
 
 class TestModelValidationSection:
     """Tests for the model_validation section in daily brief."""
+
+    def test_model_validation_benchmark_loader_reads_manifest_metadata(self, tmp_path):
+        """Benchmark metadata should live in an explicit manifest, not inline literals."""
+        manifest_path = tmp_path / "daily_brief_model_validation_benchmark.json"
+        _write_model_validation_benchmark_manifest(manifest_path)
+
+        benchmark = daily_brief.load_model_validation_benchmark(manifest_path)
+
+        assert benchmark.benchmark_id == "test-benchmark"
+        assert benchmark.sharpe_ratio == 1.23
+        assert benchmark.n_trials == 7
+        assert benchmark.n_observations == 4321
+        assert benchmark.date_range == {"start": "2010-01-04", "end": "2020-12-31"}
+        assert benchmark.observation_semantics == "frozen_benchmark_not_live_snapshot"
+
+    def test_default_model_validation_benchmark_documents_frozen_grid_search(self):
+        """The default manifest preserves the original 94-config base-grid tuple."""
+        benchmark = daily_brief.load_model_validation_benchmark()
+
+        assert benchmark.benchmark_id == "base-grid-champion-94-config"
+        assert benchmark.sharpe_ratio == 0.79
+        assert benchmark.n_trials == 94
+        assert benchmark.n_observations == 5371
+        assert benchmark.date_range == {"start": "2005-01-03", "end": "2026-05-08"}
+        assert benchmark.provenance == "projects/portfolio-lab/compound/grid-search-results"
+        assert benchmark.observation_semantics == "frozen_benchmark_not_live_snapshot"
+
+    @patch("src.backtest.metrics.compute_deflated_sharpe_ratio")
+    def test_model_validation_uses_manifest_dsr_inputs_not_live_snapshot(
+        self, mock_dsr, sample_dashboard, tmp_path,
+    ):
+        """DSR inputs should come from benchmark provenance, not current live row counts."""
+        mock_dsr.return_value = 0.77
+        sample_dashboard["market_data"] = {"spy_rows": 9999}
+        manifest_path = tmp_path / "daily_brief_model_validation_benchmark.json"
+        _write_model_validation_benchmark_manifest(
+            manifest_path,
+            description="Frozen test benchmark",
+        )
+
+        with patch.object(daily_brief, "MODEL_VALIDATION_BENCHMARK_PATH", manifest_path, create=True):
+            sections = generate_brief_sections(sample_dashboard)
+
+        mock_dsr.assert_called_once_with(
+            sharpe_ratio=1.23,
+            n_trials=7,
+            n_observations=4321,
+        )
+        mv = next(s for s in sections if s.name == "model_validation")
+        assert "DSR=0.77" in mv.data_text
+        assert "7 configs" in mv.data_text
+        assert "test-benchmark" in mv.data_text
 
     def test_model_validation_section_exists(self, sample_dashboard):
         sections = generate_brief_sections(sample_dashboard)
