@@ -93,6 +93,9 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
       feature_count: null,
       feature_count_metadata_available: false,
       feature_count_source: 'unavailable_no_model',
+      runtime_mode: 'fallback_no_model',
+      model_backed: false,
+      operator_disclosure: 'No stacking model loaded; panel is showing weighted-voting fallback.',
       latency_ms: 0.12,
     });
 
@@ -101,6 +104,31 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
       expect(good.data.feature_count).toBeNull();
       expect(good.data.feature_count_metadata_available).toBe(false);
       expect(good.data.feature_count_source).toBe('unavailable_no_model');
+      expect(good.data.runtime_mode).toBe('fallback_no_model');
+      expect(good.data.model_backed).toBe(false);
+      expect(good.data.operator_disclosure).toContain('No stacking model loaded');
     }
+  });
+
+  it('StackingEnsembleSchema rejects fallback payloads without runtime disclosure', () => {
+    const bad = StackingEnsembleSchema.safeParse({
+      active: true,
+      stacking_available: false,
+      prediction_direction: 'neutral',
+      confidence: 0,
+      probability_bullish: 0,
+      probability_bearish: 0,
+      probability_neutral: 0,
+      fallback_used: true,
+      model_version: 'fallback_v2.81',
+      voting_accuracy: 0.65,
+      stacking_accuracy: 0.76,
+      feature_count: null,
+      feature_count_metadata_available: false,
+      feature_count_source: 'unavailable_no_model',
+      latency_ms: 0.12,
+    });
+
+    expect(bad.success).toBe(false);
   });
 });

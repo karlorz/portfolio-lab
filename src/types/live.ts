@@ -19,6 +19,34 @@ export interface HedgeSelectorData {
   transition_cost_bps: number;
 }
 
+export type StackingRuntimeMode =
+  | 'model_backed'
+  | 'fallback_no_model'
+  | 'fallback_weighted_voting';
+
+export interface StackingEnsembleData {
+  active: boolean;
+  stacking_available: boolean;
+  prediction_direction: string;
+  confidence: number;
+  probability_bullish: number;
+  probability_bearish: number;
+  probability_neutral: number;
+  fallback_used: boolean;
+  model_version: string;
+  voting_accuracy: number;
+  stacking_accuracy: number;
+  feature_count: number | null;
+  feature_count_metadata_available: boolean;
+  feature_count_source: 'model_metadata' | 'unavailable_no_model' | 'unavailable_missing_metadata';
+  runtime_mode: StackingRuntimeMode;
+  model_backed: boolean;
+  operator_disclosure: string;
+  latency_ms: number;
+  top_features?: Array<{ name: string; importance: number }>;
+  backtest_finding?: string;
+}
+
 export interface SignalsData {
   timestamp: string;
   regime: {
@@ -111,7 +139,7 @@ export interface SignalsData {
   ensemble_voting?: Record<string, unknown> | null;
   alternative_data?: Record<string, unknown> | null;
   factor_rotation?: Record<string, unknown> | null;
-  stacking_ensemble?: Record<string, unknown> | null;
+  stacking_ensemble?: StackingEnsembleData | null;
   convexity_harvest?: Record<string, unknown> | null;
   llm_sentiment?: Record<string, unknown> | null;
   sector_rotation?: Record<string, unknown> | null;

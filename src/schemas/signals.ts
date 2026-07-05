@@ -456,6 +456,13 @@ export const StackingEnsembleSchema = z.object({
     'unavailable_no_model',
     'unavailable_missing_metadata',
   ]),
+  runtime_mode: z.enum([
+    'model_backed',
+    'fallback_no_model',
+    'fallback_weighted_voting',
+  ]),
+  model_backed: z.boolean(),
+  operator_disclosure: z.string().min(1),
   latency_ms: z.number(),
   top_features: z.optional(z.array(z.object({
     name: z.string(),

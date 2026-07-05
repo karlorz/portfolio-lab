@@ -1388,6 +1388,9 @@ class TestSignalsJSONEdgeCases:
         assert stacking["feature_count"] is None
         assert stacking["feature_count_metadata_available"] is False
         assert stacking["feature_count_source"] == "unavailable_no_model"
+        assert stacking["runtime_mode"] == "fallback_no_model"
+        assert stacking["model_backed"] is False
+        assert "No stacking model loaded" in stacking["operator_disclosure"]
         gen.conn.close()
 
 

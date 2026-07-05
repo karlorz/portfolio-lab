@@ -838,6 +838,7 @@ class DashboardGenerator:
                 "voting_accuracy": 0.65,
                 "stacking_accuracy": 0.76,
                 **self._build_stacking_feature_count_metadata(integrator),
+                **self._build_stacking_runtime_disclosure(integrator, prediction),
                 "latency_ms": prediction.latency_ms if prediction else 0.0,
                 "backtest_finding": (
                     "+11% accuracy produces negligible Sharpe gain (2021-2026). "
@@ -932,6 +933,43 @@ class DashboardGenerator:
             "feature_count_metadata_available": False,
             "feature_count_source": (
                 "unavailable_missing_metadata" if model_loaded else "unavailable_no_model"
+            ),
+        }
+
+    @staticmethod
+    def _build_stacking_runtime_disclosure(
+        integrator: Any,
+        prediction: Any,
+    ) -> Dict[str, Any]:
+        """Make fallback-vs-model runtime authority explicit for operators."""
+        model_loaded = getattr(integrator, "model", None) is not None
+        fallback_used = bool(getattr(prediction, "fallback_used", True))
+
+        if model_loaded and not fallback_used:
+            return {
+                "runtime_mode": "model_backed",
+                "model_backed": True,
+                "operator_disclosure": (
+                    "Stacking model loaded; panel is showing model-backed inference."
+                ),
+            }
+
+        if not model_loaded:
+            return {
+                "runtime_mode": "fallback_no_model",
+                "model_backed": False,
+                "operator_disclosure": (
+                    "No stacking model loaded; panel is showing weighted-voting "
+                    "fallback, not a model-backed stacking prediction."
+                ),
+            }
+
+        return {
+            "runtime_mode": "fallback_weighted_voting",
+            "model_backed": False,
+            "operator_disclosure": (
+                "Stacking model loaded, but this prediction used weighted-voting "
+                "fallback; treat it as fallback output, not model-backed inference."
             ),
         }
 

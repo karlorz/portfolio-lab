@@ -23,7 +23,6 @@ import type { CalendarData } from './CalendarSeasonalityPanel';
 import type { EnsembleVotingData } from './EnsembleVotingPanel';
 import type { AlternativeData } from './AlternativeDataPanel';
 import type { FactorRotationData } from './FactorRotationPanel';
-import type { StackingEnsembleData } from './StackingEnsemblePanel';
 import type { ConvexityHarvestData } from './ConvexityHarvestPanel';
 import type { LLMSentimentData } from './LLMSentimentPanel';
 import type { SectorRotationData } from './SectorRotationPanel';
@@ -869,7 +868,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                   <FactorRotationPanel data={(signals?.factor_rotation ?? null) as unknown as FactorRotationData | null} />
                 </PanelErrorBoundary>
                 <PanelErrorBoundary name="Analytics/Stacking Ensemble">
-                  <StackingEnsemblePanel data={(signals?.stacking_ensemble ?? null) as unknown as StackingEnsembleData | null} />
+                  <StackingEnsemblePanel data={signals?.stacking_ensemble ?? null} />
                 </PanelErrorBoundary>
               </div>
               <div className="dashboard-grid dashboard-grid-two analytics-panel-group">

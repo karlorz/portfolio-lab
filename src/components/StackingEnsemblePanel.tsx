@@ -1,24 +1,5 @@
 import React from 'react';
-
-export interface StackingEnsembleData {
-  active: boolean;
-  stacking_available: boolean;      // XGBoost model loaded
-  prediction_direction: string;     // bullish, bearish, neutral
-  confidence: number;               // 0-1
-  probability_bullish: number;
-  probability_bearish: number;
-  probability_neutral: number;
-  fallback_used: boolean;           // True if weighted voting fallback
-  model_version: string;
-  voting_accuracy: number;          // Baseline 65%
-  stacking_accuracy: number;        // Target 76%
-  feature_count: number | null;     // Model-metadata-backed feature vector size
-  feature_count_metadata_available: boolean;
-  feature_count_source: 'model_metadata' | 'unavailable_no_model' | 'unavailable_missing_metadata';
-  latency_ms: number;               // Inference latency
-  top_features?: Array<{ name: string; importance: number }>;
-  backtest_finding?: string;
-}
+import type { StackingEnsembleData } from '../types/live';
 
 interface StackingEnsemblePanelProps {
   data: StackingEnsembleData | null;
@@ -59,9 +40,18 @@ export function StackingEnsemblePanel({ data }: StackingEnsemblePanelProps) {
     );
   }
 
+  const isModelBacked = data.model_backed && data.runtime_mode === 'model_backed';
+
   return (
     <div className="panel">
       <h3>Stacking Ensemble (v3.10)</h3>
+
+      {!isModelBacked && (
+        <div className="stacking-runtime-disclosure" role="status">
+          <strong>Not model-backed</strong>
+          <span>{data.operator_disclosure}</span>
+        </div>
+      )}
 
       {/* Model status */}
       <div className="panel-section">
