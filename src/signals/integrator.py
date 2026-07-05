@@ -52,6 +52,10 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 from src.paths import DATA_DIR
+from src.strategy.ensemble_voter import (
+    REGIME_WEIGHTS as CANONICAL_REGIME_WEIGHTS,
+    Regime as CanonicalRegime,
+)
 
 # Existing module imports
 from src.data.alternative_data import AlternativeDataClient
@@ -88,26 +92,27 @@ BASE_WEIGHTS = {
     "network_momentum": 0.09,
 }
 
-# Regime-specific weight adjustments
-REGIME_WEIGHTS = {
-    "bull": {
-        "momentum": 0.38, "multi_speed": 0.05, "network_momentum": 0.21,
-        "tsmom": 0.18, "value": 0.08, "macro": 0.05, "quality": 0.05
-    },
-    "bear": {
-        "risk_parity": 0.20, "macro": 0.20, "tsmom": 0.15, "hmm_regime": 0.15,
-        "value": 0.15, "multi_speed": 0.08, "sentiment": 0.05, "quality": 0.02
-    },
-    "neutral": BASE_WEIGHTS,
-    "crisis": {
-        "risk_parity": 0.25, "macro": 0.20, "hmm_regime": 0.15, "tsmom": 0.10,
-        "value": 0.15, "quality": 0.10, "sentiment": 0.05
-    },
-    "high_vol": {
-        "risk_parity": 0.20, "tsmom": 0.20, "hmm_regime": 0.15, "multi_speed": 0.05,
-        "macro": 0.20, "quality": 0.15, "value": 0.05
-    },
-}
+def _project_canonical_regime_weights() -> Dict[str, Dict[str, float]]:
+    """Expose canonical ensemble regime weights through the legacy integrator.
+
+    ``ensemble_voter`` owns loading and env/file overrides. This projection
+    keeps this legacy module from carrying a second hardcoded regime table.
+    """
+    projected = {
+        regime.value: {
+            source.value: weight
+            for source, weight in weights.items()
+        }
+        for regime, weights in CANONICAL_REGIME_WEIGHTS.items()
+    }
+    projected["neutral"] = projected[CanonicalRegime.NORMAL.value]
+    return projected
+
+
+# Regime-specific weight adjustments, projected from the canonical ensemble
+# voter config. Legacy signal types that do not match a canonical source keep
+# the existing fallback weight in ``get_composite_signal``.
+REGIME_WEIGHTS = _project_canonical_regime_weights()
 
 # Minimum signal sources required for valid composite
 MIN_SIGNAL_SOURCES = 2
