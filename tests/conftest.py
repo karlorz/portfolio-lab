@@ -4,18 +4,21 @@ pytest configuration: ML feature gating.
 ML features (torch/xgboost/sklearn/hmmlearn) are DISABLED by default via
 a 4-layer defense to prevent OOM/CPU stalls. torch (~63MB) + sklearn
 (~78MB) + hmmlearn (~23MB) accumulate in single-process test runs, causing
-SIGKILL at ~47% through the 3900-test suite on low-resource hosts.
+SIGKILL partway through safe-suite runs on low-resource hosts.
 
 Layered defense (each layer independently prevents host CPU exhaust):
   0. collect_ignore — pytest never opens known heavy test files (0 CPU)
   1. Env var gate — PORTFOLIO_LAB_ENABLE_ML=0 set before any import
   2. builtins.__import__ hook — blocks ML imports at interpreter level
   3. Post-collection leak check — warns if real ML libs evaded all guards
-  4. ulimit -v (Makefile) — OS kernel enforces 1GB virtual memory cap
+  4. ulimit -v (Makefile) — OS kernel enforces 3GB virtual memory cap
 
-Default (safe, ~3700 non-ML tests, zero ML libs loaded):
+Default (safe, ML-disabled lane; exact count from pytest output):
   make test
   pytest tests/
+
+Include extracted ML-kernel tests without heavy ML imports:
+  PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/ --include-ml-extract
 
 Include ML tests:
   PORTFOLIO_LAB_ENABLE_ML=1 pytest tests/ --include-heavy
@@ -183,12 +186,23 @@ def pytest_addoption(parser):
         help="Run tests marked heavy (torch/xgboost/sklearn/hmmlearn). "
              "Requires PORTFOLIO_LAB_ENABLE_ML=1.",
     )
+    parser.addoption(
+        "--include-ml-extract",
+        action="store_true",
+        default=False,
+        help="Run tests marked ml_extract. These are extracted ML-kernel tests "
+             "that must stay safe with PORTFOLIO_LAB_ENABLE_ML=0.",
+    )
 
 
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "heavy: tests requiring heavy ML libraries (torch, xgboost, sklearn, hmmlearn)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "ml_extract: safe-mode tests for extracted pure ML-adjacent kernels",
     )
 
 
@@ -217,6 +231,23 @@ def pytest_collection_modifyitems(config, items):
                 f"ML library(ies) {leaked} loaded during test collection despite "
                 f"PORTFOLIO_LAB_ENABLE_ML=0. The import hook may have been "
                 f"bypassed — check for sys.modules injections."
+            )
+
+    # Tier-2 extracted ML-kernel tests are safe in ML-disabled mode, but opt-in
+    # so the default safe lane stays stable until specific kernels are extracted.
+    if not config.getoption("--include-ml-extract"):
+        skip_ml_extract = pytest.mark.skip(
+            reason="ml_extract tests skipped (use --include-ml-extract)"
+        )
+        count = 0
+        for item in items:
+            if "ml_extract" in item.keywords:
+                item.add_marker(skip_ml_extract)
+                count += 1
+        if count > 0:
+            print(
+                f"\n[Skipped {count} extracted ML-kernel tests. "
+                f"Use --include-ml-extract to run.]"
             )
 
     # Skip heavy tests unless both env var AND CLI flag are set.

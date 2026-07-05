@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
+  convertToBacktestFormat,
   createYahooFinanceProvider,
   fetchAllDataWithSummary,
   fetchFredSeriesWithSummary,
@@ -302,6 +303,24 @@ describe('market data fetcher source provenance', () => {
       symbols: ['SPY'],
     });
     expect(JSON.stringify(manifestRows)).not.toContain('query2.finance.yahoo.com');
+  });
+
+  it('converts multi-symbol price rows to chronological backtest rows', () => {
+    const rows = convertToBacktestFormat({
+      GLD: [
+        { date: '2024-01-03', open: 192, high: 194, low: 191, close: 193, adjClose: 193, volume: 1 },
+        { date: '2024-01-01', open: 190, high: 192, low: 189, close: 191, adjClose: 191, volume: 1 },
+      ],
+      SPY: [
+        { date: '2024-01-02', open: 470, high: 472, low: 469, close: 471, adjClose: 471, volume: 1 },
+      ],
+    });
+
+    expect(rows).toEqual([
+      { date: '2024-01-01', symbol: 'GLD', price: 191 },
+      { date: '2024-01-02', symbol: 'SPY', price: 471 },
+      { date: '2024-01-03', symbol: 'GLD', price: 193 },
+    ]);
   });
 
   it('builds an ok price data quality report for clean compact prices', () => {

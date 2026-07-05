@@ -64,6 +64,7 @@ no-build-isolation-package = []
 addopts = "--import-mode=importlib"
 markers = [
     "heavy: tests requiring heavy ML libraries (torch, xgboost) — require PORTFOLIO_LAB_ENABLE_ML=1",
+    "ml_extract: safe-mode tests for extracted pure ML-adjacent kernels — require PORTFOLIO_LAB_ENABLE_ML=0 and --include-ml-extract",
     "db: tests that require SQLite database access",
     "network: tests that make real HTTP requests",
     "slow: tests that take >2 seconds to complete",

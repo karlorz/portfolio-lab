@@ -36,7 +36,9 @@ export function DecisionReplayPanel({ initialData }: DecisionReplayPanelProps) {
   const [data, setData] = useState<DecisionRegistryData | null>(initialData ?? null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(initialData === undefined);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialData?.recent_decisions[0]?.decision_id ?? null,
+  );
 
   useEffect(() => {
     if (initialData !== undefined) {

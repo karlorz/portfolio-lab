@@ -5,10 +5,11 @@
 #   0. pytest collect_ignore — heavy test files never opened
 #   1. PORTFOLIO_LAB_ENABLE_ML=0 — env var gate
 #   2. builtins.__import__ hook — blocks torch/sklearn/xgboost/hmmlearn
-#   3. ulimit -v 3145728 — OS kernel enforces 1GB virtual memory cap
+#   3. ulimit -v 3145728 — OS kernel enforces 3GB virtual memory cap
 #
 # Usage:
-#   ./scripts/run-tests-safe              # safe mode (default, ~3700 tests)
+#   ./scripts/run-tests-safe              # safe mode (default, count from pytest output)
+#   ./scripts/run-tests-safe --ml-extract # extracted ML-kernel lane, ML disabled
 #   ./scripts/run-tests-safe --ml         # ML mode (all tests, needs >3GB RAM)
 #   ./scripts/run-tests-safe -k "factor"  # filter tests by keyword
 
@@ -22,11 +23,13 @@ PYTEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --ml-extract) MODE="ml-extract"; shift ;;
         --ml) MODE="ml"; shift ;;
         --help|-h)
-            echo "Usage: run-tests-safe [--ml] [pytest args...]"
+            echo "Usage: run-tests-safe [--ml-extract|--ml] [pytest args...]"
             echo ""
-            echo "  (default)    Safe mode: ML disabled, 1GB cap, ~3700 tests"
+            echo "  (default)    Safe mode: ML disabled, 3GB cap, count from pytest output"
+            echo "  --ml-extract Extracted ML-kernel lane: ML disabled, heavy tests skipped"
             echo "  --ml         ML mode: all tests including heavy ML"
             echo "  --help       This message"
             exit 0
@@ -38,12 +41,12 @@ done
 if [ "$MODE" = "safe" ]; then
     echo "=== Safe Test Run ==="
     echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
-    echo "  Memory: 1GB virtual cap (ulimit -v)"
+    echo "  Memory: 3GB virtual cap (ulimit -v)"
     echo "  Heavy tests: excluded via collect_ignore"
     echo ""
 
     # ulimit -v sets the maximum virtual memory in KB.
-    # 1048576 KB = 1 GB. If exceeded, the process gets SIGSEGV (not SIGKILL),
+    # 3145728 KB = 3072 MB = 3 GB. If exceeded, the process gets SIGSEGV (not SIGKILL),
     # which is cleaner than OOM-killer and protects the host.
     (
         ulimit -v 3145728
@@ -54,7 +57,7 @@ if [ "$MODE" = "safe" ]; then
 
     echo ""
     if [ $EXIT -eq 139 ]; then
-        echo "FATAL: SIGSEGV (139) — virtual memory cap (1GB) exceeded."
+        echo "FATAL: SIGSEGV (139) — virtual memory cap (3GB) exceeded."
         echo "An ML library may have loaded despite guards. Investigate immediately."
     elif [ $EXIT -eq 137 ]; then
         echo "FATAL: SIGKILL (137) — system OOM killer. Memory use too high."
@@ -64,6 +67,21 @@ if [ "$MODE" = "safe" ]; then
         echo "All safe tests passed."
     fi
     exit $EXIT
+elif [ "$MODE" = "ml-extract" ]; then
+    echo "=== Extracted ML-Kernel Test Run ==="
+    echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
+    echo "  Memory: 3GB virtual cap (ulimit -v)"
+    echo "  Heavy tests: skipped unless explicitly enabled elsewhere"
+    echo ""
+
+    (
+        ulimit -v 3145728
+        export PORTFOLIO_LAB_ENABLE_ML=0
+        if [ ${#PYTEST_ARGS[@]} -gt 0 ]; then
+            exec uv run pytest "${PYTEST_ARGS[@]}" -q --tb=short --include-ml-extract
+        fi
+        exec uv run pytest tests/ -q --tb=short --include-ml-extract
+    )
 else
     echo "=== ML Test Run ==="
     echo "  ML: enabled (PORTFOLIO_LAB_ENABLE_ML=1)"

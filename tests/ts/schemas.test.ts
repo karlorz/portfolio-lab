@@ -1084,6 +1084,48 @@ describe('HealthDataSchema', () => {
     expect(HealthDataSchema.safeParse(data).success).toBe(true);
   });
 
+  it('accepts health data with data pipeline SLO runbook guidance', () => {
+    const data = {
+      ...validHealth(),
+      data_pipeline_slo: {
+        schema_version: 'data-pipeline-slo/v1',
+        status: 'warning' as const,
+        top_dimension: 'market_data',
+        dimensions: {
+          market_data: {
+            status: 'warning' as const,
+            message: 'Yahoo latest date is one session behind.',
+            latest_available_market_date: '2026-07-02',
+          },
+        },
+        runbook: {
+          status: 'warning' as const,
+          top_cause: {
+            dimension: 'market_data',
+            code: 'stale_prices',
+            severity: 'warning' as const,
+            action: 'Run make fetch-data before dashboard generation.',
+            artifact: 'public/data/prices.json',
+            provider: 'Yahoo Finance',
+          },
+          actions: [
+            {
+              dimension: 'market_data',
+              code: 'stale_prices',
+              severity: 'warning' as const,
+              action: 'Run make fetch-data before dashboard generation.',
+            },
+          ],
+        },
+      },
+    };
+
+    const result = HealthDataSchema.safeParse(data);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.data_pipeline_slo?.runbook?.top_cause?.code).toBe('stale_prices');
+  });
+
   it('rejects missing cron_jobs', () => {
     const { cron_jobs, ...rest } = validHealth();
     const result = HealthDataSchema.safeParse(rest);

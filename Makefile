@@ -42,7 +42,8 @@ PERF_UPDATE_BASELINE ?= 0
 help:
 	@echo "Portfolio-Lab Makefile"
 	@echo ""
-	@echo "  make test         Run test suite (safe: ML disabled, 1GB memory cap)"
+	@echo "  make test         Run test suite (safe: ML disabled, 3GB memory cap)"
+	@echo "  make test-ml-extract  Run extracted ML-kernel tests (safe: ML disabled)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
 	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"
 	@echo "  make data         Fetch Yahoo Finance market data"
@@ -137,7 +138,7 @@ test:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
 	echo "=== Test Suite (safe mode): $$(date) ==="; \
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
-	echo "  Memory cap: 1GB virtual (ulimit -v)"; \
+	echo "  Memory cap: 3GB virtual (ulimit -v 3145728)"; \
 	echo "  Heavy tests: excluded via collect_ignore"; \
 	echo "  Timeout: 1200s (increased from 600s to prevent false failures)"; \
 	START=$$(date +%s); \
@@ -149,7 +150,7 @@ test:
 	echo ""; \
 	echo "=== Test Suite: exit $$EXIT, duration $${DUR}s ==="; \
 	if [ $$EXIT -eq 124 ]; then \
-		echo "TIMEOUT (124): Test suite exceeded 600s limit. Check for hanging tests."; \
+		echo "TIMEOUT (124): Test suite exceeded 1200s limit. Check for hanging tests."; \
 	elif [ $$EXIT -eq 137 ]; then \
 		echo "SIGKILL (137): memory limit exceeded. Check for ML import leaks."; \
 	elif [ $$EXIT -ne 0 ]; then \
@@ -157,7 +158,11 @@ test:
 	fi; \
 	exit $$EXIT
 
-.PHONY: test test-ml test-fast
+.PHONY: test test-ml test-ml-extract test-fast
+
+test-ml-extract:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	PORTFOLIO_LAB_ENABLE_ML=0 ./scripts/run-tests-safe --ml-extract
 
 test-fast:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
