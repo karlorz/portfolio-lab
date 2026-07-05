@@ -22,5 +22,6 @@ __all__ = [
     "run_actual_ubt_validation",
     "stacking_ensemble_backtest",
     "unified_overlay_backtest",
+    "vix_dual_threshold_backtest",
     "vixy_hedge_backtest",
 ]
