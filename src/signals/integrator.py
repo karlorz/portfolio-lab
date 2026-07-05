@@ -52,6 +52,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 from src.paths import DATA_DIR
+from src.signals.signal_source import SignalSource as CanonicalSignalSource
 from src.strategy.ensemble_voter import (
     REGIME_WEIGHTS as CANONICAL_REGIME_WEIGHTS,
     Regime as CanonicalRegime,
@@ -92,26 +93,60 @@ BASE_WEIGHTS = {
     "network_momentum": 0.09,
 }
 
-def _project_canonical_regime_weights() -> Dict[str, Dict[str, float]]:
-    """Expose canonical ensemble regime weights through the legacy integrator.
+_CANONICAL_SOURCE_TO_LEGACY_TYPE = {
+    CanonicalSignalSource.MULTI_SPEED_MOM: "multi_speed",
+    CanonicalSignalSource.CROSS_ASSET_RV: "value",
+    CanonicalSignalSource.INTERNATIONAL_MOMENTUM: "momentum",
+    CanonicalSignalSource.ALTERNATIVE_DATA: "sentiment",
+    CanonicalSignalSource.CROSS_ASSET_REGIME_ARB: "hmm_regime",
+    CanonicalSignalSource.UNIFIED_OVERLAY: "tsmom",
+    CanonicalSignalSource.MULTI_TIMEFRAME_FUSION: "network_momentum",
+    CanonicalSignalSource.GOOGLE_TRENDS: "sentiment",
+    CanonicalSignalSource.VIX_TERM_STRUCTURE: "macro",
+}
 
-    ``ensemble_voter`` owns loading and env/file overrides. This projection
-    keeps this legacy module from carrying a second hardcoded regime table.
-    """
-    projected = {
-        regime.value: {
-            source.value: weight
-            for source, weight in weights.items()
-        }
-        for regime, weights in CANONICAL_REGIME_WEIGHTS.items()
-    }
-    projected["neutral"] = projected[CanonicalRegime.NORMAL.value]
+
+def _project_canonical_source_weights(
+    weights: Dict[CanonicalSignalSource, float],
+) -> Dict[str, float]:
+    """Map canonical ensemble source weights into legacy integrator source types."""
+    projected: Dict[str, float] = {}
+    for source, weight in weights.items():
+        legacy_type = _CANONICAL_SOURCE_TO_LEGACY_TYPE.get(source)
+        if legacy_type is None:
+            continue
+        projected[legacy_type] = round(projected.get(legacy_type, 0.0) + weight, 10)
     return projected
 
 
+def _project_canonical_regime_weights() -> Dict[str, Dict[str, float]]:
+    """Build the legacy integrator regime view from canonical ensemble weights.
+
+    ``ensemble_voter`` owns file/env loading. The integrator still exposes its
+    historical signal-type contract (momentum/macro/...) because its component
+    signals use that domain, not ensemble source identifiers.
+    """
+    return {
+        "bull": _project_canonical_source_weights(
+            CANONICAL_REGIME_WEIGHTS[CanonicalRegime.LOW_VOL]
+        ),
+        "bear": _project_canonical_source_weights(
+            CANONICAL_REGIME_WEIGHTS[CanonicalRegime.CRISIS]
+        ),
+        "neutral": BASE_WEIGHTS,
+        "crisis": _project_canonical_source_weights(
+            CANONICAL_REGIME_WEIGHTS[CanonicalRegime.CRISIS]
+        ),
+        "high_vol": _project_canonical_source_weights(
+            CANONICAL_REGIME_WEIGHTS[CanonicalRegime.HIGH_VOL]
+        ),
+    }
+
+
 # Regime-specific weight adjustments, projected from the canonical ensemble
-# voter config. Legacy signal types that do not match a canonical source keep
-# the existing fallback weight in ``get_composite_signal``.
+# voter config into the legacy integrator source-type domain. Legacy signal
+# types that do not match a canonical source keep the existing fallback weight
+# in ``get_composite_signal``.
 REGIME_WEIGHTS = _project_canonical_regime_weights()
 
 # Minimum signal sources required for valid composite

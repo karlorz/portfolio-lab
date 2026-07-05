@@ -1,4 +1,4 @@
-"""Regression tests for canonical regime-weight exposure."""
+"""Regression tests for canonical regime-weight input to legacy integrator weights."""
 
 from __future__ import annotations
 
@@ -12,28 +12,48 @@ from src.signals import integrator
 from src.strategy import ensemble_voter
 
 
-def _projected_weights(regime: ensemble_voter.Regime) -> dict[str, float]:
-    return {
+def test_integrator_regime_weights_keep_legacy_public_contract():
+    assert set(integrator.REGIME_WEIGHTS) == {
+        "bull",
+        "bear",
+        "neutral",
+        "crisis",
+        "high_vol",
+    }
+    assert integrator.REGIME_WEIGHTS["neutral"] is integrator.BASE_WEIGHTS
+
+    for regime, weights in integrator.REGIME_WEIGHTS.items():
+        assert set(weights).issubset(integrator.BASE_WEIGHTS), regime
+
+
+def test_integrator_bull_weights_project_from_canonical_low_vol_weights():
+    canonical_low_vol = {
         source.value: weight
-        for source, weight in ensemble_voter.REGIME_WEIGHTS[regime].items()
+        for source, weight in ensemble_voter.REGIME_WEIGHTS[
+            ensemble_voter.Regime.LOW_VOL
+        ].items()
     }
 
+    bull_weights = integrator.REGIME_WEIGHTS["bull"]
 
-def test_integrator_regime_weights_project_canonical_ensemble_weights():
-    for regime in ensemble_voter.Regime:
-        assert integrator.REGIME_WEIGHTS[regime.value] == _projected_weights(regime)
-
-
-def test_integrator_legacy_neutral_alias_uses_canonical_normal_weights():
-    assert integrator.REGIME_WEIGHTS["neutral"] == _projected_weights(
-        ensemble_voter.Regime.NORMAL
+    assert bull_weights["multi_speed"] == canonical_low_vol["multi_speed_momentum"]
+    assert bull_weights["value"] == canonical_low_vol["cross_asset_rv"]
+    assert bull_weights["momentum"] == canonical_low_vol["international_momentum"]
+    assert bull_weights["sentiment"] == (
+        canonical_low_vol["alternative_data"] + canonical_low_vol["google_trends"]
     )
 
 
 def test_integrator_regime_weights_respect_ensemble_weights_file_override(tmp_path):
     weights_path = tmp_path / "ensemble_weights.json"
+    projected_sources = {
+        "international_momentum": 0.40,
+        "alternative_data": 0.20,
+        "google_trends": 0.10,
+        "vix_term_structure": 0.30,
+    }
     custom_weights = {
-        regime.value: {"multi_speed_momentum": 0.42}
+        regime.value: projected_sources
         for regime in ensemble_voter.Regime
     }
     weights_path.write_text(json.dumps(custom_weights), encoding="utf-8")
@@ -46,7 +66,7 @@ def test_integrator_regime_weights_respect_ensemble_weights_file_override(tmp_pa
     script = (
         "import json; "
         "from src.signals.integrator import REGIME_WEIGHTS; "
-        "print(json.dumps(REGIME_WEIGHTS['normal'], sort_keys=True))"
+        "print(json.dumps(REGIME_WEIGHTS['bull'], sort_keys=True))"
     )
 
     result = subprocess.run(
@@ -59,4 +79,8 @@ def test_integrator_regime_weights_respect_ensemble_weights_file_override(tmp_pa
     )
 
     assert result.returncode == 0
-    assert json.loads(result.stdout) == {"multi_speed_momentum": 0.42}
+    assert json.loads(result.stdout) == {
+        "macro": 0.30,
+        "momentum": 0.40,
+        "sentiment": 0.30,
+    }
