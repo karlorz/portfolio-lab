@@ -71,11 +71,15 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
 
 ## Data
 
-- **prices.json** — Compact OHLCV data for 15 symbols (2005-01-03 to 2026-05-08,
-  5371 trading days). Fetched from Yahoo Finance v8 API via `bun run fetch-data`.
+- **prices.json** — Generated compact OHLCV data fetched from Yahoo Finance v8
+  via `bun run fetch-data`. At this revision, the checked-in snapshot has 38
+  symbols and 5,404 SPY rows from 2005-01-03 to 2026-06-26. Because this file is
+  refreshed frequently, verify the current row/date/symbol coverage with:
+  `node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('public/data/prices.json','utf8'));console.log(p.SPY.length,p.SPY[0].d,p.SPY[p.SPY.length-1].d,Object.keys(p).length)"`.
 - **market.db** — SQLite fallback for close-only data when Yahoo is unavailable.
-- **Symbol universe**: SPY, GLD, TLT, IEF, SHY, QQQ, EFA, VXUS, MTUM, VLUE, USMV,
-  DBC, BTC, ETH, VIXY.
+- **Symbol universe**: AGG, DBC, EFA, FXA, FXB, FXC, FXE, FXF, FXY, GLD, IEF,
+  MTUM, QQQ, QUAL, SHY, SPY, TLT, TMF, UBT, UDN, USMV, UUP, VBR, VLUE, VTI,
+  VXUS, XLB, XLC, XLE, XLF, XLI, XLK, XLP, XLRE, XLU, XLV, XLY, ^VIX3M.
 
 ## Project Conventions
 
@@ -86,4 +90,6 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
   Do not use repo-local `wiki/` or `work/` directories.
 - **CLAUDE.md** is canonical implementation status — update after every feature lands
 - **No ML imports without explicit user request** — always default to `PORTFOLIO_LAB_ENABLE_ML=0`
-- **Test safety**: `make test` runs safe suite (ML disabled, 3GB ulimit, ~6000 tests)
+- **Test safety**: `make test` runs the generated safe suite with ML disabled
+  and a 3GB ulimit. Treat exact test counts as generated output from the latest
+  run, not a static contract.
