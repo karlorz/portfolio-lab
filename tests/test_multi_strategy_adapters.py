@@ -337,6 +337,13 @@ class TestNetworkMomentumSignalAdapter:
         assert adapter.source_type == "network_momentum"
         assert adapter.source_name == "imperial_network_momentum"
 
+    def test_adapter_declares_research_only_runtime_role(self, mock_network_momentum):
+        adapter = NetworkMomentumSignalAdapter()
+
+        assert adapter.runtime_role == "research_only"
+        assert adapter.live_activation_status == "research_only"
+        assert "benchmark" in adapter.promotion_benchmark
+
     def test_init_custom_allocation(self, mock_network_momentum):
         alloc = {"SPY": 0.5, "GLD": 0.3, "TLT": 0.2}
         adapter = NetworkMomentumSignalAdapter(base_allocation=alloc)
@@ -391,6 +398,14 @@ class TestNetworkMomentumSignalAdapter:
         assert "leadership_score" in result.metadata
         assert "followership_score" in result.metadata
         assert "window_count" in result.metadata
+
+    def test_metadata_marks_signal_as_research_only(self, mock_network_momentum):
+        adapter = NetworkMomentumSignalAdapter()
+        result = adapter.generate_signal("SPY")
+
+        assert result.metadata["runtime_role"] == "research_only"
+        assert result.metadata["live_activation_status"] == "research_only"
+        assert "benchmark" in result.metadata["promotion_benchmark"]
 
     def test_metadata_contains_dominant_leader(self, mock_network_momentum):
         adapter = NetworkMomentumSignalAdapter()

@@ -2779,7 +2779,7 @@ class TestConstantsExistenceAndTypes:
         expected_keys = {
             "momentum", "value", "macro", "quality", "sentiment",
             "ai_agent", "tsmom", "fed_policy", "hmm_regime",
-            "multi_speed", "risk_parity", "network_momentum",
+            "multi_speed", "risk_parity",
         }
         assert set(BASE_WEIGHTS.keys()) == expected_keys
 
@@ -3561,21 +3561,19 @@ class TestSignalIntegratorInitEdgeCases:
 
     def test_sources_contains_all_expected_keys(self):
         """SignalIntegrator.sources has all expected keys."""
-        with patch("src.signals.integrator.init_database"):
-            with patch("src.signals.integrator.SignalIntegrator.__init__", lambda self: None):
-                integrator = SignalIntegrator()
-        integrator.sources = {
-            "technical": MagicMock(), "macro": MagicMock(),
-            "alternative_data": MagicMock(), "llm_sentiment": MagicMock(),
-            "tsmom": MagicMock(), "multi_speed": MagicMock(),
-            "risk_parity": MagicMock(), "network_momentum": MagicMock(),
-        }
+        with (
+            patch("src.signals.integrator.init_database"),
+            patch("src.signals.tsmom_integration.TSMOMSignalAdapter", MagicMock()),
+            patch("src.signals.multi_strategy_adapters.MultiSpeedSignalAdapter", MagicMock()),
+            patch("src.signals.multi_strategy_adapters.RiskParitySignalAdapter", MagicMock()),
+        ):
+            integrator = SignalIntegrator()
         expected_keys = {
             "technical", "macro", "alternative_data", "llm_sentiment",
-            "tsmom", "multi_speed", "risk_parity", "network_momentum",
+            "tsmom", "multi_speed", "risk_parity",
         }
         assert set(integrator.sources.keys()) == expected_keys
-        assert len(integrator.sources) == 8
+        assert len(integrator.sources) == 7
 
 
 class TestStoreRecommendationEdgeCases:
@@ -3828,4 +3826,3 @@ class TestBinanceSignalAgreement:
         # Should not crash — scores 0.0, no crash
         assert result.composite_score == 0.0
         assert result.signal_agreement in ("mixed", "conflicting", "aligned_bullish", "aligned_bearish", "insufficient_data")
-

@@ -79,7 +79,9 @@ DB_PATH = DATA_DIR / "signals.db"
 
 # Base signal weights (adjusted dynamically by regime) - sum = 1.0
 BASE_WEIGHTS = {
-    "momentum": 0.13,
+    # Former standalone network_momentum weight is folded into generic momentum;
+    # the standalone adapter remains research-only until a promotion decision.
+    "momentum": 0.22,
     "value": 0.08,
     "macro": 0.11,
     "quality": 0.08,
@@ -90,7 +92,6 @@ BASE_WEIGHTS = {
     "hmm_regime": 0.05,      # HMM regime weight
     "multi_speed": 0.05,     # health 0.55 — reduced from 0.11 (below viability)
     "risk_parity": 0.10,
-    "network_momentum": 0.09,
 }
 
 _CANONICAL_SOURCE_TO_LEGACY_TYPE = {
@@ -100,7 +101,7 @@ _CANONICAL_SOURCE_TO_LEGACY_TYPE = {
     CanonicalSignalSource.ALTERNATIVE_DATA: "sentiment",
     CanonicalSignalSource.CROSS_ASSET_REGIME_ARB: "hmm_regime",
     CanonicalSignalSource.UNIFIED_OVERLAY: "tsmom",
-    CanonicalSignalSource.MULTI_TIMEFRAME_FUSION: "network_momentum",
+    CanonicalSignalSource.MULTI_TIMEFRAME_FUSION: "momentum",
     CanonicalSignalSource.GOOGLE_TRENDS: "sentiment",
     CanonicalSignalSource.VIX_TERM_STRUCTURE: "macro",
 }
@@ -911,7 +912,6 @@ class SignalIntegrator:
         from src.signals.multi_strategy_adapters import (
             MultiSpeedSignalAdapter,
             RiskParitySignalAdapter,
-            NetworkMomentumSignalAdapter
         )
         self.sources: Dict[str, SignalSource] = {
             "technical": TechnicalSignal(),
@@ -921,7 +921,6 @@ class SignalIntegrator:
             "tsmom": TSMOMSignalAdapter(),
             "multi_speed": MultiSpeedSignalAdapter(),
             "risk_parity": RiskParitySignalAdapter(),
-            "network_momentum": NetworkMomentumSignalAdapter(),
         }
         
         self.db_path = DB_PATH
