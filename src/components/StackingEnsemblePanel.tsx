@@ -12,7 +12,9 @@ export interface StackingEnsembleData {
   model_version: string;
   voting_accuracy: number;          // Baseline 65%
   stacking_accuracy: number;        // Target 76%
-  feature_count: number;            // 59-dim feature vector
+  feature_count: number | null;     // Model-metadata-backed feature vector size
+  feature_count_metadata_available: boolean;
+  feature_count_source: 'model_metadata' | 'unavailable_no_model' | 'unavailable_missing_metadata';
   latency_ms: number;               // Inference latency
   top_features?: Array<{ name: string; importance: number }>;
   backtest_finding?: string;
@@ -72,7 +74,7 @@ export function StackingEnsemblePanel({ data }: StackingEnsemblePanelProps) {
         {data.stacking_available && (
           <div className="metric-row">
             <span className="label">Features</span>
-            <span className="value">{data.feature_count}</span>
+            <span className="value">{data.feature_count ?? 'Unavailable'}</span>
           </div>
         )}
         {data.stacking_available && (

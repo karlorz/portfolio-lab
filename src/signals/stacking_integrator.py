@@ -50,7 +50,7 @@ class ModelMetadata:
     """Metadata for loaded stacking model"""
     version: str
     training_date: datetime
-    feature_count: int
+    feature_count: Optional[int]
     accuracy_train: float
     accuracy_val: float
     feature_importance: Dict[str, float]
@@ -118,7 +118,7 @@ class StackingIntegrator:
             self.metadata = ModelMetadata(
                 version=metadata_dict.get('version', 'unknown'),
                 training_date=metadata_dict.get('training_date', datetime.now()),
-                feature_count=metadata_dict.get('feature_count', 102),
+                feature_count=metadata_dict.get('feature_count'),
                 accuracy_train=metadata_dict.get('accuracy_train', 0.0),
                 accuracy_val=metadata_dict.get('accuracy_val', 0.0),
                 feature_importance=metadata_dict.get('feature_importance', {}),
@@ -126,9 +126,9 @@ class StackingIntegrator:
             )
             
             logger.info(
-                "Loaded stacking model v%s (%d features, val_acc=%.3f)",
+                "Loaded stacking model v%s (%s features, val_acc=%.3f)",
                 self.metadata.version,
-                self.metadata.feature_count,
+                self.metadata.feature_count if self.metadata.feature_count is not None else "unknown",
                 self.metadata.accuracy_val,
             )
             return True
@@ -301,7 +301,7 @@ class StackingIntegrator:
             features.append(0.2)  # Default neutral
         
         # Pad to expected feature count if metadata available
-        if self.metadata:
+        if self.metadata and self.metadata.feature_count is not None:
             while len(features) < self.metadata.feature_count:
                 features.append(0.0)
             features = features[:self.metadata.feature_count]

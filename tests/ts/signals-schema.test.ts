@@ -3,6 +3,7 @@ import {
   GarchCvarSchema,
   IcDecaySchema,
   RegimeSchema,
+  StackingEnsembleSchema,
   SmartRebalanceSchema,
   YieldCurveSchema,
 } from '../../src/schemas/signals';
@@ -74,5 +75,32 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
   it('IcDecaySchema accepts empty signals map', () => {
     const good = IcDecaySchema.safeParse({ signals: {} });
     expect(good.success).toBe(true);
+  });
+
+  it('StackingEnsembleSchema accepts unavailable feature count with provenance', () => {
+    const good = StackingEnsembleSchema.safeParse({
+      active: true,
+      stacking_available: false,
+      prediction_direction: 'neutral',
+      confidence: 0,
+      probability_bullish: 0,
+      probability_bearish: 0,
+      probability_neutral: 0,
+      fallback_used: true,
+      model_version: 'fallback_v2.81',
+      voting_accuracy: 0.65,
+      stacking_accuracy: 0.76,
+      feature_count: null,
+      feature_count_metadata_available: false,
+      feature_count_source: 'unavailable_no_model',
+      latency_ms: 0.12,
+    });
+
+    expect(good.success).toBe(true);
+    if (good.success) {
+      expect(good.data.feature_count).toBeNull();
+      expect(good.data.feature_count_metadata_available).toBe(false);
+      expect(good.data.feature_count_source).toBe('unavailable_no_model');
+    }
   });
 });

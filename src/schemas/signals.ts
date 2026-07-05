@@ -437,6 +437,33 @@ const OptionalPanelObjectSchema = z.union([
   z.null(),
 ]);
 
+export const StackingEnsembleSchema = z.object({
+  active: z.boolean(),
+  stacking_available: z.boolean(),
+  prediction_direction: z.string(),
+  confidence: z.number(),
+  probability_bullish: z.number(),
+  probability_bearish: z.number(),
+  probability_neutral: z.number(),
+  fallback_used: z.boolean(),
+  model_version: z.string(),
+  voting_accuracy: z.number(),
+  stacking_accuracy: z.number(),
+  feature_count: z.nullable(z.number()),
+  feature_count_metadata_available: z.boolean(),
+  feature_count_source: z.enum([
+    'model_metadata',
+    'unavailable_no_model',
+    'unavailable_missing_metadata',
+  ]),
+  latency_ms: z.number(),
+  top_features: z.optional(z.array(z.object({
+    name: z.string(),
+    importance: z.number(),
+  }).passthrough())),
+  backtest_finding: z.optional(z.string()),
+}).passthrough();
+
 // Generated optional panels may be disabled as null, emitted as {}, or emitted
 // in a legacy summary shape while their panel code remains defensive.
 const optionalPanel = <T extends z.ZodTypeAny>(schema: T) => (
@@ -488,7 +515,7 @@ const SignalsDataObjectSchema = z.object({
   ensemble_voting: z.optional(OptionalPanelObjectSchema),
   alternative_data: z.optional(OptionalPanelObjectSchema),
   factor_rotation: z.optional(OptionalPanelObjectSchema),
-  stacking_ensemble: z.optional(OptionalPanelObjectSchema),
+  stacking_ensemble: optionalPanel(StackingEnsembleSchema),
   convexity_harvest: z.optional(OptionalPanelObjectSchema),
   llm_sentiment: z.optional(OptionalPanelObjectSchema),
   sector_rotation: z.optional(OptionalPanelObjectSchema),

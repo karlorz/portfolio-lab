@@ -837,7 +837,7 @@ class DashboardGenerator:
                 "model_version": prediction.model_version if prediction else "unknown",
                 "voting_accuracy": 0.65,
                 "stacking_accuracy": 0.76,
-                "feature_count": 102,
+                **self._build_stacking_feature_count_metadata(integrator),
                 "latency_ms": prediction.latency_ms if prediction else 0.0,
                 "backtest_finding": (
                     "+11% accuracy produces negligible Sharpe gain (2021-2026). "
@@ -911,6 +911,28 @@ class DashboardGenerator:
             "entropy": entropy_data,
             "bond_momentum": overlay_data.get("bond_momentum", {}),
             "hedge_selector": validate_signal("hedge_selector", hedge_selector_signal),
+        }
+
+    @staticmethod
+    def _build_stacking_feature_count_metadata(integrator: Any) -> Dict[str, Any]:
+        """Expose stacking feature count only when loaded model metadata backs it."""
+        metadata = getattr(integrator, "metadata", None)
+        feature_count = getattr(metadata, "feature_count", None)
+        model_loaded = getattr(integrator, "model", None) is not None
+
+        if model_loaded and feature_count is not None:
+            return {
+                "feature_count": int(feature_count),
+                "feature_count_metadata_available": True,
+                "feature_count_source": "model_metadata",
+            }
+
+        return {
+            "feature_count": None,
+            "feature_count_metadata_available": False,
+            "feature_count_source": (
+                "unavailable_missing_metadata" if model_loaded else "unavailable_no_model"
+            ),
         }
 
     def _build_optional_signal_sections(

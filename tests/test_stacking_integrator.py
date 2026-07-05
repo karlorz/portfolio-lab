@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 import tempfile
+from typing import Optional
 
 from src.signals.stacking_integrator import (
     StackingIntegrator,
@@ -1121,7 +1122,7 @@ class TestModelMetadataFieldValidation:
         field_map = {f.name: f.type for f in fields(ModelMetadata)}
         assert field_map["version"] is str
         assert field_map["training_date"] is datetime
-        assert field_map["feature_count"] is int
+        assert field_map["feature_count"] == Optional[int]
         assert field_map["accuracy_train"] is float
         assert field_map["accuracy_val"] is float
         assert "Dict" in str(field_map["feature_importance"]) or "dict" in str(field_map["feature_importance"])
@@ -1357,7 +1358,7 @@ class TestLoadModelEdgeCases:
         assert integrator.model is None
 
     def test_load_model_missing_metadata_key(self, tmp_path):
-        """Pickle without 'metadata' key should use empty defaults."""
+        """Pickle without metadata must not invent a feature count."""
         model_data = {"model": PicklableModel([0.1, 0.2, 0.7])}
         model_path = tmp_path / "no_metadata.pkl"
         with open(model_path, "wb") as f:
@@ -1368,10 +1369,10 @@ class TestLoadModelEdgeCases:
         assert result is True
         assert integrator.metadata is not None
         assert integrator.metadata.version == "unknown"
-        assert integrator.metadata.feature_count == 102  # default
+        assert integrator.metadata.feature_count is None
 
     def test_load_model_partial_metadata(self, tmp_path):
-        """Partial metadata should use defaults for missing fields."""
+        """Partial metadata should leave feature count unavailable when absent."""
         model_data = {"model": None, "metadata": {"version": "v1"}}
         model_path = tmp_path / "partial.pkl"
         with open(model_path, "wb") as f:
@@ -1381,7 +1382,7 @@ class TestLoadModelEdgeCases:
         result = integrator.load_model(model_path)
         assert result is True
         assert integrator.metadata.version == "v1"
-        assert integrator.metadata.feature_count == 102  # default
+        assert integrator.metadata.feature_count is None
 
     def test_load_model_empty_file(self, tmp_path):
         """Empty pickle file should fail gracefully."""

@@ -1369,6 +1369,27 @@ class TestSignalsJSONEdgeCases:
         assert data["total_value"] == 100000.0
         gen.conn.close()
 
+    def test_stacking_no_model_feature_count_is_not_hardcoded(self, tmp_path):
+        """No-model stacking artifact exposes feature count as unavailable."""
+        gen, _ = _make_generator(tmp_path)
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps([{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]))
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    path = gen.generate_signals_json()
+
+        with open(path) as f:
+            data = json.load(f)
+
+        stacking = data["stacking_ensemble"]
+        assert stacking["stacking_available"] is False
+        assert stacking["fallback_used"] is True
+        assert stacking["feature_count"] is None
+        assert stacking["feature_count_metadata_available"] is False
+        assert stacking["feature_count_source"] == "unavailable_no_model"
+        gen.conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Health JSON edge cases
