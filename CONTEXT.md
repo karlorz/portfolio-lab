@@ -88,7 +88,7 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
   `skillwiki path`, under `projects/portfolio-lab/work/`; compound pages go
   in `projects/portfolio-lab/compound/`, ADRs in `projects/portfolio-lab/architecture/`.
   Do not use repo-local `wiki/` or `work/` directories.
-- **CLAUDE.md** is canonical implementation status — update after every feature lands
+- **Agent instructions**: slim `CLAUDE.md` / `AGENTS.md` (hard rules + wiki index only). Durable status/docs live in SkillWiki `projects/portfolio-lab/knowledge.md` and `compound/claude-md-agent-reference.md` — update those after features land, not a status dump in CLAUDE.md
 - **No ML imports without explicit user request** — always default to `PORTFOLIO_LAB_ENABLE_ML=0`
 - **Test safety**: `make test` runs the generated safe suite with ML disabled
   and a 3GB ulimit. Treat exact test counts as generated output from the latest
