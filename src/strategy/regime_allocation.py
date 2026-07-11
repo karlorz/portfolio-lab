@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "REGIME_ALLOCATIONS",
     "DEFAULT_ALLOCATION",
+    "normalize_allocation_regime",
     "get_regime_allocation",
     "get_regime_allocation_with_override",
     "validate_allocations",
@@ -40,6 +41,20 @@ REGIME_ALLOCATIONS: Dict[str, Dict[str, float]] = {
     "recovery": {"SPY": 0.58, "GLD": 0.27, "TLT": 0.15},
 }
 
+REGIME_ALIASES: Dict[str, str] = {
+    # classify_vix_regime() emits vol_spike; the allocation table uses the
+    # five-regime portfolio vocabulary where the same state is high_vol.
+    "vol_spike": "high_vol",
+}
+
+
+def normalize_allocation_regime(regime: str | None) -> str | None:
+    """Normalize live classifier labels into allocation-table labels."""
+    if not regime:
+        return None
+    key = regime.lower().strip()
+    return REGIME_ALIASES.get(key, key)
+
 
 def get_regime_allocation(regime: str | None) -> Dict[str, float]:
     """Get allocation weights for a regime.
@@ -53,7 +68,7 @@ def get_regime_allocation(regime: str | None) -> Dict[str, float]:
     """
     if not regime:
         return dict(REGIME_ALLOCATIONS["normal"])
-    key = regime.lower().strip()
+    key = normalize_allocation_regime(regime)
     if key in REGIME_ALLOCATIONS:
         return dict(REGIME_ALLOCATIONS[key])
     logger.warning("Unknown regime '%s', falling back to NORMAL", regime)
@@ -87,25 +102,27 @@ def get_regime_allocation_with_override(regime: str | None) -> Dict[str, float]:
     if not regime:
         return base
 
-    key = regime.lower().strip()
-    if key not in overrides:
+    raw_key = regime.lower().strip()
+    key = normalize_allocation_regime(regime)
+    override_key = key if key in overrides else raw_key
+    if override_key not in overrides:
         return base
 
-    regime_override = overrides[key]
+    regime_override = overrides[override_key]
     if not isinstance(regime_override, dict):
         return base
 
     # Validate required assets
     required = {"SPY", "GLD", "TLT"}
     if not required.issubset(set(regime_override.keys())):
-        logger.warning("Override for '%s' missing assets, ignoring", key)
+        logger.warning("Override for '%s' missing assets, ignoring", override_key)
         return base
 
     # Normalize if not summing to 1.0
     total = sum(regime_override.values())
     if abs(total - 1.0) > 1e-6 and total > 0:
         regime_override = {k: v / total for k, v in regime_override.items()}
-        logger.info("Normalized '%s' override to sum to 1.0", key)
+        logger.info("Normalized '%s' override to sum to 1.0", override_key)
 
     return dict(regime_override)
 

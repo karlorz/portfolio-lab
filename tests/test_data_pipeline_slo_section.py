@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from unittest.mock import patch
 
 from src.dashboard.data_pipeline_slo_section import (
@@ -63,3 +64,83 @@ def test_build_data_pipeline_slo_section_log_error_invoked(tmp_path: Path) -> No
     assert len(calls) == 1
     assert calls[0][0] == "data_pipeline_slo"
     assert isinstance(calls[0][1], OSError)
+
+
+def test_build_data_pipeline_slo_section_uses_current_data_quality_artifact(tmp_path: Path) -> None:
+    """Current data_quality.json dominates stale embedded source-manifest summaries."""
+    (tmp_path / "source_manifest.json").write_text(json.dumps({
+        "artifacts": [
+            {
+                "artifact": "prices.json",
+                "provider": "Yahoo Finance",
+                "source_mode": "live",
+                "status": "success",
+                "symbols": ["SPY", "GLD"],
+                "data_quality": {
+                    "artifact": "data_quality.json",
+                    "schema_version": "price-data-quality/v1",
+                    "generated_at": "2026-06-01T00:00:00Z",
+                    "status": "fail",
+                    "issue_counts": {"stale_latest_dates": 2, "total": 2},
+                },
+            }
+        ]
+    }), encoding="utf-8")
+    (tmp_path / "data_quality.json").write_text(json.dumps({
+        "artifact": "data_quality.json",
+        "schema_version": "price-data-quality/v1",
+        "generated_at": "2026-06-16T12:00:00Z",
+        "status": "ok",
+        "issue_counts": {"stale_latest_dates": 0, "total": 0},
+    }), encoding="utf-8")
+
+    out = build_data_pipeline_slo_section(
+        health_data={
+            "cron_jobs": [],
+            "scheduler_status": {"status": "ok", "backends": {}},
+            "data_freshness": {},
+        },
+        public_dir=tmp_path,
+    )
+
+    data_quality = out["dimensions"]["data_quality"]
+    assert data_quality["status"] == "ok"
+    assert data_quality["quality_status"] == "ok"
+    assert data_quality["generated_at"] == "2026-06-16T12:00:00Z"
+    assert data_quality["issue_counts"]["stale_latest_dates"] == 0
+
+
+def test_build_data_pipeline_slo_section_accepts_current_overall_status_shape(tmp_path: Path) -> None:
+    """Standalone data_quality.json uses overall_status in generated artifacts."""
+    (tmp_path / "source_manifest.json").write_text(json.dumps({
+        "artifacts": [
+            {
+                "artifact": "prices.json",
+                "provider": "Yahoo Finance",
+                "source_mode": "live",
+                "status": "success",
+                "symbols": ["SPY", "GLD"],
+            }
+        ]
+    }), encoding="utf-8")
+    (tmp_path / "data_quality.json").write_text(json.dumps({
+        "schema_version": "price-data-quality/v1",
+        "generated_at": "2026-07-06T11:05:20.437Z",
+        "overall_status": "warn",
+        "issue_counts": {"split_like_returns": 4, "stale_latest_dates": 0, "total": 4},
+    }), encoding="utf-8")
+
+    out = build_data_pipeline_slo_section(
+        health_data={
+            "cron_jobs": [],
+            "scheduler_status": {"status": "ok", "backends": {}},
+            "data_freshness": {},
+        },
+        public_dir=tmp_path,
+    )
+
+    data_quality = out["dimensions"]["data_quality"]
+    assert data_quality["status"] == "warning"
+    assert data_quality["quality_status"] == "warn"
+    assert data_quality["generated_at"] == "2026-07-06T11:05:20.437Z"
+    assert data_quality["issue_counts"]["split_like_returns"] == 4

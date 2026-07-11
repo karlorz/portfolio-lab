@@ -172,6 +172,7 @@ class SmartRebalanceGate:
                 'in_optimal_window': self.controller._in_optimal_window(now),
                 'ytd_cost_bps': self.controller.cost_tracker.ytd_total_bps,
                 'remaining_budget_pct': self.controller.cost_tracker.remaining_budget_pct,
+                'remaining_budget_ratio': self.controller.cost_tracker.remaining_budget_pct,
             },
         )
 
@@ -198,6 +199,9 @@ def create_gate_from_config(config_path: str = 'config/smart_rebalance.yaml') ->
 # CLI interface
 if __name__ == '__main__':
     import sys
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
 
     gate = SmartRebalanceGate()
 

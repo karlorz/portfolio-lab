@@ -2,11 +2,13 @@
 """
 Portfolio-Lab v3.10 Phase 1: Stacking Feature Engineering
 
-Generates 59-dimensional feature vectors for XGBoost meta-learner from base signals:
-- 6 base signal values
-- 45 pairwise interaction features (15 pairs × 3 types: multiplicative, disagreement, average)
+Generates feature vectors for the XGBoost meta-learner from the current
+canonical SignalSource roster:
+- one base signal value per source
+- one set of pairwise interaction features per source pair
+  (multiplicative, disagreement, average)
 - 2 regime context features (VIX normalized, trend strength)
-- 6 historical accuracy features (90-day rolling)
+- one historical accuracy feature per source (90-day rolling)
 
 Usage:
     from src.signals.stacking_feature_engine import StackingFeatureEngine
@@ -18,13 +20,13 @@ Usage:
     python -m src.signals.stacking_feature_engine --test
 
 Performance:
-- Feature generation latency: <10ms for 6 signals
+- Feature generation latency: <10ms for the current source roster
 - Memory footprint: ~35KB per feature vector
 """
 
 import numpy as np
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import combinations
@@ -35,9 +37,35 @@ logger = logging.getLogger(__name__)
 
 
 
-__all__ = ['SignalSource', 'Signal', 'RegimeContext', 'HistoricalAccuracy', 'FeatureVector', 'StackingFeatureEngine', 'StackingAccuracyTracker', 'demo', 'main']
+__all__ = [
+    'SignalSource',
+    'STACKING_SOURCE_ROSTER',
+    'STACKING_SOURCE_ROSTER_VERSION',
+    'STACKING_FALLBACK_SEMANTICS',
+    'expected_feature_count_for_roster',
+    'Signal',
+    'RegimeContext',
+    'HistoricalAccuracy',
+    'FeatureVector',
+    'StackingFeatureEngine',
+    'StackingAccuracyTracker',
+    'demo',
+    'main',
+]
 
 from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
+
+
+STACKING_SOURCE_ROSTER = tuple(SignalSource)
+STACKING_SOURCE_ROSTER_VERSION = "SignalSource.full.v1"
+STACKING_FALLBACK_SEMANTICS = "no_model_feature_count_unavailable"
+
+
+def expected_feature_count_for_roster(roster: Sequence[SignalSource]) -> int:
+    """Return stacking feature count for a concrete source roster."""
+    n_sources = len(tuple(roster))
+    n_pairs = n_sources * (n_sources - 1) // 2
+    return n_sources + n_pairs * 3 + 2 + n_sources
 
 
 @dataclass
@@ -94,21 +122,22 @@ class StackingFeatureEngine:
     Generate feature vectors for XGBoost meta-learner.
 
     Features:
-    - Base signal values (7)
-    - Pairwise multiplicative interactions (21)
-    - Pairwise disagreement features (21)
-    - Pairwise average features (21)
+    - Base signal values, one per canonical source
+    - Pairwise multiplicative interactions
+    - Pairwise disagreement features
+    - Pairwise average features
     - Regime context (2)
-    - Historical accuracy (7)
-
-    Total: 79 features
+    - Historical accuracy, one per canonical source
     """
 
-    NUM_BASE_SIGNALS = len(list(SignalSource))
+    SOURCE_ROSTER = STACKING_SOURCE_ROSTER
+    SOURCE_ROSTER_VERSION = STACKING_SOURCE_ROSTER_VERSION
+    FALLBACK_SEMANTICS = STACKING_FALLBACK_SEMANTICS
+    NUM_BASE_SIGNALS = len(SOURCE_ROSTER)
     NUM_PAIRWISE_COMBINATIONS = NUM_BASE_SIGNALS * (NUM_BASE_SIGNALS - 1) // 2  # C(n,2)
     NUM_REGIME_FEATURES = 2
-    NUM_ACCURACY_FEATURES = len(list(SignalSource))
-    TOTAL_DIMENSIONS = NUM_BASE_SIGNALS + NUM_PAIRWISE_COMBINATIONS * 3 + 2 + NUM_ACCURACY_FEATURES  # base + pairwise*3 + regime + accuracy
+    NUM_ACCURACY_FEATURES = len(SOURCE_ROSTER)
+    TOTAL_DIMENSIONS = expected_feature_count_for_roster(SOURCE_ROSTER)
     
     def __init__(self, vix_normalization_factor: float = 30.0):
         """
@@ -133,7 +162,7 @@ class StackingFeatureEngine:
         historical_accuracy: Dict[SignalSource, HistoricalAccuracy]
     ) -> FeatureVector:
         """
-        Generate complete 79-dimensional feature vector.
+        Generate the complete canonical stacking feature vector.
 
         Args:
             signals: Dictionary of Signal objects keyed by SignalSource
@@ -141,24 +170,30 @@ class StackingFeatureEngine:
             historical_accuracy: Dictionary of HistoricalAccuracy by SignalSource
 
         Returns:
-            FeatureVector with all 79 features computed
+            FeatureVector with all canonical features computed
 
         Raises:
             ValueError: If not all signal sources are provided
         """
-        # Validate input
-        if len(signals) != self.NUM_BASE_SIGNALS:
-            missing = set(SignalSource) - set(signals.keys())
-            raise ValueError(f"Expected {self.NUM_BASE_SIGNALS} signals, got {len(signals)}. Missing: {missing}")
+        # Validate input against the class roster, not the global enum.
+        expected_sources = set(self.SOURCE_ROSTER)
+        provided_sources = set(signals)
+        if provided_sources != expected_sources:
+            missing = expected_sources - provided_sources
+            extra = provided_sources - expected_sources
+            raise ValueError(
+                f"Expected {self.NUM_BASE_SIGNALS} signals, got {len(signals)}. "
+                f"Missing: {missing}. Extra: {extra}"
+            )
         
-        # Base signal values (6 features)
+        # Base signal values
         base_values = {source: signal.value for source, signal in signals.items()}
         
         # Pairwise combinations
-        sources = list(signals)
+        sources = list(self.SOURCE_ROSTER)
         pairs = self._get_pairwise_combinations(sources)
         
-        # Pairwise interaction features (45 features = 15 pairs × 3 types)
+        # Pairwise interaction features
         multiplicative = {}
         disagreement = {}
         averages = {}
@@ -180,7 +215,7 @@ class StackingFeatureEngine:
         vix_normalized = regime_context.vix_level / self.vix_normalization_factor
         trend_strength = regime_context.trend_strength
         
-        # Historical accuracy features (6 features)
+        # Historical accuracy features
         accuracy_values = {
             source: hist.accuracy_90d 
             for source, hist in historical_accuracy.items()
@@ -203,14 +238,14 @@ class StackingFeatureEngine:
         Convert FeatureVector to numpy array for XGBoost inference.
         
         Returns:
-            numpy array of shape (79,) with all features concatenated
-            Order: base (7) + multiplicative (21) + disagreement (21) +
-                   averages (21) + regime (2) + accuracy (7)
+            numpy array with all features concatenated.
+            Order: base + multiplicative + disagreement + averages + regime +
+                   accuracy, all in canonical roster order.
         """
         features = []
 
         # Base signals in fixed order
-        for source in SignalSource:
+        for source in self.SOURCE_ROSTER:
             features.append(feature_vector.base_values.get(source, 0.0))
         
         # Pairwise features in fixed order (sorted by source enum value)
@@ -231,7 +266,7 @@ class StackingFeatureEngine:
         features.append(feature_vector.trend_strength)
         
         # Historical accuracy in fixed order
-        for source in SignalSource:
+        for source in self.SOURCE_ROSTER:
             features.append(feature_vector.accuracy_values.get(source, 0.0))
         
         return np.array(features, dtype=np.float32)
@@ -258,16 +293,16 @@ class StackingFeatureEngine:
         Get ordered list of feature names matching numpy array order.
         
         Returns:
-            List of 59 feature name strings
+            List of canonical feature name strings
         """
         names = []
         
         # Base signals
-        for source in SignalSource:
+        for source in self.SOURCE_ROSTER:
             names.append(f"base_{source.value}")
         
         # Pairwise combinations for interaction features
-        sources = list(SignalSource)
+        sources = list(self.SOURCE_ROSTER)
         pairs = self._get_pairwise_combinations(sources)
         pairs_sorted = sorted(pairs, key=lambda x: (x[0].value, x[1].value))
         
@@ -288,7 +323,7 @@ class StackingFeatureEngine:
         names.append("trend_strength")
         
         # Historical accuracy
-        for source in SignalSource:
+        for source in self.SOURCE_ROSTER:
             names.append(f"acc90d_{source.value}")
         
         return names

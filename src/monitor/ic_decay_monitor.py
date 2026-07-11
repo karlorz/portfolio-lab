@@ -35,7 +35,7 @@ import json
 import os
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -190,6 +190,13 @@ class ICMonitor:
             return self._staged.get("date")
         return None
 
+    def get_staged_prediction_count(self) -> int:
+        """Return the number of currently unresolved staged predictions."""
+        if not self._staged:
+            return 0
+        predictions = self._staged.get("predictions", {})
+        return len(predictions) if isinstance(predictions, dict) else 0
+
     def compute_ic(self, signal_name: str) -> Optional[float]:
         """Compute rolling IC for a specific signal.
 
@@ -294,7 +301,7 @@ class ICMonitor:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(state, f)
-        logger.info("IC monitor state saved: %s (%d signals)", path, len(state))
+        logger.info("IC monitor state saved: %s (%d signals)", path, len(self._data))
         return path
 
     def load_state(self, path: Optional[Path] = None) -> None:
@@ -313,12 +320,12 @@ class ICMonitor:
                     self._data[key] = deque(maxlen=self.window_size)
                     for pred, actual in observations:
                         self._data[key].append((pred, actual))
-            logger.info("IC monitor state loaded: %d signals", len(state))
+            logger.info("IC monitor state loaded: %d signals", len(self._data))
         except (json.JSONDecodeError, OSError, TypeError) as e:
             logger.warning("Failed to load IC monitor state: %s", e)
 
 
-def compute_ic_decay_report() -> Dict[str, Dict]:
+def compute_ic_decay_report() -> Dict[str, Any]:
     """Convenience function: compute IC decay report from saved state.
 
     Creates an ICMonitor, loads any persisted state, and returns
@@ -326,4 +333,27 @@ def compute_ic_decay_report() -> Dict[str, Dict]:
     """
     monitor = ICMonitor()
     monitor.load_state()
-    return monitor.compute_decay_report()
+    signals = monitor.compute_decay_report()
+    pending = monitor.get_staged_prediction_count()
+    if signals:
+        statuses = [row.get("status") for row in signals.values()]
+        if any(status == "critical" for status in statuses):
+            status = "critical"
+        elif any(status == "warning" for status in statuses):
+            status = "warning"
+        elif all(status == "healthy" for status in statuses):
+            status = "healthy"
+        else:
+            status = "insufficient_resolved_history"
+    elif pending:
+        status = "waiting_for_forward_returns"
+    else:
+        status = "no_data"
+    return {
+        "status": status,
+        "signals": signals,
+        "resolved_signal_count": len(signals),
+        "pending_predictions": pending,
+        "staged_date": monitor.get_staged_date(),
+        "label_horizon": "SPY close-to-close forward return from staged market-data date to latest available SPY row",
+    }

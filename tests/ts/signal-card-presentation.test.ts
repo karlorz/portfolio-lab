@@ -13,12 +13,47 @@ import {
   CalendarSeasonalityPanel,
   type CalendarData,
 } from '../../src/components/CalendarSeasonalityPanel';
+import { YieldCurveIndicator } from '../../src/components/YieldCurveIndicator';
+import DurationOverlayPanel from '../../src/components/DurationOverlayPanel';
 
 function render(element: React.ReactElement): string {
   return renderToStaticMarkup(element);
 }
 
 describe('signal card presentation', () => {
+  it('renders yield curve source mode near the spread metric', () => {
+    const html = render(React.createElement(YieldCurveIndicator, {
+      spread2s10s: -12,
+      regime: 'inverted',
+      spreadHistory: [-8, -10, -12],
+      sourceMode: 'synthetic',
+      sourceStatus: 'degraded',
+      sourceReason: 'FRED_API_KEY missing',
+    }));
+
+    expect(html).toContain('SYNTHETIC / DEGRADED');
+    expect(html).toContain('2s10s Spread');
+  });
+
+  it('renders duration overlay source mode near the yield metric', () => {
+    const html = render(React.createElement(DurationOverlayPanel, {
+      yieldCurve: {
+        spread2s10s: -12,
+        dgs2: 4.6,
+        dgs10: 4.48,
+        duration_regime: 'inverted',
+        spread_history: [-8, -10, -12],
+        source_mode: 'synthetic',
+        source_status: 'degraded',
+        source_reason: 'FRED_API_KEY missing',
+      },
+      durationAllocation: { tlt: 0.15, ief: 0.25, shy: 0.35, bil: 0.25 },
+    }));
+
+    expect(html).toContain('SYNTHETIC / DEGRADED');
+    expect(html).toContain('10Y - 2Y Spread');
+  });
+
   it('frames behavioral sentiment as a diagnostic signal with decision hierarchy', () => {
     const data: BehavioralSentimentData = {
       active: true,

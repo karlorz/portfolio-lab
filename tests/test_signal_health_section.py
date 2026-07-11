@@ -32,11 +32,15 @@ def test_build_signal_health_section_success() -> None:
         "scores": {"msm": 0.55},
         "alerts": [],
         "overall_health": "degraded",
+        "status": "degraded",
+        "label_horizon": "SPY actual direction resolved by prediction date",
     }
     with patch("src.signals.health_tracker.SignalHealthTracker") as tracker_cls:
         tracker_cls.return_value.get_health_report.return_value = mock_report
         out = build_signal_health_section()
     assert out["overall_health"] == "degraded"
+    assert out["status"] == "degraded"
+    assert out["label_horizon"] == "SPY actual direction resolved by prediction date"
     assert out["scores"]["msm"] == 0.55
 
 

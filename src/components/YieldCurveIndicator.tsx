@@ -6,6 +6,9 @@ interface YieldCurveIndicatorProps {
   regime: DurationRegime | null;
   spreadHistory?: number[];
   lastUpdate?: string;
+  sourceMode?: string;
+  sourceStatus?: string;
+  sourceReason?: string | null;
 }
 
 const REGIME_CONFIG: Record<DurationRegime, { 
@@ -44,9 +47,23 @@ export function YieldCurveIndicator({
   spread2s10s, 
   regime, 
   spreadHistory = [],
-  lastUpdate 
+  lastUpdate,
+  sourceMode,
+  sourceStatus,
+  sourceReason,
 }: YieldCurveIndicatorProps) {
   const config = regime ? REGIME_CONFIG[regime] : null;
+  const sourceDisclosure = [sourceMode, sourceStatus]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.replace(/_/g, ' ').toUpperCase())
+    .join(' / ');
+  const showSourceDisclosure = Boolean(
+    sourceDisclosure
+    && (
+      !['live', 'cached'].includes(sourceMode ?? '')
+      || !['success', 'ok'].includes(sourceStatus ?? '')
+    )
+  );
   
   // Calculate sparkline points
   const sparklinePoints = useMemo(() => {
@@ -104,6 +121,11 @@ export function YieldCurveIndicator({
             {spread2s10s > 0 ? '+' : ''}{spread2s10s.toFixed(1)} bps
           </span>
           <span className="spread-label">2s10s Spread</span>
+          {showSourceDisclosure && (
+            <span className="source-disclosure" title={sourceReason ?? undefined}>
+              {sourceDisclosure}
+            </span>
+          )}
         </div>
 
         {/* Momentum Indicator */}
@@ -213,6 +235,21 @@ export function YieldCurveIndicator({
         .spread-label {
           font-size: 12px;
           color: #6b7280;
+        }
+
+        .source-disclosure {
+          display: inline-flex;
+          width: fit-content;
+          max-width: 100%;
+          padding: 3px 6px;
+          border-radius: 6px;
+          border: 1px solid #f59e0b;
+          color: #fbbf24;
+          background: rgba(245, 158, 11, 0.12);
+          font-size: 10px;
+          font-weight: 700;
+          line-height: 1.2;
+          overflow-wrap: anywhere;
         }
 
         .momentum-indicator {

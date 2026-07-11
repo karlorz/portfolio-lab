@@ -7,7 +7,7 @@ Integrates with v2.24 signal integrator to provide signal-driven
 MARL-based portfolio allocations.
 
 Usage:
-    # Inference mode (live signals)
+    # Advisory inference mode (research-shadow, non-routed)
     python -m src.agents.ai_controller --mode infer --portfolio 46/38/16
     
     # Training mode
@@ -18,7 +18,7 @@ Usage:
 
 Integration:
     - Consumes: src.signals.integrator (v2.24)
-    - Produces: Portfolio allocation deltas, execution plans
+    - Produces: Research-shadow advisory allocation metadata
     - Format: JSON via stdout and file output
 """
 
@@ -58,6 +58,7 @@ except ImportError:
 
 # Constants
 VERSION = "2.51.0"
+MARL_EXECUTION_ROLE = "research_shadow_non_routed"
 MODELS_DIR = PROJECT_ROOT / "models"
 CHECKPOINT_DIR = MODELS_DIR / "marl_checkpoints"
 SYNTHETIC_PRICE_DAYS = 252 * 20
@@ -222,6 +223,41 @@ def _resolve_device(requested_device: str) -> str:
     return requested_device
 
 
+def _execution_role_metadata() -> Dict[str, Any]:
+    """Return MARL live-authority boundary metadata."""
+    return {
+        "execution_role": MARL_EXECUTION_ROLE,
+        "routed": False,
+        "routed_by": None,
+        "live_authoritative": False,
+    }
+
+
+def _ml_disabled_infer_result(
+    current_allocation: Dict[str, float],
+    portfolio_value: float,
+    requested_device: str,
+) -> Dict[str, Any]:
+    """Return deterministic fail-closed CLI infer output when ML is disabled."""
+    return {
+        "version": VERSION,
+        "timestamp": datetime.now().isoformat(),
+        "status": "safe_mode",
+        "error": "ml_disabled",
+        "message": (
+            "PORTFOLIO_LAB_ENABLE_ML=0 disables MARL inference; "
+            "no agent graph was executed and no live order routing is authorized."
+        ),
+        "portfolio_value": portfolio_value,
+        "current_allocation": current_allocation,
+        "recommended_allocation": current_allocation,
+        "should_rebalance": False,
+        "confidence": 0.0,
+        "requested_device": requested_device,
+        **_execution_role_metadata(),
+    }
+
+
 class AIController:
     """
     Main AI Controller for v2.51 MARL system.
@@ -254,7 +290,10 @@ class AIController:
         # Initialize signal integrator
         self.signal_integrator = None
         if use_signal_integrator and SIGNAL_INTEGRATOR_AVAILABLE:
-            self.signal_integrator = SignalIntegrator()
+            try:
+                self.signal_integrator = SignalIntegrator()
+            except Exception as exc:
+                logger.warning("Signal integrator unavailable for AI controller: %s", exc)
         
         # Trainer (initialized on demand)
         self.trainer: Optional[MARLTrainer] = None
@@ -377,7 +416,8 @@ class AIController:
                     "confidence": action.confidence
                 }
                 for agent_id, action in actions.items() if agent_id != 'controller'
-            }
+            },
+            **_execution_role_metadata(),
         }
         
         # Update state
@@ -522,7 +562,8 @@ class AIController:
             "checkpoint_loaded": self.checkpoint_path is not None and self.checkpoint_path.exists(),
             "inference_count": len(self.action_history),
             "current_allocation": self.current_allocation,
-            "graph_metrics": self.graph.metrics if hasattr(self.graph, 'metrics') else {}
+            "graph_metrics": self.graph.metrics if hasattr(self.graph, 'metrics') else {},
+            **_execution_role_metadata(),
         }
 
 
@@ -550,6 +591,19 @@ def main():
     args = parser.parse_args()
     
     # Device
+    if args.mode == 'infer' and not _ML_ENABLED:
+        allocation = parse_allocation_string(args.portfolio)
+        result = _ml_disabled_infer_result(
+            current_allocation=allocation,
+            portfolio_value=args.value,
+            requested_device=args.device,
+        )
+        print(json.dumps(result, indent=2))
+        if args.output:
+            save_results_json(result, output_path=args.output)
+            print(f"\nSaved to {args.output}")
+        return
+
     device = _resolve_device(args.device)
     
     # Checkpoint

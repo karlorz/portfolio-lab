@@ -21,6 +21,12 @@ export const YieldCurveSchema = z.object({
     z.enum(['steep', 'normal', 'flat', 'inverted'])
   ),
   spread_history: z.optional(z.array(z.number())),
+  source_mode: z.optional(z.string()),
+  source_status: z.optional(z.string()),
+  source_reason: z.optional(z.nullable(z.string())),
+  source_provider: z.optional(z.nullable(z.string())),
+  source_generated_at: z.optional(z.nullable(z.string())),
+  source_latest_observation: z.optional(z.nullable(z.string())),
 });
 
 // ---------------------------------------------------------------------------
@@ -54,6 +60,30 @@ export const RecentOrderSchema = z.object({
 // ---------------------------------------------------------------------------
 // GARCH-CVaR
 // ---------------------------------------------------------------------------
+const ConformalCoverageDiagnosticsSchema = z.object({
+  schema_version: z.literal('conformal-coverage/v1'),
+  observations: z.number(),
+  alpha: z.number(),
+  expected_exceedance_rate: z.number(),
+  exceedance_count: z.number(),
+  exceedance_rate: z.number(),
+  coverage_rate: z.number(),
+  coverage_pass: z.boolean(),
+  rolling_window: z.number(),
+  rolling_exceedance_rate: z.number(),
+  longest_violation_cluster: z.number(),
+  kupiec_statistic: z.number(),
+  kupiec_p_value: z.number(),
+  kupiec_pass: z.boolean(),
+  christoffersen_statistic: z.number(),
+  christoffersen_p_value: z.number(),
+  christoffersen_pass: z.boolean(),
+  conditional_coverage_statistic: z.number(),
+  conditional_coverage_p_value: z.number(),
+  conditional_coverage_pass: z.boolean(),
+  by_regime: z.optional(z.record(z.string(), z.record(z.string(), z.unknown()))),
+});
+
 export const GarchCvarSchema = z.object({
   cvar_95: z.number(),
   cvar_95_garch: z.number(),
@@ -68,6 +98,7 @@ export const GarchCvarSchema = z.object({
   conformal_cvar_95: z.optional(z.nullable(z.number())),
   conformal_var_95: z.optional(z.nullable(z.number())),
   conformal_cvar_ratio: z.optional(z.nullable(z.number())),
+  coverage_diagnostics: z.optional(z.nullable(ConformalCoverageDiagnosticsSchema)),
 });
 
 // ---------------------------------------------------------------------------
@@ -98,6 +129,7 @@ const SmartRebalanceStatusSchema = z.object({
   ytd_cost_bps: z.number(),
   ytd_cost_pct: z.number(),
   remaining_budget_pct: z.number(),
+  remaining_budget_ratio: z.optional(z.number().min(0).max(1)),
   is_over_budget: z.boolean(),
   is_warning: z.boolean(),
   last_rebalance: z.nullable(z.string()),
@@ -117,7 +149,21 @@ export const SmartRebalanceSchema = z.object({
   in_optimal_window: z.boolean(),
   ytd_cost_bps: z.number(),
   remaining_budget_pct: z.number(),
+  remaining_budget_ratio: z.optional(z.number().min(0).max(1)),
   status: SmartRebalanceStatusSchema,
+}).superRefine((data, ctx) => {
+  const hasRatioContract =
+    data.remaining_budget_ratio !== undefined || data.status.remaining_budget_ratio !== undefined;
+  if (
+    hasRatioContract
+    && Math.abs(data.remaining_budget_pct - data.status.remaining_budget_pct) > 0.000001
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['remaining_budget_pct'],
+      message: 'remaining_budget_pct must match status.remaining_budget_pct display units',
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -156,6 +202,10 @@ export const BrokerSchema = z.object({
   recent_orders: z.array(BrokerOrderSchema),
   last_sync: z.nullable(z.string()),
   kill_switch: z.boolean(),
+  kill_switch_level: z.optional(z.nullable(z.string())),
+  kill_switch_source: z.optional(z.nullable(z.string())),
+  kill_switch_reason: z.optional(z.nullable(z.string())),
+  kill_switch_incident_id: z.optional(z.nullable(z.string())),
 });
 
 // ---------------------------------------------------------------------------
@@ -343,6 +393,13 @@ export const HedgeSelectorSchema = z.object({
   confidence_scaled_size: z.number().default(0),
   min_hold_days: z.number().default(0),
   transition_cost_bps: z.number().default(0),
+  canonical_controller: z.string().default('hedge_selector'),
+  vixy_role: z.string().default('diagnostic_sizing_helper'),
+  term_structure_role: z.string().default('gate_discount_multiplier'),
+  term_structure_gate: z.boolean().default(false),
+  term_structure_multiplier: z.number().default(0),
+  term_structure_signal: z.nullable(z.number()).default(null),
+  gate_reason: z.string().default('unknown'),
 }).passthrough();
 
 // ---------------------------------------------------------------------------
@@ -353,6 +410,9 @@ const MLPredictionSchema = z.object({
   confidence: z.number(),
   probabilities: z.record(z.string(), z.number()),
   heuristic: z.boolean(),
+  feature_timestamp: z.optional(z.nullable(z.string())),
+  feature_freshness_status: z.optional(z.nullable(z.string())),
+  source_artifact: z.optional(z.nullable(z.string())),
 });
 
 const MLFeatureSchema = z.object({
@@ -361,6 +421,7 @@ const MLFeatureSchema = z.object({
   price_vs_sma20: z.number(),
   return_5d: z.number(),
   spy_correlation: z.number(),
+  feature_timestamp: z.optional(z.nullable(z.string())),
 });
 
 const MLGridSearchSchema = z.object({
@@ -369,14 +430,58 @@ const MLGridSearchSchema = z.object({
   top_allocation: z.nullable(z.record(z.string(), z.number())),
   sharpe: z.nullable(z.number()),
   volatility: z.nullable(z.number()),
+  source_artifact: z.optional(z.nullable(z.string())),
+  benchmark_timestamp: z.optional(z.nullable(z.string())),
+  observation_semantics: z.optional(z.nullable(z.string())),
+  freshness_status: z.optional(z.nullable(z.string())),
+  staleness_days: z.optional(z.nullable(z.number())),
+  live_authoritative: z.optional(z.boolean()),
+});
+
+const MLExecutionRoleSchema = z.object({
+  role: z.string(),
+  routed: z.boolean(),
+  routed_by: z.optional(z.nullable(z.string())),
+  live_authoritative: z.boolean(),
 });
 
 const MLSignalsSchema = z.object({
   available: z.boolean(),
   timestamp: z.nullable(z.string()),
+  generated_at: z.optional(z.nullable(z.string())),
+  feature_source_artifact: z.optional(z.nullable(z.string())),
+  feature_as_of: z.optional(z.nullable(z.string())),
+  feature_freshness_status: z.optional(z.nullable(z.string())),
+  feature_staleness_days: z.optional(z.nullable(z.number())),
+  prediction_source_mode: z.optional(z.nullable(z.string())),
+  execution_role: z.optional(MLExecutionRoleSchema),
   predictions: z.record(z.string(), MLPredictionSchema),
   features: z.record(z.string(), MLFeatureSchema),
   grid_search: MLGridSearchSchema,
+});
+
+export const MarlStatusSchema = z.object({
+  schema_version: z.literal('marl-runtime-status/v1'),
+  available: z.boolean(),
+  timestamp: z.nullable(z.string()),
+  runtime: z.object({
+    version: z.string(),
+    device: z.string(),
+    agents_loaded: z.array(z.string()),
+    signal_integrator_connected: z.boolean(),
+    checkpoint_loaded: z.boolean(),
+    inference_count: z.number(),
+    current_allocation: z.record(z.string(), z.number()),
+    graph_metrics: z.record(z.string(), z.unknown()),
+  }),
+  execution_role: z.object({
+    role: z.literal('research_shadow_non_routed'),
+    routed: z.literal(false),
+    routed_by: z.null(),
+    live_authoritative: z.literal(false),
+    description: z.string(),
+  }),
+  error: z.optional(z.nullable(z.string())),
 });
 
 // ---------------------------------------------------------------------------
@@ -390,7 +495,19 @@ const IcDecaySignalEntrySchema = z.object({
 });
 
 export const IcDecaySchema = z.object({
+  status: z.optional(z.enum([
+    'healthy',
+    'warning',
+    'critical',
+    'insufficient_resolved_history',
+    'waiting_for_forward_returns',
+    'no_data',
+  ])),
   signals: z.record(z.string(), IcDecaySignalEntrySchema).optional(),
+  resolved_signal_count: z.optional(z.number()),
+  pending_predictions: z.optional(z.number()),
+  staged_date: z.optional(z.nullable(z.string())),
+  label_horizon: z.optional(z.string()),
   error: z.optional(z.string()),
 }).passthrough();
 
@@ -409,7 +526,20 @@ const SignalWFEEntrySchema = z.object({
 });
 
 export const SignalWFESchema = z.object({
+  status: z.optional(z.enum([
+    'validated',
+    'weak',
+    'unvalidated',
+    'insufficient_data',
+    'insufficient_resolved_history',
+    'waiting_for_forward_returns',
+    'no_data',
+  ])),
   signals: z.record(z.string(), SignalWFEEntrySchema).optional(),
+  resolved_signal_count: z.optional(z.number()),
+  pending_predictions: z.optional(z.number()),
+  staged_date: z.optional(z.nullable(z.string())),
+  label_horizon: z.optional(z.string()),
   error: z.optional(z.string()),
 }).passthrough();
 
@@ -426,6 +556,426 @@ export const FredMacroSchema = z.object({
   credit_conditions: z.string(),
   indicators: z.record(z.string(), z.number()),
   timestamp: z.string(),
+  status: z.optional(z.string()),
+  source_mode: z.optional(z.string()),
+  cache_status: z.optional(z.string()),
+  api_key_configured: z.optional(z.boolean()),
+  reason: z.optional(z.nullable(z.string())),
+  latest_fetched_at: z.optional(z.nullable(z.string())),
+  row_count: z.optional(z.nullable(z.number())),
+  age_hours: z.optional(z.nullable(z.number())),
+  ttl_hours: z.optional(z.nullable(z.number())),
+  indicators_observed: z.optional(z.boolean()),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// Active signals.json panel schemas
+// ---------------------------------------------------------------------------
+const NullableNumberSchema = z.nullable(z.number());
+
+export const CryptoAllocationSchema = z.object({
+  active: z.boolean(),
+  btc_weight: z.number(),
+  eth_weight: z.number(),
+  total_crypto: z.number(),
+  btc_momentum_6m: z.number(),
+  eth_momentum_6m: z.number(),
+  btc_vol_regime: z.string(),
+  eth_vol_regime: z.string(),
+  confidence: z.number(),
+}).passthrough();
+
+export const CalendarSeasonalitySchema = z.object({
+  active: z.boolean(),
+  modifier: z.number(),
+  active_windows: z.array(z.string()),
+  next_window: z.string(),
+  days_to_next: z.number(),
+  recommendation: z.string(),
+  effect: z.string(),
+}).passthrough();
+
+const EnsembleSourceVoteSchema = z.object({
+  source: z.string(),
+  direction: z.union([z.string(), z.number()]),
+  strength: z.number(),
+  confidence: z.number(),
+  weight: z.number(),
+  weight_original: z.optional(z.number()),
+  staleness_decay: z.optional(z.number()),
+}).passthrough();
+
+const ConfiguredSourceStatusSchema = z.object({
+  source: z.string(),
+  label: z.optional(z.string()),
+  configured: z.boolean(),
+  configured_weight: z.optional(z.number()),
+  collected: z.boolean(),
+  active: z.boolean(),
+  contributing: z.boolean(),
+  status: z.string(),
+  reason: z.optional(z.string()),
+}).passthrough();
+
+const AdaptiveLearningStatusSchema = z.enum([
+  'active',
+  'disabled',
+  'unavailable',
+  'non_effective',
+]);
+
+const AdaptiveLearningBranchSchema = z.object({
+  status: AdaptiveLearningStatusSchema,
+  enabled: z.boolean(),
+  reason: z.string(),
+  observations: z.optional(z.number()),
+  warmup_days: z.optional(z.number()),
+  max_blend: z.optional(z.number()),
+  current_blend: z.optional(z.number()),
+  state_available: z.optional(z.boolean()),
+  blend_alpha: z.optional(z.number()),
+}).passthrough();
+
+const AdaptiveLearningDisclosureSchema = z.object({
+  bandit: AdaptiveLearningBranchSchema,
+  online_ic: AdaptiveLearningBranchSchema,
+}).passthrough();
+
+export const EnsembleVotingSchema = z.object({
+  regime: z.string(),
+  regime_confidence: z.number(),
+  weighted_consensus: z.number(),
+  agreement_ratio: z.number(),
+  action: z.string(),
+  confidence: z.number(),
+  equity_bias: z.number(),
+  duration_bias: z.number(),
+  gold_bias: z.number(),
+  num_sources: z.number(),
+  configured_source_count: z.optional(z.number()),
+  collected_source_count: z.optional(z.number()),
+  contributing_source_count: z.optional(z.number()),
+  inactive_source_count: z.optional(z.number()),
+  inactive_sources: z.optional(z.array(z.string())),
+  configured_source_status: z.optional(z.array(ConfiguredSourceStatusSchema)),
+  source_breakdown: z.array(EnsembleSourceVoteSchema),
+  n_eff: z.optional(z.number()),
+  weight_entropy: z.optional(z.number()),
+  adaptive_learning: z.optional(AdaptiveLearningDisclosureSchema),
+  total_weight_after_decay: z.optional(z.number()),
+}).passthrough();
+
+const AlternativeDataComponentSchema = z.object({
+  score: NullableNumberSchema,
+  confidence: NullableNumberSchema,
+  weight: NullableNumberSchema,
+}).passthrough();
+
+export const AlternativeDataSchema = z.object({
+  regime: z.optional(z.string()),
+  probability: z.optional(z.number()),
+  confidence: z.optional(z.number()),
+  timestamp: z.string(),
+  components: z.optional(z.record(z.string(), AlternativeDataComponentSchema)),
+  composite_score: z.optional(NullableNumberSchema),
+  z_score: z.optional(NullableNumberSchema),
+  sources_count: z.optional(NullableNumberSchema),
+  data_freshness_hours: z.optional(NullableNumberSchema),
+}).passthrough();
+
+export const FactorRotationSignalSchema = z.object({
+  selected_factors: z.array(z.string()),
+  allocation: z.record(z.string(), z.number()),
+  signal_strength: z.number(),
+  recommendation: z.string(),
+}).passthrough();
+
+export const StackingEnsembleSchema = z.object({
+  active: z.boolean(),
+  stacking_available: z.boolean(),
+  runtime_role: z.enum(['research_dormant', 'model_backed_advisory']),
+  runtime_status: z.enum(['unavailable_no_model', 'model_loaded']),
+  live_authoritative: z.boolean(),
+  routed: z.boolean(),
+  routed_by: z.nullable(z.string()),
+  prediction_available: z.boolean(),
+  prediction_direction: z.string(),
+  confidence: z.number(),
+  probability_bullish: z.number(),
+  probability_bearish: z.number(),
+  probability_neutral: z.number(),
+  fallback_used: z.boolean(),
+  model_version: z.string(),
+  voting_accuracy: NullableNumberSchema,
+  stacking_accuracy: NullableNumberSchema,
+  accuracy_metrics_available: z.boolean(),
+  feature_count: NullableNumberSchema,
+  feature_count_metadata_available: z.boolean(),
+  feature_count_source: z.enum([
+    'model_metadata',
+    'unavailable_no_model',
+    'unavailable_missing_metadata',
+  ]),
+  source_roster: z.array(z.string()),
+  source_roster_version: z.string(),
+  fallback_semantics: z.string(),
+  latency_ms: z.number(),
+  status_reason: z.string(),
+  operator_message: z.string(),
+  top_features: z.optional(z.array(z.object({
+    name: z.string(),
+    importance: z.number(),
+  }).passthrough())),
+  backtest_finding: z.optional(z.string()),
+}).passthrough();
+
+export const ConvexityHarvestSchema = z.object({
+  date: z.string(),
+  allocation_pct: z.number(),
+  position_type: z.string(),
+  vix_level: z.number(),
+  contango_pct: z.number(),
+  expected_roll_yield: z.number(),
+  risk_score: z.number(),
+  exit_triggered: z.boolean(),
+  exit_reason: z.nullable(z.string()),
+}).passthrough();
+
+export const LLMSentimentSchema = z.object({
+  timestamp: z.string(),
+  technical_regime: z.string(),
+  technical_confidence: z.number(),
+  sentiment_regime: z.string(),
+  sentiment_confidence: z.number(),
+  combined_score: z.number(),
+  combined_regime: z.string(),
+  technical_weight: z.number(),
+  sentiment_weight: z.number(),
+  circuit_breaker_level: z.string(),
+  position_scaling_factor: z.number(),
+  equity_tilt: z.number(),
+  bond_duration_tilt: z.number(),
+  gold_tilt: z.number(),
+}).passthrough();
+
+const SectorEntrySchema = z.object({
+  symbol: z.string(),
+  name: z.string(),
+  momentumScore: z.number(),
+  allocation: z.number(),
+  rank: z.number(),
+  longMomentum: z.optional(z.number()),
+  shortMomentum: z.optional(z.number()),
+  volatility: z.optional(z.number()),
+}).passthrough();
+
+const SectorAllocationEntrySchema = z.object({
+  symbol: z.string(),
+  weight: z.number(),
+  momentum: z.number(),
+  rank: z.number(),
+}).passthrough();
+
+const SectorAllocationSchema = z.object({
+  spy_core: z.number(),
+  spy_total: z.number(),
+  sector_overlay: z.number(),
+  sectors: z.array(SectorAllocationEntrySchema),
+}).passthrough();
+
+export const SectorRotationSchema = z.object({
+  timestamp: z.string(),
+  status: z.string(),
+  vix: z.optional(z.number()),
+  regime: z.optional(z.nullable(z.string())),
+  methodology: z.optional(z.string()),
+  overlay_pct: z.optional(z.number()),
+  top_sectors: z.optional(z.array(SectorEntrySchema)),
+  allocation: z.optional(SectorAllocationSchema),
+  rebalanceRecommended: z.optional(z.boolean()),
+  rebalanceReason: z.optional(z.nullable(z.string())),
+  spAllocation: z.optional(z.number()),
+  sectorAllocations: z.optional(z.array(z.unknown())),
+  totalEquityWeight: z.optional(z.number()),
+  regimeAdjusted: z.optional(z.boolean()),
+}).passthrough();
+
+export const FactorRotationDashboardSchema = z.object({
+  active: z.boolean(),
+  selected_factors: z.array(z.string()),
+  signal_strength: z.number(),
+  factor_allocations: z.record(z.string(), z.number()),
+  backtest_finding: z.string(),
+}).passthrough();
+
+export const CollarSchema = z.object({
+  active: z.boolean(),
+  regime: z.string(),
+  call_strike: z.number(),
+  put_strike: z.number(),
+  net_premium: z.number(),
+  is_cashless: z.boolean(),
+  max_upside_pct: z.number(),
+  max_downside_pct: z.number(),
+  vix_level: z.number(),
+  confidence: z.number(),
+}).passthrough();
+
+export const KurtosisRegimeSchema = z.object({
+  active: z.boolean(),
+  kurtosis_20d: z.number(),
+  kurtosis_60d: z.number(),
+  ker_ratio: z.number(),
+  regime: z.string(),
+  transitioning: z.boolean(),
+  strategy_preference: z.string(),
+  tsom_weight: z.number(),
+  mr_weight: z.number(),
+  fat_tail_risk: z.number(),
+}).passthrough();
+
+export const VolatilityParitySchema = z.object({
+  date: z.string(),
+  target_volatility: z.number(),
+  spy_pct: z.number(),
+  gld_pct: z.number(),
+  tlt_pct: z.number(),
+  core_vol_contribution: z.number(),
+  vix_short_pct: z.number(),
+  vix_tail_pct: z.number(),
+  vix_vol_contribution: z.number(),
+  cash_pct: z.number(),
+  expected_portfolio_vol: z.number(),
+  expected_max_dd: z.number(),
+  rebalance_triggered: z.boolean(),
+  rebalance_reason: z.nullable(z.string()),
+}).passthrough();
+
+const AllocationSurfaceRoleSchema = z.object({
+  label: z.string(),
+  role: z.enum(['execution_routed', 'advisory_non_routed']),
+  routed: z.boolean(),
+  routed_by: z.nullable(z.string()),
+  live_authoritative: z.optional(z.boolean()),
+  canonical_controller: z.optional(z.string()),
+  description: z.string(),
+}).passthrough();
+
+const AdvisoryAllocationArtifactRoleSchema = z.object({
+  schema_version: z.literal('allocation-artifact-role/v1'),
+  surface: z.string(),
+  allocation_field: z.string(),
+  runtime_role: z.literal('advisory_non_routed'),
+  live_authoritative: z.literal(false),
+  routed: z.literal(false),
+  routed_by: z.null(),
+  canonical_controller: z.literal('signals.json.target_allocations'),
+  routed_surface: z.literal('target_allocations'),
+  routed_surface_path: z.literal('public/data/signals.json#target_allocations'),
+  description: z.string(),
+}).passthrough();
+
+const uppercaseSymbolWeightsSchema = () => (
+  z.record(z.string(), z.number()).refine(
+    (weights) => Object.keys(weights).every((symbol) => symbol === symbol.toUpperCase()),
+    { message: 'allocation symbols must be uppercase canonical identifiers' },
+  )
+);
+
+export const AllocationSurfaceRolesSchema = z.object({
+  schema_version: z.literal('allocation-surface-roles/v1'),
+  routed_surface: z.string(),
+  routed_by: z.string(),
+  surfaces: z.object({
+    target_allocations: AllocationSurfaceRoleSchema.extend({
+      role: z.literal('execution_routed'),
+      routed: z.literal(true),
+      routed_by: z.string(),
+    }),
+    ensemble_voting: AllocationSurfaceRoleSchema.extend({
+      role: z.literal('advisory_non_routed'),
+      routed: z.literal(false),
+      routed_by: z.null(),
+    }),
+    adaptive_sizing: AllocationSurfaceRoleSchema.extend({
+      role: z.literal('advisory_non_routed'),
+      routed: z.literal(false),
+      routed_by: z.null(),
+      live_authoritative: z.literal(false),
+    }),
+    black_litterman: AllocationSurfaceRoleSchema.extend({
+      role: z.literal('advisory_non_routed'),
+      routed: z.literal(false),
+      routed_by: z.null(),
+      live_authoritative: z.literal(false),
+    }),
+  }).passthrough(),
+}).passthrough();
+
+export const AdaptiveSizingSchema = z.object({
+  base_allocation: uppercaseSymbolWeightsSchema().optional(),
+  adjusted_allocation: uppercaseSymbolWeightsSchema(),
+  adjustments: uppercaseSymbolWeightsSchema().optional(),
+  regime_adjustment: z.optional(z.number()),
+  volatility_adjustment: z.optional(z.number()),
+  signal_adjustment: z.optional(z.number()),
+  drawdown_adjustment: z.optional(z.number()),
+  factors: z.optional(z.record(z.string(), z.unknown())),
+  authority: AdvisoryAllocationArtifactRoleSchema.extend({
+    surface: z.literal('adaptive_sizing'),
+    allocation_field: z.literal('adjusted_allocation'),
+  }),
+  generated_at: z.string(),
+}).passthrough();
+
+const BlackLittermanViewSchema = z.object({
+  signal_name: z.string(),
+  asset: z.string().refine((asset) => asset === asset.toUpperCase(), {
+    message: 'view asset must be uppercase canonical identifier',
+  }),
+  direction: z.enum(['bullish', 'bearish', 'neutral']),
+  confidence: z.number(),
+  expected_return_delta: z.number(),
+});
+
+export const BlackLittermanSchema = z.object({
+  prior_weights: uppercaseSymbolWeightsSchema(),
+  posterior_weights: uppercaseSymbolWeightsSchema(),
+  posterior_returns: uppercaseSymbolWeightsSchema().optional(),
+  views: z.array(BlackLittermanViewSchema),
+  tau: z.number(),
+  view_confidence_method: z.string(),
+  optimization_available: z.optional(z.boolean()),
+  excluded_assets: z.array(z.string()).optional(),
+  zero_weight_assets: z.array(z.string()).optional(),
+  authority: AdvisoryAllocationArtifactRoleSchema.extend({
+    surface: z.literal('black_litterman'),
+    allocation_field: z.literal('posterior_weights'),
+  }),
+  generated_at: z.optional(z.string()),
+}).passthrough();
+
+const AdvancedRegimeSignalAuthoritySchema = z.object({
+  role: z.literal('advisory_shadow'),
+  routed: z.literal(false),
+  availability: z.optional(z.enum(['present', 'unavailable', 'stale', 'error', 'unknown'])),
+  published: z.optional(z.boolean()),
+  description: z.optional(z.string()),
+}).passthrough();
+
+export const RegimeAuthoritySchema = z.object({
+  schema_version: z.literal('regime-authority/v1'),
+  live_controller: z.literal('classify_vix_regime'),
+  live_controller_module: z.literal('src.utils.classify_vix_regime'),
+  live_regime: z.string(),
+  allocation_regime: z.string(),
+  routed_surface: z.literal('target_allocations'),
+  target_allocations: z.record(z.string(), z.number()),
+  advanced_regime_signals: z.object({
+    two_stage_regime: AdvancedRegimeSignalAuthoritySchema,
+    bocd_regime: AdvancedRegimeSignalAuthoritySchema,
+    regime_transition: AdvancedRegimeSignalAuthoritySchema,
+  }).passthrough(),
 }).passthrough();
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -437,44 +987,14 @@ const OptionalPanelObjectSchema = z.union([
   z.null(),
 ]);
 
-export const StackingEnsembleSchema = z.object({
-  active: z.boolean(),
-  stacking_available: z.boolean(),
-  prediction_direction: z.string(),
-  confidence: z.number(),
-  probability_bullish: z.number(),
-  probability_bearish: z.number(),
-  probability_neutral: z.number(),
-  fallback_used: z.boolean(),
-  model_version: z.string(),
-  voting_accuracy: z.number(),
-  stacking_accuracy: z.number(),
-  feature_count: z.nullable(z.number()),
-  feature_count_metadata_available: z.boolean(),
-  feature_count_source: z.enum([
-    'model_metadata',
-    'unavailable_no_model',
-    'unavailable_missing_metadata',
-  ]),
-  runtime_mode: z.enum([
-    'model_backed',
-    'fallback_no_model',
-    'fallback_weighted_voting',
-  ]),
-  model_backed: z.boolean(),
-  operator_disclosure: z.string().min(1),
-  latency_ms: z.number(),
-  top_features: z.optional(z.array(z.object({
-    name: z.string(),
-    importance: z.number(),
-  }).passthrough())),
-  backtest_finding: z.optional(z.string()),
-}).passthrough();
-
 // Generated optional panels may be disabled as null, emitted as {}, or emitted
 // in a legacy summary shape while their panel code remains defensive.
 const optionalPanel = <T extends z.ZodTypeAny>(schema: T) => (
   z.optional(z.union([schema, OptionalPanelObjectSchema]))
+);
+
+const activePanel = <T extends z.ZodTypeAny>(schema: T) => (
+  z.optional(z.nullable(schema))
 );
 
 function normalizeSignalsTimestamp(raw: unknown): unknown {
@@ -494,10 +1014,13 @@ const SignalsDataObjectSchema = z.object({
   latest_prices: z.record(z.string(), z.number()),
   current_positions: z.array(PositionSchema),
   target_allocations: z.record(z.string(), z.number()),
+  allocation_surface_roles: z.optional(AllocationSurfaceRolesSchema),
+  regime_authority: z.optional(RegimeAuthoritySchema),
   cash: z.number(),
   total_value: z.number(),
   recent_orders: z.array(RecentOrderSchema),
   ml_signals: MLSignalsSchema,
+  marl_status: MarlStatusSchema,
   // generated_at is a runtime field not in the TS interface — keep as passthrough
   generated_at: z.optional(z.string()),
 
@@ -515,20 +1038,20 @@ const SignalsDataObjectSchema = z.object({
   vix_overlay: z.optional(VIXOverlaySchema),
   hedge_selector: z.optional(z.nullable(HedgeSelectorSchema)),
 
-  // Untyped signal panels can be null when the signal is disabled/unavailable.
+  // Active signal panels can be null when the signal is disabled/unavailable.
   behavioral_sentiment: z.optional(OptionalPanelObjectSchema),
-  crypto_allocation: z.optional(OptionalPanelObjectSchema),
-  calendar_seasonality: z.optional(OptionalPanelObjectSchema),
-  ensemble_voting: z.optional(OptionalPanelObjectSchema),
-  alternative_data: z.optional(OptionalPanelObjectSchema),
-  factor_rotation: z.optional(OptionalPanelObjectSchema),
-  stacking_ensemble: optionalPanel(StackingEnsembleSchema),
-  convexity_harvest: z.optional(OptionalPanelObjectSchema),
-  llm_sentiment: z.optional(OptionalPanelObjectSchema),
-  sector_rotation: z.optional(OptionalPanelObjectSchema),
-  factor_rotation_dashboard: z.optional(OptionalPanelObjectSchema),
-  collar: z.optional(OptionalPanelObjectSchema),
-  kurtosis_regime: z.optional(OptionalPanelObjectSchema),
+  crypto_allocation: activePanel(CryptoAllocationSchema),
+  calendar_seasonality: activePanel(CalendarSeasonalitySchema),
+  ensemble_voting: activePanel(EnsembleVotingSchema),
+  alternative_data: activePanel(AlternativeDataSchema),
+  factor_rotation: activePanel(FactorRotationSignalSchema),
+  stacking_ensemble: activePanel(StackingEnsembleSchema),
+  convexity_harvest: activePanel(ConvexityHarvestSchema),
+  llm_sentiment: activePanel(LLMSentimentSchema),
+  sector_rotation: activePanel(SectorRotationSchema),
+  factor_rotation_dashboard: activePanel(FactorRotationDashboardSchema),
+  collar: activePanel(CollarSchema),
+  kurtosis_regime: activePanel(KurtosisRegimeSchema),
   bocd_regime: z.optional(z.object({
     regime: z.number(),
     regime_change_prob: z.number(),
@@ -540,7 +1063,7 @@ const SignalsDataObjectSchema = z.object({
     description: z.string(),
     timestamp: z.string(),
   })),
-  volatility_parity: z.optional(z.record(z.string(), z.unknown())),
+  volatility_parity: activePanel(VolatilityParitySchema),
   rebalance_health: z.optional(z.record(z.string(), z.unknown())),
   broker_circuit_breaker: z.optional(z.object({
     state: z.enum(['closed', 'open', 'half-open']),

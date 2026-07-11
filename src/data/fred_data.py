@@ -138,6 +138,16 @@ class FredSignal:
     monetary_stance: str  # "tight", "neutral", "accommodative"
     manufacturing_health: float  # PMI-based (0-100)
     credit_conditions: str  # "tight", "normal", "loose"
+    source_mode: str = "unknown"
+    cache_status: str = "unknown"
+    api_key_configured: bool = False
+    reason: str | None = None
+    latest_fetched_at: str | None = None
+    indicators_observed: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.indicators_observed is None:
+            self.indicators_observed = bool(self.indicators)
 
 
 # ── Cache Helpers ───────────────────────────────────────────────────────
@@ -503,6 +513,24 @@ class FredMdFetcher:
         if pmi is not None:
             indicators["pmi"] = pmi
 
+        if not indicators:
+            return FredSignal(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                regime="UNKNOWN",
+                confidence=0.0,
+                indicators={},
+                recession_probability=0.0,
+                inflation_pressure=0.0,
+                monetary_stance=monet_stance,
+                manufacturing_health=50.0,
+                credit_conditions=credit,
+                source_mode="unavailable",
+                cache_status="unavailable",
+                api_key_configured=bool(self._api_key),
+                reason="no_fred_indicators",
+                indicators_observed=False,
+            )
+
         # Preliminary regime classification (will be replaced in Phase 2)
         regime = "NORMAL"
         confidence = 0.5
@@ -538,6 +566,10 @@ class FredMdFetcher:
             monetary_stance=monet_stance,
             manufacturing_health=pmi or 50.0,
             credit_conditions=credit,
+            source_mode="cached" if self.use_cache else "live",
+            cache_status="ok" if self.use_cache else "not_used",
+            api_key_configured=bool(self._api_key),
+            indicators_observed=True,
         )
 
 
@@ -571,4 +603,9 @@ def get_fred_signal(fetcher: Optional[FredMdFetcher] = None,
             monetary_stance="unknown",
             manufacturing_health=50.0,
             credit_conditions="unknown",
+            source_mode="unavailable",
+            cache_status="unavailable",
+            api_key_configured=bool(api_key),
+            reason=str(e),
+            indicators_observed=False,
         )

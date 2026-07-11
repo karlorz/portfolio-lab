@@ -8,6 +8,7 @@ import json
 import sqlite3
 import logging
 import os
+import shutil
 from collections import deque
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -16,6 +17,10 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
+from src.strategy.regime_allocation import (
+    get_regime_allocation_with_override,
+    normalize_allocation_regime,
+)
 from src.utils import safe_get, classify_vix_regime
 from src.backtest.metrics import save_results_json
 from src.dashboard.public_data_index import build_public_data_index
@@ -51,6 +56,81 @@ _ENSEMBLE_STALENESS_MAP = {
 
 logger = logging.getLogger(__name__)
 
+PUBLIC_DATA_DIST_MIRROR_FILES = ("source_manifest.json", "index.json", "health.json")
+
+
+def _is_predictive_fred_macro(fred: Any) -> bool:
+    """Return true when FRED macro has observed inputs suitable for IC staging."""
+    if not isinstance(fred, dict) or fred.get("confidence") is None:
+        return False
+    indicators = fred.get("indicators")
+    if not isinstance(indicators, dict) or not indicators:
+        return False
+    if fred.get("indicators_observed") is False:
+        return False
+    unavailable_values = {"unavailable", "missing", "empty", "failed", "degraded", "fallback"}
+    fallback_modes = {"unavailable", "synthetic", "last_good", "fallback"}
+    source_mode = str(fred.get("source_mode", "")).lower()
+    status = str(fred.get("status", "")).lower()
+    cache_status = str(fred.get("cache_status", "")).lower()
+    if source_mode in fallback_modes:
+        return False
+    if status in unavailable_values:
+        return False
+    return cache_status not in unavailable_values
+
+
+def _source_manifest_row_for(public_dir: Path, artifact_name: str) -> dict[str, Any] | None:
+    """Return the compact source-manifest row for a public data artifact."""
+    manifest_path = public_dir / "source_manifest.json"
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        return None
+
+    for row in artifacts:
+        if not isinstance(row, dict):
+            continue
+        candidates = {
+            row.get("artifact"),
+            row.get("filename"),
+            row.get("path"),
+        }
+        if artifact_name in candidates:
+            return row
+    return None
+
+
+def _yield_source_provenance(public_dir: Path) -> dict[str, Any]:
+    """Map yields source-manifest metadata into the yield curve payload."""
+    row = _source_manifest_row_for(public_dir, "yields.json")
+    if row is None:
+        return {}
+    return {
+        "source_mode": row.get("source_mode"),
+        "source_status": row.get("status"),
+        "source_reason": row.get("failure_reason") or row.get("reason"),
+        "source_provider": row.get("provider"),
+        "source_generated_at": row.get("generated_at"),
+        "source_latest_observation": row.get("latest_observation"),
+    }
+
+
+def _first_known_value(*values: Any, default: str = "unknown") -> Any:
+    """Return the first non-empty metadata value, treating 'unknown' as absent."""
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and value.lower() in {"", "unknown"}:
+            continue
+        return value
+    return default
+
 # Common exception types caught when signal generators fail.
 # ValueError/TypeError indicate likely bugs — callers should log these at
 # error level. ImportError/AttributeError indicate missing deps — warning.
@@ -74,6 +154,34 @@ def _attach_signal_metadata(output: Dict, *, generated_at: str | None = None) ->
     enriched["generated_at"] = timestamp
     enriched.setdefault("timestamp", timestamp)
     return enriched
+
+
+def _finalize_signal_metadata(output: Dict, *, finalized_at: str | None = None) -> Dict:
+    """Stamp final artifact metadata after all signal sections are assembled."""
+    timestamp = finalized_at or datetime.now(timezone.utc).isoformat()
+    finalized = dict(output)
+    finalized["generated_at"] = timestamp
+    finalized["timestamp"] = timestamp
+    return finalized
+
+
+def _dist_data_dir_for_public_dir(public_dir: Path) -> Path:
+    """Return the app dist/data directory that mirrors public/data."""
+    if public_dir.name == "data" and public_dir.parent.name == "public":
+        app_root = public_dir.parent.parent
+    else:
+        app_root = public_dir.parent
+    return app_root / "dist" / "data"
+
+
+def _mirror_public_data_contract_files_to_dist(public_dir: Path) -> None:
+    """Mirror deploy-checked public data files after final generation."""
+    dist_data = _dist_data_dir_for_public_dir(public_dir)
+    dist_data.mkdir(parents=True, exist_ok=True)
+    for filename in PUBLIC_DATA_DIST_MIRROR_FILES:
+        source = public_dir / filename
+        if source.exists():
+            shutil.copyfile(source, dist_data / filename)
 
 
 def _compact_health_summary(report: Dict) -> Dict:
@@ -108,7 +216,52 @@ def _compact_health_summary(report: Dict) -> Dict:
     if isinstance(scheduler_status, dict) and scheduler_status.get("status"):
         summary["scheduler_status"] = scheduler_status.get("status")
 
+    data_pipeline_slo = report.get("data_pipeline_slo")
+    if isinstance(data_pipeline_slo, dict):
+        if data_pipeline_slo.get("status"):
+            summary["data_pipeline_slo_status"] = data_pipeline_slo.get("status")
+        if data_pipeline_slo.get("top_dimension"):
+            summary["top_slo_dimension"] = data_pipeline_slo.get("top_dimension")
+        runbook = data_pipeline_slo.get("runbook")
+        if isinstance(runbook, dict):
+            top_cause = runbook.get("top_cause")
+            if isinstance(top_cause, dict) and top_cause.get("code"):
+                summary["top_slo_cause_code"] = top_cause.get("code")
+
     return summary
+
+
+def _remaining_budget_ratio(metadata: dict[str, Any], status: dict[str, Any]) -> float:
+    """Return remaining rebalance budget as a fraction of portfolio value."""
+    value = metadata.get("remaining_budget_ratio")
+    if value is None:
+        value = metadata.get("remaining_budget_pct")
+    if value is None:
+        value = status.get("remaining_budget_ratio")
+    if value is None and status.get("remaining_budget_pct") is not None:
+        value = status.get("remaining_budget_pct") / 100
+    if value is None:
+        return 1.0
+    return round(float(value), 6)
+
+
+def _remaining_budget_display_pct(ratio: float, status: dict[str, Any]) -> float:
+    """Return remaining rebalance budget in display percent units."""
+    status_pct = status.get("remaining_budget_pct")
+    if status_pct is not None:
+        return float(status_pct)
+    return round(ratio * 100, 3)
+
+
+def _load_canonical_health_report() -> dict[str, Any] | None:
+    """Load canonical health.json when already published."""
+    health_path = PUBLIC_DIR / "health.json"
+    try:
+        with health_path.open(encoding="utf-8") as handle:
+            report = json.load(handle)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    return report if isinstance(report, dict) else None
 
 
 def _log_signal_error(signal_name: str, exc: Exception) -> None:
@@ -145,6 +298,21 @@ class DashboardGenerator:
         PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite_connect(DB_PATH)
         self.conn.row_factory = sqlite3.Row
+
+    @staticmethod
+    def _deduplicate_performance_entries_by_date(
+        entries: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Keep the last performance entry for each calendar date."""
+        daily_map: Dict[str, Dict[str, Any]] = {}
+        for idx, entry in enumerate(entries):
+            ts = entry.get("timestamp", "")
+            date_key = ts[:10] if len(ts) >= 10 else ""
+            if not date_key:
+                # Preserve legacy behavior: timestamp-less rows are distinct.
+                date_key = f"__no_ts_{idx}__"
+            daily_map[date_key] = entry
+        return [daily_map[d] for d in sorted(daily_map)]
 
     def __enter__(self):
         return self
@@ -194,17 +362,21 @@ class DashboardGenerator:
         perf_log = DATA_DIR / "performance.jsonl"
         paper_perf = []
         if perf_log.exists():
+            raw_entries = []
             with open(perf_log) as f:
                 for line in deque(f, maxlen=500):
                     try:
-                        entry = json.loads(line)
-                        paper_perf.append({
-                            "t": entry.get("timestamp", "")[:10],
-                            "v": entry.get("total_value", 0),
-                            "r": entry.get("daily_return", 0)
-                        })
+                        raw_entries.append(json.loads(line))
                     except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                         logger.warning("Failed to parse performance log entry: %s", e)
+            paper_perf = [
+                {
+                    "t": entry.get("timestamp", "")[:10],
+                    "v": entry.get("total_value", 0),
+                    "r": entry.get("daily_return", 0)
+                }
+                for entry in self._deduplicate_performance_entries_by_date(raw_entries)
+            ]
 
         output = {
             "prices": prices,
@@ -277,24 +449,26 @@ class DashboardGenerator:
 
             monitor = ICMonitor()
             monitor.load_state()
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT date, close FROM prices WHERE symbol = 'SPY' "
+                "ORDER BY date DESC LIMIT 1",
+            )
+            latest_spy_row = cursor.fetchone()
+            latest_spy_date = latest_spy_row[0] if latest_spy_row else None
 
             # Phase 1: Resolve previously staged predictions
             if monitor.has_staged_predictions():
                 staged_date = monitor.get_staged_date()
                 if staged_date:
                     # Compute SPY forward return from staged date to latest
-                    cursor = self.conn.cursor()
                     cursor.execute(
                         "SELECT date, close FROM prices WHERE symbol = 'SPY' "
                         "AND date >= ? ORDER BY date ASC LIMIT 1",
                         (staged_date,),
                     )
                     start_row = cursor.fetchone()
-                    cursor.execute(
-                        "SELECT date, close FROM prices WHERE symbol = 'SPY' "
-                        "ORDER BY date DESC LIMIT 1",
-                    )
-                    end_row = cursor.fetchone()
+                    end_row = latest_spy_row
                     if start_row and end_row and start_row[0] != end_row[0]:
                         start_price = float(start_row[1])
                         end_price = float(end_row[1])
@@ -340,13 +514,13 @@ class DashboardGenerator:
 
             # FRED-MD macro confidence
             fred = output.get("fred_macro")
-            if isinstance(fred, dict) and fred.get("confidence") is not None:
+            if _is_predictive_fred_macro(fred):
                 predictions["fred_macro"] = float(fred["confidence"])
 
-            if predictions:
+            if predictions and latest_spy_date and not monitor.has_staged_predictions():
                 monitor.stage_predictions(
                     predictions,
-                    datetime.now().strftime("%Y-%m-%d"),
+                    str(latest_spy_date),
                 )
 
             monitor.save_state()
@@ -510,8 +684,10 @@ class DashboardGenerator:
             cash = 100000
         
         # Target allocation based on regime
-        base_alloc = BASE_ALLOCATION
-        target_alloc = REGIME_OVERRIDES.get(current_regime) or base_alloc
+        if os.environ.get("REGIME_ALLOC_ENABLED", "0") == "1":
+            target_alloc = get_regime_allocation_with_override(current_regime)
+        else:
+            target_alloc = REGIME_OVERRIDES.get(current_regime) or BASE_ALLOCATION
         
         # Pending orders (tail read only)
         orders = []
@@ -544,6 +720,375 @@ class DashboardGenerator:
             "target_alloc": target_alloc,
             "orders": orders,
         }
+
+    @staticmethod
+    def _build_ensemble_source_breakdown(source_votes: List[Any]) -> List[Dict[str, Any]]:
+        """Serialize ensemble source readings for downstream postprocessors."""
+        source_breakdown = []
+        for src in source_votes:
+            value = float(src.value)
+            source_breakdown.append({
+                "source": src.source.value if hasattr(src.source, 'value') else str(src.source),
+                "value": round(value, 4),
+                "direction": "bullish" if value > 0 else ("bearish" if value < 0 else "neutral"),
+                "strength": round(abs(value), 3),
+                "confidence": round(src.confidence, 3),
+                "weight": round(src.weight, 3),
+            })
+        return source_breakdown
+
+    @staticmethod
+    def _build_ensemble_source_count_metadata(
+        regime: Any,
+        source_breakdown: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Describe configured, collected, and positive-weight ensemble sources."""
+        configured_sources = []
+        try:
+            from src.strategy.ensemble_voter import REGIME_WEIGHTS, Regime, SignalSource
+
+            regime_key = regime if isinstance(regime, Regime) else Regime(str(regime).lower())
+            configured_sources = [
+                source.value if hasattr(source, "value") else str(source)
+                for source in REGIME_WEIGHTS.get(regime_key, {})
+            ] or [source.value for source in SignalSource]
+        except (ImportError, AttributeError, KeyError, TypeError, ValueError):
+            configured_sources = []
+
+        inactive_sources = []
+        contributing_count = 0
+        for source in source_breakdown:
+            try:
+                weight = float(source.get("weight", 0.0))
+            except (TypeError, ValueError):
+                weight = 0.0
+            source_name = str(source.get("source", "unknown"))
+            if np.isfinite(weight) and weight > 0:
+                contributing_count += 1
+            else:
+                inactive_sources.append(source_name)
+
+        collected_count = len(source_breakdown)
+        configured_count = len(set(configured_sources)) if configured_sources else collected_count
+        return {
+            "num_sources": collected_count,
+            "configured_source_count": configured_count,
+            "collected_source_count": collected_count,
+            "contributing_source_count": contributing_count,
+            "inactive_source_count": len(inactive_sources),
+            "inactive_sources": inactive_sources,
+        }
+
+    @staticmethod
+    def _get_configured_ensemble_source_weights(regime: Any) -> Dict[str, float]:
+        """Return configured ensemble source weights for the active regime."""
+        try:
+            from src.strategy.ensemble_voter import REGIME_WEIGHTS, Regime
+
+            regime_key = regime if isinstance(regime, Regime) else Regime(str(regime).lower())
+            weights_file = Path(os.environ.get("ENSEMBLE_WEIGHTS_FILE", str(DATA_DIR / "ensemble_weights.json")))
+            if weights_file.exists():
+                try:
+                    with open(weights_file) as f:
+                        configured = json.load(f)
+                    regime_weights = configured.get(regime_key.value)
+                    if isinstance(regime_weights, dict):
+                        return {
+                            str(source): float(weight)
+                            for source, weight in regime_weights.items()
+                        }
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            return {
+                source.value if hasattr(source, "value") else str(source): float(weight)
+                for source, weight in REGIME_WEIGHTS.get(regime_key, {}).items()
+            }
+        except (ImportError, AttributeError, KeyError, TypeError, ValueError):
+            return {}
+
+    @staticmethod
+    def _format_ensemble_source_label(source: str) -> str:
+        """Format a source identifier for operator-facing source disclosure."""
+        return source.replace("_", " ").title()
+
+    @staticmethod
+    def _google_trends_inactive_disclosure() -> tuple[str, str]:
+        """Inspect Google Trends directly when it is configured but not collected."""
+        try:
+            from src.signals.google_trends_signal import GoogleTrendsSignal
+
+            snapshot = GoogleTrendsSignal().get_signal_snapshot()
+            if snapshot.is_active:
+                return "missing", "Configured Google Trends did not appear in ensemble source rows."
+
+            reason = snapshot.metadata.get("inactive_reason") if isinstance(snapshot.metadata, dict) else None
+            if not reason:
+                reason = snapshot.explanation.replace("Google Trends:", "", 1).strip()
+            category = snapshot.metadata.get("inactive_category") if isinstance(snapshot.metadata, dict) else None
+            status = str(category or "inactive")
+            return status, str(reason or "Google Trends source is inactive.")
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            return "unavailable", f"Google Trends status unavailable: {e}"
+
+    @staticmethod
+    def _build_configured_source_status(
+        regime: Any,
+        source_breakdown: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Explain configured source state, including missing stale configured sources."""
+        configured_weights = DashboardGenerator._get_configured_ensemble_source_weights(regime)
+        if not configured_weights:
+            return []
+
+        rows_by_source = {
+            str(row.get("source", "")): row
+            for row in source_breakdown
+            if isinstance(row, dict) and row.get("source")
+        }
+        statuses: List[Dict[str, Any]] = []
+
+        for source, configured_weight in configured_weights.items():
+            row = rows_by_source.get(source)
+            collected = row is not None
+            if row is not None:
+                try:
+                    row_weight = float(row.get("weight", 0.0))
+                except (TypeError, ValueError):
+                    row_weight = 0.0
+                contributing = bool(np.isfinite(row_weight) and row_weight > 0)
+                status = "active" if contributing else "zero_weight"
+                reason = (
+                    "Collected and contributing to the ensemble vote."
+                    if contributing
+                    else "Collected but assigned zero effective weight."
+                )
+            else:
+                contributing = False
+                status = "missing"
+                reason = "Configured source did not produce an active ensemble reading."
+                if source == "google_trends":
+                    status, reason = DashboardGenerator._google_trends_inactive_disclosure()
+
+            statuses.append({
+                "source": source,
+                "label": DashboardGenerator._format_ensemble_source_label(source),
+                "configured": True,
+                "configured_weight": round(configured_weight, 5),
+                "collected": collected,
+                "active": collected and contributing,
+                "contributing": contributing,
+                "status": status,
+                "reason": reason,
+            })
+
+        return statuses
+
+    @staticmethod
+    def _build_ensemble_adaptive_learning_disclosure(ensemble_result: Any) -> Dict[str, Any]:
+        """Serialize adaptive-learning branch status from an ensemble vote."""
+        disclosure = getattr(ensemble_result, "adaptive_learning", {})
+        return disclosure if isinstance(disclosure, dict) else {}
+
+    @staticmethod
+    def _build_allocation_surface_roles() -> Dict[str, Any]:
+        """Describe the current live-routing role of allocation-like signals surfaces."""
+        advisory_description = (
+            "Published for advisory diagnostics; current order routing uses "
+            "target_allocations."
+        )
+        return {
+            "schema_version": "allocation-surface-roles/v1",
+            "routed_surface": "target_allocations",
+            "routed_by": "src.broker.order_router",
+            "surfaces": {
+                "target_allocations": {
+                    "label": "Target Allocation",
+                    "role": "execution_routed",
+                    "routed": True,
+                    "routed_by": "src.broker.order_router",
+                    "live_authoritative": True,
+                    "canonical_controller": "signals.json.target_allocations",
+                    "description": (
+                        "Current order-routing input consumed by src.broker.order_router."
+                    ),
+                },
+                "ensemble_voting": {
+                    "label": "Ensemble Voting",
+                    "role": "advisory_non_routed",
+                    "routed": False,
+                    "routed_by": None,
+                    "live_authoritative": False,
+                    "canonical_controller": "signals.json.target_allocations",
+                    "description": advisory_description,
+                },
+                "adaptive_sizing": {
+                    "label": "Adaptive Sizing",
+                    "role": "advisory_non_routed",
+                    "routed": False,
+                    "routed_by": None,
+                    "live_authoritative": False,
+                    "canonical_controller": "signals.json.target_allocations",
+                    "description": advisory_description,
+                },
+                "black_litterman": {
+                    "label": "Black-Litterman",
+                    "role": "advisory_non_routed",
+                    "routed": False,
+                    "routed_by": None,
+                    "live_authoritative": False,
+                    "canonical_controller": "signals.json.target_allocations",
+                    "description": advisory_description,
+                },
+            },
+        }
+
+    @staticmethod
+    def _build_advisory_allocation_artifact_role(
+        surface: str,
+        allocation_field: str,
+    ) -> Dict[str, Any]:
+        """Describe a standalone allocation artifact as advisory/non-routed."""
+        return {
+            "schema_version": "allocation-artifact-role/v1",
+            "surface": surface,
+            "allocation_field": allocation_field,
+            "runtime_role": "advisory_non_routed",
+            "live_authoritative": False,
+            "routed": False,
+            "routed_by": None,
+            "canonical_controller": "signals.json.target_allocations",
+            "routed_surface": "target_allocations",
+            "routed_surface_path": "public/data/signals.json#target_allocations",
+            "description": (
+                f"{surface} is published for advisory diagnostics; live order routing "
+                "continues to consume signals.json.target_allocations."
+            ),
+        }
+
+    @staticmethod
+    def _canonicalize_public_weights(
+        weights: Dict[str, Any],
+        canonical_assets: tuple[str, ...] = ("SPY", "GLD", "TLT"),
+    ) -> Dict[str, Any]:
+        """Uppercase public weight keys and preserve zero-weight diagnostics."""
+        normalized: Dict[str, float] = {}
+        excluded_assets: list[str] = []
+        for symbol, raw_weight in (weights or {}).items():
+            canonical = str(symbol).upper()
+            try:
+                normalized[canonical] = float(raw_weight)
+            except (TypeError, ValueError):
+                excluded_assets.append(canonical)
+
+        public_weights = {
+            symbol: normalized.get(symbol, 0.0)
+            for symbol in canonical_assets
+        }
+        zero_weight_assets = [
+            symbol for symbol, weight in public_weights.items()
+            if abs(weight) < 1e-12
+        ]
+
+        return {
+            "weights": public_weights,
+            "excluded_assets": sorted(set(excluded_assets)),
+            "zero_weight_assets": zero_weight_assets,
+        }
+
+    @staticmethod
+    def _build_regime_authority(
+        current_regime: str,
+        target_alloc: Dict[str, float],
+    ) -> Dict[str, Any]:
+        """Document the live regime controller and advisory role of advanced regimes."""
+        return {
+            "schema_version": "regime-authority/v1",
+            "live_controller": "classify_vix_regime",
+            "live_controller_module": "src.utils.classify_vix_regime",
+            "live_regime": current_regime,
+            "allocation_regime": normalize_allocation_regime(current_regime) or "normal",
+            "routed_surface": "target_allocations",
+            "target_allocations": target_alloc,
+            "advanced_regime_signals": {
+                "two_stage_regime": {
+                    "role": "advisory_shadow",
+                    "routed": False,
+                    "availability": "unknown",
+                    "published": False,
+                    "description": "Availability pending staleness check; not live order-routing authority.",
+                },
+                "bocd_regime": {
+                    "role": "advisory_shadow",
+                    "routed": False,
+                    "availability": "unknown",
+                    "published": False,
+                    "description": "Availability pending staleness check; not live order-routing authority.",
+                },
+                "regime_transition": {
+                    "role": "advisory_shadow",
+                    "routed": False,
+                    "availability": "unknown",
+                    "published": False,
+                    "description": "Availability pending staleness check; not live order-routing authority.",
+                },
+            },
+        }
+
+    @staticmethod
+    def _dedupe_preserve_order(values: list[str]) -> list[str]:
+        """Return unique string identifiers while preserving first occurrence order."""
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            key = str(value)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(key)
+        return result
+
+    @classmethod
+    def _update_regime_authority_availability(cls, output: Dict[str, Any]) -> None:
+        """Update advanced regime authority entries with observed snapshot state."""
+        authority = output.get("regime_authority")
+        if not isinstance(authority, dict):
+            return
+
+        advanced = authority.get("advanced_regime_signals")
+        if not isinstance(advanced, dict):
+            return
+
+        staleness = output.get("staleness") if isinstance(output.get("staleness"), dict) else {}
+        unavailable = set(staleness.get("unavailable_signals") or [])
+        stale = set(staleness.get("stale_signals") or [])
+
+        for signal_name, entry in advanced.items():
+            if not isinstance(entry, dict):
+                continue
+
+            signal_block = output.get(signal_name)
+            if signal_name in unavailable or signal_block is None:
+                availability = "unavailable"
+                published = False
+                description = "Unavailable in this snapshot; not live order-routing authority."
+            elif signal_name in stale:
+                availability = "stale"
+                published = False
+                description = "Stale in this snapshot; not live order-routing authority."
+            elif cls._is_unavailable_signal_block(signal_block):
+                availability = "error"
+                published = False
+                description = "Error or degraded placeholder in this snapshot; not live order-routing authority."
+            else:
+                availability = "present"
+                published = True
+                description = "Published for advisory diagnostics; not live order-routing authority."
+
+            entry.update({
+                "availability": availability,
+                "published": published,
+                "description": description,
+            })
 
     def _build_base_signal_sections(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Build the core signal sections before dashboard-level metadata."""
@@ -627,15 +1172,17 @@ class DashboardGenerator:
             ensemble_engine = EnsembleVoter()
             ensemble_result = ensemble_engine.compute_vote()
             if ensemble_result:
-                source_breakdown = []
-                for src in ensemble_result.source_votes:
-                    source_breakdown.append({
-                        "source": src.source.value if hasattr(src.source, 'value') else str(src.source),
-                        "direction": "bullish" if src.value > 0 else ("bearish" if src.value < 0 else "neutral"),
-                        "strength": round(abs(src.value), 3),
-                        "confidence": round(src.confidence, 3),
-                        "weight": round(src.weight, 3),
-                    })
+                source_breakdown = self._build_ensemble_source_breakdown(
+                    ensemble_result.source_votes
+                )
+                source_counts = self._build_ensemble_source_count_metadata(
+                    ensemble_result.regime,
+                    source_breakdown,
+                )
+                configured_source_status = self._build_configured_source_status(
+                    ensemble_result.regime,
+                    source_breakdown,
+                )
                 ensemble_signal = {
                     "regime": ensemble_result.regime.value,
                     "regime_confidence": ensemble_result.regime_confidence,
@@ -646,9 +1193,13 @@ class DashboardGenerator:
                     "equity_bias": round(ensemble_result.equity_bias, 3),
                     "duration_bias": round(ensemble_result.duration_bias, 3),
                     "gold_bias": round(ensemble_result.gold_bias, 3),
-                    "num_sources": ensemble_result.num_sources,
+                    **source_counts,
+                    "configured_source_status": configured_source_status,
                     "n_eff": round(getattr(ensemble_result, 'n_eff', 0), 2),
                     "weight_entropy": round(getattr(ensemble_result, 'weight_entropy', 0), 4),
+                    "adaptive_learning": self._build_ensemble_adaptive_learning_disclosure(
+                        ensemble_result
+                    ),
                     "source_breakdown": source_breakdown,
                 }
         except SIGNAL_EXCEPTIONS as e:
@@ -677,6 +1228,11 @@ class DashboardGenerator:
                     target_allocations=target_alloc,
                     total_value=total_value,
                 )
+                gate_status = gate.get_status()
+                remaining_budget_ratio = _remaining_budget_ratio(
+                    gate_result.metadata,
+                    gate_status,
+                )
                 smart_rebalance_data = {
                     'should_execute': gate_result.should_execute,
                     'decision': gate_result.decision,
@@ -688,11 +1244,17 @@ class DashboardGenerator:
                     'vpin': gate_result.metadata.get('vpin', 0.30),
                     'in_optimal_window': gate_result.metadata.get('in_optimal_window', False),
                     'ytd_cost_bps': gate_result.metadata.get('ytd_cost_bps', 0),
-                    'remaining_budget_pct': gate_result.metadata.get('remaining_budget_pct', 100),
-                    'status': gate.get_status(),
+                    'remaining_budget_pct': _remaining_budget_display_pct(
+                        remaining_budget_ratio,
+                        gate_status,
+                    ),
+                    'remaining_budget_ratio': remaining_budget_ratio,
+                    'status': gate_status,
                 }
             else:
                 # No positions — use gate status only
+                gate_status = gate.get_status()
+                remaining_budget_ratio = _remaining_budget_ratio({}, gate_status)
                 smart_rebalance_data = {
                     'should_execute': False,
                     'decision': 'no_positions',
@@ -704,8 +1266,12 @@ class DashboardGenerator:
                     'vpin': 0.30,
                     'in_optimal_window': False,
                     'ytd_cost_bps': 0,
-                    'remaining_budget_pct': 100,
-                    'status': gate.get_status(),
+                    'remaining_budget_pct': _remaining_budget_display_pct(
+                        remaining_budget_ratio,
+                        gate_status,
+                    ),
+                    'remaining_budget_ratio': remaining_budget_ratio,
+                    'status': gate_status,
                 }
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
             logger.warning("Dashboard generation error: %s", e)
@@ -823,28 +1389,14 @@ class DashboardGenerator:
             from src.signals.stacking_integrator import StackingIntegrator
 
             integrator = StackingIntegrator()
-            # Try to get a prediction (may use fallback if no model)
-            prediction = integrator.predict({})
-            stacking_ensemble_dashboard = {
-                "active": True,
-                "stacking_available": integrator.model is not None,
-                "prediction_direction": prediction.direction if prediction else "neutral",
-                "confidence": prediction.confidence if prediction else 0.5,
-                "probability_bullish": prediction.probability_bullish if prediction else 0.33,
-                "probability_bearish": prediction.probability_bearish if prediction else 0.33,
-                "probability_neutral": prediction.probability_neutral if prediction else 0.34,
-                "fallback_used": prediction.fallback_used if prediction else True,
-                "model_version": prediction.model_version if prediction else "unknown",
-                "voting_accuracy": 0.65,
-                "stacking_accuracy": 0.76,
-                **self._build_stacking_feature_count_metadata(integrator),
-                **self._build_stacking_runtime_disclosure(integrator, prediction),
-                "latency_ms": prediction.latency_ms if prediction else 0.0,
-                "backtest_finding": (
-                    "+11% accuracy produces negligible Sharpe gain (2021-2026). "
-                    "Signal frequency and shift magnitude are binding constraints."
-                ),
-            }
+            if integrator.model is None:
+                stacking_ensemble_dashboard = self._build_stacking_no_model_dashboard(integrator)
+            else:
+                prediction = integrator.predict({})
+                stacking_ensemble_dashboard = self._build_stacking_model_dashboard(
+                    integrator,
+                    prediction,
+                )
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("stacking_ensemble", e)
 
@@ -874,19 +1426,26 @@ class DashboardGenerator:
         # Hedge selector recommendation
         hedge_selector_signal = None
         try:
-            hedge_selector_signal = self._get_hedge_selector_signal(vix_level, current_regime)
+            hedge_selector_signal = self._get_hedge_selector_signal(
+                vix_level,
+                current_regime,
+                overlay_data.get("vix_term_structure", {}),
+            )
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("hedge_selector", e)
 
         return {
             "regime": validate_signal("regime", regime_data),
             "target_allocations": target_alloc,
+            "allocation_surface_roles": self._build_allocation_surface_roles(),
+            "regime_authority": self._build_regime_authority(current_regime, target_alloc),
             "current_positions": positions,
             "cash": round(cash, 2),
             "total_value": round(total_value, 2),
             "latest_prices": latest,
             "recent_orders": list(reversed(orders)),
             "ml_signals": self._generate_ml_signals(),
+            "marl_status": validate_signal("marl_status", self._generate_marl_status()),
             "factor_rotation": factor_rotation_signal,
             "yield_curve": validate_signal("yield_curve", yield_curve_data.get("yield_curve")),
             "duration_allocation": yield_curve_data.get("duration_allocation"),
@@ -926,6 +1485,17 @@ class DashboardGenerator:
                 "feature_count": int(feature_count),
                 "feature_count_metadata_available": True,
                 "feature_count_source": "model_metadata",
+                "source_roster": list(getattr(metadata, "source_roster", [])),
+                "source_roster_version": getattr(
+                    metadata,
+                    "source_roster_version",
+                    "unavailable_missing_metadata",
+                ),
+                "fallback_semantics": getattr(
+                    metadata,
+                    "fallback_semantics",
+                    "unavailable_missing_metadata",
+                ),
             }
 
         return {
@@ -934,42 +1504,81 @@ class DashboardGenerator:
             "feature_count_source": (
                 "unavailable_missing_metadata" if model_loaded else "unavailable_no_model"
             ),
+            "source_roster": [],
+            "source_roster_version": (
+                "unavailable_missing_metadata" if model_loaded else "unavailable_no_model"
+            ),
+            "fallback_semantics": (
+                "unavailable_missing_metadata" if model_loaded else "no_model_feature_count_unavailable"
+            ),
         }
 
     @staticmethod
-    def _build_stacking_runtime_disclosure(
-        integrator: Any,
-        prediction: Any,
-    ) -> Dict[str, Any]:
-        """Make fallback-vs-model runtime authority explicit for operators."""
-        model_loaded = getattr(integrator, "model", None) is not None
-        fallback_used = bool(getattr(prediction, "fallback_used", True))
-
-        if model_loaded and not fallback_used:
-            return {
-                "runtime_mode": "model_backed",
-                "model_backed": True,
-                "operator_disclosure": (
-                    "Stacking model loaded; panel is showing model-backed inference."
-                ),
-            }
-
-        if not model_loaded:
-            return {
-                "runtime_mode": "fallback_no_model",
-                "model_backed": False,
-                "operator_disclosure": (
-                    "No stacking model loaded; panel is showing weighted-voting "
-                    "fallback, not a model-backed stacking prediction."
-                ),
-            }
-
+    def _build_stacking_no_model_dashboard(integrator: Any) -> Dict[str, Any]:
+        """Build the explicit dormant stacking artifact when no model is loaded."""
         return {
-            "runtime_mode": "fallback_weighted_voting",
-            "model_backed": False,
-            "operator_disclosure": (
-                "Stacking model loaded, but this prediction used weighted-voting "
-                "fallback; treat it as fallback output, not model-backed inference."
+            "active": False,
+            "stacking_available": False,
+            "runtime_role": "research_dormant",
+            "runtime_status": "unavailable_no_model",
+            "live_authoritative": False,
+            "routed": False,
+            "routed_by": None,
+            "prediction_available": False,
+            "prediction_direction": "unavailable",
+            "confidence": 0.0,
+            "probability_bullish": 0.0,
+            "probability_bearish": 0.0,
+            "probability_neutral": 0.0,
+            "fallback_used": False,
+            "model_version": "unavailable_no_model",
+            "voting_accuracy": None,
+            "stacking_accuracy": None,
+            "accuracy_metrics_available": False,
+            **DashboardGenerator._build_stacking_feature_count_metadata(integrator),
+            "latency_ms": 0.0,
+            "status_reason": (
+                "No stacking model artifact is loaded and no runtime base-signal "
+                "input path is available."
+            ),
+            "operator_message": (
+                "Stacking ensemble is research/dormant, not live-authoritative, "
+                "and not order-routed."
+            ),
+        }
+
+    @staticmethod
+    def _build_stacking_model_dashboard(integrator: Any, prediction: Any) -> Dict[str, Any]:
+        """Build the model-backed stacking dashboard artifact."""
+        return {
+            "active": True,
+            "stacking_available": True,
+            "runtime_role": "model_backed_advisory",
+            "runtime_status": "model_loaded",
+            "live_authoritative": False,
+            "routed": False,
+            "routed_by": None,
+            "prediction_available": prediction is not None,
+            "prediction_direction": prediction.direction if prediction else "unavailable",
+            "confidence": prediction.confidence if prediction else 0.0,
+            "probability_bullish": prediction.probability_bullish if prediction else 0.0,
+            "probability_bearish": prediction.probability_bearish if prediction else 0.0,
+            "probability_neutral": prediction.probability_neutral if prediction else 0.0,
+            "fallback_used": prediction.fallback_used if prediction else False,
+            "model_version": prediction.model_version if prediction else "unknown",
+            "voting_accuracy": 0.65,
+            "stacking_accuracy": 0.76,
+            "accuracy_metrics_available": True,
+            **DashboardGenerator._build_stacking_feature_count_metadata(integrator),
+            "latency_ms": prediction.latency_ms if prediction else 0.0,
+            "status_reason": "Stacking model artifact is loaded for advisory inference.",
+            "operator_message": (
+                "Stacking ensemble is advisory and not order-routed; live routing "
+                "still consumes target_allocations."
+            ),
+            "backtest_finding": (
+                "+11% accuracy produces negligible Sharpe gain (2021-2026). "
+                "Signal frequency and shift magnitude are binding constraints."
             ),
         }
 
@@ -1005,16 +1614,40 @@ class DashboardGenerator:
         cursor = context["cursor"]
         current_regime = context["current_regime"]
 
-        # Signal staleness detection (production readiness)
-        output["staleness"] = self._check_signal_staleness(output)
-
-        # Apply staleness-weighted decay to ensemble weights
-        output = self._apply_staleness_decay(output)
-
         # FRED-MD macro regime signal
         try:
-            from src.data.fred_data import get_fred_signal
-            fred_signal = get_fred_signal()
+            from src.data import fred_data
+            fred_signal = fred_data.get_fred_signal()
+            readiness_getter = getattr(fred_data, "get_fred_md_cache_health", None)
+            fred_readiness = readiness_getter() if callable(readiness_getter) else {}
+            indicators = getattr(fred_signal, "indicators", {}) or {}
+            indicators_observed = bool(
+                getattr(fred_signal, "indicators_observed", bool(indicators))
+            )
+            source_mode = _first_known_value(
+                getattr(fred_signal, "source_mode", None)
+                if indicators_observed else None,
+                fred_readiness.get("source_mode"),
+                getattr(fred_signal, "source_mode", None),
+                default="unknown",
+            )
+            cache_status = _first_known_value(
+                fred_readiness.get("status")
+                if fred_readiness else None,
+                getattr(fred_signal, "cache_status", None),
+                default="unknown",
+            )
+            status = (
+                "ok"
+                if _is_predictive_fred_macro({
+                    "confidence": fred_signal.confidence,
+                    "indicators": indicators,
+                    "indicators_observed": indicators_observed,
+                    "source_mode": source_mode,
+                    "cache_status": cache_status,
+                })
+                else "unavailable"
+            )
             output["fred_macro"] = validate_signal("fred_macro", {
                 "regime": fred_signal.regime,
                 "confidence": fred_signal.confidence,
@@ -1023,14 +1656,35 @@ class DashboardGenerator:
                 "monetary_stance": fred_signal.monetary_stance,
                 "manufacturing_health": fred_signal.manufacturing_health,
                 "credit_conditions": fred_signal.credit_conditions,
-                "indicators": fred_signal.indicators,
+                "indicators": indicators,
                 "timestamp": fred_signal.timestamp,
+                "status": status,
+                "source_mode": source_mode,
+                "cache_status": cache_status,
+                "api_key_configured": fred_readiness.get(
+                    "api_key_configured",
+                    getattr(fred_signal, "api_key_configured", False),
+                ),
+                "reason": getattr(fred_signal, "reason", None) or fred_readiness.get("reason"),
+                "latest_fetched_at": fred_readiness.get(
+                    "latest_fetched_at",
+                    getattr(fred_signal, "latest_fetched_at", None),
+                ),
+                "row_count": fred_readiness.get("row_count"),
+                "age_hours": fred_readiness.get("age_hours"),
+                "ttl_hours": fred_readiness.get("ttl_hours"),
+                "indicators_observed": indicators_observed,
             })
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("fred_macro", e)
             output["fred_macro"] = {
                 "regime": "UNKNOWN",
                 "confidence": 0.0,
+                "status": "unavailable",
+                "source_mode": "unavailable",
+                "cache_status": "unavailable",
+                "indicators": {},
+                "indicators_observed": False,
                 "error": str(e),
             }
 
@@ -1087,10 +1741,18 @@ class DashboardGenerator:
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("regime_transition", e)
 
+        # Signal staleness must be computed after optional regime sections are appended.
+        output["staleness"] = self._check_signal_staleness(output)
+        self._update_regime_authority_availability(output)
+
+        # Apply staleness-weighted decay to ensemble weights
+        output = self._apply_staleness_decay(output)
+
         # Health check report
         try:
             from src.monitor.health_check import run_health_check
-            output["health"] = _compact_health_summary(run_health_check())
+            health_report = _load_canonical_health_report() or run_health_check()
+            output["health"] = _compact_health_summary(health_report)
         except Exception as e:
             output["health"] = _compact_health_summary({"status": "error", "error": str(e)})
 
@@ -1166,6 +1828,7 @@ class DashboardGenerator:
         output = _attach_signal_metadata(self._build_base_signal_sections(context))
         output = self._build_optional_signal_sections(output, context)
         output = self._apply_signal_postprocessors(output, context)
+        output = _finalize_signal_metadata(output)
 
         try:
             from src.monitor.decision_registry import record_dashboard_cycle_decision
@@ -1205,11 +1868,16 @@ class DashboardGenerator:
             "conformal_cvar_95": None,
             "conformal_var_95": None,
             "conformal_cvar_ratio": None,
+            "coverage_diagnostics": None,
         }
 
         # Compute conformal CVaR cross-check from SPY returns
         try:
-            from src.monitor.conformal_risk import conformal_cvar, conformal_var
+            from src.monitor.conformal_risk import (
+                conformal_coverage_diagnostics,
+                conformal_cvar,
+                conformal_var,
+            )
             cursor = self.conn.cursor()
             cursor.execute(
                 "SELECT close FROM prices WHERE symbol = 'SPY' ORDER BY date ASC"
@@ -1224,12 +1892,23 @@ class DashboardGenerator:
                 garch_cvar["conformal_var_95"] = round(
                     float(conformal_var(returns, alpha=0.05)), 6,
                 )
+                var_thresholds = np.full_like(
+                    returns,
+                    garch_cvar["conformal_var_95"],
+                    dtype=float,
+                )
+                garch_cvar["coverage_diagnostics"] = conformal_coverage_diagnostics(
+                    returns,
+                    var_thresholds,
+                    alpha=0.05,
+                    rolling_window=252,
+                )
                 if garch_cvar["conformal_var_95"] != 0:
                     garch_cvar["conformal_cvar_ratio"] = round(
                         garch_cvar["conformal_cvar_95"]
                         / garch_cvar["conformal_var_95"], 3,
                     )
-        except (ImportError, ValueError, IndexError) as e:
+        except (ImportError, ValueError, TypeError, IndexError) as e:
             logger.info("Conformal CVaR cross-check unavailable: %s", e)
 
         try:
@@ -1308,9 +1987,46 @@ class DashboardGenerator:
 
     def _generate_ml_signals(self) -> Dict:
         """Generate ML-based signals from features data."""
+        def parse_timestamp(value: Any) -> Optional[datetime]:
+            if not isinstance(value, str) or not value:
+                return None
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
+            except ValueError:
+                return None
+
+        def staleness_days(value: Any, now: datetime) -> Optional[int]:
+            parsed = parse_timestamp(value)
+            if parsed is None:
+                return None
+            return max(0, (now - parsed).days)
+
+        def feature_freshness(value: Any, now: datetime) -> tuple[str, Optional[int]]:
+            age_days = staleness_days(value, now)
+            if age_days is None:
+                return "unknown", None
+            return ("stale" if age_days > 2 else "fresh"), age_days
+
+        generated_at_dt = datetime.now(timezone.utc)
+        generated_at = generated_at_dt.isoformat()
         signals = {
             "available": False,
             "timestamp": None,
+            "generated_at": None,
+            "feature_source_artifact": None,
+            "feature_as_of": None,
+            "feature_freshness_status": "unknown",
+            "feature_staleness_days": None,
+            "prediction_source_mode": "unavailable",
+            "execution_role": {
+                "role": "advisory_non_routed",
+                "routed": False,
+                "routed_by": None,
+                "live_authoritative": False,
+            },
             "predictions": {},
             "features": {},
             "grid_search": {},
@@ -1335,8 +2051,21 @@ class DashboardGenerator:
                             continue
 
                 if latest_features:
+                    feature_as_of = max(
+                        (feat.get("timestamp") for feat in latest_features.values() if feat.get("timestamp")),
+                        default=None,
+                    )
+                    freshness_status, age_days = feature_freshness(feature_as_of, generated_at_dt)
                     signals["available"] = True
-                    signals["timestamp"] = datetime.now().isoformat()
+                    signals["timestamp"] = generated_at
+                    signals["generated_at"] = generated_at
+                    signals["feature_source_artifact"] = "features.jsonl"
+                    signals["feature_as_of"] = feature_as_of
+                    signals["feature_freshness_status"] = freshness_status
+                    signals["feature_staleness_days"] = age_days
+                    signals["prediction_source_mode"] = (
+                        "stale_features" if freshness_status == "stale" else "features"
+                    )
                     signals["features"] = {
                         sym: {
                             "vix_level": feat.get("vix_level"),
@@ -1344,6 +2073,7 @@ class DashboardGenerator:
                             "price_vs_sma20": feat.get("price_vs_sma20"),
                             "return_5d": feat.get("return_5d"),
                             "spy_correlation": feat.get("spy_correlation_20d"),
+                            "feature_timestamp": feat.get("timestamp"),
                         }
                         for sym, feat in latest_features.items()
                     }
@@ -1376,6 +2106,9 @@ class DashboardGenerator:
                             "confidence": round(confidence, 3),
                             "probabilities": {k: round(v, 3) for k, v in probs.items()},
                             "heuristic": True,  # Not ML-based yet
+                            "feature_timestamp": feat.get("timestamp"),
+                            "feature_freshness_status": freshness_status,
+                            "source_artifact": "features.jsonl",
                         }
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
                 signals["error"] = str(e)
@@ -1388,17 +2121,80 @@ class DashboardGenerator:
                     tail = deque(f, maxlen=1)
                 if tail:
                     latest = json.loads(tail[0])
+                    benchmark_timestamp = latest.get("timestamp")
                     signals["grid_search"] = {
                         "available": True,
-                        "timestamp": latest.get("timestamp"),
+                        "timestamp": benchmark_timestamp,
                         "top_allocation": latest.get("allocations"),
                         "sharpe": latest.get("sharpe"),
                         "volatility": latest.get("volatility"),
+                        "source_artifact": "grid_search_results.jsonl",
+                        "benchmark_timestamp": benchmark_timestamp,
+                        "observation_semantics": "frozen_benchmark_not_live_snapshot",
+                        "freshness_status": "frozen_benchmark",
+                        "staleness_days": staleness_days(benchmark_timestamp, generated_at_dt),
+                        "live_authoritative": False,
                     }
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load grid search results: %s", e)
 
         return signals
+
+    @staticmethod
+    def _marl_execution_role() -> Dict[str, Any]:
+        """Describe MARL's current operator-visible but non-routed role."""
+        return {
+            "role": "research_shadow_non_routed",
+            "routed": False,
+            "routed_by": None,
+            "live_authoritative": False,
+            "description": (
+                "MARL status is visible for research/shadow diagnostics; "
+                "order routing still consumes target_allocations."
+            ),
+        }
+
+    @staticmethod
+    def _default_marl_runtime_status() -> Dict[str, Any]:
+        """Return a stable runtime shape for unavailable MARL status."""
+        return {
+            "version": "unknown",
+            "device": "unknown",
+            "agents_loaded": [],
+            "signal_integrator_connected": False,
+            "checkpoint_loaded": False,
+            "inference_count": 0,
+            "current_allocation": {},
+            "graph_metrics": {},
+        }
+
+    @staticmethod
+    def _generate_marl_status() -> Dict[str, Any]:
+        """Expose AIController runtime status without implying live routing authority."""
+        status = {
+            "schema_version": "marl-runtime-status/v1",
+            "available": False,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "runtime": DashboardGenerator._default_marl_runtime_status(),
+            "execution_role": DashboardGenerator._marl_execution_role(),
+        }
+
+        try:
+            from src.agents.ai_controller import AIController
+
+            controller = AIController(use_signal_integrator=False)
+            runtime_status = controller.get_status()
+            if isinstance(runtime_status, dict):
+                status["available"] = True
+                status["runtime"] = {
+                    **DashboardGenerator._default_marl_runtime_status(),
+                    **runtime_status,
+                }
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("marl_status", e)
+            status["error"] = str(e)
+
+        return status
     
     def _get_yield_curve_data(self) -> Dict:
         """Get yield curve data from yields.json and calculate duration allocation."""
@@ -1443,7 +2239,12 @@ class DashboardGenerator:
                 "dgs2": latest.get("dgs2"),
                 "dgs10": latest.get("dgs10"),
                 "duration_regime": regime,
-                "spread_history": spread_history
+                "spread_history": spread_history,
+                **{
+                    key: value
+                    for key, value in _yield_source_provenance(PUBLIC_DIR).items()
+                    if value is not None
+                },
             }
             
             # Calculate duration allocation based on regime
@@ -1500,19 +2301,9 @@ class DashboardGenerator:
                 if len(tail_lines) >= 20:
                     raw_entries = [json.loads(l) for l in tail_lines]
 
-                    # Deduplicate to daily: keep last entry per calendar date
-                    # (performance.jsonl contains intraday entries; raw count
-                    # overstates trading days and inflates Sharpe)
-                    daily_map: dict[str, dict] = {}
-                    for idx, entry in enumerate(raw_entries):
-                        ts = entry.get("timestamp", "")
-                        date_key = ts[:10] if len(ts) >= 10 else ""
-                        if not date_key:
-                            # Fallback: entries without timestamps are
-                            # treated as separate days
-                            date_key = f"__no_ts_{idx}__"
-                        daily_map[date_key] = entry
-                    daily_entries = [daily_map[d] for d in sorted(daily_map)]
+                    # performance.jsonl contains intraday entries; raw count
+                    # overstates trading days and inflates Sharpe.
+                    daily_entries = self._deduplicate_performance_entries_by_date(raw_entries)
 
                     daily_returns = [
                         e.get("daily_return", 0)
@@ -1589,24 +2380,145 @@ class DashboardGenerator:
         
         return out_path
     
+    @staticmethod
+    def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
+        if not path.exists():
+            return None
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def _has_open_blocking_incident(data_dir: Path) -> bool:
+        for filename in ("incidents.json", "incident_state.json"):
+            payload = DashboardGenerator._load_json_file(data_dir / filename)
+            if not payload:
+                continue
+            raw_incidents = payload.get("incidents", payload.get("open_incidents", []))
+            incidents = raw_incidents if isinstance(raw_incidents, list) else []
+            for incident in incidents:
+                if not isinstance(incident, dict):
+                    continue
+                status = str(incident.get("status", "open")).lower()
+                blocking = bool(incident.get("blocking") or incident.get("blocks_promotion"))
+                if blocking and status not in {"closed", "resolved", "pass"}:
+                    return True
+        return False
+
+    @staticmethod
+    def _promotion_gate_status(data_dir: Path) -> tuple[bool, list[str]]:
+        kill_switch = DashboardGenerator._load_json_file(data_dir / "kill_switch.json")
+        blockers: list[str] = []
+        if kill_switch and kill_switch.get("enabled"):
+            blockers.append("kill_switch")
+        if DashboardGenerator._has_open_blocking_incident(data_dir):
+            blockers.append("blocking_incident")
+
+        try:
+            from src.strategy.graduation_checklist import GraduationChecklist
+
+            checklist = GraduationChecklist()
+            results = checklist.check()
+            manual = results.get("manual_approval")
+            if manual is None or not manual.passed:
+                blockers.append("manual_approval")
+            if not checklist.is_graduation_ready(results):
+                blockers.append("graduation_checklist")
+        except SIGNAL_EXCEPTIONS:
+            blockers.append("graduation_checklist_unavailable")
+
+        return not blockers, blockers
+
+    @staticmethod
+    def _graduation_candidate_alert(data_dir: Path) -> Optional[Dict[str, Any]]:
+        data = DashboardGenerator._load_json_file(data_dir / ".promote_to_live")
+        if not data:
+            return None
+
+        allowed, blockers = DashboardGenerator._promotion_gate_status(data_dir)
+        if allowed:
+            return {
+                "level": "success",
+                "type": "graduation_candidate",
+                "title": "Paper Trading Graduation Ready",
+                "message": f"Sharpe: {safe_get(data, 'metrics', 'sharpe')}, ready for live approval",
+                "timestamp": data.get("timestamp"),
+                "requires_action": True,
+            }
+        return {
+            "level": "warning",
+            "type": "graduation_candidate",
+            "title": "Paper Trading Graduation Blocked",
+            "message": "Promotion marker present but current gates block live approval: "
+            + ", ".join(sorted(set(blockers))),
+            "timestamp": data.get("timestamp"),
+            "requires_action": True,
+        }
+
+    @staticmethod
+    def _stale_data_alerts_from_quality_report(public_dir: Path) -> Optional[List[Dict[str, Any]]]:
+        report = DashboardGenerator._load_json_file(public_dir / "data_quality.json")
+        if report is None:
+            return None
+
+        issue_counts = report.get("issue_counts")
+        stale_count = (
+            issue_counts.get("stale_latest_dates", 0)
+            if isinstance(issue_counts, dict)
+            else 0
+        )
+        if not isinstance(stale_count, int) or isinstance(stale_count, bool) or stale_count <= 0:
+            return []
+
+        alerts: List[Dict[str, Any]] = []
+        symbols = report.get("symbols")
+        rows = symbols if isinstance(symbols, list) else []
+        stale_rows = [
+            row for row in rows
+            if isinstance(row, dict)
+            and (
+                row.get("stale_latest_date")
+                or str(row.get("status", "")).lower() in {"fail", "failed", "critical"}
+                or (isinstance(row.get("issue_counts"), dict)
+                    and row["issue_counts"].get("stale_latest_dates", 0) > 0)
+            )
+        ]
+
+        for row in stale_rows[:stale_count]:
+            stale_meta = row.get("stale_latest_date") if isinstance(row.get("stale_latest_date"), dict) else {}
+            symbol = row.get("symbol", "unknown")
+            latest_date = stale_meta.get("latest_date") or row.get("latest_date", "unknown")
+            reference_date = stale_meta.get("reference_date") or report.get("reference_date", "unknown")
+            lag_days = stale_meta.get("latest_lag_days")
+            lag = f" ({lag_days} trading day lag)" if isinstance(lag_days, int) else ""
+            alerts.append({
+                "level": "warning",
+                "type": "stale_data",
+                "title": f"Stale Data: {symbol}",
+                "message": f"{symbol} latest date {latest_date} lags reference {reference_date}{lag}",
+                "timestamp": report.get("generated_at"),
+                "requires_action": False,
+            })
+
+        while len(alerts) < stale_count:
+            alerts.append({
+                "level": "warning",
+                "type": "stale_data",
+                "title": "Stale Data",
+                "message": f"data_quality.json reports {stale_count} stale latest-date issue(s)",
+                "timestamp": report.get("generated_at"),
+                "requires_action": False,
+            })
+        return alerts
+
     def generate_alerts_json(self) -> Path:
         """Generate active alerts and notifications."""
         alerts = []
-        
-        # Check for promotion trigger
-        promote_trigger = DATA_DIR / ".promote_to_live"
-        if promote_trigger.exists():
-            with open(promote_trigger) as f:
-                data = json.load(f)
-                alerts.append({
-                    "level": "success",
-                    "type": "graduation_candidate",
-                    "title": "Paper Trading Graduation Ready",
-                    "message": f"Sharpe: {safe_get(data, 'metrics', 'sharpe')}, ready for live approval",
-                    "timestamp": data.get("timestamp"),
-                    "requires_action": True
-                })
-        
+
+        promote_alert = self._graduation_candidate_alert(DATA_DIR)
+        if promote_alert is not None:
+            alerts.append(promote_alert)
+
         # Check for kill switch
         kill_file = DATA_DIR / "kill_switch.json"
         if kill_file.exists():
@@ -1637,22 +2549,26 @@ class DashboardGenerator:
                     "requires_action": False
                 })
         
-        # Check data quality
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            SELECT symbol, MAX(date) as last_date, COUNT(*) as count
-            FROM prices GROUP BY symbol
-        """)
-        for row in cursor.fetchall():
-            last_date = datetime.strptime(row[1], "%Y-%m-%d") if row[1] else None
-            if last_date and (datetime.now() - last_date).days > 2:
-                alerts.append({
-                    "level": "warning",
-                    "type": "stale_data",
-                    "title": f"Stale Data: {row[0]}",
-                    "message": f"Last update: {row[1]} ({(datetime.now() - last_date).days} days ago)",
-                    "requires_action": False
-                })
+        quality_alerts = self._stale_data_alerts_from_quality_report(PUBLIC_DIR)
+        if quality_alerts is not None:
+            alerts.extend(quality_alerts)
+        else:
+            # Fallback for test/local environments that do not publish data_quality.json.
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT symbol, MAX(date) as last_date, COUNT(*) as count
+                FROM prices GROUP BY symbol
+            """)
+            for row in cursor.fetchall():
+                last_date = datetime.strptime(row[1], "%Y-%m-%d") if row[1] else None
+                if last_date and (datetime.now() - last_date).days > 2:
+                    alerts.append({
+                        "level": "warning",
+                        "type": "stale_data",
+                        "title": f"Stale Data: {row[0]}",
+                        "message": f"Last update: {row[1]} ({(datetime.now() - last_date).days} days ago)",
+                        "requires_action": False
+                    })
         
         output = {
             "alerts": sorted(alerts, key=lambda x: x.get("timestamp", ""), reverse=True),
@@ -1663,6 +2579,44 @@ class DashboardGenerator:
         out_path = PUBLIC_DIR / "alerts.json"
         save_results_json(output, output_path=str(out_path))
         
+        return out_path
+
+    @staticmethod
+    def _empty_incident_summary() -> Dict[str, Any]:
+        return {
+            "schema_version": "incident-lifecycle/v1",
+            "generated_at": datetime.now().isoformat(),
+            "open_count": 0,
+            "incidents": [],
+            "metrics": {
+                "incident_frequency": 0,
+                "open_count": 0,
+                "resolved_count": 0,
+                "mean_mttr_seconds": None,
+            },
+        }
+
+    def generate_incidents_json(self) -> Path:
+        """Publish the incident lifecycle summary consumed by LiveDashboard."""
+        try:
+            payload = self._load_json_file(DATA_DIR / "incidents.json") or self._empty_incident_summary()
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            logger.warning("Incident lifecycle summary unavailable; publishing empty summary: %s", exc)
+            payload = self._empty_incident_summary()
+
+        payload.setdefault("schema_version", "incident-lifecycle/v1")
+        payload.setdefault("generated_at", datetime.now().isoformat())
+        payload.setdefault("open_count", 0)
+        payload.setdefault("incidents", [])
+        payload.setdefault("metrics", {
+            "incident_frequency": 0,
+            "open_count": int(payload.get("open_count", 0) or 0),
+            "resolved_count": 0,
+            "mean_mttr_seconds": None,
+        })
+
+        out_path = PUBLIC_DIR / "incidents.json"
+        save_results_json(payload, output_path=str(out_path))
         return out_path
     
     def generate_health_json(self) -> Path:
@@ -1769,7 +2723,9 @@ class DashboardGenerator:
             gen = OverlayDashboardGenerator()
             dashboard = gen.generate()
             gen.save(dashboard)
-            return gen.OUTPUT_PATH
+            public_path = PUBLIC_DIR / gen.OUTPUT_PATH.name
+            save_results_json(dashboard.to_dict(), output_path=str(public_path))
+            return public_path
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("overlay_dashboard_generate", e)
             return None
@@ -1791,6 +2747,10 @@ class DashboardGenerator:
                 "signal_adjustment": decision.signal_adjustment,
                 "drawdown_adjustment": decision.drawdown_adjustment,
                 "factors": asdict(decision.factors) if hasattr(decision.factors, '__dataclass_fields__') else {},
+                "authority": self._build_advisory_allocation_artifact_role(
+                    surface="adaptive_sizing",
+                    allocation_field="adjusted_allocation",
+                ),
                 "generated_at": datetime.now().isoformat(),
             }
 
@@ -1813,6 +2773,10 @@ class DashboardGenerator:
             hedge_data = {
                 **status,
                 "generated_at": datetime.now().isoformat(),
+                "canonical_controller": "hedge_selector",
+                "runtime_role": "diagnostic_cost_evidence",
+                "live_authoritative": False,
+                "routed": False,
             }
 
             out_path = PUBLIC_DIR / "vixy_hedge.json"
@@ -1874,12 +2838,16 @@ class DashboardGenerator:
 
             # Fallback: use views without full BL optimization
             if bl_weights is None:
-                bl_weights = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
+                bl_weights = dict(BASE_ALLOCATION)
             if posterior_returns is None:
                 posterior_returns = {}
 
             # Use base allocation as prior
-            prior = {k.lower(): v for k, v in BASE_ALLOCATION.items()}
+            prior = dict(BASE_ALLOCATION)
+            canonical_assets = tuple(str(symbol).upper() for symbol in symbols)
+            prior_public = self._canonicalize_public_weights(prior, canonical_assets=canonical_assets)
+            posterior_public = self._canonicalize_public_weights(bl_weights, canonical_assets=canonical_assets)
+            returns_public = self._canonicalize_public_weights(posterior_returns, canonical_assets=canonical_assets)
 
             # Build views list for panel consumption
             view_list = []
@@ -1890,20 +2858,33 @@ class DashboardGenerator:
                     conf = views.view_confidences[i] if i < len(views.view_confidences) else 0.5
                     view_list.append({
                         "signal_name": "ensemble_consensus",
-                        "asset": sym,
+                        "asset": str(sym).upper(),
                         "direction": "bullish" if ret > 0 else ("bearish" if ret < 0 else "neutral"),
                         "confidence": round(conf, 3),
                         "expected_return_delta": round(ret, 6),
                     })
 
             bl_data = {
-                "prior_weights": prior,
-                "posterior_weights": bl_weights,
-                "posterior_returns": posterior_returns,
+                "prior_weights": prior_public["weights"],
+                "posterior_weights": posterior_public["weights"],
+                "posterior_returns": returns_public["weights"],
                 "views": view_list,
                 "tau": bl_input.get("tau", 0.15),
                 "view_confidence_method": "idzorek",
                 "optimization_available": result is not None,
+                "excluded_assets": sorted(set(
+                    prior_public["excluded_assets"]
+                    + posterior_public["excluded_assets"]
+                    + returns_public["excluded_assets"]
+                )),
+                "zero_weight_assets": sorted(set(
+                    prior_public["zero_weight_assets"]
+                    + posterior_public["zero_weight_assets"]
+                )),
+                "authority": self._build_advisory_allocation_artifact_role(
+                    surface="black_litterman",
+                    allocation_field="posterior_weights",
+                ),
                 "health_scores": bl_input.get("health_scores_used", {}),
                 "biases": {
                     "equity": round(bl_input.get("equity_bias", 0.0), 3),
@@ -1924,13 +2905,30 @@ class DashboardGenerator:
     def generate_turnover_validator_json(self) -> Optional[Path]:
         """Generate turnover validator data for dashboard."""
         try:
+            from src.signals.signal_source import SignalSource
             from src.strategy.turnover_validator import TurnoverValidator
 
             validator = TurnoverValidator()
             diagnostics = validator.get_state_diagnostics()
+            canonical_sources = {source.value for source in SignalSource}
+            production_signals = {
+                source: data
+                for source, data in diagnostics.items()
+                if source in canonical_sources
+            }
+            synthetic_baselines = {
+                source: {
+                    "metadata": {"source_type": "synthetic_or_fixture"},
+                    "diagnostics": data,
+                }
+                for source, data in diagnostics.items()
+                if source not in canonical_sources
+            }
 
             turnover_data = {
-                **diagnostics,
+                "schema_version": "turnover-validator/v1",
+                "signals": production_signals,
+                "synthetic_baselines": synthetic_baselines,
                 "generated_at": datetime.now().isoformat(),
             }
 
@@ -1961,11 +2959,13 @@ class DashboardGenerator:
                     regime_confidence = state.get("confidence", 0.5)
 
             # Build gate rules with current regime active status
-            all_signals = list(summary.keys())
-            active_signals = gate.get_active_signal_names(
-                all_signals + ["alt_data", "cross_asset_rv", "unified_overlay"],
-                regime_name,
+            all_signals = self._dedupe_preserve_order(
+                list(summary.keys()) + ["alt_data", "cross_asset_rv", "unified_overlay"],
             )
+            active_signals = self._dedupe_preserve_order(gate.get_active_signal_names(
+                all_signals,
+                regime_name,
+            ))
             inactive_signals = [s for s in all_signals if s not in active_signals]
 
             gate_data = {
@@ -2059,19 +3059,92 @@ class DashboardGenerator:
                            e, DashboardGenerator._last_regime)
             return DashboardGenerator._last_regime.lower() in {"high_vol", "crisis"}
 
-    def _get_hedge_selector_signal(self, vix_level: Optional[float], regime: str) -> Optional[Dict]:
-        """Get hedge selector recommendation for dashboard."""
-        if vix_level is None:
+    @staticmethod
+    def _extract_vix_term_structure_signal(vix_term_structure: Optional[Dict]) -> Optional[float]:
+        """Extract the fractional VIX term-structure signal when available."""
+        if not isinstance(vix_term_structure, dict):
             return None
+        raw_signal = vix_term_structure.get("signal_value")
+        if raw_signal is None:
+            return None
+        try:
+            return float(raw_signal)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _resolve_hedge_vix_level(
+        vix_level: Optional[float],
+        vix_term_structure: Optional[Dict],
+    ) -> Optional[float]:
+        """Use the VIX term-structure spot value when market.db lacks ^VIX."""
+        if vix_level is not None:
+            return vix_level
+        if not isinstance(vix_term_structure, dict):
+            return None
+        raw_vix = vix_term_structure.get("vix_spot")
+        if raw_vix is None:
+            return None
+        try:
+            return float(raw_vix)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _build_unavailable_hedge_selector_signal(
+        regime: str,
+        term_structure_signal: Optional[float],
+    ) -> Dict[str, Any]:
+        """Publish a typed canonical hedge-selector artifact when VIX is unavailable."""
+        return {
+            "available": False,
+            "generated_at": datetime.now().isoformat(),
+            "regime": regime,
+            "regime_confidence": 0.0,
+            "primary_hedge": "none",
+            "primary_size_pct": 0.0,
+            "secondary_hedge": None,
+            "secondary_size_pct": 0.0,
+            "cost_benefit_gate": False,
+            "net_benefit_bps": 0.0,
+            "kelly_fraction": 0.0,
+            "expected_cost_bps": 0.0,
+            "expected_benefit_bps": 0.0,
+            "min_hold_days": 0,
+            "transition_cost_bps": 0.0,
+            "canonical_controller": "hedge_selector",
+            "vixy_role": "diagnostic_sizing_helper",
+            "term_structure_role": "gate_discount_multiplier",
+            "term_structure_gate": False,
+            "term_structure_multiplier": 0.0,
+            "term_structure_signal": term_structure_signal,
+            "gate_reason": "vix_unavailable",
+        }
+
+    def _get_hedge_selector_signal(
+        self,
+        vix_level: Optional[float],
+        regime: str,
+        vix_term_structure: Optional[Dict] = None,
+    ) -> Optional[Dict]:
+        """Get hedge selector recommendation for dashboard."""
+        term_structure_signal = self._extract_vix_term_structure_signal(vix_term_structure)
+        hedge_vix_level = self._resolve_hedge_vix_level(vix_level, vix_term_structure)
+        if hedge_vix_level is None:
+            return self._build_unavailable_hedge_selector_signal(
+                regime,
+                term_structure_signal,
+            )
         try:
             from src.strategy.hedge_selector import HedgeSelector
             selector = HedgeSelector()
             # Estimate confidence based on regime stability
             regime_confidence = 0.8 if regime in ["normal", "crisis"] else 0.6
             rec = selector.select(
-                vix_level=vix_level,
+                vix_level=hedge_vix_level,
                 regime_confidence=regime_confidence,
-                regime_label=regime
+                regime_label=regime,
+                term_structure_signal=term_structure_signal,
             )
             return {
                 "available": True,
@@ -2089,6 +3162,13 @@ class DashboardGenerator:
                 "expected_benefit_bps": rec.expected_benefit_bps,
                 "min_hold_days": rec.min_hold_days,
                 "transition_cost_bps": rec.transition_cost_bps,
+                "canonical_controller": rec.canonical_controller,
+                "vixy_role": rec.vixy_role,
+                "term_structure_role": rec.term_structure_role,
+                "term_structure_gate": rec.term_structure_gate,
+                "term_structure_multiplier": rec.term_structure_multiplier,
+                "term_structure_signal": term_structure_signal,
+                "gate_reason": rec.gate_reason,
             }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("hedge_selector", e)
@@ -2115,10 +3195,20 @@ class DashboardGenerator:
         "bocd_regime",
         "regime_transition",
         "hedge_selector",
+        "fred_macro",
+    }
+    OPTIONAL_DAILY_SIGNAL_STALENESS_KEYS = {
+        "convexity_harvest",
+        "volatility_parity",
     }
 
     @staticmethod
-    def _normalized_signal_timestamp(signal_block: Any, preferred_field: str) -> str | None:
+    def _normalized_signal_timestamp(
+        signal_block: Any,
+        preferred_field: str,
+        *,
+        allow_date: bool = False,
+    ) -> str | None:
         """Return the first usable timestamp from a generated signal block."""
         if not isinstance(signal_block, dict):
             return None
@@ -2134,6 +3224,19 @@ class DashboardGenerator:
             value = signal_block.get(field)
             if isinstance(value, str) and value:
                 return value
+        if allow_date:
+            value = signal_block.get("date")
+            if isinstance(value, str) and value:
+                try:
+                    parsed_date = datetime.strptime(value, "%Y-%m-%d").date()
+                    # Daily sections remain fresh through their UTC calendar day.
+                    return datetime.combine(
+                        parsed_date,
+                        datetime.max.time().replace(microsecond=0),
+                        tzinfo=timezone.utc,
+                    ).isoformat()
+                except ValueError:
+                    return value
         return None
 
     @staticmethod
@@ -2145,6 +3248,12 @@ class DashboardGenerator:
             return False
         status = str(signal_block.get("status", "")).lower()
         if status in {"unavailable", "disabled", "missing"}:
+            return True
+        source_mode = str(signal_block.get("source_mode", "")).lower()
+        if source_mode in {"unavailable", "synthetic", "last_good", "fallback"}:
+            return True
+        cache_status = str(signal_block.get("cache_status", "")).lower()
+        if cache_status in {"unavailable", "empty", "missing", "failed", "degraded"}:
             return True
         return "error" in signal_block
 
@@ -2203,6 +3312,7 @@ class DashboardGenerator:
             "bocd_regime": ("timestamp", None),
             "regime_transition": ("timestamp", None),
             "hedge_selector": ("generated_at", None),
+            "fred_macro": ("timestamp", None),
         }
 
         for signal_key, (ts_field, _) in timestamped_signals.items():
@@ -2220,14 +3330,27 @@ class DashboardGenerator:
                 staleness_decay[signal_key] = 0.0
                 continue
 
-            ts_str = self._normalized_signal_timestamp(signal_block, ts_field)
+            is_optional = signal_key in self.OPTIONAL_SIGNAL_STALENESS_KEYS
+            if self._is_unavailable_signal_block(signal_block):
+                unavailable_signals.append(signal_key)
+                signal_timestamps[signal_key] = None
+                signal_age_hours[signal_key] = None
+                staleness_decay[signal_key] = 0.0
+                continue
+
+            ts_str = self._normalized_signal_timestamp(
+                signal_block,
+                ts_field,
+                allow_date=signal_key in self.OPTIONAL_DAILY_SIGNAL_STALENESS_KEYS,
+            )
+            if ts_str is None and not is_optional and isinstance(signal_block, dict):
+                artifact_ts = signal_data.get("generated_at") or signal_data.get("timestamp")
+                if isinstance(artifact_ts, str) and artifact_ts:
+                    ts_str = artifact_ts
             signal_timestamps[signal_key] = ts_str
 
             if ts_str is None:
-                if (
-                    signal_key in self.OPTIONAL_SIGNAL_STALENESS_KEYS
-                    and self._is_unavailable_signal_block(signal_block)
-                ):
+                if is_optional:
                     unavailable_signals.append(signal_key)
                     signal_age_hours[signal_key] = None
                     staleness_decay[signal_key] = 0.0
@@ -2243,12 +3366,15 @@ class DashboardGenerator:
                 ts = datetime.fromisoformat(ts_str_clean)
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
-                age_seconds = (now - ts).total_seconds()
+                else:
+                    ts = ts.astimezone(timezone.utc)
+                age_seconds = max((now - ts).total_seconds(), 0.0)
                 age_hours = age_seconds / 3600.0
                 signal_age_hours[signal_key] = round(age_hours, 2)
 
                 # Exponential decay: fresh signals get 1.0, stale signals approach 0.0
                 decay = _math.exp(-age_hours / tau_hours) if tau_hours > 0 else 1.0
+                decay = min(max(decay, 0.0), 1.0)
                 staleness_decay[signal_key] = round(decay, 4)
 
                 if age_seconds > ttl_seconds:
@@ -2304,14 +3430,38 @@ class DashboardGenerator:
                     src["staleness_decay"] = decay
 
             # Recompute weighted_consensus with decayed weights
-            total_weight = sum(s.get("weight", 0.0) for s in ensemble["source_breakdown"])
+            valid_sources = []
+            for source in ensemble["source_breakdown"]:
+                try:
+                    value = float(source.get("value", 0.0))
+                    weight = float(source.get("weight", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                if np.isnan(value) or np.isnan(weight):
+                    continue
+                valid_sources.append((value, weight))
+
+            total_weight = sum(weight for _, weight in valid_sources)
             if total_weight > 0:
-                weighted_sum = sum(
-                    s.get("value", 0.0) * s.get("weight", 0.0)
-                    for s in ensemble["source_breakdown"]
+                weighted_consensus = sum(
+                    value * weight for value, weight in valid_sources
+                ) / total_weight
+                agreement_weight = sum(
+                    weight for value, weight in valid_sources
+                    if np.sign(value) == np.sign(weighted_consensus) or abs(value) < 0.1
                 )
-                ensemble["weighted_consensus"] = round(weighted_sum / total_weight, 4)
+                ensemble["weighted_consensus"] = round(weighted_consensus, 4)
+                ensemble["agreement_ratio"] = round(agreement_weight / total_weight, 4)
                 ensemble["total_weight_after_decay"] = round(total_weight, 4)
+
+            ensemble.update(self._build_ensemble_source_count_metadata(
+                ensemble.get("regime", "normal"),
+                ensemble["source_breakdown"],
+            ))
+            ensemble["configured_source_status"] = self._build_configured_source_status(
+                ensemble.get("regime", "normal"),
+                ensemble["source_breakdown"],
+            )
 
         return output
 
@@ -2433,8 +3583,19 @@ class DashboardGenerator:
             is_gated = regime.lower() in gated_regimes
 
             rv_data = {
-                "signal_value": signal.composite_signal if hasattr(signal, 'composite_signal') else 0.0,
-                "pairs": [p.to_dict() for p in signal.pair_signals] if hasattr(signal, 'pair_signals') and signal.pair_signals else [],
+                "signal_value": signal.risk_on_score,
+                "pairs": [p.to_dict() for p in signal.pairs.values()],
+                "avg_z_score": signal.avg_z_score,
+                "max_divergence": signal.max_divergence,
+                "num_diverged": signal.num_diverged,
+                "total_pairs": signal.total_pairs,
+                "available_pair_count": signal.available_pair_count,
+                "unavailable_pair_count": signal.unavailable_pair_count,
+                "unavailable_pairs": signal.unavailable_pairs,
+                "missing_symbols": signal.missing_symbols,
+                "risk_on_score": signal.risk_on_score,
+                "duration_score": signal.duration_score,
+                "overall_conviction": signal.overall_conviction,
                 "current_regime": regime,
                 "is_gated_off": is_gated,
                 "regime_note": "Mean-reversion fails in volatile regimes" if is_gated else "Active — mean-reversion favorable",
@@ -2507,33 +3668,105 @@ class DashboardGenerator:
             _log_signal_error("graduation", e)
             return None
 
-    def generate_explainability_json(self) -> Optional[Path]:
-        """Copy latest explainability data to public data directory.
+    @staticmethod
+    def _latest_stale_explainability_metadata(source_dir: Path) -> Dict[str, Any]:
+        """Return metadata for the newest historical explainability file, if any."""
+        dated_files = sorted(source_dir.glob("explainability_*.json"), reverse=True)
+        if not dated_files:
+            return {}
 
-        The explainability files are generated by portfolio_explainability.py
-        and stored in data/explainability/. This method copies the latest
-        dated file to public/data/explainability/explainability_latest.json.
-        """
+        latest = dated_files[0]
+        metadata: Dict[str, Any] = {"stale_source_file": latest.name}
         try:
-            import shutil
+            payload = json.loads(latest.read_text())
+            analysis_date = payload.get("analysis_date")
+            if analysis_date:
+                metadata["stale_analysis_date"] = str(analysis_date)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+            metadata["stale_read_error"] = str(e)
+        return metadata
+
+    @staticmethod
+    def _build_unavailable_explainability_payload(
+        *,
+        generated_at: str,
+        reason: str,
+        source_file: Optional[str] = None,
+        analysis_date: Optional[str] = None,
+        stale_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build an explicit no-current-explainability artifact."""
+        return {
+            "timestamp": generated_at,
+            "analysis_date": analysis_date or generated_at[:10],
+            "latest_decision": None,
+            "recent_decisions": [],
+            "signal_deep_dives": {},
+            "top_sources_today": [],
+            "decision_quality": {
+                "status": "unavailable_current_signals",
+                "reason": reason,
+            },
+            "freshness": {
+                "status": "unavailable",
+                "generated_at": generated_at,
+                "source_file": source_file,
+                "reason": reason,
+                **(stale_metadata or {}),
+            },
+        }
+
+    def generate_explainability_json(self) -> Optional[Path]:
+        """Generate current or explicitly unavailable explainability data."""
+        try:
+            from src.dashboard.explainability import build_explainability_from_signals_data
+
             source_dir = DATA_DIR / "explainability"
             target_dir = PUBLIC_DIR / "explainability"
             target_dir.mkdir(parents=True, exist_ok=True)
-
-            # Find the latest dated explainability file
-            dated_files = sorted(source_dir.glob("explainability_*.json"), reverse=True)
-            if not dated_files:
-                logger.warning("No explainability data files found in %s", source_dir)
-                return None
-
-            latest = dated_files[0]
             target = target_dir / "explainability_latest.json"
-            shutil.copy2(latest, target)
-            logger.info("Copied %s → %s", latest.name, target)
+            generated_at = datetime.now().isoformat()
+            stale_metadata = self._latest_stale_explainability_metadata(source_dir)
+            signals_path = PUBLIC_DIR / "signals.json"
+
+            if signals_path.exists():
+                signals_data = json.loads(signals_path.read_text())
+                payload = build_explainability_from_signals_data(
+                    signals_data,
+                    timestamp=generated_at,
+                )
+                has_current_decision = payload.get("latest_decision") is not None
+                payload["freshness"] = {
+                    "status": "current" if has_current_decision else "unavailable",
+                    "generated_at": generated_at,
+                    "source_file": signals_path.name,
+                    "analysis_date": payload.get("analysis_date"),
+                    "latest_decision_timestamp": (
+                        payload.get("latest_decision") or {}
+                    ).get("timestamp"),
+                    **stale_metadata,
+                }
+                if not has_current_decision:
+                    payload = self._build_unavailable_explainability_payload(
+                        generated_at=generated_at,
+                        reason="Current signals.json did not contain ensemble explainability inputs.",
+                        source_file=signals_path.name,
+                        analysis_date=payload.get("analysis_date"),
+                        stale_metadata=stale_metadata,
+                    )
+                save_results_json(payload, output_path=str(target))
+                return target
+
+            payload = self._build_unavailable_explainability_payload(
+                generated_at=generated_at,
+                reason="Current signals.json was not available for explainability generation.",
+                stale_metadata=stale_metadata,
+            )
+            save_results_json(payload, output_path=str(target))
             return target
 
-        except (OSError, ValueError, TypeError) as e:
-            logger.warning("Failed to copy explainability data: %s", e)
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.warning("Failed to generate explainability data: %s", e)
             return None
 
     def generate_risk_decomposition_json(self) -> Path:
@@ -2593,10 +3826,11 @@ class DashboardGenerator:
         try:
             paths = [
                 self.generate_performance_json(),
+                self.generate_health_json(),
                 self.generate_signals_json(),
                 self.generate_stats_json(),
                 self.generate_alerts_json(),
-                self.generate_health_json(),
+                self.generate_incidents_json(),
                 self.generate_analytics_json(),
                 self.generate_graduation_json(),
                 self.generate_adaptive_sizing_json(),
@@ -2691,6 +3925,7 @@ class DashboardGenerator:
             # existing dashboard consumers.
             index = build_public_data_index(paths, public_dir=PUBLIC_DIR)
             save_results_json(index, output_path=str(PUBLIC_DIR / "index.json"))
+            _mirror_public_data_contract_files_to_dist(PUBLIC_DIR)
         finally:
             self.close()
 

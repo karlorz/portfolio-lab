@@ -17,7 +17,7 @@ from unittest.mock import patch, MagicMock
 
 from src.strategy.ensemble_voter import (
     Regime, SignalSource, SignalReading, EnsembleVote, BanditWeighter,
-    REGIME_WEIGHTS, REGIME_CONDITIONAL_WEIGHTS, SignalAggregator, EnsembleVoter,
+    REGIME_WEIGHTS, REGIME_CONDITIONAL_WEIGHTS, EnsembleVoter,
 )
 
 
@@ -154,7 +154,7 @@ class TestEnsembleVote:
             'timestamp', 'regime', 'regime_confidence', 'num_sources',
             'weighted_consensus', 'agreement_ratio', 'equity_bias', 'duration_bias',
             'gold_bias', 'action', 'confidence', 'reasoning', 'source_votes', 'n_eff', 'weight_entropy',
-            'regime_multipliers',
+            'regime_multipliers', 'adaptive_learning',
         }
         actual = {f.name for f in fields(EnsembleVote)}
         assert actual == expected, f"Missing fields: {expected - actual}"
@@ -364,6 +364,25 @@ class TestEnsembleVoter:
         assert vote.num_sources == 2
         assert vote.weighted_consensus != 0
         assert vote.action in ['increase_equity', 'decrease_equity', 'neutral', 'risk_off']
+
+    def test_compute_vote_discloses_adaptive_learning_status(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ENSEMBLE_USE_IC_WEIGHTS", raising=False)
+        voter = EnsembleVoter(data_path=tmp_path)
+        readings = {
+            SignalSource.ALTERNATIVE_DATA: _make_reading(
+                value=0.4,
+                source=SignalSource.ALTERNATIVE_DATA,
+            ),
+        }
+
+        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+
+        assert vote.adaptive_learning["bandit"]["status"] == "non_effective"
+        assert vote.adaptive_learning["bandit"]["observations"] == 0
+        assert vote.adaptive_learning["bandit"]["reason"] == "cold_start_no_regime_weights"
+        assert vote.adaptive_learning["online_ic"]["status"] == "disabled"
+        assert vote.adaptive_learning["online_ic"]["enabled"] is False
+        assert vote.adaptive_learning["online_ic"]["reason"] == "env_disabled"
 
     def test_compute_vote_crisis_action(self, tmp_path):
         voter = _make_voter(tmp_path)
@@ -2080,7 +2099,7 @@ class TestEnsembleVoteFieldValidation:
 
     def test_field_count(self):
         flds = fields(EnsembleVote)
-        assert len(flds) == 16
+        assert len(flds) == 17
 
     def test_all_field_types(self):
         """Verify specific type annotations for EnsembleVote fields."""
@@ -2109,7 +2128,7 @@ class TestEnsembleVoteFieldValidation:
     def test_no_fields_have_defaults(self):
         """All EnsembleVote fields are required except diagnostic fields."""
         import dataclasses
-        exempt = {"n_eff", "weight_entropy", "regime_multipliers"}
+        exempt = {"n_eff", "weight_entropy", "regime_multipliers", "adaptive_learning"}
         for f in fields(EnsembleVote):
             if f.name in exempt:
                 continue
@@ -3145,18 +3164,18 @@ class TestCollectSignalsEdgeCases:
         assert SignalSource.INTERNATIONAL_MOMENTUM not in active_sources_set
         assert voter._should_skip(SignalSource.INTERNATIONAL_MOMENTUM, active_sources_set, Regime.CRISIS)
 
-    def test_signal_aggregator_collect_msm_does_not_crash(self):
-        """SignalAggregator._collect_msm_signal should not crash."""
-        aggregator = SignalAggregator(load_price_data=lambda: None, regime_weights=REGIME_WEIGHTS)
+    def test_collect_signals_in_collect_msm(self, tmp_path):
+        """_collect_msm_signal should not crash."""
+        voter = _make_voter(tmp_path)
         readings = {}
-        aggregator._collect_msm_signal(readings, active_sources=None, regime=None, date=None)
+        voter._collect_msm_signal(readings, active_sources=None, regime=None, date=None)
         assert isinstance(readings, dict)
 
-    def test_signal_aggregator_collect_cross_asset_rv_does_not_crash(self):
-        """SignalAggregator._collect_cross_asset_rv_signal should not crash."""
-        aggregator = SignalAggregator(load_price_data=lambda: None, regime_weights=REGIME_WEIGHTS)
+    def test_collect_signals_in_collect_cross_asset_rv(self, tmp_path):
+        """_collect_cross_asset_rv_signal should not crash."""
+        voter = _make_voter(tmp_path)
         readings = {}
-        aggregator._collect_cross_asset_rv_signal(readings, active_sources=None, regime=None)
+        voter._collect_cross_asset_rv_signal(readings, active_sources=None, regime=None)
         assert isinstance(readings, dict)
 
 

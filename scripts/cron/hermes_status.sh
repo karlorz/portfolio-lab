@@ -15,6 +15,17 @@ cron_status_from_exit() {
     fi
 }
 
+cron_pipeline_exit() {
+    local producer_status="${1:-0}"
+    local tee_status="${2:-0}"
+
+    if [ "$producer_status" -ne 0 ]; then
+        echo "$producer_status"
+    else
+        echo "$tee_status"
+    fi
+}
+
 record_hermes_cron_status() {
     local job_name="${1:?job name required}"
     local exit_code="${2:-0}"

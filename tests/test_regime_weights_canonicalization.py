@@ -38,22 +38,10 @@ def test_integrator_bull_weights_project_from_canonical_low_vol_weights():
 
     assert bull_weights["multi_speed"] == canonical_low_vol["multi_speed_momentum"]
     assert bull_weights["value"] == canonical_low_vol["cross_asset_rv"]
-    assert bull_weights["momentum"] == (
-        canonical_low_vol["international_momentum"]
-        + canonical_low_vol["multi_timeframe_fusion"]
-    )
-    assert "network_momentum" not in bull_weights
+    assert bull_weights["momentum"] == canonical_low_vol["international_momentum"]
     assert bull_weights["sentiment"] == (
         canonical_low_vol["alternative_data"] + canonical_low_vol["google_trends"]
     )
-
-
-def test_multi_timeframe_fusion_does_not_project_to_network_momentum():
-    legacy_type = integrator._CANONICAL_SOURCE_TO_LEGACY_TYPE[
-        ensemble_voter.SignalSource.MULTI_TIMEFRAME_FUSION
-    ]
-
-    assert legacy_type != "network_momentum"
 
 
 def test_integrator_regime_weights_respect_ensemble_weights_file_override(tmp_path):

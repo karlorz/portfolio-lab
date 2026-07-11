@@ -58,6 +58,8 @@ export interface LabsPanelRow {
   artifactPath: string;
   status: LabsRegistryRow['status'];
   provenanceStatus: LabsRegistryRow['provenance_status'];
+  governanceState: NonNullable<LabsRegistryRow['governance_state']>;
+  governanceReasons: string[];
   scorecardStatus: LabsScorecardData['status'] | 'missing';
   replayStatus: LabsReplayData['status'] | 'missing';
   replayDiagnostics: LabsPanelReplayDiagnostics | null;
@@ -156,6 +158,7 @@ export interface LabsPanelViewModel {
     scorecards: number;
     replays: number;
     invalidArtifacts: number;
+    missingProvenanceCandidates: number;
     summaryLimitedEndpoints: number;
     indexedRows: number;
   };
@@ -473,6 +476,8 @@ export function buildLabsPanelViewModel(
       artifactPath: row.artifact_path,
       status: row.status,
       provenanceStatus: row.provenance_status,
+      governanceState: row.governance_state ?? scorecard?.governance_state ?? 'clear',
+      governanceReasons: row.governance_reasons ?? scorecard?.governance_reasons ?? [],
       scorecardStatus: scorecard?.status ?? 'missing',
       replayStatus: replay?.status ?? 'missing',
       replayDiagnostics: buildReplayDiagnostics(replay),
@@ -516,6 +521,15 @@ export function buildLabsPanelViewModel(
     (total, status) => total + endpointRowCount(status),
     0,
   );
+  const missingProvenanceCandidates = rows.filter((row) => (
+    row.provenanceStatus === 'missing' &&
+    (
+      row.status === 'candidate' ||
+      row.status === 'validated' ||
+      row.scorecardStatus === 'watch' ||
+      row.scorecardStatus === 'promote'
+    )
+  )).length;
   const hasSummaryLimitedData = summaryLimitedEndpoints.length > 0;
   const disabled = !data || (!data.available && !hasPublishedData && !hasSummaryLimitedData);
   const emptyMessage = disabled
@@ -549,6 +563,7 @@ export function buildLabsPanelViewModel(
       scorecards: data?.scorecards.length ?? 0,
       replays: data?.replays.length ?? 0,
       invalidArtifacts: rows.filter((row) => row.validationStatus === 'invalid').length,
+      missingProvenanceCandidates,
       summaryLimitedEndpoints: summaryLimitedEndpoints.length,
       indexedRows: summaryLimitedRowCount,
     },
@@ -702,6 +717,12 @@ export function LabsPanel() {
           <label>Invalid</label>
           <span className={view.summary.invalidArtifacts > 0 ? 'negative' : 'positive'}>
             {view.summary.invalidArtifacts}
+          </span>
+        </div>
+        <div className="analytics-card">
+          <label>Missing Provenance</label>
+          <span className={view.summary.missingProvenanceCandidates > 0 ? 'negative' : 'positive'}>
+            {view.summary.missingProvenanceCandidates}
           </span>
         </div>
       </div>
@@ -944,7 +965,17 @@ export function LabsPanel() {
                           <strong>{row.experimentId}</strong>
                           <small>{row.artifactPath}</small>
                         </td>
-                        <td>{row.status}</td>
+                        <td>
+                          {row.status}
+                          {row.governanceState !== 'clear' && (
+                            <small>
+                              {row.governanceState}
+                              {row.governanceReasons.length > 0
+                                ? `: ${row.governanceReasons.join(', ')}`
+                                : ''}
+                            </small>
+                          )}
+                        </td>
                         <td>{formatMetric(row.sharpe)}</td>
                         <td className={(row.maxDrawdownPct ?? 0) < -20 ? 'negative' : ''}>
                           {formatMetric(row.maxDrawdownPct, '%')}

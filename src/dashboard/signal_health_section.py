@@ -61,6 +61,8 @@ def build_signal_health_section(
             "scores": report.get("scores", {}),
             "alerts": report.get("alerts", []),
             "overall_health": report.get("overall_health", "unknown"),
+            "status": report.get("status", report.get("overall_health", "unknown")),
+            "label_horizon": report.get("label_horizon"),
         }
     except SIGNAL_HEALTH_EXCEPTIONS as exc:
         if log_error:

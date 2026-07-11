@@ -18,14 +18,19 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def test_repo_hermes_wrapper_records_status_json_with_hermes_backend(tmp_path: Path) -> None:
-    """A direct Hermes wrapper run should update cron_status.json as backend=hermes."""
+def _prepare_dashboard_wrapper_harness(
+    tmp_path: Path,
+    *,
+    create_data_dir: bool,
+    producer_exit: int,
+) -> tuple[Path, Path, Path]:
+    """Create a temp project with dashboard wrapper, status helper, and stubs."""
     project = tmp_path / "portfolio-lab"
     scripts_dir = project / "scripts"
     cron_dir = scripts_dir / "cron"
-    data_dir = project / "data"
     cron_dir.mkdir(parents=True)
-    data_dir.mkdir()
+    if create_data_dir:
+        (project / "data").mkdir()
 
     guard = scripts_dir / "cron_guard.sh"
     guard.write_text(
@@ -33,12 +38,10 @@ def test_repo_hermes_wrapper_records_status_json_with_hermes_backend(tmp_path: P
 set -euo pipefail
 
 cron_guard_start() {
-    echo "guard_start $1"
     return 0
 }
 
 cron_guard_end() {
-    echo "guard_end $1 $2"
     return "$2"
 }
 """
@@ -57,14 +60,22 @@ cron_guard_end() {
         runtime,
         f"""#!/bin/bash
 printf '%s\\n' "$*" >> "{update_args}"
-exit 0
+if [ "$1" = "scripts/cron_update.py" ]; then
+    exit 0
+fi
+exit {producer_exit}
 """,
     )
 
+    return project, runtime, update_args
+
+
+def _run_wrapper(wrapper: Path, project: Path, runtime: Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["PYTHON_RUNTIME"] = str(runtime)
+    env["PORTFOLIO_LAB_PROJECT_DIR"] = str(project)
 
-    result = subprocess.run(
+    return subprocess.run(
         ["bash", str(wrapper)],
         cwd=project,
         env=env,
@@ -73,11 +84,67 @@ exit 0
         timeout=10,
     )
 
+
+def test_repo_hermes_wrapper_records_status_json_with_hermes_backend(tmp_path: Path) -> None:
+    """A direct Hermes wrapper run should update cron_status.json as backend=hermes."""
+    project, runtime, update_args = _prepare_dashboard_wrapper_harness(
+        tmp_path,
+        create_data_dir=True,
+        producer_exit=0,
+    )
+    wrapper = project / "scripts" / "cron" / "portfolio-lab-dashboard.sh"
+
+    result = _run_wrapper(wrapper, project, runtime)
+
     assert result.returncode == 0, result.stdout + result.stderr
     recorded_calls = update_args.read_text().splitlines()
     assert "src/dashboard/generator.py" in recorded_calls
     assert any(
         call.startswith("scripts/cron_update.py portfolio-lab-dashboard ok ")
+        and call.endswith(" hermes")
+        for call in recorded_calls
+    )
+
+
+def test_dashboard_wrapper_records_error_when_tee_stage_fails(tmp_path: Path) -> None:
+    """A successful producer with a failed tee stage must not record ok."""
+    project, runtime, update_args = _prepare_dashboard_wrapper_harness(
+        tmp_path,
+        create_data_dir=False,
+        producer_exit=0,
+    )
+    wrapper = project / "scripts" / "cron" / "portfolio-lab-dashboard.sh"
+
+    result = _run_wrapper(wrapper, project, runtime)
+
+    assert result.returncode != 0
+    assert "tee: data/dashboard.log" in result.stderr
+    recorded_calls = update_args.read_text().splitlines()
+    assert any(
+        call.startswith("scripts/cron_update.py portfolio-lab-dashboard error ")
+        and call.endswith(" hermes")
+        for call in recorded_calls
+    )
+
+
+def test_dashboard_wrapper_preserves_producer_failure_precedence_when_tee_fails(
+    tmp_path: Path,
+) -> None:
+    """Producer status remains authoritative when both producer and tee fail."""
+    project, runtime, update_args = _prepare_dashboard_wrapper_harness(
+        tmp_path,
+        create_data_dir=False,
+        producer_exit=42,
+    )
+    wrapper = project / "scripts" / "cron" / "portfolio-lab-dashboard.sh"
+
+    result = _run_wrapper(wrapper, project, runtime)
+
+    assert result.returncode == 42
+    assert "tee: data/dashboard.log" in result.stderr
+    recorded_calls = update_args.read_text().splitlines()
+    assert any(
+        call.startswith("scripts/cron_update.py portfolio-lab-dashboard error ")
         and call.endswith(" hermes")
         for call in recorded_calls
     )

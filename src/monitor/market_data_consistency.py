@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import json
 from collections import Counter
 from datetime import date
 from datetime import datetime, timezone
@@ -21,6 +22,10 @@ DEFAULT_PROVIDER_MAX_LATEST_LAG_DAYS = int(
     os.getenv("MARKET_DATA_RECON_MAX_LATEST_LAG_DAYS", "1")
 )
 DEFAULT_PROVIDER_MAX_OFFENDERS = int(os.getenv("MARKET_DATA_RECON_MAX_OFFENDERS", "5"))
+DEFAULT_MARKET_DB_SYNC_REMEDIATION_COMMAND = (
+    "./scripts/python_runtime.sh -m src.data.market_db_sync "
+    "--prices public/data/prices.json --db data/market.db"
+)
 
 
 class MarketDataSemanticsError(ValueError):
@@ -140,6 +145,198 @@ def _latest_rows_by_symbol(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[
                 "adjusted_close": _row_adjusted_close(row),
             }
     return latest
+
+
+def _latest_compact_prices(prices_path: Path) -> dict[str, dict[str, Any]]:
+    if not prices_path.exists():
+        return {}
+    with prices_path.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, Mapping):
+        return {}
+
+    latest: dict[str, dict[str, Any]] = {}
+    for raw_symbol, records in payload.items():
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol or not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, Mapping):
+                continue
+            row_date = _parse_price_row_date(record.get("d"))
+            price = _row_adjusted_close({"close": record.get("p")})
+            if row_date is None or price is None:
+                continue
+            current = latest.get(symbol)
+            if current is None or row_date > current["date"]:
+                latest[symbol] = {
+                    "symbol": symbol,
+                    "date": row_date,
+                    "date_raw": record.get("d"),
+                    "price": price,
+                }
+    return latest
+
+
+def _latest_market_db_prices(db_path: Path) -> dict[str, dict[str, Any]]:
+    if not db_path.exists():
+        return {}
+    with sqlite_connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT p.symbol, p.date, p.close
+            FROM prices p
+            INNER JOIN (
+                SELECT symbol, MAX(date) AS latest_date
+                FROM prices
+                GROUP BY symbol
+            ) latest
+                ON p.symbol = latest.symbol
+               AND p.date = latest.latest_date
+            """
+        ).fetchall()
+
+    latest: dict[str, dict[str, Any]] = {}
+    for symbol, row_date, close in rows:
+        normalized_symbol = str(symbol).strip().upper()
+        parsed_date = _parse_price_row_date(row_date)
+        if not normalized_symbol or parsed_date is None:
+            continue
+        try:
+            price = float(close)
+        except (TypeError, ValueError):
+            continue
+        latest[normalized_symbol] = {
+            "symbol": normalized_symbol,
+            "date": parsed_date,
+            "date_raw": row_date,
+            "price": price,
+        }
+    return latest
+
+
+def _compact_sqlite_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {"date": row["date"].isoformat(), "price": row["price"]}
+
+
+def reconcile_compact_prices_with_market_db(
+    *,
+    prices_path: str | Path,
+    db_path: str | Path,
+    required_symbols: Sequence[str] | None = None,
+    price_tolerance_abs: float = 1e-6,
+    max_offenders: int = DEFAULT_PROVIDER_MAX_OFFENDERS,
+    remediation_command: str = DEFAULT_MARKET_DB_SYNC_REMEDIATION_COMMAND,
+) -> dict[str, Any]:
+    """Compare compact public latest prices against the SQLite serving store.
+
+    ``public/data/prices.json`` is the canonical compact price artifact written
+    by the fetcher. ``market.db`` is still the serving store for dashboard
+    latest-price consumers, so publication must prove the serving store has the
+    same latest date and adjusted close for configured symbols.
+    """
+    resolved_prices_path = Path(prices_path)
+    resolved_db_path = Path(db_path)
+    compact_latest = _latest_compact_prices(resolved_prices_path)
+    sqlite_latest = _latest_market_db_prices(resolved_db_path)
+
+    if not compact_latest:
+        return {
+            "status": "unavailable",
+            "failure_type": "compact_prices_unavailable",
+            "symbols_checked": 0,
+            "issue_counts": {"compact_prices_unavailable": 1},
+            "top_offenders": [],
+            "remediation_command": "Regenerate public/data/prices.json before publishing dashboard artifacts.",
+            "message": f"no comparable compact prices found at {resolved_prices_path}",
+        }
+    if not sqlite_latest:
+        return {
+            "status": "fail",
+            "failure_type": "market_db_unavailable",
+            "symbols_checked": 0,
+            "issue_counts": {"market_db_unavailable": 1},
+            "top_offenders": [],
+            "remediation_command": remediation_command,
+            "message": f"no comparable SQLite prices found at {resolved_db_path}",
+        }
+
+    symbols = (
+        [str(symbol).strip().upper() for symbol in required_symbols if str(symbol).strip()]
+        if required_symbols is not None
+        else sorted(compact_latest)
+    )
+    issues: list[dict[str, Any]] = []
+    for symbol in symbols:
+        compact = compact_latest.get(symbol)
+        sqlite = sqlite_latest.get(symbol)
+        if compact is None:
+            continue
+        if sqlite is None:
+            issues.append(
+                {
+                    "issue": "missing_sqlite_symbol",
+                    "symbol": symbol,
+                    "compact_latest_row": _compact_sqlite_row(compact),
+                    "sqlite_latest_row": None,
+                    "message": f"{symbol} is present in prices.json but missing from market.db",
+                }
+            )
+            continue
+
+        lag_days = (compact["date"] - sqlite["date"]).days
+        if lag_days > 0:
+            issues.append(
+                {
+                    "issue": "stale_latest_date",
+                    "symbol": symbol,
+                    "compact_latest_row": _compact_sqlite_row(compact),
+                    "sqlite_latest_row": _compact_sqlite_row(sqlite),
+                    "lag_days": lag_days,
+                    "message": (
+                        f"{symbol} market.db latest date {sqlite['date'].isoformat()} "
+                        f"lags prices.json {compact['date'].isoformat()} by {lag_days}d"
+                    ),
+                }
+            )
+            continue
+
+        if compact["date"] == sqlite["date"] and abs(compact["price"] - sqlite["price"]) > price_tolerance_abs:
+            issues.append(
+                {
+                    "issue": "latest_price_divergence",
+                    "symbol": symbol,
+                    "compact_latest_row": _compact_sqlite_row(compact),
+                    "sqlite_latest_row": _compact_sqlite_row(sqlite),
+                    "difference": round(compact["price"] - sqlite["price"], 8),
+                    "tolerance": price_tolerance_abs,
+                    "message": (
+                        f"{symbol} market.db latest price {sqlite['price']} differs from "
+                        f"prices.json {compact['price']} on {compact['date'].isoformat()}"
+                    ),
+                }
+            )
+
+    issue_counts = dict(Counter(str(issue["issue"]) for issue in issues))
+    failure_type = None
+    if issues:
+        failure_type = (
+            "market_db_stale"
+            if any(issue["issue"] == "stale_latest_date" for issue in issues)
+            else "market_db_mismatch"
+        )
+
+    return {
+        "status": "fail" if issues else "ok",
+        "failure_type": failure_type,
+        "symbols_checked": len(symbols),
+        "issue_counts": issue_counts,
+        "top_offenders": issues[:max_offenders],
+        "remediation_command": remediation_command,
+        "message": "; ".join(str(issue["message"]) for issue in issues[:max_offenders])
+        if issues
+        else "compact prices and market.db latest rows reconciled",
+    }
 
 
 def _append_missing_issue(

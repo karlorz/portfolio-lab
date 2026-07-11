@@ -107,6 +107,10 @@ class GraduationChecklist:
 
     # Gate: minimum days before ANY graduation alert (prevents false alarms)
     MIN_OBSERVATION_DAYS = 30
+    OBSERVATION_WINDOW_CRITERIA = frozenset({
+        "health_checks",
+        "circuit_breaker_confidence",
+    })
 
     def __init__(self, criteria: Optional[Dict] = None):
         self.criteria = copy.deepcopy(criteria) if criteria is not None else copy.deepcopy(self.DEFAULT_CRITERIA)
@@ -199,7 +203,16 @@ class GraduationChecklist:
         auto_criteria = [r for n, r in results.items() if n != "manual_approval"]
         if not auto_criteria:
             return 0.0
-        passed = sum(1 for r in auto_criteria if r.passed)
+        passed = sum(
+            1
+            for name, result in results.items()
+            if name != "manual_approval"
+            and result.passed
+            and not (
+                name in self.OBSERVATION_WINDOW_CRITERIA
+                and result.value < result.required
+            )
+        )
         return round(passed / len(auto_criteria) * 100, 1)
 
     def save_report(self, results: Dict[str, CheckResult], path: Optional[Path] = None) -> Path:
@@ -472,22 +485,24 @@ class GraduationChecklist:
 
     def _check_health(self, state: Dict) -> CheckResult:
         """Check that health checks have been consistently passing."""
-        # We check the latest health report — if it shows all passing, that's good
-        # For a more rigorous check we'd need historical health reports
         health = state.get("health_report", {})
         summary = health.get("summary", {})
         total = summary.get("total_checks", 0)
         passed = summary.get("passed", 0)
         
         required = int(self.criteria["health_checks"]["value"])
+        consecutive_days = int(
+            summary.get("consecutive_passing_days")
+            or summary.get("consecutive_ok_days")
+            or summary.get("consecutive_green_days")
+            or 0
+        )
         
-        # Check current report
-        if total > 0 and passed == total:
-            # All current checks passing — accept as meeting threshold
+        if total > 0 and passed == total and consecutive_days >= required:
             return CheckResult(
                 name="health_checks",
                 passed=True,
-                value=passed,
+                value=consecutive_days,
                 required=required,
                 description=self.criteria["health_checks"]["description"],
             )
@@ -495,7 +510,7 @@ class GraduationChecklist:
         return CheckResult(
             name="health_checks",
             passed=False,
-            value=passed,
+            value=consecutive_days,
             required=required,
             description=self.criteria["health_checks"]["description"],
         )
@@ -542,22 +557,12 @@ class GraduationChecklist:
         
         required = int(self.criteria["circuit_breaker_confidence"]["value"])
         
-        # Green status or no trips in recent history = pass
-        if isinstance(status, str) and status.lower() in ("green", "ok", "normal"):
+        status_ok = isinstance(status, str) and status.lower() in ("green", "ok", "normal", "yellow")
+        if status_ok and trips == 0 and consecutive_ok >= required:
             return CheckResult(
                 name="circuit_breaker_confidence",
                 passed=True,
-                value=consecutive_ok if consecutive_ok > 0 else 1,
-                required=required,
-                description=self.criteria["circuit_breaker_confidence"]["description"],
-            )
-
-        # If status isn't green but no recent trips, still pass
-        if trips == 0:
-            return CheckResult(
-                name="circuit_breaker_confidence",
-                passed=True,
-                value=consecutive_ok if consecutive_ok > 0 else 1,
+                value=consecutive_ok,
                 required=required,
                 description=self.criteria["circuit_breaker_confidence"]["description"],
             )

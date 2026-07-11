@@ -51,6 +51,7 @@ from datetime import datetime, timedelta
 
 from src.paths import DATA_DIR, BASE_ALLOCATION
 from src.backtest.metrics import save_results_json
+from src.utils.log_config import configure_logging
 
 
 __all__ = ['FRED_SERIES', 'FRED_CACHE', 'fetch_fred_series', 'fetch_all_fred_data', 'calculate_inflation_yoy', 'calculate_real_rate', 'FedPolicyRegime', 'classify_fed_regime', 'FedPolicyOverlay']
@@ -74,6 +75,19 @@ FRED_SERIES = {
 
 # Cache directory
 FRED_CACHE = DATA_DIR / "fred_data.json"
+
+
+def _format_fred_date(value: object) -> str:
+    """Format FRED dates from fresh pandas rows or cached JSON reloads."""
+    if hasattr(value, "strftime"):
+        return value.strftime('%Y-%m-%d')
+    if isinstance(value, str):
+        stripped = value.strip()
+        try:
+            return datetime.fromisoformat(stripped).strftime('%Y-%m-%d')
+        except ValueError:
+            return stripped
+    return str(value)
 
 
 def fetch_fred_series(series_id: str, start_date: str = "2000-01-01") -> Optional[pd.DataFrame]:
@@ -562,6 +576,8 @@ class FedPolicyOverlay:
 
 
 def main():
+    configure_logging()
+
     parser = argparse.ArgumentParser(description="Fed Policy Overlay v2.54")
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
     
@@ -593,7 +609,7 @@ def main():
         data = overlay.fetch_data(force_refresh=args.force)
         logger.info("\nFetched %d series:", len(data))
         for series_id, df in data.items():
-            latest = df.iloc[-1]['date'].strftime('%Y-%m-%d') if not df.empty else "N/A"
+            latest = _format_fred_date(df.iloc[-1]['date']) if not df.empty else "N/A"
             logger.info("  %s: %d obs, latest=%s", series_id, len(df), latest)
 
     elif args.command == 'regime':
@@ -645,7 +661,7 @@ def main():
         for series_id, df in data.items():
             if not df.empty:
                 latest = df.iloc[-1]
-                logger.info("  %s: %s = %.2f", series_id, latest['date'].strftime('%Y-%m-%d'), latest['value'])
+                logger.info("  %s: %s = %.2f", series_id, _format_fred_date(latest['date']), latest['value'])
 
     else:
         parser.print_help()

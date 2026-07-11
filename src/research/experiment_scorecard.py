@@ -24,15 +24,18 @@ from src.research.experiment_artifact_validator import (
 from src.research.experiment_registry import LABS_REGISTRY_FILENAME
 from src.research.experiment_replay_batch import LABS_REPLAYS_FILENAME
 from src.research.labs_validation_report import LABS_VALIDATION_FILENAME
+from src.research.promotion_policy import (
+    governance_disclosure_fields,
+    is_clean_provenance_status,
+    is_rejecting_provenance_status,
+    is_rejecting_registry_status,
+)
 
 logger = logging.getLogger(__name__)
 
 LABS_SCORECARDS_FILENAME = "labs_scorecards.json"
 LABS_SCORECARD_POLICY_ENV_VAR = "LABS_SCORECARD_POLICY_FILE"
 
-_CLEAN_PROVENANCE_STATUSES = {"present", "embedded", "sidecar"}
-_BAD_PROVENANCE_STATUSES = {"malformed", "stale"}
-_REJECT_REGISTRY_STATUSES = {"warning", "rejected", "archived"}
 DEFAULT_SCORECARD_POLICY_VERSION = "default-v1"
 DEFAULT_SCORECARD_POLICY_THRESHOLDS: dict[str, float] = {
     "min_promote_sharpe": 0.9,
@@ -247,8 +250,8 @@ def _classification(
     baseline_deltas = _mapping(row.get("baseline_deltas"))
 
     if (
-        row_status in _REJECT_REGISTRY_STATUSES
-        or provenance_status in _BAD_PROVENANCE_STATUSES
+        is_rejecting_registry_status(row_status)
+        or is_rejecting_provenance_status(provenance_status)
         or experiment_id in invalid_experiment_ids
         or artifact_path in invalid_artifact_paths
         or experiment_id in failed_replay_ids
@@ -267,7 +270,7 @@ def _classification(
         return "reject"
 
     promote_ready = (
-        provenance_status in _CLEAN_PROVENANCE_STATUSES
+        is_clean_provenance_status(provenance_status)
         and sharpe is not None
         and sharpe >= _policy_threshold(policy, "min_promote_sharpe")
         and sharpe_delta is not None
@@ -276,6 +279,51 @@ def _classification(
         and (wfe is None or wfe >= _policy_threshold(policy, "min_promote_wfe"))
     )
     return "promote" if promote_ready else "watch"
+
+
+def _metric_gate(
+    row: Mapping[str, Any],
+    *,
+    invalid_experiment_ids: set[str],
+    invalid_artifact_paths: set[str],
+    failed_replay_ids: set[str],
+    policy: Mapping[str, Any],
+) -> tuple[str, bool, list[str]]:
+    experiment_id = str(row.get("experiment_id", ""))
+    artifact_path = str(row.get("artifact_path", ""))
+    metrics = _mapping(row.get("metrics"))
+    baseline_deltas = _mapping(row.get("baseline_deltas"))
+
+    failures: list[str] = []
+    if experiment_id in invalid_experiment_ids:
+        failures.append("invalid_validation_report")
+    if artifact_path in invalid_artifact_paths:
+        failures.append("invalid_artifact_validation")
+    if experiment_id in failed_replay_ids:
+        failures.append("failed_replay")
+
+    sharpe = _metric_value(metrics, "sharpe")
+    sharpe_delta = _metric_value(baseline_deltas, "sharpe")
+    max_drawdown_delta = _metric_value(baseline_deltas, "max_drawdown_pct")
+    dsr = _metric_value(metrics, "dsr")
+    wfe = _metric_value(metrics, "wfe")
+
+    if sharpe_delta is not None and sharpe_delta < 0:
+        failures.append("negative_sharpe_delta")
+    if max_drawdown_delta is not None and max_drawdown_delta < 0:
+        failures.append("worse_max_drawdown")
+    if sharpe is None or sharpe < _policy_threshold(policy, "min_promote_sharpe"):
+        failures.append("sharpe_below_threshold")
+    if sharpe_delta is None or sharpe_delta < _policy_threshold(policy, "min_promote_sharpe_delta"):
+        failures.append("sharpe_delta_below_threshold")
+    if dsr is not None and dsr < _policy_threshold(policy, "min_promote_dsr"):
+        failures.append("dsr_below_threshold")
+    if wfe is not None and wfe < _policy_threshold(policy, "min_promote_wfe"):
+        failures.append("wfe_below_threshold")
+
+    if failures:
+        return "candidate", False, failures
+    return "promoted", True, []
 
 
 def _scorecard_row(
@@ -287,6 +335,13 @@ def _scorecard_row(
     failed_replay_ids: set[str],
     policy: Mapping[str, Any],
 ) -> dict[str, Any]:
+    metric_gate_status, metric_gate_pass, metric_failures = _metric_gate(
+        row,
+        invalid_experiment_ids=invalid_experiment_ids,
+        invalid_artifact_paths=invalid_artifact_paths,
+        failed_replay_ids=failed_replay_ids,
+        policy=policy,
+    )
     scorecard = {
         "schema_version": LABS_SCORECARD_SCHEMA_VERSION,
         "experiment_id": str(row.get("experiment_id", "")),
@@ -303,6 +358,14 @@ def _scorecard_row(
         "baseline_deltas": dict(_mapping(row.get("baseline_deltas"))),
         "policy": _policy_copy(policy),
     }
+    scorecard.update(
+        governance_disclosure_fields(
+            row,
+            metric_gate_status=metric_gate_status,
+            metric_gate_pass=metric_gate_pass,
+            metric_failures=metric_failures,
+        )
+    )
     validation = validate_artifact(scorecard)
     if not validation.valid:
         raise ValueError(f"generated Labs scorecard failed validation: {validation.error_messages()}")

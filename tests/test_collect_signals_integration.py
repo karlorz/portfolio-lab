@@ -19,6 +19,7 @@ from src.strategy.ensemble_voter import (
     Regime, SignalSource, SignalReading, EnsembleVoter,
 )
 from src.signals.signal_snapshot import SignalSnapshot
+from src.signals.vix_term_structure import VIXTermStructureSignal
 
 
 def _make_voter(tmp_path):
@@ -31,6 +32,32 @@ def _make_voter(tmp_path):
     voter.current_regime_confidence = 0.5
     voter._init_db()
     return voter
+
+
+def _make_vix_signal(**overrides):
+    defaults = dict(
+        timestamp="2026-07-05T00:00:00+00:00",
+        signal_state="NEUTRAL",
+        signal_value=0.2,
+        vix_spot=18.0,
+        vix3m=19.5,
+        vix6m=20.0,
+        slope_vix3m_vix=1.083,
+        regime="contango",
+        regime_strength=0.5,
+        slope_signal=0.3,
+        roll_yield_signal=0.08,
+        vix_zscore_signal=0.0,
+        curve_shape_signal=0.25,
+        spy_shift=0.02,
+        gld_shift=-0.01,
+        tlt_shift=-0.01,
+        confidence=90.0,
+        is_valid=True,
+        reason="VIX=18.00, Slope=1.083, Regime=contango",
+    )
+    defaults.update(overrides)
+    return VIXTermStructureSignal(**defaults)
 
 
 class TestCollectSignalsMSM:
@@ -295,6 +322,35 @@ class TestCollectSignalsUnifiedOverlay:
                    side_effect=ImportError):
             readings = voter.collect_signals()
         assert SignalSource.UNIFIED_OVERLAY not in readings
+
+
+class TestCollectSignalsVIXTermStructure:
+    """VIX term structure via typed SignalSnapshot bridge."""
+
+    def test_vix_percentage_confidence_collected_as_fractional_reading(self, tmp_path):
+        voter = _make_voter(tmp_path)
+        vix_signal = _make_vix_signal(confidence=90.0)
+
+        with (
+            patch.object(voter, "_collect_msm_signal", return_value=None),
+            patch.object(voter, "_collect_cross_asset_rv_signal", return_value=None),
+            patch.object(voter, "_collect_intl_momentum_signal", return_value=None),
+            patch.object(voter, "_collect_alt_data_signal", return_value=None),
+            patch.object(voter, "_collect_regime_arb_signal", return_value=None),
+            patch.object(voter, "_collect_unified_overlay_signal", return_value=None),
+            patch.object(voter, "_collect_mtf_signal", return_value=None),
+            patch.object(voter, "_collect_google_trends", return_value=None),
+            patch(
+                "src.signals.vix_term_structure.VIXTermStructureSignalGenerator"
+            ) as MockVIX,
+        ):
+            MockVIX.return_value.generate_signal.return_value = vix_signal
+            readings = voter.collect_signals(regime=Regime.NORMAL)
+
+        assert SignalSource.VIX_TERM_STRUCTURE in readings
+        reading = readings[SignalSource.VIX_TERM_STRUCTURE]
+        assert reading.confidence == pytest.approx(0.9)
+        assert 0.0 <= reading.confidence <= 1.0
 
 
 class TestCollectSignalsRegimeGating:

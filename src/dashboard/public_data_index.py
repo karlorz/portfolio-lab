@@ -33,6 +33,7 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "signals.json": ("signals", "signals/v1"),
     "stats.json": ("dashboard", "stats/v1"),
     "alerts.json": ("monitoring", "alerts/v1"),
+    "incidents.json": ("monitoring", "incident-lifecycle/v1"),
     "health.json": ("monitoring", "health/v1"),
     "analytics.json": ("analytics", "analytics/v1"),
     "graduation.json": ("paper_trading", "graduation/v1"),
@@ -50,7 +51,11 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "prices_compact.json": ("market_data", "prices/compact-v1"),
     "historical.json": ("market_data", "historical/v1"),
     "yields.json": ("market_data", "yields/v1"),
+    "data_quality.json": ("market_data", "price-data-quality/v1"),
     "source_manifest.json": ("market_data", "market-data-source-manifest/v1"),
+    "rebalance_health.json": ("operations", "rebalance-health/v1"),
+    "tasker_status.json": ("operations", "tasker-status/v1"),
+    "duration-sweep-results.json": ("research_archive", "duration-sweep-results/v1"),
     "labs_registry.json": ("labs", LABS_REGISTRY_SCHEMA_VERSION),
     "labs_scorecards.json": ("labs", LABS_SCORECARD_SCHEMA_VERSION),
     "labs_replays.json": ("labs", LABS_REPLAY_SCHEMA_VERSION),
@@ -59,11 +64,16 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
 }
 
 _OPTIONAL_PUBLIC_DATA_FILES = (
+    "data_quality.json",
+    "rebalance_health.json",
+    "tasker_status.json",
+    "duration-sweep-results.json",
     "labs_registry.json",
     "labs_scorecards.json",
     "labs_replays.json",
     "labs_validation.json",
     "decision_registry.json",
+    "incidents.json",
 )
 
 _LABS_OBJECT_PAGINATION_ROW_KEYS = {
@@ -78,6 +88,7 @@ _DEFAULT_LABS_PAGE_SIZE = 1000
 _REDISTRIBUTION_MODES = {"public_summary", "provider_derived", "restricted", "internal_only"}
 _LICENSE_SCOPES = {"project_generated", "public_domain", "provider_terms", "licensed_provider", "internal"}
 _PROVIDER_DERIVED_MARKET_FILES = {"prices.json", "prices_compact.json", "historical.json"}
+_ARCHIVED_RESEARCH_FILES = {"duration-sweep-results.json"}
 
 
 def _sha256_file(path: Path) -> str:
@@ -177,8 +188,10 @@ def _generated_at_for_file(path: Path, fallback: str) -> str:
             data = json.load(f)
     except (OSError, json.JSONDecodeError, TypeError):
         return fallback
-    if isinstance(data, dict) and isinstance(data.get("generated_at"), str):
-        return data["generated_at"]
+    if isinstance(data, dict):
+        for key in ("generated_at", "generated", "timestamp"):
+            if isinstance(data.get(key), str):
+                return data[key]
     if isinstance(data, list):
         generated_values = [
             item.get("generated_at")
@@ -260,6 +273,23 @@ def _validate_public_data_entry(path: Path, filename: str, schema_version: str) 
             "valid" if result.valid else "invalid",
             result.error_messages(),
         )
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+    except json.JSONDecodeError as exc:
+        return schema_version, "invalid", [f"$: invalid JSON: {exc.msg}"]
+    except OSError as exc:
+        return schema_version, "invalid", [f"$: could not read file: {exc}"]
+
+    if isinstance(payload, Mapping) and isinstance(payload.get("schema_version"), str):
+        payload_schema_version = payload["schema_version"]
+        if schema_version != "unknown" and payload_schema_version != schema_version:
+            return (
+                payload_schema_version,
+                "invalid",
+                [f"$.schema_version: expected {schema_version}, got {payload_schema_version}"],
+            )
+        return payload_schema_version, "valid", []
     return schema_version, "not_applicable", []
 
 
@@ -277,7 +307,23 @@ def _discover_labs_public_paths(public_dir: Path) -> list[Path]:
 
 
 def _discover_market_data_public_paths(public_dir: Path) -> list[Path]:
-    filenames = ("prices.json", "prices_compact.json", "historical.json", "yields.json", "source_manifest.json")
+    filenames = (
+        "prices.json",
+        "prices_compact.json",
+        "historical.json",
+        "yields.json",
+        "data_quality.json",
+        "source_manifest.json",
+    )
+    return sorted(path for filename in filenames if (path := public_dir / filename).exists())
+
+
+def _discover_governed_public_paths(public_dir: Path) -> list[Path]:
+    filenames = (
+        "rebalance_health.json",
+        "tasker_status.json",
+        "duration-sweep-results.json",
+    )
     return sorted(path for filename in filenames if (path := public_dir / filename).exists())
 
 
@@ -383,6 +429,57 @@ def _source_manifest_row_for(filename: str, source_manifest: Mapping[str, Any] |
         return None
     row = artifacts.get(filename)
     return row if isinstance(row, Mapping) else None
+
+
+def _source_manifest_quality_artifacts(source_manifest: Mapping[str, Any] | None) -> set[str]:
+    if source_manifest is None:
+        return set()
+    artifacts = source_manifest.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        return set()
+    quality_artifacts: set[str] = set()
+    for row in artifacts.values():
+        if not isinstance(row, Mapping):
+            continue
+        quality = row.get("data_quality")
+        if not isinstance(quality, Mapping):
+            continue
+        artifact = quality.get("artifact")
+        if isinstance(artifact, str) and artifact:
+            quality_artifacts.add(artifact)
+    return quality_artifacts
+
+
+def _lineage_status_for(
+    filename: str,
+    category: str,
+    source_manifest_row: Mapping[str, Any] | None,
+    source_manifest: Mapping[str, Any] | None,
+    source_manifest_quality_artifacts: set[str],
+) -> str | None:
+    if filename == "source_manifest.json":
+        return "self_describing"
+    if source_manifest_row is not None:
+        return "source_manifest_row"
+    if filename in source_manifest_quality_artifacts:
+        return "referenced_by_source_manifest"
+    if filename in _PROVIDER_DERIVED_MARKET_FILES and source_manifest is not None:
+        return "missing_source_manifest_row"
+    if category == "research_archive":
+        return "frozen_archive"
+    return None
+
+
+def _missing_source_metadata_for(
+    filename: str,
+    source_manifest: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if filename not in _PROVIDER_DERIVED_MARKET_FILES or source_manifest is None:
+        return None
+    return {
+        "status": "skipped",
+        "failure_reason": "missing_source_manifest_row",
+    }
 
 
 def _source_manifest_identity(
@@ -589,6 +686,7 @@ def _public_data_entry(
     hash_cache: dict[str, dict[str, Any]] | None = None,
     hash_cache_updates: dict[str, dict[str, Any]] | None = None,
     source_manifest: Mapping[str, Any] | None = None,
+    source_manifest_quality_artifacts: set[str] | None = None,
 ) -> dict[str, Any]:
     category, schema_version = _contract_for_filename(filename)
     if path is None or not path.exists():
@@ -612,6 +710,24 @@ def _public_data_entry(
     size_budget = measure_public_data_size_budget(path)
     pagination = _write_labs_pagination_shards(path, filename, public_dir, size_budget, validation_status)
     source_manifest_row = _source_manifest_row_for(filename, source_manifest)
+    if filename == "source_manifest.json":
+        sha256 = _sha256_file(path)
+        if hash_cache_updates is not None:
+            stat = path.stat()
+            cache_key = _hash_cache_key(path, public_dir)
+            hash_cache_updates[cache_key] = {
+                "path": cache_key,
+                "size_bytes": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "sha256": sha256,
+            }
+    else:
+        sha256 = _cached_sha256_file(
+            path,
+            public_dir=public_dir,
+            hash_cache=hash_cache,
+            hash_cache_updates=hash_cache_updates,
+        )
 
     entry = {
         "filename": filename,
@@ -623,21 +739,32 @@ def _public_data_entry(
         "validation_errors": validation_errors,
         "size_bytes": path.stat().st_size,
         "size_budget": size_budget,
-        "sha256": _cached_sha256_file(
-            path,
-            public_dir=public_dir,
-            hash_cache=hash_cache,
-            hash_cache_updates=hash_cache_updates,
-        ),
+        "sha256": sha256,
         "generated_at": _generated_at_for_file(path, generated_at),
         **_public_data_policy_for(filename, category, source_manifest_row),
     }
     if pagination is not None:
         entry["pagination"] = pagination
     source_metadata = _source_metadata_for(filename, source_manifest)
+    lineage_status = _lineage_status_for(
+        filename,
+        category,
+        source_manifest_row,
+        source_manifest,
+        source_manifest_quality_artifacts or set(),
+    )
+    if lineage_status is not None:
+        entry["lineage_status"] = lineage_status
+    if filename in _ARCHIVED_RESEARCH_FILES:
+        entry["archive_status"] = "frozen_research_artifact"
     if source_metadata is not None:
         entry["source_manifest_path"] = source_manifest.get("path", "source_manifest.json")
         entry["source_metadata"] = source_metadata
+    else:
+        missing_source_metadata = _missing_source_metadata_for(filename, source_manifest)
+        if missing_source_metadata is not None:
+            entry["source_manifest_path"] = source_manifest.get("path", "source_manifest.json")
+            entry["source_metadata"] = missing_source_metadata
     return entry
 
 
@@ -658,6 +785,7 @@ def build_public_data_index(
     hash_cache = _load_hash_cache(resolved_cache_path) if use_hash_cache else None
     hash_cache_updates = dict(hash_cache) if hash_cache is not None else None
     source_manifest = _load_source_manifest(public_dir)
+    source_manifest_quality_artifacts = _source_manifest_quality_artifacts(source_manifest)
     path_map: dict[str, Path] = {}
     ordered_filenames: list[str] = []
 
@@ -680,7 +808,15 @@ def build_public_data_index(
         if path.name not in ordered_filenames:
             ordered_filenames.append(path.name)
 
+    for path in _discover_governed_public_paths(public_dir):
+        path_map.setdefault(path.name, path)
+        if path.name not in ordered_filenames:
+            ordered_filenames.append(path.name)
+
     for filename in _OPTIONAL_PUBLIC_DATA_FILES:
+        path = public_dir / filename
+        if filename not in path_map and path.exists():
+            path_map[filename] = path
         if filename not in ordered_filenames:
             ordered_filenames.append(filename)
 
@@ -693,6 +829,7 @@ def build_public_data_index(
             hash_cache=hash_cache,
             hash_cache_updates=hash_cache_updates,
             source_manifest=source_manifest,
+            source_manifest_quality_artifacts=source_manifest_quality_artifacts,
         )
         for filename in ordered_filenames
     ]
@@ -700,7 +837,7 @@ def build_public_data_index(
 
     index = {
         "schema_version": PUBLIC_DATA_INDEX_SCHEMA_VERSION,
-        "files": [entry["filename"] for entry in entries if entry["status"] == "present"],
+        "files": [entry["path"] for entry in entries if entry["status"] == "present"],
         "entries": entries,
         "generated_at": generated_at,
     }

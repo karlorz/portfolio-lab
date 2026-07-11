@@ -31,6 +31,14 @@ from src.ml.stacking_trainer import (
     TrainingResult,
     PredictionResult,
 )
+from src.signals.stacking_feature_engine import StackingFeatureEngine
+from src.signals.signal_source import SignalSource
+from src.paths import MARKET_DB
+
+
+CANONICAL_FEATURE_COUNT = StackingFeatureEngine.TOTAL_DIMENSIONS
+CANONICAL_SOURCE_COUNT = len(SignalSource)
+CANONICAL_PAIR_COUNT = CANONICAL_SOURCE_COUNT * (CANONICAL_SOURCE_COUNT - 1) // 2
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -54,7 +62,7 @@ class TestTrainingConfig:
         assert config.reg_lambda == 1.0
         assert config.eval_metric == "auc"
         assert config.min_training_days == 252
-        assert config.feature_count == 59
+        assert config.feature_count == CANONICAL_FEATURE_COUNT
 
     def test_custom_config(self):
         """Test custom configuration values."""
@@ -92,7 +100,7 @@ class TestStackingTrainer:
         """Test synthetic data generation for testing."""
         X, y, dates = trainer._generate_synthetic_data(n_samples=100)
 
-        assert X.shape == (100, 59)
+        assert X.shape == (100, CANONICAL_FEATURE_COUNT)
         assert len(y) == 100
         assert len(dates) == 100
         assert all(isinstance(d, str) for d in dates)
@@ -102,15 +110,15 @@ class TestStackingTrainer:
         """Test feature names list generation."""
         names = trainer._get_feature_names()
 
-        # Should have 59 features
-        assert len(names) == 59
+        # Should have canonical feature count
+        assert len(names) == CANONICAL_FEATURE_COUNT
 
         # Check for expected prefixes
         base_names = [n for n in names if n.startswith("base_")]
-        assert len(base_names) == 6  # 6 base signals
+        assert len(base_names) == CANONICAL_SOURCE_COUNT
 
         mult_names = [n for n in names if n.startswith("mult_")]
-        assert len(mult_names) == 15  # C(6,2) = 15 pairs
+        assert len(mult_names) == CANONICAL_PAIR_COUNT
 
     def test_train_with_synthetic_data(self, trainer, tmp_path):
         """Test full training pipeline with synthetic data."""
@@ -171,7 +179,7 @@ class TestStackingTrainer:
         trainer.load_model(result.model_path)
 
         # Create test features
-        X_test = np.random.randn(59)
+        X_test = np.random.randn(CANONICAL_FEATURE_COUNT)
 
         prediction = trainer.predict(X_test)
 
@@ -185,7 +193,7 @@ class TestStackingTrainer:
 
     def test_predict_without_model(self, trainer):
         """Test prediction without loaded model triggers fallback."""
-        X_test = np.random.randn(59)
+        X_test = np.random.randn(CANONICAL_FEATURE_COUNT)
 
         prediction = trainer.predict(X_test)
 
@@ -200,7 +208,7 @@ class TestStackingTrainer:
         trainer.load_model(result.model_path)
 
         # Test features (may trigger low confidence)
-        X_test = np.zeros(59)
+        X_test = np.zeros(CANONICAL_FEATURE_COUNT)
 
         prediction = trainer.predict(X_test, confidence_threshold=0.9)
 
@@ -311,7 +319,7 @@ class TestIntegration:
         assert success
 
         # 3. Predict
-        X_test = np.random.randn(59)
+        X_test = np.random.randn(CANONICAL_FEATURE_COUNT)
         prediction = new_trainer.predict(X_test)
         assert prediction is not None
 
@@ -508,10 +516,14 @@ class TestTrainingConfigDataclass:
         assert TrainingConfig().n_splits == 5
 
     def test_default_feature_count(self):
-        assert TrainingConfig().feature_count == 59
+        assert TrainingConfig().feature_count == CANONICAL_FEATURE_COUNT
+
+    def test_default_feature_count_tracks_stacking_feature_engine(self):
+        """Default training dimensions derive from the canonical stacking roster."""
+        assert TrainingConfig().feature_count == StackingFeatureEngine.TOTAL_DIMENSIONS
 
     def test_default_db_path(self):
-        assert TrainingConfig().db_path == "data/market.db"
+        assert TrainingConfig().db_path == str(MARKET_DB)
 
     def test_default_model_dir(self):
         assert TrainingConfig().model_dir == "models"
@@ -884,7 +896,7 @@ class TestSyntheticDataEdgeCases:
         """n_samples=0 must return empty arrays."""
         trainer = StackingTrainer(TrainingConfig())
         X, y, dates = trainer._generate_synthetic_data(n_samples=0)
-        assert X.shape == (0, 59)
+        assert X.shape == (0, CANONICAL_FEATURE_COUNT)
         assert len(y) == 0
         assert len(dates) == 0
 
@@ -892,7 +904,7 @@ class TestSyntheticDataEdgeCases:
         """n_samples=1 must return single-element arrays."""
         trainer = StackingTrainer(TrainingConfig())
         X, y, dates = trainer._generate_synthetic_data(n_samples=1)
-        assert X.shape == (1, 59)
+        assert X.shape == (1, CANONICAL_FEATURE_COUNT)
         assert len(y) == 1
         assert len(dates) == 1
         assert y[0] in (0, 1)
@@ -901,7 +913,7 @@ class TestSyntheticDataEdgeCases:
         """n_samples=10000 must produce correct shapes."""
         trainer = StackingTrainer(TrainingConfig())
         X, y, dates = trainer._generate_synthetic_data(n_samples=10000)
-        assert X.shape == (10000, 59)
+        assert X.shape == (10000, CANONICAL_FEATURE_COUNT)
         assert len(y) == 10000
         assert len(dates) == 10000
 
@@ -929,6 +941,12 @@ class TestSyntheticDataEdgeCases:
         trainer = StackingTrainer(config)
         X, y, dates = trainer._generate_synthetic_data(n_samples=10)
         assert X.shape[1] == 128
+
+    def test_default_shape_tracks_current_signal_roster(self):
+        """Synthetic fallback uses the full current SignalSource roster by default."""
+        trainer = StackingTrainer(TrainingConfig())
+        X, y, dates = trainer._generate_synthetic_data(n_samples=10)
+        assert X.shape == (10, StackingFeatureEngine.TOTAL_DIMENSIONS)
 
     def test_dates_ascending(self):
         """Dates must be in ascending order."""
@@ -965,38 +983,43 @@ class TestFeatureNamesEdgeCases:
     """Test _get_feature_names structure (pure Python, no ML)."""
 
     def test_exact_length(self):
-        """Must produce exactly 59 feature names."""
+        """Must produce the canonical number of feature names."""
         trainer = StackingTrainer(TrainingConfig())
         names = trainer._get_feature_names()
-        assert len(names) == 59
+        assert len(names) == CANONICAL_FEATURE_COUNT
+
+    def test_names_match_feature_engine_contract(self):
+        """Trainer feature names must not drift from feature-engine order."""
+        trainer = StackingTrainer(TrainingConfig())
+        assert trainer._get_feature_names() == StackingFeatureEngine().get_feature_names()
 
     def test_base_prefix_count(self):
-        """Must have 6 base_ feature names (one per SignalSource)."""
+        """Must have one base_ feature name per SignalSource."""
         trainer = StackingTrainer(TrainingConfig())
         names = trainer._get_feature_names()
         base = [n for n in names if n.startswith("base_")]
-        assert len(base) == 6
+        assert len(base) == CANONICAL_SOURCE_COUNT
 
     def test_mult_prefix_count(self):
-        """Must have 15 mult_ features (C(6,2)=15 pairs)."""
+        """Must have one mult_ feature per source pair."""
         trainer = StackingTrainer(TrainingConfig())
         names = trainer._get_feature_names()
         mult = [n for n in names if n.startswith("mult_")]
-        assert len(mult) == 15
+        assert len(mult) == CANONICAL_PAIR_COUNT
 
     def test_disagree_prefix_count(self):
-        """Must have 15 disagree_ features."""
+        """Must have one disagree_ feature per source pair."""
         trainer = StackingTrainer(TrainingConfig())
         names = trainer._get_feature_names()
         disagree = [n for n in names if n.startswith("disagree_")]
-        assert len(disagree) == 15
+        assert len(disagree) == CANONICAL_PAIR_COUNT
 
     def test_avg_prefix_count(self):
-        """Must have 15 avg_ features."""
+        """Must have one avg_ feature per source pair."""
         trainer = StackingTrainer(TrainingConfig())
         names = trainer._get_feature_names()
         avg = [n for n in names if n.startswith("avg_")]
-        assert len(avg) == 15
+        assert len(avg) == CANONICAL_PAIR_COUNT
 
     def test_vix_and_trend_present(self):
         """vix_normalized and trend_strength must be in names."""
@@ -1006,34 +1029,23 @@ class TestFeatureNamesEdgeCases:
         assert "trend_strength" in names
 
     def test_hist_acc_count(self):
-        """Must have 6 hist_acc_ features (one per SignalSource)."""
+        """Must have one accuracy feature per SignalSource."""
         trainer = StackingTrainer(TrainingConfig())
         names = trainer._get_feature_names()
-        hist = [n for n in names if n.startswith("hist_acc_")]
-        assert len(hist) == 6
+        hist = [n for n in names if n.startswith("acc90d_")]
+        assert len(hist) == CANONICAL_SOURCE_COUNT
 
     def test_all_names_unique(self):
-        """Feature names: 52 unique + 7 known duplicates due to source[:3] truncation.
-
-        Known duplicates: cross_asset_rv and cross_asset_regime_arb both
-        truncate to 'cro', causing 7 pairs of duplicate names in the
-        pairwise interaction and hist_acc sections.
-        """
+        """Feature names are unique under the full-roster contract."""
         trainer = StackingTrainer(TrainingConfig())
         names = trainer._get_feature_names()
-        unique = set(names)
-        assert len(names) == 59
-        assert len(unique) == 52
-        # Verify the 7 known duplicates by name prefix
-        dupe_prefixes = [
-            "mult_cro_uni", "disagree_cro_uni", "avg_cro_uni",
-            "mult_mul_cro", "disagree_mul_cro", "avg_mul_cro",
-            "hist_acc_cro",
-        ]
-        from collections import Counter
-        counts = Counter(names)
-        for prefix in dupe_prefixes:
-            assert counts[prefix] == 2, f"{prefix} expected 2x, got {counts[prefix]}"
+        assert len(names) == CANONICAL_FEATURE_COUNT
+        assert len(set(names)) == len(names)
+
+    def test_feature_names_are_unique_under_full_roster_contract(self):
+        """Full source values avoid old prefix-truncation duplicate names."""
+        names = StackingTrainer(TrainingConfig())._get_feature_names()
+        assert len(set(names)) == len(names)
 
     def test_no_empty_names(self):
         """No feature name may be empty or whitespace-only."""
@@ -1063,7 +1075,7 @@ class TestPredictEdgeCases:
     def test_predict_no_model_returns_fallback(self):
         """predict() with no loaded model must return fallback prediction."""
         trainer = StackingTrainer(TrainingConfig())
-        features = np.random.randn(59)
+        features = np.random.randn(CANONICAL_FEATURE_COUNT)
         result = trainer.predict(features)
         assert result.using_fallback is True
         assert result.fallback_reason == "No model loaded"
@@ -1088,34 +1100,34 @@ class TestPredictEdgeCases:
     def test_predict_with_nan_features_no_model(self):
         """predict() with NaN features must not crash."""
         trainer = StackingTrainer(TrainingConfig())
-        features = np.full(59, np.nan)
+        features = np.full(CANONICAL_FEATURE_COUNT, np.nan)
         result = trainer.predict(features)
         assert result.using_fallback is True
 
     def test_predict_with_inf_features_no_model(self):
         """predict() with Inf features must not crash."""
         trainer = StackingTrainer(TrainingConfig())
-        features = np.full(59, np.inf)
+        features = np.full(CANONICAL_FEATURE_COUNT, np.inf)
         result = trainer.predict(features)
         assert result.using_fallback is True
 
     def test_predict_returns_prediction_result_type(self):
         """predict() must return PredictionResult instance."""
         trainer = StackingTrainer(TrainingConfig())
-        result = trainer.predict(np.random.randn(59))
+        result = trainer.predict(np.random.randn(CANONICAL_FEATURE_COUNT))
         assert isinstance(result, PredictionResult)
 
     def test_predict_timestamp_format(self):
         """predict() timestamp must be ISO format."""
         trainer = StackingTrainer(TrainingConfig())
-        result = trainer.predict(np.random.randn(59))
+        result = trainer.predict(np.random.randn(CANONICAL_FEATURE_COUNT))
         assert "T" in result.timestamp
         assert len(result.timestamp) >= 19  # YYYY-MM-DDTHH:MM:SS
 
     def test_predict_feature_vector_none_when_no_model(self):
         """predict() with no model must have feature_vector=None."""
         trainer = StackingTrainer(TrainingConfig())
-        result = trainer.predict(np.random.randn(59))
+        result = trainer.predict(np.random.randn(CANONICAL_FEATURE_COUNT))
         assert result.feature_vector is None
 
 
@@ -1173,7 +1185,7 @@ class TestLoadModelEdgeCases:
 class _MockXGBClassifier:
     """Picklable stand-in for xgb.XGBClassifier, used with patch()."""
     def __init__(self, **kwargs):
-        self.feature_importances_ = np.random.rand(59)
+        self.feature_importances_ = np.random.rand(CANONICAL_FEATURE_COUNT)
     def fit(self, X, y, **kwargs):
         return self
     def predict(self, X):
@@ -1311,7 +1323,7 @@ class TestStubbedMLPipeline:
         trainer.model = mock_clf
         trainer.model_version = "vtest"
 
-        features = np.random.randn(59)
+        features = np.random.randn(CANONICAL_FEATURE_COUNT)
         result = trainer.predict(features)
 
         assert isinstance(result, PredictionResult)
@@ -1319,31 +1331,31 @@ class TestStubbedMLPipeline:
         assert 0.0 <= result.probability <= 1.0
         assert 0.5 <= result.confidence <= 1.0
         assert isinstance(result.feature_vector, list)
-        assert len(result.feature_vector) == 59
+        assert len(result.feature_vector) == CANONICAL_FEATURE_COUNT
 
     def test_predict_1d_reshaped(self, trainer):
         """predict() must reshape 1D input to 2D for the model; verify
-        by checking that the output contains a full 59-dim feature_vector."""
+        by checking that the output contains a full canonical feature_vector."""
         from unittest.mock import MagicMock
         # Use a MagicMock with spec to track predict_proba calls
         mock_clf = MagicMock(spec=_MockXGBClassifier)
-        mock_clf.feature_importances_ = np.random.rand(59)
+        mock_clf.feature_importances_ = np.random.rand(CANONICAL_FEATURE_COUNT)
         mock_clf.predict.return_value = np.array([1])
         mock_clf.predict_proba.return_value = np.array([[0.3, 0.7]])
         trainer.model = mock_clf
         trainer.model_version = "vtest"
 
-        features_1d = np.random.randn(59)
+        features_1d = np.random.randn(CANONICAL_FEATURE_COUNT)
         result = trainer.predict(features_1d)
         # The model should receive 2D input
         call_args = mock_clf.predict_proba.call_args
         assert call_args is not None
         input_arr = call_args[0][0]
         assert input_arr.ndim == 2
-        assert input_arr.shape == (1, 59)
+        assert input_arr.shape == (1, CANONICAL_FEATURE_COUNT)
         # verify the result still has a feature vector
         assert result.feature_vector is not None
-        assert len(result.feature_vector) == 59
+        assert len(result.feature_vector) == CANONICAL_FEATURE_COUNT
 
     def test_predict_with_confidence_threshold_zero(self, trainer):
         """confidence_threshold=0.0 must never trigger fallback."""
@@ -1351,7 +1363,7 @@ class TestStubbedMLPipeline:
         trainer.model = mock_clf
         trainer.model_version = "vtest"
 
-        features = np.random.randn(59)
+        features = np.random.randn(CANONICAL_FEATURE_COUNT)
         result = trainer.predict(features, confidence_threshold=0.0)
         # using_fallback may be np.False_ — compare with == not "is"
         assert bool(result.using_fallback) is False
@@ -1366,7 +1378,7 @@ class TestStubbedMLPipeline:
         trainer.model = mock_clf
         trainer.model_version = "vtest"
 
-        features = np.random.randn(59)
+        features = np.random.randn(CANONICAL_FEATURE_COUNT)
         result = trainer.predict(features, confidence_threshold=1.0)
         # using_fallback may be np.True_ — compare with == not "is"
         assert bool(result.using_fallback) is True
@@ -1560,6 +1572,17 @@ class TestCliMain:
 class TestCreateFeaturesFromSignalsEdgeCases:
     """Test _create_features_from_signals boundary conditions."""
 
+    @staticmethod
+    def _full_signal_payload() -> dict[str, dict[str, float | int]]:
+        return {
+            source.value: {
+                "value": 0.1,
+                "confidence": 0.7,
+                "predicted_direction": 1,
+            }
+            for source in SignalSource
+        }
+
     def test_empty_signals_returns_none(self):
         """Empty signals dict must return None."""
         trainer = StackingTrainer(TrainingConfig())
@@ -1615,6 +1638,24 @@ class TestCreateFeaturesFromSignalsEdgeCases:
         # With the real feature engine, this should work
         result = trainer._create_features_from_signals(signals)
         assert result is None or isinstance(result, np.ndarray)
+
+    def test_partial_current_roster_returns_none(self):
+        """A partial 8-of-9 current roster is not a valid stacking row."""
+        trainer = StackingTrainer(TrainingConfig())
+        signals = self._full_signal_payload()
+        signals.pop(SignalSource.VIX_TERM_STRUCTURE.value)
+
+        result = trainer._create_features_from_signals(signals)
+
+        assert result is None
+
+    def test_full_current_roster_returns_canonical_dimension(self):
+        """Complete current roster produces the canonical feature dimension."""
+        trainer = StackingTrainer(TrainingConfig())
+        result = trainer._create_features_from_signals(self._full_signal_payload())
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (StackingFeatureEngine.TOTAL_DIMENSIONS,)
 
 
 # ── _load_historical_data edge cases ────────────────────────────────────

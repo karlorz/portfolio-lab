@@ -1038,11 +1038,114 @@ if __name__ == '__main__':
 # ===========================================================================
 
 
+class TestInternationalMomentumRiskControlDisclosure(unittest.TestCase):
+    """Risk-control input availability should be explicit and persisted."""
+
+    def setUp(self):
+        self.temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        self.generator = InternationalMomentumGenerator(cache_db=Path(self.temp_db.name))
+
+    def tearDown(self):
+        self.temp_db.close()
+        Path(self.temp_db.name).unlink(missing_ok=True)
+
+    @staticmethod
+    def _strong_efa_data():
+        return {
+            'timestamp': '2026-05-14T10:00:00',
+            'data_fresh': True,
+            'relative': {
+                'efa_momentum_6m': 0.20,
+                'eem_momentum_6m': 0.08,
+                'spy_momentum_6m': 0.12,
+                'efa_vs_spy': 0.08,
+                'eem_vs_spy': -0.04,
+            },
+        }
+
+    def _create_prices_table(self):
+        with sqlite3.connect(str(self.generator.cache_db)) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS prices (
+                    symbol TEXT,
+                    date TEXT,
+                    close REAL,
+                    PRIMARY KEY (symbol, date)
+                )
+            """)
+            conn.commit()
+
+    def test_missing_current_risk_control_inputs_make_signal_unavailable(self):
+        signal = self.generator.generate_signal(self._strong_efa_data())
+
+        self.assertEqual(signal.signal_type, 'efa_lead')
+        self.assertFalse(signal.is_active())
+        self.assertEqual(signal.risk_controls_status, 'unavailable')
+        self.assertFalse(signal.risk_controls_available)
+        self.assertIn('vix', signal.risk_controls_reason.lower())
+        self.assertIn('correlation', signal.risk_controls_reason.lower())
+
+    def test_prices_table_vix_is_canonical_risk_control_source(self):
+        self._create_prices_table()
+        with sqlite3.connect(str(self.generator.cache_db)) as conn:
+            conn.execute(
+                "INSERT INTO prices(symbol, date, close) VALUES (?, ?, ?)",
+                ('^VIX', '2026-05-14', 27.5),
+            )
+            conn.commit()
+
+        self.assertEqual(self.generator._get_vix_level(), 27.5)
+
+    def test_prices_table_correlation_is_canonical_risk_control_source(self):
+        self._create_prices_table()
+        with sqlite3.connect(str(self.generator.cache_db)) as conn:
+            for i in range(35):
+                day = f"2026-04-{i + 1:02d}" if i < 30 else f"2026-05-{i - 29:02d}"
+                conn.execute(
+                    "INSERT INTO prices(symbol, date, close) VALUES (?, ?, ?)",
+                    ('SPY', day, 100.0 + i),
+                )
+                conn.execute(
+                    "INSERT INTO prices(symbol, date, close) VALUES (?, ?, ?)",
+                    ('EFA', day, 50.0 + i * 2),
+                )
+            conn.commit()
+
+        self.assertAlmostEqual(self.generator._get_correlation(), 1.0, places=6)
+
+    def test_risk_control_status_roundtrips_from_signal_history(self):
+        signal = InternationalMomentumSignal(
+            timestamp='2026-05-14T10:00:00', signal_type='efa_lead',
+            confidence=0.7, confidence_level='medium',
+            efa_momentum_6m=0.20, eem_momentum_6m=0.08, spy_momentum_6m=0.12,
+            efa_vs_spy=0.08, eem_vs_spy=-0.04,
+            spy_shift=0.035, efa_shift=0.035, eem_shift=0.0,
+            max_allocation_efa=0.05, max_allocation_eem=0.03,
+            holding_period_days=30,
+            data_fresh=True, vix_filter_active=False, correlation_override=False,
+            risk_controls_status='evaluated_blocked',
+            risk_controls_available=True,
+            risk_controls_reason='correlation above cutoff',
+            vix_level=20.0,
+            correlation_efa_spy=0.96,
+        )
+
+        self.generator._save_signal(signal)
+        retrieved = self.generator.get_current_signal()
+
+        self.assertIsNotNone(retrieved)
+        self.assertEqual(retrieved.risk_controls_status, 'evaluated_blocked')
+        self.assertTrue(retrieved.risk_controls_available)
+        self.assertEqual(retrieved.risk_controls_reason, 'correlation above cutoff')
+        self.assertEqual(retrieved.vix_level, 20.0)
+        self.assertEqual(retrieved.correlation_efa_spy, 0.96)
+
+
 class TestInternationalMomentumSignalDataclassFields(unittest.TestCase):
     """Validate dataclass field definitions via dataclasses.fields()."""
 
     def test_all_fields_present(self):
-        """Verify all 18 fields are defined in the correct order."""
+        """Verify all fields are defined in the correct order."""
         import dataclasses
         fields = dataclasses.fields(InternationalMomentumSignal)
         field_names = [f.name for f in fields]
@@ -1053,6 +1156,8 @@ class TestInternationalMomentumSignalDataclassFields(unittest.TestCase):
             'spy_shift', 'efa_shift', 'eem_shift',
             'max_allocation_efa', 'max_allocation_eem', 'holding_period_days',
             'data_fresh', 'vix_filter_active', 'correlation_override',
+            'risk_controls_status', 'risk_controls_available',
+            'risk_controls_reason', 'vix_level', 'correlation_efa_spy',
         ]
         self.assertEqual(field_names, expected)
 
@@ -1078,6 +1183,8 @@ class TestInternationalMomentumSignalDataclassFields(unittest.TestCase):
         self.assertIs(fields['data_fresh'], bool)
         self.assertIs(fields['vix_filter_active'], bool)
         self.assertIs(fields['correlation_override'], bool)
+        self.assertIs(fields['risk_controls_status'], str)
+        self.assertIs(fields['risk_controls_available'], bool)
 
     def test_is_active_eem_lead(self):
         """EEM lead with high confidence should be active."""

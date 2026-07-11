@@ -13,15 +13,18 @@ if cron_guard_start "pf-data" 300; then
 
     set +e
     bun run fetch-data 2>&1 | tee -a data/cron.log
-    EXIT=${PIPESTATUS[0]}
+    fetch_pipeline_status=("${PIPESTATUS[@]}")
+    EXIT="$(cron_pipeline_exit "${fetch_pipeline_status[0]}" "${fetch_pipeline_status[1]}")"
 
     if [ "$EXIT" -eq 0 ]; then
         "$PYTHON_RUNTIME" -m src.monitor.performance_attribution report --save 2>&1 | tee -a data/attribution.log
-        EXIT=${PIPESTATUS[0]}
+        attribution_pipeline_status=("${PIPESTATUS[@]}")
+        EXIT="$(cron_pipeline_exit "${attribution_pipeline_status[0]}" "${attribution_pipeline_status[1]}")"
     fi
     if [ "$EXIT" -eq 0 ]; then
         "$PYTHON_RUNTIME" -m src.strategy.adaptive_ensemble_weights update --regime normal 2>&1 | tee -a data/adaptive_weights.log
-        EXIT=${PIPESTATUS[0]}
+        weights_pipeline_status=("${PIPESTATUS[@]}")
+        EXIT="$(cron_pipeline_exit "${weights_pipeline_status[0]}" "${weights_pipeline_status[1]}")"
     fi
     set -e
 

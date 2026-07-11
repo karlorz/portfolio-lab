@@ -17,9 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.paths import DATA_DIR, PROJECT_ROOT, PUBLIC_DATA_DIR, sqlite_connect
+from src.research.promotion_policy import (
+    classify_offline_promotion_governance,
+    governance_failures,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +34,17 @@ DECISION_REGISTRY_DB = Path(
 DECISION_REGISTRY_JSON = "decision_registry.json"
 
 PromotionStatus = Literal["candidate", "shadow", "promoted", "rejected", "archived"]
+DecisionRole = Literal["live_executed", "shadow"]
+DecisionSource = Literal["dashboard_cycle", "evaluator_cycle", "manual"]
+DecisionPromotionReviewStatus = Literal[
+    "not_applicable",
+    "pending_review",
+    "eligible_for_promotion",
+    "promoted",
+    "rejected",
+    "archived",
+]
+BenchmarkWindowValue = str | int | float | None
 
 __all__ = [
     "DECISION_REGISTRY_DB",
@@ -69,7 +84,39 @@ class DecisionRecord(BaseModel):
     gates_triggered: list[str] = Field(default_factory=list)
     data_snapshot_hash: str | None = None
     freeze_manifest_hash: str | None = None
+    decision_role: DecisionRole = "live_executed"
+    decision_source: DecisionSource | None = None
+    controller_id: str | None = None
+    live_decision_id: str | None = None
+    baseline_controller_id: str | None = None
+    benchmark_window: dict[str, BenchmarkWindowValue] = Field(default_factory=dict)
+    divergence_metrics: dict[str, float] = Field(default_factory=dict)
+    promotion_review_status: DecisionPromotionReviewStatus = "not_applicable"
     extras: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _infer_decision_source(self) -> "DecisionRecord":
+        if self.decision_source is not None:
+            return self._validate_shadow_evidence_contract()
+        source = str(self.extras.get("source") or "")
+        if source == "evaluator" or self.run_id.startswith("evaluator-"):
+            self.decision_source = "evaluator_cycle"
+        elif self.run_id.startswith("dashboard-"):
+            self.decision_source = "dashboard_cycle"
+        else:
+            self.decision_source = "manual"
+        return self._validate_shadow_evidence_contract()
+
+    def _validate_shadow_evidence_contract(self) -> "DecisionRecord":
+        if self.decision_role != "shadow":
+            return self
+        if not self.controller_id:
+            raise ValueError("shadow decisions require controller_id")
+        if not self.live_decision_id:
+            raise ValueError("shadow decisions require live_decision_id linkage")
+        if self.promotion_review_status == "not_applicable":
+            self.promotion_review_status = "pending_review"
+        return self
 
 
 class ExperimentRecord(BaseModel):
@@ -129,6 +176,20 @@ def _freeze_manifest_hash() -> str | None:
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
     except Exception:
         return None
+
+
+def _is_temp_path(value: Any) -> bool:
+    text = str(value or "")
+    return "/tmp/pytest-of-root/" in text or text.startswith("/tmp/pytest-")
+
+
+def _is_fixture_or_temp_experiment(experiment_id: str, artifacts: Mapping[str, Any]) -> bool:
+    """Identify rows that are test fixtures rather than production evidence."""
+    return (
+        experiment_id == "bad-registry-row"
+        or _is_temp_path(artifacts.get("artifact_path"))
+        or _is_temp_path(artifacts.get("output_path"))
+    )
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:
@@ -205,6 +266,19 @@ class DecisionRegistry:
             ).fetchall()
         return [DecisionRecord.model_validate(json.loads(r[0])) for r in rows]
 
+    def decision_head(self) -> dict[str, Any]:
+        """Return the authoritative ledger head and total decision count."""
+        with closing(sqlite_connect(self.db_path)) as conn:
+            count = int(conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0])
+            row = conn.execute(
+                "SELECT decision_id, timestamp_utc FROM decisions "
+                "ORDER BY timestamp_utc DESC LIMIT 1",
+            ).fetchone()
+        head = None
+        if row:
+            head = {"decision_id": str(row[0]), "timestamp_utc": str(row[1])}
+        return {"head": head, "count": count}
+
     def list_experiments(self, status: str | None = None) -> list[ExperimentRecord]:
         with closing(sqlite_connect(self.db_path)) as conn:
             if status:
@@ -255,6 +329,14 @@ class DecisionRegistry:
                 "git_sha": record.git_sha,
                 "run_id": record.run_id,
                 "strategy_version": record.strategy_version,
+                "decision_role": record.decision_role,
+                "decision_source": record.decision_source,
+                "controller_id": record.controller_id,
+                "live_decision_id": record.live_decision_id,
+                "baseline_controller_id": record.baseline_controller_id,
+                "benchmark_window": dict(record.benchmark_window),
+                "divergence_metrics": dict(record.divergence_metrics),
+                "promotion_review_status": record.promotion_review_status,
                 "data_snapshot_hash": record.data_snapshot_hash,
                 "freeze_manifest_hash": record.freeze_manifest_hash,
             },
@@ -271,8 +353,20 @@ def evaluate_promotion_candidate(
         metrics = dict(experiment.metrics)
         bench = dict(experiment.benchmark_metrics)
         exp_id = experiment.experiment_id
-        rejected = experiment.promotion_status == "rejected"
+        artifacts = dict(experiment.artifacts or {})
+        governance_row: dict[str, Any] = {
+            "promotion_status": experiment.promotion_status,
+            "registry_status": artifacts.get("registry_status", experiment.promotion_status),
+            "provenance_status": artifacts.get("provenance_status"),
+            "artifacts": artifacts,
+        }
+        if _is_fixture_or_temp_experiment(exp_id, artifacts):
+            governance_row["promotion_status"] = "rejected"
+            governance_row["registry_status"] = "rejected"
+            governance_row["provenance_status"] = "invalid"
     else:
+        raw_artifacts = experiment.get("artifacts", {})
+        artifacts = dict(raw_artifacts) if isinstance(raw_artifacts, Mapping) else {}
         metrics = {
             k: float(v)
             for k, v in dict(experiment.get("metrics", {})).items()
@@ -284,7 +378,22 @@ def evaluate_promotion_candidate(
             if isinstance(v, (int, float)) and not isinstance(v, bool)
         }
         exp_id = str(experiment.get("experiment_id", "unknown"))
-        rejected = experiment.get("promotion_status") == "rejected"
+        governance_row = {
+            "promotion_status": experiment.get("promotion_status", experiment.get("status")),
+            "registry_status": artifacts.get(
+                "registry_status",
+                experiment.get("registry_status", experiment.get("status")),
+            ),
+            "provenance_status": experiment.get(
+                "provenance_status",
+                artifacts.get("provenance_status"),
+            ),
+            "artifacts": artifacts,
+        }
+        if _is_fixture_or_temp_experiment(exp_id, artifacts):
+            governance_row["promotion_status"] = "rejected"
+            governance_row["registry_status"] = "rejected"
+            governance_row["provenance_status"] = "invalid"
 
     if benchmark_metrics:
         bench.update({k: float(v) for k, v in benchmark_metrics.items()})
@@ -296,6 +405,11 @@ def evaluate_promotion_candidate(
     require_wfe = os.environ.get("PROMOTION_REQUIRE_WFE", "0").lower() in {"1", "true", "yes"}
 
     failures: list[str] = []
+    if not metrics:
+        failures.append("missing_metrics")
+    if not bench:
+        failures.append("missing_benchmark_metrics")
+
     sharpe = metrics.get("sharpe")
     bench_sharpe = bench.get("sharpe")
     if sharpe is not None and bench_sharpe is not None:
@@ -321,15 +435,20 @@ def evaluate_promotion_candidate(
     if require_wfe and metrics.get("wfe") is None:
         failures.append("missing_walk_forward_wfe")
 
-    recommended: PromotionStatus = "promoted" if not failures else "candidate"
-    if failures and rejected:
-        recommended = "rejected"
-
+    metric_gate_status = "promoted" if not failures else "candidate"
+    policy = classify_offline_promotion_governance(
+        governance_row,
+        metric_gate_status=metric_gate_status,
+        metric_gate_pass=not failures,
+        metric_failures=failures,
+    )
     return {
         "experiment_id": exp_id,
-        "recommended_status": recommended,
-        "pass": not failures,
-        "failures": failures,
+        "recommended_status": policy["recommended_status"],
+        "metric_gate_status": policy["metric_gate_status"],
+        "metric_gate_pass": policy["metric_gate_pass"],
+        "pass": policy["pass"],
+        "failures": policy["failures"],
         "thresholds": {
             "min_sharpe_delta": min_sharpe_delta,
             "max_dd_worse_pct": max_dd_worse,
@@ -338,6 +457,139 @@ def evaluate_promotion_candidate(
             "require_wfe": require_wfe,
         },
     }
+
+
+def _promotion_semantic_disclosure(
+    experiment: ExperimentRecord,
+    promotion_row: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Disclose when a metric-only promotion is blocked by governance policy."""
+    recommended_status = str(promotion_row.get("recommended_status") or "")
+    metric_gate_status = str(promotion_row.get("metric_gate_status") or "")
+    artifacts = dict(experiment.artifacts or {})
+    governance_status = str(artifacts.get("registry_status") or experiment.promotion_status or "candidate")
+    provenance_raw = artifacts.get("provenance_status")
+    provenance_status = str(provenance_raw) if provenance_raw is not None else "unknown"
+
+    if metric_gate_status != "promoted" or recommended_status == "promoted":
+        return None
+
+    reasons = governance_failures(
+        {
+            "registry_status": governance_status,
+            "provenance_status": provenance_status,
+        }
+    )
+    if not reasons:
+        return None
+
+    return {
+        "state": "governance_blocked",
+        "recommendation_type": "metric_gate",
+        "governance_status": governance_status,
+        "provenance_status": provenance_status,
+        "metric_gate_status": metric_gate_status,
+        "reasons": reasons,
+    }
+
+
+def _build_shadow_evidence_summary(decisions: list[DecisionRecord]) -> dict[str, Any]:
+    shadow_decisions = [decision for decision in decisions if decision.decision_role == "shadow"]
+    status_counts: dict[str, int] = {}
+    for decision in shadow_decisions:
+        status = decision.promotion_review_status
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    return {
+        "shadow_decision_count": len(shadow_decisions),
+        "linked_shadow_decision_count": sum(1 for d in shadow_decisions if d.live_decision_id),
+        "controllers": sorted({d.controller_id for d in shadow_decisions if d.controller_id}),
+        "promotion_review_status_counts": dict(sorted(status_counts.items())),
+        "latest_shadow_decisions": [
+            {
+                "decision_id": decision.decision_id,
+                "controller_id": decision.controller_id,
+                "live_decision_id": decision.live_decision_id,
+                "baseline_controller_id": decision.baseline_controller_id,
+                "promotion_review_status": decision.promotion_review_status,
+                "divergence_metrics": dict(decision.divergence_metrics),
+                "benchmark_window": dict(decision.benchmark_window),
+            }
+            for decision in shadow_decisions[:10]
+        ],
+    }
+
+
+def _parse_iso_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def _build_projection_freshness(
+    registry: DecisionRegistry,
+    decisions: list[DecisionRecord],
+) -> dict[str, Any]:
+    """Describe whether the public replay projection is current to ledger head."""
+    ledger = registry.decision_head()
+    ledger_head = ledger["head"]
+    projection_head = None
+    if decisions:
+        projection_head = {
+            "decision_id": decisions[0].decision_id,
+            "timestamp_utc": decisions[0].timestamp_utc,
+        }
+
+    current = ledger_head == projection_head
+    lag_seconds: float | None = 0.0
+    if ledger_head and projection_head and not current:
+        ledger_ts = _parse_iso_seconds(ledger_head.get("timestamp_utc"))
+        projection_ts = _parse_iso_seconds(projection_head.get("timestamp_utc"))
+        if ledger_ts is not None and projection_ts is not None:
+            lag_seconds = max(ledger_ts - projection_ts, 0.0)
+    elif ledger_head and projection_head is None:
+        lag_seconds = None
+
+    return {
+        "status": "current" if current else "projection_lagged",
+        "ledger_head": ledger_head,
+        "projection_head": projection_head,
+        "lag_decision_count": 0 if current else max(int(ledger["count"]) - len(decisions), 1),
+        "lag_seconds": lag_seconds,
+    }
+
+
+def _public_experiment_payload(experiment: ExperimentRecord) -> dict[str, Any]:
+    """Serialize experiment rows without exposing test fixtures as production evidence."""
+    payload = experiment.model_dump(mode="json")
+    artifacts = dict(payload.get("artifacts") or {})
+    if not _is_fixture_or_temp_experiment(experiment.experiment_id, artifacts):
+        return payload
+
+    for key in ("artifact_path", "output_path"):
+        if _is_temp_path(artifacts.get(key)):
+            artifacts[key] = None
+    artifacts["registry_status"] = "rejected"
+    artifacts["provenance_status"] = "invalid"
+    artifacts["temp_path_redacted"] = True
+    artifacts["synthetic_or_test_only"] = True
+
+    tags = list(payload.get("tags") or [])
+    if "synthetic_or_test_only" not in tags:
+        tags.append("synthetic_or_test_only")
+
+    payload["hypothesis"] = ""
+    payload["promotion_status"] = "rejected"
+    payload["rejection_reason"] = "synthetic_or_test_only"
+    payload["artifacts"] = artifacts
+    payload["tags"] = tags
+    return payload
 
 
 def build_decision_registry_snapshot(
@@ -352,32 +604,43 @@ def build_decision_registry_snapshot(
     experiments = reg.list_experiments()[:experiment_limit]
 
     replay_summaries = [reg.replay_decision(dec.decision_id) for dec in decisions[:5]]
-    promotion_rows = [evaluate_promotion_candidate(exp) for exp in experiments]
-    recent_experiment_ids = [exp.experiment_id for exp in experiments]
-    evaluated_experiment_ids = {row["experiment_id"] for row in promotion_rows}
+    promotion_rows = []
+    evaluated_experiment_ids: set[str] = set()
+    for exp in experiments:
+        row = evaluate_promotion_candidate(exp)
+        disclosure = _promotion_semantic_disclosure(exp, row)
+        if disclosure is not None:
+            row["semantic_disclosure"] = disclosure
+        promotion_rows.append(row)
+        evaluated_experiment_ids.add(exp.experiment_id)
+
+    recent_experiments = [_public_experiment_payload(e) for e in experiments]
     unmatched_experiment_ids = [
-        exp_id for exp_id in recent_experiment_ids if exp_id not in evaluated_experiment_ids
+        str(row.get("experiment_id"))
+        for row in recent_experiments
+        if str(row.get("experiment_id")) not in evaluated_experiment_ids
     ]
 
     return {
         "schema_version": DECISION_REGISTRY_SCHEMA_VERSION,
         "generated_at": generated_at or _now_iso(),
+        "projection_freshness": _build_projection_freshness(reg, decisions),
         "recent_decisions": [d.model_dump(mode="json") for d in decisions],
-        "recent_experiments": [e.model_dump(mode="json") for e in experiments],
+        "recent_experiments": recent_experiments,
         "replay_summaries": replay_summaries,
         "promotion_evaluations": promotion_rows,
         "promotion_coverage": {
-            "scope": "recent_experiments",
-            "recent_experiment_count": len(experiments),
-            "evaluated_experiment_count": len(promotion_rows),
-            "unmatched_experiment_count": len(unmatched_experiment_ids),
+            "recent_experiment_count": len(recent_experiments),
+            "evaluated_count": len(promotion_rows),
+            "unmatched_count": len(unmatched_experiment_ids),
             "unmatched_experiment_ids": unmatched_experiment_ids,
             "disclosure": (
-                "complete_promotion_evaluation_coverage"
-                if not unmatched_experiment_ids
-                else "partial_promotion_evaluation_coverage"
+                "partial_promotion_evaluation_coverage"
+                if unmatched_experiment_ids
+                else "complete_promotion_evaluation_coverage"
             ),
         },
+        "shadow_evidence": _build_shadow_evidence_summary(decisions),
         "counts": {
             "decisions": len(decisions),
             "experiments": len(experiments),
@@ -468,6 +731,9 @@ def record_dashboard_cycle_decision(
         timestamp_utc=ts,
         git_sha=_git_sha_short(),
         run_id=run_id or f"dashboard-{ts[:19]}",
+        decision_role="live_executed",
+        decision_source="dashboard_cycle",
+        controller_id="dashboard_generator",
         portfolio_value=total_value if total_value > 0 else None,
         current_weights=current_weights,
         target_weights=target_weights,
@@ -507,8 +773,10 @@ def record_evaluator_cycle_decision(
     orders: list[Mapping[str, Any]] | None,
     kill_reason: str | None = None,
     registry: DecisionRegistry | None = None,
+    public_dir: str | Path | None = None,
 ) -> str | None:
     """Record one strategy-evaluator rebalance / hold / kill-switch decision."""
+    owns_default_registry = registry is None
     reg = registry or DecisionRegistry()
     ts = _now_iso()
     target_weights = {str(k): float(v) for k, v in target_alloc.items()}
@@ -540,6 +808,9 @@ def record_evaluator_cycle_decision(
         timestamp_utc=ts,
         git_sha=_git_sha_short(),
         run_id=f"evaluator-{mode}-{ts[:19]}",
+        decision_role="live_executed",
+        decision_source="evaluator_cycle",
+        controller_id="strategy_evaluator",
         strategy_version="champion",
         portfolio_value=float(portfolio_value) if portfolio_value > 0 else None,
         current_weights=cur,
@@ -553,10 +824,19 @@ def record_evaluator_cycle_decision(
         extras={"source": "evaluator", "mode": mode, "order_count": len(orders or [])},
     )
     try:
-        return reg.record_decision(record)
+        decision_id = reg.record_decision(record)
     except (sqlite3.Error, OSError, ValueError) as exc:
         logger.warning("Evaluator decision registry record skipped: %s", exc)
         return None
+    if owns_default_registry or public_dir is not None:
+        try:
+            publish_decision_registry_json(
+                public_dir=public_dir or PUBLIC_DATA_DIR,
+                registry=reg,
+            )
+        except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+            logger.warning("Evaluator decision registry projection refresh skipped: %s", exc)
+    return decision_id
 
 
 def _metrics_from_result_payload(data: Mapping[str, Any]) -> dict[str, float]:
@@ -681,21 +961,38 @@ def sync_labs_registry_experiments(
             for k, v in metrics_raw.items()
             if isinstance(v, (int, float)) and not isinstance(v, bool)
         }
-        status = row.get("status") or "candidate"
+        registry_status = row.get("status") or "candidate"
+        status = registry_status
         if status not in {"candidate", "shadow", "promoted", "rejected", "archived"}:
             status = "candidate"
+        artifact_path = row.get("artifact_path")
+        is_fixture = _is_fixture_or_temp_experiment(
+            exp_id,
+            {"artifact_path": artifact_path},
+        )
+        artifacts = {
+            "artifact_path": None if is_fixture else artifact_path,
+            "registry_status": "rejected" if is_fixture else registry_status,
+            "provenance_status": "invalid" if is_fixture else row.get("provenance_status"),
+        }
+        tags = ["labs_registry"]
+        rejection_reason = None
+        if is_fixture:
+            status = "rejected"
+            artifacts["temp_path_redacted"] = True
+            artifacts["synthetic_or_test_only"] = True
+            tags.append("synthetic_or_test_only")
+            rejection_reason = "synthetic_or_test_only"
         record = ExperimentRecord(
             experiment_id=exp_id,
             timestamp_utc=str(payload.get("generated_at") or _now_iso()),
             name=exp_id,
-            hypothesis=str(row.get("artifact_path") or ""),
+            hypothesis="" if is_fixture else str(artifact_path or ""),
             metrics=metrics,
             promotion_status=status,  # type: ignore[arg-type]
-            artifacts={
-                "artifact_path": row.get("artifact_path"),
-                "provenance_status": row.get("provenance_status"),
-            },
-            tags=["labs_registry"],
+            rejection_reason=rejection_reason,
+            artifacts=artifacts,
+            tags=tags,
         )
         reg.record_experiment(record)
         written += 1

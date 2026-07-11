@@ -71,6 +71,10 @@ export function makeSignalListKey(name: string, index: number): string {
   return `${name}-${index}`;
 }
 
+export function uniqueSignalNames(names: string[]): string[] {
+  return [...new Set(names)];
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 function RegimeDot({ active, color }: { active: boolean; color: string }) {
@@ -115,6 +119,8 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
 
   const regime = data.current_regime?.toUpperCase() || 'NORMAL';
   const meta = REGIME_META[regime] || DEFAULT_REGIME_META;
+  const activeSignals = uniqueSignalNames(data.active_signals);
+  const inactiveSignals = uniqueSignalNames(data.inactive_signals);
 
   // ── Compute per-signal x per-regime state ────────────────────────
   const signalRegimeMap = new Map<string, Record<string, boolean>>();
@@ -245,15 +251,15 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
           <div className="alc-card">
             <div className="alc-cluster">
               <span className="alc-chip-small alc-chip-success">
-                {data.active_signals.length}
+                {activeSignals.length}
               </span>
               <span className="alc-label">Active Signals</span>
             </div>
-            {data.active_signals.length === 0 ? (
+            {activeSignals.length === 0 ? (
               <p className="alc-muted">No active signals</p>
             ) : (
               <div className="alc-cluster">
-                {data.active_signals.map((name, index) => (
+                {activeSignals.map((name, index) => (
                   <span
                     key={makeSignalListKey(name, index)}
                     className="alc-chip-small alc-chip-success"
@@ -269,15 +275,15 @@ export function RegimeGatePanel({ data }: RegimeGatePanelProps) {
           <div className="alc-card">
             <div className="alc-cluster">
               <span className="alc-chip-small alc-chip-danger">
-                {data.inactive_signals.length}
+                {inactiveSignals.length}
               </span>
               <span className="alc-label">Inactive Signals</span>
             </div>
-            {data.inactive_signals.length === 0 ? (
+            {inactiveSignals.length === 0 ? (
               <p className="alc-muted">No inactive signals</p>
             ) : (
               <div className="alc-cluster">
-                {data.inactive_signals.map((name, index) => (
+                {inactiveSignals.map((name, index) => (
                   <span
                     key={makeSignalListKey(name, index)}
                     className="alc-chip-small alc-chip-danger"

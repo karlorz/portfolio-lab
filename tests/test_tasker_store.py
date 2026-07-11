@@ -126,6 +126,12 @@ def test_store_writes_tasker_and_cron_compatibility_mirrors(tmp_path):
     assert tasker_status["service"] == "portfolio-lab-tasker"
     assert cron_status["jobs"][0]["name"] == "portfolio-lab-health"
     assert cron_status["jobs"][0]["backend"] == "tasker"
+    by_name = {job["name"]: job for job in cron_status["jobs"]}
+    assert by_name["portfolio-lab-build"]["enabled"] is False
+    assert by_name["portfolio-lab-build"]["manual_only"] is True
+    assert by_name["portfolio-lab-build"]["state"] == "manual_only"
+    assert by_name["portfolio-lab-build"]["status"] == "disabled"
+    assert by_name["portfolio-lab-build"]["last_run"] is None
 
 
 # ── prune_runs() — per-task run-log retention ─────────────────────────

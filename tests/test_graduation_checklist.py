@@ -264,11 +264,35 @@ class TestWinRateCheck:
 
 
 class TestHealthChecks:
-    def test_passes_with_all_ok(self):
-        state = _make_state_file(None)
+    def test_passes_with_all_ok_for_required_observation_window(self):
+        state = _make_state_file(None, {
+            "health_report": {
+                "summary": {
+                    "total_checks": 9,
+                    "passed": 9,
+                    "failed": 0,
+                    "consecutive_passing_days": 30,
+                }
+            }
+        })
         checklist = GraduationChecklist()
         result = checklist._check_health(state)
         assert result.passed is True
+
+    def test_fails_when_current_checks_pass_but_observation_window_unproven(self):
+        state = _make_state_file(None, {
+            "health_report": {
+                "summary": {
+                    "total_checks": 9,
+                    "passed": 9,
+                    "failed": 0,
+                }
+            }
+        })
+        checklist = GraduationChecklist()
+        result = checklist._check_health(state)
+        assert result.passed is False
+        assert result.value == 0
 
     def test_fails_with_failed_checks(self):
         state = _make_state_file(None, {
@@ -331,7 +355,9 @@ class TestTCAOrders:
 
 class TestCircuitBreaker:
     def test_passes_with_green_status(self):
-        state = _make_state_file(None)
+        state = _make_state_file(None, {
+            "circuit_breaker": {"status": "green", "trips": 0, "consecutive_ok": 3}
+        })
         checklist = GraduationChecklist()
         result = checklist._check_circuit_breaker(state)
         assert result.passed is True
@@ -344,6 +370,15 @@ class TestCircuitBreaker:
         result = checklist._check_circuit_breaker(state)
         assert result.passed is True
 
+    def test_fails_when_green_status_has_insufficient_observation_count(self):
+        state = _make_state_file(None, {
+            "circuit_breaker": {"status": "green", "trips": 0, "consecutive_ok": 1}
+        })
+        checklist = GraduationChecklist()
+        result = checklist._check_circuit_breaker(state)
+        assert result.passed is False
+        assert result.value == 1
+
     def test_fails_with_red_status(self):
         state = _make_state_file(None, {
             "circuit_breaker": {"status": "red", "trips": 3, "consecutive_ok": 0}
@@ -354,13 +389,13 @@ class TestCircuitBreaker:
 
     def test_missing_circuit_breaker(self):
         state = _make_state_file(None, {"circuit_breaker": {}})
+        state["circuit_breaker"] = {}
         checklist = GraduationChecklist()
         result = checklist._check_circuit_breaker(state)
-        # Empty dict — status not found, passes with default
-        assert result.passed is True  # Default: green/normal
+        assert result.passed is False
 
     def test_non_green_status_but_zero_trips_passes(self):
-        """Regression: non-green status with 0 trips should still pass."""
+        """Non-green status with 0 trips still requires enough clean observations."""
         state = _make_state_file(None, {
             "circuit_breaker": {"status": "yellow", "trips": 0, "consecutive_ok": 5}
         })
@@ -511,7 +546,7 @@ class TestEdgeCases:
         checklist = GraduationChecklist()
         results = checklist.check({})
         for name, result in results.items():
-            if name in ("max_drawdown", "circuit_breaker_confidence"):
+            if name == "max_drawdown":
                 assert result.passed is True  # No data = no drawdown / default green CB
             else:
                 assert result.passed is False, f"{name} should fail on empty state"
@@ -637,6 +672,16 @@ class TestGraduationChecklistExtended:
         checklist = GraduationChecklist()
         score = checklist.readiness_score({})
         assert score == 0.0
+
+    def test_readiness_score_does_not_count_unproven_observation_gates(self):
+        """Snapshot-only observation-window gates should not inflate readiness."""
+        checklist = GraduationChecklist()
+        results = {
+            "health_checks": CheckResult("health_checks", True, 9, 30, ""),
+            "circuit_breaker_confidence": CheckResult("circuit_breaker_confidence", True, 1, 3, ""),
+            "manual_approval": CheckResult("manual_approval", False, 0, 1, ""),
+        }
+        assert checklist.readiness_score(results) == 0.0
 
     # --- is_graduation_ready ---
 
@@ -1216,13 +1261,14 @@ class TestEdgeCasesExtended:
         checklist = GraduationChecklist()
         result = checklist._check_circuit_breaker(state)
         # String is not a dict; path for isinstance(cb, dict) is False
-        assert result.passed is True  # Default pass
+        assert result.passed is False
 
     def test_circuit_breaker_missing_all_keys(self):
         state = _make_state_file(None, {"circuit_breaker": {"status": "unknown"}})
+        state["circuit_breaker"] = {"status": "unknown"}
         checklist = GraduationChecklist()
         result = checklist._check_circuit_breaker(state)
-        assert result.passed is True  # trips=0 default
+        assert result.passed is False
 
     # --- _check_dsr edge cases ---
 

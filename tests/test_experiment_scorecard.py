@@ -100,6 +100,32 @@ def test_scorecard_generator_classifies_registry_rows_conservatively() -> None:
     assert all(validate_artifact(row).valid for row in scorecards)
 
 
+def test_scorecard_discloses_missing_provenance_governance_block_for_strong_metrics() -> None:
+    module = _scorecard_module()
+
+    scorecards = module.build_labs_scorecards(
+        registry=_registry(
+            [
+                _registry_row(
+                    "metric-only",
+                    status="candidate",
+                    provenance_status="missing",
+                    metrics={"sharpe": 1.21, "dsr": 0.98, "wfe": 1.1},
+                    baseline_deltas={"sharpe": 0.08, "max_drawdown_pct": 2.0},
+                )
+            ]
+        ),
+        generated_at="2026-06-09T01:00:00+00:00",
+    )
+
+    assert scorecards[0]["status"] == "watch"
+    assert scorecards[0]["governance_state"] == "governance_blocked"
+    assert scorecards[0]["governance_reasons"] == ["provenance_missing"]
+    assert scorecards[0]["promotion_governance"]["recommended_status"] == "candidate"
+    assert scorecards[0]["promotion_governance"]["failures"] == ["provenance_missing"]
+    assert validate_artifact(scorecards[0]).valid is True
+
+
 def test_scorecard_rejects_invalid_validation_or_failed_replay_inputs() -> None:
     module = _scorecard_module()
 

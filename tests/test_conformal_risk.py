@@ -12,6 +12,7 @@ from src.monitor.conformal_risk import (
     ConformalPrediction,
     conformal_var,
     conformal_cvar,
+    conformal_coverage_diagnostics,
 )
 
 
@@ -205,6 +206,91 @@ class TestConformalCVaR:
         # Should be within 3x of each other (same ballpark)
         ratio = abs(conf_cvar / hist_cvar) if hist_cvar != 0 else 1
         assert 0.3 < ratio < 3.0, f"Conformal CVaR ratio {ratio:.2f} too far from historical"
+
+
+class TestConformalCoverageDiagnostics:
+    """Backtests for conformal VaR exceedance diagnostics."""
+
+    def test_calibrated_sequence_passes_coverage_diagnostics(self):
+        returns = np.full(500, 0.001)
+        var_thresholds = np.full(500, -0.02)
+        returns[::20] = -0.03
+
+        diagnostics = conformal_coverage_diagnostics(
+            returns,
+            var_thresholds,
+            alpha=0.05,
+            rolling_window=252,
+        )
+
+        assert diagnostics["observations"] == 500
+        assert diagnostics["exceedance_count"] == 25
+        assert diagnostics["exceedance_rate"] == pytest.approx(0.05)
+        assert diagnostics["coverage_rate"] == pytest.approx(0.95)
+        assert diagnostics["coverage_pass"] is True
+        assert diagnostics["kupiec_pass"] is True
+        assert diagnostics["christoffersen_pass"] is True
+        assert diagnostics["conditional_coverage_pass"] is True
+        assert diagnostics["longest_violation_cluster"] == 1
+        assert diagnostics["rolling_window"] == 252
+        assert diagnostics["rolling_exceedance_rate"] == pytest.approx(0.047619, rel=1e-4)
+
+    def test_undercovered_sequence_fails_kupiec_diagnostics(self):
+        returns = np.full(500, 0.001)
+        var_thresholds = np.full(500, -0.02)
+        returns[:80] = -0.03
+
+        diagnostics = conformal_coverage_diagnostics(
+            returns,
+            var_thresholds,
+            alpha=0.05,
+        )
+
+        assert diagnostics["exceedance_count"] == 80
+        assert diagnostics["exceedance_rate"] == pytest.approx(0.16)
+        assert diagnostics["coverage_pass"] is False
+        assert diagnostics["kupiec_pass"] is False
+        assert diagnostics["kupiec_p_value"] < 0.05
+
+    def test_clustered_violations_fail_independence_diagnostics(self):
+        returns = np.full(500, 0.001)
+        var_thresholds = np.full(500, -0.02)
+        returns[100:125] = -0.03
+
+        diagnostics = conformal_coverage_diagnostics(
+            returns,
+            var_thresholds,
+            alpha=0.05,
+        )
+
+        assert diagnostics["exceedance_rate"] == pytest.approx(0.05)
+        assert diagnostics["kupiec_pass"] is True
+        assert diagnostics["longest_violation_cluster"] == 25
+        assert diagnostics["christoffersen_pass"] is False
+        assert diagnostics["conditional_coverage_pass"] is False
+        assert diagnostics["christoffersen_p_value"] < 0.05
+
+    def test_regime_labels_add_optional_per_regime_summaries(self):
+        returns = np.full(200, 0.001)
+        var_thresholds = np.full(200, -0.02)
+        returns[:100:20] = -0.03
+        returns[100:120] = -0.03
+        regimes = ["normal"] * 100 + ["high_vol"] * 100
+
+        diagnostics = conformal_coverage_diagnostics(
+            returns,
+            var_thresholds,
+            alpha=0.05,
+            regime_labels=regimes,
+        )
+
+        assert set(diagnostics["by_regime"]) == {"normal", "high_vol"}
+        assert diagnostics["by_regime"]["normal"]["observations"] == 100
+        assert diagnostics["by_regime"]["normal"]["exceedance_rate"] == pytest.approx(0.05)
+        assert diagnostics["by_regime"]["normal"]["coverage_pass"] is True
+        assert diagnostics["by_regime"]["high_vol"]["observations"] == 100
+        assert diagnostics["by_regime"]["high_vol"]["exceedance_rate"] == pytest.approx(0.20)
+        assert diagnostics["by_regime"]["high_vol"]["coverage_pass"] is False
 
 
 class TestEdgeCases:

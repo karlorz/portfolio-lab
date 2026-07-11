@@ -36,6 +36,13 @@ class EnsembleVotingSignal(BaseModel):
     duration_bias: float = 0.0
     gold_bias: float = 0.0
     num_sources: int = 0
+    configured_source_count: int = 0
+    collected_source_count: int = 0
+    contributing_source_count: int = 0
+    inactive_source_count: int = 0
+    inactive_sources: List[str] = Field(default_factory=list)
+    configured_source_status: List[Dict[str, Any]] = Field(default_factory=list)
+    adaptive_learning: Dict[str, Any] = Field(default_factory=dict)
     source_breakdown: List[Dict[str, Any]] = Field(default_factory=list)
 
 
@@ -61,6 +68,7 @@ class GarchCvarSignal(BaseModel):
     conformal_cvar_95: Optional[float] = None
     conformal_var_95: Optional[float] = None
     conformal_cvar_ratio: Optional[float] = None
+    coverage_diagnostics: Optional[Dict[str, Any]] = None
 
 
 class SmartRebalanceSignal(BaseModel):
@@ -74,6 +82,8 @@ class SmartRebalanceSignal(BaseModel):
     max_drift: float = 0.0
     estimated_cost_bps: float = 0.0
     reason: str = ""
+    remaining_budget_pct: Optional[float] = None
+    remaining_budget_ratio: Optional[float] = None
 
 
 class RegimeSignal(BaseModel):
@@ -96,6 +106,12 @@ class YieldCurveSignal(BaseModel):
     dgs10: Optional[float] = None
     duration_regime: str = "normal"
     spread_history: List[float] = Field(default_factory=list)
+    source_mode: Optional[str] = None
+    source_status: Optional[str] = None
+    source_reason: Optional[str] = None
+    source_provider: Optional[str] = None
+    source_generated_at: Optional[str] = None
+    source_latest_observation: Optional[str] = None
 
 
 class SignalSnapshotSchema(BaseModel):
@@ -131,6 +147,16 @@ class FredMacroSignal(BaseModel):
     credit_conditions: str = "unknown"
     indicators: Dict[str, float] = Field(default_factory=dict)
     timestamp: str = ""
+    status: str = "unknown"
+    source_mode: str = "unknown"
+    cache_status: str = "unknown"
+    api_key_configured: bool = False
+    reason: Optional[str] = None
+    latest_fetched_at: Optional[str] = None
+    row_count: Optional[int] = None
+    age_hours: Optional[float] = None
+    ttl_hours: Optional[int] = None
+    indicators_observed: bool = False
 
 
 class TwoStageRegimeSignal(BaseModel):
@@ -182,7 +208,12 @@ class IcDecaySignal(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    status: str = "no_data"
     signals: Dict[str, Any] = Field(default_factory=dict)
+    resolved_signal_count: int = 0
+    pending_predictions: int = 0
+    staged_date: Optional[str] = None
+    label_horizon: Optional[str] = None
 
 
 class SignalWfeSignal(BaseModel):
@@ -190,7 +221,12 @@ class SignalWfeSignal(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    status: str = "no_data"
     signals: Dict[str, Any] = Field(default_factory=dict)
+    resolved_signal_count: int = 0
+    pending_predictions: int = 0
+    staged_date: Optional[str] = None
+    label_horizon: Optional[str] = None
 
 
 class RampSignal(BaseModel):
@@ -256,6 +292,26 @@ class HedgeSelectorSignal(BaseModel):
     confidence_scaled_size: float = 0.0
     min_hold_days: int = 0
     transition_cost_bps: float = 0.0
+    canonical_controller: str = "hedge_selector"
+    vixy_role: str = "diagnostic_sizing_helper"
+    term_structure_role: str = "gate_discount_multiplier"
+    term_structure_gate: bool = False
+    term_structure_multiplier: float = 0.0
+    term_structure_signal: Optional[float] = None
+    gate_reason: str = "unknown"
+
+
+class MarlRuntimeStatusSignal(BaseModel):
+    """Validates the ``marl_status`` section of signals.json."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schema_version: str = "marl-runtime-status/v1"
+    available: bool = False
+    timestamp: Optional[str] = None
+    runtime: Dict[str, Any] = Field(default_factory=dict)
+    execution_role: Dict[str, Any] = Field(default_factory=dict)
+    error: Optional[str] = None
 
 
 SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
@@ -274,6 +330,7 @@ SIGNAL_MODELS: Dict[str, type[BaseModel]] = {
     "gold_tlt_correlation": GoldTltCorrelationSignal,
     "portfolio_explainability": PortfolioExplainabilitySignal,
     "hedge_selector": HedgeSelectorSignal,
+    "marl_status": MarlRuntimeStatusSignal,
 }
 
 # Signals for which schemas are defined — used when integrating into
@@ -353,6 +410,7 @@ class SignalsData(BaseModel):
     smart_rebalance: Optional[SmartRebalanceSignal] = None
     yield_curve: Optional[YieldCurveSignal] = None
     hedge_selector: Optional[HedgeSelectorSignal] = None
+    marl_status: Optional[MarlRuntimeStatusSignal] = None
 
     @classmethod
     def validate_dict(cls, raw: Dict[str, Any]) -> Dict[str, Any]:

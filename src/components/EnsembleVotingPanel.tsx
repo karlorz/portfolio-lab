@@ -2,11 +2,52 @@ import React from 'react';
 
 interface SourceVote {
   source: string;
-  direction: number;
+  direction: number | string;
   strength: number;
   confidence: number;
   weight: number;
 }
+
+interface AdaptiveLearningBranch {
+  status: string;
+  enabled: boolean;
+  reason: string;
+  observations?: number;
+  warmup_days?: number;
+  max_blend?: number;
+  current_blend?: number;
+  state_available?: boolean;
+  blend_alpha?: number;
+}
+
+interface AdaptiveLearningDisclosure {
+  bandit?: AdaptiveLearningBranch;
+  online_ic?: AdaptiveLearningBranch;
+}
+
+interface ConfiguredSourceStatus {
+  source: string;
+  label?: string;
+  configured: boolean;
+  configured_weight?: number;
+  collected: boolean;
+  active: boolean;
+  contributing: boolean;
+  status: string;
+  reason?: string;
+}
+
+export interface AllocationSurfaceRole {
+  label: string;
+  role: 'execution_routed' | 'advisory_non_routed';
+  routed: boolean;
+  routed_by: string | null;
+  description: string;
+}
+
+type NormalizedSourceVote = Omit<SourceVote, 'direction'> & {
+  direction: number;
+};
 
 export interface EnsembleVotingData {
   regime: string;
@@ -19,11 +60,19 @@ export interface EnsembleVotingData {
   duration_bias: number;
   gold_bias: number;
   num_sources: number;
+  configured_source_count?: number;
+  collected_source_count?: number;
+  contributing_source_count?: number;
+  inactive_source_count?: number;
+  inactive_sources?: string[];
+  configured_source_status?: ConfiguredSourceStatus[];
+  adaptive_learning?: AdaptiveLearningDisclosure;
   source_breakdown: SourceVote[];
 }
 
 interface EnsembleVotingPanelProps {
   data: EnsembleVotingData | null;
+  allocationSurfaceRole?: AllocationSurfaceRole;
 }
 
 const REGIME_COLORS: Record<string, string> = {
@@ -48,6 +97,23 @@ const SOURCE_LABELS: Record<string, string> = {
   INTERNATIONAL_MOMENTUM: 'Intl Mom',
   CROSS_ASSET_REGIME_ARB: 'Regime Arb',
   UNIFIED_OVERLAY: 'Unified',
+  google_trends: 'Google Trends',
+};
+
+const ADAPTIVE_STATUS_COLORS: Record<string, string> = {
+  active: '#10b981',
+  disabled: '#94a3b8',
+  unavailable: '#ef4444',
+  non_effective: '#f59e0b',
+};
+
+const CONFIGURED_SOURCE_STATUS_COLORS: Record<string, string> = {
+  active: '#10b981',
+  stale: '#f59e0b',
+  missing: '#f59e0b',
+  zero_weight: '#94a3b8',
+  unavailable: '#ef4444',
+  inactive: '#f59e0b',
 };
 
 function safeNumber(value: unknown, fallback = 0): number {
@@ -64,7 +130,7 @@ function directionToNumber(value: unknown): number {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-export function normalizeSourceVote(raw: unknown): SourceVote {
+export function normalizeSourceVote(raw: unknown): NormalizedSourceVote {
   const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   return {
     source: typeof source.source === 'string' && source.source.trim() !== '' ? source.source : 'unknown',
@@ -78,6 +144,20 @@ export function normalizeSourceVote(raw: unknown): SourceVote {
 export function formatSourceDirection(value: unknown): string {
   const direction = directionToNumber(value);
   return `${direction > 0 ? '+' : ''}${direction.toFixed(0)}`;
+}
+
+function formatAdaptiveStatus(status: string): string {
+  const normalized = status.replaceAll('_', '-');
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function formatAdaptiveReason(reason: string): string {
+  return reason.replace(/^.*:/, '').replaceAll('_', ' ');
+}
+
+export function formatConfiguredSourceStatus(status: string): string {
+  const normalized = status.replaceAll('_', ' ');
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 function DirectionBar({ value, maxAbs = 1 }: { value: number; maxAbs?: number }) {
@@ -104,11 +184,48 @@ function DirectionBar({ value, maxAbs = 1 }: { value: number; maxAbs?: number })
   );
 }
 
-export function EnsembleVotingPanel({ data }: EnsembleVotingPanelProps) {
+function AllocationSurfaceRoleDisclosure({ role }: { role?: AllocationSurfaceRole }) {
+  if (!role) return null;
+  const status = role.routed ? 'Order-routed' : 'Not order-routed';
+  const routeText = role.routed_by ? ` via ${role.routed_by}` : '';
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        background: '#0f172a',
+        border: '1px solid #334155',
+        borderRadius: 6,
+        padding: 8,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <span className="label">Live Role</span>
+        <span
+          style={{
+            color: role.routed ? '#10b981' : '#f59e0b',
+            fontSize: 12,
+            fontWeight: 600,
+            minWidth: 0,
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {status}{routeText}
+        </span>
+      </div>
+      <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 4, overflowWrap: 'anywhere' }}>
+        {role.description}
+      </div>
+    </div>
+  );
+}
+
+export function EnsembleVotingPanel({ data, allocationSurfaceRole }: EnsembleVotingPanelProps) {
   if (!data) {
     return (
       <div className="panel">
         <h3>Ensemble Voting</h3>
+        <AllocationSurfaceRoleDisclosure role={allocationSurfaceRole} />
         <p className="muted">No ensemble data available</p>
       </div>
     );
@@ -121,10 +238,29 @@ export function EnsembleVotingPanel({ data }: EnsembleVotingPanelProps) {
   const sourceBreakdown = Array.isArray(data.source_breakdown)
     ? data.source_breakdown.map(normalizeSourceVote)
     : [];
+  const collectedSourceCount = safeNumber(data.collected_source_count, data.num_sources);
+  const configuredSourceCount = safeNumber(data.configured_source_count, collectedSourceCount);
+  const contributingSourceCount = safeNumber(
+    data.contributing_source_count,
+    sourceBreakdown.filter((src) => src.weight > 0).length,
+  );
+  const inactiveSourceCount = safeNumber(
+    data.inactive_source_count,
+    Math.max(collectedSourceCount - contributingSourceCount, 0),
+  );
+  const configuredSourceStatus = Array.isArray(data.configured_source_status)
+    ? data.configured_source_status
+    : [];
+  const inactiveConfiguredSources = configuredSourceStatus.filter((source) => !source.active);
+  const adaptiveBranches = [
+    { label: 'Bandit', branch: data.adaptive_learning?.bandit },
+    { label: 'Online IC', branch: data.adaptive_learning?.online_ic },
+  ].filter((entry): entry is { label: string; branch: AdaptiveLearningBranch } => Boolean(entry.branch));
 
   return (
     <div className="panel">
       <h3>Ensemble Voting</h3>
+      <AllocationSurfaceRoleDisclosure role={allocationSurfaceRole} />
       <div className="panel-grid">
         <div className="metric">
           <span className="label">Regime</span>
@@ -153,8 +289,20 @@ export function EnsembleVotingPanel({ data }: EnsembleVotingPanelProps) {
           <span className="value">{(data.confidence * 100).toFixed(0)}%</span>
         </div>
         <div className="metric">
-          <span className="label">Sources</span>
-          <span className="value">{data.num_sources}</span>
+          <span className="label">Configured Sources</span>
+          <span className="value">{configuredSourceCount}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Collected Sources</span>
+          <span className="value">{collectedSourceCount}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Contributing Sources</span>
+          <span className="value">{contributingSourceCount}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Inactive/Zero Weight</span>
+          <span className="value">{inactiveSourceCount}</span>
         </div>
       </div>
 
@@ -173,6 +321,84 @@ export function EnsembleVotingPanel({ data }: EnsembleVotingPanelProps) {
           <DirectionBar value={data.gold_bias} />
         </div>
       </div>
+
+      {adaptiveBranches.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <span className="label" style={{ marginBottom: 6, display: 'block' }}>
+            Adaptive Learning
+          </span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+            {adaptiveBranches.map(({ label, branch }) => (
+              <div
+                key={label}
+                style={{
+                  background: '#0f172a',
+                  border: '1px solid #1e293b',
+                  borderRadius: 6,
+                  padding: 8,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>{label}</span>
+                  <span
+                    style={{
+                      color: ADAPTIVE_STATUS_COLORS[branch.status] || '#94a3b8',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {formatAdaptiveStatus(branch.status)}
+                  </span>
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 4 }}>
+                  {formatAdaptiveReason(branch.reason)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {inactiveConfiguredSources.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <span className="label" style={{ marginBottom: 6, display: 'block' }}>
+            Configured Source Status
+          </span>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {inactiveConfiguredSources.map((source) => (
+              <div
+                key={source.source}
+                style={{
+                  background: '#0f172a',
+                  border: '1px solid #1e293b',
+                  borderRadius: 6,
+                  padding: 8,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>
+                    {source.label || SOURCE_LABELS[source.source] || source.source}
+                  </span>
+                  <span
+                    style={{
+                      color: CONFIGURED_SOURCE_STATUS_COLORS[source.status] || '#94a3b8',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {formatConfiguredSourceStatus(source.status)}
+                  </span>
+                </div>
+                {source.reason && (
+                  <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 4 }}>
+                    {source.reason}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Per-Source Breakdown */}
       {sourceBreakdown.length > 0 && (

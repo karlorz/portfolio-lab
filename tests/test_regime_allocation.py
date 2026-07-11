@@ -90,6 +90,11 @@ class TestGetRegimeAllocation:
         result = get_regime_allocation("CRISIS")
         assert result == REGIME_ALLOCATIONS["crisis"]
 
+    def test_vol_spike_maps_to_high_vol_allocation(self):
+        """VIX classifier vol_spike explicitly maps to the five-regime HIGH_VOL allocation."""
+        result = get_regime_allocation("vol_spike")
+        assert result == REGIME_ALLOCATIONS["high_vol"]
+
     def test_unknown_regime_returns_default(self):
         """Unknown regime falls back to NORMAL allocation."""
         result = get_regime_allocation("unknown_regime")
@@ -131,6 +136,15 @@ class TestGetRegimeAllocationWithOverride:
         with patch.dict(os.environ, {"REGIME_ALLOC_OVERRIDE": override}):
             result = get_regime_allocation_with_override("normal")
             assert result == REGIME_ALLOCATIONS["normal"]
+
+    def test_vol_spike_uses_high_vol_override(self):
+        """Overrides use the explicit high_vol allocation vocabulary for vol_spike inputs."""
+        override = json.dumps({"high_vol": {"SPY": 0.25, "GLD": 0.50, "TLT": 0.25}})
+        with patch.dict(os.environ, {"REGIME_ALLOC_OVERRIDE": override}):
+            result = get_regime_allocation_with_override("vol_spike")
+            assert result["SPY"] == pytest.approx(0.25)
+            assert result["GLD"] == pytest.approx(0.50)
+            assert result["TLT"] == pytest.approx(0.25)
 
     def test_malformed_json_ignores_override(self):
         """Malformed JSON in env var should fall back to defaults."""

@@ -174,6 +174,23 @@ class TestGoogleTrendsSignal:
         snapshot = signal.get_signal_snapshot()
         assert snapshot.is_active is False
 
+    def test_stale_data_snapshot_exposes_machine_readable_reason(self, tmp_path):
+        """Inactive stale data snapshots include a reason dashboards can surface."""
+        data_file = tmp_path / "google_trends.json"
+        old_data = {}
+        for i in range(100):
+            date = (datetime.now() - timedelta(days=30 + i)).strftime("%Y-%m-%d")
+            old_data[date] = 50
+        data_file.write_text(json.dumps({"recession": old_data}))
+
+        signal = GoogleTrendsSignal(data_path=str(data_file))
+        snapshot = signal.get_signal_snapshot()
+
+        assert snapshot.is_active is False
+        assert snapshot.metadata["inactive_reason"].startswith("Data is ")
+        assert snapshot.metadata["inactive_reason"].endswith("days old (max 14)")
+        assert snapshot.metadata["inactive_category"] == "stale"
+
     def test_confidence_reflects_data_quality(self, tmp_path):
         """Confidence is higher with more data points and recent data."""
         data_file = tmp_path / "google_trends.json"

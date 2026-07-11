@@ -204,6 +204,17 @@ describe('LiveDashboard lazy tab panel contract', () => {
     expect(optionalFetchSource).toContain('/data/cross_asset_rv.json');
   });
 
+  it('validates standalone allocation artifacts with dedicated schemas', () => {
+    const optionalFetchSource = sourceBetween('const fetchOptionalDataForTab = async (tab: TabType', 'const portfolioValue');
+
+    expect(source).toContain('AdaptiveSizingSchema');
+    expect(source).toContain('BlackLittermanSchema');
+    expect(optionalFetchSource).toContain("validateFetchData(raw, AdaptiveSizingSchema, 'adaptive_sizing')");
+    expect(optionalFetchSource).toContain("validateFetchData(raw, BlackLittermanSchema, 'black_litterman')");
+    expect(optionalFetchSource).not.toContain("validateFetchData(raw, PassthroughSchema, 'adaptive_sizing')");
+    expect(optionalFetchSource).not.toContain("validateFetchData(raw, PassthroughSchema, 'black_litterman')");
+  });
+
   it('schedules core refresh separately from active-tab optional refresh', () => {
     expect(source).toMatch(/useEffect\(\(\) => \{\s*fetchCoreData\(\);[\s\S]*setInterval\(fetchCoreData, refreshInterval \* 1000\)/);
     expect(source).toMatch(/useEffect\(\(\) => \{\s*fetchOptionalDataForTab\(activeTab\);[\s\S]*setInterval\(\(\) => fetchOptionalDataForTab\(activeTab, true\), refreshInterval \* 1000\)/);

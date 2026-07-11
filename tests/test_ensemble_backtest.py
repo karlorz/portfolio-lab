@@ -12,7 +12,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
-from src.backtest.metrics import BacktestResult
+from src.backtest.metrics import BacktestResult, compute_metrics_from_returns
 from src.backtest.ensemble_backtest import (
     EnsembleBacktestEngine,
 )
@@ -73,6 +73,29 @@ def _make_price_data(days: int = 60, base_price: float = 100.0, symbol: str = "S
         }
         for i, d in enumerate(range(1, days + 1))
     ]
+
+
+def _make_price_data_from_closes(closes: list[float]) -> list:
+    """Generate synthetic price data from explicit closes."""
+    rows = []
+    for i, close in enumerate(closes):
+        day = i + 1
+        date = f"2020-01-{day:02d}" if day <= 31 else f"2020-02-{day - 31:02d}"
+        rows.append({
+            "date": date,
+            "close": close,
+            "open": close,
+            "high": close,
+            "low": close,
+            "volume": 1000000,
+        })
+    return rows
+
+
+def _returns_from_equity_curve(curve) -> list[float]:
+    """Convert an equity curve into simple returns for shared metrics."""
+    curve_arr = np.array(curve, dtype=float)
+    return list(curve_arr[1:] / curve_arr[:-1] - 1)
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +418,50 @@ class TestEnsembleBacktestEngine:
         result = _make_result()
         result.sharpe_ratio = -0.5
         assert engine.validate_target(result, target_sharpe=0.0) is False
+
+
+class TestEnsembleMaxDrawdownMetricsParity:
+    """Parity checks for migrating only max-drawdown value calculation."""
+
+    @pytest.mark.parametrize(
+        "curve",
+        [
+            [100, 100, 100, 100],
+            [100, 101, 103, 106],
+            [100, 110, 90, 95, 120],
+        ],
+        ids=["flat", "monotonic_positive", "drawdown_recovery"],
+    )
+    def test_local_max_drawdown_value_matches_shared_metrics_when_initial_peak_holds(
+        self,
+        tmp_path,
+        curve,
+    ):
+        engine = _make_engine(tmp_path)
+
+        local_dd, _ = engine._calculate_max_drawdown(np.array(curve, dtype=float))
+        shared = compute_metrics_from_returns(
+            _returns_from_equity_curve(curve),
+            risk_free_rate=0.0,
+        )
+        local_dd_rounded = round(float(local_dd), 6)
+
+        assert local_dd_rounded == shared["max_drawdown"]
+
+    def test_shared_metrics_misses_drawdown_from_initial_equity_peak(self, tmp_path):
+        engine = _make_engine(tmp_path)
+        curve = [100, 98, 97, 96, 100, 99, 98, 101]
+
+        local_dd, _ = engine._calculate_max_drawdown(np.array(curve, dtype=float))
+        shared = compute_metrics_from_returns(
+            _returns_from_equity_curve(curve),
+            risk_free_rate=0.0,
+        )
+        local_dd_rounded = round(float(local_dd), 6)
+
+        assert local_dd_rounded == -0.04
+        assert shared["max_drawdown"] == -0.020408
+        assert local_dd_rounded != shared["max_drawdown"]
 
 
 class TestEnsembleBacktestEngineExtended:
@@ -722,6 +789,34 @@ class TestEnsembleBacktestEngineSignals:
 
 class TestEnsembleBacktestEngineRun:
     """Tests for run_backtest."""
+
+    def test_run_backtest_preserves_initial_equity_peak_drawdown(self, tmp_path):
+        """Do not migrate to shared max_dd helper until it handles the initial peak."""
+        engine = _make_engine(tmp_path)
+        spy_data = _make_price_data_from_closes([
+            100, 95, 90, 85, 90, 95, 100, 101, 102, 103,
+            104, 105, 106, 107, 108, 109, 110, 111, 112, 113,
+            114, 115, 116, 117, 118, 119, 120, 121, 122, 123,
+            124,
+        ])
+        shared = compute_metrics_from_returns(
+            _returns_from_equity_curve([row["close"] for row in spy_data]),
+            risk_free_rate=0.0,
+        )
+
+        with patch.object(engine, '_fetch_historical_prices', return_value=spy_data):
+            with patch.object(engine, '_generate_daily_signals', return_value={}):
+                result = engine.run_backtest(
+                    {"SPY": 1.0},
+                    start_date="2020-01-01",
+                    end_date="2020-01-31",
+                    rebalance_freq="monthly",
+                )
+
+        assert result.max_drawdown == pytest.approx(-0.15)
+        assert result.extras["max_dd_duration"] == 5
+        assert shared["max_drawdown"] == -0.105263
+        assert round(result.max_drawdown, 6) != shared["max_drawdown"]
 
     def test_insufficient_data(self, tmp_path):
         """Fewer than 30 trading days should raise ValueError."""

@@ -102,6 +102,58 @@ class TestCheckDataFreshness:
         assert freshness["cron"]["backends"]["hermes"]["status"] == "unavailable"
         assert "missing-jobs.json" in freshness["cron"]["backends"]["hermes"]["source"]
 
+    def test_manual_only_tasker_rows_do_not_degrade_cron_health(self, tmp_path, monkeypatch):
+        """Disabled/manual-only tasker rows remain explicit but do not imply active unknown jobs."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "backend": "tasker",
+            "jobs": [
+                {
+                    "name": "portfolio-lab-build",
+                    "status": "disabled",
+                    "state": "manual_only",
+                    "enabled": False,
+                    "manual_only": True,
+                    "last_run": None,
+                    "backend": "tasker",
+                }
+            ],
+        }))
+
+        freshness = _check_data_freshness()
+
+        job = freshness["cron"]["jobs"][0]
+        assert job["state"] == "manual_only"
+        assert job["status"] == "disabled"
+        assert freshness["cron"]["status"] == "ok"
+        assert freshness["cron"]["backends"]["tasker"]["status"] == "ok"
+
+    def test_enabled_unknown_tasker_rows_degrade_cron_health(self, tmp_path, monkeypatch):
+        """Enabled scheduled rows without runtime evidence should not collapse to healthy."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "backend": "tasker",
+            "jobs": [
+                {
+                    "name": "portfolio-lab-health",
+                    "status": "pending",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "manual_only": False,
+                    "last_run": None,
+                    "backend": "tasker",
+                }
+            ],
+        }))
+
+        freshness = _check_data_freshness()
+
+        assert freshness["cron"]["jobs"][0]["status"] == "unknown"
+        assert freshness["cron"]["status"] in {"warning", "degraded"}
+        assert freshness["cron"]["backends"]["tasker"]["status"] == "degraded"
+
     def test_unreadable_hermes_cron_state_warns_without_crashing(self):
         """Permission-denied Hermes state should degrade health, not crash CI."""
         unreadable = MagicMock(spec=Path)

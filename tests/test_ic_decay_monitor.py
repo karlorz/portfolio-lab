@@ -327,3 +327,26 @@ class TestComputeICDecayReport:
         """compute_ic_decay_report should return a dict without crashing."""
         report = compute_ic_decay_report()
         assert isinstance(report, dict)
+
+    def test_staged_only_state_reports_waiting_for_forward_returns(
+        self, tmp_path, monkeypatch
+    ):
+        """Pending labels should be explicit instead of looking like no IC data."""
+        import src.monitor.ic_decay_monitor as icm
+
+        state_path = tmp_path / "ic_monitor_state.json"
+        state_path.write_text(json.dumps({
+            "__staged__": {
+                "date": "2026-07-02",
+                "predictions": {"ensemble_equity": 0.4, "fred_macro": 0.6},
+            }
+        }))
+        monkeypatch.setattr(icm, "IC_STATE_PATH", state_path)
+
+        report = compute_ic_decay_report()
+
+        assert report["status"] == "waiting_for_forward_returns"
+        assert report["pending_predictions"] == 2
+        assert report["staged_date"] == "2026-07-02"
+        assert report["signals"] == {}
+        assert "__staged__" not in report["signals"]

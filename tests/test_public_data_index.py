@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -288,6 +290,176 @@ def test_public_index_adds_market_source_metadata_from_manifest(tmp_path: Path) 
     assert entries["source_manifest.json"]["category"] == "market_data"
 
 
+def test_public_index_catalogs_manifest_referenced_data_quality_report(tmp_path: Path) -> None:
+    prices = _write_json(tmp_path / "prices.json", {"SPY": [{"d": "2026-06-10", "p": 600.0}]})
+    _write_json(
+        tmp_path / "data_quality.json",
+        {
+            "schema_version": "price-data-quality/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "status": "ok",
+            "issue_counts": {
+                "duplicate_dates": 0,
+                "empty_symbols": 0,
+                "extreme_returns": 0,
+                "internal_gaps": 0,
+                "invalid_dates": 0,
+                "invalid_prices": 0,
+                "missing_required_keys": 0,
+                "non_monotonic_rows": 0,
+                "non_object_records": 0,
+                "split_like_returns": 0,
+                "stale_latest_dates": 0,
+                "total": 0,
+            },
+        },
+    )
+    _write_json(
+        tmp_path / "source_manifest.json",
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [
+                {
+                    "artifact": "prices.json",
+                    "provider": "Yahoo Finance",
+                    "status": "success",
+                    "data_quality": {
+                        "artifact": "data_quality.json",
+                        "schema_version": "price-data-quality/v1",
+                        "generated_at": "2026-06-11T00:00:00+00:00",
+                        "status": "ok",
+                    },
+                }
+            ],
+        },
+    )
+
+    index = build_public_data_index([prices], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entries = _entries_by_filename(index)
+    quality = entries["data_quality.json"]
+    assert "data_quality.json" in index["files"]
+    assert quality["category"] == "market_data"
+    assert quality["schema_version"] == "price-data-quality/v1"
+    assert quality["status"] == "present"
+    assert quality["validation_status"] == "valid"
+    assert quality["lineage_status"] == "referenced_by_source_manifest"
+
+
+def test_public_index_marks_provider_market_artifact_without_manifest_row_as_unmanaged(
+    tmp_path: Path,
+) -> None:
+    historical = _write_json(tmp_path / "historical.json", {"SPY": [{"date": "2026-06-10", "close": 600.0}]})
+    _write_json(
+        tmp_path / "source_manifest.json",
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [{"artifact": "prices.json", "provider": "Yahoo Finance", "status": "success"}],
+        },
+    )
+
+    index = build_public_data_index([historical], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entry = _entries_by_filename(index)["historical.json"]
+    assert entry["status"] == "present"
+    assert entry["lineage_status"] == "missing_source_manifest_row"
+    assert entry["source_metadata"]["status"] == "skipped"
+    assert entry["source_metadata"]["failure_reason"] == "missing_source_manifest_row"
+
+
+def test_public_index_files_preserve_reachable_nested_public_paths(tmp_path: Path) -> None:
+    explainability = _write_json(
+        tmp_path / "explainability" / "explainability_latest.json",
+        {"generated_at": "2026-06-11T00:00:00+00:00", "sections": []},
+    )
+
+    index = build_public_data_index([explainability], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entry = _entries_by_filename(index)["explainability_latest.json"]
+    assert entry["path"] == "explainability/explainability_latest.json"
+    assert "explainability/explainability_latest.json" in index["files"]
+    assert "explainability_latest.json" not in index["files"]
+
+
+def test_public_index_validates_non_labs_schema_versioned_artifacts(tmp_path: Path) -> None:
+    rebalance_health = _write_json(
+        tmp_path / "rebalance_health.json",
+        {
+            "schema_version": "rebalance-health/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "status": "ok",
+        },
+    )
+
+    index = build_public_data_index([rebalance_health], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entry = _entries_by_filename(index)["rebalance_health.json"]
+    assert entry["status"] == "present"
+    assert entry["validation_status"] == "valid"
+    assert entry["validation_errors"] == []
+
+
+def test_public_index_discovers_named_operational_and_archived_public_json(tmp_path: Path) -> None:
+    _write_json(
+        tmp_path / "duration-sweep-results.json",
+        {
+            "schema_version": "duration-sweep-results/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "results": [],
+        },
+    )
+    _write_json(
+        tmp_path / "tasker_status.json",
+        {
+            "schema_version": "tasker-status/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "status": "ok",
+        },
+    )
+
+    index = build_public_data_index([], public_dir=tmp_path, generated_at="2026-06-11T00:00:00+00:00")
+
+    entries = _entries_by_filename(index)
+    duration = entries["duration-sweep-results.json"]
+    tasker = entries["tasker_status.json"]
+    assert duration["category"] == "research_archive"
+    assert duration["archive_status"] == "frozen_research_artifact"
+    assert duration["validation_status"] == "valid"
+    assert tasker["category"] == "operations"
+    assert tasker["validation_status"] == "valid"
+    assert "duration-sweep-results.json" in index["files"]
+    assert "tasker_status.json" in index["files"]
+
+
+def test_public_index_uses_legacy_timestamp_fields_for_artifact_freshness(tmp_path: Path) -> None:
+    duration = _write_json(
+        tmp_path / "duration-sweep-results.json",
+        {
+            "timestamp": "2026-05-13T20:48:59.155Z",
+            "results": [],
+        },
+    )
+    rebalance = _write_json(
+        tmp_path / "rebalance_health.json",
+        {
+            "generated": "2026-07-06T16:03:07.405835+00:00",
+            "status": "ok",
+        },
+    )
+
+    index = build_public_data_index(
+        [duration, rebalance],
+        public_dir=tmp_path,
+        generated_at="2026-07-07T00:10:38+00:00",
+    )
+
+    entries = _entries_by_filename(index)
+    assert entries["duration-sweep-results.json"]["generated_at"] == "2026-05-13T20:48:59.155Z"
+    assert entries["rebalance_health.json"]["generated_at"] == "2026-07-06T16:03:07.405835+00:00"
+
+
 def test_public_index_adds_top_level_source_manifest_identity(tmp_path: Path) -> None:
     prices = _write_json(tmp_path / "prices.json", {"SPY": [{"d": "2026-06-10", "p": 600.0}]})
     _write_json(
@@ -350,6 +522,51 @@ def test_public_index_source_manifest_identity_hash_changes_with_manifest_conten
     )
 
     assert first["source_manifest"]["sha256"] != second["source_manifest"]["sha256"]
+
+
+def test_public_index_source_manifest_identity_ignores_stale_hash_cache_metadata(tmp_path: Path) -> None:
+    prices = _write_json(tmp_path / "prices.json", {"SPY": [{"d": "2026-06-10", "p": 600.0}]})
+    manifest = tmp_path / "source_manifest.json"
+    _write_json(
+        manifest,
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [{"artifact": "prices.json", "provider": "A", "status": "success"}],
+        },
+    )
+    cache_path = tmp_path / ".public_data_index_hash_cache.json"
+    first = build_public_data_index(
+        [prices],
+        public_dir=tmp_path,
+        generated_at="2026-06-11T00:00:00+00:00",
+        hash_cache_path=cache_path,
+    )
+    old_hash = first["source_manifest"]["sha256"]
+    old_stat = manifest.stat()
+
+    _write_json(
+        manifest,
+        {
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-06-11T00:00:00+00:00",
+            "artifacts": [{"artifact": "prices.json", "provider": "B", "status": "success"}],
+        },
+    )
+    assert manifest.stat().st_size == old_stat.st_size
+    os.utime(manifest, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns))
+
+    second = build_public_data_index(
+        [prices],
+        public_dir=tmp_path,
+        generated_at="2026-06-11T00:00:00+00:00",
+        hash_cache_path=cache_path,
+    )
+
+    actual_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert actual_hash != old_hash
+    assert second["source_manifest"]["sha256"] == actual_hash
+    assert _entries_by_filename(second)["source_manifest.json"]["sha256"] == actual_hash
 
 
 def test_public_index_marks_project_generated_artifacts_public_safe(tmp_path: Path) -> None:
@@ -500,6 +717,18 @@ def test_public_index_represents_missing_optional_labs_files(tmp_path: Path) -> 
     assert labs_registry["size_bytes"] is None
     assert labs_registry["sha256"] is None
     assert "labs_registry.json" not in index["files"]
+
+
+def test_public_index_records_incident_lifecycle_contract_when_missing(tmp_path: Path) -> None:
+    index = build_public_data_index([], public_dir=tmp_path, generated_at="2026-07-06T00:00:00+00:00")
+
+    entries = _entries_by_filename(index)
+    incidents = entries["incidents.json"]
+    assert incidents["category"] == "monitoring"
+    assert incidents["schema_version"] == "incident-lifecycle/v1"
+    assert incidents["status"] == "missing"
+    assert incidents["validation_status"] == "missing"
+    assert "incidents.json" not in index["files"]
 
 
 def test_dashboard_generation_publishes_labs_scorecards_from_registry_rows(tmp_path: Path) -> None:

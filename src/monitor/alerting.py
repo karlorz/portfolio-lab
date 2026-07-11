@@ -225,12 +225,16 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
     """Check IC decay report and fire alerts for degrading signals.
 
     Args:
-        ic_decay_data: Output from compute_ic_decay_report(), mapping
-            signal_name -> {"status": "healthy"|"warning"|"critical"|...,
-                           "ic_rolling": float, "ic_trend": str, ...}
+        ic_decay_data: Output from compute_ic_decay_report(). Accepts either
+            the wrapper shape with a ``signals`` mapping or the legacy direct
+            signal mapping.
     """
     if not ic_decay_data or "error" in ic_decay_data:
         return
+
+    signal_rows = ic_decay_data.get("signals") if isinstance(ic_decay_data, dict) else None
+    if isinstance(signal_rows, dict):
+        ic_decay_data = signal_rows
 
     warning_signals = []
     critical_signals = []

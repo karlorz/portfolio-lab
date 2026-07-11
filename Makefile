@@ -158,11 +158,7 @@ test:
 	fi; \
 	exit $$EXIT
 
-.PHONY: test test-ml test-ml-extract test-fast
-
-test-ml-extract:
-	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
-	PORTFOLIO_LAB_ENABLE_ML=0 ./scripts/run-tests-safe --ml-extract
+.PHONY: test test-ml test-fast test-ml-extract
 
 test-fast:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
@@ -185,6 +181,10 @@ test-fast:
 		echo "Some tests failed (exit $$EXIT). Review output above."; \
 	fi; \
 	exit $$EXIT
+
+test-ml-extract:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	PORTFOLIO_LAB_ENABLE_ML=0 ./scripts/run-tests-safe --ml-extract
 
 # ── Test Isolation (bypasses pollution) ────────────────
 

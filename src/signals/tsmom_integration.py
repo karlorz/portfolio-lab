@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 from src.signals.tsmom_overlay import TSMOMOverlay, TSMOMSignal, DEFAULT_BASE_ALLOCATION
 from src.signals.integrator import SignalSourceResult
+from src.signals.sample_counts import get_live_sample_count
 
 
 
@@ -68,7 +69,7 @@ class TSMOMSignalAdapter:
             raw_score=tsmom_signal.lookback_return,
             raw_unit="formation_return_12m",
             historical_accuracy=0.68,  # Based on AQR research
-            sample_count=5371,  # Trading days in dataset
+            sample_count=get_live_sample_count(ticker),
             timestamp=tsmom_signal.timestamp,
             metadata={
                 "lookback_return": tsmom_signal.lookback_return,

@@ -243,6 +243,16 @@ class GoogleTrendsSignal:
     @staticmethod
     def _inactive_snapshot(reason: str) -> SignalSnapshot:
         """Create an inactive snapshot."""
+        reason_lower = reason.lower()
+        if "days old" in reason_lower or "stale" in reason_lower:
+            inactive_category = "stale"
+        elif "no " in reason_lower:
+            inactive_category = "missing"
+        elif "insufficient" in reason_lower:
+            inactive_category = "insufficient_data"
+        else:
+            inactive_category = "inactive"
+
         return SignalSnapshot(
             source="google_trends",
             timestamp=str(datetime.now()),
@@ -251,4 +261,8 @@ class GoogleTrendsSignal:
             regime_fit="all",
             is_active=False,
             explanation=f"Google Trends: {reason}",
+            metadata={
+                "inactive_reason": reason,
+                "inactive_category": inactive_category,
+            },
         )

@@ -22,6 +22,10 @@ def empty_broker_payload() -> dict[str, Any]:
         "recent_orders": [],
         "last_sync": None,
         "kill_switch": False,
+        "kill_switch_level": None,
+        "kill_switch_source": None,
+        "kill_switch_reason": None,
+        "kill_switch_incident_id": None,
     }
 
 
@@ -66,6 +70,10 @@ class BrokerDataLoader:
                 with open(kill_file) as f:
                     ks = json.load(f)
                 broker["kill_switch"] = ks.get("enabled", False)
+                broker["kill_switch_level"] = ks.get("level")
+                broker["kill_switch_source"] = ks.get("source")
+                broker["kill_switch_reason"] = ks.get("reason")
+                broker["kill_switch_incident_id"] = ks.get("incident_id")
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to load kill switch state: %s", e)
 

@@ -1508,6 +1508,7 @@ class TestKillSwitchTrigger:
         assert data["enabled"] is True
         assert data["reason"] == "max_drawdown_-25.0%"
         assert data["mode"] == "paper"
+        assert data["source"] == "evaluator_risk"
 
     @patch('src.strategy.evaluator.sqlite_connect')
     @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
@@ -1544,6 +1545,51 @@ class TestKillSwitchTrigger:
 
         # Stale kill switch file should be deleted
         assert not stale.exists()
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_no_risk_breach_preserves_incident_owned_kill_switch(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, capsys,
+    ):
+        """Evaluator recovery must not clear incident-owned router gates."""
+        from src.strategy.evaluator import main
+
+        kill_file = tmp_path / "kill_switch.json"
+        incident_gate = {
+            "enabled": True,
+            "level": "halt",
+            "reason": "unresolved_incident:signal_staleness",
+            "source": "incident_lifecycle",
+            "incident_id": "incident-123",
+            "incident_channel": "signal_staleness",
+            "mode": "paper",
+            "timestamp": "2026-07-06T00:00:00+00:00",
+            "position_reduction": 1.0,
+        }
+        kill_file.write_text(json.dumps(incident_gate))
+
+        with (
+            patch('src.strategy.evaluator.DATA_DIR', tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch('src.strategy.evaluator.Portfolio') as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = None
+            mock_portfolio.total_value.return_value = 100000
+            mock_portfolio.calculate_orders.return_value = []
+            mock_portfolio.cash = 100000
+            mock_portfolio.positions = {}
+            mock_portfolio.mode = "paper"
+            mock_portfolio.history = [{"total_value": 100000}]
+            MockPortfolio.return_value = mock_portfolio
+
+            main()
+
+        assert kill_file.exists()
+        assert json.loads(kill_file.read_text()) == incident_gate
 
     @patch('src.strategy.evaluator.sqlite_connect')
     @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
@@ -1737,6 +1783,45 @@ class TestKillSwitchGraduatedLevels:
             data = json.load(f)
         assert data["level"] == "liquidate"
         assert data["position_reduction"] == 1.0
+
+
+class TestRegimeTargetAllocationParity:
+    """Evaluator audit and cron paths should match env-enabled allocation semantics."""
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="recovery")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=16.0)
+    def test_kill_path_records_env_enabled_regime_allocation(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite, tmp_path, monkeypatch
+    ):
+        """Kill-switch decision registry records the same target as normal eval."""
+        from src.strategy.evaluator import main
+        from src.strategy.regime_allocation import get_regime_allocation_with_override
+
+        monkeypatch.setenv("REGIME_ALLOC_ENABLED", "1")
+        expected = get_regime_allocation_with_override("recovery")
+
+        with (
+            patch('src.strategy.evaluator.DATA_DIR', tmp_path),
+            patch('src.strategy.evaluator.Portfolio') as MockPortfolio,
+            patch('src.monitor.decision_registry.record_evaluator_cycle_decision') as record_decision,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = "max_drawdown_-25.0%"
+            mock_portfolio.total_value.return_value = 75000
+            mock_portfolio.current_weights.return_value = {"SPY": 1.0}
+            MockPortfolio.return_value = mock_portfolio
+
+            main()
+
+        assert record_decision.call_args.kwargs["target_alloc"] == expected
+
+    def test_dashboard_cron_enables_regime_allocation_contract(self):
+        """Scheduled dashboard generation uses the same env contract as eval."""
+        dashboard_cron = Path("scripts/cron/portfolio-lab-dashboard.sh").read_text()
+
+        assert "export REGIME_ALLOC_ENABLED=1" in dashboard_cron
 
 
 # ---------------------------------------------------------------------------

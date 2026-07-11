@@ -8,6 +8,16 @@ interface SignalSize {
   regime_adjusted: Record<string, number>;
 }
 
+interface AllocationArtifactAuthority {
+  runtime_role: 'advisory_non_routed';
+  live_authoritative: false;
+  routed: false;
+  routed_by: null;
+  canonical_controller: string;
+  routed_surface: 'target_allocations';
+  description: string;
+}
+
 export interface AdaptiveSizingData {
   signals: SignalSize[];
   constraints: {
@@ -18,6 +28,7 @@ export interface AdaptiveSizingData {
   };
   current_regime: string;
   total_weight: number;
+  authority?: AllocationArtifactAuthority;
 }
 
 interface AdaptiveSizingPanelProps {
@@ -98,6 +109,25 @@ function normalizeSignalSize(value: unknown, fallbackHealth: number): SignalSize
   };
 }
 
+function normalizeAuthority(value: unknown): AllocationArtifactAuthority | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.runtime_role !== 'advisory_non_routed') return undefined;
+  if (value.live_authoritative !== false || value.routed !== false || value.routed_by !== null) return undefined;
+  if (value.routed_surface !== 'target_allocations') return undefined;
+  if (typeof value.canonical_controller !== 'string') return undefined;
+  if (typeof value.description !== 'string') return undefined;
+
+  return {
+    runtime_role: 'advisory_non_routed',
+    live_authoritative: false,
+    routed: false,
+    routed_by: null,
+    canonical_controller: value.canonical_controller,
+    routed_surface: 'target_allocations',
+    description: value.description,
+  };
+}
+
 function normalizeAllocationRows(value: UnknownRecord): SignalSize[] {
   if (!isRecord(value.adjusted_allocation)) return [];
 
@@ -140,7 +170,30 @@ export function normalizeAdaptiveSizingData(value: unknown): AdaptiveSizingData 
     constraints,
     current_regime: normalizeRegimeName(value.current_regime ?? factors.regime),
     total_weight: totalWeight,
+    authority: normalizeAuthority(value.authority),
   };
+}
+
+function AuthorityDisclosure({ authority }: { authority?: AllocationArtifactAuthority }) {
+  if (!authority) return null;
+
+  return (
+    <div style={{
+      marginTop: 8,
+      padding: '6px 8px',
+      borderRadius: 4,
+      background: 'rgba(245, 158, 11, 0.12)',
+      border: '1px solid rgba(245, 158, 11, 0.35)',
+      color: '#fbbf24',
+      fontSize: 11,
+      fontWeight: 600,
+    }}>
+      <span>Not order-routed</span>
+      <span style={{ color: '#94a3b8', fontWeight: 400 }}>
+        {' '}· live orders use {authority.routed_surface}
+      </span>
+    </div>
+  );
 }
 
 function HealthBar({ score, floor }: { score: number; floor: number }) {
@@ -232,7 +285,7 @@ export function AdaptiveSizingPanel({ data }: AdaptiveSizingPanelProps) {
     );
   }
 
-  const { signals, constraints, current_regime, total_weight } = normalizedData;
+  const { signals, constraints, current_regime, total_weight, authority } = normalizedData;
   const floor = constraints.viability_floor;
   const withinLeverage = total_weight <= constraints.max_leverage;
   const totalWeightColor = total_weight > constraints.max_leverage
@@ -246,6 +299,7 @@ export function AdaptiveSizingPanel({ data }: AdaptiveSizingPanelProps) {
   return (
     <div className="panel">
       <h3>Adaptive Sizing</h3>
+      <AuthorityDisclosure authority={authority} />
 
       {/* Summary metrics */}
       <div className="panel-grid">

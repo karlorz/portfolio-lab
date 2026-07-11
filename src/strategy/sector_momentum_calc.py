@@ -8,7 +8,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import numpy as np
 
 from src.paths import HISTORICAL_JSON
@@ -248,7 +248,7 @@ def generate_sector_signals(historical_path: Path, vix: float = 0, regime: str =
         top_sectors = momentum_scores[:5]
         
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": "active",
             "vix": vix,
             "regime": regime,

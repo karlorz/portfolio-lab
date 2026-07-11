@@ -318,6 +318,24 @@ class IncidentManager:
         except OSError as exc:
             logger.warning("Failed to write incident kill switch: %s", exc)
 
+    def _write_most_restrictive_open_incident_kill_switch(self) -> None:
+        candidates = [
+            incident
+            for incident in self.open_incidents()
+            if incident.kill_switch_level is not None
+        ]
+        if not candidates:
+            return
+        incident = sorted(
+            candidates,
+            key=lambda item: (
+                _KILL_SWITCH_LEVEL_RANK.get(item.kill_switch_level or "none", 0),
+                item.updated_at,
+                item.incident_id,
+            ),
+        )[-1]
+        self._write_incident_kill_switch(incident)
+
     def _should_write_incident_kill_switch(self, level: str) -> bool:
         new_rank = _KILL_SWITCH_LEVEL_RANK[level]
         try:
@@ -353,6 +371,8 @@ class IncidentManager:
                 self.kill_switch_path.unlink(missing_ok=True)
             except OSError as exc:
                 logger.warning("Failed to clear resolved incident kill switch: %s", exc)
+                return
+            self._write_most_restrictive_open_incident_kill_switch()
 
     def _find_open_by_channel(self, channel: str) -> Incident | None:
         candidates = [

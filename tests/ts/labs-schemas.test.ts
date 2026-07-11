@@ -190,6 +190,49 @@ describe('Labs artifact schemas', () => {
     expect(unrelatedResult.success).toBe(false);
   });
 
+  it('accepts Labs governance disclosure fields for missing-provenance rows', () => {
+    const registry = {
+      ...loadLabsFixture('valid_registry'),
+      experiments: [
+        {
+          ...loadLabsFixture('valid_registry').experiments[0],
+          status: 'candidate',
+          provenance_status: 'missing',
+          governance_state: 'governance_blocked',
+          governance_reasons: ['provenance_missing'],
+          promotion_governance: {
+            recommended_status: 'candidate',
+            pass: false,
+            failures: ['provenance_missing'],
+            metric_gate_status: 'promoted',
+            metric_gate_pass: true,
+            governance_status: 'candidate',
+            provenance_status: 'missing',
+          },
+        },
+      ],
+    };
+    const scorecard = {
+      ...loadLabsFixture('valid_scorecard'),
+      status: 'watch',
+      provenance_status: 'missing',
+      governance_state: 'governance_blocked',
+      governance_reasons: ['provenance_missing'],
+      promotion_governance: {
+        recommended_status: 'candidate',
+        pass: false,
+        failures: ['provenance_missing'],
+        metric_gate_status: 'promoted',
+        metric_gate_pass: true,
+        governance_status: 'candidate',
+        provenance_status: 'missing',
+      },
+    };
+
+    expect(LabsRegistrySchema.safeParse(registry).success).toBe(true);
+    expect(LabsScorecardSchema.safeParse(scorecard).success).toBe(true);
+  });
+
   it('rejects malformed Labs fixture JSON with clear schema diagnostics', () => {
     const malformed = loadLabsFixture('invalid_missing_metrics');
 
@@ -1218,6 +1261,51 @@ describe('Labs panel view model', () => {
     expect(view.filterOptions.provenanceStatus).toContain('missing');
     expect(view.filterOptions.replayStatus).toContain('failed');
     expect(view.filterOptions.validationStatus).toEqual(['all', 'valid', 'invalid', 'missing']);
+  });
+
+  it('summarizes missing-provenance candidate/watch rows with governance reasons', () => {
+    const data = labsData();
+    data.registry!.experiments = [
+      registryRow('metric-only', {
+        status: 'candidate',
+        provenance_status: 'missing',
+        metrics: {
+          sharpe: 1.21,
+          cagr_pct: 12.4,
+          max_drawdown_pct: -14,
+        },
+        baseline_deltas: {
+          sharpe: 0.08,
+        },
+        governance_state: 'governance_blocked',
+        governance_reasons: ['provenance_missing'],
+      }),
+      registryRow('clean-watch', {
+        status: 'candidate',
+        provenance_status: 'present',
+      }),
+    ];
+    data.scorecards = [
+      {
+        schema_version: 'labs-scorecard/v1',
+        experiment_id: 'metric-only',
+        generated_at: '2026-06-08T12:00:00+00:00',
+        status: 'watch',
+        provenance_status: 'missing',
+        metrics: { sharpe: 1.21 },
+        baseline_deltas: { sharpe: 0.08 },
+        governance_state: 'governance_blocked',
+        governance_reasons: ['provenance_missing'],
+      },
+    ];
+
+    const view = buildLabsPanelViewModel(data);
+
+    expect(view.summary.missingProvenanceCandidates).toBe(1);
+    expect(view.rows.find((row) => row.experimentId === 'metric-only')).toMatchObject({
+      governanceState: 'governance_blocked',
+      governanceReasons: ['provenance_missing'],
+    });
   });
 
   it('filters Labs rows by status, provenance, replay, and validation state', () => {

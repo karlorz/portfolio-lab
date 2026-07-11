@@ -14,7 +14,7 @@ Integrates with:
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Any, Tuple
 from enum import Enum
@@ -267,7 +267,7 @@ class RegimeSentimentIntegrator:
             technical_confidence: Confidence score 0-1 from technical model
             sentiment: Aggregated sentiment from sentiment_analyzer.py
         """
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         # Get scores
         tech_score = self.map_technical_to_score(technical_regime)

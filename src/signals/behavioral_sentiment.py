@@ -425,6 +425,9 @@ class BehavioralSentimentSignal:
 
 if __name__ == "__main__":
     import argparse
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
 
     parser = argparse.ArgumentParser(description="Behavioral Sentiment Signal Generator")
     parser.add_argument("--signal", action="store_true", help="Generate current signal")

@@ -633,7 +633,7 @@ class TestVIXExtendedCoverage:
         assert snapshot.source == "vix_term_structure"
         assert snapshot.timestamp == "2026-05-15T12:00:00"
         assert snapshot.value == -0.8
-        assert snapshot.confidence == 85.0
+        assert snapshot.confidence == 0.85
         assert snapshot.asset_signals == {"SPY": -0.10, "GLD": 0.05, "TLT": 0.05}
         assert snapshot.is_active is True
         assert "VIX TS" in snapshot.explanation
@@ -1896,4 +1896,3 @@ class TestRegimeClassificationEdgeCases:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
-

@@ -10,10 +10,12 @@ if cron_guard_start "pf-dashboard" 120; then
     cd "$PROJECT_DIR"
     PYTHON_RUNTIME="${PYTHON_RUNTIME:-$PROJECT_DIR/scripts/python_runtime.sh}"
     export PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src"
+    export REGIME_ALLOC_ENABLED=1
 
     set +e
     "$PYTHON_RUNTIME" src/dashboard/generator.py 2>&1 | tee -a data/dashboard.log
-    EXIT=${PIPESTATUS[0]}
+    dashboard_pipeline_status=("${PIPESTATUS[@]}")
+    EXIT="$(cron_pipeline_exit "${dashboard_pipeline_status[0]}" "${dashboard_pipeline_status[1]}")"
     set -e
 
     if [ "$EXIT" -eq 0 ]; then

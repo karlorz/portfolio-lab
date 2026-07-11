@@ -29,6 +29,7 @@ from src.signals.stacking_integrator import (
     ModelMetadata,
     get_stacking_prediction
 )
+from src.signals.signal_source import SignalSource
 
 
 class TestStackingPrediction:
@@ -90,6 +91,26 @@ class TestModelMetadata:
         assert meta.feature_count == 102
         assert meta.accuracy_train == 0.75
         assert len(meta.feature_importance) == 2
+
+    def test_metadata_carries_roster_version_and_fallback_semantics(self):
+        """Feature dimensions are meaningful only with explicit roster metadata."""
+        roster = [source.value for source in SignalSource]
+        meta = ModelMetadata(
+            version='v1.2',
+            training_date=datetime(2026, 5, 1),
+            feature_count=128,
+            accuracy_train=0.75,
+            accuracy_val=0.68,
+            feature_importance={'feature_1': 0.15},
+            total_samples=15000,
+            source_roster=roster,
+            source_roster_version="SignalSource.full.v1",
+            fallback_semantics="no_model_feature_count_unavailable",
+        )
+
+        assert meta.source_roster == roster
+        assert meta.source_roster_version == "SignalSource.full.v1"
+        assert meta.fallback_semantics == "no_model_feature_count_unavailable"
 
 
 class TestStackingIntegratorInit:
@@ -169,6 +190,7 @@ class TestModelLoading:
     
     def test_load_valid_model(self, tmp_path):
         """Test loading a valid model pickle"""
+        roster = [source.value for source in SignalSource]
         model_data = {
             'model': PicklableModel([0.1, 0.2, 0.7]),
             'metadata': {
@@ -178,7 +200,10 @@ class TestModelLoading:
                 'accuracy_train': 0.75,
                 'accuracy_val': 0.68,
                 'feature_importance': {'feat_1': 0.15},
-                'total_samples': 10000
+                'total_samples': 10000,
+                'source_roster': roster,
+                'source_roster_version': 'SignalSource.full.v1',
+                'fallback_semantics': 'weighted_voting_if_model_unavailable',
             }
         }
         
@@ -194,6 +219,9 @@ class TestModelLoading:
         assert integrator.metadata is not None
         assert integrator.metadata.version == 'v1.0'
         assert integrator.metadata.accuracy_val == 0.68
+        assert integrator.metadata.source_roster == roster
+        assert integrator.metadata.source_roster_version == 'SignalSource.full.v1'
+        assert integrator.metadata.fallback_semantics == 'weighted_voting_if_model_unavailable'
     
     def test_load_invalid_model(self, tmp_path):
         """Test loading non-existent model"""
@@ -944,7 +972,8 @@ class TestModelMetadataExtended:
         expected = {
             "version", "training_date", "feature_count",
             "accuracy_train", "accuracy_val", "feature_importance",
-            "total_samples",
+            "total_samples", "source_roster", "source_roster_version",
+            "fallback_semantics",
         }
         assert field_names == expected
 
@@ -953,6 +982,8 @@ class TestModelMetadataExtended:
             version="1.0", training_date=datetime.now(),
             feature_count=50, accuracy_train=0.85, accuracy_val=0.80,
             feature_importance={"feat1": 0.3}, total_samples=1000,
+            source_roster=["a"], source_roster_version="v1",
+            fallback_semantics="fallback",
         )
         assert meta.version == "1.0"
         assert meta.total_samples == 1000
@@ -1113,7 +1144,8 @@ class TestModelMetadataFieldValidation:
         expected = {
             "version", "training_date", "feature_count",
             "accuracy_train", "accuracy_val", "feature_importance",
-            "total_samples",
+            "total_samples", "source_roster", "source_roster_version",
+            "fallback_semantics",
         }
         assert field_names == expected
 
@@ -1127,6 +1159,9 @@ class TestModelMetadataFieldValidation:
         assert field_map["accuracy_val"] is float
         assert "Dict" in str(field_map["feature_importance"]) or "dict" in str(field_map["feature_importance"])
         assert field_map["total_samples"] is int
+        assert "List" in str(field_map["source_roster"]) or "list" in str(field_map["source_roster"])
+        assert field_map["source_roster_version"] is str
+        assert field_map["fallback_semantics"] is str
 
     def test_no_defaults_required(self):
         """All metadata fields are required (no defaults in source)."""
@@ -1134,6 +1169,8 @@ class TestModelMetadataFieldValidation:
             version="v1", training_date=datetime.now(),
             feature_count=10, accuracy_train=0.5, accuracy_val=0.4,
             feature_importance={"a": 0.1}, total_samples=100,
+            source_roster=["a"], source_roster_version="v1",
+            fallback_semantics="fallback",
         )
         assert meta.version == "v1"
         assert meta.total_samples == 100

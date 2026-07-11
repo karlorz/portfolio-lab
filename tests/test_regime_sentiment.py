@@ -9,7 +9,7 @@ import json
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.strategy.regime_sentiment import (
     RegimeSentiment,
@@ -373,6 +373,15 @@ class TestCombineSignals:
         assert -1 <= signal.equity_tilt <= 1
         assert -1 <= signal.bond_duration_tilt <= 1
         assert -1 <= signal.gold_tilt <= 1
+
+    def test_timestamp_is_utc_timezone_aware(self):
+        integrator = RegimeSentimentIntegrator()
+        sentiment = _make_mock_sentiment("neutral", 0.6)
+        signal = integrator.combine_signals("bullish_momentum", 0.8, sentiment)
+
+        ts = datetime.fromisoformat(signal.timestamp)
+        assert ts.tzinfo is not None
+        assert ts.utcoffset() == timezone.utc.utcoffset(ts)
 
 
 # ---------------------------------------------------------------------------

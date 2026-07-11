@@ -452,6 +452,7 @@ class SmartRebalancingController:
                 'in_optimal_window': in_window,
                 'ytd_cost_bps': self.cost_tracker.ytd_total_bps,
                 'remaining_budget_pct': self.cost_tracker.remaining_budget_pct,
+                'remaining_budget_ratio': self.cost_tracker.remaining_budget_pct,
                 'per_symbol_cost_bps': per_symbol_costs,
             },
         )
@@ -468,6 +469,7 @@ class SmartRebalancingController:
             'ytd_cost_bps': self.cost_tracker.ytd_total_bps,
             'ytd_cost_pct': round(self.cost_tracker.ytd_total_pct * 100, 3),
             'remaining_budget_pct': round(self.cost_tracker.remaining_budget_pct * 100, 3),
+            'remaining_budget_ratio': round(self.cost_tracker.remaining_budget_pct, 6),
             'is_over_budget': self.cost_tracker.is_over_budget(),
             'is_warning': self.cost_tracker.is_warning(),
             'last_rebalance': self.last_rebalance.isoformat() if self.last_rebalance else None,

@@ -841,4 +841,7 @@ def main():
     else:
         parser.print_help()
 if __name__ == '__main__':
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     main()

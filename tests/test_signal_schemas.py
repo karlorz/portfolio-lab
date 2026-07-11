@@ -50,6 +50,33 @@ class TestEnsembleVotingSignal:
         assert model.weighted_consensus == 0.32
         assert len(model.source_breakdown) == 1
 
+    def test_source_count_semantics_have_defaults(self):
+        model = EnsembleVotingSignal.model_validate({})
+
+        assert model.configured_source_count == 0
+        assert model.collected_source_count == 0
+        assert model.contributing_source_count == 0
+        assert model.inactive_source_count == 0
+        assert model.inactive_sources == []
+
+    def test_source_count_semantics_are_preserved(self):
+        model = EnsembleVotingSignal.model_validate({
+            "num_sources": 4,
+            "configured_source_count": 9,
+            "collected_source_count": 4,
+            "contributing_source_count": 2,
+            "inactive_source_count": 2,
+            "inactive_sources": ["cross_asset_rv", "multi_speed_momentum"],
+        })
+
+        dumped = model.model_dump()
+        assert dumped["num_sources"] == 4
+        assert dumped["configured_source_count"] == 9
+        assert dumped["collected_source_count"] == 4
+        assert dumped["contributing_source_count"] == 2
+        assert dumped["inactive_source_count"] == 2
+        assert dumped["inactive_sources"] == ["cross_asset_rv", "multi_speed_momentum"]
+
     def test_missing_fields_use_defaults(self):
         model = EnsembleVotingSignal.model_validate({})
         assert model.regime == "unknown"

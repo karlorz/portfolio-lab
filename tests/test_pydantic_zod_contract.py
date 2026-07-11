@@ -27,6 +27,22 @@ PYDANTIC_TO_ZOD_TYPED: dict[str, str] = {
     "gold_tlt_correlation": "gold_tlt_correlation",
 }
 
+ACTIVE_SIGNALS_JSON_PANEL_SCHEMAS: dict[str, str] = {
+    "crypto_allocation": "CryptoAllocationSchema",
+    "calendar_seasonality": "CalendarSeasonalitySchema",
+    "ensemble_voting": "EnsembleVotingSchema",
+    "alternative_data": "AlternativeDataSchema",
+    "factor_rotation": "FactorRotationSignalSchema",
+    "stacking_ensemble": "StackingEnsembleSchema",
+    "convexity_harvest": "ConvexityHarvestSchema",
+    "llm_sentiment": "LLMSentimentSchema",
+    "sector_rotation": "SectorRotationSchema",
+    "factor_rotation_dashboard": "FactorRotationDashboardSchema",
+    "collar": "CollarSchema",
+    "kurtosis_regime": "KurtosisRegimeSchema",
+    "volatility_parity": "VolatilityParitySchema",
+}
+
 # Integrator REGIME_WEIGHTS (momentum/macro/…) ≠ ensemble REGIME_WEIGHTS (SignalSource).
 # Documented exception — not the same constant.
 INTEGRATOR_ONLY_PYDANTIC = frozenset(
@@ -66,6 +82,15 @@ def test_typed_zod_schemas_exist_for_dashboard_panels() -> None:
         assert pydantic_key in SIGNAL_MODELS, pydantic_key
         if zod_hint.endswith("Schema"):
             assert zod_hint in ts, f"expected export {zod_hint} for {pydantic_key}"
+
+
+def test_active_signals_json_panels_do_not_use_optional_passthrough() -> None:
+    """Active signals.json panels must use dedicated Zod schemas, not any-record passthrough."""
+    ts = _signals_ts_text()
+    for panel_key, schema_name in ACTIVE_SIGNALS_JSON_PANEL_SCHEMAS.items():
+        assert f"export const {schema_name}" in ts, f"missing dedicated schema for {panel_key}"
+        assert f"{panel_key}: z.optional(OptionalPanelObjectSchema)" not in ts
+        assert f"{panel_key}: z.optional(z.record(z.string(), z.unknown()))" not in ts
 
 
 def test_ensemble_voter_regime_weights_loads_without_ml() -> None:

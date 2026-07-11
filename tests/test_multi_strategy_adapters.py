@@ -227,6 +227,29 @@ class TestMultiSpeedSignalAdapter:
         # 2 out of 3 agree (fast and medium match)
         assert result.confidence == pytest.approx(2 / 3)
 
+    def test_sample_count_uses_active_ticker_history(self, mock_multi_speed):
+        with patch(
+            "src.data.price_cache.get_prices",
+            return_value={"SPY": [{"d": "2026-01-01", "p": 1.0}] * 4},
+        ):
+            adapter = MultiSpeedSignalAdapter()
+            result = adapter.generate_signal("SPY")
+
+        assert result.sample_count == 4
+
+    def test_get_signal_snapshot_uses_canonical_source_and_bridges_to_reading(
+        self, mock_multi_speed
+    ):
+        adapter = MultiSpeedSignalAdapter()
+
+        snapshot = adapter.get_signal_snapshot(["SPY"])
+        reading = snapshot.to_signal_reading()
+
+        assert snapshot.source == "multi_speed_momentum"
+        assert reading.source.value == "multi_speed_momentum"
+        assert snapshot.value == pytest.approx(1.0)
+        assert snapshot.confidence == pytest.approx(1.0)
+
 
 # ===================================================================
 # RiskParitySignalAdapter
@@ -309,10 +332,15 @@ class TestRiskParitySignalAdapter:
         assert "risk_parity_quality" in result.metadata
         assert "expected_vol" in result.metadata
 
-    def test_sample_count(self, mock_risk_parity):
-        adapter = RiskParitySignalAdapter()
-        result = adapter.generate_signal("SPY")
-        assert result.sample_count == 5371
+    def test_sample_count_uses_active_ticker_history(self, mock_risk_parity):
+        with patch(
+            "src.data.price_cache.get_prices",
+            return_value={"SPY": [{"d": "2026-01-01", "p": 1.0}] * 5},
+        ):
+            adapter = RiskParitySignalAdapter()
+            result = adapter.generate_signal("SPY")
+
+        assert result.sample_count == 5
 
     def test_get_portfolio_signals(self, mock_risk_parity):
         adapter = RiskParitySignalAdapter()
@@ -326,6 +354,15 @@ class TestRiskParitySignalAdapter:
         signals = adapter.get_portfolio_signals([])
         assert signals == {}
 
+    def test_get_signal_snapshot_returns_without_datetime_error(self, mock_risk_parity):
+        adapter = RiskParitySignalAdapter()
+
+        snapshot = adapter.get_signal_snapshot(["SPY"])
+
+        assert snapshot.source == "risk_parity"
+        assert snapshot.value == pytest.approx(0.2)
+        assert snapshot.confidence == pytest.approx(0.85)
+
 
 # ===================================================================
 # NetworkMomentumSignalAdapter
@@ -336,13 +373,6 @@ class TestNetworkMomentumSignalAdapter:
         adapter = NetworkMomentumSignalAdapter()
         assert adapter.source_type == "network_momentum"
         assert adapter.source_name == "imperial_network_momentum"
-
-    def test_adapter_declares_research_only_runtime_role(self, mock_network_momentum):
-        adapter = NetworkMomentumSignalAdapter()
-
-        assert adapter.runtime_role == "research_only"
-        assert adapter.live_activation_status == "research_only"
-        assert "benchmark" in adapter.promotion_benchmark
 
     def test_init_custom_allocation(self, mock_network_momentum):
         alloc = {"SPY": 0.5, "GLD": 0.3, "TLT": 0.2}
@@ -399,14 +429,6 @@ class TestNetworkMomentumSignalAdapter:
         assert "followership_score" in result.metadata
         assert "window_count" in result.metadata
 
-    def test_metadata_marks_signal_as_research_only(self, mock_network_momentum):
-        adapter = NetworkMomentumSignalAdapter()
-        result = adapter.generate_signal("SPY")
-
-        assert result.metadata["runtime_role"] == "research_only"
-        assert result.metadata["live_activation_status"] == "research_only"
-        assert "benchmark" in result.metadata["promotion_benchmark"]
-
     def test_metadata_contains_dominant_leader(self, mock_network_momentum):
         adapter = NetworkMomentumSignalAdapter()
         result = adapter.generate_signal("SPY")
@@ -430,10 +452,15 @@ class TestNetworkMomentumSignalAdapter:
         result = adapter.generate_signal("SPY")
         assert result.historical_accuracy == 0.68
 
-    def test_sample_count(self, mock_network_momentum):
-        adapter = NetworkMomentumSignalAdapter()
-        result = adapter.generate_signal("SPY")
-        assert result.sample_count == 5371
+    def test_sample_count_uses_active_ticker_history(self, mock_network_momentum):
+        with patch(
+            "src.data.price_cache.get_prices",
+            return_value={"SPY": [{"d": "2026-01-01", "p": 1.0}] * 6},
+        ):
+            adapter = NetworkMomentumSignalAdapter()
+            result = adapter.generate_signal("SPY")
+
+        assert result.sample_count == 6
 
     def test_confidence_from_ensemble(self, mock_network_momentum):
         ens, ll = _make_mock_network_signal(confidence_val=0.85)
@@ -442,6 +469,17 @@ class TestNetworkMomentumSignalAdapter:
         adapter = NetworkMomentumSignalAdapter()
         result = adapter.generate_signal("SPY")
         assert result.confidence == 0.85
+
+    def test_get_signal_snapshot_returns_without_datetime_error(
+        self, mock_network_momentum
+    ):
+        adapter = NetworkMomentumSignalAdapter()
+
+        snapshot = adapter.get_signal_snapshot(["SPY"])
+
+        assert snapshot.source == "network_momentum"
+        assert snapshot.value == pytest.approx(0.5)
+        assert snapshot.confidence == pytest.approx(0.7)
 
 
 # ===================================================================

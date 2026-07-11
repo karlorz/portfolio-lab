@@ -42,11 +42,17 @@ interface SignalDeepDive {
 export interface ExplainabilityData {
   timestamp: string;
   analysis_date: string;
-  latest_decision: LatestDecision;
+  latest_decision: LatestDecision | null;
   recent_decisions: Array<any>;
   signal_deep_dives: Record<string, SignalDeepDive>;
   top_sources_today: string[];
   decision_quality: Record<string, any>;
+  freshness?: {
+    status?: string;
+    reason?: string;
+    stale_source_file?: string;
+    stale_analysis_date?: string;
+  };
 }
 
 interface Props {
@@ -98,6 +104,28 @@ export function normalizeContributionRows(rows: unknown, _role: 'driver' | 'oppo
   });
 }
 
+export function getExplainabilityEmptyState(data: ExplainabilityData | null | undefined): {
+  title: string;
+  detail: string;
+} {
+  if (data?.freshness?.status === 'unavailable') {
+    const staleSource = data.freshness.stale_source_file;
+    const staleDate = data.freshness.stale_analysis_date;
+    const historical = staleSource
+      ? ` The last historical report was ${staleSource}${staleDate ? ` from ${staleDate}` : ''}.`
+      : '';
+    return {
+      title: 'No current explainability available',
+      detail: `${data.decision_quality?.reason || 'Current signals data could not produce explainability.'}${historical}`,
+    };
+  }
+
+  return {
+    title: 'No explainability data available',
+    detail: 'Current signals data has not produced an explainability report yet.',
+  };
+}
+
 function regimeColor(r: string): string {
   switch (r) {
     case 'normal': return '#10b981';
@@ -127,11 +155,12 @@ function signalBarColor(v: number): string {
 
 export function PortfolioExplainabilityPanel({ data }: Props) {
   if (!data?.latest_decision) {
+    const emptyState = getExplainabilityEmptyState(data);
     return (
       <div className="explainability-panel empty">
         <h3>Portfolio Explainability</h3>
-        <p>No explainability data available</p>
-        <small>Run portfolio_explainability.py to generate</small>
+        <p>{emptyState.title}</p>
+        <small>{emptyState.detail}</small>
       </div>
     );
   }

@@ -6,6 +6,7 @@ infrastructure, CLI parsing, and data utility functions. Does NOT test
 ML inference/training (requires torch).
 """
 import os
+import json
 import subprocess
 import sys
 import pytest
@@ -201,6 +202,44 @@ class TestAIControllerStatus:
 
 
 class TestAIControllerCli:
+    def test_infer_cli_returns_non_routed_safe_mode_json_when_ml_disabled(self):
+        env = os.environ.copy()
+        env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "src.agents.ai_controller",
+                "--mode",
+                "infer",
+                "--portfolio",
+                "46/38/16/0",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "FloatTensor" not in result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "safe_mode"
+        assert payload["error"] == "ml_disabled"
+        assert payload["execution_role"] == "research_shadow_non_routed"
+        assert payload["routed"] is False
+        assert payload["routed_by"] is None
+        assert payload["live_authoritative"] is False
+        assert payload["current_allocation"] == {
+            "SPY": 0.46,
+            "GLD": 0.38,
+            "TLT": 0.16,
+            "CASH": 0.0,
+        }
+
     def test_status_cuda_request_falls_back_in_safe_mode_without_torch(self, monkeypatch, capsys):
         monkeypatch.setenv("PORTFOLIO_LAB_ENABLE_ML", "0")
         monkeypatch.setattr(

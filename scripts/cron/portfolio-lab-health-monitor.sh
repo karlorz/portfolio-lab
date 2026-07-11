@@ -16,13 +16,7 @@ if cron_guard_start "pf-health" 60; then
     health_pipeline_status=("${PIPESTATUS[@]}")
     set -e
 
-    health_status="${health_pipeline_status[0]}"
-    tee_status="${health_pipeline_status[1]}"
-    if [ "$health_status" -ne 0 ]; then
-        EXIT="$health_status"
-    else
-        EXIT="$tee_status"
-    fi
+    EXIT="$(cron_pipeline_exit "${health_pipeline_status[0]}" "${health_pipeline_status[1]}")"
 
     END=$(date +%s)
     DUR=$((END - START))

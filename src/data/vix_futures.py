@@ -35,6 +35,29 @@ class VIXTermStructure:
         # Filter out unexpected keys to maintain backward compatibility
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        front_month = float(filtered_data["front_month"])
+        if filtered_data.get("second_month") is None:
+            contango_1m_2m = filtered_data.get("contango_1m_2m")
+            if contango_1m_2m is not None:
+                filtered_data["second_month"] = front_month * (1 + float(contango_1m_2m) / 100)
+            elif filtered_data.get("third_month") is not None:
+                filtered_data["second_month"] = float(filtered_data["third_month"])
+            else:
+                filtered_data["second_month"] = front_month
+        if filtered_data.get("third_month") is None:
+            filtered_data["third_month"] = filtered_data["second_month"]
+        if filtered_data.get("days_to_expiry_front") is None:
+            filtered_data["days_to_expiry_front"] = 0
+        for field_name in (
+            "vix_spot",
+            "front_month",
+            "second_month",
+            "third_month",
+            "contango_1m_2m",
+            "contango_spot_1m",
+        ):
+            filtered_data[field_name] = float(filtered_data[field_name])
+        filtered_data["days_to_expiry_front"] = int(filtered_data["days_to_expiry_front"])
         return cls(**filtered_data)
 
 
@@ -68,11 +91,28 @@ class VIXDataManager:
             try:
                 with open(self.VIX_FILE, 'r') as f:
                     raw_data = json.load(f)
-                    self.data = {
-                        date: VIXTermStructure.from_dict(ts)
-                        for date, ts in raw_data.items()
-                    }
+                if not isinstance(raw_data, dict):
+                    raise ValueError("VIX cache must contain a date-to-record object")
+                loaded = {}
+                skipped = []
+                for date, ts in raw_data.items():
+                    if not isinstance(ts, dict):
+                        skipped.append((date, "record is not an object"))
+                        continue
+                    try:
+                        loaded[date] = VIXTermStructure.from_dict(ts)
+                    except (KeyError, ValueError, TypeError) as e:
+                        skipped.append((date, str(e)))
+                self.data = loaded
                 logger.info("Loaded %d VIX term structure records", len(self.data))
+                if skipped:
+                    first_date, first_error = skipped[0]
+                    logger.warning(
+                        "Skipped %d invalid VIX cache rows; first invalid row %s: %s",
+                        len(skipped),
+                        first_date,
+                        first_error,
+                    )
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Error loading VIX cache: %s", e)
     

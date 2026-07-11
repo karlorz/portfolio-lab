@@ -2811,6 +2811,7 @@ button.incident-row:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
@@ -2831,6 +2832,20 @@ button.incident-row:hover {
 
 .metric-value.negative {
   color: #ef4444;
+}
+
+.source-badge {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.12);
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .sparkline-container {
@@ -5241,23 +5256,6 @@ button.incident-row:hover {
   color: #94a3b8;
 }
 
-.stacking-runtime-disclosure {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border: 1px solid rgba(245, 158, 11, 0.42);
-  border-left: 4px solid #f59e0b;
-  border-radius: 8px;
-  background: rgba(245, 158, 11, 0.10);
-  color: #fef3c7;
-  padding: 10px 12px;
-}
-
-.stacking-runtime-disclosure span {
-  color: #fcd34d;
-  font-size: 0.86rem;
-}
-
 .panel-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5506,6 +5504,7 @@ button.incident-row:hover {
 /* ===== Decision Replay panel ===== */
 .decision-replay-panel {
   min-width: 0;
+  overflow-x: hidden;
 }
 
 .decision-replay-header {
@@ -5519,6 +5518,7 @@ button.incident-row:hover {
 
 .decision-replay-panel .labs-table-scroll {
   min-width: 0;
+  width: 100%;
   max-width: 100%;
   overflow-x: auto;
 }

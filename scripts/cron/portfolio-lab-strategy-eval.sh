@@ -15,7 +15,8 @@ if cron_guard_start "pf-eval" 600; then
 
     set +e
     "$PYTHON_RUNTIME" src/strategy/evaluator.py 2>&1 | tee -a data/eval.log
-    EXIT=${PIPESTATUS[0]}
+    eval_pipeline_status=("${PIPESTATUS[@]}")
+    EXIT="$(cron_pipeline_exit "${eval_pipeline_status[0]}" "${eval_pipeline_status[1]}")"
     set -e
 
     if [ -f data/.promote_to_live ]; then

@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from enum import Enum
 import logging
@@ -58,7 +58,7 @@ from src.utils import safe_get
 from src.utils.computation_cache import get_realized_volatility
 
 
-__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'REGIME_CONSENSUS_THRESHOLDS', 'DEFAULT_DIVERSITY_FLOOR', 'BanditWeighter', 'SignalAggregator', 'EnsembleVoter', 'compute_signal_correlation_matrix']
+__all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'REGIME_CONSENSUS_THRESHOLDS', 'DEFAULT_DIVERSITY_FLOOR', 'BanditWeighter', 'EnsembleVoter', 'compute_signal_correlation_matrix']
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,6 @@ class Regime(Enum):
 
 
 from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
-from src.strategy.signal_aggregator import SignalAggregator
 
 
 @dataclass
@@ -164,6 +163,9 @@ class EnsembleVote:
 
     # Regime-conditional diagnostics (v2.60)
     regime_multipliers: Optional[Dict[str, float]] = None
+
+    # Runtime disclosure for adaptive-learning branches.
+    adaptive_learning: Dict[str, Any] = field(default_factory=dict)
 
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
@@ -726,10 +728,6 @@ class EnsembleVoter:
         self.current_readings: Dict[SignalSource, SignalReading] = {}
         self.current_regime: Regime = Regime.NORMAL
         self.current_regime_confidence: float = 0.5
-        self.signal_aggregator = SignalAggregator(
-            load_price_data=self._load_price_data,
-            regime_weights=REGIME_WEIGHTS,
-        )
 
         # Bandit weighter for dynamic signal weight adaptation
         self.bandit = BanditWeighter(
@@ -777,15 +775,6 @@ class EnsembleVoter:
 
         self._prev_regime: Optional[str] = None
         self._days_in_regime: int = 999  # Start assuming stable regime
-
-    def _get_signal_aggregator(self) -> SignalAggregator:
-        """Return the signal collection collaborator, including __new__ test fixtures."""
-        if not hasattr(self, "signal_aggregator") or self.signal_aggregator is None:
-            self.signal_aggregator = SignalAggregator(
-                load_price_data=self._load_price_data,
-                regime_weights=REGIME_WEIGHTS,
-            )
-        return self.signal_aggregator
 
     
     def _init_db(self):
@@ -904,13 +893,212 @@ class EnsembleVoter:
         - Unified overlay (collar + bond + crypto + calendar)
         - Multi-timeframe fusion (v806 redo — timeframe decomposition)
         """
-        readings = self._get_signal_aggregator().collect(date=date, regime=regime)
+        # Determine which signals have non-zero weight for this regime
+        active_sources = None
+        if regime is not None:
+            regime_weights = REGIME_WEIGHTS.get(regime, {})
+            active_sources = {src for src, w in regime_weights.items() if w > 0}
+
+        readings = {}
+
+        # Collect from each signal source
+        self._collect_msm_signal(readings, active_sources, regime, date)
+        self._collect_cross_asset_rv_signal(readings, active_sources, regime)
+        self._collect_intl_momentum_signal(readings, active_sources, regime)
+        self._collect_alt_data_signal(readings, active_sources, regime)
+        self._collect_regime_arb_signal(readings, active_sources, regime)
+        self._collect_unified_overlay_signal(readings, active_sources, regime)
+        self._collect_mtf_signal(readings, active_sources, regime, date)
+        self._collect_google_trends(readings, active_sources, regime, date)
+        self._collect_vix_term_structure_signal(readings, active_sources, regime)
+
         self.current_readings = readings
         return readings
 
     def _should_skip(self, source: SignalSource, active_sources, regime: Optional[Regime]) -> bool:
         """Check if a signal source should be skipped for the current regime."""
-        return self._get_signal_aggregator().should_skip(source, active_sources, regime)
+        if active_sources is not None and source not in active_sources:
+            logger.debug("Skipping %s: zero weight for regime=%s", source.value, regime.value if regime else '?')
+            return True
+        return False
+
+    def _collect_msm_signal(self, readings: Dict, active_sources, regime: Optional[Regime], date: Optional[str]) -> None:
+        """Collect multi-speed momentum signal."""
+        if self._should_skip(SignalSource.MULTI_SPEED_MOM, active_sources, regime):
+            return
+        try:
+            from src.signals.multi_speed_momentum import MultiSpeedMomentum
+            msm = MultiSpeedMomentum()
+            snapshot = msm.get_signal_snapshot(tickers=['SPY', 'TLT', 'GLD'], date=date)
+            if snapshot.is_active:
+                readings[SignalSource.MULTI_SPEED_MOM] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Multi-speed momentum unavailable: %s", e)
+
+    def _collect_cross_asset_rv_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect cross-asset relative value signal."""
+        if self._should_skip(SignalSource.CROSS_ASSET_RV, active_sources, regime):
+            return
+        try:
+            from src.signals.cross_asset_relative_value import CrossAssetRVScanner
+            rv_scanner = CrossAssetRVScanner()
+            snapshot = rv_scanner.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.CROSS_ASSET_RV] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Cross-asset RV unavailable: %s", e)
+
+    def _collect_intl_momentum_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect international equity momentum signal."""
+        if self._should_skip(SignalSource.INTERNATIONAL_MOMENTUM, active_sources, regime):
+            return
+        try:
+            from src.signals.international_momentum import InternationalMomentumGenerator
+
+            price_data = self._load_price_data()
+            if price_data is not None and not price_data.empty:
+                window = 126  # ~6 months of trading days
+                required_cols = [c for c in ['SPY', 'EFA', 'EEM'] if c in price_data.columns]
+                if len(required_cols) >= 2:
+                    recent = price_data[required_cols].iloc[-window:] if len(price_data) >= window else price_data[required_cols]
+                    if len(recent) >= 20:
+                        efa_mom = (recent['EFA'].iloc[-1] / recent['EFA'].iloc[0] - 1) * 100 if 'EFA' in recent else 0.0
+                        eem_mom = (recent['EEM'].iloc[-1] / recent['EEM'].iloc[0] - 1) * 100 if 'EEM' in recent else 0.0
+                        spy_mom = (recent['SPY'].iloc[-1] / recent['SPY'].iloc[0] - 1) * 100
+
+                        data = {
+                            'timestamp': str(datetime.now()),
+                            'relative': {
+                                'efa_momentum_6m': efa_mom,
+                                'eem_momentum_6m': eem_mom,
+                                'spy_momentum_6m': spy_mom,
+                                'efa_vs_spy': efa_mom - spy_mom,
+                                'eem_vs_spy': eem_mom - spy_mom,
+                            },
+                            'data_fresh': True,
+                        }
+
+                        intl_gen = InternationalMomentumGenerator()
+                        intl_signal = intl_gen.generate_signal(data)
+                        snapshot = intl_signal.to_signal_snapshot()
+                        if snapshot.is_active:
+                            readings[SignalSource.INTERNATIONAL_MOMENTUM] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("International momentum unavailable: %s", e)
+
+    def _collect_alt_data_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect alternative data signal."""
+        if self._should_skip(SignalSource.ALTERNATIVE_DATA, active_sources, regime):
+            return
+        try:
+            from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
+            alt_gen = AlternativeDataSignalGenerator()
+            snapshot = alt_gen.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.ALTERNATIVE_DATA] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Alternative data unavailable: %s", e)
+
+    def _collect_regime_arb_signal(self, readings: Dict, active_sources, regime: Optional[Regime]) -> None:
+        """Collect cross-asset regime arbitrage signal."""
+        if self._should_skip(SignalSource.CROSS_ASSET_REGIME_ARB, active_sources, regime):
+            return
+        try:
+            from src.signals.cross_asset_regime_arb import CrossAssetRegimeArbDetector
+            arb_detector = CrossAssetRegimeArbDetector()
+            snapshot = arb_detector.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.CROSS_ASSET_REGIME_ARB] = snapshot.to_signal_reading()
+        except ImportError:
+            logger.warning("Cross-asset regime arb module not available")
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Cross-asset regime arb unavailable: %s", e)
+
+    def _collect_unified_overlay_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect unified overlay signal (collar + bond_duration + crypto + calendar)."""
+        if self._should_skip(SignalSource.UNIFIED_OVERLAY, active_sources, regime):
+            return
+        try:
+            from .orchestrator_ensemble_bridge import OrchestratorEnsembleBridge
+            bridge = OrchestratorEnsembleBridge()
+            unified_reading = bridge.get_ensemble_reading()
+            readings[SignalSource.UNIFIED_OVERLAY] = unified_reading
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Unified overlay unavailable: %s", e)
+
+    def _collect_mtf_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+        date: Optional[str] = None,
+    ) -> None:
+        """Collect multi-timeframe fusion signal (v806 redo)."""
+        if self._should_skip(SignalSource.MULTI_TIMEFRAME_FUSION, active_sources, regime):
+            return
+        try:
+            from src.signals.multi_timeframe_fusion import MultiTimeframeFusion
+            prices_df = self._load_price_data()
+            mtf = MultiTimeframeFusion(prices_df=prices_df)
+            regime_name = regime.value if regime else "normal"
+            snapshot = mtf.get_signal_snapshot(
+                tickers=['SPY', 'GLD', 'TLT'],
+                date=date,
+                regime=regime_name,
+            )
+            if snapshot.is_active:
+                readings[SignalSource.MULTI_TIMEFRAME_FUSION] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Multi-timeframe fusion unavailable: %s", e)
+
+    def _collect_google_trends(
+        self, readings: dict, active_sources: set, regime, date: str
+    ) -> None:
+        """Collect Google Trends sentiment signal."""
+        if self._should_skip(SignalSource.GOOGLE_TRENDS, active_sources, regime):
+            return
+        try:
+            from src.signals.google_trends_signal import GoogleTrendsSignal
+            gt = GoogleTrendsSignal()
+            snapshot = gt.get_signal_snapshot()
+            if snapshot.is_active:
+                readings[SignalSource.GOOGLE_TRENDS] = snapshot.to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("Google Trends signal unavailable: %s", e)
+
+    def _collect_vix_term_structure_signal(self, readings: dict, active_sources: set, regime) -> None:
+        """Collect VIX term structure signal for intraday volatility timing."""
+        if self._should_skip(SignalSource.VIX_TERM_STRUCTURE, active_sources, regime):
+            return
+        try:
+            from src.signals.vix_term_structure import VIXTermStructureSignalGenerator
+            vix_generator = VIXTermStructureSignalGenerator()
+            signal = vix_generator.generate_signal()
+            if signal.is_valid:
+                readings[SignalSource.VIX_TERM_STRUCTURE] = signal.to_signal_snapshot().to_signal_reading()
+        except ImportError:
+            pass
+        except (AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
+            logger.warning("VIX term structure signal unavailable: %s", e)
 
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
@@ -950,6 +1138,84 @@ class EnsembleVoter:
         # Convert back to SignalSource keys
         value_to_source = {s.value: s for s in SignalSource}
         return {value_to_source[k]: v for k, v in blended.items() if k in value_to_source}
+
+    def get_adaptive_learning_status(self, regime_name: Optional[str] = None) -> Dict[str, Any]:
+        """Disclose adaptive-learning branch status without changing weights."""
+        if regime_name is None:
+            current = getattr(self, "current_regime", Regime.NORMAL)
+            regime_name = current.name if hasattr(current, "name") else str(current)
+
+        observations = int(getattr(self, "bandit_observations", 0) or 0)
+        bandit = getattr(self, "bandit", None)
+        bandit_status: Dict[str, Any] = {
+            "status": "unavailable",
+            "enabled": False,
+            "observations": observations,
+            "warmup_days": BANDIT_WARMUP_DAYS,
+            "max_blend": BANDIT_MAX_BLEND,
+            "current_blend": 0.0,
+            "reason": "bandit_weighter_unavailable",
+        }
+
+        if bandit is not None:
+            bandit_status.update({
+                "enabled": True,
+                "status": "non_effective",
+                "reason": "cold_start_no_regime_weights",
+            })
+            try:
+                bandit_weights = bandit.get_weights(regime_name)
+                if bandit_weights is not None:
+                    blend = min(
+                        BANDIT_MAX_BLEND,
+                        observations / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND,
+                    )
+                    bandit_status["current_blend"] = round(blend, 4)
+                    if blend > 0:
+                        bandit_status["status"] = "active"
+                        bandit_status["reason"] = "blending_with_static_weights"
+                    else:
+                        bandit_status["reason"] = "cold_start_no_observations"
+            except (AttributeError, KeyError, ValueError, TypeError, OSError) as e:
+                bandit_status.update({
+                    "enabled": False,
+                    "status": "unavailable",
+                    "reason": f"bandit_status_error:{type(e).__name__}",
+                })
+
+        use_ic = bool(getattr(self, "_use_ic_weights", False))
+        ic_weighter = getattr(self, "_ic_weighter", None)
+        try:
+            ic_blend_alpha = float(os.environ.get("ENSEMBLE_IC_WEIGHT_BLEND_ALPHA", "0.3"))
+        except ValueError:
+            ic_blend_alpha = 0.3
+
+        online_ic_status: Dict[str, Any] = {
+            "status": "disabled",
+            "enabled": use_ic,
+            "state_available": ic_weighter is not None,
+            "blend_alpha": ic_blend_alpha,
+            "reason": "env_disabled",
+        }
+        if use_ic and ic_weighter is None:
+            online_ic_status.update({
+                "status": "unavailable",
+                "reason": "initialization_failed_or_unavailable",
+            })
+        elif use_ic and ic_weighter is not None:
+            online_ic_status.update({
+                "status": "active",
+                "reason": "weighter_initialized",
+            })
+
+        last_ic_status = getattr(self, "_last_online_ic_learning_status", None)
+        if isinstance(last_ic_status, dict):
+            online_ic_status.update(last_ic_status)
+
+        return {
+            "bandit": bandit_status,
+            "online_ic": online_ic_status,
+        }
 
     def get_rebalance_config(self) -> Dict[str, Any]:
         """
@@ -1125,7 +1391,8 @@ class EnsembleVoter:
                 action="neutral",
                 confidence=0.0,
                 reasoning="No signals available",
-                source_votes=[]
+                source_votes=[],
+                adaptive_learning=self.get_adaptive_learning_status(regime.name),
             )
 
         consensus_result = self._compute_consensus(weighted_signals, regime, regime_confidence)
@@ -1264,7 +1531,22 @@ class EnsembleVoter:
         Expected impact: +0.005-0.01 Sharpe by dynamically reweighting
         signals based on their recent predictive power.
         """
-        if not getattr(self, '_use_ic_weights', False) or getattr(self, '_ic_weighter', None) is None:
+        if not getattr(self, '_use_ic_weights', False):
+            self._last_online_ic_learning_status = {
+                "status": "disabled",
+                "enabled": False,
+                "state_available": False,
+                "reason": "env_disabled",
+            }
+            return weights
+
+        if getattr(self, '_ic_weighter', None) is None:
+            self._last_online_ic_learning_status = {
+                "status": "unavailable",
+                "enabled": True,
+                "state_available": False,
+                "reason": "initialization_failed_or_unavailable",
+            }
             return weights
 
         try:
@@ -1288,6 +1570,12 @@ class EnsembleVoter:
 
             if not ic_values:
                 logger.debug("No IC data available for online weight learning")
+                self._last_online_ic_learning_status = {
+                    "status": "non_effective",
+                    "enabled": True,
+                    "state_available": True,
+                    "reason": "no_ic_data_available",
+                }
                 return weights
 
             # Update the OnlineICWeighter with current IC values and trends
@@ -1298,6 +1586,12 @@ class EnsembleVoter:
             ic_weights = self._ic_weighter.get_weights()
 
             if not ic_weights:
+                self._last_online_ic_learning_status = {
+                    "status": "non_effective",
+                    "enabled": True,
+                    "state_available": True,
+                    "reason": "no_ic_weights_available",
+                }
                 return weights
 
             # Convert weights to string format for blending
@@ -1335,10 +1629,22 @@ class EnsembleVoter:
                         for k, v in ic_adjusted.items() if v > 0.01
                     )
                 )
+                self._last_online_ic_learning_status = {
+                    "status": "active",
+                    "enabled": True,
+                    "state_available": True,
+                    "reason": "blending_with_static_weights",
+                }
                 return ic_adjusted
 
         except (ImportError, KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Could not apply IC-based weights: %s", e)
+            self._last_online_ic_learning_status = {
+                "status": "unavailable",
+                "enabled": True,
+                "state_available": getattr(self, "_ic_weighter", None) is not None,
+                "reason": f"ic_weight_application_failed:{type(e).__name__}",
+            }
 
         return weights
 
@@ -1943,6 +2249,7 @@ class EnsembleVoter:
             source_votes=weighted_signals,
             n_eff=round(n_eff, 2),
             weight_entropy=round(weight_entropy, 4),
+            adaptive_learning=self.get_adaptive_learning_status(regime.name),
         )
 
     def _persist_vote(self, vote: EnsembleVote, weighted_consensus: float) -> None:

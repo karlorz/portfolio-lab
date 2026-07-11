@@ -20,13 +20,13 @@ import { PanelErrorBoundary } from './PanelErrorBoundary';
 import type { BehavioralSentimentData } from './BehavioralSentimentPanel';
 import type { CryptoData } from './CryptoAllocationPanel';
 import type { CalendarData } from './CalendarSeasonalityPanel';
-import type { EnsembleVotingData } from './EnsembleVotingPanel';
+import type { AllocationSurfaceRole, EnsembleVotingData } from './EnsembleVotingPanel';
 import type { AlternativeData } from './AlternativeDataPanel';
 import type { FactorRotationData } from './FactorRotationPanel';
+import type { StackingEnsembleData } from './StackingEnsemblePanel';
 import type { ConvexityHarvestData } from './ConvexityHarvestPanel';
 import type { LLMSentimentData } from './LLMSentimentPanel';
 import type { SectorRotationData } from './SectorRotationPanel';
-import type { MLSignalsData } from './MLSignalsPanel';
 import type { FactorRotationDashboardData } from './FactorRotationDashboardPanel';
 import type { CollarData } from './CollarPanel';
 import type { KurtosisData } from './KurtosisRegimePanel';
@@ -51,6 +51,8 @@ import {
   AnalyticsDataSchema,
   RebalanceHealthSchema,
   GraduationDataSchema,
+  AdaptiveSizingSchema,
+  BlackLittermanSchema,
 } from '../schemas/signals';
 import { z } from 'zod';
 
@@ -76,6 +78,7 @@ const ConvexityHarvestPanel = lazy(() => import('./ConvexityHarvestPanel').then(
 const LLMSentimentPanel = lazy(() => import('./LLMSentimentPanel').then((module) => ({ default: module.LLMSentimentPanel })));
 const SectorRotationPanel = lazy(() => import('./SectorRotationPanel').then((module) => ({ default: module.SectorRotationPanel })));
 const MLSignalsPanel = lazy(() => import('./MLSignalsPanel').then((module) => ({ default: module.MLSignalsPanel })));
+const MarlRuntimeStatusPanel = lazy(() => import('./MarlRuntimeStatusPanel').then((module) => ({ default: module.MarlRuntimeStatusPanel })));
 const FactorRotationDashboardPanel = lazy(() => import('./FactorRotationDashboardPanel').then((module) => ({ default: module.FactorRotationDashboardPanel })));
 const GraduationChecklistPanel = lazy(() => import('./GraduationChecklistPanel').then((module) => ({ default: module.GraduationChecklistPanel })));
 const AdaptiveSizingPanel = lazy(() => import('./AdaptiveSizingPanel').then((module) => ({ default: module.AdaptiveSizingPanel })));
@@ -113,6 +116,11 @@ function tabLoadingFallback(name: string) {
 
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
+}
+
+function formatAllocationSurfaceRoute(role: AllocationSurfaceRole): string {
+  const status = role.routed ? 'Order-routed' : 'Not order-routed';
+  return role.routed_by ? `${status} via ${role.routed_by}` : status;
 }
 
 function isBehavioralSentimentData(value: unknown): value is BehavioralSentimentData {
@@ -323,7 +331,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (adaptiveSizingRaw) {
           const raw = adaptiveSizingRaw;
-          const validated = validateFetchData(raw, PassthroughSchema, 'adaptive_sizing');
+          const validated = validateFetchData(raw, AdaptiveSizingSchema, 'adaptive_sizing');
           if (validated) setAdaptiveSizingData(validated as unknown as AdaptiveSizingData);
         }
         const vixyRaw = await safeParseJson(vixyRes, 'vixy_hedge');
@@ -337,7 +345,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (blackLittermanRaw) {
           const raw = blackLittermanRaw;
-          const validated = validateFetchData(raw, PassthroughSchema, 'black_litterman');
+          const validated = validateFetchData(raw, BlackLittermanSchema, 'black_litterman');
           if (validated) setBLMapperData(validated as unknown as BlackLittermanMapperData);
         }
         const turnoverRaw = await safeParseJson(turnoverRes, 'turnover_validator');
@@ -441,6 +449,8 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     () => getIncidentsForTab(dashboardIncidents, 'risk'),
     [dashboardIncidents],
   );
+  const targetAllocationRole = signals?.allocation_surface_roles?.surfaces.target_allocations;
+  const ensembleVotingRole = signals?.allocation_surface_roles?.surfaces.ensemble_voting;
 
   const countBadge = (count: number | undefined, severity: TabIncidentBadge['severity']): TabIncidentBadge | undefined => {
     return count && count > 0 ? { count, severity } : undefined;
@@ -554,6 +564,11 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                     ))
                   }
                 </div>
+                {targetAllocationRole && (
+                  <small style={{ overflowWrap: 'anywhere' }}>
+                    {formatAllocationSurfaceRoute(targetAllocationRole)}
+                  </small>
+                )}
               </div>
             </div>
 
@@ -625,6 +640,9 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
                 regime={signals?.yield_curve?.duration_regime ?? null}
                 spreadHistory={signals?.yield_curve?.spread_history}
                 lastUpdate={lastUpdate}
+                sourceMode={signals?.yield_curve?.source_mode}
+                sourceStatus={signals?.yield_curve?.source_status}
+                sourceReason={signals?.yield_curve?.source_reason}
               />
               <BondAllocationPanel 
                 currentAllocation={signals?.duration_allocation ?? null}
@@ -650,12 +668,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               )}
               <div className="signal-panel-slot">
                 <CryptoAllocationPanel
-                  data={(signals?.crypto_allocation ?? null) as unknown as CryptoData | null}
+                  data={signals?.crypto_allocation ?? null}
                   portfolioValue={portfolioValue}
                 />
               </div>
               <div className="signal-panel-slot">
-                <CalendarSeasonalityPanel data={(signals?.calendar_seasonality ?? null) as unknown as CalendarData | null} />
+                <CalendarSeasonalityPanel data={signals?.calendar_seasonality ?? null} />
               </div>
             </div>
           </div>
@@ -857,10 +875,13 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               {/* Model & Ensemble Panels */}
               <div className="dashboard-grid dashboard-grid-two analytics-panel-group">
                 <PanelErrorBoundary name="Analytics/Ensemble Voting">
-                  <EnsembleVotingPanel data={(signals?.ensemble_voting ?? null) as unknown as EnsembleVotingData | null} />
+                  <EnsembleVotingPanel
+                    data={signals?.ensemble_voting ?? null}
+                    allocationSurfaceRole={ensembleVotingRole}
+                  />
                 </PanelErrorBoundary>
                 <PanelErrorBoundary name="Analytics/Alternative Data">
-                  <AlternativeDataPanel data={(signals?.alternative_data ?? null) as unknown as AlternativeData | null} />
+                  <AlternativeDataPanel data={signals?.alternative_data ?? null} />
                 </PanelErrorBoundary>
               </div>
               <div className="dashboard-grid dashboard-grid-two analytics-panel-group">
@@ -873,23 +894,26 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               </div>
               <div className="dashboard-grid dashboard-grid-two analytics-panel-group">
                 <PanelErrorBoundary name="Analytics/Convexity Harvest">
-                  <ConvexityHarvestPanel data={(signals?.convexity_harvest ?? null) as unknown as ConvexityHarvestData | null} />
+                  <ConvexityHarvestPanel data={signals?.convexity_harvest ?? null} />
                 </PanelErrorBoundary>
                 <PanelErrorBoundary name="Analytics/LLM Sentiment">
-                  <LLMSentimentPanel data={(signals?.llm_sentiment ?? null) as unknown as LLMSentimentData | null} />
+                  <LLMSentimentPanel data={signals?.llm_sentiment ?? null} />
                 </PanelErrorBoundary>
               </div>
               <div className="analytics-panel-group">
                 <PanelErrorBoundary name="Analytics/Sector Rotation">
-                  <SectorRotationPanel data={(signals?.sector_rotation ?? null) as unknown as SectorRotationData | null} />
+                  <SectorRotationPanel data={signals?.sector_rotation ?? null} />
                 </PanelErrorBoundary>
               </div>
-              <div className="dashboard-grid dashboard-grid-two analytics-panel-group">
+              <div className="dashboard-grid dashboard-grid-three analytics-panel-group">
                 <PanelErrorBoundary name="Analytics/ML Signals">
-                  <MLSignalsPanel data={(signals?.ml_signals ?? null) as unknown as MLSignalsData | null} />
+                  <MLSignalsPanel data={signals?.ml_signals ?? null} />
+                </PanelErrorBoundary>
+                <PanelErrorBoundary name="Analytics/MARL Runtime Status">
+                  <MarlRuntimeStatusPanel data={signals?.marl_status ?? null} />
                 </PanelErrorBoundary>
                 <PanelErrorBoundary name="Analytics/Factor Rotation Dashboard">
-                  <FactorRotationDashboardPanel data={(signals?.factor_rotation_dashboard ?? null) as unknown as FactorRotationDashboardData | null} />
+                  <FactorRotationDashboardPanel data={signals?.factor_rotation_dashboard ?? null} />
                 </PanelErrorBoundary>
               </div>
               <div className="dashboard-grid dashboard-grid-three analytics-panel-group">
@@ -955,7 +979,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
             />
             <div className="options-panel-section">
               <CollarPanel
-                data={(signals?.collar ?? null) as unknown as CollarData | null}
+                data={signals?.collar ?? null}
                 spyPrice={signals?.latest_prices?.SPY}
               />
             </div>
@@ -1005,7 +1029,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
             <div className="risk-panel-section">
-              <KurtosisRegimePanel data={(signals?.kurtosis_regime ?? null) as unknown as KurtosisData | null} />
+              <KurtosisRegimePanel data={signals?.kurtosis_regime ?? null} />
             </div>
             <div className="risk-panel-section">
               <VolatilityParityPanel data={(signals?.volatility_parity ?? null) as unknown as VolatilityParityData | null} />

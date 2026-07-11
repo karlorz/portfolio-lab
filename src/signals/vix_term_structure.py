@@ -75,6 +75,13 @@ class VIXTermStructureSignal:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def _confidence_fraction(self) -> float:
+        """Normalize percent-style VIX confidence for typed ensemble consumers."""
+        confidence = float(self.confidence)
+        if confidence > 1.0:
+            confidence /= 100.0
+        return max(0.0, min(1.0, confidence))
+
     def to_signal_snapshot(self):
         """Convert to canonical SignalSnapshot for typed pipeline consumption."""
         from src.signals.signal_snapshot import SignalSnapshot
@@ -83,7 +90,7 @@ class VIXTermStructureSignal:
             source="vix_term_structure",
             timestamp=self.timestamp,
             value=self.signal_value,
-            confidence=self.confidence,
+            confidence=self._confidence_fraction(),
             asset_signals={
                 "SPY": self.spy_shift,
                 "GLD": self.gld_shift,

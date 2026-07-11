@@ -8,8 +8,8 @@
 #   3. ulimit -v 3145728 — OS kernel enforces 3GB virtual memory cap
 #
 # Usage:
-#   ./scripts/run-tests-safe              # safe mode (default, count from pytest output)
-#   ./scripts/run-tests-safe --ml-extract # extracted ML-kernel lane, ML disabled
+#   ./scripts/run-tests-safe              # safe mode (default; count from pytest output)
+#   ./scripts/run-tests-safe --ml-extract # extracted ML-kernel tests, ML disabled
 #   ./scripts/run-tests-safe --ml         # ML mode (all tests, needs >3GB RAM)
 #   ./scripts/run-tests-safe -k "factor"  # filter tests by keyword
 
@@ -41,7 +41,7 @@ done
 if [ "$MODE" = "safe" ]; then
     echo "=== Safe Test Run ==="
     echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
-    echo "  Memory: 3GB virtual cap (ulimit -v)"
+    echo "  Memory: 3GB virtual cap (ulimit -v 3145728)"
     echo "  Heavy tests: excluded via collect_ignore"
     echo ""
 
@@ -68,20 +68,31 @@ if [ "$MODE" = "safe" ]; then
     fi
     exit $EXIT
 elif [ "$MODE" = "ml-extract" ]; then
-    echo "=== Extracted ML-Kernel Test Run ==="
+    echo "=== ML Extract Test Run ==="
     echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
-    echo "  Memory: 3GB virtual cap (ulimit -v)"
-    echo "  Heavy tests: skipped unless explicitly enabled elsewhere"
+    echo "  Memory: 3GB virtual cap (ulimit -v 3145728)"
+    echo "  Heavy tests: skipped; only ml_extract marker is included"
     echo ""
 
     (
         ulimit -v 3145728
         export PORTFOLIO_LAB_ENABLE_ML=0
-        if [ ${#PYTEST_ARGS[@]} -gt 0 ]; then
-            exec uv run pytest "${PYTEST_ARGS[@]}" -q --tb=short --include-ml-extract
-        fi
-        exec uv run pytest tests/ -q --tb=short --include-ml-extract
+        exec uv run pytest tests/ -q --tb=short --include-ml-extract "${PYTEST_ARGS[@]}"
     )
+    EXIT=$?
+
+    echo ""
+    if [ $EXIT -eq 139 ]; then
+        echo "FATAL: SIGSEGV (139) — virtual memory cap exceeded."
+        echo "An ML library may have loaded despite guards. Investigate immediately."
+    elif [ $EXIT -eq 137 ]; then
+        echo "FATAL: SIGKILL (137) — system OOM killer. Memory use too high."
+    elif [ $EXIT -ne 0 ]; then
+        echo "Some ml_extract tests failed (exit $EXIT). See output above."
+    else
+        echo "All ml_extract tests passed."
+    fi
+    exit $EXIT
 else
     echo "=== ML Test Run ==="
     echo "  ML: enabled (PORTFOLIO_LAB_ENABLE_ML=1)"

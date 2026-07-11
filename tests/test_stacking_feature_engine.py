@@ -3,7 +3,7 @@
 Tests for stacking feature engine — v3.10 Phase 1 feature generation.
 
 Covers:
-- Feature vector creation with 6 base signals
+- Feature vector creation with the current canonical signal roster
 - Pairwise interaction features (45 total)
 - Regime context features
 - Historical accuracy tracking
@@ -22,7 +22,8 @@ from pathlib import Path
 
 from src.signals.stacking_feature_engine import (
     SignalSource, Signal, RegimeContext, HistoricalAccuracy,
-    FeatureVector, StackingFeatureEngine, StackingAccuracyTracker
+    FeatureVector, StackingFeatureEngine, StackingAccuracyTracker,
+    expected_feature_count_for_roster,
 )
 
 
@@ -204,7 +205,7 @@ def test_to_numpy_order(engine, full_signals, regime_context, historical_accurac
 
 
 def test_get_feature_names_count(engine):
-    """Test: Feature names list has 59 entries."""
+    """Test: Feature names list has the canonical feature count."""
     names = engine.get_feature_names()
     assert len(names) == engine.TOTAL_DIMENSIONS
     assert all(isinstance(n, str) for n in names)
@@ -420,16 +421,16 @@ class TestNumpyConversion:
         """Multiplicative features should appear in the correct array positions."""
         fv = engine.create_features(full_signals, regime_context, historical_accuracy)
         arr = engine.to_numpy(fv)
-        # Base: 0-5, Multiplicative: 6-20
-        for i in range(6, 21):
+        base_end = len(SignalSource)
+        mult_end = base_end + len(SignalSource) * (len(SignalSource) - 1) // 2
+        for i in range(base_end, mult_end):
             assert -1.0 <= arr[i] <= 1.0  # Signal values are -1 to +1
 
     def test_numpy_accuracy_section(self, engine, full_signals, regime_context, historical_accuracy):
         """Accuracy values should be in [0, 1] range."""
         fv = engine.create_features(full_signals, regime_context, historical_accuracy)
         arr = engine.to_numpy(fv)
-        # Accuracy: indices 53-58
-        for i in range(53, 59):
+        for i in range(engine.TOTAL_DIMENSIONS - len(SignalSource), engine.TOTAL_DIMENSIONS):
             assert 0.0 <= arr[i] <= 1.0
 
 
@@ -441,6 +442,49 @@ class TestFeatureNames:
         names = engine.get_feature_names()
         for source in SignalSource:
             assert f"base_{source.value}" in names
+
+    def test_source_roster_drives_names_and_numpy_shape(self, regime_context):
+        """A curated roster subclass should not leak the full SignalSource enum."""
+        roster = (
+            SignalSource.MULTI_SPEED_MOM,
+            SignalSource.CROSS_ASSET_RV,
+            SignalSource.GOOGLE_TRENDS,
+        )
+
+        class CuratedRosterEngine(StackingFeatureEngine):
+            SOURCE_ROSTER = roster
+            NUM_BASE_SIGNALS = len(SOURCE_ROSTER)
+            NUM_PAIRWISE_COMBINATIONS = NUM_BASE_SIGNALS * (NUM_BASE_SIGNALS - 1) // 2
+            NUM_REGIME_FEATURES = 2
+            NUM_ACCURACY_FEATURES = len(SOURCE_ROSTER)
+            TOTAL_DIMENSIONS = expected_feature_count_for_roster(SOURCE_ROSTER)
+
+        now = datetime.now()
+        signals = {
+            source: Signal(source=source, value=0.25, timestamp=now, confidence=0.7)
+            for source in roster
+        }
+        historical_accuracy = {
+            source: HistoricalAccuracy(
+                source=source,
+                accuracy_90d=0.55,
+                predictions_count=10,
+                timestamp=now,
+            )
+            for source in roster
+        }
+        engine = CuratedRosterEngine()
+
+        feature_vector = engine.create_features(signals, regime_context, historical_accuracy)
+        arr = engine.to_numpy(feature_vector)
+        names = engine.get_feature_names()
+
+        assert arr.shape == (engine.TOTAL_DIMENSIONS,)
+        assert len(names) == engine.TOTAL_DIMENSIONS
+        for source in roster:
+            assert f"base_{source.value}" in names
+        for source in set(SignalSource) - set(roster):
+            assert f"base_{source.value}" not in names
 
     def test_pairwise_feature_names(self, engine):
         """Pairwise names should contain mult_, disagree_, avg_ prefixes."""
@@ -725,7 +769,7 @@ class TestFeatureVectorDirectConstruction:
     """Direct FeatureVector construction edge cases."""
 
     def test_default_dimension_count(self):
-        """FeatureVector defaults to 59."""
+        """FeatureVector defaults to unset dimension count until engine creation."""
         fv = FeatureVector(
             base_values={}, multiplicative={}, disagreement={},
             averages={}, vix_normalized=0.0, trend_strength=0.0,
@@ -871,7 +915,7 @@ class TestFeatureNamesEdgeCases:
     """Edge cases for get_feature_names."""
 
     def test_feature_names_all_unique(self, engine):
-        """All 59 feature names should be unique."""
+        """All feature names should be unique."""
         names = engine.get_feature_names()
         assert len(names) == len(set(names))
 

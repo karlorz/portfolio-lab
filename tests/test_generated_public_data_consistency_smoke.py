@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import shutil
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -95,6 +96,125 @@ def test_generated_public_data_consistency_smoke_rejects_missing_required_artifa
 
     assert result.ok is False
     assert "public/data/health.json is missing" in result.errors
+
+
+def test_generated_public_data_consistency_smoke_rejects_present_index_entry_with_missing_path(
+    tmp_path: Path,
+) -> None:
+    _write_consistent_public_data_set(tmp_path)
+    index_path = tmp_path / "public" / "data" / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["entries"].append(
+        {
+            "filename": "overlay_dashboard.json",
+            "path": "overlay_dashboard.json",
+            "status": "present",
+        }
+    )
+    _write_json(index_path, index)
+    shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
+
+    result = check_public_data_consistency(tmp_path)
+
+    assert result.ok is False
+    assert (
+        "public/data/index.json entry overlay_dashboard.json is marked present "
+        "but public/data/overlay_dashboard.json is missing"
+    ) in result.errors
+
+
+def test_generated_public_data_consistency_smoke_rejects_manifest_referenced_quality_report_missing_from_index(
+    tmp_path: Path,
+) -> None:
+    _write_consistent_public_data_set(tmp_path)
+    source_path = tmp_path / "public" / "data" / "source_manifest.json"
+    index_path = tmp_path / "public" / "data" / "index.json"
+    source_manifest = json.loads(source_path.read_text(encoding="utf-8"))
+    source_manifest["artifacts"][0]["data_quality"] = {
+        "artifact": "data_quality.json",
+        "schema_version": "price-data-quality/v1",
+        "generated_at": "2026-06-12T09:05:25.028Z",
+        "status": "ok",
+    }
+    _write_json(source_path, source_manifest)
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["source_manifest"]["sha256"] = _sha256(source_path)
+    _write_json(index_path, index)
+    shutil.copyfile(source_path, tmp_path / "dist" / "data" / "source_manifest.json")
+    shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
+
+    result = check_public_data_consistency(tmp_path)
+
+    assert result.ok is False
+    assert (
+        "public/data/source_manifest.json references data_quality.json "
+        "but public/data/index.json has no entry for it"
+    ) in result.errors
+
+
+def test_generated_public_data_consistency_smoke_rejects_unmanaged_public_json(
+    tmp_path: Path,
+) -> None:
+    _write_consistent_public_data_set(tmp_path)
+    _write_json(
+        tmp_path / "public" / "data" / "duration-sweep-results.json",
+        {"schema_version": "duration-sweep-results/v1", "results": []},
+    )
+
+    result = check_public_data_consistency(tmp_path)
+
+    assert result.ok is False
+    assert (
+        "public/data/duration-sweep-results.json exists but is absent from public/data/index.json"
+    ) in result.errors
+
+
+def test_generated_public_data_consistency_smoke_rejects_stale_market_db_vix3m(
+    tmp_path: Path,
+) -> None:
+    _write_consistent_public_data_set(tmp_path)
+    prices_path = tmp_path / "public" / "data" / "prices.json"
+    _write_json(
+        prices_path,
+        {
+            "^VIX3M": [
+                {"d": "2026-06-26", "p": 20.13},
+                {"d": "2026-07-02", "p": 19.04},
+            ]
+        },
+    )
+    index_path = tmp_path / "public" / "data" / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["entries"].append(
+        {
+            "filename": "prices.json",
+            "path": "prices.json",
+            "status": "present",
+            "sha256": _sha256(prices_path),
+        }
+    )
+    _write_json(index_path, index)
+    shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
+    db_path = tmp_path / "data" / "market.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE prices (
+                symbol TEXT,
+                date TEXT,
+                close REAL,
+                PRIMARY KEY (symbol, date)
+            )
+            """
+        )
+        conn.execute("INSERT INTO prices VALUES ('^VIX3M', '2026-06-26', 20.13)")
+
+    result = check_public_data_consistency(tmp_path)
+
+    assert result.ok is False
+    assert any("^VIX3M market.db latest date 2026-06-26 lags prices.json 2026-07-02 by 6d" in error for error in result.errors)
+    assert any("src.data.market_db_sync" in error for error in result.errors)
 
 
 def _write_prices(path: Path, payload: dict) -> None:

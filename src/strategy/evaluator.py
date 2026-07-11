@@ -50,6 +50,14 @@ KILL_SWITCH_THRESHOLDS = {
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_target_allocation(regime: str | None) -> Dict[str, float]:
+    """Resolve target allocation using the scheduled env contract."""
+    if os.environ.get("REGIME_ALLOC_ENABLED", "0") == "1":
+        return get_regime_allocation_with_override(regime)
+    return REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION
+
+
 # Config
 DB_PATH = MARKET_DB
 ORDERS_LOG = DATA_DIR / "orders.jsonl"
@@ -584,6 +592,38 @@ def _kill_level_reduction(level: KillSwitchLevel) -> float:
     }.get(level, 1.0)
 
 
+def _is_evaluator_owned_kill_switch(payload: dict) -> bool:
+    """Return true for current or legacy evaluator-owned kill-switch files."""
+    source = payload.get("source")
+    if source == "evaluator_risk":
+        return True
+    if source is not None:
+        return False
+    return not (
+        payload.get("incident_id")
+        or payload.get("incident_channel")
+        or str(payload.get("reason", "")).startswith("unresolved_incident:")
+    )
+
+
+def _clear_evaluator_kill_switch_if_owned(kill_file: Path, mode: str) -> None:
+    try:
+        with open(kill_file) as f:
+            payload = json.load(f)
+    except FileNotFoundError:
+        return
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        logger.warning("Kill switch file unreadable; preserving for safety: %s", exc)
+        return
+
+    if not isinstance(payload, dict) or not _is_evaluator_owned_kill_switch(payload):
+        logger.info("Kill switch preserved for %s — source is not evaluator-owned", mode)
+        return
+
+    kill_file.unlink(missing_ok=True)
+    logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
+
+
 def main():
     """Main evaluation loop."""
     logger.info("Strategy Evaluator Starting")
@@ -617,7 +657,7 @@ def main():
             record_evaluator_cycle_decision(
                 mode=mode,
                 regime=regime,
-                target_alloc=REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION,
+                target_alloc=_resolve_target_allocation(regime),
                 prices=prices,
                 portfolio_value=portfolio.total_value(prices),
                 current_weights=portfolio.current_weights(prices),
@@ -634,21 +674,18 @@ def main():
             "mode": mode,
             "timestamp": datetime.now().isoformat(),
             "position_reduction": _kill_level_reduction(kill_level),
+            "source": "evaluator_risk",
         }, output_path=str(DATA_DIR / "kill_switch.json"))
         return
 
     # Clear stale kill switch if risk limits are no longer breached
     kill_file = DATA_DIR / "kill_switch.json"
-    if kill_file.exists():
-        kill_file.unlink(missing_ok=True)
-        logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
+    _clear_evaluator_kill_switch_if_owned(kill_file, mode)
 
     # Determine target allocation
+    target_alloc = _resolve_target_allocation(regime)
     if os.environ.get("REGIME_ALLOC_ENABLED", "0") == "1":
-        target_alloc = get_regime_allocation_with_override(regime)
         logger.info("Regime-conditional allocation (%s): %s", regime, target_alloc)
-    else:
-        target_alloc = REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION
     logger.info("Target allocation: %s", target_alloc)
 
     # Generate orders

@@ -24,6 +24,11 @@ def test_compact_health_summary_drops_unbounded_sections_and_counts_statuses():
                 "TLT": {"status": "stale"},
             },
             "scheduler_status": {"status": "degraded"},
+            "data_pipeline_slo": {
+                "status": "critical",
+                "top_dimension": "data_quality",
+                "runbook": {"top_cause": {"code": "stale_prices"}},
+            },
         }
     )
 
@@ -34,6 +39,9 @@ def test_compact_health_summary_drops_unbounded_sections_and_counts_statuses():
         "failed_cron_jobs": 1,
         "stale_data_count": 2,
         "scheduler_status": "degraded",
+        "data_pipeline_slo_status": "critical",
+        "top_slo_dimension": "data_quality",
+        "top_slo_cause_code": "stale_prices",
     }
 
 

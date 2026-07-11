@@ -14,6 +14,9 @@ interface YieldCurveData {
   dgs10: number | null;
   duration_regime: 'inverted' | 'flat' | 'steep' | 'normal' | null;
   spread_history?: number[];
+  source_mode?: string;
+  source_status?: string;
+  source_reason?: string | null;
 }
 
 interface DurationOverlayProps {
@@ -36,6 +39,17 @@ const DurationOverlayPanel: React.FC<DurationOverlayProps> = ({
 
   const { spread2s10s, duration_regime, spread_history } = yieldCurve;
   const { tlt, ief, shy, bil } = durationAllocation;
+  const sourceDisclosure = [yieldCurve.source_mode, yieldCurve.source_status]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.replace(/_/g, ' ').toUpperCase())
+    .join(' / ');
+  const showSourceDisclosure = Boolean(
+    sourceDisclosure
+    && (
+      !['live', 'cached'].includes(yieldCurve.source_mode ?? '')
+      || !['success', 'ok'].includes(yieldCurve.source_status ?? '')
+    )
+  );
 
   // Calculate effective duration
   const effectiveDuration = (
@@ -110,6 +124,11 @@ const DurationOverlayPanel: React.FC<DurationOverlayProps> = ({
           <span className={`metric-value ${(spread2s10s ?? 0) < 0 ? 'negative' : 'positive'}`}>
             {(spread2s10s ?? 0) > 0 ? '+' : ''}{((spread2s10s ?? 0) / 100).toFixed(2)}%
           </span>
+          {showSourceDisclosure && (
+            <span className="source-badge" title={yieldCurve.source_reason ?? undefined}>
+              {sourceDisclosure}
+            </span>
+          )}
         </div>
         <div className="sparkline-container">
           {renderSparkline()}

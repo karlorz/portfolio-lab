@@ -19,6 +19,7 @@ import json
 import time
 
 from src.backtest.metrics import save_results_json
+from src.signals.stacking_feature_engine import STACKING_FALLBACK_SEMANTICS
 
 import numpy as np
 
@@ -55,6 +56,9 @@ class ModelMetadata:
     accuracy_val: float
     feature_importance: Dict[str, float]
     total_samples: int
+    source_roster: List[str] = field(default_factory=list)
+    source_roster_version: str = "unavailable_missing_metadata"
+    fallback_semantics: str = STACKING_FALLBACK_SEMANTICS
 
 
 class StackingIntegrator:
@@ -119,6 +123,15 @@ class StackingIntegrator:
                 version=metadata_dict.get('version', 'unknown'),
                 training_date=metadata_dict.get('training_date', datetime.now()),
                 feature_count=metadata_dict.get('feature_count'),
+                source_roster=list(metadata_dict.get('source_roster', [])),
+                source_roster_version=metadata_dict.get(
+                    'source_roster_version',
+                    'unavailable_missing_metadata',
+                ),
+                fallback_semantics=metadata_dict.get(
+                    'fallback_semantics',
+                    STACKING_FALLBACK_SEMANTICS,
+                ),
                 accuracy_train=metadata_dict.get('accuracy_train', 0.0),
                 accuracy_val=metadata_dict.get('accuracy_val', 0.0),
                 feature_importance=metadata_dict.get('feature_importance', {}),

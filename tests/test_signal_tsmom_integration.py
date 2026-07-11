@@ -125,6 +125,19 @@ class TestGetSignal:
         adapter = TSMOMSignalAdapter()
         assert adapter.generate_signal == adapter.get_signal
 
+    def test_sample_count_uses_active_ticker_history(self):
+        sig = _make_tsmom_signal()
+        with (
+            _patch_compute_signal(sig),
+            patch(
+                "src.data.price_cache.get_prices",
+                return_value={"SPY": [{"d": "2026-01-01", "p": 1.0}] * 7},
+            ),
+        ):
+            result = TSMOMSignalAdapter().get_signal("SPY")
+
+        assert result.sample_count == 7
+
 
 # ── get_portfolio_signals() ──────────────────────────────────────────
 

@@ -185,3 +185,27 @@ class TestComputeSignalWFEReport:
         """compute_signal_wfe_report should return a dict without crashing."""
         report = compute_signal_wfe_report()
         assert isinstance(report, dict)
+
+    def test_staged_ic_state_reports_waiting_for_resolved_history(
+        self, tmp_path, monkeypatch
+    ):
+        """WFE should not emit an empty report when predictions are label-pending."""
+        import src.monitor.ic_decay_monitor as icm
+        import src.monitor.signal_walk_forward as swf
+
+        wfe_state = tmp_path / "signal_wfe_state.json"
+        ic_state = tmp_path / "ic_monitor_state.json"
+        ic_state.write_text(json.dumps({
+            "__staged__": {
+                "date": "2026-07-02",
+                "predictions": {"ensemble_equity": 0.4},
+            }
+        }))
+        monkeypatch.setattr(swf, "WFV_STATE_PATH", wfe_state)
+        monkeypatch.setattr(icm, "IC_STATE_PATH", ic_state)
+
+        report = compute_signal_wfe_report()
+
+        assert report["status"] == "waiting_for_forward_returns"
+        assert report["pending_predictions"] == 1
+        assert report["signals"] == {}

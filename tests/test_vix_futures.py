@@ -317,6 +317,111 @@ class TestVIXDataManagerInit:
         assert len(mgr.data) == 1
         assert mgr.data["2024-01-01"].vix_spot == 15.0
 
+    def test_load_cached_data_hydrates_legacy_vix3m_proxy_rows(self, tmp_path, caplog):
+        """Legacy VIX3M proxy cache rows missing second_month remain usable."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        vix_file = data_dir / "vix_term_structure.json"
+        cached = {
+            "2024-01-02": {
+                "date": "2024-01-02",
+                "vix_spot": 14.0,
+                "front_month": 15.0,
+                "third_month": 17.0,
+                "vix_vix3m_ratio": 0.82,
+                "contango_1m_2m": 6.6667,
+                "contango_spot_1m": 7.1429,
+                "is_contango": True,
+                "days_to_expiry_front": None,
+            }
+        }
+        with open(vix_file, "w") as f:
+            json.dump(cached, f)
+
+        mgr = VIXDataManager.__new__(VIXDataManager)
+        mgr.DATA_DIR = data_dir
+        mgr.VIX_FILE = vix_file
+        mgr.data = {}
+        with caplog.at_level(logging.WARNING):
+            mgr._load_cached_data()
+
+        assert "missing 1 required positional argument: 'second_month'" not in caplog.text
+        assert len(mgr.data) == 1
+        ts = mgr.data["2024-01-02"]
+        assert ts.second_month == pytest.approx(16.0, abs=0.0001)
+        assert ts.days_to_expiry_front == 0
+        signal = mgr.get_contango_signal("2024-01-02")
+        assert signal is not None
+        assert signal["signal"] == "contango"
+
+    def test_load_cached_data_hydrates_current_vix3m_proxy_rows_with_null_third_month(self, tmp_path, caplog):
+        """Current persisted VIX3M proxy rows use null third_month and still load."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        vix_file = data_dir / "vix_term_structure.json"
+        cached = {
+            "2024-01-05": {
+                "date": "2024-01-05",
+                "vix_spot": 13.350000381469727,
+                "front_month": 15.510000228881836,
+                "third_month": None,
+                "vix_vix3m_ratio": 0.860735021564353,
+                "regime": "backwardation",
+                "is_contango": False,
+                "contango_spot_1m": 16.179773675589296,
+                "contango_1m_2m": 0.0,
+                "days_to_expiry_front": None,
+            }
+        }
+        with open(vix_file, "w") as f:
+            json.dump(cached, f)
+
+        mgr = VIXDataManager.__new__(VIXDataManager)
+        mgr.DATA_DIR = data_dir
+        mgr.VIX_FILE = vix_file
+        mgr.data = {}
+        with caplog.at_level(logging.WARNING):
+            mgr._load_cached_data()
+
+        assert "Skipped" not in caplog.text
+        ts = mgr.data["2024-01-05"]
+        assert ts.second_month == pytest.approx(15.510000228881836)
+        assert ts.third_month == pytest.approx(15.510000228881836)
+        signal = mgr.get_contango_signal("2024-01-05")
+        assert signal is not None
+        assert signal["contango_spot_1m"] == pytest.approx(16.179773675589296)
+
+    def test_load_cached_data_skips_only_unparseable_cache_rows(self, tmp_path, caplog):
+        """One malformed legacy row does not discard otherwise compatible cache rows."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        vix_file = data_dir / "vix_term_structure.json"
+        cached = {
+            "2024-01-02": {
+                "date": "2024-01-02",
+                "vix_spot": 14.0,
+                "front_month": 15.0,
+                "third_month": 17.0,
+                "contango_1m_2m": 6.6667,
+                "contango_spot_1m": 7.1429,
+                "is_contango": True,
+                "days_to_expiry_front": None,
+            },
+            "2024-01-03": {"date": "2024-01-03", "front_month": "bad"},
+        }
+        with open(vix_file, "w") as f:
+            json.dump(cached, f)
+
+        mgr = VIXDataManager.__new__(VIXDataManager)
+        mgr.DATA_DIR = data_dir
+        mgr.VIX_FILE = vix_file
+        mgr.data = {}
+        with caplog.at_level(logging.WARNING):
+            mgr._load_cached_data()
+
+        assert list(mgr.data) == ["2024-01-02"]
+        assert "Skipped 1 invalid VIX cache rows" in caplog.text
+
     def test_load_cached_data_missing_file(self, tmp_path):
         """_load_cached_data silently does nothing when file missing."""
         data_dir = tmp_path / "data"

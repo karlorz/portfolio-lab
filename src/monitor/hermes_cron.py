@@ -19,15 +19,19 @@ def normalize_cron_status(value: Any) -> str:
         return "ok"
     if status in {"error", "failed", "fail", "failure", "timeout", "oom", "critical"}:
         return "error"
+    if status in {"disabled", "paused"}:
+        return "disabled"
     return "unknown"
 
 
-def normalize_cron_state(value: Any, *, enabled: Any = True) -> str:
+def normalize_cron_state(value: Any, *, enabled: Any = True, manual_only: Any = False) -> str:
     """Map scheduler state strings to dashboard state values."""
+    state = str(value or "").strip().lower()
+    if manual_only is True or state == "manual_only":
+        return "manual_only"
     if enabled is False:
         return "paused"
-    state = str(value or "").strip().lower()
-    if state in {"scheduled", "paused", "running"}:
+    if state in {"scheduled", "paused", "running", "manual"}:
         return state
     return "scheduled"
 
@@ -63,7 +67,13 @@ def normalize_cron_job(job: dict[str, Any], *, backend: str, source: str, index:
         "last_run": job.get("last_run") or job.get("last_run_at"),
         "next_run": job.get("next_run") or job.get("next_run_at"),
         "status": normalize_cron_status(job.get("status", job.get("last_status"))),
-        "state": normalize_cron_state(job.get("state"), enabled=job.get("enabled", True)),
+        "state": normalize_cron_state(
+            job.get("state"),
+            enabled=job.get("enabled", True),
+            manual_only=job.get("manual_only", False),
+        ),
+        "enabled": bool(job.get("enabled", True)),
+        "manual_only": bool(job.get("manual_only", False)),
         "backend": backend,
         "source": source,
     }
@@ -85,7 +95,15 @@ def summarize_backend(
 ) -> dict[str, Any]:
     """Build backend-level scheduler health metadata."""
     failed_jobs = sum(1 for job in jobs if job.get("status") == "error")
-    backend_status = status or ("degraded" if failed_jobs else "ok")
+    active_unknown_jobs = sum(
+        1
+        for job in jobs
+        if job.get("enabled", True)
+        and not job.get("manual_only", False)
+        and job.get("state") not in {"manual_only", "paused"}
+        and job.get("status") == "unknown"
+    )
+    backend_status = status or ("degraded" if failed_jobs or active_unknown_jobs else "ok")
     summary = {
         "backend": backend,
         "status": backend_status,
@@ -93,6 +111,8 @@ def summarize_backend(
         "total_jobs": len(jobs),
         "failed_jobs": failed_jobs,
     }
+    if active_unknown_jobs:
+        summary["unknown_active_jobs"] = active_unknown_jobs
     if reason:
         summary["reason"] = reason
     return summary

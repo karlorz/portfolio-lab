@@ -26,10 +26,10 @@ Usage:
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,8 @@ class PairReading:
     active: bool         # Currently in position?
     days_active: int     # Days since entry
     entry_zscore: float  # Z-score at entry
+    coverage_status: str = "available"
+    missing_symbols: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -107,6 +109,10 @@ class CrossAssetRVSignal:
 
     # Confidence
     overall_conviction: float
+    unavailable_pairs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    available_pair_count: int = 0
+    unavailable_pair_count: int = 0
+    missing_symbols: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -119,6 +125,10 @@ class CrossAssetRVSignal:
             "risk_on_score": self.risk_on_score,
             "duration_score": self.duration_score,
             "overall_conviction": self.overall_conviction,
+            "unavailable_pairs": self.unavailable_pairs,
+            "available_pair_count": self.available_pair_count,
+            "unavailable_pair_count": self.unavailable_pair_count,
+            "missing_symbols": self.missing_symbols,
         }
 
 
@@ -197,6 +207,41 @@ class CrossAssetRVScanner:
 
         return z_scores, means, stds
 
+    def _pair_unavailability(self, pair_name: str) -> Optional[Dict[str, Any]]:
+        """Return coverage metadata when a configured pair cannot be scanned."""
+        if pair_name not in CROSS_ASSET_PAIRS:
+            return None
+
+        sym_a, sym_b, _ = CROSS_ASSET_PAIRS[pair_name]
+        missing_symbols = []
+        has_insufficient_history = False
+
+        for sym in (sym_a, sym_b):
+            prices = self.prices.get(sym)
+            if prices is None:
+                missing_symbols.append(sym)
+            elif len(prices) < LOOKBACK + 1:
+                has_insufficient_history = True
+            elif np.all(np.isnan(prices)):
+                missing_symbols.append(sym)
+
+        if not missing_symbols and not has_insufficient_history:
+            return None
+
+        reason = (
+            "missing_or_all_nan_symbol"
+            if missing_symbols
+            else "insufficient_history"
+        )
+        return {
+            "pair_name": pair_name,
+            "symbol_a": sym_a,
+            "symbol_b": sym_b,
+            "coverage_status": "unavailable",
+            "missing_symbols": sorted(set(missing_symbols)),
+            "reason": reason,
+        }
+
     def scan_pair(
         self, pair_name: str, current_idx: int = -1
     ) -> Optional[PairReading]:
@@ -205,16 +250,13 @@ class CrossAssetRVScanner:
             logger.warning("Unknown pair: %s", pair_name)
             return None
 
-        sym_a, sym_b, interpretation = CROSS_ASSET_PAIRS[pair_name]
+        sym_a, sym_b, _ = CROSS_ASSET_PAIRS[pair_name]
 
-        if sym_a not in self.prices or sym_b not in self.prices:
+        if self._pair_unavailability(pair_name) is not None:
             return None
 
         prices_a = self.prices[sym_a]
         prices_b = self.prices[sym_b]
-
-        if len(prices_a) < LOOKBACK + 1 or len(prices_b) < LOOKBACK + 1:
-            return None
 
         # Compute return differential
         ret_a = self._compute_returns(prices_a, LOOKBACK)
@@ -229,13 +271,24 @@ class CrossAssetRVScanner:
         if current_idx >= len(diff):
             current_idx = len(diff) - 1
 
-        current_diff = diff[current_idx] if not np.isnan(diff[current_idx]) else 0.0
-        current_z = z_scores[current_idx] if not np.isnan(z_scores[current_idx]) else 0.0
-        current_mean = means[current_idx] if not np.isnan(means[current_idx]) else 0.0
-        current_std = stds[current_idx] if not np.isnan(stds[current_idx]) else 0.0
+        required_values = (
+            diff[current_idx],
+            z_scores[current_idx],
+            means[current_idx],
+            stds[current_idx],
+            ret_a[current_idx],
+            ret_b[current_idx],
+        )
+        if any(np.isnan(value) for value in required_values):
+            return None
 
-        ret_a_val = ret_a[current_idx] if not np.isnan(ret_a[current_idx]) else 0.0
-        ret_b_val = ret_b[current_idx] if not np.isnan(ret_b[current_idx]) else 0.0
+        current_diff = diff[current_idx]
+        current_z = z_scores[current_idx]
+        current_mean = means[current_idx]
+        current_std = stds[current_idx]
+
+        ret_a_val = ret_a[current_idx]
+        ret_b_val = ret_b[current_idx]
 
         # Determine regime and signal
         abs_z = abs(current_z)
@@ -309,12 +362,18 @@ class CrossAssetRVScanner:
                 return self._empty_signal()
 
         readings: Dict[str, PairReading] = {}
+        unavailable_pairs: Dict[str, Dict[str, Any]] = {}
         z_scores = []
         diverged = 0
         risk_on = 0.0
         duration = 0.0
 
         for pair_name in CROSS_ASSET_PAIRS:
+            unavailable = self._pair_unavailability(pair_name)
+            if unavailable is not None:
+                unavailable_pairs[pair_name] = unavailable
+                continue
+
             reading = self.scan_pair(pair_name)
             if reading is not None:
                 readings[pair_name] = reading
@@ -330,12 +389,27 @@ class CrossAssetRVScanner:
                     risk_on -= reading.signal_value * 0.3
                 elif pair_name == "tlt_ief":
                     duration += reading.signal_value
+            else:
+                sym_a, sym_b, _ = CROSS_ASSET_PAIRS[pair_name]
+                unavailable_pairs[pair_name] = {
+                    "pair_name": pair_name,
+                    "symbol_a": sym_a,
+                    "symbol_b": sym_b,
+                    "coverage_status": "unavailable",
+                    "missing_symbols": [],
+                    "reason": "insufficient_current_signal_data",
+                }
 
         avg_z = float(np.mean(z_scores)) if z_scores else 0.0
         max_div = float(max(abs(z) for z in z_scores)) if z_scores else 0.0
         avg_conviction = float(np.mean([
             r.conviction for r in readings.values()
         ])) if readings else 0.0
+        missing_symbols = sorted({
+            symbol
+            for metadata in unavailable_pairs.values()
+            for symbol in metadata.get("missing_symbols", [])
+        })
 
         return CrossAssetRVSignal(
             timestamp=str(datetime.now()),
@@ -347,6 +421,10 @@ class CrossAssetRVScanner:
             risk_on_score=round(risk_on, 4),
             duration_score=round(duration, 4),
             overall_conviction=round(avg_conviction, 4),
+            unavailable_pairs=unavailable_pairs,
+            available_pair_count=len(readings),
+            unavailable_pair_count=len(unavailable_pairs),
+            missing_symbols=missing_symbols,
         )
 
     def get_ensemble_signal(self) -> Dict:
@@ -356,7 +434,17 @@ class CrossAssetRVScanner:
         """
         signal = self.scan_all()
         if not signal.pairs:
-            return {"signal_value": 0.0, "confidence": 0.0, "pairs": {}}
+            return {
+                "signal_value": 0.0,
+                "confidence": 0.0,
+                "pairs": {},
+                "timestamp": signal.timestamp,
+                "unavailable_pairs": signal.unavailable_pairs,
+                "available_pair_count": signal.available_pair_count,
+                "unavailable_pair_count": signal.unavailable_pair_count,
+                "missing_symbols": signal.missing_symbols,
+                "total_pairs": signal.total_pairs,
+            }
 
         # Average signal across all diverged pairs
         diverged = [r for r in signal.pairs.values() if abs(r.z_score) > ZSCORE_ENTRY]
@@ -397,6 +485,10 @@ class CrossAssetRVScanner:
             "avg_z_score": signal.avg_z_score,
             "num_diverged": signal.num_diverged,
             "total_pairs": signal.total_pairs,
+            "unavailable_pairs": signal.unavailable_pairs,
+            "available_pair_count": signal.available_pair_count,
+            "unavailable_pair_count": signal.unavailable_pair_count,
+            "missing_symbols": signal.missing_symbols,
         }
 
     def get_signal_snapshot(self):
@@ -408,7 +500,9 @@ class CrossAssetRVScanner:
         raw["regime_fit"] = "all"
         raw["explanation"] = (
             f"Cross-asset RV: z={raw.get('avg_z_score', 0):+.2f}, "
-            f"diverged={raw.get('num_diverged', 0)}/{raw.get('total_pairs', 0)} pairs"
+            f"diverged={raw.get('num_diverged', 0)}/"
+            f"{raw.get('available_pair_count', raw.get('total_pairs', 0))} available pairs, "
+            f"unavailable={raw.get('unavailable_pair_count', 0)}"
         )
         return SignalSnapshot.from_dict(raw)
 
@@ -423,6 +517,10 @@ class CrossAssetRVScanner:
             risk_on_score=0.0,
             duration_score=0.0,
             overall_conviction=0.0,
+            unavailable_pairs={},
+            available_pair_count=0,
+            unavailable_pair_count=0,
+            missing_symbols=[],
         )
 
     def _load_state(self) -> Dict:

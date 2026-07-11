@@ -3,7 +3,7 @@
 import json
 import logging
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 import pytest
@@ -67,6 +67,7 @@ class TestParseOrderFile:
             result = _parse_order_file(path)
         assert result["date"] == "2026-05-11"
         assert result["time"] == "14:30"
+        assert datetime.fromisoformat(result["timestamp"]).tzinfo is not None
 
     def test_fallback_timestamp_on_invalid_filename(self):
         orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
@@ -275,16 +276,56 @@ class TestGenerateExtended:
         """Next rebalance should be ~30 days after the last execution."""
         import src.monitor.rebalance_health as rh
         original_dir = rh.ORDERS_DIR
+        original_data_dir = rh.DATA_DIR
         try:
             with tempfile.TemporaryDirectory() as d:
-                rh.ORDERS_DIR = Path(d)
+                data_dir = Path(d)
+                rh.DATA_DIR = data_dir
+                rh.ORDERS_DIR = data_dir / "historical_orders"
+                rh.ORDERS_DIR.mkdir()
                 orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
-                _make_order_file(Path(d), "order_history_20260510_120000_aaa", orders)
+                _make_order_file(rh.ORDERS_DIR, "order_history_20260510_120000_aaa", orders)
                 result = generate()
         finally:
             rh.ORDERS_DIR = original_dir
+            rh.DATA_DIR = original_data_dir
         assert result["next_rebalance"]["date"] == "2026-06-09"
         assert result["next_rebalance"]["frequency"] == "monthly (~30 days)"
+
+    def test_root_daily_order_history_is_canonical_when_newer(self):
+        """Root order-history daily summaries should advance rebalance freshness."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        original_data_dir = rh.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                data_dir = Path(d)
+                rh.DATA_DIR = data_dir
+                rh.ORDERS_DIR = data_dir / "historical_orders"
+                rh.ORDERS_DIR.mkdir()
+                _make_order_file(
+                    rh.ORDERS_DIR,
+                    "order_history_20260510_120000_aaa",
+                    [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}],
+                )
+                (data_dir / "order-history-2026-07-06.json").write_text(json.dumps({
+                    "date": "2026-07-06",
+                    "total_orders": 4,
+                    "orders": [
+                        {"symbol": "SPY", "side": "buy", "estimated_value": 1000, "timestamp": "2026-07-06T12:00:00+00:00"},
+                        {"symbol": "GLD", "side": "sell", "estimated_value": 500, "timestamp": "2026-07-06T12:00:00+00:00"},
+                    ],
+                }))
+
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+            rh.DATA_DIR = original_data_dir
+
+        assert result["execution_history"][0]["date"] == "2026-07-06"
+        assert result["execution_history"][0]["source"] == "daily_order_summary"
+        assert result["next_rebalance"]["date"] == "2026-08-05"
+        assert result["canonical_order_history_source"] == "combined_order_history"
 
     def test_nonexistent_orders_dir(self):
         """Should handle non-existent ORDERS_DIR gracefully."""
@@ -755,6 +796,8 @@ class TestGenerateEdge:
         # Verify it's a parseable ISO datetime
         dt = datetime.fromisoformat(result["generated"])
         assert isinstance(dt, datetime)
+        assert dt.tzinfo is not None
+        assert dt.utcoffset() == timezone.utc.utcoffset(dt)
 
     def test_compliance_with_three_intervals_mixed(self):
         """Mixed on-time and delayed intervals should compute correct pct."""

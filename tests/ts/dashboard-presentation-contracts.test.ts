@@ -210,6 +210,33 @@ describe('dashboard presentation source contracts', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*\.performance-summary\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
   });
 
+  it('defines configured stale Google Trends disclosure in the ensemble panel', () => {
+    const ensemblePanel = read('src/components/EnsembleVotingPanel.tsx');
+
+    expect(ensemblePanel).toContain('configured_source_status');
+    expect(ensemblePanel).toContain('Configured Source Status');
+    expect(ensemblePanel).toContain('formatConfiguredSourceStatus');
+    expect(ensemblePanel).toContain('Google Trends');
+  });
+
+  it('defines separate MARL runtime status presentation outside ML signals', () => {
+    const marlPanel = read('src/components/MarlRuntimeStatusPanel.tsx');
+
+    expect(liveDashboard).toContain("import('./MarlRuntimeStatusPanel')");
+    expect(liveDashboard).toContain('<MarlRuntimeStatusPanel data={signals?.marl_status ?? null} />');
+    expect(liveDashboard).toContain('Analytics/MARL Runtime Status');
+    expect(marlPanel).toContain('MARL Runtime Status');
+    expect(marlPanel).toContain('research_shadow_non_routed');
+    expect(marlPanel).toContain('Not order-routed');
+    expect(marlPanel).toContain('target_allocations');
+  });
+
+  it('passes ML signals through the typed dashboard boundary without a broad cast', () => {
+    expect(liveDashboard).toContain('<MLSignalsPanel data={signals?.ml_signals ?? null} />');
+    expect(liveDashboard).not.toContain('as unknown as MLSignalsData | null');
+    expect(liveDashboard).not.toContain("import type { MLSignalsData } from './MLSignalsPanel'");
+  });
+
   it('defines loaded Analytics chart shell and summary class contracts', () => {
     const analyticsCharts = read('src/components/AnalyticsCharts.tsx');
 

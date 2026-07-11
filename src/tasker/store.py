@@ -388,17 +388,38 @@ class TaskerStore:
         }
 
     def _cron_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        def cron_job(task: dict[str, Any]) -> dict[str, Any]:
+            enabled = bool(task.get("enabled", True))
+            manual_only = bool(task.get("manual_only", False))
+            schedule = task.get("schedule")
+            paused = bool(task.get("paused", False))
+            if manual_only:
+                state = "manual_only"
+                status = "disabled"
+            elif not enabled:
+                state = "paused"
+                status = "disabled"
+            elif paused:
+                state = "paused"
+                status = task["last_status"] or "pending"
+            else:
+                state = "scheduled" if schedule else "manual"
+                status = task["last_status"] or "pending"
+
+            return {
+                "name": task["id"],
+                "schedule": schedule,
+                "enabled": enabled,
+                "manual_only": manual_only,
+                "state": state,
+                "status": status,
+                "last_run": task["last_finished_at"],
+                "duration_seconds": task["last_duration_seconds"],
+                "backend": "tasker",
+            }
+
         return {
             "backend": "tasker",
             "timestamp": payload["timestamp"],
-            "jobs": [
-                {
-                    "name": task["id"],
-                    "status": task["last_status"] or "pending",
-                    "last_run": task["last_finished_at"],
-                    "duration_seconds": task["last_duration_seconds"],
-                    "backend": "tasker",
-                }
-                for task in payload["tasks"]
-            ],
+            "jobs": [cron_job(task) for task in payload["tasks"]],
         }

@@ -26,7 +26,8 @@ if cron_guard_start "pf-build" 600; then
         echo "Running TypeScript check..."
         set +e
         bun run tsc --noEmit 2>&1 | tee -a data/build.log
-        EXIT=${PIPESTATUS[0]}
+        tsc_pipeline_status=("${PIPESTATUS[@]}")
+        EXIT="$(cron_pipeline_exit "${tsc_pipeline_status[0]}" "${tsc_pipeline_status[1]}")"
         set -e
     fi
 
@@ -34,7 +35,8 @@ if cron_guard_start "pf-build" 600; then
         echo "Building production app..."
         set +e
         bun run build 2>&1 | tee -a data/build.log
-        EXIT=${PIPESTATUS[0]}
+        build_pipeline_status=("${PIPESTATUS[@]}")
+        EXIT="$(cron_pipeline_exit "${build_pipeline_status[0]}" "${build_pipeline_status[1]}")"
         set -e
     else
         echo "TypeScript errors detected, build aborted"

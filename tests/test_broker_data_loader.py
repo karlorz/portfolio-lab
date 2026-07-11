@@ -34,6 +34,16 @@ def test_load_from_position_sync_tail(tmp_path: Path) -> None:
 
 
 def test_kill_switch_enabled(tmp_path: Path) -> None:
-    (tmp_path / "kill_switch.json").write_text(json.dumps({"enabled": True, "level": "HALT"}))
+    (tmp_path / "kill_switch.json").write_text(json.dumps({
+        "enabled": True,
+        "level": "halt",
+        "reason": "unresolved_incident:signal_staleness",
+        "source": "incident_lifecycle",
+        "incident_id": "incident-123",
+    }))
     broker = BrokerDataLoader(data_dir=tmp_path).load()
     assert broker["kill_switch"] is True
+    assert broker["kill_switch_level"] == "halt"
+    assert broker["kill_switch_source"] == "incident_lifecycle"
+    assert broker["kill_switch_reason"] == "unresolved_incident:signal_staleness"
+    assert broker["kill_switch_incident_id"] == "incident-123"

@@ -13,7 +13,8 @@ if cron_guard_start "pf-wiki-sync" 120; then
 
     set +e
     "$PYTHON_RUNTIME" src/research/wiki_sync.py 2>&1 | tee -a data/wiki_sync.log
-    EXIT=${PIPESTATUS[0]}
+    wiki_sync_pipeline_status=("${PIPESTATUS[@]}")
+    EXIT="$(cron_pipeline_exit "${wiki_sync_pipeline_status[0]}" "${wiki_sync_pipeline_status[1]}")"
     set -e
 
     if [ "$EXIT" -eq 0 ]; then

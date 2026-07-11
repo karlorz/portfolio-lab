@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchDecisionRegistry } from '../data/decisionRegistry';
-import type { DecisionRecordRow, DecisionRegistryData } from '../schemas/decision_registry';
+import type {
+  DecisionRecordRow,
+  DecisionRegistryData,
+  PromotionEvaluationRow,
+  PromotionRowDisclosure,
+} from '../schemas/decision_registry';
 
 function formatTs(ts: string): string {
   try {
@@ -8,6 +13,14 @@ function formatTs(ts: string): string {
   } catch {
     return ts;
   }
+}
+
+function formatLabel(value: string | undefined): string {
+  if (!value) {
+    return '—';
+  }
+  const label = value.replaceAll('_', ' ');
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function weightTable(weights: Record<string, number> | undefined): React.ReactNode {
@@ -25,6 +38,104 @@ function weightTable(weights: Record<string, number> | undefined): React.ReactNo
         ))}
     </ul>
   );
+}
+
+function formatMetricValue(name: string, value: number): string {
+  if (name.includes('weight') || name.includes('delta') || name.includes('drift')) {
+    return `${(value * 100).toFixed(2)}%`;
+  }
+  return Number.isInteger(value) ? String(value) : value.toFixed(4);
+}
+
+function metricsTable(metrics: Record<string, number> | undefined): React.ReactNode {
+  if (!metrics || Object.keys(metrics).length === 0) {
+    return <span className="muted">—</span>;
+  }
+  return (
+    <table className="positions-table compact">
+      <tbody>
+        {Object.entries(metrics)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, value]) => (
+            <tr key={name}>
+              <td>{name}</td>
+              <td>{formatMetricValue(name, value)}</td>
+            </tr>
+          ))}
+      </tbody>
+    </table>
+  );
+}
+
+function formatBenchmarkWindow(
+  window: Record<string, string | number | null> | undefined,
+): string {
+  if (!window || Object.keys(window).length === 0) {
+    return '—';
+  }
+  return Object.entries(window)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}: ${value ?? '—'}`)
+    .join(' · ');
+}
+
+function promotionLabel(
+  promo: PromotionEvaluationRow | undefined,
+  disclosure: PromotionRowDisclosure | undefined,
+): React.ReactNode {
+  if (!promo) {
+    if (disclosure?.state === 'not_evaluated') {
+      return (
+        <div className="decision-promotion-disclosure">
+          <strong>Not evaluated</strong>
+          <br />
+          <span>Promotion evaluation not published</span>
+          <br />
+          <small>{disclosure.message}</small>
+        </div>
+      );
+    }
+    return '—';
+  }
+
+  const semanticDisclosure = promo.semantic_disclosure;
+  if (semanticDisclosure?.state === 'governance_blocked') {
+    const details = [`governance: ${semanticDisclosure.governance_status}`];
+    if (semanticDisclosure.provenance_status) {
+      details.push(`provenance: ${semanticDisclosure.provenance_status}`);
+    }
+
+    return (
+      <div className="decision-promotion-disclosure">
+        <strong>Governance blocked</strong>
+        <br />
+        <span>Canonical recommendation: {promo.recommended_status}</span>
+        <br />
+        <span>Metric gate: {promo.metric_gate_status ?? '—'}</span>
+        <br />
+        <small>{details.join(' · ')}</small>
+      </div>
+    );
+  }
+
+  if (semanticDisclosure?.state === 'conflict') {
+    const details = [`governance: ${semanticDisclosure.governance_status}`];
+    if (semanticDisclosure.provenance_status) {
+      details.push(`provenance: ${semanticDisclosure.provenance_status}`);
+    }
+
+    return (
+      <div className="decision-promotion-disclosure">
+        <strong>Semantic conflict</strong>
+        <br />
+        <span>Metric recommendation: {promo.recommended_status}</span>
+        <br />
+        <small>{details.join(' · ')}</small>
+      </div>
+    );
+  }
+
+  return `${promo.recommended_status}${promo.pass ? ' ✓' : ''}`;
 }
 
 export interface DecisionReplayPanelProps {
@@ -160,6 +271,12 @@ export function DecisionReplayPanel({ initialData }: DecisionReplayPanelProps) {
                 <dd>
                   <code>{selected.run_id}</code>
                 </dd>
+                <dt>Role</dt>
+                <dd>{formatLabel(selected.decision_role)}</dd>
+                <dt>Source</dt>
+                <dd>{formatLabel(selected.decision_source)}</dd>
+                <dt>Controller</dt>
+                <dd>{selected.controller_id ?? '—'}</dd>
                 <dt>Git</dt>
                 <dd>{selected.git_sha ?? '—'}</dd>
                 <dt>Confidence</dt>
@@ -169,6 +286,23 @@ export function DecisionReplayPanel({ initialData }: DecisionReplayPanelProps) {
                     : '—'}
                 </dd>
               </dl>
+              {selected.decision_role === 'shadow' ? (
+                <>
+                  <h5>Shadow evidence</h5>
+                  <dl className="decision-replay-dl">
+                    <dt>Live decision</dt>
+                    <dd>{selected.live_decision_id ?? '—'}</dd>
+                    <dt>Baseline controller</dt>
+                    <dd>{selected.baseline_controller_id ?? '—'}</dd>
+                    <dt>Promotion review</dt>
+                    <dd>{formatLabel(selected.promotion_review_status)}</dd>
+                    <dt>Benchmark window</dt>
+                    <dd>{formatBenchmarkWindow(selected.benchmark_window)}</dd>
+                  </dl>
+                  <h5>Divergence metrics</h5>
+                  {metricsTable(selected.divergence_metrics)}
+                </>
+              ) : null}
               <h5>Current vs target weights</h5>
               <div className="dashboard-grid dashboard-grid-two">
                 <div>
@@ -203,11 +337,9 @@ export function DecisionReplayPanel({ initialData }: DecisionReplayPanelProps) {
       {data.recent_experiments.length > 0 && (
         <div className="stats-section">
           <h4>Recent experiments (registry)</h4>
-          {data.promotion_coverage.unmatched_experiment_count > 0 && (
-            <p className="muted">
-              Promotion coverage is partial: {data.promotion_coverage.evaluated_experiment_count}{' '}
-              of {data.promotion_coverage.recent_experiment_count} surfaced experiments have
-              published promotion evaluations.
+          {data.promotion_coverage.disclosure === 'partial_promotion_evaluation_coverage' && (
+            <p className="muted decision-promotion-coverage">
+              {`Partial coverage: ${data.promotion_coverage.evaluated_count}/${data.promotion_coverage.recent_experiment_count} evaluated`}
             </p>
           )}
           <div className="labs-table-scroll">
@@ -233,17 +365,7 @@ export function DecisionReplayPanel({ initialData }: DecisionReplayPanelProps) {
                       </td>
                       <td>{exp.promotion_status ?? 'candidate'}</td>
                       <td>{sharpe != null ? sharpe.toFixed(2) : '—'}</td>
-                      <td>
-                        {promo ? (
-                          `${promo.recommended_status}${promo.pass ? ' ✓' : ''}`
-                        ) : (
-                          <span>
-                            <strong>Not evaluated</strong>
-                            <br />
-                            <small>Promotion evaluation not published</small>
-                          </span>
-                        )}
-                      </td>
+                      <td>{promotionLabel(promo, exp.promotion_disclosure)}</td>
                     </tr>
                   );
                 })}

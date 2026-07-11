@@ -17,11 +17,11 @@ Default (safe, ML-disabled lane; exact count from pytest output):
   make test
   pytest tests/
 
-Include extracted ML-kernel tests without heavy ML imports:
-  PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/ --include-ml-extract
-
 Include ML tests:
   PORTFOLIO_LAB_ENABLE_ML=1 pytest tests/ --include-heavy
+
+Include extracted pure ML-adjacent kernel tests without heavy ML imports:
+  PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/ --include-ml-extract
 
 All tests including ML:
   PORTFOLIO_LAB_ENABLE_ML=1 pytest tests/
@@ -190,8 +190,8 @@ def pytest_addoption(parser):
         "--include-ml-extract",
         action="store_true",
         default=False,
-        help="Run tests marked ml_extract. These are extracted ML-kernel tests "
-             "that must stay safe with PORTFOLIO_LAB_ENABLE_ML=0.",
+        help="Run tests marked ml_extract for extracted pure ML-adjacent kernels. "
+             "Keeps PORTFOLIO_LAB_ENABLE_ML=0 and does not include heavy tests.",
     )
 
 
@@ -202,7 +202,8 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers",
-        "ml_extract: safe-mode tests for extracted pure ML-adjacent kernels",
+        "ml_extract: safe-mode tests for extracted pure ML-adjacent kernels; "
+        "must run with PORTFOLIO_LAB_ENABLE_ML=0 and without heavy ML imports",
     )
 
 
@@ -233,11 +234,11 @@ def pytest_collection_modifyitems(config, items):
                 f"bypassed — check for sys.modules injections."
             )
 
-    # Tier-2 extracted ML-kernel tests are safe in ML-disabled mode, but opt-in
-    # so the default safe lane stays stable until specific kernels are extracted.
+    # Skip extracted ML-kernel tests unless explicitly requested. These tests
+    # are safe-mode only and remain independent from the heavy ML lane.
     if not config.getoption("--include-ml-extract"):
         skip_ml_extract = pytest.mark.skip(
-            reason="ml_extract tests skipped (use --include-ml-extract)"
+            reason="ml_extract tests skipped (use --include-ml-extract with PORTFOLIO_LAB_ENABLE_ML=0)"
         )
         count = 0
         for item in items:
@@ -246,8 +247,8 @@ def pytest_collection_modifyitems(config, items):
                 count += 1
         if count > 0:
             print(
-                f"\n[Skipped {count} extracted ML-kernel tests. "
-                f"Use --include-ml-extract to run.]"
+                f"\n[Skipped {count} ml_extract tests. "
+                f"Use PORTFOLIO_LAB_ENABLE_ML=0 --include-ml-extract to run.]"
             )
 
     # Skip heavy tests unless both env var AND CLI flag are set.

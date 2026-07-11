@@ -159,7 +159,13 @@ class TestPairScanning:
         scanner._load_price_data()
         signal = scanner.scan_all()
         assert isinstance(signal, CrossAssetRVSignal)
-        assert len(signal.pairs) == len(CROSS_ASSET_PAIRS)
+        assert signal.available_pair_count == len(signal.pairs)
+        assert (
+            signal.available_pair_count + signal.unavailable_pair_count
+            == len(CROSS_ASSET_PAIRS)
+        )
+        if signal.unavailable_pairs:
+            assert signal.missing_symbols
 
     def test_scan_specific_pair(self, scanner):
         scanner._load_price_data()
@@ -386,7 +392,7 @@ class TestPairReadingDataclass:
             'pair_name', 'symbol_a', 'symbol_b', 'return_a_60d', 'return_b_60d',
             'return_differential', 'z_score', 'z_score_mean', 'z_score_std',
             'signal_value', 'regime', 'conviction', 'active', 'days_active',
-            'entry_zscore',
+            'entry_zscore', 'coverage_status', 'missing_symbols',
         }
         assert expected_keys == set(d.keys())
 
@@ -459,7 +465,8 @@ class TestCrossAssetRVSignalDataclass:
         expected_keys = {
             'timestamp', 'pairs', 'avg_z_score', 'max_divergence',
             'num_diverged', 'total_pairs', 'risk_on_score',
-            'duration_score', 'overall_conviction',
+            'duration_score', 'overall_conviction', 'unavailable_pairs',
+            'available_pair_count', 'unavailable_pair_count', 'missing_symbols',
         }
         assert expected_keys == set(d.keys())
 
@@ -552,6 +559,27 @@ class TestPairScanningExtended:
         scanner._load_price_data()
         reading = scanner.scan_pair("spy_qqq", current_idx=9999)
         assert reading is not None  # Should clamp and return
+
+    def test_scan_pair_all_nan_leg_is_unavailable(self, tmp_path):
+        """A pair with an all-NaN leg is unavailable, not neutral/converged."""
+        scanner = CrossAssetRVScanner(data_dir=tmp_path / "missing_leg")
+        n = LOOKBACK * 3
+        scanner.prices = {
+            "GLD": np.linspace(180.0, 210.0, n),
+            "BTC": np.full(n, np.nan),
+        }
+        scanner.dates = [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)]
+
+        reading = scanner.scan_pair("gld_btc")
+
+        assert reading is None
+
+        signal = scanner.scan_all()
+        assert "gld_btc" not in signal.pairs
+        assert signal.available_pair_count == 0
+        assert signal.unavailable_pair_count == len(CROSS_ASSET_PAIRS)
+        assert signal.unavailable_pairs["gld_btc"]["coverage_status"] == "unavailable"
+        assert signal.unavailable_pairs["gld_btc"]["missing_symbols"] == ["BTC"]
 
 
 class TestSignalGenerationExtended:
@@ -694,6 +722,7 @@ class TestPairReadingExtended:
             "z_score", "z_score_mean", "z_score_std",
             "signal_value", "regime", "conviction",
             "active", "days_active", "entry_zscore",
+            "coverage_status", "missing_symbols",
         }
         assert set(d.keys()) == expected_keys
 

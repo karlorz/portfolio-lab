@@ -597,6 +597,24 @@ class TestLoadSignalsExtended:
             signals = router.load_signals()
             assert len(signals) == 2
 
+    def test_load_signals_ignores_advisory_allocation_artifacts_without_target_allocations(self):
+        with tempfile.TemporaryDirectory() as d:
+            signals_file = os.path.join(d, "signals.json")
+            with open(signals_file, "w") as f:
+                json.dump({
+                    "adaptive_sizing": {
+                        "adjusted_allocation": {"SPY": 1.0},
+                        "routed": False,
+                    },
+                    "black_litterman": {
+                        "posterior_weights": {"GLD": 1.0},
+                        "routed": False,
+                    },
+                }, f)
+            router = OrderRouter(signals_file=signals_file, data_dir=d)
+            signals = router.load_signals()
+            assert signals == []
+
     def test_load_signals_empty_allocations(self):
         with tempfile.TemporaryDirectory() as d:
             signals_file = os.path.join(d, "signals.json")

@@ -32,7 +32,7 @@ import logging
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -293,11 +293,51 @@ class SignalWalkForwardValidator:
             return {}
 
 
-def compute_signal_wfe_report() -> Dict[str, Dict]:
+def compute_signal_wfe_report() -> Dict[str, Any]:
     """Convenience function: compute per-signal WFE report from saved state.
 
     Creates a SignalWalkForwardValidator, loads any persisted state,
     and returns the WFE report. Used by DashboardGenerator.
     """
     validator = SignalWalkForwardValidator()
-    return validator.load_state()
+    signals = validator.load_state()
+    if signals:
+        statuses = [row.get("status") for row in signals.values() if isinstance(row, dict)]
+        if any(status == "validated" for status in statuses):
+            status = "validated"
+        elif any(status == "weak" for status in statuses):
+            status = "weak"
+        elif statuses:
+            status = "insufficient_resolved_history"
+        else:
+            status = "no_data"
+        return {
+            "status": status,
+            "signals": signals,
+            "resolved_signal_count": len(signals),
+        }
+
+    try:
+        from src.monitor.ic_decay_monitor import ICMonitor
+
+        monitor = ICMonitor()
+        monitor.load_state()
+        pending = monitor.get_staged_prediction_count()
+        if pending:
+            return {
+                "status": "waiting_for_forward_returns",
+                "signals": {},
+                "resolved_signal_count": 0,
+                "pending_predictions": pending,
+                "staged_date": monitor.get_staged_date(),
+                "label_horizon": "Uses resolved IC prediction/forward-return pairs; pending until forward returns exist.",
+            }
+    except (ImportError, RuntimeError, OSError, ValueError, TypeError, json.JSONDecodeError) as e:
+        logger.warning("Failed to inspect IC state for WFE pending status: %s", e)
+
+    return {
+        "status": "no_data",
+        "signals": {},
+        "resolved_signal_count": 0,
+        "pending_predictions": 0,
+    }

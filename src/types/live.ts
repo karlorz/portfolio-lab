@@ -1,5 +1,18 @@
 // Types for live trading dashboard data
 
+import type { AlternativeData } from '../components/AlternativeDataPanel';
+import type { CalendarData } from '../components/CalendarSeasonalityPanel';
+import type { CollarData } from '../components/CollarPanel';
+import type { ConvexityHarvestData } from '../components/ConvexityHarvestPanel';
+import type { CryptoData } from '../components/CryptoAllocationPanel';
+import type { AllocationSurfaceRole, EnsembleVotingData } from '../components/EnsembleVotingPanel';
+import type { FactorRotationDashboardData } from '../components/FactorRotationDashboardPanel';
+import type { KurtosisData } from '../components/KurtosisRegimePanel';
+import type { LLMSentimentData } from '../components/LLMSentimentPanel';
+import type { MarlRuntimeStatusData } from '../components/MarlRuntimeStatusPanel';
+import type { SectorRotationData } from '../components/SectorRotationPanel';
+import type { StackingEnsembleData } from '../components/StackingEnsemblePanel';
+
 export interface HedgeSelectorData {
   available: boolean;
   generated_at: string;
@@ -19,32 +32,55 @@ export interface HedgeSelectorData {
   transition_cost_bps: number;
 }
 
-export type StackingRuntimeMode =
-  | 'model_backed'
-  | 'fallback_no_model'
-  | 'fallback_weighted_voting';
+export interface FactorRotationSignalData {
+  selected_factors: string[];
+  allocation: Record<string, number>;
+  signal_strength: number;
+  recommendation: string;
+  [key: string]: unknown;
+}
 
-export interface StackingEnsembleData {
-  active: boolean;
-  stacking_available: boolean;
-  prediction_direction: string;
-  confidence: number;
-  probability_bullish: number;
-  probability_bearish: number;
-  probability_neutral: number;
-  fallback_used: boolean;
-  model_version: string;
-  voting_accuracy: number;
-  stacking_accuracy: number;
-  feature_count: number | null;
-  feature_count_metadata_available: boolean;
-  feature_count_source: 'model_metadata' | 'unavailable_no_model' | 'unavailable_missing_metadata';
-  runtime_mode: StackingRuntimeMode;
-  model_backed: boolean;
-  operator_disclosure: string;
-  latency_ms: number;
-  top_features?: Array<{ name: string; importance: number }>;
-  backtest_finding?: string;
+export interface AdvancedRegimeSignalAuthority {
+  role: 'advisory_shadow';
+  routed: false;
+  availability?: 'present' | 'unavailable' | 'stale' | 'error' | 'unknown';
+  published?: boolean;
+  description?: string;
+  [key: string]: unknown;
+}
+
+export interface RegimeAuthority {
+  schema_version: 'regime-authority/v1';
+  live_controller: 'classify_vix_regime';
+  live_controller_module: 'src.utils.classify_vix_regime';
+  live_regime: string;
+  allocation_regime: string;
+  routed_surface: 'target_allocations';
+  target_allocations: Record<string, number>;
+  advanced_regime_signals: {
+    two_stage_regime: AdvancedRegimeSignalAuthority;
+    bocd_regime: AdvancedRegimeSignalAuthority;
+    regime_transition: AdvancedRegimeSignalAuthority;
+    [key: string]: AdvancedRegimeSignalAuthority;
+  };
+}
+
+export interface VolatilityParitySignalData {
+  date: string;
+  target_volatility: number;
+  spy_pct: number;
+  gld_pct: number;
+  tlt_pct: number;
+  core_vol_contribution: number;
+  vix_short_pct: number;
+  vix_tail_pct: number;
+  vix_vol_contribution: number;
+  cash_pct: number;
+  expected_portfolio_vol: number;
+  expected_max_dd: number;
+  rebalance_triggered: boolean;
+  rebalance_reason: string | null;
+  [key: string]: unknown;
 }
 
 export interface SignalsData {
@@ -60,6 +96,12 @@ export interface SignalsData {
     dgs10: number | null;
     duration_regime: 'steep' | 'normal' | 'flat' | 'inverted' | null;
     spread_history?: number[];
+    source_mode?: string;
+    source_status?: string;
+    source_reason?: string | null;
+    source_provider?: string | null;
+    source_generated_at?: string | null;
+    source_latest_observation?: string | null;
   };
   duration_allocation?: {
     tlt: number;
@@ -76,6 +118,17 @@ export interface SignalsData {
     unrealized: number;
   }>;
   target_allocations: Record<string, number>;
+  regime_authority?: RegimeAuthority;
+  allocation_surface_roles?: {
+    schema_version: 'allocation-surface-roles/v1';
+    routed_surface: string;
+    routed_by: string;
+    surfaces: {
+      target_allocations: AllocationSurfaceRole;
+      ensemble_voting: AllocationSurfaceRole;
+      [key: string]: AllocationSurfaceRole;
+    };
+  };
   cash: number;
   total_value: number;
   recent_orders: Array<{
@@ -87,11 +140,26 @@ export interface SignalsData {
   ml_signals: {
     available: boolean;
     timestamp: string | null;
+    generated_at?: string | null;
+    feature_source_artifact?: string | null;
+    feature_as_of?: string | null;
+    feature_freshness_status?: string | null;
+    feature_staleness_days?: number | null;
+    prediction_source_mode?: string | null;
+    execution_role?: {
+      role: string;
+      routed: boolean;
+      routed_by?: string | null;
+      live_authoritative: boolean;
+    };
     predictions: Record<string, {
       predicted_regime: string;
       confidence: number;
       probabilities: Record<string, number>;
       heuristic: boolean;
+      feature_timestamp?: string | null;
+      feature_freshness_status?: string | null;
+      source_artifact?: string | null;
     }>;
     features: Record<string, {
       vix_level: number | null;
@@ -99,6 +167,7 @@ export interface SignalsData {
       price_vs_sma20: number;
       return_5d: number;
       spy_correlation: number;
+      feature_timestamp?: string | null;
     }>;
     grid_search: {
       available: boolean;
@@ -106,8 +175,15 @@ export interface SignalsData {
       top_allocation: Record<string, number> | null;
       sharpe: number | null;
       volatility: number | null;
+      source_artifact?: string | null;
+      benchmark_timestamp?: string | null;
+      observation_semantics?: string | null;
+      freshness_status?: string | null;
+      staleness_days?: number | null;
+      live_authoritative?: boolean;
     };
   };
+  marl_status: MarlRuntimeStatusData;
   smart_rebalance?: SmartRebalanceData;
   broker?: BrokerData;
   closing_auction?: {
@@ -131,22 +207,21 @@ export interface SignalsData {
   vix_term_structure?: VIXTermStructureData;
   vix_overlay?: VIXOverlayState;
   hedge_selector?: HedgeSelectorData | null;
-  // Signal panel data — typed as Record<string, unknown> until each panel
-  // defines a proper interface
+  // Signal panel data
   behavioral_sentiment?: Record<string, unknown> | null;
-  crypto_allocation?: Record<string, unknown> | null;
-  calendar_seasonality?: Record<string, unknown> | null;
-  ensemble_voting?: Record<string, unknown> | null;
-  alternative_data?: Record<string, unknown> | null;
-  factor_rotation?: Record<string, unknown> | null;
+  crypto_allocation?: CryptoData | null;
+  calendar_seasonality?: CalendarData | null;
+  ensemble_voting?: EnsembleVotingData | null;
+  alternative_data?: AlternativeData | null;
+  factor_rotation?: FactorRotationSignalData | null;
   stacking_ensemble?: StackingEnsembleData | null;
-  convexity_harvest?: Record<string, unknown> | null;
-  llm_sentiment?: Record<string, unknown> | null;
-  sector_rotation?: Record<string, unknown> | null;
-  factor_rotation_dashboard?: Record<string, unknown> | null;
-  collar?: Record<string, unknown> | null;
-  kurtosis_regime?: Record<string, unknown> | null;
-  volatility_parity?: Record<string, unknown> | null;
+  convexity_harvest?: ConvexityHarvestData | null;
+  llm_sentiment?: LLMSentimentData | null;
+  sector_rotation?: SectorRotationData | null;
+  factor_rotation_dashboard?: FactorRotationDashboardData | null;
+  collar?: CollarData | null;
+  kurtosis_regime?: KurtosisData | null;
+  volatility_parity?: VolatilityParitySignalData | null;
   // Rebalance health
   rebalance_health?: Record<string, unknown>;
   // Circuit breaker state
@@ -172,6 +247,16 @@ export interface SignalsData {
     credit_conditions: string;
     indicators: Record<string, number>;
     timestamp: string;
+    status?: string;
+    source_mode?: string;
+    cache_status?: string;
+    api_key_configured?: boolean;
+    reason?: string | null;
+    latest_fetched_at?: string | null;
+    row_count?: number | null;
+    age_hours?: number | null;
+    ttl_hours?: number | null;
+    indicators_observed?: boolean;
   };
   // Two-stage k-means macro regime classifier (Oliveira et al. 2025)
   two_stage_regime?: {
@@ -200,16 +285,22 @@ export interface SignalsData {
   };
   // IC decay monitoring for signal quality tracking
   ic_decay?: {
+    status?: 'healthy' | 'warning' | 'critical' | 'insufficient_resolved_history' | 'waiting_for_forward_returns' | 'no_data';
     signals?: Record<string, {
       ic_rolling: number | null;
       ic_trend: 'stable' | 'decaying' | 'improving' | 'unknown';
       observations: number;
       status: 'healthy' | 'warning' | 'critical' | 'insufficient_data';
     }>;
+    resolved_signal_count?: number;
+    pending_predictions?: number;
+    staged_date?: string | null;
+    label_horizon?: string;
     error?: string;
   };
   // Per-signal walk-forward validation
   signal_wfe?: {
+    status?: 'validated' | 'weak' | 'unvalidated' | 'insufficient_data' | 'insufficient_resolved_history' | 'waiting_for_forward_returns' | 'no_data';
     signals?: Record<string, {
       signal_name: string;
       wfe: number;
@@ -220,6 +311,10 @@ export interface SignalsData {
       positive_oos_ratio: number;
       status: 'validated' | 'weak' | 'unvalidated' | 'insufficient_data';
     }>;
+    resolved_signal_count?: number;
+    pending_predictions?: number;
+    staged_date?: string | null;
+    label_horizon?: string;
     error?: string;
   };
 }
@@ -506,6 +601,10 @@ export interface BrokerData {
   }>;
   last_sync: string | null;
   kill_switch: boolean;
+  kill_switch_level?: string | null;
+  kill_switch_source?: string | null;
+  kill_switch_reason?: string | null;
+  kill_switch_incident_id?: string | null;
 }
 
 // Smart Rebalance Types (v2.90)
@@ -521,10 +620,12 @@ export interface SmartRebalanceData {
   in_optimal_window: boolean;
   ytd_cost_bps: number;
   remaining_budget_pct: number;
+  remaining_budget_ratio?: number;
   status: {
     ytd_cost_bps: number;
     ytd_cost_pct: number;
     remaining_budget_pct: number;
+    remaining_budget_ratio?: number;
     is_over_budget: boolean;
     is_warning: boolean;
     last_rebalance: string | null;
@@ -607,6 +708,31 @@ export interface GarchCvarData {
   conformal_cvar_95?: number | null;
   conformal_var_95?: number | null;
   conformal_cvar_ratio?: number | null;
+  coverage_diagnostics?: ConformalCoverageDiagnostics | null;
+}
+
+export interface ConformalCoverageDiagnostics {
+  schema_version: 'conformal-coverage/v1';
+  observations: number;
+  alpha: number;
+  expected_exceedance_rate: number;
+  exceedance_count: number;
+  exceedance_rate: number;
+  coverage_rate: number;
+  coverage_pass: boolean;
+  rolling_window: number;
+  rolling_exceedance_rate: number;
+  longest_violation_cluster: number;
+  kupiec_statistic: number;
+  kupiec_p_value: number;
+  kupiec_pass: boolean;
+  christoffersen_statistic: number;
+  christoffersen_p_value: number;
+  christoffersen_pass: boolean;
+  conditional_coverage_statistic: number;
+  conditional_coverage_p_value: number;
+  conditional_coverage_pass: boolean;
+  by_regime?: Record<string, Record<string, unknown>>;
 }
 
 // Entropy Monitor Types (v3.22)

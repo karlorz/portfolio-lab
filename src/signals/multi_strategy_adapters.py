@@ -5,24 +5,25 @@ Portfolio-Lab v2.56-2.58: Multi-Strategy Signal Adapters
 Signal adapters for integrating new strategies into the v2.51 signal integrator:
 - MultiSpeedSignalAdapter: v2.56 Multi-Speed Momentum Ensemble (Man AHL)
 - RiskParitySignalAdapter: v2.57 Risk Parity Weight Overlay (Bridgewater)
-- NetworkMomentumSignalAdapter: v2.58 Network Momentum Lead-Lag (research-only)
+- NetworkMomentumSignalAdapter: v2.58 Network Momentum Lead-Lag (Imperial College)
 
 Usage:
     from src.signals.multi_strategy_adapters import (
         MultiSpeedSignalAdapter, RiskParitySignalAdapter, NetworkMomentumSignalAdapter
     )
     
-    # Each adapter provides SignalSourceResult outputs. MultiSpeed and
-    # RiskParity are active integrator sources; NetworkMomentum is for
-    # research/comparison until a future promotion decision.
+    # Each adapter provides get_signal() returning SignalSourceResult
+    # For integrator integration, use class methods
 """
 
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 from src.signals.integrator import SignalSourceResult
+from src.signals.sample_counts import get_live_sample_count
 from src.signals.multi_speed_momentum import MultiSpeedMomentum, SPEED_TIERS, DEFAULT_BASE_ALLOCATION
 from src.strategy.risk_parity_weight_overlay import RiskParityWeightOverlay, DEFAULT_BASE as RP_DEFAULT
 from src.strategy.network_momentum_leadlag import NetworkMomentumLeadLag, DEFAULT_BASE_ALLOCATION as NM_DEFAULT
@@ -81,7 +82,7 @@ class MultiSpeedSignalAdapter:
             raw_score=ensemble_signal.ensemble_position,
             raw_unit="vol_scaled_position",
             historical_accuracy=0.72,  # Based on Man AHL research (speed diversification)
-            sample_count=5371,
+            sample_count=get_live_sample_count(ticker),
             timestamp=ensemble_signal.timestamp,
             metadata={
                 "fast_signal": ensemble_signal.fast_signal.signal,
@@ -118,7 +119,7 @@ class MultiSpeedSignalAdapter:
                 confidences.append(sig.confidence)
         if not values:
             return SignalSnapshot(
-                source="multi_speed",
+                source="multi_speed_momentum",
                 timestamp=str(datetime.now()),
                 value=0.0,
                 confidence=0.0,
@@ -128,7 +129,7 @@ class MultiSpeedSignalAdapter:
         avg_value = sum(values) / len(values)
         avg_conf = sum(confidences) / len(confidences)
         return SignalSnapshot(
-            source="multi_speed",
+            source="multi_speed_momentum",
             timestamp=str(datetime.now()),
             value=float(avg_value),
             confidence=float(avg_conf),
@@ -183,7 +184,7 @@ class RiskParitySignalAdapter:
             raw_score=adjustment,
             raw_unit="weight_adjustment",
             historical_accuracy=0.70,  # Risk parity track record
-            sample_count=5371,
+            sample_count=get_live_sample_count(ticker),
             timestamp=rp_allocation.timestamp,
             metadata={
                 "base_weight": rp_allocation.base_weights.get(ticker, 0.0),
@@ -245,16 +246,7 @@ class NetworkMomentumSignalAdapter:
     Adapter for v2.58 Network Momentum Lead-Lag (Imperial College style).
     
     Provides SignalSourceResult format based on cross-asset lead-lag dynamics.
-    This adapter is research/comparison-only; it is not loaded by the active
-    live SignalIntegrator unless a future promotion decision changes that.
     """
-
-    RUNTIME_ROLE = "research_only"
-    LIVE_ACTIVATION_STATUS = "research_only"
-    PROMOTION_BENCHMARK = (
-        "future benchmark decision must beat current active ensemble or "
-        "an explicitly documented benchmark"
-    )
     
     def __init__(
         self,
@@ -264,9 +256,6 @@ class NetworkMomentumSignalAdapter:
         self.base_allocation = base_allocation or NM_DEFAULT.copy()
         self.source_type = "network_momentum"
         self.source_name = "imperial_network_momentum"
-        self.runtime_role = self.RUNTIME_ROLE
-        self.live_activation_status = self.LIVE_ACTIVATION_STATUS
-        self.promotion_benchmark = self.PROMOTION_BENCHMARK
     
     def generate_signal(self, ticker: str) -> Optional[SignalSourceResult]:
         """Get network momentum signal for a ticker."""
@@ -300,12 +289,9 @@ class NetworkMomentumSignalAdapter:
             raw_score=raw_momentum,
             raw_unit="ensemble_momentum",
             historical_accuracy=0.68,  # From paper: +29-33% improvement over baseline
-            sample_count=5371,
+            sample_count=get_live_sample_count(ticker),
             timestamp=ensemble_signal.timestamp,
             metadata={
-                "runtime_role": self.runtime_role,
-                "live_activation_status": self.live_activation_status,
-                "promotion_benchmark": self.promotion_benchmark,
                 "network_centrality": ensemble_signal.network_centrality,
                 "leadership_score": ensemble_signal.leadership_score,
                 "followership_score": ensemble_signal.followership_score,

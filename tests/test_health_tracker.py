@@ -2133,6 +2133,37 @@ class TestGetHealthReportEdgeCases:
         assert "alerts" in report
         assert "overall_health" in report
 
+    def test_many_unresolved_predictions_are_insufficient_not_healthy(self, tmp_path):
+        """Logged predictions without realized labels are pending quality evidence."""
+        import sqlite3
+
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        with sqlite3.connect(str(db)) as conn:
+            cursor = conn.cursor()
+            for i in range(25):
+                cursor.execute(
+                    "INSERT INTO signal_predictions "
+                    "(timestamp, source, signal_value, confidence, predicted_direction, metadata) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        f"2026-07-{(i % 5) + 1:02d}T10:00:00",
+                        "multi_speed_momentum",
+                        0.5,
+                        0.8,
+                        1,
+                        "{}",
+                    ),
+                )
+            conn.commit()
+
+        report = tracker.get_health_report()
+
+        assert report["summary"]["total_tracked"] == 0
+        assert report["summary"]["pending_predictions"] == 25
+        assert report["overall_health"] in {"insufficient_data", "unknown", "unavailable"}
+        assert report["status"] == "insufficient_data"
+
     def test_report_with_mixed_health(self, tmp_path):
         """Mixed healthy/degraded sources should produce correct summary."""
         db = tmp_path / "health.db"
@@ -3707,4 +3738,3 @@ class TestGetAdjustedWeightsMinMultiplier:
         # With custom (0.5): src_a = 0.5*0.5=0.25, src_b = 0.5*0.9=0.45
         #   normalized: src_a = 0.25/0.70 ≈ 0.357, src_b = 0.45/0.70 ≈ 0.643
         assert adj_custom["src_a"] > adj_default["src_a"]
-

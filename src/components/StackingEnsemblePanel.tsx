@@ -1,5 +1,36 @@
 import React from 'react';
-import type { StackingEnsembleData } from '../types/live';
+
+export interface StackingEnsembleData {
+  active: boolean;
+  stacking_available: boolean;      // XGBoost model loaded
+  runtime_role: 'research_dormant' | 'model_backed_advisory';
+  runtime_status: 'unavailable_no_model' | 'model_loaded';
+  live_authoritative: boolean;
+  routed: boolean;
+  routed_by: string | null;
+  prediction_available: boolean;
+  prediction_direction: string;     // bullish, bearish, neutral
+  confidence: number;               // 0-1
+  probability_bullish: number;
+  probability_bearish: number;
+  probability_neutral: number;
+  fallback_used: boolean;           // True if weighted voting fallback
+  model_version: string;
+  voting_accuracy: number | null;   // Baseline 65%, unavailable without a model
+  stacking_accuracy: number | null; // Target 76%, unavailable without a model
+  accuracy_metrics_available: boolean;
+  feature_count: number | null;     // Model-metadata-backed feature vector size
+  feature_count_metadata_available: boolean;
+  feature_count_source: 'model_metadata' | 'unavailable_no_model' | 'unavailable_missing_metadata';
+  source_roster: string[];          // Empty when feature metadata is unavailable
+  source_roster_version: string;
+  fallback_semantics: string;
+  latency_ms: number;               // Inference latency
+  status_reason: string;
+  operator_message: string;
+  top_features?: Array<{ name: string; importance: number }>;
+  backtest_finding?: string;
+}
 
 interface StackingEnsemblePanelProps {
   data: StackingEnsembleData | null;
@@ -20,6 +51,7 @@ function DirectionBadge({ direction, fallback }: { direction: string; fallback: 
     bullish: '#22c55e',
     bearish: '#ef4444',
     neutral: '#6b7280',
+    unavailable: '#6b7280',
   };
   const color = colors[direction] || '#6b7280';
   const label = direction.toUpperCase();
@@ -28,6 +60,10 @@ function DirectionBadge({ direction, fallback }: { direction: string; fallback: 
       {label}{fallback ? ' (fallback)' : ''}
     </span>
   );
+}
+
+function formatRuntimeRole(role: StackingEnsembleData['runtime_role']) {
+  return role === 'research_dormant' ? 'Research dormant' : 'Model-backed advisory';
 }
 
 export function StackingEnsemblePanel({ data }: StackingEnsemblePanelProps) {
@@ -40,25 +76,37 @@ export function StackingEnsemblePanel({ data }: StackingEnsemblePanelProps) {
     );
   }
 
-  const isModelBacked = data.model_backed && data.runtime_mode === 'model_backed';
+  const predictionVisible = data.prediction_available;
+  const accuracyMetricsVisible = (
+    data.accuracy_metrics_available
+    && data.voting_accuracy !== null
+    && data.stacking_accuracy !== null
+  );
+  const votingAccuracy = data.voting_accuracy ?? 0;
+  const stackingAccuracy = data.stacking_accuracy ?? 0;
 
   return (
     <div className="panel">
       <h3>Stacking Ensemble (v3.10)</h3>
-
-      {!isModelBacked && (
-        <div className="stacking-runtime-disclosure" role="status">
-          <strong>Not model-backed</strong>
-          <span>{data.operator_disclosure}</span>
-        </div>
-      )}
 
       {/* Model status */}
       <div className="panel-section">
         <div className="metric-row">
           <span className="label">Model</span>
           <span className="value">
-            {data.stacking_available ? data.model_version : 'Weighted Voting (fallback)'}
+            {data.stacking_available ? data.model_version : 'Unavailable (no model)'}
+          </span>
+        </div>
+        <div className="metric-row">
+          <span className="label">Runtime role</span>
+          <span className="value">
+            {formatRuntimeRole(data.runtime_role)}
+          </span>
+        </div>
+        <div className="metric-row">
+          <span className="label">Order routed</span>
+          <span className="value">
+            {data.routed ? `Yes (${data.routed_by ?? 'unknown'})` : 'No'}
           </span>
         </div>
         {data.stacking_available && (
@@ -79,54 +127,66 @@ export function StackingEnsemblePanel({ data }: StackingEnsemblePanelProps) {
         )}
       </div>
 
+      {!predictionVisible && (
+        <div className="panel-section">
+          <h4>{formatRuntimeRole(data.runtime_role)}</h4>
+          <p className="muted small">{data.status_reason}</p>
+          <p className="muted small">{data.operator_message}</p>
+        </div>
+      )}
+
       {/* Prediction */}
-      <div className="panel-section">
-        <h4>Current Prediction</h4>
-        <DirectionBadge direction={data.prediction_direction} fallback={data.fallback_used} />
-        <div className="panel-grid" style={{ marginTop: '0.5rem' }}>
-          <div className="metric">
-            <span className="label">Bullish</span>
-            <ConfidenceBar value={data.probability_bullish} color="#22c55e" />
+      {predictionVisible && (
+        <div className="panel-section">
+          <h4>Current Prediction</h4>
+          <DirectionBadge direction={data.prediction_direction} fallback={data.fallback_used} />
+          <div className="panel-grid" style={{ marginTop: '0.5rem' }}>
+            <div className="metric">
+              <span className="label">Bullish</span>
+              <ConfidenceBar value={data.probability_bullish} color="#22c55e" />
+            </div>
+            <div className="metric">
+              <span className="label">Bearish</span>
+              <ConfidenceBar value={data.probability_bearish} color="#ef4444" />
+            </div>
+            <div className="metric">
+              <span className="label">Neutral</span>
+              <ConfidenceBar value={data.probability_neutral} color="#6b7280" />
+            </div>
           </div>
-          <div className="metric">
-            <span className="label">Bearish</span>
-            <ConfidenceBar value={data.probability_bearish} color="#ef4444" />
-          </div>
-          <div className="metric">
-            <span className="label">Neutral</span>
-            <ConfidenceBar value={data.probability_neutral} color="#6b7280" />
+          <div className="metric-row">
+            <span className="label">Overall Confidence</span>
+            <span className="value">{(data.confidence * 100).toFixed(0)}%</span>
           </div>
         </div>
-        <div className="metric-row">
-          <span className="label">Overall Confidence</span>
-          <span className="value">{(data.confidence * 100).toFixed(0)}%</span>
-        </div>
-      </div>
+      )}
 
       {/* Accuracy comparison */}
-      <div className="panel-section">
-        <h4>Directional Accuracy</h4>
-        <div className="panel-grid">
-          <div className="metric">
-            <span className="label">Voting (baseline)</span>
-            <span className="value" style={{ color: '#f97316' }}>
-              {(data.voting_accuracy * 100).toFixed(0)}%
-            </span>
-          </div>
-          <div className="metric">
-            <span className="label">Stacking (target)</span>
-            <span className="value" style={{ color: '#22c55e' }}>
-              {(data.stacking_accuracy * 100).toFixed(0)}%
-            </span>
-          </div>
-          <div className="metric">
-            <span className="label">Delta</span>
-            <span className="value" style={{ color: '#3b82f6' }}>
-              +{((data.stacking_accuracy - data.voting_accuracy) * 100).toFixed(0)}pp
-            </span>
+      {accuracyMetricsVisible && (
+        <div className="panel-section">
+          <h4>Directional Accuracy</h4>
+          <div className="panel-grid">
+            <div className="metric">
+              <span className="label">Voting (baseline)</span>
+              <span className="value" style={{ color: '#f97316' }}>
+                {(votingAccuracy * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="metric">
+              <span className="label">Stacking (target)</span>
+              <span className="value" style={{ color: '#22c55e' }}>
+                {(stackingAccuracy * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="metric">
+              <span className="label">Delta</span>
+              <span className="value" style={{ color: '#3b82f6' }}>
+                +{((stackingAccuracy - votingAccuracy) * 100).toFixed(0)}pp
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Top features */}
       {data.top_features && data.top_features.length > 0 && (
@@ -150,7 +210,7 @@ export function StackingEnsemblePanel({ data }: StackingEnsemblePanelProps) {
       )}
 
       {/* Backtest finding */}
-      {data.backtest_finding && (
+      {accuracyMetricsVisible && data.backtest_finding && (
         <div className="panel-section">
           <h4>Backtest Finding (Phase 5)</h4>
           <p className="muted small">{data.backtest_finding}</p>

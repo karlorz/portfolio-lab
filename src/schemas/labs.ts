@@ -22,6 +22,16 @@ export const LabsStatusSchema = z.enum([
 
 export const LabsScorecardStatusSchema = z.enum(['promote', 'watch', 'reject']);
 export const LabsReplayStatusSchema = z.enum(['passed', 'failed', 'warning']);
+export const LabsGovernanceStateSchema = z.enum(['clear', 'governance_blocked', 'rejected']);
+export const LabsPromotionGovernanceSchema = z.object({
+  recommended_status: z.string(),
+  pass: z.boolean(),
+  failures: z.array(z.string()),
+  metric_gate_status: z.string(),
+  metric_gate_pass: z.boolean(),
+  governance_status: z.string(),
+  provenance_status: z.string(),
+}).strict();
 export const LabsReplayFailureReasonSchema = z.enum([
   'safety_skip',
   'timeout',
@@ -47,6 +57,9 @@ export const LabsRegistryRowSchema = z.object({
   provenance_status: LabsProvenanceStatusSchema,
   metrics: MetricMapSchema,
   baseline_deltas: MetricMapSchema,
+  governance_state: LabsGovernanceStateSchema.optional(),
+  governance_reasons: z.array(z.string()).optional(),
+  promotion_governance: LabsPromotionGovernanceSchema.optional(),
 }).strict();
 
 export const LabsRegistryWarningSchema = z.object({
@@ -102,6 +115,9 @@ export const LabsScorecardSchema = z.object({
   metrics: MetricMapSchema,
   baseline_deltas: MetricMapSchema,
   policy: LabsScorecardPolicySchema.optional(),
+  governance_state: LabsGovernanceStateSchema.optional(),
+  governance_reasons: z.array(z.string()).optional(),
+  promotion_governance: LabsPromotionGovernanceSchema.optional(),
 }).strict();
 
 export const LabsReplaySchema = z.object({

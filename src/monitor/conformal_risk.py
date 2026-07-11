@@ -24,8 +24,9 @@ References:
 """
 
 import logging
+import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
@@ -36,6 +37,7 @@ __all__ = [
     'ConformalRiskQuantifier',
     'conformal_var',
     'conformal_cvar',
+    'conformal_coverage_diagnostics',
 ]
 
 
@@ -216,3 +218,177 @@ def conformal_cvar(returns: np.ndarray, alpha: float = 0.05) -> float:
         return var_threshold
 
     return float(np.mean(tail))
+
+
+def _bernoulli_log_likelihood(successes: int, failures: int, probability: float) -> float:
+    """Log-likelihood for Bernoulli counts, safely handling 0*log(0)."""
+    probability = min(max(float(probability), 1e-12), 1.0 - 1e-12)
+    ll = 0.0
+    if successes:
+        ll += successes * math.log(probability)
+    if failures:
+        ll += failures * math.log1p(-probability)
+    return ll
+
+
+def _chi_square_sf(statistic: float, degrees_of_freedom: int) -> float:
+    """Survival function for the chi-square cases used by VaR backtests."""
+    statistic = max(float(statistic), 0.0)
+    if degrees_of_freedom == 1:
+        return float(math.erfc(math.sqrt(statistic / 2.0)))
+    if degrees_of_freedom == 2:
+        return float(math.exp(-statistic / 2.0))
+    raise ValueError("Only chi-square df=1 and df=2 are supported")
+
+
+def _longest_true_run(values: np.ndarray) -> int:
+    longest = 0
+    current = 0
+    for value in values:
+        if bool(value):
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return longest
+
+
+def _coverage_summary(
+    exceedances: np.ndarray,
+    *,
+    alpha: float,
+    rolling_window: int,
+    include_schema: bool,
+) -> Dict[str, Any]:
+    n_obs = int(len(exceedances))
+    exceedance_count = int(np.sum(exceedances))
+    exceedance_rate = float(exceedance_count / n_obs) if n_obs else 0.0
+    coverage_rate = float(1.0 - exceedance_rate)
+    expected_exceedance_rate = float(alpha)
+
+    phat = exceedance_rate
+    ll_null = _bernoulli_log_likelihood(
+        exceedance_count,
+        n_obs - exceedance_count,
+        expected_exceedance_rate,
+    )
+    ll_alt = _bernoulli_log_likelihood(
+        exceedance_count,
+        n_obs - exceedance_count,
+        phat,
+    )
+    kupiec_statistic = max(0.0, 2.0 * (ll_alt - ll_null))
+    kupiec_p_value = _chi_square_sf(kupiec_statistic, 1) if n_obs else 1.0
+
+    if n_obs >= 2:
+        previous = exceedances[:-1].astype(bool)
+        current = exceedances[1:].astype(bool)
+        n00 = int(np.sum(~previous & ~current))
+        n01 = int(np.sum(~previous & current))
+        n10 = int(np.sum(previous & ~current))
+        n11 = int(np.sum(previous & current))
+        transition_exceedances = n01 + n11
+        transition_non_exceedances = n00 + n10
+        transition_count = n_obs - 1
+        pi = transition_exceedances / transition_count if transition_count else 0.0
+        pi01 = n01 / (n00 + n01) if (n00 + n01) else 0.0
+        pi11 = n11 / (n10 + n11) if (n10 + n11) else 0.0
+
+        ll_independent = (
+            _bernoulli_log_likelihood(n01, n00, pi)
+            + _bernoulli_log_likelihood(n11, n10, pi)
+        )
+        ll_markov = (
+            _bernoulli_log_likelihood(n01, n00, pi01)
+            + _bernoulli_log_likelihood(n11, n10, pi11)
+        )
+        christoffersen_statistic = max(0.0, 2.0 * (ll_markov - ll_independent))
+        christoffersen_p_value = _chi_square_sf(christoffersen_statistic, 1)
+    else:
+        christoffersen_statistic = 0.0
+        christoffersen_p_value = 1.0
+
+    conditional_coverage_statistic = kupiec_statistic + christoffersen_statistic
+    conditional_coverage_p_value = _chi_square_sf(conditional_coverage_statistic, 2)
+
+    effective_window = max(1, min(int(rolling_window), n_obs)) if n_obs else 0
+    rolling_exceedance_rate = (
+        float(np.mean(exceedances[-effective_window:])) if effective_window else 0.0
+    )
+
+    summary: Dict[str, Any] = {
+        "observations": n_obs,
+        "alpha": expected_exceedance_rate,
+        "expected_exceedance_rate": expected_exceedance_rate,
+        "exceedance_count": exceedance_count,
+        "exceedance_rate": round(exceedance_rate, 6),
+        "coverage_rate": round(coverage_rate, 6),
+        "coverage_pass": bool(kupiec_p_value >= 0.05),
+        "rolling_window": effective_window,
+        "rolling_exceedance_rate": round(rolling_exceedance_rate, 6),
+        "longest_violation_cluster": _longest_true_run(exceedances),
+        "kupiec_statistic": round(kupiec_statistic, 6),
+        "kupiec_p_value": round(kupiec_p_value, 6),
+        "kupiec_pass": bool(kupiec_p_value >= 0.05),
+        "christoffersen_statistic": round(christoffersen_statistic, 6),
+        "christoffersen_p_value": round(christoffersen_p_value, 6),
+        "christoffersen_pass": bool(christoffersen_p_value >= 0.05),
+        "conditional_coverage_statistic": round(conditional_coverage_statistic, 6),
+        "conditional_coverage_p_value": round(conditional_coverage_p_value, 6),
+        "conditional_coverage_pass": bool(conditional_coverage_p_value >= 0.05),
+    }
+    if include_schema:
+        summary = {"schema_version": "conformal-coverage/v1", **summary}
+    return summary
+
+
+def conformal_coverage_diagnostics(
+    returns: np.ndarray,
+    var_thresholds: np.ndarray | float,
+    *,
+    alpha: float = 0.05,
+    rolling_window: int = 252,
+    regime_labels: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Backtest conformal VaR coverage with standard exceedance diagnostics.
+
+    An exceedance is a realized return less than or equal to the VaR threshold.
+    The function is monitoring-only: it returns machine-readable diagnostics
+    and does not prescribe allocation, alerting, or routing decisions.
+    """
+    returns_arr = np.asarray(returns, dtype=float)
+    thresholds_arr = np.asarray(var_thresholds, dtype=float)
+    if thresholds_arr.ndim == 0:
+        thresholds_arr = np.full_like(returns_arr, float(thresholds_arr), dtype=float)
+
+    if len(returns_arr) != len(thresholds_arr):
+        raise ValueError("returns and var_thresholds must have the same length")
+    if not 0 < alpha < 1:
+        raise ValueError("alpha must be between 0 and 1")
+
+    finite_mask = np.isfinite(returns_arr) & np.isfinite(thresholds_arr)
+    returns_arr = returns_arr[finite_mask]
+    thresholds_arr = thresholds_arr[finite_mask]
+    exceedances = returns_arr <= thresholds_arr
+
+    diagnostics = _coverage_summary(
+        exceedances,
+        alpha=alpha,
+        rolling_window=rolling_window,
+        include_schema=True,
+    )
+
+    if regime_labels is not None and len(regime_labels) == len(finite_mask):
+        labels = np.asarray(regime_labels, dtype=object)[finite_mask]
+        by_regime: Dict[str, Any] = {}
+        for label in dict.fromkeys(str(item) for item in labels):
+            regime_mask = labels == label
+            by_regime[label] = _coverage_summary(
+                exceedances[regime_mask],
+                alpha=alpha,
+                rolling_window=rolling_window,
+                include_schema=False,
+            )
+        diagnostics["by_regime"] = by_regime
+
+    return diagnostics

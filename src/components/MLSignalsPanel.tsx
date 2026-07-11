@@ -1,32 +1,7 @@
 import React from 'react';
+import type { SignalsData } from '../types/live';
 
-interface FeatureData {
-  vix_level?: number | null;
-  trend_direction?: number | null;
-  price_vs_sma20?: number | null;
-  return_5d?: number | null;
-  spy_correlation?: number | null;
-}
-
-interface PredictionData {
-  predicted_return?: number | null;
-  confidence?: number | null;
-  direction?: string | null;
-}
-
-interface GridSearchData {
-  best_sharpe?: number | null;
-  best_params?: Record<string, number | string> | null;
-  configs_tested?: number | null;
-}
-
-export interface MLSignalsData {
-  available: boolean;
-  timestamp: string | null;
-  predictions: Record<string, PredictionData>;
-  features: Record<string, FeatureData>;
-  grid_search: GridSearchData;
-}
+type MLSignalsData = SignalsData['ml_signals'];
 
 interface MLSignalsPanelProps {
   data: MLSignalsData | null;
@@ -54,6 +29,43 @@ function DirectionIndicator({ direction }: { direction: string | null | undefine
   );
 }
 
+function RegimeIndicator({ regime }: { regime: string | null | undefined }) {
+  if (!regime) return <span style={{ color: '#6b7280' }}>—</span>;
+  const normalized = regime.toLowerCase();
+  const color = normalized === 'bull'
+    ? '#10b981'
+    : normalized === 'bear'
+      ? '#ef4444'
+      : '#94a3b8';
+
+  return (
+    <span style={{ fontSize: 11, color }}>
+      {regime}
+    </span>
+  );
+}
+
+function formatProbabilitySummary(probabilities: Record<string, number> | null | undefined) {
+  const keys = Object.keys(probabilities ?? {});
+  if (!probabilities || keys.length === 0) return '—';
+  const preferredOrder = ['bear', 'neutral', 'bull'];
+  const orderedKeys = [
+    ...preferredOrder.filter((key) => key in probabilities),
+    ...keys.filter((key) => !preferredOrder.includes(key)).sort(),
+  ];
+
+  return orderedKeys
+    .map((key) => `${key} ${(probabilities[key] * 100).toFixed(0)}%`)
+    .join(', ');
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return value.slice(0, 10);
+}
+
 export function MLSignalsPanel({ data }: MLSignalsPanelProps) {
   if (!data || !data.available) {
     return (
@@ -68,26 +80,60 @@ export function MLSignalsPanel({ data }: MLSignalsPanelProps) {
 
   const featureSymbols = Object.keys(data.features);
   const predictionSymbols = Object.keys(data.predictions);
-  const hasGridSearch = data.grid_search?.best_sharpe != null;
+  const hasGridSearch = data.grid_search?.sharpe != null;
+  const gridSearchStatus = data.grid_search?.freshness_status === 'frozen_benchmark'
+    ? 'Frozen benchmark'
+    : data.grid_search?.freshness_status;
 
   return (
     <div className="panel">
       <h3>ML Signals</h3>
 
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '6px 12px',
+        marginBottom: 8,
+        fontSize: 11,
+        color: '#94a3b8',
+      }}>
+        <span>Generated {formatDate(data.generated_at ?? data.timestamp)}</span>
+        <span>
+          Feature as of {formatDate(data.feature_as_of)}
+          {data.feature_freshness_status ? ` · ${data.feature_freshness_status}` : ''}
+        </span>
+        {data.feature_source_artifact && <span>{data.feature_source_artifact}</span>}
+      </div>
+
       {/* Grid search summary */}
       {hasGridSearch && (
-        <div className="panel-grid">
-          <div className="metric">
-            <span className="label">Best Sharpe</span>
-            <span className="value" style={{
-              color: (data.grid_search.best_sharpe || 0) > 0.5 ? '#10b981' : '#f59e0b',
-            }}>
-              {(data.grid_search.best_sharpe || 0).toFixed(2)}
-            </span>
+        <div>
+          <div className="panel-grid">
+            <div className="metric">
+              <span className="label">Sharpe</span>
+              <span className="value" style={{
+                color: (data.grid_search.sharpe ?? 0) > 0.5 ? '#10b981' : '#f59e0b',
+              }}>
+                {(data.grid_search.sharpe ?? 0).toFixed(2)}
+              </span>
+            </div>
+            <div className="metric">
+              <span className="label">Volatility</span>
+              <span className="value">
+                {data.grid_search.volatility != null
+                  ? `${(data.grid_search.volatility * 100).toFixed(1)}%`
+                  : '—'}
+              </span>
+            </div>
           </div>
-          <div className="metric">
-            <span className="label">Configs Tested</span>
-            <span className="value">{data.grid_search.configs_tested || 0}</span>
+          <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>
+            {gridSearchStatus && <span>{gridSearchStatus}</span>}
+            {data.grid_search.benchmark_timestamp && (
+              <span> · {formatDate(data.grid_search.benchmark_timestamp)}</span>
+            )}
+            {data.grid_search.source_artifact && (
+              <span> · {data.grid_search.source_artifact}</span>
+            )}
           </div>
         </div>
       )}
@@ -100,9 +146,10 @@ export function MLSignalsPanel({ data }: MLSignalsPanelProps) {
             <thead>
               <tr style={{ color: '#94a3b8', borderBottom: '1px solid #1e293b' }}>
                 <th style={{ textAlign: 'left', padding: '2px 4px' }}>Symbol</th>
-                <th style={{ textAlign: 'center', padding: '2px 4px' }}>Dir</th>
-                <th style={{ textAlign: 'right', padding: '2px 4px' }}>Return</th>
+                <th style={{ textAlign: 'center', padding: '2px 4px' }}>Predicted Regime</th>
+                <th style={{ textAlign: 'left', padding: '2px 4px' }}>Probabilities</th>
                 <th style={{ textAlign: 'right', padding: '2px 4px' }}>Conf</th>
+                <th style={{ textAlign: 'right', padding: '2px 4px' }}>Source</th>
               </tr>
             </thead>
             <tbody>
@@ -114,18 +161,16 @@ export function MLSignalsPanel({ data }: MLSignalsPanelProps) {
                       {sym}
                     </td>
                     <td style={{ textAlign: 'center', padding: '2px 4px' }}>
-                      <DirectionIndicator direction={pred?.direction} />
+                      <RegimeIndicator regime={pred?.predicted_regime} />
                     </td>
-                    <td style={{
-                      textAlign: 'right', padding: '2px 4px',
-                      color: (pred?.predicted_return || 0) > 0 ? '#10b981' : '#ef4444',
-                    }}>
-                      {pred?.predicted_return != null
-                        ? `${pred.predicted_return >= 0 ? '+' : ''}${(pred.predicted_return * 100).toFixed(1)}%`
-                        : '—'}
+                    <td style={{ textAlign: 'left', padding: '2px 4px', color: '#cbd5e1' }}>
+                      {formatProbabilitySummary(pred?.probabilities)}
                     </td>
                     <td style={{ textAlign: 'right', padding: '2px 4px', color: '#94a3b8' }}>
                       {pred?.confidence != null ? `${(pred.confidence * 100).toFixed(0)}%` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '2px 4px', color: '#94a3b8' }}>
+                      {pred?.heuristic == null ? '—' : pred.heuristic ? 'Heuristic' : 'Model'}
                     </td>
                   </tr>
                 );

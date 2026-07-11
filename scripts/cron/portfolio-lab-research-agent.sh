@@ -13,7 +13,8 @@ if cron_guard_start "pf-research" 300; then
 
     set +e
     "$PYTHON_RUNTIME" src/research/agent.py 2>&1 | tee -a data/research.log
-    EXIT=${PIPESTATUS[0]}
+    research_pipeline_status=("${PIPESTATUS[@]}")
+    EXIT="$(cron_pipeline_exit "${research_pipeline_status[0]}" "${research_pipeline_status[1]}")"
     set -e
 
     for prompt in work/claude_*.md; do

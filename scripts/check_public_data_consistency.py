@@ -12,8 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.monitor.market_data_consistency import reconcile_compact_prices_with_market_db
+
 
 REQUIRED_DATA_FILES = ("source_manifest.json", "index.json", "health.json")
+IGNORED_UNMANAGED_PUBLIC_JSON = {
+    ".public_data_index_hash_cache.json",
+    *REQUIRED_DATA_FILES,
+}
 
 
 @dataclass(frozen=True)
@@ -124,6 +130,128 @@ def _check_source_manifest_identity(
         errors.append("public/data/index.json source_manifest.sha256 does not match public/data/source_manifest.json")
 
 
+def _check_present_index_entries_resolve(
+    public_data: Path,
+    public_index: dict[str, Any] | None,
+    errors: list[str],
+) -> None:
+    if public_index is None:
+        return
+    entries = public_index.get("entries")
+    if not isinstance(entries, list):
+        errors.append("public/data/index.json entries must be an array")
+        return
+
+    public_root = public_data.resolve()
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict) or entry.get("status") != "present":
+            continue
+        filename = entry.get("filename")
+        path_value = entry.get("path")
+        label = filename if isinstance(filename, str) and filename else f"entries[{index}]"
+        if not isinstance(path_value, str) or not path_value:
+            errors.append(f"public/data/index.json entry {label} is marked present but path is missing")
+            continue
+        path = Path(path_value)
+        if path.is_absolute() or ".." in path.parts:
+            errors.append(
+                f"public/data/index.json entry {label} is marked present but path {path_value} escapes public/data"
+            )
+            continue
+        resolved = (public_data / path).resolve()
+        try:
+            resolved.relative_to(public_root)
+        except ValueError:
+            errors.append(
+                f"public/data/index.json entry {label} is marked present but path {path_value} escapes public/data"
+            )
+            continue
+        if not resolved.exists():
+            errors.append(
+                f"public/data/index.json entry {label} is marked present but public/data/{path_value} is missing"
+            )
+
+
+def _indexed_public_paths(public_index: dict[str, Any] | None) -> set[str]:
+    if public_index is None:
+        return set()
+    indexed: set[str] = set()
+    entries = public_index.get("entries")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            filename = entry.get("filename")
+            path = entry.get("path")
+            if isinstance(filename, str) and filename:
+                indexed.add(filename)
+            if isinstance(path, str) and path:
+                indexed.add(path)
+            pagination = entry.get("pagination")
+            pages = pagination.get("pages") if isinstance(pagination, dict) else None
+            if isinstance(pages, list):
+                for page in pages:
+                    if not isinstance(page, dict):
+                        continue
+                    page_path = page.get("path")
+                    if isinstance(page_path, str) and page_path:
+                        indexed.add(page_path)
+    files = public_index.get("files")
+    if isinstance(files, list):
+        indexed.update(file for file in files if isinstance(file, str) and file)
+    return indexed
+
+
+def _check_source_manifest_quality_artifacts_are_indexed(
+    source_manifest: dict[str, Any] | None,
+    public_index: dict[str, Any] | None,
+    errors: list[str],
+) -> None:
+    if source_manifest is None or public_index is None:
+        return
+    artifacts = source_manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        return
+    indexed = _indexed_public_paths(public_index)
+    checked_quality_artifacts: set[str] = set()
+    for row in artifacts:
+        if not isinstance(row, dict):
+            continue
+        quality = row.get("data_quality")
+        if not isinstance(quality, dict):
+            continue
+        quality_artifact = quality.get("artifact")
+        if not isinstance(quality_artifact, str) or not quality_artifact:
+            continue
+        if quality_artifact in checked_quality_artifacts:
+            continue
+        checked_quality_artifacts.add(quality_artifact)
+        if quality_artifact not in indexed:
+            errors.append(
+                "public/data/source_manifest.json references "
+                f"{quality_artifact} but public/data/index.json has no entry for it"
+            )
+
+
+def _check_public_json_artifacts_are_indexed(
+    public_data: Path,
+    public_index: dict[str, Any] | None,
+    errors: list[str],
+) -> None:
+    if public_index is None or not public_data.exists():
+        return
+    indexed = _indexed_public_paths(public_index)
+    for path in sorted(public_data.rglob("*.json")):
+        try:
+            relative_path = path.relative_to(public_data).as_posix()
+        except ValueError:
+            continue
+        if relative_path in IGNORED_UNMANAGED_PUBLIC_JSON or path.name in IGNORED_UNMANAGED_PUBLIC_JSON:
+            continue
+        if relative_path not in indexed and path.name not in indexed:
+            errors.append(f"public/data/{relative_path} exists but is absent from public/data/index.json")
+
+
 def _check_dist_matches_public(app_dir: Path, errors: list[str]) -> None:
     public_data = app_dir / "public" / "data"
     dist_data = app_dir / "dist" / "data"
@@ -140,6 +268,32 @@ def _check_dist_matches_public(app_dir: Path, errors: list[str]) -> None:
             errors.append(f"dist/data/{filename} does not match public/data/{filename}")
 
 
+def _check_compact_prices_match_market_db(app_dir: Path, errors: list[str]) -> None:
+    prices_path = app_dir / "public" / "data" / "prices.json"
+    if not prices_path.exists():
+        return
+    report = reconcile_compact_prices_with_market_db(
+        prices_path=prices_path,
+        db_path=app_dir / "data" / "market.db",
+    )
+    if report["status"] == "ok":
+        return
+    if report["status"] == "unavailable" and report["failure_type"] == "compact_prices_unavailable":
+        return
+    remediation = report.get("remediation_command")
+    for offender in report.get("top_offenders", []):
+        message = offender.get("message")
+        if isinstance(message, str) and message:
+            if remediation:
+                message = f"{message}. Remediation: {remediation}"
+            errors.append(message)
+    if not report.get("top_offenders"):
+        message = str(report.get("message") or "market.db did not reconcile with public/data/prices.json")
+        if remediation:
+            message = f"{message}. Remediation: {remediation}"
+        errors.append(message)
+
+
 def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
     """Return deploy-blocking public data consistency errors for an app checkout."""
     root = Path(app_dir)
@@ -153,7 +307,11 @@ def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
     _load_json(public_data / "health.json", errors)
     _check_timestamp_order(source_manifest, public_index, errors)
     _check_source_manifest_identity(source_manifest_path, source_manifest, public_index, errors)
+    _check_present_index_entries_resolve(public_data, public_index, errors)
+    _check_source_manifest_quality_artifacts_are_indexed(source_manifest, public_index, errors)
+    _check_public_json_artifacts_are_indexed(public_data, public_index, errors)
     _check_dist_matches_public(root, errors)
+    _check_compact_prices_match_market_db(root, errors)
 
     return ConsistencyResult(ok=not errors, errors=errors, warnings=warnings)
 

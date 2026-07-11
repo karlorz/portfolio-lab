@@ -823,18 +823,40 @@ class SignalHealthTracker:
                 "ic_half_life_days": half_life,
             }
 
+        with sqlite_connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            total_predictions = cursor.execute(
+                "SELECT COUNT(*) FROM signal_predictions"
+            ).fetchone()[0]
+            resolved_predictions = cursor.execute(
+                "SELECT COUNT(*) FROM signal_predictions WHERE actual_direction IS NOT NULL"
+            ).fetchone()[0]
+        pending_predictions = max(0, int(total_predictions) - int(resolved_predictions))
+
+        if len(scores) == 0:
+            overall_health = "insufficient_data" if pending_predictions else "unknown"
+            status = "insufficient_data" if pending_predictions else "no_data"
+        else:
+            overall_health = "healthy" if healthy_count >= len(scores) * 0.6 else "degraded"
+            status = overall_health
+
         return {
             "timestamp": datetime.now().isoformat(),
             "summary": {
                 "healthy": healthy_count,
                 "degraded": degraded_count,
                 "unhealthy": unhealthy_count,
-                "total_tracked": len(scores)
+                "total_tracked": len(scores),
+                "total_predictions": int(total_predictions),
+                "resolved_predictions": int(resolved_predictions),
+                "pending_predictions": pending_predictions,
             },
             "scores": {s: scores[s].to_dict() for s in scores},
             "ic_metrics": ic_data,
             "alerts": [a.to_dict() for a in alerts],
-            "overall_health": "healthy" if healthy_count >= len(scores) * 0.6 else "degraded"
+            "overall_health": overall_health,
+            "status": status,
+            "label_horizon": "SPY actual direction resolved by update_actual_directions for each prediction date",
         }
 
 def backfill_predictions(

@@ -90,7 +90,7 @@ def test_registry_derives_rows_from_plain_result_artifacts_with_sidecar_provenan
     )
 
     row = _rows_by_id(registry)["walk-forward-validation"]
-    assert row == {
+    expected = {
         "experiment_id": "walk-forward-validation",
         "artifact_path": "data/backtest_results/walk_forward_report.json",
         "status": "candidate",
@@ -102,6 +102,37 @@ def test_registry_derives_rows_from_plain_result_artifacts_with_sidecar_provenan
         },
         "baseline_deltas": {"sharpe": 0.17},
     }
+    assert {key: row[key] for key in expected} == expected
+    assert row["governance_state"] == "clear"
+    assert row["governance_reasons"] == []
+    assert validate_artifact(registry).valid is True
+
+
+def test_registry_marks_missing_provenance_candidates_as_governance_blocked(tmp_path: Path) -> None:
+    """Strong metric rows without provenance need explicit public governance disclosure."""
+    from src.research.experiment_registry import build_labs_registry
+
+    _write_json(
+        tmp_path / "data" / "backtest_results" / "metric_only_result.json",
+        {
+            "sharpe_ratio": 1.21,
+            "cagr": 12.4,
+            "max_drawdown": -14.0,
+            "baseline_sharpe": 0.95,
+        },
+    )
+
+    registry = build_labs_registry(
+        data_dirs=[tmp_path / "data"],
+        project_root=tmp_path,
+        generated_at="2026-06-08T01:00:00+00:00",
+    )
+
+    row = _rows_by_id(registry)["artifact:metric_only_result"]
+    assert row["status"] == "candidate"
+    assert row["provenance_status"] == "missing"
+    assert row["governance_state"] == "governance_blocked"
+    assert row["governance_reasons"] == ["provenance_missing"]
     assert validate_artifact(registry).valid is True
 
 

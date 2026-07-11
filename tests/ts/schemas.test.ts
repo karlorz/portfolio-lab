@@ -17,6 +17,7 @@ import {
   VIXTermStructureSchema,
   VIXOverlaySchema,
   SignalsDataSchema,
+  FredMacroSchema,
   validateSignalsData,
   DashboardDataSchema,
   AlertsDataSchema,
@@ -66,6 +67,28 @@ function validGarchCvar() {
     current_volatility: 0.15,
     forecast_volatility: 0.16,
     volatility_clustering: 'normal' as const,
+    coverage_diagnostics: {
+      schema_version: 'conformal-coverage/v1',
+      observations: 500,
+      alpha: 0.05,
+      expected_exceedance_rate: 0.05,
+      exceedance_count: 25,
+      exceedance_rate: 0.05,
+      coverage_rate: 0.95,
+      coverage_pass: true,
+      rolling_window: 252,
+      rolling_exceedance_rate: 0.0476,
+      longest_violation_cluster: 1,
+      kupiec_statistic: 0,
+      kupiec_p_value: 1,
+      kupiec_pass: true,
+      christoffersen_statistic: 0,
+      christoffersen_p_value: 1,
+      christoffersen_pass: true,
+      conditional_coverage_statistic: 0,
+      conditional_coverage_p_value: 1,
+      conditional_coverage_pass: true,
+    },
   };
 }
 
@@ -93,10 +116,12 @@ function validSmartRebalance() {
     in_optimal_window: true,
     ytd_cost_bps: 45,
     remaining_budget_pct: 0.55,
+    remaining_budget_ratio: 0.0055,
     status: {
       ytd_cost_bps: 45,
       ytd_cost_pct: 0.0045,
       remaining_budget_pct: 0.55,
+      remaining_budget_ratio: 0.0055,
       is_over_budget: false,
       is_warning: false,
       last_rebalance: '2026-05-20T10:00:00Z',
@@ -111,6 +136,31 @@ function validSmartRebalance() {
   };
 }
 
+function validMarlStatus(): Record<string, unknown> {
+  return {
+    schema_version: 'marl-runtime-status/v1',
+    available: false,
+    timestamp: '2026-05-26T12:00:00Z',
+    runtime: {
+      version: 'unknown',
+      device: 'unknown',
+      agents_loaded: [],
+      signal_integrator_connected: false,
+      checkpoint_loaded: false,
+      inference_count: 0,
+      current_allocation: {},
+      graph_metrics: {},
+    },
+    execution_role: {
+      role: 'research_shadow_non_routed',
+      routed: false,
+      routed_by: null,
+      live_authoritative: false,
+      description: 'MARL status is visible for research/shadow diagnostics; order routing still consumes target_allocations.',
+    },
+  };
+}
+
 function validSignalsData(): Record<string, unknown> {
   return {
     timestamp: '2026-05-26T12:00:00Z',
@@ -121,6 +171,7 @@ function validSignalsData(): Record<string, unknown> {
     cash: 5000,
     total_value: 110000,
     recent_orders: [validRecentOrder()],
+    marl_status: validMarlStatus(),
     ml_signals: {
       available: false,
       timestamp: null,
@@ -142,7 +193,17 @@ function validSignalsData(): Record<string, unknown> {
     smart_rebalance: validSmartRebalance(),
     // Untyped panel
     behavioral_sentiment: { score: 0.7, signal: 'bullish' },
-    crypto_allocation: { btc: 0.02 },
+    crypto_allocation: {
+      active: true,
+      btc_weight: 0.6,
+      eth_weight: 0.4,
+      total_crypto: 0.02,
+      btc_momentum_6m: 0.12,
+      eth_momentum_6m: 0.08,
+      btc_vol_regime: 'normal',
+      eth_vol_regime: 'normal',
+      confidence: 0.55,
+    },
   };
 }
 
@@ -207,6 +268,48 @@ describe('YieldCurveSchema', () => {
     const result = YieldCurveSchema.safeParse(rest);
     expect(result.success).toBe(true);
   });
+
+  it('preserves FRED source provenance metadata', () => {
+    const result = YieldCurveSchema.safeParse({
+      ...validYieldCurve(),
+      source_mode: 'synthetic',
+      source_status: 'degraded',
+      source_reason: 'FRED_API_KEY missing',
+      source_provider: 'FRED',
+      source_latest_observation: '2026-07-02',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('expected source provenance to parse');
+    expect(result.data.source_mode).toBe('synthetic');
+    expect(result.data.source_status).toBe('degraded');
+  });
+});
+
+describe('FredMacroSchema', () => {
+  it('preserves source readiness metadata', () => {
+    const result = FredMacroSchema.safeParse({
+      regime: 'UNKNOWN',
+      confidence: 0,
+      recession_probability: 0,
+      inflation_pressure: 0,
+      monetary_stance: 'unknown',
+      manufacturing_health: 50,
+      credit_conditions: 'unknown',
+      indicators: {},
+      timestamp: '2026-07-06T00:00:00Z',
+      source_mode: 'unavailable',
+      cache_status: 'empty',
+      api_key_configured: false,
+      indicators_observed: false,
+      reason: 'empty_cache',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('expected FRED readiness to parse');
+    expect(result.data.source_mode).toBe('unavailable');
+    expect(result.data.indicators_observed).toBe(false);
+  });
 });
 
 describe('PositionSchema', () => {
@@ -258,6 +361,12 @@ describe('GarchCvarSchema', () => {
     const { cvar_95, ...rest } = validGarchCvar();
     const result = GarchCvarSchema.safeParse(rest);
     expect(result.success).toBe(false);
+  });
+
+  it('keeps conformal coverage diagnostics optional for old payloads', () => {
+    const { coverage_diagnostics, ...legacyPayload } = validGarchCvar();
+    const result = GarchCvarSchema.safeParse(legacyPayload);
+    expect(result.success).toBe(true);
   });
 });
 
@@ -315,6 +424,20 @@ describe('SmartRebalanceSchema', () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+
+  it('rejects mixed remaining budget percent units', () => {
+    const result = SmartRebalanceSchema.safeParse({
+      ...validSmartRebalance(),
+      remaining_budget_pct: 0.005,
+      remaining_budget_ratio: 0.005,
+      status: {
+        ...validSmartRebalance().status,
+        remaining_budget_pct: 0.5,
+        remaining_budget_ratio: 0.005,
+      },
+    });
+    expect(result.success).toBe(false);
   });
 });
 
@@ -613,6 +736,7 @@ describe('SignalsDataSchema', () => {
         features: {},
         grid_search: { available: false, timestamp: null, top_allocation: null, sharpe: null, volatility: null },
       },
+      marl_status: validMarlStatus(),
     };
     const result = SignalsDataSchema.safeParse(minimal);
     expect(result.success).toBe(true);
@@ -676,11 +800,11 @@ describe('SignalsDataSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('passes through arbitrary data for crypto_allocation (z.unknown() record)', () => {
+  it('rejects arbitrary data for typed crypto_allocation panel', () => {
     const data = validSignalsData();
     data.crypto_allocation = { btc: 0.5, eth: 0.3, sol: 0.2 };
     const result = SignalsDataSchema.safeParse(data);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
   it('accepts the generated signals artifact optional panel shapes when present', () => {
@@ -696,9 +820,9 @@ describe('SignalsDataSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('allows deeply nested unknown data in signal panels', () => {
+  it('allows deeply nested unknown data in untyped behavioral_sentiment panel', () => {
     const data = validSignalsData();
-    data.ensemble_voting = {
+    data.behavioral_sentiment = {
       weights: [0.3, 0.5, 0.2],
       signals: { msm: 0.5, carv: -0.2 },
       meta: { generated_at: '2026-05-26', version: 'v2' },

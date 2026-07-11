@@ -130,6 +130,17 @@ class TestVIXTermStructureSignal:
         sig = _make_signal(vix6m=None)
         assert sig.vix6m is None
 
+    def test_signal_snapshot_bridge_normalizes_percentage_confidence(self):
+        sig = _make_signal(confidence=90.0)
+
+        snapshot = sig.to_signal_snapshot()
+        reading = snapshot.to_signal_reading()
+
+        assert snapshot.confidence == pytest.approx(0.9)
+        assert 0.0 <= snapshot.confidence <= 1.0
+        assert reading.confidence == pytest.approx(0.9)
+        assert 0.0 <= reading.confidence <= 1.0
+
 
 # ── VIXTermStructureCalculator constants ─────────────────────────────
 

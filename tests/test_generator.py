@@ -6,6 +6,8 @@ health status, alerts, broker data, and stats calculation.
 import json
 import inspect
 import sqlite3
+import sys
+import types
 import numpy as np
 
 import pytest
@@ -76,6 +78,256 @@ def _write_ok_source_manifest(public_dir: Path) -> None:
     }))
 
 
+def _write_data_quality_report(public_dir: Path, *, status: str = "ok", stale_latest_dates: int = 0) -> None:
+    """Write a compact current data_quality.json report for alert/SLO fixtures."""
+    issue_counts = {
+        "duplicate_dates": 0,
+        "empty_symbols": 0,
+        "extreme_returns": 0,
+        "internal_gaps": 0,
+        "invalid_dates": 0,
+        "invalid_prices": 0,
+        "missing_required_keys": 0,
+        "non_monotonic_rows": 0,
+        "non_object_records": 0,
+        "split_like_returns": 0,
+        "stale_latest_dates": stale_latest_dates,
+        "total": stale_latest_dates,
+    }
+    (public_dir / "data_quality.json").write_text(json.dumps({
+        "artifact": "data_quality.json",
+        "schema_version": "price-data-quality/v1",
+        "generated_at": "2026-06-16T12:00:00Z",
+        "status": status,
+        "issue_counts": issue_counts,
+        "symbols": [
+            {"symbol": "SPY", "status": "ok", "latest_date": "2026-06-15"},
+            {
+                "symbol": "GLD",
+                "status": "fail" if stale_latest_dates else "ok",
+                "latest_date": "2026-06-11" if stale_latest_dates else "2026-06-15",
+                "stale_latest_date": {
+                    "reference_date": "2026-06-15",
+                    "latest_date": "2026-06-11",
+                    "latest_lag_days": 2,
+                } if stale_latest_dates else None,
+            },
+        ],
+    }))
+
+
+class TestFredMacroProvenance:
+    """FRED macro unavailable states should be explicit and non-predictive."""
+
+    def test_record_ic_data_skips_unavailable_fred_macro(self, tmp_path, monkeypatch):
+        """Fallback FRED confidence must not be staged as an IC prediction."""
+        gen, _ = _make_generator(tmp_path)
+
+        class FakeICMonitor:
+            def __init__(self):
+                self.staged = []
+
+            def load_state(self):
+                return None
+
+            def has_staged_predictions(self):
+                return False
+
+            def stage_predictions(self, predictions, staged_date):
+                self.staged.append((predictions, staged_date))
+
+            def save_state(self):
+                return None
+
+        monitor = FakeICMonitor()
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.ic_decay_monitor",
+            types.SimpleNamespace(ICMonitor=lambda: monitor),
+        )
+
+        gen._record_ic_data({
+            "fred_macro": {
+                "regime": "UNKNOWN",
+                "confidence": 0.5,
+                "indicators": {},
+                "indicators_observed": False,
+                "source_mode": "unavailable",
+                "status": "unavailable",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+
+        assert monitor.staged == []
+        gen.conn.close()
+
+    def test_staleness_classifies_unavailable_fred_macro(self, tmp_path):
+        """Unavailable FRED macro should appear in freshness semantics."""
+        gen, _ = _make_generator(tmp_path)
+
+        staleness = gen._check_signal_staleness({
+            "fred_macro": {
+                "regime": "UNKNOWN",
+                "confidence": 0.0,
+                "indicators": {},
+                "indicators_observed": False,
+                "source_mode": "unavailable",
+                "status": "unavailable",
+            },
+        })
+
+        assert "fred_macro" in staleness["unavailable_signals"]
+        assert staleness["signal_timestamps"]["fred_macro"] is None
+        assert staleness["staleness_decay"]["fred_macro"] == 0.0
+        gen.conn.close()
+
+
+class TestTurnoverValidatorPublicArtifact:
+    """Public turnover-validator diagnostics must separate production and fixture keys."""
+
+    def test_generate_turnover_validator_json_groups_non_canonical_sources(self, tmp_path, monkeypatch):
+        from src.strategy.turnover_validator import TurnoverValidator
+
+        monkeypatch.setattr(
+            TurnoverValidator,
+            "get_state_diagnostics",
+            lambda _self: {
+                "multi_speed_momentum": {"periods": 7, "turnover_penalty": 0.1},
+                "src": {"periods": 7, "turnover_penalty": 0.2},
+            },
+        )
+
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            path = gen.generate_turnover_validator_json()
+
+        assert path == tmp_path / "turnover_validator.json"
+        payload = json.loads(path.read_text())
+        assert "src" not in payload
+        assert payload["signals"] == {
+            "multi_speed_momentum": {"periods": 7, "turnover_penalty": 0.1},
+        }
+        assert payload["synthetic_baselines"] == {
+            "src": {
+                "metadata": {"source_type": "synthetic_or_fixture"},
+                "diagnostics": {"periods": 7, "turnover_penalty": 0.2},
+            },
+        }
+
+
+class TestPredictionLabelLifecycle:
+    """IC staging should follow market-data label lifecycle, not wall-clock runs."""
+
+    def _make_spy_generator(self, tmp_path, rows):
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE prices (
+                symbol TEXT,
+                date TEXT,
+                close REAL,
+                PRIMARY KEY (symbol, date)
+            )
+            """
+        )
+        for date, close in rows:
+            conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", date, close))
+        conn.commit()
+        conn.row_factory = sqlite3.Row
+
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        gen.conn = conn
+        return gen
+
+    @staticmethod
+    def _ic_output(value=0.4):
+        return {
+            "ensemble_voting": {
+                "equity_bias": value,
+                "gold_bias": -0.1,
+                "duration_bias": 0.2,
+                "weighted_consensus": value,
+            }
+        }
+
+    def test_record_ic_data_stages_latest_market_data_date_not_wall_clock(
+        self, tmp_path, monkeypatch
+    ):
+        """Staged prediction date must not move past the latest available SPY row."""
+        from src.monitor import ic_decay_monitor
+
+        monkeypatch.setattr(
+            ic_decay_monitor,
+            "IC_STATE_PATH",
+            tmp_path / "ic_monitor_state.json",
+        )
+        gen = self._make_spy_generator(tmp_path, [("2026-07-02", 100.0)])
+
+        try:
+            gen._record_ic_data(self._ic_output())
+        finally:
+            gen.conn.close()
+
+        state = json.loads((tmp_path / "ic_monitor_state.json").read_text())
+        assert state["__staged__"]["date"] == "2026-07-02"
+
+    def test_record_ic_data_preserves_unresolved_staged_predictions_on_same_market_date(
+        self, tmp_path, monkeypatch
+    ):
+        """Repeated dashboard runs on stale market data must not overwrite unresolved labels."""
+        from src.monitor import ic_decay_monitor
+
+        state_path = tmp_path / "ic_monitor_state.json"
+        monkeypatch.setattr(ic_decay_monitor, "IC_STATE_PATH", state_path)
+        state_path.write_text(json.dumps({
+            "__staged__": {
+                "date": "2026-07-02",
+                "predictions": {"old_signal": 0.25},
+            }
+        }))
+        gen = self._make_spy_generator(tmp_path, [("2026-07-02", 100.0)])
+
+        try:
+            gen._record_ic_data(self._ic_output(value=0.9))
+        finally:
+            gen.conn.close()
+
+        state = json.loads(state_path.read_text())
+        assert state["__staged__"] == {
+            "date": "2026-07-02",
+            "predictions": {"old_signal": 0.25},
+        }
+
+    def test_record_ic_data_resolves_staged_predictions_when_later_spy_row_exists(
+        self, tmp_path, monkeypatch
+    ):
+        """A later SPY close should turn staged predictions into resolved observations."""
+        from src.monitor import ic_decay_monitor
+
+        state_path = tmp_path / "ic_monitor_state.json"
+        monkeypatch.setattr(ic_decay_monitor, "IC_STATE_PATH", state_path)
+        state_path.write_text(json.dumps({
+            "__staged__": {
+                "date": "2026-07-02",
+                "predictions": {"old_signal": 0.5},
+            }
+        }))
+        gen = self._make_spy_generator(
+            tmp_path,
+            [("2026-07-02", 100.0), ("2026-07-03", 102.0)],
+        )
+
+        try:
+            gen._record_ic_data(self._ic_output(value=-0.2))
+        finally:
+            gen.conn.close()
+
+        state = json.loads(state_path.read_text())
+        assert state["old_signal"] == [[0.5, pytest.approx(0.02)]]
+        assert state["__staged__"]["date"] == "2026-07-03"
+
+
 class TestSignalStalenessNormalization:
     """Signal staleness should distinguish stale from optional unavailable."""
 
@@ -95,6 +347,28 @@ class TestSignalStalenessNormalization:
         assert "behavioral_sentiment" in result["unavailable_signals"]
         assert "two_stage_regime" in result["unavailable_signals"]
         assert result["signal_timestamps"]["rebalance_health"] == fresh
+        assert result["healthy_count"] == result["required_count"]
+
+    def test_present_required_sections_without_section_timestamp_use_artifact_generated_at(
+        self,
+        tmp_path,
+    ):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+
+        result = gen._check_signal_staleness({
+            "generated_at": fresh,
+            "ensemble_voting": {"regime": "normal"},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"cvar_95": -0.02},
+            "smart_rebalance": {"decision": "hold"},
+            "rebalance_health": {"status": "ok"},
+        })
+
+        for signal_key in ("ensemble_voting", "garch_cvar", "smart_rebalance", "rebalance_health"):
+            assert signal_key not in result["stale_signals"]
+            assert result["signal_timestamps"][signal_key] == fresh
+            assert result["staleness_decay"][signal_key] > 0.0
         assert result["healthy_count"] == result["required_count"]
 
     def test_required_stale_signal_remains_stale(self, tmp_path):
@@ -128,6 +402,760 @@ class TestSignalStalenessNormalization:
 
         assert "two_stage_regime" not in result["stale_signals"]
         assert "two_stage_regime" in result["unavailable_signals"]
+
+    def test_fresh_date_only_optional_daily_sections_are_not_stale(self, tmp_path):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+        today = datetime.now(timezone.utc).date().isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": fresh},
+            "convexity_harvest": {"date": today, "allocation_pct": 0.0},
+            "volatility_parity": {"date": today, "target_volatility": 10.0},
+        })
+
+        assert "convexity_harvest" not in result["stale_signals"]
+        assert "volatility_parity" not in result["stale_signals"]
+        assert "convexity_harvest" not in result["unavailable_signals"]
+        assert "volatility_parity" not in result["unavailable_signals"]
+        assert result["signal_timestamps"]["convexity_harvest"].startswith(today)
+        assert result["signal_timestamps"]["volatility_parity"].startswith(today)
+
+    def test_stale_date_only_optional_daily_sections_remain_stale(self, tmp_path):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+        stale_date = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": fresh},
+            "convexity_harvest": {"date": stale_date, "allocation_pct": 0.0},
+            "volatility_parity": {"date": stale_date, "target_volatility": 10.0},
+        })
+
+        assert "convexity_harvest" in result["stale_signals"]
+        assert "volatility_parity" in result["stale_signals"]
+        assert result["signal_timestamps"]["convexity_harvest"].startswith(stale_date)
+        assert result["signal_timestamps"]["volatility_parity"].startswith(stale_date)
+        assert result["signal_age_hours"]["convexity_harvest"] >= 24.0
+        assert result["signal_age_hours"]["volatility_parity"] >= 24.0
+
+    def test_optional_active_only_sections_without_freshness_are_unavailable(self, tmp_path):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": fresh},
+            "collar": {"active": True, "status_text": "Collar active"},
+            "bond_momentum": {"active": True, "status_text": "Bonds active"},
+        })
+
+        assert "collar" not in result["stale_signals"]
+        assert "bond_momentum" not in result["stale_signals"]
+        assert "collar" in result["unavailable_signals"]
+        assert "bond_momentum" in result["unavailable_signals"]
+        assert result["signal_timestamps"]["collar"] is None
+        assert result["signal_timestamps"]["bond_momentum"] is None
+
+    def test_future_naive_timestamp_is_bounded_to_fresh_age_and_decay(self, tmp_path):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+        future_naive = (
+            datetime.now(timezone.utc) + timedelta(hours=8)
+        ).replace(tzinfo=None).isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": future_naive},
+        })
+
+        assert result["signal_age_hours"]["rebalance_health"] == 0.0
+        assert result["staleness_decay"]["rebalance_health"] == 1.0
+
+    def test_future_aware_timestamp_cannot_publish_decay_above_one(self, tmp_path):
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+        future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": future},
+        })
+
+        decay_values = result["staleness_decay"].values()
+        age_values = [
+            age for age in result["signal_age_hours"].values()
+            if age is not None
+        ]
+        assert all(age >= 0.0 for age in age_values)
+        assert all(0.0 <= decay <= 1.0 for decay in decay_values)
+
+
+    def test_hedge_selector_signal_discloses_canonical_hedge_roles(self):
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+
+        class FakeSelector:
+            def select(
+                self,
+                vix_level,
+                regime_confidence,
+                regime_label,
+                term_structure_signal=None,
+            ):
+                assert vix_level == 25.0
+                assert regime_label == "elevated"
+                assert term_structure_signal == -0.5
+                return types.SimpleNamespace(
+                    regime="elevated",
+                    regime_confidence=regime_confidence,
+                    primary_hedge="vixy",
+                    primary_size_pct=3.0,
+                    secondary_hedge=None,
+                    secondary_size_pct=0.0,
+                    cost_benefit_gate=True,
+                    net_benefit_bps=42.0,
+                    kelly_fraction=0.18,
+                    expected_cost_bps=5.0,
+                    expected_benefit_bps=47.0,
+                    confidence_scaled_size=3.0,
+                    min_hold_days=5,
+                    transition_cost_bps=25.0,
+                    canonical_controller="hedge_selector",
+                    vixy_role="diagnostic_sizing_helper",
+                    term_structure_role="gate_discount_multiplier",
+                    term_structure_gate=True,
+                    term_structure_multiplier=0.9,
+                    gate_reason="term_structure_confirmed",
+                )
+
+        with patch("src.strategy.hedge_selector.HedgeSelector", return_value=FakeSelector()):
+            result = gen._get_hedge_selector_signal(
+                25.0,
+                "elevated",
+                {"signal_value": -0.5, "regime": "backwardation"},
+            )
+
+        assert result["canonical_controller"] == "hedge_selector"
+        assert result["vixy_role"] == "diagnostic_sizing_helper"
+        assert result["term_structure_role"] == "gate_discount_multiplier"
+        assert result["term_structure_gate"] is True
+        assert result["term_structure_multiplier"] == 0.9
+        assert result["gate_reason"] == "term_structure_confirmed"
+
+    def test_hedge_selector_uses_vix_term_structure_spot_when_market_vix_missing(self):
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+
+        class FakeSelector:
+            def select(
+                self,
+                vix_level,
+                regime_confidence,
+                regime_label,
+                term_structure_signal=None,
+            ):
+                assert vix_level == 16.76
+                assert term_structure_signal == 0.5
+                return types.SimpleNamespace(
+                    regime="normal",
+                    regime_confidence=regime_confidence,
+                    primary_hedge="none",
+                    primary_size_pct=0.0,
+                    secondary_hedge=None,
+                    secondary_size_pct=0.0,
+                    cost_benefit_gate=False,
+                    net_benefit_bps=0.0,
+                    kelly_fraction=0.0,
+                    expected_cost_bps=0.0,
+                    expected_benefit_bps=0.0,
+                    confidence_scaled_size=0.0,
+                    min_hold_days=5,
+                    transition_cost_bps=0.0,
+                    canonical_controller="hedge_selector",
+                    vixy_role="diagnostic_sizing_helper",
+                    term_structure_role="gate_discount_multiplier",
+                    term_structure_gate=False,
+                    term_structure_multiplier=0.0,
+                    gate_reason="normal_no_trade_band",
+                )
+
+        with patch("src.strategy.hedge_selector.HedgeSelector", return_value=FakeSelector()):
+            result = gen._get_hedge_selector_signal(
+                None,
+                "normal",
+                {"signal_value": 0.5, "vix_spot": 16.76, "regime": "extreme_contango"},
+            )
+
+        assert result["available"] is True
+        assert result["primary_hedge"] == "none"
+        assert result["gate_reason"] == "normal_no_trade_band"
+
+
+    def test_postprocessors_recompute_staleness_after_optional_regime_publish(
+        self, tmp_path, monkeypatch
+    ):
+        """Final artifact staleness matches optional regime sections appended later."""
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+
+        class FakeFredSignal:
+            regime = "NORMAL"
+            confidence = 0.6
+            recession_probability = 0.1
+            inflation_pressure = "neutral"
+            monetary_stance = "neutral"
+            manufacturing_health = "neutral"
+            credit_conditions = "neutral"
+            indicators = {}
+            timestamp = fresh
+
+        class FakeRegimeTransitionForecaster:
+            def fit(self, history):
+                self.history = history
+
+            def forecast(self, current, horizon_days):
+                return types.SimpleNamespace(
+                    probabilities={"normal": 0.7, "high_vol": 0.3},
+                    most_likely="normal",
+                    persistence_params={"normal": 7.0},
+                )
+
+        class FakeLiveTransitionManager:
+            def get_status(self):
+                return {"status": "paper", "timestamp": fresh}
+
+        monkeypatch.setitem(
+            sys.modules,
+            "src.data.fred_data",
+            types.SimpleNamespace(get_fred_signal=lambda: FakeFredSignal()),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.regime.regime_transition_forecaster",
+            types.SimpleNamespace(RegimeTransitionForecaster=FakeRegimeTransitionForecaster),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.health_check",
+            types.SimpleNamespace(run_health_check=lambda: {"status": "ok"}),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.alerting",
+            types.SimpleNamespace(
+                check_staleness_and_alert=lambda staleness: None,
+                check_ic_decay_and_alert=lambda ic_decay: None,
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.ic_decay_monitor",
+            types.SimpleNamespace(compute_ic_decay_report=lambda: {"status": "healthy"}),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.signal_walk_forward",
+            types.SimpleNamespace(compute_signal_wfe_report=lambda: {"status": "validated"}),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.research.gold_tlt_correlation",
+            types.SimpleNamespace(
+                run_analysis=lambda window, save: types.SimpleNamespace(
+                    current_correlation=0.1,
+                    current_regime="neutral",
+                    correlation_trend="stable",
+                    mean_correlation=0.2,
+                    min_correlation=-0.1,
+                    max_correlation=0.5,
+                    structural_breaks=[],
+                    regimes=[],
+                    implications=[],
+                )
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.broker.alpaca",
+            types.SimpleNamespace(LiveTransitionManager=FakeLiveTransitionManager),
+        )
+        monkeypatch.setattr(
+            "src.dashboard.generator.validate_signal",
+            lambda _name, signal: signal,
+        )
+        monkeypatch.setattr(gen, "_generate_two_stage_regime", lambda: None)
+        monkeypatch.setattr(
+            gen,
+            "_generate_bocd_regime",
+            lambda: {
+                "regime": 1,
+                "regime_change_prob": 0.2,
+                "timestamp": fresh,
+            },
+        )
+        monkeypatch.setattr(gen, "_run_spc_monitor", lambda output: {"status": "ok"})
+        monkeypatch.setattr(gen, "_record_ic_data", lambda output: None)
+
+        output = {
+            "ensemble_voting": {
+                "generated_at": fresh,
+                "regime": "normal",
+                "source_breakdown": [],
+            },
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated_at": fresh},
+        }
+
+        try:
+            result = gen._apply_signal_postprocessors(
+                output,
+                {
+                    "cursor": gen.conn.cursor(),
+                    "current_regime": "normal",
+                },
+            )
+        finally:
+            gen.conn.close()
+
+        assert result["bocd_regime"]["timestamp"] == fresh
+        assert "bocd_regime" not in result["staleness"]["unavailable_signals"]
+        assert result["staleness"]["signal_timestamps"]["bocd_regime"] == fresh
+        assert result["staleness"]["signal_age_hours"]["bocd_regime"] is not None
+        assert result["staleness"]["staleness_decay"]["bocd_regime"] > 0.0
+
+    def test_postprocessors_embed_canonical_health_report_when_available(
+        self, tmp_path, monkeypatch
+    ):
+        """signals.json health preserves canonical health.json severity and SLO cause."""
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+        (tmp_path / "health.json").write_text(json.dumps({
+            "system_status": "critical",
+            "generated_at": fresh,
+            "cron_jobs": [],
+            "data_freshness": {},
+            "scheduler_status": {"status": "degraded"},
+            "data_pipeline_slo": {
+                "status": "critical",
+                "top_dimension": "data_quality",
+                "runbook": {"top_cause": {"code": "stale_prices"}},
+            },
+        }))
+
+        class FakeFredSignal:
+            regime = "NORMAL"
+            confidence = 0.6
+            recession_probability = 0.1
+            inflation_pressure = "neutral"
+            monetary_stance = "neutral"
+            manufacturing_health = "neutral"
+            credit_conditions = "neutral"
+            indicators = {}
+            timestamp = fresh
+
+        monkeypatch.setitem(
+            sys.modules,
+            "src.data.fred_data",
+            types.SimpleNamespace(get_fred_signal=lambda: FakeFredSignal()),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.health_check",
+            types.SimpleNamespace(run_health_check=lambda: {"system_status": "warning"}),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.alerting",
+            types.SimpleNamespace(
+                check_staleness_and_alert=lambda staleness: None,
+                check_ic_decay_and_alert=lambda ic_decay: None,
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.ic_decay_monitor",
+            types.SimpleNamespace(compute_ic_decay_report=lambda: {"status": "healthy"}),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "src.monitor.signal_walk_forward",
+            types.SimpleNamespace(compute_signal_wfe_report=lambda: {"status": "validated"}),
+        )
+        monkeypatch.setattr("src.dashboard.generator.PUBLIC_DIR", tmp_path)
+        monkeypatch.setattr("src.dashboard.generator.validate_signal", lambda _name, signal: signal)
+        monkeypatch.setattr(gen, "_generate_two_stage_regime", lambda: None)
+        monkeypatch.setattr(gen, "_generate_bocd_regime", lambda: None)
+        monkeypatch.setattr(gen, "_run_spc_monitor", lambda output: {"status": "ok"})
+        monkeypatch.setattr(gen, "_record_ic_data", lambda output: None)
+
+        output = {
+            "ensemble_voting": {"generated_at": fresh, "regime": "normal", "source_breakdown": []},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated_at": fresh},
+        }
+
+        try:
+            result = gen._apply_signal_postprocessors(
+                output,
+                {"cursor": gen.conn.cursor(), "current_regime": "normal"},
+            )
+        finally:
+            gen.conn.close()
+
+        assert result["health"]["status"] == "critical"
+        assert result["health"]["data_pipeline_slo_status"] == "critical"
+        assert result["health"]["top_slo_dimension"] == "data_quality"
+        assert result["health"]["top_slo_cause_code"] == "stale_prices"
+
+
+class TestEnsemblePostDecayMetrics:
+    """Ensemble post-decay metrics should share one signed source contract."""
+
+    def test_allocation_surface_roles_disclose_current_live_routing(self):
+        roles = DashboardGenerator._build_allocation_surface_roles()
+
+        assert roles["schema_version"] == "allocation-surface-roles/v1"
+        assert roles["routed_surface"] == "target_allocations"
+        assert roles["surfaces"]["target_allocations"]["routed"] is True
+        assert roles["surfaces"]["target_allocations"]["routed_by"] == "src.broker.order_router"
+        assert roles["surfaces"]["ensemble_voting"]["routed"] is False
+        assert roles["surfaces"]["ensemble_voting"]["role"] == "advisory_non_routed"
+
+    def test_allocation_surface_roles_include_standalone_advisory_artifacts(self):
+        roles = DashboardGenerator._build_allocation_surface_roles()
+
+        for surface in ("adaptive_sizing", "black_litterman"):
+            role = roles["surfaces"][surface]
+            assert role["role"] == "advisory_non_routed"
+            assert role["routed"] is False
+            assert role["routed_by"] is None
+            assert role["live_authoritative"] is False
+            assert role["canonical_controller"] == "signals.json.target_allocations"
+            assert "target_allocations" in role["description"]
+
+    def test_advisory_allocation_artifact_role_block_is_machine_readable(self):
+        role = DashboardGenerator._build_advisory_allocation_artifact_role(
+            surface="black_litterman",
+            allocation_field="posterior_weights",
+        )
+
+        assert role == {
+            "schema_version": "allocation-artifact-role/v1",
+            "surface": "black_litterman",
+            "allocation_field": "posterior_weights",
+            "runtime_role": "advisory_non_routed",
+            "live_authoritative": False,
+            "routed": False,
+            "routed_by": None,
+            "canonical_controller": "signals.json.target_allocations",
+            "routed_surface": "target_allocations",
+            "routed_surface_path": "public/data/signals.json#target_allocations",
+            "description": (
+                "black_litterman is published for advisory diagnostics; live order routing "
+                "continues to consume signals.json.target_allocations."
+            ),
+        }
+
+    def test_black_litterman_public_weights_are_uppercase_with_exclusion_diagnostics(self):
+        weights = DashboardGenerator._canonicalize_public_weights(
+            {"spy": 0.46, "gld": 0.0, "tlt": 0.16},
+            canonical_assets=("SPY", "GLD", "TLT", "IEF"),
+        )
+
+        assert weights["weights"] == {"SPY": 0.46, "GLD": 0.0, "TLT": 0.16, "IEF": 0.0}
+        assert weights["excluded_assets"] == []
+        assert weights["zero_weight_assets"] == ["GLD", "IEF"]
+
+    def test_regime_authority_discloses_live_controller_and_shadow_roles(self):
+        authority = DashboardGenerator._build_regime_authority(
+            current_regime="vol_spike",
+            target_alloc={"SPY": 0.38, "GLD": 0.42, "TLT": 0.20},
+        )
+
+        assert authority["schema_version"] == "regime-authority/v1"
+        assert authority["live_controller"] == "classify_vix_regime"
+        assert authority["live_controller_module"] == "src.utils.classify_vix_regime"
+        assert authority["live_regime"] == "vol_spike"
+        assert authority["allocation_regime"] == "high_vol"
+        assert authority["routed_surface"] == "target_allocations"
+        assert authority["advanced_regime_signals"]["two_stage_regime"]["role"] == "advisory_shadow"
+        assert authority["advanced_regime_signals"]["bocd_regime"]["routed"] is False
+
+    def test_regime_authority_marks_missing_advanced_sections_unpublished(self):
+        output = {
+            "regime_authority": DashboardGenerator._build_regime_authority(
+                current_regime="normal",
+                target_alloc={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            ),
+            "staleness": {
+                "unavailable_signals": ["two_stage_regime", "regime_transition"],
+                "stale_signals": [],
+            },
+        }
+
+        DashboardGenerator._update_regime_authority_availability(output)
+
+        advanced = output["regime_authority"]["advanced_regime_signals"]
+        for signal_name in ("two_stage_regime", "regime_transition"):
+            entry = advanced[signal_name]
+            assert entry["published"] is False
+            assert entry["availability"] == "unavailable"
+            assert entry["routed"] is False
+            assert entry["role"] == "advisory_shadow"
+            assert "Published" not in entry["description"]
+
+    def test_regime_authority_marks_present_fresh_advanced_sections_published(self):
+        fresh = datetime.now(timezone.utc).isoformat()
+        output = {
+            "regime_authority": DashboardGenerator._build_regime_authority(
+                current_regime="normal",
+                target_alloc={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            ),
+            "two_stage_regime": {"timestamp": fresh, "regime": "NORMAL"},
+            "staleness": {
+                "unavailable_signals": [],
+                "stale_signals": [],
+            },
+        }
+
+        DashboardGenerator._update_regime_authority_availability(output)
+
+        entry = output["regime_authority"]["advanced_regime_signals"]["two_stage_regime"]
+        assert entry["published"] is True
+        assert entry["availability"] == "present"
+        assert entry["routed"] is False
+        assert entry["role"] == "advisory_shadow"
+
+    def test_source_breakdown_preserves_signed_signal_values(self):
+        """Serialized source rows include the signed value used downstream."""
+        from src.signals.signal_source import SignalSource
+        from src.strategy.ensemble_voter import SignalReading
+
+        rows = DashboardGenerator._build_ensemble_source_breakdown([
+            SignalReading(
+                source=SignalSource.ALTERNATIVE_DATA,
+                timestamp="2026-07-05T00:00:00+00:00",
+                value=0.8,
+                confidence=0.9,
+                weight=0.6,
+                regime_fit="normal",
+            ),
+            SignalReading(
+                source=SignalSource.CROSS_ASSET_RV,
+                timestamp="2026-07-05T00:00:00+00:00",
+                value=-0.4,
+                confidence=0.7,
+                weight=0.4,
+                regime_fit="normal",
+            ),
+        ])
+
+        assert rows[0]["source"] == "alternative_data"
+        assert rows[0]["value"] == pytest.approx(0.8)
+        assert rows[1]["source"] == "cross_asset_rv"
+        assert rows[1]["value"] == pytest.approx(-0.4)
+
+    def test_vix_source_breakdown_uses_fractional_bridge_confidence(self):
+        """VIX source rows publish the normalized typed-bridge confidence."""
+        from src.signals.vix_term_structure import VIXTermStructureSignal
+
+        vix_signal = VIXTermStructureSignal(
+            timestamp="2026-07-05T00:00:00+00:00",
+            signal_state="NEUTRAL",
+            signal_value=0.2,
+            vix_spot=18.0,
+            vix3m=19.5,
+            vix6m=20.0,
+            slope_vix3m_vix=1.083,
+            regime="contango",
+            regime_strength=0.5,
+            slope_signal=0.3,
+            roll_yield_signal=0.08,
+            vix_zscore_signal=0.0,
+            curve_shape_signal=0.25,
+            spy_shift=0.02,
+            gld_shift=-0.01,
+            tlt_shift=-0.01,
+            confidence=90.0,
+            is_valid=True,
+            reason="VIX=18.00, Slope=1.083, Regime=contango",
+        )
+        reading = vix_signal.to_signal_snapshot().to_signal_reading()
+        reading.weight = 0.05
+
+        rows = DashboardGenerator._build_ensemble_source_breakdown([reading])
+
+        assert rows[0]["source"] == "vix_term_structure"
+        assert rows[0]["confidence"] == pytest.approx(0.9)
+        assert 0.0 <= rows[0]["confidence"] <= 1.0
+
+    def test_ensemble_adaptive_learning_disclosure_preserves_runtime_status(self):
+        disclosure = {
+            "bandit": {
+                "status": "non_effective",
+                "enabled": True,
+                "reason": "cold_start_no_regime_weights",
+            },
+            "online_ic": {
+                "status": "disabled",
+                "enabled": False,
+                "reason": "env_disabled",
+            },
+        }
+        ensemble_result = type("EnsembleResult", (), {"adaptive_learning": disclosure})()
+
+        assert DashboardGenerator._build_ensemble_adaptive_learning_disclosure(ensemble_result) == disclosure
+
+    def test_ensemble_source_count_metadata_distinguishes_configured_collected_and_contributing(self):
+        """Source count metadata separates roster, collected rows, and live contributors."""
+        source_breakdown = [
+            {"source": "alternative_data", "weight": 0.24},
+            {"source": "cross_asset_rv", "weight": 0.0},
+            {"source": "google_trends", "weight": 0.05},
+            {"source": "multi_speed_momentum", "weight": 0.0},
+        ]
+
+        counts = DashboardGenerator._build_ensemble_source_count_metadata(
+            regime="normal",
+            source_breakdown=source_breakdown,
+        )
+
+        assert counts["configured_source_count"] == 9
+        assert counts["collected_source_count"] == 4
+        assert counts["contributing_source_count"] == 2
+        assert counts["inactive_source_count"] == 2
+        assert counts["inactive_sources"] == ["cross_asset_rv", "multi_speed_momentum"]
+        assert counts["num_sources"] == counts["collected_source_count"]
+
+    def test_configured_source_status_discloses_stale_google_trends(self, monkeypatch):
+        """Configured source status explains stale Google Trends omission from source rows."""
+        from src.signals.signal_snapshot import SignalSnapshot
+
+        class FakeGoogleTrendsSignal:
+            def get_signal_snapshot(self):
+                return SignalSnapshot(
+                    source="google_trends",
+                    timestamp="2026-07-05T00:00:00+00:00",
+                    value=0.0,
+                    confidence=0.0,
+                    is_active=False,
+                    explanation="Google Trends: Data is 37 days old (max 14)",
+                    metadata={
+                        "inactive_reason": "Data is 37 days old (max 14)",
+                        "inactive_category": "stale",
+                    },
+                )
+
+        monkeypatch.setattr(
+            "src.signals.google_trends_signal.GoogleTrendsSignal",
+            FakeGoogleTrendsSignal,
+        )
+
+        statuses = DashboardGenerator._build_configured_source_status(
+            regime="normal",
+            source_breakdown=[{"source": "alternative_data", "weight": 0.24}],
+        )
+
+        google_trends = next(status for status in statuses if status["source"] == "google_trends")
+        assert google_trends["status"] == "stale"
+        assert google_trends["active"] is False
+        assert google_trends["collected"] is False
+        assert google_trends["configured_weight"] == pytest.approx(0.04762)
+        assert google_trends["reason"] == "Data is 37 days old (max 14)"
+
+    def test_marl_status_discloses_controller_runtime_non_routed(self, monkeypatch):
+        """MARL status publishes the controller contract without implying routing authority."""
+        controller_status = {
+            "version": "2.51.0",
+            "device": "cpu",
+            "agents_loaded": ["analyst", "sentiment", "risk", "execution", "controller"],
+            "signal_integrator_connected": False,
+            "checkpoint_loaded": False,
+            "inference_count": 0,
+            "current_allocation": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "CASH": 0.0},
+            "graph_metrics": {"messages_routed": 0},
+        }
+
+        class FakeAIController:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+            def get_status(self):
+                return controller_status
+
+        monkeypatch.setattr("src.agents.ai_controller.AIController", FakeAIController)
+
+        status = DashboardGenerator._generate_marl_status()
+
+        assert status["available"] is True
+        assert status["schema_version"] == "marl-runtime-status/v1"
+        assert status["runtime"]["version"] == "2.51.0"
+        assert status["runtime"]["agents_loaded"] == controller_status["agents_loaded"]
+        assert status["runtime"]["signal_integrator_connected"] is False
+        assert status["runtime"]["inference_count"] == 0
+        assert status["execution_role"]["routed"] is False
+        assert status["execution_role"]["role"] == "research_shadow_non_routed"
+        assert status["execution_role"]["routed_by"] is None
+        assert "target_allocations" in status["execution_role"]["description"]
+
+    def test_staleness_decay_recomputes_consensus_and_agreement(self, tmp_path):
+        """Post-decay consensus and agreement derive from decayed source rows."""
+        gen, _ = _make_generator(tmp_path)
+        output = {
+            "staleness": {
+                "staleness_decay": {
+                    "alternative_data": 0.1,
+                    "ensemble_voting": 1.0,
+                },
+            },
+            "ensemble_voting": {
+                "weighted_consensus": 0.0,
+                "agreement_ratio": 0.5,
+                "source_breakdown": [
+                    {
+                        "source": "alternative_data",
+                        "value": 1.0,
+                        "weight": 0.5,
+                    },
+                    {
+                        "source": "cross_asset_rv",
+                        "value": -1.0,
+                        "weight": 0.5,
+                    },
+                ],
+            },
+        }
+
+        try:
+            result = gen._apply_staleness_decay(output)
+        finally:
+            gen.conn.close()
+
+        ensemble = result["ensemble_voting"]
+        assert ensemble["total_weight_after_decay"] == pytest.approx(0.55)
+        assert ensemble["weighted_consensus"] == pytest.approx(-0.8182)
+        assert ensemble["agreement_ratio"] == pytest.approx(0.9091)
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +1312,73 @@ class TestGeneratorInit:
 
 
 # ---------------------------------------------------------------------------
+# Cross-asset relative value JSON tests
+# ---------------------------------------------------------------------------
+
+class TestCrossAssetRVJSON:
+    """Test cross-asset relative-value dashboard artifact generation."""
+
+    def test_uses_current_signal_shape_and_unavailable_pair_metadata(
+        self, tmp_path
+    ):
+        gen, _ = _make_generator(tmp_path)
+
+        class FakeReading:
+            def to_dict(self):
+                return {
+                    "pair_name": "spy_gld",
+                    "symbol_a": "SPY",
+                    "symbol_b": "GLD",
+                    "z_score": 2.2,
+                    "signal_value": -0.55,
+                    "regime": "diverged_bull",
+                    "conviction": 0.73,
+                    "coverage_status": "available",
+                }
+
+        fake_signal = types.SimpleNamespace(
+            pairs={"spy_gld": FakeReading()},
+            avg_z_score=2.2,
+            max_divergence=2.2,
+            num_diverged=1,
+            total_pairs=5,
+            available_pair_count=1,
+            unavailable_pair_count=1,
+            unavailable_pairs={
+                "gld_btc": {
+                    "coverage_status": "unavailable",
+                    "missing_symbols": ["BTC"],
+                    "reason": "missing_or_all_nan_symbol",
+                },
+            },
+            missing_symbols=["BTC"],
+            risk_on_score=0.4,
+            duration_score=0.0,
+            overall_conviction=0.73,
+        )
+
+        class FakeScanner:
+            def scan_all(self):
+                return fake_signal
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch(
+                "src.signals.cross_asset_relative_value.CrossAssetRVScanner",
+                return_value=FakeScanner(),
+            ):
+                path = gen.generate_cross_asset_rv_json()
+
+        data = json.loads(path.read_text())
+        assert data["signal_value"] == pytest.approx(0.4)
+        assert data["pairs"][0]["pair_name"] == "spy_gld"
+        assert data["available_pair_count"] == 1
+        assert data["unavailable_pair_count"] == 1
+        assert data["unavailable_pairs"]["gld_btc"]["missing_symbols"] == ["BTC"]
+        assert data["missing_symbols"] == ["BTC"]
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Performance JSON tests
 # ---------------------------------------------------------------------------
 
@@ -408,6 +1503,78 @@ class TestAlertsJSON:
             data = json.load(f)
         stale_alerts = [a for a in data["alerts"] if a["type"] == "stale_data"]
         assert len(stale_alerts) >= 1
+        gen.conn.close()
+
+    def test_promote_trigger_success_blocked_by_active_kill_switch(self, tmp_path):
+        """Stale promotion markers cannot publish success while kill switch is active."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / ".promote_to_live").write_text(json.dumps({
+            "metrics": {"sharpe": 0.85},
+            "timestamp": "2026-01-01T00:00:00",
+        }))
+        (tmp_path / "kill_switch.json").write_text(json.dumps({
+            "enabled": True,
+            "mode": "paper",
+            "reason": "drawdown breach",
+            "timestamp": "2026-01-02T00:00:00",
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        assert not [
+            alert for alert in data["alerts"]
+            if alert["type"] == "graduation_candidate" and alert["level"] == "success"
+        ]
+        gen.conn.close()
+
+    def test_promote_trigger_success_requires_manual_approval(self, tmp_path):
+        """Promotion success must fail closed when manual approval is absent."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / ".promote_to_live").write_text(json.dumps({
+            "metrics": {"sharpe": 0.85},
+            "timestamp": "2026-01-01T00:00:00",
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        assert not [
+            alert for alert in data["alerts"]
+            if alert["type"] == "graduation_candidate" and alert["level"] == "success"
+        ]
+        gen.conn.close()
+
+    def test_promote_trigger_success_requires_current_ready_checklist(self, tmp_path):
+        """Current checklist failures dominate stale promote-to-live markers."""
+        from src.strategy.graduation_checklist import CheckResult
+
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / ".promote_to_live").write_text(json.dumps({
+            "metrics": {"sharpe": 0.85},
+            "timestamp": "2026-01-01T00:00:00",
+        }))
+        (tmp_path / ".manual_approval").write_text("approved")
+        not_ready = {
+            "min_trading_days": CheckResult("min_trading_days", False, 5, 63, ""),
+            "manual_approval": CheckResult("manual_approval", True, 1, 1, ""),
+        }
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path), \
+             patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path), \
+             patch("src.strategy.graduation_checklist.GraduationChecklist.check", return_value=not_ready):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        assert not [
+            alert for alert in data["alerts"]
+            if alert["type"] == "graduation_candidate" and alert["level"] == "success"
+        ]
         gen.conn.close()
 
 
@@ -578,6 +1745,68 @@ class TestHealthJSON:
 
 
 # ---------------------------------------------------------------------------
+# Incident lifecycle JSON tests
+# ---------------------------------------------------------------------------
+
+class TestIncidentLifecycleJSON:
+    """Test generate_incidents_json."""
+
+    def test_copies_incident_summary_to_public_data(self, tmp_path):
+        """Existing incident lifecycle state is published for dashboard fetches."""
+        gen, _ = _make_generator(tmp_path)
+        source = tmp_path / "incidents.json"
+        source.write_text(json.dumps({
+            "generated_at": "2026-07-06T00:00:00+00:00",
+            "open_count": 1,
+            "incidents": [
+                {
+                    "incident_id": "incident-123",
+                    "channel": "signal_staleness",
+                    "severity": "p0",
+                    "state": "firing",
+                    "message": "signals stale",
+                    "details": {},
+                    "created_at": "2026-07-06T00:00:00+00:00",
+                    "updated_at": "2026-07-06T00:00:00+00:00",
+                    "resolved_at": None,
+                    "resolution_notes": None,
+                    "mttr_seconds": None,
+                    "alert_count": 6,
+                    "kill_switch_level": "halt",
+                }
+            ],
+            "metrics": {
+                "incident_frequency": 1,
+                "open_count": 1,
+                "resolved_count": 0,
+                "mean_mttr_seconds": None,
+            },
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path / "public"), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_incidents_json()
+
+        assert path == tmp_path / "public" / "incidents.json"
+        assert json.loads(path.read_text())["incidents"][0]["kill_switch_level"] == "halt"
+        gen.conn.close()
+
+    def test_missing_incident_summary_publishes_empty_summary(self, tmp_path):
+        """Dashboard core endpoint exists even before the first incident event."""
+        gen, _ = _make_generator(tmp_path)
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path / "public"), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_incidents_json()
+
+        data = json.loads(path.read_text())
+        assert data["open_count"] == 0
+        assert data["incidents"] == []
+        assert data["metrics"]["open_count"] == 0
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Broker data tests
 # ---------------------------------------------------------------------------
 
@@ -652,6 +1881,38 @@ class TestMLSignals:
         assert "SPY" in signals["features"]
         gen.conn.close()
 
+    def test_stale_feature_rows_publish_source_freshness_metadata(self, tmp_path):
+        """Feature predictions expose feature as-of time and stale status."""
+        gen, _ = _make_generator(tmp_path)
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY",
+            "timestamp": old_timestamp,
+            "vix_level": 15,
+            "trend_direction": 1,
+            "price_vs_sma20": 0.05,
+            "return_5d": 0.01,
+            "spy_correlation_20d": 0.4,
+        }) + "\n")
+
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+
+        assert signals["available"] is True
+        assert signals["timestamp"] is not None
+        assert signals["generated_at"] == signals["timestamp"]
+        assert signals["feature_source_artifact"] == "features.jsonl"
+        assert signals["feature_as_of"] == old_timestamp
+        assert signals["feature_freshness_status"] == "stale"
+        assert signals["feature_staleness_days"] >= 30
+        assert signals["prediction_source_mode"] == "stale_features"
+        assert signals["predictions"]["SPY"]["feature_timestamp"] == old_timestamp
+        assert signals["predictions"]["SPY"]["feature_freshness_status"] == "stale"
+        assert signals["predictions"]["SPY"]["source_artifact"] == "features.jsonl"
+        assert signals["execution_role"]["routed"] is False
+        gen.conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Yield curve tests
@@ -666,6 +1927,38 @@ class TestYieldCurve:
         with patch("src.dashboard.generator.DATA_DIR", tmp_path):
             data = gen._get_yield_curve_data()
         assert "yield_curve" in data or "duration_allocation" in data
+        gen.conn.close()
+
+    def test_yield_curve_includes_yields_source_manifest_provenance(self, tmp_path):
+        """Synthetic/degraded yields provenance follows the yield curve payload."""
+        gen, _ = _make_generator(tmp_path)
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps([
+            {"spread2s10s": -10.0, "dgs2": 4.6, "dgs10": 4.5},
+        ]))
+        (tmp_path / "source_manifest.json").write_text(json.dumps({
+            "artifacts": [
+                {
+                    "artifact": "yields.json",
+                    "provider": "FRED",
+                    "source_mode": "synthetic",
+                    "status": "degraded",
+                    "failure_reason": "FRED_API_KEY missing",
+                    "generated_at": "2026-07-06T00:00:00Z",
+                    "latest_observation": "2026-07-02",
+                },
+            ],
+        }))
+
+        with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+            with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+                data = gen._get_yield_curve_data()
+
+        assert data["yield_curve"]["source_mode"] == "synthetic"
+        assert data["yield_curve"]["source_status"] == "degraded"
+        assert data["yield_curve"]["source_reason"] == "FRED_API_KEY missing"
+        assert data["yield_curve"]["source_provider"] == "FRED"
+        assert data["yield_curve"]["source_latest_observation"] == "2026-07-02"
         gen.conn.close()
 
 
@@ -730,6 +2023,21 @@ class TestGarchCvarData:
         assert data["var_95"] == -0.0127
         assert data["garch_active"] is True
         assert data["volatility_clustering"] == "elevated"
+        gen.conn.close()
+
+    def test_conformal_coverage_diagnostics_are_optional_monitoring_metadata(self, tmp_path):
+        """GARCH-CVaR payload includes optional conformal coverage diagnostics."""
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            data = gen._load_garch_cvar_data()
+
+        diagnostics = data["coverage_diagnostics"]
+        assert diagnostics["schema_version"] == "conformal-coverage/v1"
+        assert diagnostics["alpha"] == pytest.approx(0.05)
+        assert diagnostics["observations"] >= 21
+        assert "kupiec_pass" in diagnostics
+        assert "christoffersen_pass" in diagnostics
+        assert "conditional_coverage_pass" in diagnostics
         gen.conn.close()
 
     def test_flat_format_normalizes_percentages(self, tmp_path):
@@ -1027,6 +2335,39 @@ class TestMlSignalsEdgeCases:
         assert gs["top_allocation"] == {"SPY": 0.5, "GLD": 0.3, "TLT": 0.2}
         gen.conn.close()
 
+    def test_grid_search_results_publish_frozen_benchmark_semantics(self, tmp_path):
+        """Grid-search metrics disclose source artifact and frozen benchmark status."""
+        gen, _ = _make_generator(tmp_path)
+        grid_timestamp = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        grid_file = tmp_path / "grid_search_results.jsonl"
+        grid_file.write_text(json.dumps({
+            "timestamp": grid_timestamp,
+            "allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            "sharpe": 0.95,
+            "volatility": 0.11,
+        }) + "\n")
+        features_file = tmp_path / "features.jsonl"
+        features_file.write_text(json.dumps({
+            "symbol": "SPY",
+            "vix_level": 15,
+            "trend_direction": 0,
+            "price_vs_sma20": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }) + "\n")
+
+        with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            signals = gen._generate_ml_signals()
+
+        gs = signals["grid_search"]
+        assert gs["available"] is True
+        assert gs["source_artifact"] == "grid_search_results.jsonl"
+        assert gs["benchmark_timestamp"] == grid_timestamp
+        assert gs["observation_semantics"] == "frozen_benchmark_not_live_snapshot"
+        assert gs["freshness_status"] == "frozen_benchmark"
+        assert gs["staleness_days"] >= 45
+        assert gs["live_authoritative"] is False
+        gen.conn.close()
+
     def test_multi_symbol_features(self, tmp_path):
         """Multiple symbols produce separate predictions."""
         gen, _ = _make_generator(tmp_path)
@@ -1268,6 +2609,37 @@ class TestPerformanceJSONEdgeCases:
         assert len(data["paper_portfolio"]) == 1
         gen.conn.close()
 
+    def test_paper_portfolio_deduplicates_intraday_entries_by_date(self, tmp_path):
+        """Date-only paper_portfolio chart rows keep the last entry per day."""
+        gen, _ = _make_generator(tmp_path)
+        perf_log = tmp_path / "performance.jsonl"
+        lines = []
+        for day in range(1, 4):
+            for hour in range(10):
+                lines.append(json.dumps({
+                    "timestamp": f"2026-01-{day:02d}T{hour:02d}:00:00",
+                    "total_value": 100000 + day * 100 + hour,
+                    "daily_return": round(day * 0.001 + hour * 0.0001, 6),
+                }))
+        perf_log.write_text("\n".join(lines) + "\n")
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_performance_json()
+
+        with open(path) as f:
+            data = json.load(f)
+
+        paper = data["paper_portfolio"]
+        assert [row["t"] for row in paper] == [
+            "2026-01-01",
+            "2026-01-02",
+            "2026-01-03",
+        ]
+        assert [row["v"] for row in paper] == [100109, 100209, 100309]
+        assert len(paper) == len({row["t"] for row in paper})
+        gen.conn.close()
+
     def test_prices_contain_correct_keys(self, tmp_path):
         """Each price entry has d and p keys."""
         gen, _ = _make_generator(tmp_path)
@@ -1320,6 +2692,93 @@ class TestSignalsJSONEdgeCases:
             assert helper_name in source
             assert hasattr(DashboardGenerator, helper_name)
 
+    def test_generate_signals_json_finalizes_top_level_generated_at_after_nested_sections(
+        self,
+        tmp_path,
+    ):
+        """Top-level generated_at should describe the finalized signals artifact."""
+
+        class FakeDateTime(datetime):
+            _values = iter(
+                [
+                    datetime(2026, 7, 6, 12, 0, 0, tzinfo=timezone.utc),
+                    datetime(2026, 7, 6, 12, 0, 2, tzinfo=timezone.utc),
+                ]
+            )
+
+            @classmethod
+            def now(cls, tz=None):
+                value = next(cls._values)
+                if tz is None:
+                    return value.replace(tzinfo=None)
+                return value.astimezone(tz)
+
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+
+        def add_nested_timestamp(output, context):
+            nested_ts = datetime.fromisoformat(output["generated_at"]) + timedelta(seconds=1)
+            enriched = dict(output)
+            enriched["regime_transition"] = {"timestamp": nested_ts.isoformat()}
+            return enriched
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.datetime", FakeDateTime):
+                with patch.object(gen, "_load_signal_generation_context", return_value={}):
+                    with patch.object(gen, "_build_base_signal_sections", return_value={}):
+                        with patch.object(gen, "_build_optional_signal_sections", side_effect=add_nested_timestamp):
+                            with patch.object(gen, "_apply_signal_postprocessors", side_effect=lambda output, context: output):
+                                with patch(
+                                    "src.monitor.decision_registry.record_dashboard_cycle_decision",
+                                    side_effect=lambda *args, **kwargs: None,
+                                ):
+                                    path = gen.generate_signals_json()
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        top_level = datetime.fromisoformat(data["generated_at"])
+        nested = datetime.fromisoformat(data["regime_transition"]["timestamp"])
+        if top_level.tzinfo is None:
+            top_level = top_level.replace(tzinfo=timezone.utc)
+        if nested.tzinfo is None:
+            nested = nested.replace(tzinfo=timezone.utc)
+        assert top_level >= nested
+        assert data["timestamp"] == data["generated_at"]
+
+    def test_generate_regime_gate_json_deduplicates_active_signal_identifiers(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Producer artifact should not count duplicate configured aliases twice."""
+
+        class FakeRegimeGate:
+            min_dwell_days = 2
+
+            def get_gate_summary(self):
+                return {
+                    "cross_asset_rv": set(),
+                    "alt_data": set(),
+                }
+
+            def get_active_signal_names(self, signal_names, regime_name):
+                assert regime_name == "NORMAL"
+                return list(signal_names)
+
+        monkeypatch.setitem(
+            sys.modules,
+            "src.signals.regime_gate",
+            types.SimpleNamespace(RegimeGate=FakeRegimeGate),
+        )
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        monkeypatch.setattr(gen, "_load_price_data", lambda: None, raising=False)
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_regime_gate_json()
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["active_signals"] == ["cross_asset_rv", "alt_data", "unified_overlay"]
+        assert len(data["active_signals"]) == len(set(data["active_signals"]))
+
     def test_missing_vix_handled(self, tmp_path):
         """Missing VIX symbol defaults vix to None and falls back to trend."""
         gen, _ = _make_generator(tmp_path)
@@ -1350,7 +2809,7 @@ class TestSignalsJSONEdgeCases:
             data = json.load(f)
         required_keys = {"generated_at", "regime", "target_allocations", "current_positions",
                          "cash", "total_value", "latest_prices", "ml_signals",
-                         "yield_curve", "broker"}
+                         "marl_status", "yield_curve", "broker"}
         assert required_keys.issubset(set(data.keys()))
         gen.conn.close()
 
@@ -1384,13 +2843,44 @@ class TestSignalsJSONEdgeCases:
 
         stacking = data["stacking_ensemble"]
         assert stacking["stacking_available"] is False
-        assert stacking["fallback_used"] is True
+        assert stacking["fallback_used"] is False
         assert stacking["feature_count"] is None
         assert stacking["feature_count_metadata_available"] is False
         assert stacking["feature_count_source"] == "unavailable_no_model"
-        assert stacking["runtime_mode"] == "fallback_no_model"
-        assert stacking["model_backed"] is False
-        assert "No stacking model loaded" in stacking["operator_disclosure"]
+        assert stacking["source_roster"] == []
+        assert stacking["source_roster_version"] == "unavailable_no_model"
+        assert stacking["fallback_semantics"] == "no_model_feature_count_unavailable"
+        gen.conn.close()
+
+    def test_stacking_no_model_runtime_status_is_dormant(self, tmp_path):
+        """No-model stacking is dormant/unavailable, not a live fallback prediction."""
+        gen, _ = _make_generator(tmp_path)
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps([{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]))
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    path = gen.generate_signals_json()
+
+        with open(path) as f:
+            data = json.load(f)
+
+        stacking = data["stacking_ensemble"]
+        assert stacking["active"] is False
+        assert stacking["stacking_available"] is False
+        assert stacking["runtime_role"] == "research_dormant"
+        assert stacking["runtime_status"] == "unavailable_no_model"
+        assert stacking["live_authoritative"] is False
+        assert stacking["routed"] is False
+        assert stacking["routed_by"] is None
+        assert stacking["prediction_available"] is False
+        assert stacking["prediction_direction"] == "unavailable"
+        assert stacking["fallback_used"] is False
+        assert stacking["voting_accuracy"] is None
+        assert stacking["stacking_accuracy"] is None
+        assert stacking["accuracy_metrics_available"] is False
+        assert "No stacking model artifact is loaded" in stacking["status_reason"]
+        assert "not order-routed" in stacking["operator_message"]
         gen.conn.close()
 
 
@@ -1693,16 +3183,25 @@ class TestAlertsJSONEdgeCases:
         gen.conn.close()
 
     def test_promote_trigger_alert(self, tmp_path):
-        """.promote_to_live file generates graduation_candidate alert."""
+        """.promote_to_live file generates success only when current gates pass."""
+        from src.strategy.graduation_checklist import CheckResult
+
         gen, _ = _make_generator(tmp_path)
         promote_file = tmp_path / ".promote_to_live"
         promote_file.write_text(json.dumps({
             "metrics": {"sharpe": 0.85},
             "timestamp": "2026-01-01T00:00:00"
         }))
-        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
-            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
-                path = gen.generate_alerts_json()
+        (tmp_path / ".manual_approval").write_text("approved")
+        ready = {
+            "min_trading_days": CheckResult("min_trading_days", True, 63, 63, ""),
+            "manual_approval": CheckResult("manual_approval", True, 1, 1, ""),
+        }
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path), \
+             patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path), \
+             patch("src.strategy.graduation_checklist.GraduationChecklist.check", return_value=ready):
+            path = gen.generate_alerts_json()
         with open(path) as f:
             data = json.load(f)
         promote_alerts = [a for a in data["alerts"] if a["type"] == "graduation_candidate"]
@@ -2341,6 +3840,52 @@ class TestSignalsJSONRegimeComposite:
         gen.conn.close()
 
 
+class TestRegimeTargetAllocationParity:
+    """Dashboard target allocations should match scheduled evaluator semantics."""
+
+    @pytest.mark.parametrize(
+            ("expected_regime", "vix_level", "trend_regime"),
+            [
+                ("crisis", 30.0, "normal"),
+                ("vol_spike", 22.5, "normal"),
+                ("high_vol", 16.0, "high_vol"),
+                ("recovery", 16.0, "recovery"),
+            ],
+        )
+    def test_env_enabled_target_allocations_match_regime_helper(
+        self, tmp_path, monkeypatch, expected_regime, vix_level, trend_regime
+    ):
+        """REGIME_ALLOC_ENABLED dashboard path uses the evaluator helper."""
+        from src.strategy.regime_allocation import get_regime_allocation_with_override
+
+        monkeypatch.setenv("REGIME_ALLOC_ENABLED", "1")
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO prices VALUES ('^VIX', ?, ?)",
+            (datetime.now().strftime("%Y-%m-%d"), vix_level),
+        )
+        conn.execute(
+            "INSERT INTO regime_log VALUES (?, ?, ?, ?)",
+            (
+                datetime.now().strftime("%Y-%m-%d"),
+                trend_regime,
+                vix_level,
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        try:
+            context = gen._load_signal_generation_context()
+        finally:
+            gen.conn.close()
+
+        assert context["current_regime"] == expected_regime
+        assert context["target_alloc"] == get_regime_allocation_with_override(expected_regime)
+
+
 # ---------------------------------------------------------------------------
 # Signals JSON — positions, orders, and paper portfolio state
 # ---------------------------------------------------------------------------
@@ -2486,6 +4031,88 @@ class TestSignalsJSONSmartRebalance:
             data = json.load(f)
         # smart_rebalance should be None when import fails
         assert data["smart_rebalance"] is None
+        gen.conn.close()
+
+    def test_smart_rebalance_remaining_budget_pct_is_display_percent(
+        self, tmp_path, monkeypatch
+    ):
+        """Public percent fields use display units while ratio fields preserve fractions."""
+        gen, _ = _make_generator(tmp_path)
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps(
+            [{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]
+        ))
+        (tmp_path / "portfolio_paper.json").write_text(json.dumps({
+            "cash": 50000,
+            "positions": {
+                "SPY": {
+                    "shares": 100,
+                    "value": 50000,
+                    "weight": 0.5,
+                    "unrealized_pnl": 0,
+                },
+            },
+        }))
+
+        class FakeGateResult:
+            should_execute = False
+            decision = "wait"
+            urgency = "low"
+            max_drift = 0.04
+            estimated_cost_bps = 3.0
+            reason = "budget_available"
+            metadata = {
+                "drift_details": {"SPY": 0.04},
+                "vpin": 0.2,
+                "in_optimal_window": True,
+                "ytd_cost_bps": 0,
+                "remaining_budget_pct": 0.005,
+                "remaining_budget_ratio": 0.005,
+            }
+
+        class FakeSmartRebalanceGate:
+            def evaluate(self, current_holdings, target_allocations, total_value):
+                assert current_holdings == {"SPY": 50000}
+                assert total_value == 100000
+                return FakeGateResult()
+
+            def get_status(self):
+                return {
+                    "ytd_cost_bps": 0,
+                    "ytd_cost_pct": 0.0,
+                    "remaining_budget_pct": 0.5,
+                    "remaining_budget_ratio": 0.005,
+                    "is_over_budget": False,
+                    "is_warning": False,
+                    "last_rebalance": None,
+                    "deferred_until": None,
+                    "config": {
+                        "drift_threshold": 0.1,
+                        "vpin_threshold": 0.5,
+                        "optimal_window": "10:00-15:30",
+                        "annual_cost_limit": "50bps",
+                    },
+                }
+
+        fake_rebalancing = types.SimpleNamespace(
+            integration=types.SimpleNamespace(SmartRebalanceGate=FakeSmartRebalanceGate)
+        )
+        monkeypatch.setattr("src.dashboard.generator.validate_signal", lambda _name, signal: signal)
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    with patch("importlib.import_module", return_value=fake_rebalancing):
+                        path = gen.generate_signals_json()
+
+        with open(path) as f:
+            data = json.load(f)
+
+        smart = data["smart_rebalance"]
+        assert smart["remaining_budget_pct"] == 0.5
+        assert smart["remaining_budget_ratio"] == 0.005
+        assert smart["status"]["remaining_budget_pct"] == 0.5
+        assert smart["status"]["remaining_budget_ratio"] == 0.005
         gen.conn.close()
 
 
@@ -2848,6 +4475,81 @@ class TestPerformanceJSONRegime:
 
 
 # ---------------------------------------------------------------------------
+# Explainability JSON freshness
+# ---------------------------------------------------------------------------
+
+class TestExplainabilityJSONFreshness:
+    """Test generate_explainability_json freshness contract."""
+
+    def test_generates_current_latest_from_signals_json(self, tmp_path):
+        """Current signals data is the authoritative latest explainability source."""
+        gen, _ = _make_generator(tmp_path)
+        signals = {
+            "generated_at": "2026-07-06T12:00:00",
+            "ensemble_voting": {
+                "regime": "normal",
+                "weighted_consensus": 0.25,
+                "agreement_ratio": 0.75,
+                "action": "increase_equity",
+                "confidence": 0.8,
+                "num_sources": 1,
+                "source_breakdown": [
+                    {
+                        "source": "cross_asset_rv",
+                        "value": 0.5,
+                        "confidence": 0.9,
+                        "weight": 0.4,
+                    }
+                ],
+            },
+        }
+        (tmp_path / "signals.json").write_text(json.dumps(signals))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_explainability_json()
+
+        data = json.loads(path.read_text())
+        assert data["analysis_date"] == "2026-07-06"
+        assert data["latest_decision"]["period"] == "2026-07-06"
+        assert data["freshness"]["status"] == "current"
+        assert data["freshness"]["source_file"] == "signals.json"
+        gen.conn.close()
+
+    def test_stale_dated_report_without_current_signals_is_explicit_unavailable(
+        self, tmp_path
+    ):
+        """Stale dated files are not copied as current latest explainability."""
+        gen, _ = _make_generator(tmp_path)
+        source_dir = tmp_path / "explainability"
+        source_dir.mkdir()
+        stale_payload = {
+            "timestamp": "2026-05-18T03:14:06",
+            "analysis_date": "2026-05-18",
+            "latest_decision": {"period": "2026-05-18", "action": "increase_equity"},
+            "recent_decisions": [],
+            "signal_deep_dives": {},
+            "top_sources_today": [],
+            "decision_quality": {"status": "ok"},
+        }
+        (source_dir / "explainability_2026-05-18.json").write_text(
+            json.dumps(stale_payload)
+        )
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_explainability_json()
+
+        data = json.loads(path.read_text())
+        assert data["latest_decision"] is None
+        assert data["decision_quality"]["status"] == "unavailable_current_signals"
+        assert data["freshness"]["status"] == "unavailable"
+        assert data["freshness"]["stale_source_file"] == "explainability_2026-05-18.json"
+        assert data["freshness"]["stale_analysis_date"] == "2026-05-18"
+        gen.conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Yield curve — missing keys and malformed data
 # ---------------------------------------------------------------------------
 
@@ -2940,6 +4642,26 @@ class TestRunOverlay:
             signals = json.load(f)
         assert "regime" in signals
         assert "generated_at" in signals
+        # Connection already closed by run()
+
+    def test_run_mirrors_required_public_data_contract_files_to_dist(self, tmp_path):
+        """Dashboard generation keeps deploy-checked public/data and dist/data files in sync."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / "source_manifest.json").write_text(json.dumps({
+            "schema_version": "market-data-source-manifest/v1",
+            "generated_at": "2026-07-06T00:00:00+00:00",
+            "artifacts": [],
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                gen.run()
+
+        for filename in ("source_manifest.json", "index.json", "health.json"):
+            public_file = tmp_path / filename
+            dist_file = tmp_path.parent / "dist" / "data" / filename
+            assert dist_file.exists(), f"{dist_file} missing"
+            assert dist_file.read_bytes() == public_file.read_bytes()
         # Connection already closed by run()
 
 
@@ -3159,6 +4881,13 @@ class TestOutputFieldTypes:
         assert isinstance(ml["predictions"], dict)
         assert isinstance(ml["features"], dict)
         assert isinstance(ml["grid_search"], dict)
+        marl = data["marl_status"]
+        assert isinstance(marl, dict)
+        assert marl["schema_version"] == "marl-runtime-status/v1"
+        assert isinstance(marl["available"], bool)
+        assert isinstance(marl["runtime"], dict)
+        assert marl["execution_role"]["routed"] is False
+        assert marl["execution_role"]["role"] == "research_shadow_non_routed"
         gen.conn.close()
 
     def test_health_json_field_types(self, tmp_path):
@@ -3614,6 +5343,54 @@ class TestAlertsJSONEdgeCasesExtended:
         stale = [a for a in data["alerts"] if a["type"] == "stale_data"]
         assert len(stale) >= 1
         assert "days ago" in stale[0]["message"]
+        gen.conn.close()
+
+    def test_current_data_quality_suppresses_weekend_aligned_stale_data_flood(self, tmp_path):
+        """Current data_quality.json can prove an aligned cross-section is not stale."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DELETE FROM prices")
+        conn.executemany(
+            "INSERT INTO prices VALUES (?, ?, ?)",
+            [("SPY", "2026-06-12", 100.0), ("GLD", "2026-06-12", 200.0)],
+        )
+        conn.commit()
+        conn.close()
+        _write_data_quality_report(tmp_path, status="ok", stale_latest_dates=0)
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        assert [a for a in data["alerts"] if a["type"] == "stale_data"] == []
+        gen.conn.close()
+
+    def test_stale_data_alert_count_comes_from_current_data_quality_report(self, tmp_path):
+        """Stale-data alerts should match data_quality stale_latest_dates count."""
+        gen, db_path = _make_generator(tmp_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DELETE FROM prices")
+        conn.executemany(
+            "INSERT INTO prices VALUES (?, ?, ?)",
+            [
+                ("SPY", "2020-01-01", 100.0),
+                ("GLD", "2020-01-01", 200.0),
+                ("TLT", "2020-01-01", 90.0),
+            ],
+        )
+        conn.commit()
+        conn.close()
+        _write_data_quality_report(tmp_path, status="fail", stale_latest_dates=1)
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        stale_alerts = [a for a in data["alerts"] if a["type"] == "stale_data"]
+        assert len(stale_alerts) == 1
+        assert "GLD" in stale_alerts[0]["message"]
         gen.conn.close()
 
     def test_no_trigger_files_no_alerts(self, tmp_path):

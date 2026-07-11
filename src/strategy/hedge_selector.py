@@ -95,11 +95,19 @@ class HedgeRecommendation:
     # Sizing
     kelly_fraction: float
     confidence_scaled_size: float
-    
+
     # Metadata
     min_hold_days: int
     transition_cost_bps: float
-    
+
+    # Runtime authority and VIX term-structure gating
+    canonical_controller: str = "hedge_selector"
+    vixy_role: str = "diagnostic_sizing_helper"
+    term_structure_role: str = "gate_discount_multiplier"
+    term_structure_gate: bool = False
+    term_structure_multiplier: float = 1.0
+    gate_reason: str = "cost_benefit_pass"
+
     source: str = "hedge_selector"
 
 
@@ -133,16 +141,19 @@ class HedgeSelector:
         vix_level: float,
         regime_confidence: float,
         regime_label: Optional[str] = None,
+        term_structure_signal: Optional[float] = None,
         vix_history: Optional[List[float]] = None,
         portfolio_value: float = 1_000_000,
     ) -> HedgeRecommendation:
         """
         Select optimal hedge instrument based on current regime.
-        
+
         Args:
             vix_level: Current VIX level
             regime_confidence: Confidence in regime classification (0-1)
             regime_label: Explicit regime label (overrides VIX-based classification)
+            term_structure_signal: VIX term-structure signal in [-1, 1];
+                negative values confirm risk-off/backwardation hedging
             vix_history: Historical VIX levels for regime detection
             portfolio_value: Current portfolio value for sizing
             
@@ -150,37 +161,63 @@ class HedgeSelector:
             HedgeRecommendation with selected instrument and sizing
         """
         now = datetime.now().isoformat()
-        
+
         # 1. Classify regime
         if regime_label:
             regime = self._resolve_regime_label(regime_label, vix_level)
         else:
             regime = self._classify_regime(vix_level)
+
+        # 2. Resolve no-trade and term-structure gates before min-hold logic.
+        # Hard no-trade bands must be allowed to exit an existing VIXY hedge.
+        ts_gate, ts_multiplier, gate_reason = self._term_structure_gate(
+            regime,
+            term_structure_signal,
+        )
         
-        # 2. Check if we need to switch (min hold period)
+        # 3. Check if we need to switch (min hold period)
         state = self._load_state()
-        if state.days_in_position < self.config["min_hold_days"]:
+        if (
+            state.days_in_position < self.config["min_hold_days"]
+            and not self._overrides_min_hold(regime, ts_gate)
+        ):
             logger.info("Min hold period not met (%d/%d days), maintaining current hedge",
                        state.days_in_position, self.config["min_hold_days"])
             return self._maintain_current(regime, regime_confidence, now)
         
-        # 3. Select hedge based on regime
-        primary, secondary = self._select_instruments(regime, vix_level)
+        # 4. Select hedge based on regime and term-structure confirmation
+        primary, secondary = self._select_instruments(regime, vix_level, ts_gate)
         
-        # 4. Compute sizing
-        primary_size = self._compute_size(primary, regime, regime_confidence, vix_level)
-        secondary_size = self._compute_size(secondary, regime, regime_confidence, vix_level) * 0.5  # Secondary gets 50%
-        
-        # 5. Cost-benefit gate
+        # 5. Compute sizing
+        primary_size = self._compute_size(
+            primary,
+            regime,
+            regime_confidence,
+            vix_level,
+            ts_multiplier,
+        )
+        secondary_size = self._compute_size(
+            secondary,
+            regime,
+            regime_confidence,
+            vix_level,
+            ts_multiplier,
+        ) * 0.5  # Secondary gets 50%
+
+        # 6. Cost-benefit gate
         benefit = self._estimate_benefit(primary, primary_size, vix_level)
         cost = self._estimate_cost(primary, primary_size)
         net_benefit = benefit - cost
         gate = net_benefit > 0 or regime == RegimeLabel.CRISIS
+        if primary == HedgeInstrument.NONE:
+            gate = False
+        elif not gate:
+            gate_reason = "cost_benefit_failed"
         
-        # 6. Kelly fraction
+        # 7. Kelly fraction
         kelly = self._kelly_fraction(regime, regime_confidence)
         
-        # 7. Confidence scaling
+        # 8. Confidence scaling
         conf_scale = self._confidence_scale(regime_confidence)
         primary_size_scaled = primary_size * conf_scale
         secondary_size_scaled = secondary_size * conf_scale
@@ -201,6 +238,9 @@ class HedgeSelector:
             confidence_scaled_size=round(primary_size_scaled, 2),
             min_hold_days=self.config["min_hold_days"],
             transition_cost_bps=25.0,  # estimated transition cost
+            term_structure_gate=ts_gate,
+            term_structure_multiplier=round(ts_multiplier, 3),
+            gate_reason=gate_reason,
         )
     
     def _classify_regime(self, vix_level: float) -> RegimeLabel:
@@ -229,20 +269,56 @@ class HedgeSelector:
         return mapping.get(normalized, self._classify_regime(vix_level))
     
     def _select_instruments(
-        self, regime: RegimeLabel, vix_level: float
+        self, regime: RegimeLabel, vix_level: float, term_structure_gate: bool = False
     ) -> Tuple[HedgeInstrument, HedgeInstrument]:
         """Select primary and secondary hedge instruments based on regime."""
         
-        # Regime → hedge mapping (from compound page)
+        # Regime → hedge mapping. VIXY is no longer always-on in calm regimes.
         mapping = {
-            RegimeLabel.NORMAL: (HedgeInstrument.VIXY, HedgeInstrument.NONE),
-            RegimeLabel.ELEVATED: (HedgeInstrument.VIXY, HedgeInstrument.VIX_CALLS),
+            RegimeLabel.NORMAL: (HedgeInstrument.NONE, HedgeInstrument.NONE),
+            RegimeLabel.ELEVATED: (
+                HedgeInstrument.VIXY if term_structure_gate else HedgeInstrument.NONE,
+                HedgeInstrument.NONE,
+            ),
             RegimeLabel.STRESS: (HedgeInstrument.PUT_SPREAD, HedgeInstrument.VIXY),
             RegimeLabel.CRISIS: (HedgeInstrument.COLLAR, HedgeInstrument.NONE),
-            RegimeLabel.RECOVERY: (HedgeInstrument.VIXY, HedgeInstrument.NONE),
+            RegimeLabel.RECOVERY: (HedgeInstrument.NONE, HedgeInstrument.NONE),
         }
         
         return mapping.get(regime, (HedgeInstrument.NONE, HedgeInstrument.NONE))
+
+    def _term_structure_gate(
+        self,
+        regime: RegimeLabel,
+        term_structure_signal: Optional[float],
+    ) -> Tuple[bool, float, str]:
+        """Return whether VIXY is allowed and how strongly term structure sizes it."""
+        if regime == RegimeLabel.NORMAL:
+            return False, 0.0, "normal_no_trade_band"
+        if regime == RegimeLabel.RECOVERY:
+            return False, 0.0, "recovery_no_trade_band"
+
+        if term_structure_signal is None:
+            if regime == RegimeLabel.ELEVATED:
+                return False, 0.0, "elevated_requires_risk_off_term_structure"
+            return True, 1.0, "stress_or_crisis_vix_evidence"
+
+        signal = max(-1.0, min(1.0, float(term_structure_signal)))
+        if signal <= -0.25:
+            multiplier = 0.5 + min(abs(signal), 0.8) * 0.5
+            return True, multiplier, "term_structure_confirmed"
+
+        if regime in (RegimeLabel.STRESS, RegimeLabel.CRISIS):
+            return True, 0.5, "stress_or_crisis_vix_evidence_term_structure_discount"
+
+        return False, 0.0, "elevated_requires_risk_off_term_structure"
+
+    @staticmethod
+    def _overrides_min_hold(regime: RegimeLabel, term_structure_gate: bool) -> bool:
+        """No-trade bands and unconfirmed elevated regimes may exit immediately."""
+        if regime in (RegimeLabel.NORMAL, RegimeLabel.RECOVERY):
+            return True
+        return regime == RegimeLabel.ELEVATED and not term_structure_gate
     
     def _compute_size(
         self,
@@ -250,6 +326,7 @@ class HedgeSelector:
         regime: RegimeLabel,
         confidence: float,
         vix_level: float,
+        term_structure_multiplier: float = 1.0,
     ) -> float:
         """Compute hedge size as percentage of portfolio."""
         
@@ -289,6 +366,8 @@ class HedgeSelector:
         }
         
         base = base_sizes.get(instrument, {}).get(regime, 0.0)
+        if instrument == HedgeInstrument.VIXY:
+            base *= term_structure_multiplier
         
         # VIX scaling (higher VIX → slightly larger hedge)
         vix_scale = 1.0 + (vix_level - 20) / 200  # ±10% at VIX 0/40

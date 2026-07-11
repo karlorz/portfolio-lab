@@ -44,6 +44,7 @@ def build_data_pipeline_slo_section(
     try:
         from src.monitor.data_pipeline_slo import (
             build_data_pipeline_slo,
+            load_data_quality_report,
             load_public_index,
             load_rebalance_health,
             load_signal_staleness,
@@ -55,6 +56,7 @@ def build_data_pipeline_slo_section(
         return build_data_pipeline_slo(
             health_data=health_data,
             source_manifest=load_source_manifest(public_dir),
+            data_quality_report=load_data_quality_report(public_dir),
             public_index=load_public_index(public_dir),
             signal_staleness=load_signal_staleness(public_dir),
             alpaca_feed_entitlement=rebalance_health.get("alpaca_feed_entitlement"),

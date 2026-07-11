@@ -77,6 +77,29 @@ def _make_engine():
     return engine
 
 
+class _BacktestRecommendation:
+    """Small recommendation stub for deterministic backtester tests."""
+
+    def __init__(self, target_allocation):
+        self.target_allocation = target_allocation
+        self.dominant_leader = "SPY"
+        self.network_efficiency = 0.5
+
+
+class _SequentialRecommendationEngine:
+    """Return one allocation per rebalance, repeating the final allocation."""
+
+    def __init__(self, allocations):
+        self.allocations = allocations
+        self.calls = 0
+        self._prices_df = None
+
+    def get_current_recommendation(self, _base_allocation):
+        idx = min(self.calls, len(self.allocations) - 1)
+        self.calls += 1
+        return _BacktestRecommendation(self.allocations[idx])
+
+
 # ---------------------------------------------------------------------------
 # Constants tests
 # ---------------------------------------------------------------------------
@@ -636,6 +659,100 @@ class TestNetworkMomentumBacktester:
         assert 'baseline_sharpe' in result
         assert 'excess_return' in result
         assert 'sharpe_improvement' in result
+
+
+class TestNetworkMomentumBacktesterTransactionCosts:
+    """Turnover and transaction-cost accounting for standalone validation."""
+
+    def _make_backtester(self, allocations, costs_bps=None, rebalance_freq=10):
+        bt = NetworkMomentumBacktester.__new__(NetworkMomentumBacktester)
+        bt.base_allocation = DEFAULT_BASE_ALLOCATION
+        bt.start_date = None
+        bt.end_date = None
+        bt.rebalance_freq = rebalance_freq
+        bt.network_momentum = _SequentialRecommendationEngine(allocations)
+        bt.transaction_cost_bps = costs_bps if costs_bps is not None else {
+            "SPY": 100.0,
+            "GLD": 100.0,
+            "TLT": 100.0,
+            "CASH": 0.0,
+        }
+        bt.prices_df = _make_prices_df(260)
+        return bt
+
+    def test_nonzero_turnover_with_costs_reduces_net_results(self):
+        bt = self._make_backtester([
+            {"SPY": 0.70, "GLD": 0.20, "TLT": 0.10, "CASH": 0.0},
+            {"SPY": 0.20, "GLD": 0.60, "TLT": 0.20, "CASH": 0.0},
+            {"SPY": 0.60, "GLD": 0.10, "TLT": 0.30, "CASH": 0.0},
+        ])
+
+        result = bt.run_backtest()
+
+        assert result["total_turnover"] > 0
+        assert result["transaction_cost_bps"] > 0
+        assert result["cost_drag_bps"] > 0
+        assert result["net_end_value"] < result["end_value"]
+        assert result["net_cagr"] < result["cagr"]
+        assert result["net_sharpe_ratio"] < result["sharpe_ratio"]
+
+    def test_zero_turnover_preserves_gross_results_even_with_costs(self):
+        bt = self._make_backtester([
+            DEFAULT_BASE_ALLOCATION,
+            DEFAULT_BASE_ALLOCATION,
+            DEFAULT_BASE_ALLOCATION,
+        ])
+
+        result = bt.run_backtest()
+
+        assert result["total_turnover"] == pytest.approx(0.0)
+        assert result["transaction_cost_bps"] == pytest.approx(0.0)
+        assert result["cost_drag_bps"] == pytest.approx(0.0)
+        assert result["net_end_value"] == pytest.approx(result["end_value"])
+        assert result["net_cagr"] == pytest.approx(result["cagr"])
+        assert result["net_sharpe_ratio"] == pytest.approx(result["sharpe_ratio"])
+
+    def test_zero_cost_preserves_gross_results_even_with_turnover(self):
+        bt = self._make_backtester(
+            [
+                {"SPY": 0.70, "GLD": 0.20, "TLT": 0.10, "CASH": 0.0},
+                {"SPY": 0.20, "GLD": 0.60, "TLT": 0.20, "CASH": 0.0},
+            ],
+            costs_bps={"SPY": 0.0, "GLD": 0.0, "TLT": 0.0, "CASH": 0.0},
+        )
+
+        result = bt.run_backtest()
+
+        assert result["total_turnover"] > 0
+        assert result["transaction_cost_bps"] == pytest.approx(0.0)
+        assert result["cost_drag_bps"] == pytest.approx(0.0)
+        assert result["net_end_value"] == pytest.approx(result["end_value"])
+        assert result["net_cagr"] == pytest.approx(result["cagr"])
+        assert result["net_sharpe_ratio"] == pytest.approx(result["sharpe_ratio"])
+
+    def test_annualized_turnover_is_deterministic(self):
+        bt = self._make_backtester([
+            {"SPY": 0.70, "GLD": 0.20, "TLT": 0.10, "CASH": 0.0},
+            {"SPY": 0.20, "GLD": 0.60, "TLT": 0.20, "CASH": 0.0},
+            {"SPY": 0.60, "GLD": 0.10, "TLT": 0.30, "CASH": 0.0},
+        ])
+
+        result = bt.run_backtest()
+
+        expected = result["total_turnover"] / result["trading_days"] * 252
+        assert result["annualized_turnover"] == pytest.approx(expected)
+
+    def test_reports_one_way_turnover_per_rebalance(self):
+        bt = self._make_backtester([
+            {"SPY": 0.70, "GLD": 0.20, "TLT": 0.10, "CASH": 0.0},
+            {"SPY": 0.20, "GLD": 0.60, "TLT": 0.20, "CASH": 0.0},
+        ])
+
+        result = bt.run_backtest()
+
+        assert len(result["rebalance_turnover"]) == result["rebalances"]
+        assert result["rebalance_turnover"][0]["one_way_turnover"] > 0
+        assert result["rebalance_turnover"][0]["transaction_cost_bps"] > 0
 
 
 # ---------------------------------------------------------------------------

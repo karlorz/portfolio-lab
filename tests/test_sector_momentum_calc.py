@@ -6,6 +6,7 @@ momentum calculation, regime adjustment, allocation generation.
 import numpy as np
 
 import pytest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -297,6 +298,19 @@ class TestGenerateSectorSignals:
         result = generate_sector_signals(path, vix=18.5, regime="neutral")
         assert isinstance(result, dict)
         assert "top_sectors" in result
+
+    def test_timestamp_is_utc_timezone_aware(self, tmp_path):
+        import json
+        data = _make_historical_data()
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+        result = generate_sector_signals(path, vix=18.5, regime="neutral")
+
+        ts = datetime.fromisoformat(result["timestamp"])
+        assert ts.tzinfo is not None
+        assert ts.utcoffset() == timezone.utc.utcoffset(ts)
 
 
 # ---------------------------------------------------------------------------

@@ -8,12 +8,26 @@ export interface BLView {
   expected_return_delta: number;
 }
 
+interface AllocationArtifactAuthority {
+  runtime_role: 'advisory_non_routed';
+  live_authoritative: false;
+  routed: false;
+  routed_by: null;
+  canonical_controller: string;
+  routed_surface: 'target_allocations';
+  description: string;
+}
+
 export interface BlackLittermanMapperData {
   prior_weights: Record<string, number>;
   posterior_weights: Record<string, number>;
+  posterior_returns?: Record<string, number>;
   views: BLView[];
   tau: number;
   view_confidence_method: string;  // "idzorek"
+  excluded_assets?: string[];
+  zero_weight_assets?: string[];
+  authority?: AllocationArtifactAuthority;
 }
 
 interface BlackLittermanMapperPanelProps {
@@ -86,6 +100,23 @@ function AssetBar({ label, pct, color }: { label: string; pct: number; color: st
   );
 }
 
+function AuthorityDisclosure({ authority }: { authority?: AllocationArtifactAuthority }) {
+  if (!authority) return null;
+
+  return (
+    <div className="alc-card alc-card-compact">
+      <div className="alc-row">
+        <span className="alc-chip-small alc-chip-warning">
+          Not order-routed
+        </span>
+        <span className="alc-small">
+          Live orders use {authority.routed_surface}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function BlackLittermanMapperPanel({ data }: BlackLittermanMapperPanelProps) {
   if (!data) {
     return (
@@ -96,7 +127,7 @@ export function BlackLittermanMapperPanel({ data }: BlackLittermanMapperPanelPro
     );
   }
 
-  const { prior_weights, posterior_weights, views, tau, view_confidence_method } = data;
+  const { prior_weights, posterior_weights, views, tau, view_confidence_method, authority } = data;
 
   // Collect all unique assets from both weight objects, sorted
   const allAssets = Array.from(
@@ -129,6 +160,7 @@ export function BlackLittermanMapperPanel({ data }: BlackLittermanMapperPanelPro
           tau={tau.toFixed(2)} &middot; {confidenceMethodLabel}
         </span>
       </div>
+      <AuthorityDisclosure authority={authority} />
 
       {/* 1. Prior Weights */}
       <div className="alc-section">

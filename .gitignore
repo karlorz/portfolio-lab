@@ -140,6 +140,9 @@ dist
 # `skillwiki path`, not in repo-local duplicate folders.
 /wiki/
 /work/
+/.skillwiki/.env
+/skillwiki/.env
+.claude/dev-loop/
 
 # Data files
 /data/

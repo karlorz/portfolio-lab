@@ -21,6 +21,7 @@ from src.research.experiment_artifact_validator import (
     validate_artifact,
 )
 from src.research.experiment_manifest import EXPERIMENT_MANIFEST_SCHEMA_VERSION, manifest_sidecar_path
+from src.research.promotion_policy import governance_disclosure_fields
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +270,14 @@ def _rows_from_plain_payload(
         "metrics": metrics,
         "baseline_deltas": _extract_baseline_deltas(payload, metrics),
     }
+    row.update(
+        governance_disclosure_fields(
+            row,
+            metric_gate_status="candidate" if metrics else "rejected",
+            metric_gate_pass=bool(metrics),
+            metric_failures=[] if metrics else ["missing_metrics"],
+        )
+    )
     if not _validate_row(row, generated_at):
         return [], [f"{row['artifact_path']}: generated registry row failed validation"]
     return [row], []

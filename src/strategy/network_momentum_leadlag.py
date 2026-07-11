@@ -49,6 +49,7 @@ from dataclasses import dataclass, asdict
 from itertools import combinations
 
 from src.backtest.metrics import save_results_json
+from src.costs.etf_cost_table import estimate_cost_bps
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
 from src.data.price_cache import get_prices, get_prices_df
 
@@ -707,14 +708,43 @@ class NetworkMomentumBacktester:
         base_allocation: Dict[str, float],
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        rebalance_freq: int = 21
+        rebalance_freq: int = 21,
+        transaction_cost_bps: Optional[Dict[str, float]] = None
     ):
         self.base_allocation = base_allocation
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
         self.rebalance_freq = rebalance_freq
+        self.transaction_cost_bps = transaction_cost_bps
         self.network_momentum = NetworkMomentumLeadLag()
         self.prices_df = self.network_momentum._load_prices()
+
+    def _get_transaction_cost_bps(self, ticker: str) -> float:
+        """Get one-way cost bps, allowing tests/backtests to inject a cost map."""
+        cost_map = getattr(self, "transaction_cost_bps", None)
+        if cost_map is not None:
+            return float(cost_map.get(ticker, 0.0))
+        return float(estimate_cost_bps(ticker))
+
+    def _calculate_rebalance_cost(
+        self,
+        previous_weights: Dict[str, float],
+        target_weights: Dict[str, float]
+    ) -> Tuple[float, float]:
+        """Return one-way turnover and portfolio-level transaction cost bps."""
+        tickers = set(previous_weights) | set(target_weights)
+        turnover = 0.5 * sum(
+            abs(float(target_weights.get(ticker, 0.0)) - float(previous_weights.get(ticker, 0.0)))
+            for ticker in tickers
+            if ticker != "CASH"
+        )
+        cost_bps = sum(
+            abs(float(target_weights.get(ticker, 0.0)) - float(previous_weights.get(ticker, 0.0)))
+            * self._get_transaction_cost_bps(ticker)
+            for ticker in tickers
+            if ticker != "CASH"
+        )
+        return turnover, cost_bps
     
     def run_backtest(self) -> Dict:
         """Run full historical backtest."""
@@ -730,7 +760,10 @@ class NetworkMomentumBacktester:
             return {'error': f'Insufficient data: {len(prices)} days < {min_history} required'}
         
         portfolio_value = 100000.0
+        net_portfolio_value = portfolio_value
         current_weights = self.base_allocation.copy()
+        total_turnover = 0.0
+        total_transaction_cost_bps = 0.0
         
         daily_values = []
         rebalance_dates = []
@@ -738,6 +771,7 @@ class NetworkMomentumBacktester:
         for i in range(min_history, len(prices)):
             current_date = prices.index[i]
             history = prices.iloc[:i+1]
+            rebalance_cost_rate = 0.0
             
             # Monthly rebalancing
             if (i - min_history) % self.rebalance_freq == 0:
@@ -748,10 +782,22 @@ class NetworkMomentumBacktester:
                 )
                 
                 if recommendation:
-                    current_weights = recommendation.target_allocation
+                    target_weights = recommendation.target_allocation
+                    turnover, cost_bps = self._calculate_rebalance_cost(
+                        current_weights,
+                        target_weights,
+                    )
+                    total_turnover += turnover
+                    total_transaction_cost_bps += cost_bps
+                    if cost_bps > 0:
+                        rebalance_cost_rate = cost_bps / 10000
+                        net_portfolio_value *= max(0.0, 1 - rebalance_cost_rate)
+                    current_weights = target_weights
                     rebalance_dates.append({
                         'date': current_date.isoformat(),
                         'weights': current_weights.copy(),
+                        'one_way_turnover': turnover,
+                        'transaction_cost_bps': cost_bps,
                         'dominant_leader': recommendation.dominant_leader,
                         'network_efficiency': recommendation.network_efficiency
                     })
@@ -769,11 +815,18 @@ class NetworkMomentumBacktester:
             if np.isnan(new_value) or np.isinf(new_value):
                 new_value = portfolio_value
             portfolio_value = new_value
+
+            new_net_value = net_portfolio_value * (1 + daily_return)
+            if np.isnan(new_net_value) or np.isinf(new_net_value):
+                new_net_value = net_portfolio_value
+            net_portfolio_value = new_net_value
             
             daily_values.append({
                 'date': current_date.isoformat(),
                 'value': portfolio_value,
-                'return': daily_return
+                'net_value': net_portfolio_value,
+                'return': daily_return,
+                'net_return': ((1 - rebalance_cost_rate) * (1 + daily_return)) - 1,
             })
         
         # Calculate metrics
@@ -791,6 +844,15 @@ class NetworkMomentumBacktester:
         cagr = ((end_val / start_val) ** (1/years)) - 1 if start_val > 0 and years > 0 else 0
         volatility = float(returns.std()) * np.sqrt(252)
         sharpe = cagr / volatility if volatility > 0 else 0
+
+        net_returns = df_values['net_return'].dropna()
+        net_end_val = float(df_values['net_value'].iloc[-1])
+        net_cagr = ((net_end_val / start_val) ** (1/years)) - 1 if start_val > 0 and years > 0 else 0
+        net_volatility = float(net_returns.std()) * np.sqrt(252)
+        net_sharpe = net_cagr / net_volatility if net_volatility > 0 else 0
+        cost_drag_bps = ((end_val / net_end_val) - 1) * 10000 if net_end_val > 0 else 0
+        annualized_turnover = total_turnover / len(df_values) * 252 if len(df_values) > 0 else 0
+        average_one_way_turnover = total_turnover / len(rebalance_dates) if rebalance_dates else 0
         
         # Drawdown
         cumulative = (1 + returns).cumprod()
@@ -850,6 +912,23 @@ class NetworkMomentumBacktester:
             'sharpe_ratio': sharpe,
             'max_drawdown': max_drawdown,
             'calmar_ratio': calmar,
+            'net_end_value': net_portfolio_value,
+            'net_cagr': net_cagr,
+            'net_volatility': net_volatility,
+            'net_sharpe_ratio': net_sharpe,
+            'total_turnover': total_turnover,
+            'annualized_turnover': annualized_turnover,
+            'average_one_way_turnover': average_one_way_turnover,
+            'rebalance_turnover': [
+                {
+                    'date': r['date'],
+                    'one_way_turnover': r['one_way_turnover'],
+                    'transaction_cost_bps': r['transaction_cost_bps'],
+                }
+                for r in rebalance_dates
+            ],
+            'transaction_cost_bps': total_transaction_cost_bps,
+            'cost_drag_bps': cost_drag_bps,
             'baseline_cagr': baseline_cagr,
             'baseline_sharpe': baseline_sharpe,
             'excess_return': cagr - baseline_cagr,

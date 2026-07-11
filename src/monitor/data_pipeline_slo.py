@@ -53,6 +53,10 @@ def load_source_manifest(public_dir: Path) -> dict[str, Any]:
     return _load_json(public_dir / "source_manifest.json")
 
 
+def load_data_quality_report(public_dir: Path) -> dict[str, Any]:
+    return _load_json(public_dir / "data_quality.json")
+
+
 def load_public_index(public_dir: Path) -> dict[str, Any]:
     return _load_json(public_dir / "index.json")
 
@@ -269,9 +273,18 @@ def _price_manifest_rows(source_manifest: Mapping[str, Any] | None) -> list[Mapp
     return price_rows or rows
 
 
-def _select_data_quality_row(source_manifest: Mapping[str, Any] | None) -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None]:
+def _select_data_quality_row(
+    source_manifest: Mapping[str, Any] | None,
+    data_quality_report: Mapping[str, Any] | None = None,
+) -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None]:
     rows = _price_manifest_rows(source_manifest)
     preferred_row: Mapping[str, Any] | None = None
+    if isinstance(data_quality_report, Mapping) and data_quality_report:
+        for artifact_name in ("prices.json", "prices_compact.json"):
+            for row in rows:
+                if row.get("artifact") == artifact_name:
+                    return row, data_quality_report
+        return (rows[0] if rows else None), data_quality_report
     for artifact_name in ("prices.json", "prices_compact.json"):
         for row in rows:
             if row.get("artifact") != artifact_name:
@@ -329,9 +342,16 @@ def _manifest_symbol_count(row: Mapping[str, Any] | None) -> int:
     return 0
 
 
-def _data_quality_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, Any]:
-    row, quality = _select_data_quality_row(source_manifest)
-    quality_status = str(quality.get("status", "missing")).lower() if isinstance(quality, Mapping) else "missing"
+def _data_quality_dimension(
+    source_manifest: Mapping[str, Any] | None,
+    data_quality_report: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    row, quality = _select_data_quality_row(source_manifest, data_quality_report)
+    quality_status = (
+        str(quality.get("status") or quality.get("overall_status") or "missing").lower()
+        if isinstance(quality, Mapping)
+        else "missing"
+    )
     status = _data_quality_status(quality_status)
     issue_counts = _data_quality_issue_counts(quality.get("issue_counts") if isinstance(quality, Mapping) else None)
     top_issue = _top_data_quality_issue(issue_counts)
@@ -832,6 +852,7 @@ def build_data_pipeline_slo(
     *,
     health_data: Mapping[str, Any],
     source_manifest: Mapping[str, Any] | None = None,
+    data_quality_report: Mapping[str, Any] | None = None,
     public_index: Mapping[str, Any] | None = None,
     signal_staleness: Mapping[str, Any] | None = None,
     provider_reconciliation: Mapping[str, Any] | None = None,
@@ -845,7 +866,7 @@ def build_data_pipeline_slo(
         "provider": _provider_dimension(source_manifest),
         "artifact": _artifact_dimension(health_data, public_index, source_manifest),
         "signal": _signal_dimension(signal_staleness),
-        "data_quality": _data_quality_dimension(source_manifest),
+        "data_quality": _data_quality_dimension(source_manifest, data_quality_report),
     }
     reconciliation = provider_reconciliation
     if reconciliation is None:

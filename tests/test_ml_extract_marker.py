@@ -30,7 +30,7 @@ def _makefile_target_block(makefile: str, target: str) -> str:
     return match.group("body")
 
 
-def test_pytest_help_registers_ml_extract_option_and_marker() -> None:
+def test_pytest_help_registers_ml_extract_option_and_marker():
     result = _run_pytest("--help")
 
     assert result.returncode == 0, result.stderr
@@ -38,7 +38,7 @@ def test_pytest_help_registers_ml_extract_option_and_marker() -> None:
     assert "ml_extract" in result.stdout
 
 
-def test_ml_extract_selection_runs_without_heavy_or_ml_enabled() -> None:
+def test_ml_extract_selection_runs_without_heavy_or_ml_enabled():
     probe = REPO_ROOT / "tests" / "_ml_extract_marker_probe.py"
     probe.write_text(
         "\n".join(
@@ -69,7 +69,7 @@ def test_ml_extract_selection_runs_without_heavy_or_ml_enabled() -> None:
     assert "1 skipped" in output
 
 
-def test_run_tests_safe_exposes_safe_ml_extract_lane() -> None:
+def test_run_tests_safe_exposes_safe_ml_extract_lane():
     runner = (REPO_ROOT / "scripts" / "run-tests-safe").read_text()
 
     assert "--ml-extract" in runner
@@ -77,7 +77,7 @@ def test_run_tests_safe_exposes_safe_ml_extract_lane() -> None:
     assert "PORTFOLIO_LAB_ENABLE_ML=0" in runner
 
 
-def test_makefile_exposes_safe_ml_extract_target() -> None:
+def test_makefile_exposes_safe_ml_extract_target():
     makefile = (REPO_ROOT / "Makefile").read_text()
     target = _makefile_target_block(makefile, "test-ml-extract")
 

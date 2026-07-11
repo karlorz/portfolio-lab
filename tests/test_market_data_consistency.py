@@ -13,6 +13,7 @@ from src.data.market_db_sync import sync_prices_json_to_market_db
 from src.monitor.market_data_consistency import (
     MarketDataSemanticsError,
     broker_market_data_consistency_report,
+    reconcile_compact_prices_with_market_db,
     require_true_ohlc_price_rows,
     reconcile_price_providers,
 )
@@ -244,3 +245,81 @@ def test_provider_reconciliation_classifies_empty_provider_as_outage() -> None:
     assert report["failure_type"] == "provider_outage"
     assert report["outage_provider"] == "Yahoo Fixture"
     assert report["issue_counts"] == {"provider_outage": 1}
+
+
+def test_compact_price_market_db_reconciliation_flags_stale_vix3m(tmp_path: Path) -> None:
+    prices_path = tmp_path / "prices.json"
+    db_path = _price_db(tmp_path / "market.db", [("^VIX3M", "2026-06-26", 20.13)])
+    _write_prices_json(
+        prices_path,
+        {
+            "^VIX3M": [
+                {"d": "2026-06-26", "p": 20.13},
+                {"d": "2026-07-02", "p": 19.04},
+            ]
+        },
+    )
+
+    report = reconcile_compact_prices_with_market_db(
+        prices_path=prices_path,
+        db_path=db_path,
+        required_symbols=["^VIX3M"],
+    )
+
+    assert report["status"] == "fail"
+    assert report["failure_type"] == "market_db_stale"
+    assert report["issue_counts"] == {"stale_latest_date": 1}
+    offender = report["top_offenders"][0]
+    assert offender["symbol"] == "^VIX3M"
+    assert offender["compact_latest_row"] == {"date": "2026-07-02", "price": 19.04}
+    assert offender["sqlite_latest_row"] == {"date": "2026-06-26", "price": 20.13}
+    assert offender["lag_days"] == 6
+    assert "src.data.market_db_sync" in report["remediation_command"]
+
+
+def test_compact_price_market_db_reconciliation_passes_after_sync(tmp_path: Path) -> None:
+    prices_path = tmp_path / "prices.json"
+    db_path = tmp_path / "market.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE prices (
+                symbol TEXT,
+                date TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                updated_at TEXT,
+                PRIMARY KEY (symbol, date)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO prices (symbol, date, open, high, low, close, volume, updated_at)
+            VALUES ('^VIX3M', '2026-06-26', 20.13, 20.13, 20.13, 20.13, 0, 'old')
+            """
+        )
+    _write_prices_json(
+        prices_path,
+        {
+            "^VIX3M": [
+                {"d": "2026-06-26", "p": 20.13},
+                {"d": "2026-07-02", "p": 19.04},
+            ]
+        },
+    )
+
+    sync_prices_json_to_market_db(prices_path=prices_path, db_path=db_path)
+    report = reconcile_compact_prices_with_market_db(
+        prices_path=prices_path,
+        db_path=db_path,
+        required_symbols=["^VIX3M"],
+    )
+
+    assert report["status"] == "ok"
+    assert report["failure_type"] is None
+    assert report["issue_counts"] == {}
+    assert report["top_offenders"] == []

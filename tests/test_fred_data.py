@@ -507,6 +507,21 @@ class TestRegimeSignalClassification:
         assert signal.regime in ("NORMAL", "RECOVERY", "LOW_VOL")
         assert 0 <= signal.confidence <= 1.0
 
+    def test_empty_inputs_are_unavailable_with_zero_confidence(self, mock_fetcher):
+        """Empty FRED-MD inputs must not publish a measured NORMAL signal."""
+        mock_fetcher._fred_client.get_series.return_value = pd.Series(dtype=float)
+
+        signal = mock_fetcher.compute_regime_signal(cache_ok=False)
+
+        assert signal.regime == "UNKNOWN"
+        assert signal.confidence == 0.0
+        assert signal.indicators == {}
+        assert signal.source_mode == "unavailable"
+        assert signal.cache_status == "unavailable"
+        assert signal.api_key_configured is True
+        assert signal.indicators_observed is False
+        assert signal.reason == "no_fred_indicators"
+
     def test_low_vol_detection(self, mock_fetcher):
         """Strong PMI + loose credit should indicate LOW_VOL."""
         _13_months = [(2023,1),(2023,2),(2023,3),(2023,4),(2023,5),(2023,6),(2023,7),(2023,8),(2023,9),(2023,10),(2023,11),(2023,12),(2024,1)]
@@ -564,6 +579,7 @@ class TestDataclasses:
         assert signal.monetary_stance == "neutral"
         assert signal.manufacturing_health == 52.0
         assert signal.credit_conditions == "normal"
+        assert signal.indicators_observed is True
 
     def test_fred_signal_defaults(self):
         """FredSignal should use default for timestamp."""
@@ -579,6 +595,9 @@ class TestDataclasses:
             credit_conditions="unknown",
         )
         assert signal.timestamp is not None
+        assert signal.source_mode == "unknown"
+        assert signal.cache_status == "unknown"
+        assert signal.indicators_observed is False
 
     def test_fred_series_observation(self):
         """FredSeriesObservation should store single observation."""

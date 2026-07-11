@@ -273,6 +273,81 @@ def test_pass_alert_clears_matching_incident_owned_kill_switch(tmp_path):
     assert not kill_switch_path.exists()
 
 
+def test_pass_alert_restores_next_open_incident_owned_kill_switch(tmp_path):
+    kill_switch_path = tmp_path / "kill_switch.json"
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=kill_switch_path,
+        escalation_cycles=1,
+    )
+
+    critical = None
+    for minute in (0, 1, 2):
+        critical = manager.record_alert(
+            channel="signal_staleness",
+            level="halt",
+            message="signals halted",
+            now=datetime(2026, 7, 1, 0, minute, tzinfo=timezone.utc),
+        )
+    warning = manager.record_alert(
+        channel="ic_decay",
+        level="warn",
+        message="IC warning",
+        now=datetime(2026, 7, 1, 0, 3, tzinfo=timezone.utc),
+    )
+    assert critical is not None
+    assert warning is not None
+    assert json.loads(kill_switch_path.read_text())["incident_id"] == critical.incident_id
+
+    manager.record_alert(
+        channel="signal_staleness",
+        level="pass",
+        message="signals recovered",
+        now=datetime(2026, 7, 1, 0, 5, tzinfo=timezone.utc),
+    )
+
+    restored = json.loads(kill_switch_path.read_text())
+    assert restored["source"] == "incident_lifecycle"
+    assert restored["incident_id"] == warning.incident_id
+    assert restored["incident_channel"] == "ic_decay"
+    assert restored["level"] == "warning"
+
+
+def test_signal_staleness_recovery_clears_incident_owned_kill_switch(tmp_path):
+    kill_switch_path = tmp_path / "kill_switch.json"
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=kill_switch_path,
+        escalation_cycles=1,
+    )
+
+    opened = manager.record_alert(
+        channel="signal_staleness",
+        level="halt",
+        message="all required signals stale",
+        details={"stale_signals": ["ensemble_voting", "garch_cvar"]},
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    assert opened is not None
+    assert kill_switch_path.exists()
+    assert json.loads(kill_switch_path.read_text())["reason"] == "unresolved_incident:signal_staleness"
+
+    resolved = manager.record_alert(
+        channel="signal_staleness",
+        level="pass",
+        message="required signals fresh and optional daily sections classified",
+        details={"stale_signals": [], "unavailable_signals": ["collar"]},
+        now=datetime(2026, 7, 1, 0, 5, tzinfo=timezone.utc),
+    )
+
+    assert resolved is not None
+    assert resolved.incident_id == opened.incident_id
+    assert resolved.state == IncidentState.RESOLVED
+    assert not kill_switch_path.exists()
+
+
 def test_pass_alert_does_not_clear_non_incident_kill_switch(tmp_path):
     kill_switch_path = tmp_path / "kill_switch.json"
     kill_switch_path.write_text(json.dumps({
