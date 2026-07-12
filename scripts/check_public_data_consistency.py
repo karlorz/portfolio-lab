@@ -294,6 +294,49 @@ def _check_compact_prices_match_market_db(app_dir: Path, errors: list[str]) -> N
         errors.append(message)
 
 
+def _check_critical_health_has_slo_alert(
+    public_data: Path,
+    health: dict[str, Any] | None,
+    errors: list[str],
+) -> None:
+    """Critical health/SLO must project into alerts.json (or alerts must exist)."""
+    if health is None:
+        return
+    try:
+        from src.dashboard.health_slo_alerts import (
+            HEALTH_SLO_ALERT_TYPE,
+            critical_health_requires_alert,
+        )
+    except ImportError:
+        return
+    if not critical_health_requires_alert(health):
+        return
+
+    alerts_path = public_data / "alerts.json"
+    if not alerts_path.exists():
+        errors.append(
+            "public/data/health.json is critical but public/data/alerts.json is missing"
+        )
+        return
+    alerts_payload = _load_json(alerts_path, errors)
+    if alerts_payload is None:
+        return
+    raw_alerts = alerts_payload.get("alerts")
+    alerts = raw_alerts if isinstance(raw_alerts, list) else []
+    has_health_slo = any(
+        isinstance(a, dict) and a.get("type") == HEALTH_SLO_ALERT_TYPE for a in alerts
+    )
+    if not has_health_slo:
+        system_status = health.get("system_status")
+        slo = health.get("data_pipeline_slo") if isinstance(health.get("data_pipeline_slo"), dict) else {}
+        slo_status = slo.get("status")
+        errors.append(
+            "public/data/health.json is critical "
+            f"(system_status={system_status!r}, data_pipeline_slo.status={slo_status!r}) "
+            f"but public/data/alerts.json has no type={HEALTH_SLO_ALERT_TYPE!r} alert"
+        )
+
+
 def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
     """Return deploy-blocking public data consistency errors for an app checkout."""
     root = Path(app_dir)
@@ -304,7 +347,7 @@ def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
     source_manifest_path = public_data / "source_manifest.json"
     source_manifest = _load_json(source_manifest_path, errors)
     public_index = _load_json(public_data / "index.json", errors)
-    _load_json(public_data / "health.json", errors)
+    health = _load_json(public_data / "health.json", errors)
     _check_timestamp_order(source_manifest, public_index, errors)
     _check_source_manifest_identity(source_manifest_path, source_manifest, public_index, errors)
     _check_present_index_entries_resolve(public_data, public_index, errors)
@@ -312,6 +355,7 @@ def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
     _check_public_json_artifacts_are_indexed(public_data, public_index, errors)
     _check_dist_matches_public(root, errors)
     _check_compact_prices_match_market_db(root, errors)
+    _check_critical_health_has_slo_alert(public_data, health, errors)
 
     return ConsistencyResult(ok=not errors, errors=errors, warnings=warnings)
 

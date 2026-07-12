@@ -153,92 +153,99 @@ def send_alert(
         return False
 
 
-def check_staleness_and_alert(staleness_data: Dict) -> None:
-    """Check signal staleness data and fire alerts on state transitions.
+def classify_signal_staleness(
+    staleness_data: Dict,
+) -> Optional[tuple[AlertLevel, str, Dict]]:
+    """Classify signal staleness into PASS/WARN/HALT (pure; no I/O).
 
-    Args:
-        staleness_data: Output from DashboardGenerator._check_signal_staleness()
+    Returns ``(level, message, details)`` or ``None`` when there is nothing
+    to report (``total_count == 0``).
 
     Policy:
         - Stale signals drive WARN/HALT as before.
-        - Non-empty ``unavailable_signals`` must not produce an all-fresh PASS
-          even when ``stale_signals`` is empty (partial telemetry availability).
+        - Non-empty ``unavailable_signals`` (list) must not produce an
+          all-fresh PASS even when ``stale_signals`` is empty.
+        - When both stale and unavailable, prioritise stale in the message
+          but keep unavailable in details.
     """
-    stale_signals = list(staleness_data.get("stale_signals") or [])
-    unavailable_raw = staleness_data.get("unavailable_signals", [])
+    stale_raw = staleness_data.get("stale_signals") or []
+    stale_signals = [str(x) for x in stale_raw] if isinstance(stale_raw, list) else []
+    unavailable_raw = staleness_data.get("unavailable_signals") or []
     unavailable_signals = (
-        [str(x) for x in unavailable_raw]
-        if isinstance(unavailable_raw, list)
-        else []
+        [str(x) for x in unavailable_raw] if isinstance(unavailable_raw, list) else []
     )
-    # Count may be provided as int, or derived from list length.
-    if isinstance(unavailable_raw, int):
-        unavailable_count = max(0, unavailable_raw)
-    else:
-        unavailable_count = len(unavailable_signals)
-
-    healthy_count = staleness_data.get("healthy_count", 0)
-    total_count = staleness_data.get("total_count", 0)
-    required_count = staleness_data.get("required_count")
-    optional_count = staleness_data.get("optional_count")
+    unavailable_count = len(unavailable_signals)
+    healthy_count = int(staleness_data.get("healthy_count") or 0)
+    total_count = int(staleness_data.get("total_count") or 0)
 
     if total_count == 0:
-        return
+        return None
 
-    details_base: Dict = {
+    details: Dict = {
         "stale_signals": stale_signals,
         "healthy_count": healthy_count,
         "total_count": total_count,
         "unavailable_count": unavailable_count,
     }
     if unavailable_signals:
-        details_base["unavailable_signals"] = unavailable_signals
-    if required_count is not None:
-        details_base["required_count"] = required_count
-    if optional_count is not None:
-        details_base["optional_count"] = optional_count
+        details["unavailable_signals"] = unavailable_signals
 
-    if len(stale_signals) == 0 and unavailable_count == 0:
-        # Fully healthy — PASS state
-        send_alert(
-            AlertChannel.SIGNAL_STALENESS,
+    if not stale_signals and unavailable_count == 0:
+        return (
             AlertLevel.PASS,
             f"All {total_count} signals fresh",
+            details,
         )
-    elif len(stale_signals) == 0 and unavailable_count > 0:
-        # Partial availability: not stale, but telemetry incomplete — WARN
-        names = ", ".join(unavailable_signals[:8]) if unavailable_signals else ""
+
+    if not stale_signals and unavailable_count > 0:
+        names = ", ".join(unavailable_signals[:8])
         suffix = f": {names}" if names else ""
-        if unavailable_signals and len(unavailable_signals) > 8:
+        if len(unavailable_signals) > 8:
             suffix += f" (+{len(unavailable_signals) - 8} more)"
-        send_alert(
-            AlertChannel.SIGNAL_STALENESS,
+        details["policy"] = "unavailable_signals_nonempty_blocks_all_fresh_pass"
+        return (
             AlertLevel.WARN,
             (
                 f"{unavailable_count}/{total_count} signals unavailable "
                 f"(partial availability; not all-fresh){suffix}"
             ),
-            details={
-                **details_base,
-                "policy": "unavailable_signals_nonempty_blocks_all_fresh_pass",
-            },
+            details,
         )
-    elif healthy_count > 0:
-        # Some signals stale — WARN state (may also include unavailable)
-        send_alert(
-            AlertChannel.SIGNAL_STALENESS,
+
+    if healthy_count > 0:
+        extra = ""
+        if unavailable_count:
+            extra = f"; {unavailable_count} unavailable"
+        return (
             AlertLevel.WARN,
-            f"{len(stale_signals)}/{total_count} signals stale: {', '.join(stale_signals)}",
-            details=details_base,
+            f"{len(stale_signals)}/{total_count} signals stale: "
+            f"{', '.join(stale_signals)}{extra}",
+            details,
         )
-    else:
-        # All signals stale — HALT state
-        send_alert(
-            AlertChannel.SIGNAL_STALENESS,
-            AlertLevel.HALT,
-            f"ALL {total_count} signals stale — pipeline may be down",
-            details=details_base,
-        )
+
+    return (
+        AlertLevel.HALT,
+        f"ALL {total_count} signals stale — pipeline may be down",
+        details,
+    )
+
+
+def check_staleness_and_alert(staleness_data: Dict) -> None:
+    """Check signal staleness data and fire alerts on state transitions.
+
+    Args:
+        staleness_data: Output from DashboardGenerator._check_signal_staleness()
+    """
+    classified = classify_signal_staleness(staleness_data)
+    if classified is None:
+        return
+    level, message, details = classified
+    send_alert(
+        AlertChannel.SIGNAL_STALENESS,
+        level,
+        message,
+        details=details if level != AlertLevel.PASS else None,
+    )
 
 
 def check_drift_and_alert(drift_pct: float, symbol: str = "") -> None:

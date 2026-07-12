@@ -245,8 +245,6 @@ class TestCheckStalenessAndAlert:
             "unavailable_signals": unavailable,
             "healthy_count": 11,
             "total_count": 23,
-            "required_count": 5,
-            "optional_count": 18,
         }
         check_staleness_and_alert(staleness)
         mock_send.assert_called_once()
@@ -254,30 +252,30 @@ class TestCheckStalenessAndAlert:
         assert call_args[0][0] == AlertChannel.SIGNAL_STALENESS
         assert call_args[0][1] == AlertLevel.WARN
         message = call_args[0][2]
-        assert "fresh" not in message.lower() or "partial" in message.lower() or "unavailable" in message.lower()
         assert "All 23 signals fresh" not in message
         assert "unavailable" in message.lower()
-        details = call_args[1].get("details") or (call_args[0][3] if len(call_args[0]) > 3 else None)
-        # kwargs preferred
-        if call_args.kwargs:
-            details = call_args.kwargs.get("details", details)
+        details = call_args.kwargs.get("details")
         assert details is not None
         assert details.get("unavailable_count") == 12
         assert details.get("unavailable_signals") == unavailable
 
     @patch("src.monitor.alerting.send_alert")
-    def test_unavailable_count_int_without_list(self, mock_send):
-        """Support unavailable_signals as a count when list is omitted."""
+    def test_stale_and_unavailable_mentions_both(self, mock_send):
+        """Stale WARN should surface unavailable count in the message."""
         staleness = {
-            "stale_signals": [],
-            "unavailable_signals": 12,
-            "healthy_count": 11,
-            "total_count": 23,
+            "stale_signals": ["ensemble_voting"],
+            "unavailable_signals": ["fred_macro", "bond_momentum"],
+            "healthy_count": 3,
+            "total_count": 6,
         }
         check_staleness_and_alert(staleness)
         mock_send.assert_called_once()
         assert mock_send.call_args[0][1] == AlertLevel.WARN
-        assert "All 23 signals fresh" not in mock_send.call_args[0][2]
+        message = mock_send.call_args[0][2]
+        assert "stale" in message.lower()
+        assert "unavailable" in message.lower()
+        details = mock_send.call_args.kwargs.get("details")
+        assert details["unavailable_count"] == 2
 
 
 class TestCheckDriftAndAlert:

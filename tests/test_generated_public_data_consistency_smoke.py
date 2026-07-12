@@ -98,6 +98,117 @@ def test_generated_public_data_consistency_smoke_rejects_missing_required_artifa
     assert "public/data/health.json is missing" in result.errors
 
 
+def test_generated_public_data_consistency_rejects_critical_health_without_health_slo_alert(
+    tmp_path: Path,
+) -> None:
+    """Critical health/SLO must not be invisible from alerts.json."""
+    from src.dashboard.health_slo_alerts import HEALTH_SLO_ALERT_TYPE
+
+    _write_consistent_public_data_set(tmp_path)
+    public_data = tmp_path / "public" / "data"
+    _write_json(
+        public_data / "health.json",
+        {
+            "system_status": "critical",
+            "generated_at": "2026-06-12T09:06:00+00:00",
+            "data_pipeline_slo": {
+                "status": "critical",
+                "top_dimension": "alpaca_feed_entitlement",
+            },
+        },
+    )
+    # alerts present but missing health_slo projection
+    _write_json(
+        public_data / "alerts.json",
+        {
+            "alerts": [
+                {
+                    "level": "error",
+                    "type": "kill_switch",
+                    "title": "Kill Switch",
+                    "message": "test",
+                }
+            ],
+            "count": 1,
+        },
+    )
+    # index alerts.json so unmanaged-json check does not fire first
+    index_path = public_data / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["entries"].append(
+        {
+            "filename": "alerts.json",
+            "path": "alerts.json",
+            "status": "present",
+            "generated_at": index.get("generated_at"),
+        }
+    )
+    _write_json(index_path, index)
+    shutil.copyfile(public_data / "health.json", tmp_path / "dist" / "data" / "health.json")
+    shutil.copyfile(public_data / "index.json", tmp_path / "dist" / "data" / "index.json")
+
+    result = check_public_data_consistency(tmp_path)
+
+    assert result.ok is False
+    assert any(
+        f"type={HEALTH_SLO_ALERT_TYPE!r}" in error or HEALTH_SLO_ALERT_TYPE in error
+        for error in result.errors
+    )
+
+
+def test_generated_public_data_consistency_accepts_critical_health_with_health_slo_alert(
+    tmp_path: Path,
+) -> None:
+    from src.dashboard.health_slo_alerts import HEALTH_SLO_ALERT_TYPE
+
+    _write_consistent_public_data_set(tmp_path)
+    public_data = tmp_path / "public" / "data"
+    _write_json(
+        public_data / "health.json",
+        {
+            "system_status": "critical",
+            "generated_at": "2026-06-12T09:06:00+00:00",
+            "data_pipeline_slo": {
+                "status": "critical",
+                "top_dimension": "alpaca_feed_entitlement",
+            },
+        },
+    )
+    _write_json(
+        public_data / "alerts.json",
+        {
+            "alerts": [
+                {
+                    "level": "error",
+                    "type": HEALTH_SLO_ALERT_TYPE,
+                    "title": "Critical Health/SLO: alpaca_feed_entitlement",
+                    "message": "Critical health/SLO: alpaca_feed_entitlement (missing_entitlement)",
+                    "top_dimension": "alpaca_feed_entitlement",
+                    "requires_action": True,
+                }
+            ],
+            "count": 1,
+        },
+    )
+    index_path = public_data / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["entries"].append(
+        {
+            "filename": "alerts.json",
+            "path": "alerts.json",
+            "status": "present",
+            "generated_at": index.get("generated_at"),
+        }
+    )
+    _write_json(index_path, index)
+    shutil.copyfile(public_data / "health.json", tmp_path / "dist" / "data" / "health.json")
+    shutil.copyfile(public_data / "index.json", tmp_path / "dist" / "data" / "index.json")
+
+    result = check_public_data_consistency(tmp_path)
+
+    assert result.ok is True, result.errors
+
+
 def test_generated_public_data_consistency_smoke_rejects_present_index_entry_with_missing_path(
     tmp_path: Path,
 ) -> None:
