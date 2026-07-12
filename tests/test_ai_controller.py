@@ -290,6 +290,77 @@ class TestAIControllerCli:
         assert "CUDA requested but ML is disabled" in result.stdout
         assert '"device": "cpu"' in result.stdout
 
+    def test_train_cli_returns_safe_mode_json_when_ml_disabled(self):
+        env = os.environ.copy()
+        env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "src.agents.ai_controller",
+                "--mode",
+                "train",
+                "--episodes",
+                "1",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "FloatTensor" not in result.stderr
+        assert "FloatTensor" not in result.stdout
+        assert "Starting MARL training" not in result.stdout
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "safe_mode"
+        assert payload["error"] == "ml_disabled"
+        assert payload["mode"] == "train"
+        assert payload["execution_role"] == "research_shadow_non_routed"
+        assert payload["routed"] is False
+        assert payload["routed_by"] is None
+        assert payload["live_authoritative"] is False
+        assert "ml_disabled" in payload.get("message", "").lower() or "PORTFOLIO_LAB_ENABLE_ML=0" in payload.get("message", "")
+
+    def test_backtest_cli_returns_safe_mode_json_when_ml_disabled(self):
+        env = os.environ.copy()
+        env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "src.agents.ai_controller",
+                "--mode",
+                "backtest",
+                "--start",
+                "2026-01-01",
+                "--end",
+                "2026-01-10",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "FloatTensor" not in result.stderr
+        assert "FloatTensor" not in result.stdout
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "safe_mode"
+        assert payload["error"] == "ml_disabled"
+        assert payload["mode"] == "backtest"
+        assert payload["execution_role"] == "research_shadow_non_routed"
+        assert payload["routed"] is False
+        assert payload["live_authoritative"] is False
+
 
 class TestAIControllerFetchPriceHistory:
     def test_returns_fallback_when_no_db(self):
