@@ -523,6 +523,9 @@ export interface AnalyticsData {
     portfolio: PortfolioBenchmarkData;
   };
   crisis_periods: CrisisPeriodData[];
+  /** Section-level: global status=success does not imply complete crisis comparison. */
+  crisis_periods_status?: 'success' | 'partial' | 'unavailable';
+  crisis_periods_reason?: string | null;
 }
 
 export interface DrawdownPoint {
@@ -569,6 +572,8 @@ export interface CrisisPeriodData {
   description: string;
   spy_return: number;
   portfolio_return: number | null;
+  portfolio_return_available?: boolean;
+  availability?: 'available' | 'unavailable' | 'partial';
 }
 
 export interface AlertsData {

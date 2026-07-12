@@ -372,16 +372,67 @@ interface CrisisPeriod {
   description: string;
   spy_return: number;
   portfolio_return: number | null;
+  portfolio_return_available?: boolean;
+  availability?: 'available' | 'unavailable' | 'partial';
 }
+
+export type CrisisPeriodsStatus = 'success' | 'partial' | 'unavailable';
 
 interface CrisisOverlayProps {
   periods: CrisisPeriod[];
+  /** Section-level availability; when omitted, inferred from portfolio_return nulls. */
+  crisisPeriodsStatus?: CrisisPeriodsStatus | null;
+  crisisPeriodsReason?: string | null;
 }
 
-export const CrisisOverlay: React.FC<CrisisOverlayProps> = ({ periods }) => {
+/** Infer section status from rows when producer omitted explicit metadata. */
+export function resolveCrisisPeriodsStatus(
+  periods: CrisisPeriod[],
+  explicit?: CrisisPeriodsStatus | null,
+): CrisisPeriodsStatus {
+  if (explicit === 'success' || explicit === 'partial' || explicit === 'unavailable') {
+    return explicit;
+  }
+  if (!periods.length) return 'unavailable';
+  const withReturn = periods.filter(
+    (p) => typeof p.portfolio_return === 'number' && Number.isFinite(p.portfolio_return),
+  );
+  if (withReturn.length === periods.length) return 'success';
+  if (withReturn.length === 0) return 'unavailable';
+  return 'partial';
+}
+
+export const CrisisOverlay: React.FC<CrisisOverlayProps> = ({
+  periods,
+  crisisPeriodsStatus,
+  crisisPeriodsReason,
+}) => {
+  const sectionStatus = resolveCrisisPeriodsStatus(periods, crisisPeriodsStatus);
+  const degraded = sectionStatus === 'unavailable' || sectionStatus === 'partial';
+  const bannerReason =
+    crisisPeriodsReason
+    || (sectionStatus === 'unavailable'
+      ? 'historical_simulation_unavailable'
+      : sectionStatus === 'partial'
+        ? 'historical_simulation_incomplete'
+        : null);
+
   return (
-    <div className="crisis-overlay">
+    <div
+      className={`crisis-overlay${degraded ? ' crisis-overlay--degraded' : ''}`}
+      data-crisis-status={sectionStatus}
+    >
       <h3 className="crisis-title">Crisis Period Comparison</h3>
+      {degraded && (
+        <div className="crisis-section-banner muted" role="status">
+          {sectionStatus === 'unavailable'
+            ? 'Portfolio crisis returns unavailable — historical simulation not computed. SPY reference figures only.'
+            : 'Portfolio crisis returns partial — some periods lack historical simulation.'}
+          {bannerReason ? (
+            <span className="crisis-section-reason"> ({bannerReason})</span>
+          ) : null}
+        </div>
+      )}
       <div className="crisis-grid">
         {periods.map((period) => (
           <div key={period.name} className="crisis-card">
@@ -399,16 +450,16 @@ export const CrisisOverlay: React.FC<CrisisOverlayProps> = ({ periods }) => {
               </div>
               <div className="return-row">
                 <span className="return-label">Portfolio</span>
-                {period.portfolio_return !== null ? (
+                {period.portfolio_return !== null && period.portfolio_return !== undefined ? (
                   <span className={`return-value ${period.portfolio_return < 0 ? 'negative' : 'positive'}`}>
                     {period.portfolio_return > 0 ? '+' : ''}{period.portfolio_return.toFixed(1)}%
                   </span>
                 ) : (
-                  <span className="return-value na">No data</span>
+                  <span className="return-value na">Unavailable</span>
                 )}
               </div>
             </div>
-            {period.portfolio_return !== null && (
+            {period.portfolio_return !== null && period.portfolio_return !== undefined && (
               <div className="crisis-outperformance">
                 {period.portfolio_return > period.spy_return ? (
                   <span className="outperformance positive">

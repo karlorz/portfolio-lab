@@ -1509,7 +1509,9 @@ const CrisisPeriodDataSchema = z.object({
   description: z.string(),
   spy_return: z.number(),
   portfolio_return: z.nullable(z.number()),
-});
+  portfolio_return_available: z.optional(z.boolean()),
+  availability: z.optional(z.enum(['available', 'unavailable', 'partial'])),
+}).passthrough();
 
 export const AnalyticsDataSchema = z.object({
   status: z.enum(['success', 'no_data', 'error']),
@@ -1533,6 +1535,9 @@ export const AnalyticsDataSchema = z.object({
     portfolio: PortfolioBenchmarkDataSchema,
   }),
   crisis_periods: z.array(CrisisPeriodDataSchema),
+  // Section-level availability: global status=success does not imply complete crisis comparison
+  crisis_periods_status: z.optional(z.enum(['success', 'partial', 'unavailable'])),
+  crisis_periods_reason: z.optional(z.nullable(z.string())),
 }).passthrough();
 
 // ---------------------------------------------------------------------------

@@ -829,7 +829,11 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
                 {/* Crisis Periods */}
                 {analytics.crisis_periods?.length > 0 && (
-                  <CrisisOverlay periods={analytics.crisis_periods} />
+                  <CrisisOverlay
+                    periods={analytics.crisis_periods}
+                    crisisPeriodsStatus={analytics.crisis_periods_status}
+                    crisisPeriodsReason={analytics.crisis_periods_reason}
+                  />
                 )}
 
                 {/* Data Summary */}

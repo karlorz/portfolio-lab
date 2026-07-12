@@ -4,7 +4,7 @@ Performance analytics calculations: drawdown, rolling metrics, benchmarks.
 import json
 import logging
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -53,6 +53,29 @@ class CrisisPeriod:
     description: str
     spy_return: float
     portfolio_return: Optional[float]
+
+
+def classify_crisis_periods_availability(
+    crisis_rows: List[Dict],
+) -> Tuple[str, Optional[str]]:
+    """Return (status, reason) for crisis-period portfolio comparison section.
+
+    status:
+      - success: every row has a numeric portfolio_return
+      - partial: some rows have portfolio returns, others null
+      - unavailable: no rows have portfolio returns (historical sim not run)
+    """
+    if not crisis_rows:
+        return "unavailable", "no_crisis_periods"
+    available = [
+        row for row in crisis_rows
+        if isinstance(row.get("portfolio_return"), (int, float))
+    ]
+    if len(available) == len(crisis_rows):
+        return "success", None
+    if len(available) == 0:
+        return "unavailable", "historical_simulation_unavailable"
+    return "partial", "historical_simulation_incomplete"
 
 
 class AnalyticsCalculator:
@@ -374,7 +397,9 @@ class AnalyticsCalculator:
             for d in drawdown_series
         ]
         
-        # Crisis period performance (would need historical backtest data)
+        # Crisis period performance (would need historical backtest data).
+        # Emit explicit section availability so UI does not treat all-null
+        # portfolio returns as a complete comparison under status=success.
         crisis_summary = []
         for crisis in self.CRISIS_PERIODS:
             crisis_summary.append({
@@ -383,8 +408,13 @@ class AnalyticsCalculator:
                 "description": crisis.description,
                 "spy_return": round(crisis.spy_return * 100, 1),
                 "portfolio_return": None,  # Would require historical simulation
+                "portfolio_return_available": False,
+                "availability": "unavailable",
             })
-        
+        crisis_periods_status, crisis_periods_reason = classify_crisis_periods_availability(
+            crisis_summary
+        )
+
         return {
             "status": "success",
             "generated_at": datetime.now().isoformat(),
@@ -400,6 +430,8 @@ class AnalyticsCalculator:
             "rolling_metrics": rolling_metrics,
             "benchmark_comparison": benchmark_comparison,
             "crisis_periods": crisis_summary,
+            "crisis_periods_status": crisis_periods_status,
+            "crisis_periods_reason": crisis_periods_reason,
         }
 
 

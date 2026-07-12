@@ -470,6 +470,21 @@ class TestGenerateAnalyticsReport:
         assert 'crisis_periods' in report
         assert len(report['crisis_periods']) == 3
 
+    def test_all_null_crisis_portfolio_returns_emit_unavailable_metadata(self, tmp_path):
+        """Global status may be success, but crisis comparison must not look complete."""
+        calc = AnalyticsCalculator(data_dir=str(tmp_path))
+        data = _make_perf_data(n_days=300, daily_return=0.001)
+        f = tmp_path / "performance.jsonl"
+        with open(f, 'w') as fh:
+            for entry in data:
+                fh.write(json.dumps(entry) + '\n')
+        report = calc.generate_analytics_report()
+        assert report["status"] == "success"
+        assert report["crisis_periods_status"] == "unavailable"
+        assert report["crisis_periods_reason"] == "historical_simulation_unavailable"
+        assert all(row["portfolio_return"] is None for row in report["crisis_periods"])
+        assert all(row.get("portfolio_return_available") is False for row in report["crisis_periods"])
+
     def test_report_has_benchmark(self, tmp_path):
         calc = AnalyticsCalculator(data_dir=str(tmp_path))
         data = _make_perf_data(n_days=300, daily_return=0.001)
