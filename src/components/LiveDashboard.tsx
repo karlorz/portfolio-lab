@@ -1032,7 +1032,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               <KurtosisRegimePanel data={signals?.kurtosis_regime ?? null} />
             </div>
             <div className="risk-panel-section">
-              <VolatilityParityPanel data={(signals?.volatility_parity ?? null) as unknown as VolatilityParityData | null} />
+              <VolatilityParityPanel data={(signals?.volatility_parity ?? null) as VolatilityParityData | null} />
             </div>
           </div>
           </Suspense>

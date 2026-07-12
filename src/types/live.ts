@@ -65,9 +65,16 @@ export interface RegimeAuthority {
   };
 }
 
+/**
+ * Public `signals.json.volatility_parity` allocation shape.
+ * Allocation and risk fields are **percentage points** (spy_pct: 40 = 40%,
+ * target_volatility: 10 = 10% vol) — not decimal fractions.
+ */
 export interface VolatilityParitySignalData {
   date: string;
+  /** Percentage points (10 = 10% target vol). */
   target_volatility: number;
+  /** Percentage points (40 = 40% weight). */
   spy_pct: number;
   gld_pct: number;
   tlt_pct: number;

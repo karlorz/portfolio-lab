@@ -950,9 +950,12 @@ export const KurtosisRegimeSchema = z.object({
   fat_tail_risk: z.number(),
 }).passthrough();
 
+// Public producer stores allocation/risk as percentage points (spy_pct: 40 = 40%).
 export const VolatilityParitySchema = z.object({
   date: z.string(),
+  /** Percentage points (10 = 10% target vol). */
   target_volatility: z.number(),
+  /** Percentage points (40 = 40% weight). */
   spy_pct: z.number(),
   gld_pct: z.number(),
   tlt_pct: z.number(),
