@@ -2511,6 +2511,93 @@ class DashboardGenerator:
             })
         return alerts
 
+    @staticmethod
+    def _health_slo_alerts_from_health(
+        public_dir: Path,
+        existing_alerts: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Project critical health.json / data_pipeline_slo state into operator alerts.
+
+        Critical system_status or data_pipeline_slo.status must not be invisible
+        from alerts.json. When a more-specific health_slo alert is already present
+        for the same top_dimension, skip duplication; never omit silently without
+        any health/SLO coverage.
+        """
+        health = DashboardGenerator._load_json_file(public_dir / "health.json")
+        if not health:
+            return []
+
+        system_status = str(health.get("system_status") or "").lower()
+        slo = health.get("data_pipeline_slo")
+        slo = slo if isinstance(slo, dict) else {}
+        slo_status = str(slo.get("status") or "").lower()
+
+        if system_status != "critical" and slo_status != "critical":
+            return []
+
+        existing = existing_alerts if isinstance(existing_alerts, list) else []
+        top_dimension = slo.get("top_dimension")
+        top_dim_str = str(top_dimension) if top_dimension else None
+
+        # Dedup only when an existing health/SLO alert already covers this dimension.
+        for alert in existing:
+            if not isinstance(alert, dict):
+                continue
+            if alert.get("type") not in {"health_slo", "data_pipeline_slo", "health"}:
+                continue
+            existing_dim = alert.get("top_dimension")
+            if top_dim_str is None or existing_dim is None or existing_dim == top_dim_str:
+                return []
+
+        dimensions = slo.get("dimensions") if isinstance(slo.get("dimensions"), dict) else {}
+        dim_payload = dimensions.get(top_dim_str) if top_dim_str else None
+        dim_payload = dim_payload if isinstance(dim_payload, dict) else {}
+
+        runbook = slo.get("runbook") if isinstance(slo.get("runbook"), dict) else {}
+        top_cause = runbook.get("top_cause") if isinstance(runbook.get("top_cause"), dict) else {}
+
+        reason = (
+            dim_payload.get("reason")
+            or top_cause.get("reason")
+            or top_cause.get("code")
+            or dim_payload.get("message")
+            or "critical_health_slo"
+        )
+        policy_decision = dim_payload.get("policy_decision") or top_cause.get("policy_decision")
+        action = top_cause.get("action") or dim_payload.get("action")
+        severity_source = (
+            f"system_status={system_status or 'unknown'}"
+            f", data_pipeline_slo={slo_status or 'unknown'}"
+        )
+        dim_label = top_dim_str or "unknown"
+        message_parts = [
+            f"Critical health/SLO: top_dimension={dim_label}",
+            f"reason={reason}",
+        ]
+        if policy_decision is not None:
+            message_parts.append(f"policy_decision={policy_decision}")
+        if action:
+            message_parts.append(str(action))
+        message_parts.append(f"({severity_source})")
+
+        alert: Dict[str, Any] = {
+            "level": "error",
+            "type": "health_slo",
+            "title": f"Critical Health/SLO: {dim_label}",
+            "message": "; ".join(message_parts),
+            "timestamp": health.get("generated_at"),
+            "requires_action": True,
+            "top_dimension": top_dim_str,
+            "reason": reason,
+            "system_status": system_status or None,
+            "data_pipeline_slo_status": slo_status or None,
+        }
+        if policy_decision is not None:
+            alert["policy_decision"] = policy_decision
+        if action:
+            alert["runbook_action"] = action
+        return [alert]
+
     def generate_alerts_json(self) -> Path:
         """Generate active alerts and notifications."""
         alerts = []
@@ -2569,9 +2656,15 @@ class DashboardGenerator:
                         "message": f"Last update: {row[1]} ({(datetime.now() - last_date).days} days ago)",
                         "requires_action": False
                     })
+
+        # Project critical health.json / data_pipeline_slo into operator alerts.
+        # Prefer already-published health.json (run() generates health before alerts).
+        alerts.extend(
+            self._health_slo_alerts_from_health(PUBLIC_DIR, existing_alerts=alerts)
+        )
         
         output = {
-            "alerts": sorted(alerts, key=lambda x: x.get("timestamp", ""), reverse=True),
+            "alerts": sorted(alerts, key=lambda x: x.get("timestamp", "") or "", reverse=True),
             "count": len(alerts),
             "generated_at": datetime.now().isoformat()
         }

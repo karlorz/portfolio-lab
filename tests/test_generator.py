@@ -1577,6 +1577,77 @@ class TestAlertsJSON:
         ]
         gen.conn.close()
 
+    def test_critical_health_slo_projects_into_alerts(self, tmp_path):
+        """Critical health.json / data_pipeline_slo must surface in alerts.json."""
+        gen, _ = _make_generator(tmp_path)
+        as_of = "2026-07-07T12:00:00"
+        (tmp_path / "health.json").write_text(json.dumps({
+            "system_status": "critical",
+            "generated_at": as_of,
+            "data_pipeline_slo": {
+                "status": "critical",
+                "top_dimension": "alpaca_feed_entitlement",
+                "dimensions": {
+                    "alpaca_feed_entitlement": {
+                        "status": "critical",
+                        "policy_decision": "reject",
+                        "reason": "missing_entitlement",
+                        "acceptable_for_live": False,
+                    },
+                },
+                "runbook": {
+                    "status": "critical",
+                    "top_cause": {
+                        "dimension": "alpaca_feed_entitlement",
+                        "code": "missing_entitlement",
+                        "severity": "critical",
+                        "reason": "missing_entitlement",
+                        "action": "Restore Alpaca feed entitlement before live routing.",
+                    },
+                },
+            },
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        health_alerts = [
+            a for a in data["alerts"]
+            if a.get("type") in {"health_slo", "data_pipeline_slo", "health"}
+        ]
+        assert len(health_alerts) == 1
+        alert = health_alerts[0]
+        assert alert["level"] == "error"
+        assert alert["requires_action"] is True
+        assert alert["timestamp"] == as_of
+        assert alert.get("top_dimension") == "alpaca_feed_entitlement"
+        assert "missing_entitlement" in (alert.get("message") or "")
+        assert alert.get("policy_decision") == "reject" or "reject" in (alert.get("message") or "")
+        gen.conn.close()
+
+    def test_healthy_health_json_does_not_emit_health_slo_alert(self, tmp_path):
+        """Non-critical health should not invent a health/SLO alert."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / "health.json").write_text(json.dumps({
+            "system_status": "healthy",
+            "generated_at": "2026-07-07T12:00:00",
+            "data_pipeline_slo": {"status": "healthy", "top_dimension": None},
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        health_alerts = [
+            a for a in data["alerts"]
+            if a.get("type") in {"health_slo", "data_pipeline_slo", "health"}
+        ]
+        assert health_alerts == []
+        gen.conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Health JSON tests
