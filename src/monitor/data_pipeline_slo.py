@@ -206,8 +206,16 @@ def _artifact_dimension(
 ) -> dict[str, Any]:
     data_freshness = health_data.get("data_freshness")
     freshness = data_freshness if isinstance(data_freshness, Mapping) else {}
-    critical = [name for name, row in freshness.items() if isinstance(row, Mapping) and row.get("status") == "critical"]
-    stale = [name for name, row in freshness.items() if isinstance(row, Mapping) and row.get("status") == "stale"]
+    critical = [
+        name
+        for name, row in freshness.items()
+        if isinstance(row, Mapping) and row.get("status") == "critical"
+    ]
+    stale = [
+        name
+        for name, row in freshness.items()
+        if isinstance(row, Mapping) and row.get("status") == "stale"
+    ]
 
     entries = public_index.get("entries") if isinstance(public_index, Mapping) else None
     missing_market_entries = [
@@ -221,25 +229,28 @@ def _artifact_dimension(
     source_index_freshness = _source_manifest_index_freshness(source_manifest, public_index)
     source_index_status = source_index_freshness.get("status")
 
-    if len(critical) > 10 or missing_market_entries:
+    # Highest-severity rollup: any critical data_freshness child makes the
+    # artifact dimension critical (no silent count-threshold downgrade).
+    if critical or missing_market_entries:
         status = "critical"
     elif stale or source_index_status == "warning":
-        status = "warning"
-    elif critical:
         status = "warning"
     else:
         status = "ok"
     message = (
         source_index_freshness["message"]
-        if source_index_status == "warning"
+        if source_index_status == "warning" and not critical and not missing_market_entries
         else f"{len(critical)} critical, {len(stale)} stale artifacts"
         if critical or stale
         else "artifacts fresh"
+        if not missing_market_entries
+        else f"{len(missing_market_entries)} missing market-data index entries"
     )
     return {
         **source_index_freshness,
         "status": status,
         "critical_count": len(critical),
+        "critical_artifacts": critical[:10],
         "stale_count": len(stale),
         "stale_artifacts": stale[:10],
         "missing_market_entries": missing_market_entries,
@@ -631,7 +642,9 @@ def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dic
 
 def _artifact_runbook_entries(artifact_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(artifact_dimension.get("status", "unknown"))
-    if artifact_dimension.get("source_manifest_index_status") == "stale_index":
+    if artifact_dimension.get("source_manifest_index_status") == "stale_index" and not (
+        artifact_dimension.get("critical_count") or artifact_dimension.get("critical_artifacts")
+    ):
         return [_runbook_entry(
             dimension="artifact",
             code="stale_public_data_index",
@@ -640,7 +653,9 @@ def _artifact_runbook_entries(artifact_dimension: Mapping[str, Any]) -> list[dic
             artifact="index.json",
             reason="stale_index",
         )]
-    if artifact_dimension.get("source_manifest_index_status") == "unknown_timestamp":
+    if artifact_dimension.get("source_manifest_index_status") == "unknown_timestamp" and not (
+        artifact_dimension.get("critical_count") or artifact_dimension.get("critical_artifacts")
+    ):
         return [_runbook_entry(
             dimension="artifact",
             code="public_data_timestamp_unparseable",
@@ -648,6 +663,28 @@ def _artifact_runbook_entries(artifact_dimension: Mapping[str, Any]) -> list[dic
             action="Regenerate source_manifest.json and public/data/index.json so generated_at timestamps are parseable before publishing.",
             artifact="index.json",
             reason="unknown_timestamp",
+        )]
+    critical_artifacts = artifact_dimension.get("critical_artifacts")
+    critical_names = (
+        [str(name) for name in critical_artifacts]
+        if isinstance(critical_artifacts, list)
+        else []
+    )
+    critical_count = int(artifact_dimension.get("critical_count") or 0)
+    if critical_count > 0 or critical_names:
+        sample = ", ".join(critical_names[:5]) if critical_names else "critical symbols"
+        if critical_names and len(critical_names) > 5:
+            sample = f"{sample} (+{len(critical_names) - 5} more)"
+        return [_runbook_entry(
+            dimension="artifact",
+            code="critical_data_freshness",
+            severity="critical" if severity == "critical" else severity,
+            action=(
+                f"Refresh market data for critical freshness symbols ({sample}); "
+                "verify market_lag_days and regenerate public price artifacts before live routing."
+            ),
+            artifact=critical_names[0] if critical_names else "data_freshness",
+            reason="critical_freshness",
         )]
     if artifact_dimension.get("stale_count", 0):
         return [_runbook_entry(

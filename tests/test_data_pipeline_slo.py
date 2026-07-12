@@ -252,6 +252,46 @@ def test_slo_warns_on_artifact_staleness() -> None:
     assert slo["top_dimension"] == "artifact"
 
 
+def test_slo_one_critical_data_freshness_child_rolls_up_to_artifact_critical() -> None:
+    """Any critical data_freshness child must not silently yield artifact warning only."""
+    slo = build_data_pipeline_slo(
+        health_data={
+            "cron_jobs": [{"id": "data", "status": "ok"}],
+            "scheduler_status": {"status": "ok", "backends": {}},
+            "data_freshness": {
+                "^VIX3M": {
+                    "status": "critical",
+                    "last_update": "2026-06-26",
+                    "market_lag_days": 6,
+                    "latest_available_market_date": "2026-07-02",
+                },
+            },
+        },
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    artifact = slo["dimensions"]["artifact"]
+    assert artifact["status"] == "critical"
+    assert artifact["critical_count"] == 1
+    assert "^VIX3M" in artifact.get("critical_artifacts", [])
+    assert "1 critical" in artifact["message"]
+    # Must not look like the old silent-downgrade shape
+    assert not (
+        artifact["status"] == "warning"
+        and artifact["critical_count"] == 1
+        and "critical_count_threshold" not in artifact
+    )
+    assert slo["status"] == "critical"
+    assert slo["top_dimension"] == "artifact"
+    top_cause = slo["runbook"]["top_cause"]
+    assert top_cause is not None
+    assert top_cause["code"] == "critical_data_freshness"
+    assert top_cause["severity"] == "critical"
+    assert "^VIX3M" in (top_cause.get("action") or "")
+
+
 def test_slo_warns_when_source_manifest_is_newer_than_public_index() -> None:
     source_manifest = {
         **_source_manifest(),
