@@ -24,12 +24,19 @@ from src.signals.vix_term_structure import VIXTermStructureSignal
 
 def _make_voter(tmp_path):
     """Create an EnsembleVoter with isolated paths."""
+    from src.strategy.ensemble_voter import REGIME_WEIGHTS
+    from src.strategy.signal_aggregator import SignalAggregator
+
     voter = EnsembleVoter.__new__(EnsembleVoter)
     voter.data_path = tmp_path
     voter.db_path = tmp_path / "ensemble_signals.db"
     voter.current_readings = {}
     voter.current_regime = Regime.NORMAL
     voter.current_regime_confidence = 0.5
+    voter.signal_aggregator = SignalAggregator(
+        load_price_data=lambda: voter._load_price_data(),
+        regime_weights=REGIME_WEIGHTS,
+    )
     voter._init_db()
     return voter
 
@@ -332,14 +339,14 @@ class TestCollectSignalsVIXTermStructure:
         vix_signal = _make_vix_signal(confidence=90.0)
 
         with (
-            patch.object(voter, "_collect_msm_signal", return_value=None),
-            patch.object(voter, "_collect_cross_asset_rv_signal", return_value=None),
-            patch.object(voter, "_collect_intl_momentum_signal", return_value=None),
-            patch.object(voter, "_collect_alt_data_signal", return_value=None),
-            patch.object(voter, "_collect_regime_arb_signal", return_value=None),
-            patch.object(voter, "_collect_unified_overlay_signal", return_value=None),
-            patch.object(voter, "_collect_mtf_signal", return_value=None),
-            patch.object(voter, "_collect_google_trends", return_value=None),
+            patch.object(voter.signal_aggregator, "_collect_msm_signal", return_value=None),
+            patch.object(voter.signal_aggregator, "_collect_cross_asset_rv_signal", return_value=None),
+            patch.object(voter.signal_aggregator, "_collect_intl_momentum_signal", return_value=None),
+            patch.object(voter.signal_aggregator, "_collect_alt_data_signal", return_value=None),
+            patch.object(voter.signal_aggregator, "_collect_regime_arb_signal", return_value=None),
+            patch.object(voter.signal_aggregator, "_collect_unified_overlay_signal", return_value=None),
+            patch.object(voter.signal_aggregator, "_collect_mtf_signal", return_value=None),
+            patch.object(voter.signal_aggregator, "_collect_google_trends", return_value=None),
             patch(
                 "src.signals.vix_term_structure.VIXTermStructureSignalGenerator"
             ) as MockVIX,

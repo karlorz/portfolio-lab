@@ -729,8 +729,9 @@ class EnsembleVoter:
         self.current_readings: Dict[SignalSource, SignalReading] = {}
         self.current_regime: Regime = Regime.NORMAL
         self.current_regime_confidence: float = 0.5
+        # Lambda so instance patches of _load_price_data still apply.
         self.signal_aggregator = SignalAggregator(
-            load_price_data=self._load_price_data,
+            load_price_data=lambda: self._load_price_data(),
             regime_weights=REGIME_WEIGHTS,
         )
 
@@ -783,12 +784,14 @@ class EnsembleVoter:
 
     def _get_signal_aggregator(self) -> SignalAggregator:
         """Return the signal collection collaborator, including __new__ test fixtures."""
-        if not hasattr(self, "signal_aggregator") or self.signal_aggregator is None:
-            self.signal_aggregator = SignalAggregator(
-                load_price_data=self._load_price_data,
+        aggregator = getattr(self, "signal_aggregator", None)
+        if aggregator is None:
+            aggregator = SignalAggregator(
+                load_price_data=lambda: self._load_price_data(),
                 regime_weights=REGIME_WEIGHTS,
             )
-        return self.signal_aggregator
+            self.signal_aggregator = aggregator
+        return aggregator
 
     def _init_db(self):
         """Initialize signal history database."""
