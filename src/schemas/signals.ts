@@ -303,7 +303,7 @@ export const ZeroDTESchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Bond Momentum
+// Bond Momentum (producer summary + legacy overlay rows)
 // ---------------------------------------------------------------------------
 const BondMomentumSignalSchema = z.object({
   etf: z.string(),
@@ -326,11 +326,39 @@ const BondMomentumEnsembleSchema = z.object({
   recommendation: z.string(),
 });
 
-export const BondMomentumSchema = z.object({
+/** Legacy TSMOM per-ETF overlay contract. */
+const BondMomentumLegacySchema = z.object({
   signals: z.array(BondMomentumSignalSchema),
-  timestamp: z.string(),
-  ensemble: BondMomentumEnsembleSchema,
+  timestamp: z.string().optional(),
+  ensemble: BondMomentumEnsembleSchema.optional(),
 });
+
+/**
+ * Canonical public producer shape from DashboardGenerator bond_duration /
+ * overlay bond_momentum summary (flat recommendation, no signals[]).
+ */
+const BondMomentumSummarySchema = z.object({
+  active: z.boolean().optional().default(true),
+  yield_10y: z.number(),
+  yield_2y: z.number(),
+  spread: z.number(),
+  curve_regime: z.string(),
+  rate_direction: z.string(),
+  tlt_weight: z.number(),
+  ief_weight: z.number(),
+  shy_weight: z.number(),
+  effective_duration: z.number(),
+  position: z.string(),
+  confidence: z.number(),
+  status_text: z.string().optional().default(''),
+  generated_at: z.string().optional(),
+  timestamp: z.string().optional(),
+}).passthrough();
+
+export const BondMomentumSchema = z.union([
+  BondMomentumSummarySchema,
+  BondMomentumLegacySchema,
+]);
 
 // ---------------------------------------------------------------------------
 // VIX Term Structure

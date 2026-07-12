@@ -631,7 +631,27 @@ describe('ZeroDTESchema', () => {
 });
 
 describe('BondMomentumSchema', () => {
-  it('accepts valid bond momentum data', () => {
+  it('accepts producer summary-shaped public artifact', () => {
+    const data = {
+      active: true,
+      yield_10y: 4.5,
+      yield_2y: 4.0,
+      spread: 0.5,
+      curve_regime: 'normal',
+      rate_direction: 'stable',
+      tlt_weight: 0.2,
+      ief_weight: 0.5,
+      shy_weight: 0.3,
+      effective_duration: 7.3,
+      position: 'intermediate',
+      confidence: 70.0,
+      status_text: 'Bonds: intermediate (normal/stable), dur 7yr',
+    };
+    const result = BondMomentumSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts legacy overlay signals shape', () => {
     const data = {
       signals: [{
         etf: 'TLT', timestamp: '2026-05-26T12:00:00Z',
@@ -646,7 +666,7 @@ describe('BondMomentumSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects invalid confidence', () => {
+  it('rejects invalid legacy confidence', () => {
     const data = {
       signals: [{
         etf: 'TLT', timestamp: '2026-05-26T12:00:00Z',

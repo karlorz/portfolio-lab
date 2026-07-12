@@ -206,11 +206,8 @@ export interface SignalsData {
   };
   garch_cvar?: GarchCvarData;
   entropy?: EntropyData;
-  bond_momentum?: {
-    signals: BondMomentumSignal[];
-    timestamp: string;
-    ensemble: BondMomentumEnsemble;
-  };
+  /** Producer summary shape (canonical) or legacy overlay rows. */
+  bond_momentum?: BondMomentumSummaryData | BondMomentumLegacyData | null;
   vix_term_structure?: VIXTermStructureData;
   vix_overlay?: VIXOverlayState;
   hedge_selector?: HedgeSelectorData | null;
@@ -783,7 +780,7 @@ export interface ClosingAuctionSignal {
   should_trade: boolean;
 }
 
-// Bond Momentum Types (v3.30)
+// Bond Momentum Types (v3.30 legacy overlay + current duration summary)
 export interface BondMomentumSignal {
   etf: string;
   timestamp: string;
@@ -803,6 +800,35 @@ export interface BondMomentumEnsemble {
   confidence: string;
   action: string;
   recommendation: string;
+}
+
+/** Legacy TSMOM per-ETF overlay rows (optional consumer shape). */
+export interface BondMomentumLegacyData {
+  signals: BondMomentumSignal[];
+  timestamp?: string;
+  ensemble?: BondMomentumEnsemble;
+}
+
+/**
+ * Canonical public producer shape from DashboardGenerator bond_duration /
+ * overlay bond_momentum summary (no signals[] rows).
+ */
+export interface BondMomentumSummaryData {
+  active: boolean;
+  yield_10y: number;
+  yield_2y: number;
+  spread: number;
+  curve_regime: string;
+  rate_direction: string;
+  tlt_weight: number;
+  ief_weight: number;
+  shy_weight: number;
+  effective_duration: number;
+  position: string;
+  confidence: number;
+  status_text: string;
+  generated_at?: string;
+  timestamp?: string;
 }
 
 // VIX Term Structure Types (v4.50)

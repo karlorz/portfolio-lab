@@ -1022,11 +1022,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
               />
             </div>
             <div className="risk-panel-section">
-              <BondMomentumPanel
-                signals={signals?.bond_momentum?.signals || []}
-                timestamp={signals?.bond_momentum?.timestamp}
-                ensembleRecommendation={signals?.bond_momentum?.ensemble}
-              />
+              <BondMomentumPanel data={signals?.bond_momentum ?? null} />
             </div>
             <div className="risk-panel-section">
               <KurtosisRegimePanel data={signals?.kurtosis_regime ?? null} />
