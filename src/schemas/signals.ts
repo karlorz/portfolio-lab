@@ -1000,7 +1000,8 @@ export const VolatilityParitySchema = z.object({
 
 const AllocationSurfaceRoleSchema = z.object({
   label: z.string(),
-  role: z.enum(['execution_routed', 'advisory_non_routed']),
+  // execution_blocked: kill-switch still routes via target_allocations but blocks execution
+  role: z.enum(['execution_routed', 'execution_blocked', 'advisory_non_routed']),
   routed: z.boolean(),
   routed_by: z.nullable(z.string()),
   live_authoritative: z.optional(z.boolean()),
@@ -1035,7 +1036,8 @@ export const AllocationSurfaceRolesSchema = z.object({
   routed_by: z.string(),
   surfaces: z.object({
     target_allocations: AllocationSurfaceRoleSchema.extend({
-      role: z.literal('execution_routed'),
+      // Routed surface stays order_router; role flips to execution_blocked under kill switch.
+      role: z.enum(['execution_routed', 'execution_blocked']),
       routed: z.literal(true),
       routed_by: z.string(),
     }),
@@ -1059,14 +1061,21 @@ export const AllocationSurfaceRolesSchema = z.object({
   }).passthrough(),
 }).passthrough();
 
+// Producer emits per-asset adjustment maps (SPY/GLD/TLT). Older fixtures may
+// use scalar totals; accept both so runtime validation matches public JSON.
+const adaptiveAdjustmentFieldSchema = z.union([
+  z.number(),
+  uppercaseSymbolWeightsSchema(),
+]);
+
 export const AdaptiveSizingSchema = z.object({
   base_allocation: uppercaseSymbolWeightsSchema().optional(),
   adjusted_allocation: uppercaseSymbolWeightsSchema(),
   adjustments: uppercaseSymbolWeightsSchema().optional(),
-  regime_adjustment: z.optional(z.number()),
-  volatility_adjustment: z.optional(z.number()),
-  signal_adjustment: z.optional(z.number()),
-  drawdown_adjustment: z.optional(z.number()),
+  regime_adjustment: adaptiveAdjustmentFieldSchema.optional(),
+  volatility_adjustment: adaptiveAdjustmentFieldSchema.optional(),
+  signal_adjustment: adaptiveAdjustmentFieldSchema.optional(),
+  drawdown_adjustment: adaptiveAdjustmentFieldSchema.optional(),
   factors: z.optional(z.record(z.string(), z.unknown())),
   authority: AdvisoryAllocationArtifactRoleSchema.extend({
     surface: z.literal('adaptive_sizing'),

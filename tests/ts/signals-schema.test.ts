@@ -446,6 +446,46 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
     }).success).toBe(false);
   });
 
+  it('AdaptiveSizingSchema accepts producer per-asset adjustment maps', () => {
+    // public/data/adaptive_sizing.json emits per-symbol adjustment maps, not scalars.
+    const good = AdaptiveSizingSchema.safeParse({
+      base_allocation: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
+      adjusted_allocation: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
+      adjustments: { SPY: 0.0, GLD: 0.0, TLT: 0.0 },
+      regime_adjustment: { SPY: 0.0, GLD: 0.0, TLT: 0.0 },
+      volatility_adjustment: { SPY: 0.0, GLD: 0.0, TLT: 0.0 },
+      signal_adjustment: { SPY: 0.0, GLD: 0.0, TLT: 0.0 },
+      drawdown_adjustment: { SPY: 0.0, GLD: 0.0, TLT: 0.0 },
+      factors: {
+        timestamp: '2026-07-12T03:57:50.292076',
+        regime: 'normal',
+        regime_confidence: 0.3,
+      },
+      authority: {
+        schema_version: 'allocation-artifact-role/v1',
+        surface: 'adaptive_sizing',
+        allocation_field: 'adjusted_allocation',
+        runtime_role: 'advisory_non_routed',
+        live_authoritative: false,
+        routed: false,
+        routed_by: null,
+        canonical_controller: 'signals.json.target_allocations',
+        routed_surface: 'target_allocations',
+        routed_surface_path: 'public/data/signals.json#target_allocations',
+        description: 'adaptive_sizing is advisory; live order routing continues to consume signals.json.target_allocations.',
+      },
+      generated_at: '2026-07-12T03:57:50.292076',
+    });
+    expect(good.success).toBe(true);
+  });
+
+  it('public adaptive_sizing and black_litterman artifacts validate against schemas', async () => {
+    const adaptive = await Bun.file('public/data/adaptive_sizing.json').json();
+    const bl = await Bun.file('public/data/black_litterman.json').json();
+    expect(AdaptiveSizingSchema.safeParse(adaptive).success).toBe(true);
+    expect(BlackLittermanSchema.safeParse(bl).success).toBe(true);
+  });
+
   it('BlackLittermanSchema requires authority metadata and uppercase symbol keys', () => {
     const good = BlackLittermanSchema.safeParse({
       prior_weights: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
