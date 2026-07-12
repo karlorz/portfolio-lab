@@ -45,7 +45,14 @@ def test_retention_report_classifies_representative_artifact_families(tmp_path: 
     for path in files:
         _set_age(path, 240)
 
-    report = build_retention_report(data_dir=data_dir, public_data_dir=public_dir, project_root=tmp_path)
+    report = build_retention_report(
+        data_dir=data_dir,
+        public_data_dir=public_dir,
+        project_root=tmp_path,
+        # Isolate from the real wiki tree (default reference root is huge and
+        # unrelated to this unit fixture).
+        reference_roots=[],
+    )
 
     assert report["schema_version"] == "artifact-retention-report/v1"
     assert report["dry_run"] is True

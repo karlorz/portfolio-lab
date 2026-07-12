@@ -192,8 +192,12 @@ def _merge_references(*maps: ReferenceMap) -> ReferenceMap:
     return merged
 
 
-def _age_days(path: Path, now: datetime) -> int:
-    modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+def _age_days(path: Path, now: datetime) -> int | None:
+    """Return age in whole days, or None if the path vanished (TOCTOU)."""
+    try:
+        modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return None
     return max(0, int((now - modified_at).total_seconds() // 86_400))
 
 
@@ -224,10 +228,13 @@ def _entry_for_path(
     project_root: Path,
     now: datetime,
     references: ReferenceMap,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
+    """Build one retention entry, or None if the path is no longer readable."""
     display_path = _display_path(path, project_root)
     referenced_by = sorted(references.get(display_path, set()))
     age_days = _age_days(path, now)
+    if age_days is None:
+        return None
 
     if referenced_by:
         recommendation = "keep"
@@ -238,6 +245,11 @@ def _entry_for_path(
         recommendation, retention_tier, reason = _policy_for(category, age_days)
         protected = False
 
+    try:
+        size_bytes = path.stat().st_size
+    except OSError:
+        return None
+
     return {
         "path": display_path,
         "category": category,
@@ -245,7 +257,7 @@ def _entry_for_path(
         "recommendation": recommendation,
         "protected": protected,
         "referenced_by": referenced_by,
-        "size_bytes": path.stat().st_size,
+        "size_bytes": size_bytes,
         "age_days": age_days,
         "reason": reason,
     }
@@ -351,14 +363,21 @@ def build_retention_report(
     )
 
     entries = [
-        _entry_for_path(
-            path=path,
-            category=category,
-            project_root=project_root,
-            now=now,
-            references=references,
+        entry
+        for entry in (
+            _entry_for_path(
+                path=path,
+                category=category,
+                project_root=project_root,
+                now=now,
+                references=references,
+            )
+            for path, category in sorted(
+                candidates.items(),
+                key=lambda item: _display_path(item[0], project_root),
+            )
         )
-        for path, category in sorted(candidates.items(), key=lambda item: _display_path(item[0], project_root))
+        if entry is not None
     ]
 
     return {
