@@ -340,20 +340,136 @@ const VIXTermStructureLevelSchema = z.object({
   timestamp: z.string(),
 });
 
-export const VIXTermStructureSchema = z.object({
+const VIX_TERM_STRUCTURE_REGIMES = [
+  'extreme_contango',
+  'steep_contango',
+  'mild_contango',
+  'flat',
+  'backwardation',
+  'extreme_backwardation',
+] as const;
+
+const VIXTermStructureViewSchema = z.object({
   vix: VIXTermStructureLevelSchema,
   vix3m: VIXTermStructureLevelSchema,
   vix6m: z.optional(VIXTermStructureLevelSchema),
   slope: z.number(),
   roll_yield: z.number(),
   composite_signal: z.number(),
-  regime: z.enum([
-    'extreme_contango', 'steep_contango', 'mild_contango',
-    'flat', 'backwardation', 'extreme_backwardation',
-  ]),
+  regime: z.enum(VIX_TERM_STRUCTURE_REGIMES),
   z_score: z.number(),
   percentile_1y: z.optional(z.number()),
+  timestamp: z.optional(z.string()),
 });
+
+function isVixTermStructureRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function finiteNumberOrUndefined(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function vixLevelFrom(
+  nested: unknown,
+  flatValue: unknown,
+  timestamp: string,
+): { value: number; timestamp: string } | undefined {
+  if (isVixTermStructureRecord(nested)) {
+    const value = finiteNumberOrUndefined(nested.value);
+    if (value !== undefined) {
+      return {
+        value,
+        timestamp:
+          typeof nested.timestamp === 'string' && nested.timestamp
+            ? nested.timestamp
+            : timestamp,
+      };
+    }
+  }
+  const value = finiteNumberOrUndefined(flatValue);
+  if (value === undefined) return undefined;
+  return { value, timestamp };
+}
+
+/**
+ * Accept producer-shaped public artifact keys (vix_spot, slope_vix3m_vix, …)
+ * and nested legacy view-model; emit the panel/view schema.
+ */
+function normalizeVixTermStructureInput(raw: unknown): unknown {
+  if (!isVixTermStructureRecord(raw)) return raw;
+
+  const timestamp =
+    typeof raw.timestamp === 'string'
+      ? raw.timestamp
+      : typeof raw.generated_at === 'string'
+        ? raw.generated_at
+        : '';
+
+  const vix = vixLevelFrom(raw.vix, raw.vix_spot, timestamp);
+  const vix3m = vixLevelFrom(raw.vix3m, raw.vix3m, timestamp);
+  const vix6m = vixLevelFrom(raw.vix6m, raw.vix6m_spot ?? raw.vix6m_value, timestamp);
+
+  const slope = finiteNumberOrUndefined(
+    raw.slope ?? raw.slope_vix3m_vix ?? raw.slope_signal,
+  );
+  const roll_yield = finiteNumberOrUndefined(raw.roll_yield ?? raw.roll_yield_signal);
+  const composite_signal = finiteNumberOrUndefined(
+    raw.composite_signal ?? raw.signal_value,
+  );
+  const z_score = finiteNumberOrUndefined(raw.z_score ?? raw.vix_zscore_signal);
+  const percentile_1y = finiteNumberOrUndefined(raw.percentile_1y);
+  const regime = typeof raw.regime === 'string' ? raw.regime : undefined;
+
+  // If already nested-complete, keep extras via reconstruction of required fields.
+  if (
+    vix === undefined
+    || vix3m === undefined
+    || slope === undefined
+    || roll_yield === undefined
+    || composite_signal === undefined
+    || z_score === undefined
+    || !regime
+  ) {
+    // Fall through to raw so Zod reports structured issues when incomplete.
+    // Still prefer mapped fields when partially available for better errors.
+  }
+
+  if (
+    vix !== undefined
+    && vix3m !== undefined
+    && slope !== undefined
+    && roll_yield !== undefined
+    && composite_signal !== undefined
+    && z_score !== undefined
+    && regime !== undefined
+  ) {
+    return {
+      vix,
+      vix3m,
+      ...(vix6m ? { vix6m } : {}),
+      slope,
+      roll_yield,
+      composite_signal,
+      regime,
+      z_score,
+      ...(percentile_1y !== undefined ? { percentile_1y } : {}),
+      ...(timestamp ? { timestamp } : {}),
+    };
+  }
+
+  return raw;
+}
+
+export const VIXTermStructureSchema = z.preprocess(
+  normalizeVixTermStructureInput,
+  VIXTermStructureViewSchema,
+);
 
 // ---------------------------------------------------------------------------
 // VIX Overlay

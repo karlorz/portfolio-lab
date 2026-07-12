@@ -5,16 +5,26 @@ interface VIXLevel {
   timestamp: string;
 }
 
-interface VIXTermStructureData {
+export type VIXTermStructureRegime =
+  | 'extreme_contango'
+  | 'steep_contango'
+  | 'mild_contango'
+  | 'flat'
+  | 'backwardation'
+  | 'extreme_backwardation';
+
+/** Panel view-model (nested levels + canonical metric names). */
+export interface VIXTermStructureData {
   vix?: VIXLevel;
   vix3m?: VIXLevel;
   vix6m?: VIXLevel;
   slope?: number;
   roll_yield?: number;
   composite_signal?: number;
-  regime?: 'extreme_contango' | 'steep_contango' | 'mild_contango' | 'flat' | 'backwardation' | 'extreme_backwardation';
+  regime?: VIXTermStructureRegime;
   z_score?: number;
   percentile_1y?: number;
+  timestamp?: string;
 }
 
 interface VIXOverlayState {
@@ -31,12 +41,120 @@ interface VIXOverlayState {
 }
 
 interface VIXTermStructurePanelProps {
-  data?: VIXTermStructureData | null;
+  /** Producer-shaped public artifact or nested legacy view-model. */
+  data?: VIXTermStructureData | Record<string, unknown> | null;
   overlayState?: VIXOverlayState | null;
 }
 
+const REGIMES = new Set<string>([
+  'extreme_contango',
+  'steep_contango',
+  'mild_contango',
+  'flat',
+  'backwardation',
+  'extreme_backwardation',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function levelFrom(
+  nested: unknown,
+  flatValue: unknown,
+  timestamp: string | undefined,
+): VIXLevel | undefined {
+  if (isRecord(nested)) {
+    const value = asFiniteNumber(nested.value);
+    if (value !== undefined) {
+      return {
+        value,
+        timestamp:
+          typeof nested.timestamp === 'string' && nested.timestamp
+            ? nested.timestamp
+            : timestamp ?? '',
+      };
+    }
+  }
+  const value = asFiniteNumber(flatValue);
+  if (value === undefined) return undefined;
+  return { value, timestamp: timestamp ?? '' };
+}
+
+/**
+ * Map producer-shaped `signals.json.vix_term_structure` (and nested legacy)
+ * into the panel view-model. Returns null when no usable VIX levels/signals.
+ */
+export function normalizeVixTermStructureData(
+  raw: unknown,
+): VIXTermStructureData | null {
+  if (!isRecord(raw)) return null;
+
+  const timestamp =
+    typeof raw.timestamp === 'string'
+      ? raw.timestamp
+      : typeof raw.generated_at === 'string'
+        ? raw.generated_at
+        : undefined;
+
+  const vix = levelFrom(raw.vix, raw.vix_spot, timestamp);
+  const vix3m = levelFrom(raw.vix3m, raw.vix3m, timestamp);
+  // Producer may emit null vix6m; nested legacy uses {value,timestamp}.
+  const vix6m = levelFrom(raw.vix6m, raw.vix6m_spot ?? raw.vix6m_value, timestamp);
+
+  const slope = asFiniteNumber(
+    raw.slope ?? raw.slope_vix3m_vix ?? raw.slope_signal,
+  );
+  const roll_yield = asFiniteNumber(raw.roll_yield ?? raw.roll_yield_signal);
+  const composite_signal = asFiniteNumber(
+    raw.composite_signal ?? raw.signal_value,
+  );
+  const z_score = asFiniteNumber(raw.z_score ?? raw.vix_zscore_signal);
+  const percentile_1y = asFiniteNumber(raw.percentile_1y);
+
+  const regimeRaw = typeof raw.regime === 'string' ? raw.regime : undefined;
+  const regime =
+    regimeRaw && REGIMES.has(regimeRaw)
+      ? (regimeRaw as VIXTermStructureRegime)
+      : undefined;
+
+  // Need at least one level or one primary metric to be useful.
+  if (
+    vix === undefined
+    && vix3m === undefined
+    && slope === undefined
+    && composite_signal === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    vix,
+    vix3m,
+    vix6m,
+    slope,
+    roll_yield,
+    composite_signal,
+    regime,
+    z_score,
+    percentile_1y,
+    timestamp,
+  };
+}
+
 export function VIXTermStructurePanel({ data, overlayState }: VIXTermStructurePanelProps) {
-  if (!data) {
+  const view = normalizeVixTermStructureData(data);
+
+  if (!view) {
     return (
       <div className="vix-panel">
         <div className="panel-header">
@@ -88,20 +206,20 @@ export function VIXTermStructurePanel({ data, overlayState }: VIXTermStructurePa
     return new Date(isoString).toLocaleString();
   };
 
-  const slope = data.slope ?? 0;
-  const rollYield = data.roll_yield ?? 0;
-  const signal = data.composite_signal ?? 0;
-  const zScore = data.z_score ?? 0;
+  const slope = view.slope ?? 0;
+  const rollYield = view.roll_yield ?? 0;
+  const signal = view.composite_signal ?? 0;
+  const zScore = view.z_score ?? 0;
 
   return (
     <div className="vix-panel">
       <div className="panel-header">
         <h3>VIX Term Structure</h3>
-        <span 
+        <span
           className="status-badge"
-          style={{ backgroundColor: getRegimeColor(data.regime) }}
+          style={{ backgroundColor: getRegimeColor(view.regime) }}
         >
-          {getRegimeLabel(data.regime)}
+          {getRegimeLabel(view.regime)}
         </span>
       </div>
 
@@ -110,15 +228,15 @@ export function VIXTermStructurePanel({ data, overlayState }: VIXTermStructurePa
         <div className="vix-levels">
           <div className="vix-level">
             <label>VIX Spot</label>
-            <span className="value">{data.vix?.value?.toFixed(2) ?? 'N/A'}</span>
+            <span className="value">{view.vix?.value?.toFixed(2) ?? 'N/A'}</span>
           </div>
           <div className="vix-level">
             <label>VIX3M</label>
-            <span className="value">{data.vix3m?.value?.toFixed(2) ?? 'N/A'}</span>
+            <span className="value">{view.vix3m?.value?.toFixed(2) ?? 'N/A'}</span>
           </div>
           <div className="vix-level">
             <label>VIX6M</label>
-            <span className="value">{data.vix6m?.value?.toFixed(2) ?? 'N/A'}</span>
+            <span className="value">{view.vix6m?.value?.toFixed(2) ?? 'N/A'}</span>
           </div>
         </div>
 
@@ -126,38 +244,38 @@ export function VIXTermStructurePanel({ data, overlayState }: VIXTermStructurePa
         <div className="term-structure-viz">
           <h4>Term Structure</h4>
           <div className="structure-bars">
-            {data.vix && data.vix3m && (
+            {view.vix && view.vix3m && (
               <>
-                <div 
+                <div
                   className="structure-bar vix-spot"
-                  style={{ 
-                    height: `${Math.min((data.vix.value / 40) * 100, 100)}%`,
-                    backgroundColor: data.vix.value > 25 ? '#ef4444' : data.vix.value > 20 ? '#f59e0b' : '#3b82f6'
+                  style={{
+                    height: `${Math.min((view.vix.value / 40) * 100, 100)}%`,
+                    backgroundColor: view.vix.value > 25 ? '#ef4444' : view.vix.value > 20 ? '#f59e0b' : '#3b82f6'
                   }}
                 >
                   <span className="bar-label">Spot</span>
-                  <span className="bar-value">{data.vix.value.toFixed(1)}</span>
+                  <span className="bar-value">{view.vix.value.toFixed(1)}</span>
                 </div>
-                <div 
+                <div
                   className="structure-bar vix-3m"
-                  style={{ 
-                    height: `${Math.min((data.vix3m.value / 40) * 100, 100)}%`,
+                  style={{
+                    height: `${Math.min((view.vix3m.value / 40) * 100, 100)}%`,
                     backgroundColor: '#6366f1'
                   }}
                 >
                   <span className="bar-label">3M</span>
-                  <span className="bar-value">{data.vix3m.value.toFixed(1)}</span>
+                  <span className="bar-value">{view.vix3m.value.toFixed(1)}</span>
                 </div>
-                {data.vix6m && (
-                  <div 
+                {view.vix6m && (
+                  <div
                     className="structure-bar vix-6m"
-                    style={{ 
-                      height: `${Math.min((data.vix6m.value / 40) * 100, 100)}%`,
+                    style={{
+                      height: `${Math.min((view.vix6m.value / 40) * 100, 100)}%`,
                       backgroundColor: '#8b5cf6'
                     }}
                   >
                     <span className="bar-label">6M</span>
-                    <span className="bar-value">{data.vix6m.value.toFixed(1)}</span>
+                    <span className="bar-value">{view.vix6m.value.toFixed(1)}</span>
                   </div>
                 )}
               </>
@@ -185,7 +303,7 @@ export function VIXTermStructurePanel({ data, overlayState }: VIXTermStructurePa
           <div className="metric">
             <label>Z-Score (1Y)</label>
             <span className="value">{zScore.toFixed(2)}</span>
-            <small>{data.percentile_1y ? `${data.percentile_1y.toFixed(0)}th percentile` : ''}</small>
+            <small>{view.percentile_1y ? `${view.percentile_1y.toFixed(0)}th percentile` : ''}</small>
           </div>
         </div>
 
