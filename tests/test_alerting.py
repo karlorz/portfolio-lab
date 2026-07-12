@@ -223,6 +223,62 @@ class TestCheckStalenessAndAlert:
         check_staleness_and_alert(staleness)
         mock_send.assert_not_called()
 
+    @patch("src.monitor.alerting.send_alert")
+    def test_unavailable_without_stale_sends_warn_not_pass(self, mock_send):
+        """Empty stale + non-empty unavailable must not claim all-fresh PASS."""
+        unavailable = [
+            "behavioral_sentiment",
+            "calendar_seasonality",
+            "crypto_allocation",
+            "factor_rotation",
+            "stacking_ensemble",
+            "kurtosis_regime",
+            "collar",
+            "bond_momentum",
+            "risk_decomposition",
+            "two_stage_regime",
+            "regime_transition",
+            "fred_macro",
+        ]
+        staleness = {
+            "stale_signals": [],
+            "unavailable_signals": unavailable,
+            "healthy_count": 11,
+            "total_count": 23,
+            "required_count": 5,
+            "optional_count": 18,
+        }
+        check_staleness_and_alert(staleness)
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args
+        assert call_args[0][0] == AlertChannel.SIGNAL_STALENESS
+        assert call_args[0][1] == AlertLevel.WARN
+        message = call_args[0][2]
+        assert "fresh" not in message.lower() or "partial" in message.lower() or "unavailable" in message.lower()
+        assert "All 23 signals fresh" not in message
+        assert "unavailable" in message.lower()
+        details = call_args[1].get("details") or (call_args[0][3] if len(call_args[0]) > 3 else None)
+        # kwargs preferred
+        if call_args.kwargs:
+            details = call_args.kwargs.get("details", details)
+        assert details is not None
+        assert details.get("unavailable_count") == 12
+        assert details.get("unavailable_signals") == unavailable
+
+    @patch("src.monitor.alerting.send_alert")
+    def test_unavailable_count_int_without_list(self, mock_send):
+        """Support unavailable_signals as a count when list is omitted."""
+        staleness = {
+            "stale_signals": [],
+            "unavailable_signals": 12,
+            "healthy_count": 11,
+            "total_count": 23,
+        }
+        check_staleness_and_alert(staleness)
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][1] == AlertLevel.WARN
+        assert "All 23 signals fresh" not in mock_send.call_args[0][2]
+
 
 class TestCheckDriftAndAlert:
     @patch("src.monitor.alerting.send_alert")
