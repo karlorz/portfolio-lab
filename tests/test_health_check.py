@@ -334,6 +334,16 @@ class TestComputeSystemStatus:
         circuit = {"status": "ok"}
         assert _compute_system_status(checks, circuit) == "warning"
 
+    def test_critical_component_elevates_to_critical(self):
+        """Active critical components (e.g. HALT kill switch) must not understate as warning."""
+        checks = {
+            "prices": {"status": "stale"},
+            "signals": {"status": "ok"},
+            "kill_switch": {"status": "critical"},
+        }
+        circuit = {"status": "ok"}
+        assert _compute_system_status(checks, circuit) == "critical"
+
 
 class TestRunHealthCheck:
     """Test full health check execution."""
@@ -407,6 +417,79 @@ class TestRunHealthCheck:
         assert readiness["reason"] == "missing_fred_api_key"
         assert "FRED_API_KEY" in readiness["remediation"]
         assert "super-secret-fred-key" not in json.dumps(report)
+
+    def test_active_kill_switch_halt_elevates_status_while_freshness_is_warning(
+        self, tmp_path, monkeypatch
+    ):
+        """Active incident HALT must not leave data/health.json as warning-only."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
+        monkeypatch.setattr(
+            "src.monitor.health_check._check_fred_md_cache",
+            lambda: {"status": "ok", "row_count": 1, "latest_fetched_at": "2026-06-11T00:00:00+00:00"},
+        )
+        # Fresh prices/signals so only kill-switch/incident drive severity
+        (tmp_path / "prices.json").write_text("{}")
+        (tmp_path / "signals.json").write_text("{}")
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+        (tmp_path / "kill_switch.json").write_text(json.dumps({
+            "enabled": True,
+            "level": "halt",
+            "mode": "paper",
+            "reason": "unresolved_incident:signal_staleness",
+            "source": "incident_lifecycle",
+            "message": "1/23 signals stale: alternative_data",
+            "timestamp": "2026-07-06T18:00:00+00:00",
+            "incident_id": "inc-1",
+        }))
+        (tmp_path / "incidents.json").write_text(json.dumps({
+            "open_count": 1,
+            "incidents": [{
+                "incident_id": "inc-1",
+                "channel": "signal_staleness",
+                "severity": "p2",
+                "state": "firing",
+                "message": "1/23 signals stale: alternative_data",
+                "kill_switch_level": "halt",
+            }],
+        }))
+
+        report = run_health_check()
+
+        assert report["status"] == "critical"
+        assert "kill_switch" in report["checks"]
+        assert "open_incidents" in report["checks"]
+        ks = report["checks"]["kill_switch"]
+        assert ks["status"] == "critical"
+        assert ks["enabled"] is True
+        assert ks["level"] == "halt"
+        assert ks["reason"] == "unresolved_incident:signal_staleness"
+        oi = report["checks"]["open_incidents"]
+        assert oi["status"] == "critical"
+        assert oi["open_count"] == 1
+        assert oi["incidents"][0]["incident_id"] == "inc-1"
+        assert oi["incidents"][0]["kill_switch_level"] == "halt"
+
+    def test_no_kill_switch_or_incidents_reports_ok_dimensions(self, tmp_path, monkeypatch):
+        """Absent safety controls should not invent critical dimensions."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
+        monkeypatch.setattr(
+            "src.monitor.health_check._check_fred_md_cache",
+            lambda: {"status": "ok", "row_count": 1, "latest_fetched_at": "2026-06-11T00:00:00+00:00"},
+        )
+        (tmp_path / "prices.json").write_text("{}")
+        (tmp_path / "signals.json").write_text("{}")
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+
+        report = run_health_check()
+
+        assert report["checks"]["kill_switch"]["status"] == "ok"
+        assert report["checks"]["kill_switch"]["enabled"] is False
+        assert report["checks"]["open_incidents"]["status"] == "ok"
+        assert report["checks"]["open_incidents"]["open_count"] == 0
 
 
 class TestFredReadiness:

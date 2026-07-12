@@ -234,16 +234,134 @@ def _check_fred_md_cache() -> dict:
         }
 
 
+def _load_json_file(path: Path) -> dict[str, Any] | None:
+    """Load a JSON object from disk; return None when missing or invalid."""
+    try:
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, OSError, TypeError) as exc:
+        logger.warning("Failed to read %s: %s", path, exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _check_kill_switch(data_dir: Path | None = None) -> dict[str, Any]:
+    """Bounded kill-switch dimension for operational readiness."""
+    root = data_dir or DATA_DIR
+    payload = _load_json_file(root / "kill_switch.json")
+    if not payload:
+        return {
+            "status": "ok",
+            "enabled": False,
+            "level": None,
+            "reason": None,
+            "source": None,
+            "message": None,
+            "timestamp": None,
+        }
+
+    enabled = bool(payload.get("enabled"))
+    level = str(payload.get("level") or "").lower() or None
+    reason = payload.get("reason")
+    source = payload.get("source")
+    message = payload.get("message")
+    timestamp = payload.get("timestamp")
+
+    if enabled and level == "halt":
+        status = "critical"
+    elif enabled:
+        status = "warning"
+    else:
+        status = "ok"
+
+    return {
+        "status": status,
+        "enabled": enabled,
+        "level": level,
+        "reason": reason,
+        "source": source,
+        "message": message,
+        "timestamp": timestamp,
+        "incident_id": payload.get("incident_id"),
+        "mode": payload.get("mode"),
+    }
+
+
+def _check_open_incidents(data_dir: Path | None = None) -> dict[str, Any]:
+    """Bounded open-incident dimension for operational readiness."""
+    root = data_dir or DATA_DIR
+    payload = _load_json_file(root / "incidents.json")
+    if not payload:
+        return {
+            "status": "ok",
+            "open_count": 0,
+            "incidents": [],
+        }
+
+    raw = payload.get("incidents", payload.get("open_incidents", []))
+    rows = raw if isinstance(raw, list) else []
+    open_incidents: list[dict[str, Any]] = []
+    has_halt = False
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        state = str(row.get("state") or row.get("status") or "open").lower()
+        if state in {"closed", "resolved", "pass"}:
+            continue
+        kill_level = str(row.get("kill_switch_level") or "").lower() or None
+        if kill_level == "halt":
+            has_halt = True
+        open_incidents.append({
+            "incident_id": row.get("incident_id") or row.get("id"),
+            "channel": row.get("channel"),
+            "severity": row.get("severity"),
+            "state": state,
+            "message": row.get("message"),
+            "kill_switch_level": kill_level,
+        })
+
+    open_count = int(payload.get("open_count") or len(open_incidents) or 0)
+    if open_count == 0 and open_incidents:
+        open_count = len(open_incidents)
+
+    if has_halt or any(
+        str(i.get("kill_switch_level") or "").lower() == "halt" for i in open_incidents
+    ):
+        status = "critical"
+    elif open_count > 0 or open_incidents:
+        status = "warning"
+    else:
+        status = "ok"
+
+    return {
+        "status": status,
+        "open_count": open_count,
+        "incidents": open_incidents[:10],
+    }
+
+
 def _compute_system_status(checks: dict, circuit: dict) -> str:
-    """Derive overall system status from component checks."""
+    """Derive overall system status from component checks.
+
+    Severity order (highest first): critical > degraded > warning > ok.
+    Active kill-switch HALT / open-incident HALT use status ``critical`` so
+    they cannot be understated by lower-severity freshness warnings.
+    """
     statuses = []
 
-    for name, check in checks.items():
-        statuses.append(check.get("status", "unknown"))
+    for _name, check in checks.items():
+        if isinstance(check, dict):
+            statuses.append(str(check.get("status", "unknown")))
 
-    statuses.append(circuit.get("status", "unknown"))
+    if isinstance(circuit, dict):
+        statuses.append(str(circuit.get("status", "unknown")))
 
-    if "critical" in statuses or "error" in statuses or "missing" in statuses:
+    if "critical" in statuses:
+        return "critical"
+    if "error" in statuses or "missing" in statuses:
         return "degraded"
     if (
         "stale" in statuses
@@ -262,6 +380,8 @@ def run_health_check() -> dict:
     """Run all health checks and return a structured report."""
     freshness = _check_data_freshness()
     circuit = _check_circuit_breaker()
+    kill_switch = _check_kill_switch()
+    open_incidents = _check_open_incidents()
     fred_md_cache = _check_fred_md_cache()
     freshness["fred_md_cache"] = fred_md_cache
     try:
@@ -278,7 +398,14 @@ def run_health_check() -> dict:
             "message": f"FRED readiness check unavailable: {exc}",
             "remediation": "Verify src.monitor.fred_readiness is importable.",
         }
-    system_status = _compute_system_status(freshness, circuit)
+    # Flatten nested freshness statuses for rollup while keeping nested shape
+    # in the report. Critical/warning FRED readiness must still elevate.
+    rollup_checks = {
+        **{k: v for k, v in freshness.items() if isinstance(v, dict) and "status" in v},
+        "kill_switch": kill_switch,
+        "open_incidents": open_incidents,
+    }
+    system_status = _compute_system_status(rollup_checks, circuit)
 
     report = {
         "status": system_status,
@@ -286,8 +413,11 @@ def run_health_check() -> dict:
         "checks": {
             "data_freshness": freshness,
             "circuit_breaker": circuit,
+            "kill_switch": kill_switch,
+            "open_incidents": open_incidents,
         },
         "service": "portfolio-lab",
+        "scope": "operational_readiness",
     }
 
     # Write to disk
