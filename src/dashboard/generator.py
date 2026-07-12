@@ -43,7 +43,61 @@ __all__ = [
     "DashboardGenerator",
     "PUBLIC_DIR",
     "DB_PATH",
+    "project_alternative_data_signal",
 ]
+
+# Legacy flat keys (pre seven-component producer) → panel component names
+_ALT_DATA_LEGACY_COMPONENT_KEYS = (
+    ("earnings", "earnings_sentiment", "earnings_confidence"),
+    ("news", "news_sentiment", "news_confidence"),
+    ("jobs", "jobs_signal", "jobs_confidence"),
+    ("social", "social_sentiment", "social_confidence"),
+)
+
+
+def project_alternative_data_signal(alt_data_raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Project producer alternative_data_latest.json into signals.json shape.
+
+    Primary path: ``raw_data.components`` / ``component_confidences`` / ``weights``
+    (current seven-component producer). Fallback: legacy flat
+    earnings/news/jobs/social keys when the components map is absent.
+    """
+    raw = alt_data_raw.get("raw_data") if isinstance(alt_data_raw, dict) else None
+    if not isinstance(raw, dict):
+        raw = {}
+
+    components_src = raw.get("components")
+    confidences_src = raw.get("component_confidences") if isinstance(raw.get("component_confidences"), dict) else {}
+    weights_src = raw.get("weights") if isinstance(raw.get("weights"), dict) else {}
+    components: Dict[str, Dict[str, Any]] = {}
+
+    if isinstance(components_src, dict) and components_src:
+        for key, score in components_src.items():
+            components[str(key)] = {
+                "score": score,
+                "confidence": confidences_src.get(key),
+                "weight": weights_src.get(key),
+            }
+    else:
+        # Legacy fallback only when producer lacks the components map
+        for name, score_key, conf_key in _ALT_DATA_LEGACY_COMPONENT_KEYS:
+            components[name] = {
+                "score": raw.get(score_key),
+                "confidence": raw.get(conf_key),
+                "weight": weights_src.get(name),
+            }
+
+    return {
+        "regime": alt_data_raw.get("regime"),
+        "probability": alt_data_raw.get("probability"),
+        "confidence": alt_data_raw.get("confidence"),
+        "timestamp": alt_data_raw.get("timestamp"),
+        "components": components,
+        "composite_score": raw.get("composite_score"),
+        "z_score": raw.get("z_score"),
+        "sources_count": raw.get("sources_count"),
+        "data_freshness_hours": raw.get("data_freshness_hours"),
+    }
 
 # Map ensemble signal source names to staleness check keys
 _ENSEMBLE_STALENESS_MAP = {
@@ -1284,38 +1338,7 @@ class DashboardGenerator:
             if alt_data_file.exists():
                 with open(alt_data_file) as f:
                     alt_data_raw = json.load(f)
-                    alternative_data_signal = {
-                        "regime": alt_data_raw.get("regime"),
-                        "probability": alt_data_raw.get("probability"),
-                        "confidence": alt_data_raw.get("confidence"),
-                        "timestamp": alt_data_raw.get("timestamp"),
-                        "components": {
-                            "earnings": {
-                                "score": safe_get(alt_data_raw, "raw_data", "earnings_sentiment"),
-                                "confidence": safe_get(alt_data_raw, "raw_data", "earnings_confidence"),
-                                "weight": safe_get(alt_data_raw, "raw_data", "weights", "earnings")
-                            },
-                            "news": {
-                                "score": safe_get(alt_data_raw, "raw_data", "news_sentiment"),
-                                "confidence": safe_get(alt_data_raw, "raw_data", "news_confidence"),
-                                "weight": safe_get(alt_data_raw, "raw_data", "weights", "news")
-                            },
-                            "jobs": {
-                                "score": safe_get(alt_data_raw, "raw_data", "jobs_signal"),
-                                "confidence": safe_get(alt_data_raw, "raw_data", "jobs_confidence"),
-                                "weight": safe_get(alt_data_raw, "raw_data", "weights", "jobs")
-                            },
-                            "social": {
-                                "score": safe_get(alt_data_raw, "raw_data", "social_sentiment"),
-                                "confidence": safe_get(alt_data_raw, "raw_data", "social_confidence"),
-                                "weight": safe_get(alt_data_raw, "raw_data", "weights", "social")
-                            }
-                        },
-                        "composite_score": safe_get(alt_data_raw, "raw_data", "composite_score"),
-                        "z_score": safe_get(alt_data_raw, "raw_data", "z_score"),
-                        "sources_count": safe_get(alt_data_raw, "raw_data", "sources_count"),
-                        "data_freshness_hours": safe_get(alt_data_raw, "raw_data", "data_freshness_hours")
-                    }
+                alternative_data_signal = project_alternative_data_signal(alt_data_raw)
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Alternative data signal not available: %s", e)
 

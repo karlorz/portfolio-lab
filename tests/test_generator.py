@@ -4214,6 +4214,83 @@ class TestSignalsJSONAlternativeData:
         alt_dir = tmp_path / "signals"
         alt_dir.mkdir(exist_ok=True)
         alt_file = alt_dir / "alternative_data_latest.json"
+        # Current producer shape: seven components under raw_data.components
+        alt_file.write_text(json.dumps({
+            "regime": "bull",
+            "probability": 0.65,
+            "confidence": 0.72,
+            "timestamp": "2026-01-01T00:00:00",
+            "raw_data": {
+                "composite_score": 0.38,
+                "z_score": 0.5,
+                "sources_count": 7,
+                "data_freshness_hours": 2.5,
+                "components": {
+                    "treasury_curve": 0.3,
+                    "sector_rotation": 0.1,
+                    "credit_spread": -0.1,
+                    "tail_risk": 0.6,
+                    "broad_momentum": 1.0,
+                    "crypto_sentiment": 0.0,
+                    "crypto_fg": 0.48,
+                },
+                "component_confidences": {
+                    "treasury_curve": 0.3,
+                    "sector_rotation": 0.9,
+                    "credit_spread": 0.4,
+                    "tail_risk": 0.9,
+                    "broad_momentum": 0.9,
+                    "crypto_sentiment": 0.1,
+                    "crypto_fg": 0.66,
+                },
+                "weights": {
+                    "treasury_curve": 0.18,
+                    "sector_rotation": 0.16,
+                    "credit_spread": 0.16,
+                    "tail_risk": 0.15,
+                    "broad_momentum": 0.16,
+                    "crypto_sentiment": 0.05,
+                    "crypto_fg": 0.14,
+                },
+            }
+        }))
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps(
+            [{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]
+        ))
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    path = gen.generate_signals_json()
+        with open(path) as f:
+            data = json.load(f)
+        alt = data["alternative_data"]
+        assert alt is not None
+        assert alt["regime"] == "bull"
+        assert alt["composite_score"] == 0.38
+        assert set(alt["components"].keys()) == {
+            "treasury_curve",
+            "sector_rotation",
+            "credit_spread",
+            "tail_risk",
+            "broad_momentum",
+            "crypto_sentiment",
+            "crypto_fg",
+        }
+        assert alt["components"]["treasury_curve"]["score"] == 0.3
+        assert alt["components"]["treasury_curve"]["confidence"] == 0.3
+        assert alt["components"]["treasury_curve"]["weight"] == 0.18
+        assert "earnings" not in alt["components"]
+        assert alt["sources_count"] == 7
+        assert alt["data_freshness_hours"] == 2.5
+        gen.conn.close()
+
+    def test_alternative_data_legacy_flat_keys_fallback(self, tmp_path):
+        """Legacy flat earnings/news/jobs/social keys still project when components map absent."""
+        gen, _ = _make_generator(tmp_path)
+        alt_dir = tmp_path / "signals"
+        alt_dir.mkdir(exist_ok=True)
+        alt_file = alt_dir / "alternative_data_latest.json"
         alt_file.write_text(json.dumps({
             "regime": "risk_on",
             "probability": 0.65,
@@ -4236,9 +4313,9 @@ class TestSignalsJSONAlternativeData:
                     "earnings": 0.3,
                     "news": 0.3,
                     "jobs": 0.2,
-                    "social": 0.2
-                }
-            }
+                    "social": 0.2,
+                },
+            },
         }))
         yields_path = tmp_path / "yields.json"
         yields_path.write_text(json.dumps(
@@ -4252,11 +4329,9 @@ class TestSignalsJSONAlternativeData:
             data = json.load(f)
         alt = data["alternative_data"]
         assert alt is not None
-        assert alt["regime"] == "risk_on"
-        assert alt["composite_score"] == 0.38
         assert alt["components"]["earnings"]["score"] == 0.3
+        assert alt["components"]["news"]["score"] == 0.6
         assert alt["sources_count"] == 4
-        assert alt["data_freshness_hours"] == 2.5
         gen.conn.close()
 
     def test_alternative_data_missing_file(self, tmp_path):
