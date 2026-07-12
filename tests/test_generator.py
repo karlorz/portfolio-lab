@@ -2989,13 +2989,26 @@ class TestHealthJSONEdgeCases:
         gen.conn.close()
 
     def test_stale_data_warning_threshold(self, tmp_path):
-        """stale_count > 5 sets system_status to warning."""
+        """stale_count > 5 with market_lag in the stale band (2–3d) → warning.
+
+        Symbols must not be ``critical`` freshness (market_lag > 3): any
+        critical data_freshness child rolls the artifact SLO to critical and
+        elevates system_status. Use lag=3 relative to the freshest row so
+        status is ``stale`` only.
+        """
         gen, db_path = _make_generator(tmp_path)
-        # Add 6 stale symbols to exceed warning threshold (>5) but not critical (>10)
+        # _make_generator seeds SPY/GLD/TLT/QQQ through today; lag stale rows
+        # 3 calendar days behind that cross-section (stale, not critical).
         conn = sqlite3.connect(str(db_path))
+        cursor = conn.execute("SELECT MAX(date) FROM prices")
+        latest = cursor.fetchone()[0]
+        latest_dt = datetime.strptime(latest, "%Y-%m-%d")
+        stale_date = (latest_dt - timedelta(days=3)).strftime("%Y-%m-%d")
         for i in range(6):
-            conn.execute("INSERT INTO prices VALUES (?, ?, ?)",
-                         (f"STALE{i}", "2020-01-01", 100.0))
+            conn.execute(
+                "INSERT INTO prices VALUES (?, ?, ?)",
+                (f"STALE{i}", stale_date, 100.0),
+            )
         conn.commit()
         conn.close()
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
@@ -3008,9 +3021,10 @@ class TestHealthJSONEdgeCases:
         gen.conn.close()
 
     def test_stale_data_critical_threshold(self, tmp_path):
-        """stale_count > 10 sets system_status to critical."""
+        """stale_count > 10 or critical freshness children → system critical."""
         gen, db_path = _make_generator(tmp_path)
-        # Add 11 stale symbols to exceed critical threshold (>10)
+        # Far-behind rows classify as critical freshness (market_lag > 3),
+        # which rolls up to artifact SLO critical (highest-severity policy).
         conn = sqlite3.connect(str(db_path))
         for i in range(11):
             conn.execute("INSERT INTO prices VALUES (?, ?, ?)",
