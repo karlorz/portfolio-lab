@@ -403,6 +403,11 @@ class TestCalculatePerformance:
 
 class TestGraduationCriteria:
 
+    @pytest.fixture(autouse=True)
+    def _isolate_data_dir(self, tmp_path, monkeypatch):
+        """Graduation tests must not see live data/kill_switch.json."""
+        monkeypatch.setattr("src.strategy.evaluator.DATA_DIR", tmp_path)
+
     def test_too_few_days(self, tmp_path, caplog):
         p = _make_portfolio(tmp_path)
         p.history = [{"total_value": 100000, "daily_return": 0.001}] * 30
@@ -583,8 +588,9 @@ class TestDeduplicateToDaily:
         assert len(result) == 1
         assert result[0]["daily_return"] == 0.2
 
-    def test_deferred_when_too_few_trading_days(self, tmp_path, caplog):
+    def test_deferred_when_too_few_trading_days(self, tmp_path, caplog, monkeypatch):
         """63 snapshots but only 3 unique days → should defer with message."""
+        monkeypatch.setattr("src.strategy.evaluator.DATA_DIR", tmp_path)
         p = _make_portfolio(tmp_path)
         val = 100000
         p.history = []
@@ -1149,6 +1155,12 @@ class TestCalculatePerformanceDailyReturn:
 # ---------------------------------------------------------------------------
 
 class TestGraduationCriteriaBoundaries:
+
+    @pytest.fixture(autouse=True)
+    def _isolate_data_dir(self, tmp_path, monkeypatch):
+        """Graduation tests must not see live data/kill_switch.json."""
+        monkeypatch.setattr("src.strategy.evaluator.DATA_DIR", tmp_path)
+
 
     @patch("src.backtest.metrics.compute_deflated_sharpe_ratio", return_value=0.0)
     def test_dsr_zero_blocks_graduation(self, mock_dsr, tmp_path, caplog):
@@ -2051,3 +2063,178 @@ class TestOrderRouterKillSwitch:
             result = router.execute_orders(plans, dry_run=False, kill_switch_check=True)
             # Should NOT be blocked — missing kill_switch.json means no active kill switch
             assert result["status"] != "blocked"
+
+
+# ---------------------------------------------------------------------------
+# Incident kill blocks paper execute + promote (2026-07-15 batch C)
+# ---------------------------------------------------------------------------
+
+class TestIncidentKillBlocksPaperControlLoop:
+    """Paper path must honor data/kill_switch.json like order_router."""
+
+    def test_is_kill_execution_blocked_helper(self):
+        from src.dashboard.kill_authority import is_kill_execution_blocked
+
+        assert is_kill_execution_blocked(None) is False
+        assert is_kill_execution_blocked({"enabled": False}) is False
+        assert is_kill_execution_blocked({"enabled": True, "level": "halt"}) is True
+        assert is_kill_execution_blocked({"enabled": True, "level": "restrict"}) is True
+        assert is_kill_execution_blocked({"enabled": True, "level": "warning"}) is True
+        assert is_kill_execution_blocked({"enabled": True}) is True
+
+    def test_graduation_refuses_promote_under_incident_halt(self, tmp_path, caplog):
+        """check_graduation_criteria must not write .promote_to_live under kill."""
+        from src.strategy.evaluator import check_graduation_criteria
+        import src.strategy.evaluator as ev
+
+        p = _make_portfolio(tmp_path)
+        rng = np.random.RandomState(12345)
+        p.history = []
+        val = 100000
+        for i in range(63):
+            ret = rng.normal(0.0008, 0.01)
+            val *= (1 + ret)
+            p.history.append({
+                "timestamp": f"2026-01-{i+1:02d}T23:00:00",
+                "total_value": round(val, 2),
+                "daily_return": ret,
+            })
+
+        kill_file = tmp_path / "kill_switch.json"
+        kill_file.write_text(json.dumps({
+            "enabled": True,
+            "level": "halt",
+            "reason": "unresolved_incident:signal_staleness",
+            "source": "incident_lifecycle",
+            "incident_id": "incident-halt-1",
+            "mode": "paper",
+            "timestamp": "2026-07-12T09:15:00+00:00",
+            "position_reduction": 1.0,
+        }))
+
+        with (
+            patch.object(ev, "DATA_DIR", tmp_path),
+            caplog.at_level(logging.INFO, logger="src.strategy.evaluator"),
+        ):
+            check_graduation_criteria(p)
+
+        promote = tmp_path / ".promote_to_live"
+        assert not promote.exists(), "promote file must not be written under kill halt"
+        assert "kill" in caplog.text.lower() or "HALT" in caplog.text or "blocked" in caplog.text.lower()
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0, "GLD": 180.0, "TLT": 90.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_incident_halt_blocks_paper_execute_and_promote(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, caplog,
+    ):
+        """main() must not execute fills or refresh promote when incident kill is on."""
+        from src.strategy.evaluator import main
+        import src.strategy.evaluator as ev
+
+        kill_file = tmp_path / "kill_switch.json"
+        kill_file.write_text(json.dumps({
+            "enabled": True,
+            "level": "halt",
+            "reason": "unresolved_incident:signal_staleness",
+            "source": "incident_lifecycle",
+            "incident_id": "incident-halt-1",
+            "incident_channel": "signal_staleness",
+            "mode": "paper",
+            "timestamp": "2026-07-12T09:15:00+00:00",
+            "position_reduction": 1.0,
+        }))
+
+        orders = [{
+            "symbol": "SPY",
+            "side": "buy",
+            "shares": 10,
+            "estimated_price": 500.0,
+            "estimated_value": 5000.0,
+            "reason": "rebalance_up",
+            "drift_before": 0.05,
+        }]
+
+        with (
+            patch.object(ev, "DATA_DIR", tmp_path),
+            patch.object(ev, "ORDERS_LOG", tmp_path / "orders.jsonl"),
+            patch.object(ev, "PERFORMANCE_LOG", tmp_path / "performance.jsonl"),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch.object(ev, "Portfolio") as MockPortfolio,
+            caplog.at_level(logging.INFO, logger="src.strategy.evaluator"),
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = None
+            mock_portfolio.total_value.return_value = 100000
+            mock_portfolio.calculate_orders.return_value = orders
+            mock_portfolio.current_weights.return_value = {"SPY": 0.4, "GLD": 0.4, "TLT": 0.2}
+            mock_portfolio.cash = 100000
+            mock_portfolio.positions = {}
+            mock_portfolio.mode = "paper"
+            mock_portfolio.history = []
+            mock_portfolio.execute_orders = MagicMock(return_value=[{"symbol": "SPY"}])
+            MockPortfolio.return_value = mock_portfolio
+
+            main()
+
+            mock_portfolio.execute_orders.assert_not_called()
+
+        assert kill_file.exists(), "incident kill must be preserved"
+        assert not (tmp_path / ".promote_to_live").exists()
+        # orders log should not contain fills from blocked cycle
+        orders_log = tmp_path / "orders.jsonl"
+        if orders_log.exists():
+            assert orders_log.read_text().strip() == ""
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0, "GLD": 180.0, "TLT": 90.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_no_kill_still_executes_orders(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path,
+    ):
+        """Without kill file, paper execute_orders still runs."""
+        from src.strategy.evaluator import main
+        import src.strategy.evaluator as ev
+
+        orders = [{
+            "symbol": "SPY",
+            "side": "buy",
+            "shares": 10,
+            "estimated_price": 500.0,
+            "estimated_value": 5000.0,
+            "reason": "rebalance_up",
+            "drift_before": 0.05,
+        }]
+
+        with (
+            patch.object(ev, "DATA_DIR", tmp_path),
+            patch.object(ev, "ORDERS_LOG", tmp_path / "orders.jsonl"),
+            patch.object(ev, "PERFORMANCE_LOG", tmp_path / "performance.jsonl"),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch.object(ev, "Portfolio") as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = None
+            mock_portfolio.total_value.return_value = 100000
+            mock_portfolio.calculate_orders.return_value = orders
+            mock_portfolio.current_weights.return_value = {"SPY": 0.4, "GLD": 0.4, "TLT": 0.2}
+            mock_portfolio.cash = 100000
+            mock_portfolio.positions = {}
+            mock_portfolio.mode = "paper"
+            mock_portfolio.history = [{"total_value": 100000, "daily_return": 0.0}]
+            mock_portfolio.execute_orders = MagicMock(return_value=[{
+                **orders[0],
+                "fill_price": 500.0,
+                "fill_shares": 10,
+                "fill_value": 5000.0,
+                "timestamp": "2026-07-15T00:00:00",
+            }])
+            MockPortfolio.return_value = mock_portfolio
+
+            main()
+
+            mock_portfolio.execute_orders.assert_called_once()

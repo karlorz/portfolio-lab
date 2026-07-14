@@ -15,6 +15,7 @@ from typing import Any
 __all__ = [
     "load_kill_switch_payload",
     "load_open_incidents_summary",
+    "is_kill_execution_blocked",
     "project_kill_switch_fields",
     "project_compact_kill_fields",
     "elevate_system_status_for_kill",
@@ -35,6 +36,18 @@ def _load_json(path: Path) -> dict[str, Any] | None:
 def load_kill_switch_payload(data_dir: str | Path) -> dict[str, Any] | None:
     """Load authority kill_switch.json; return None when absent/invalid."""
     return _load_json(Path(data_dir) / "kill_switch.json")
+
+
+def is_kill_execution_blocked(payload: dict[str, Any] | None) -> bool:
+    """Return True when kill authority blocks new execution / promote writes.
+
+    Matches order_router semantics: any ``enabled: true`` kill file blocks
+    non-dry-run execution. Unreadable/missing payload is not blocked here —
+    callers that need fail-closed on corrupt files should handle IO separately.
+    """
+    if not isinstance(payload, dict):
+        return False
+    return bool(payload.get("enabled"))
 
 
 def load_open_incidents_summary(data_dir: str | Path) -> dict[str, Any]:

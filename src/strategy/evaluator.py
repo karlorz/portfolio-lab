@@ -624,6 +624,36 @@ def _clear_evaluator_kill_switch_if_owned(kill_file: Path, mode: str) -> None:
     logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
 
 
+def _authority_kill_blocks_paper_actions(data_dir: Path | None = None) -> tuple[bool, dict | None]:
+    """Return (blocked, payload) when kill_switch.json blocks paper fills/promote.
+
+    SSOT loader: ``src.dashboard.kill_authority.load_kill_switch_payload`` +
+    ``is_kill_execution_blocked`` (same enabled gate as order_router).
+    """
+    root = Path(data_dir) if data_dir is not None else DATA_DIR
+    try:
+        from src.dashboard.kill_authority import (
+            is_kill_execution_blocked,
+            load_kill_switch_payload,
+        )
+    except ImportError:
+        # Fail closed if authority module unavailable under live paper path
+        kill_file = root / "kill_switch.json"
+        if not kill_file.exists():
+            return False, None
+        try:
+            with open(kill_file) as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError, TypeError):
+            return True, None
+        return bool(isinstance(payload, dict) and payload.get("enabled")), (
+            payload if isinstance(payload, dict) else None
+        )
+
+    payload = load_kill_switch_payload(root)
+    return is_kill_execution_blocked(payload), payload
+
+
 def main():
     """Main evaluation loop."""
     logger.info("Strategy Evaluator Starting")
@@ -681,6 +711,35 @@ def main():
     # Clear stale kill switch if risk limits are no longer breached
     kill_file = DATA_DIR / "kill_switch.json"
     _clear_evaluator_kill_switch_if_owned(kill_file, mode)
+
+    # Authority kill (incident lifecycle / any enabled kill file) blocks paper
+    # fills and promote writes — same enabled gate as order_router.
+    authority_blocked, authority_payload = _authority_kill_blocks_paper_actions(DATA_DIR)
+    if authority_blocked:
+        level = (authority_payload or {}).get("level") if isinstance(authority_payload, dict) else None
+        reason = (authority_payload or {}).get("reason") if isinstance(authority_payload, dict) else None
+        logger.critical(
+            "PAPER CONTROL LOOP BLOCKED by kill authority: level=%s reason=%s — "
+            "no fills, no promote write",
+            level,
+            reason,
+        )
+        try:
+            from src.monitor.decision_registry import record_evaluator_cycle_decision
+
+            record_evaluator_cycle_decision(
+                mode=mode,
+                regime=regime,
+                target_alloc=_resolve_target_allocation(regime),
+                prices=prices,
+                portfolio_value=portfolio.total_value(prices),
+                current_weights=portfolio.current_weights(prices),
+                orders=None,
+                kill_reason=f"authority_kill:{reason or level or 'enabled'}",
+            )
+        except (ImportError, ValueError, OSError, TypeError) as e:
+            logger.warning("Evaluator decision registry (authority kill) skipped: %s", e)
+        return
 
     # Determine target allocation
     target_alloc = _resolve_target_allocation(regime)
@@ -768,6 +827,19 @@ def check_graduation_criteria(portfolio: Portfolio):
     includes sanity validation to prevent false positives from near-zero
     standard deviation in intra-day return data.
     """
+    # Refuse promote writes while authority kill is enabled (incident HALT, etc.)
+    blocked, payload = _authority_kill_blocks_paper_actions(DATA_DIR)
+    if blocked:
+        level = (payload or {}).get("level") if isinstance(payload, dict) else None
+        reason = (payload or {}).get("reason") if isinstance(payload, dict) else None
+        logger.info(
+            "GRADUATION BLOCKED by kill authority: level=%s reason=%s — "
+            "skipping .promote_to_live write",
+            level,
+            reason,
+        )
+        return
+
     MIN_DAYS = int(os.environ.get("GRADUATION_MIN_DAYS", "63"))
     MIN_SHARPE = float(os.environ.get("GRADUATION_MIN_SHARPE", "0.5"))
     MAX_DD = float(os.environ.get("GRADUATION_MAX_DD", "0.15"))
