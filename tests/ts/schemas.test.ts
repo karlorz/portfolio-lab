@@ -400,6 +400,22 @@ describe('SmartRebalanceSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts kill-blocked smart rebalance fields', () => {
+    const result = SmartRebalanceSchema.safeParse({
+      ...validSmartRebalance(),
+      should_execute: false,
+      decision: 'blocked_kill_switch',
+      execution_blocked: true,
+      kill_switch_enabled: true,
+      kill_switch_level: 'halt',
+      kill_switch_reason: 'unresolved_incident:signal_staleness',
+      kill_switch_incident_id: 'inc-1',
+      kill_switch_message: 'Paper trading halted',
+    });
+    expect(result.success).toBe(true);
+  });
+
+
   it('rejects invalid urgency', () => {
     const result = SmartRebalanceSchema.safeParse({
       ...validSmartRebalance(),

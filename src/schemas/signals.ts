@@ -150,6 +150,13 @@ export const SmartRebalanceSchema = z.object({
   ytd_cost_bps: z.number(),
   remaining_budget_pct: z.number(),
   remaining_budget_ratio: z.optional(z.number().min(0).max(1)),
+  /** True when kill_switch.json blocks execution (order_router SSOT). */
+  execution_blocked: z.optional(z.boolean()),
+  kill_switch_enabled: z.optional(z.boolean()),
+  kill_switch_level: z.optional(z.string().nullable()),
+  kill_switch_reason: z.optional(z.string().nullable()),
+  kill_switch_incident_id: z.optional(z.string().nullable()),
+  kill_switch_message: z.optional(z.string().nullable()),
   status: SmartRebalanceStatusSchema,
 }).superRefine((data, ctx) => {
   const hasRatioContract =

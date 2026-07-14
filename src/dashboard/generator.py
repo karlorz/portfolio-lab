@@ -299,6 +299,62 @@ def _compact_health_summary(report: Dict) -> Dict:
     return summary
 
 
+def _apply_kill_to_smart_rebalance(
+    smart: dict[str, Any] | None,
+    kill_payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Annotate smart_rebalance with kill halt and force non-execute under kill.
+
+    Keeps drift/VPIN diagnostics visible but never implies actionable execute
+    when authority kill_switch.json is enabled (same gate as order_router).
+    """
+    if not isinstance(smart, dict):
+        return smart
+    try:
+        from src.dashboard.kill_authority import is_kill_execution_blocked
+    except ImportError:
+        is_kill_execution_blocked = lambda p: bool(isinstance(p, dict) and p.get("enabled"))
+
+    if not is_kill_execution_blocked(kill_payload):
+        # Explicit clear fields when kill is off (stable schema for consumers)
+        smart.setdefault("execution_blocked", False)
+        smart.setdefault("kill_switch_enabled", False)
+        return smart
+
+    level = None
+    reason = None
+    incident_id = None
+    message = None
+    if isinstance(kill_payload, dict):
+        level = kill_payload.get("level")
+        reason = kill_payload.get("reason")
+        incident_id = kill_payload.get("incident_id")
+        message = kill_payload.get("message")
+
+    smart["execution_blocked"] = True
+    smart["kill_switch_enabled"] = True
+    if level is not None:
+        smart["kill_switch_level"] = level
+    if reason is not None:
+        smart["kill_switch_reason"] = reason
+    if incident_id is not None:
+        smart["kill_switch_incident_id"] = incident_id
+    if message is not None:
+        smart["kill_switch_message"] = message
+
+    # Force non-actionable decision; preserve original decision for operators
+    prior_decision = smart.get("decision")
+    smart["should_execute"] = False
+    smart["decision"] = "blocked_kill_switch"
+    human = message if isinstance(message, str) and message.strip() else reason
+    smart["reason"] = (
+        f"blocked_by_kill_switch:{level or 'enabled'}"
+        + (f" ({human})" if human else "")
+        + (f"; prior={prior_decision}" if prior_decision else "")
+    )
+    return smart
+
+
 def _remaining_budget_ratio(metadata: dict[str, Any], status: dict[str, Any]) -> float:
     """Return remaining rebalance budget as a fraction of portfolio value."""
     value = metadata.get("remaining_budget_ratio")
@@ -1354,6 +1410,11 @@ class DashboardGenerator:
                     'remaining_budget_ratio': remaining_budget_ratio,
                     'status': gate_status,
                 }
+            # Kill authority blocks actionable execute (order_router SSOT)
+            smart_rebalance_data = _apply_kill_to_smart_rebalance(
+                smart_rebalance_data,
+                load_kill_switch_payload(DATA_DIR),
+            )
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
             logger.warning("Dashboard generation error: %s", e)
 

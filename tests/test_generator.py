@@ -4201,6 +4201,138 @@ class TestSignalsJSONSmartRebalance:
         assert smart["status"]["remaining_budget_ratio"] == 0.005
         gen.conn.close()
 
+    def test_apply_kill_to_smart_rebalance_helper_unit(self):
+        """Pure helper forces blocked decision when kill enabled."""
+        from src.dashboard.generator import _apply_kill_to_smart_rebalance
+
+        base = {
+            "should_execute": True,
+            "decision": "execute",
+            "urgency": "high",
+            "max_drift": 0.20,
+            "estimated_cost_bps": 5.0,
+            "reason": "drift_above_threshold",
+            "drift_details": {"SPY": 0.20},
+            "vpin": 0.25,
+            "in_optimal_window": True,
+            "ytd_cost_bps": 10,
+            "remaining_budget_pct": 0.5,
+            "remaining_budget_ratio": 0.005,
+            "status": {},
+        }
+        out = _apply_kill_to_smart_rebalance(
+            dict(base),
+            {
+                "enabled": True,
+                "level": "halt",
+                "reason": "unresolved_incident:signal_staleness",
+                "incident_id": "inc-1",
+                "message": "Paper trading halted",
+            },
+        )
+        assert out["should_execute"] is False
+        assert out["decision"] == "blocked_kill_switch"
+        assert out["execution_blocked"] is True
+        assert out["kill_switch_enabled"] is True
+        assert out["kill_switch_level"] == "halt"
+        assert out["kill_switch_incident_id"] == "inc-1"
+        assert "drift_details" in out and out["drift_details"]["SPY"] == 0.20
+        assert "prior=execute" in out["reason"]
+
+        clear = _apply_kill_to_smart_rebalance(dict(base), {"enabled": False})
+        assert clear["should_execute"] is True
+        assert clear["decision"] == "execute"
+        assert clear["execution_blocked"] is False
+
+    def test_smart_rebalance_kill_halt_blocks_execute(self, tmp_path, monkeypatch):
+        """Kill on + high-drift gate would execute → smart_rebalance not executable."""
+        gen, _ = _make_generator(tmp_path)
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps(
+            [{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]
+        ))
+        (tmp_path / "portfolio_paper.json").write_text(json.dumps({
+            "cash": 50000,
+            "positions": {
+                "SPY": {
+                    "shares": 100,
+                    "value": 50000,
+                    "weight": 0.5,
+                    "unrealized_pnl": 0,
+                },
+            },
+        }))
+        (tmp_path / "kill_switch.json").write_text(json.dumps({
+            "enabled": True,
+            "level": "halt",
+            "reason": "unresolved_incident:signal_staleness",
+            "source": "incident_lifecycle",
+            "incident_id": "inc-halt-sr",
+            "mode": "paper",
+            "message": "1/23 signals stale",
+            "position_reduction": 1.0,
+        }))
+
+        class FakeGateResult:
+            should_execute = True
+            decision = "execute"
+            urgency = "high"
+            max_drift = 0.22
+            estimated_cost_bps = 8.0
+            reason = "drift_above_threshold"
+            metadata = {
+                "drift_details": {"SPY": 0.22},
+                "vpin": 0.2,
+                "in_optimal_window": True,
+                "ytd_cost_bps": 0,
+                "remaining_budget_pct": 0.005,
+                "remaining_budget_ratio": 0.005,
+            }
+
+        class FakeSmartRebalanceGate:
+            def evaluate(self, current_holdings, target_allocations, total_value):
+                return FakeGateResult()
+
+            def get_status(self):
+                return {
+                    "ytd_cost_bps": 0,
+                    "ytd_cost_pct": 0.0,
+                    "remaining_budget_pct": 0.5,
+                    "remaining_budget_ratio": 0.005,
+                    "is_over_budget": False,
+                    "is_warning": False,
+                    "last_rebalance": None,
+                    "deferred_until": None,
+                    "config": {
+                        "drift_threshold": 0.1,
+                        "vpin_threshold": 0.5,
+                        "optimal_window": "10:00-15:30",
+                        "annual_cost_limit": "50bps",
+                    },
+                }
+
+        fake_rebalancing = types.SimpleNamespace(
+            integration=types.SimpleNamespace(SmartRebalanceGate=FakeSmartRebalanceGate)
+        )
+        monkeypatch.setattr("src.dashboard.generator.validate_signal", lambda _name, signal: signal)
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    with patch("importlib.import_module", return_value=fake_rebalancing):
+                        path = gen.generate_signals_json()
+
+        with open(path) as f:
+            data = json.load(f)
+
+        smart = data["smart_rebalance"]
+        assert smart["should_execute"] is False
+        assert smart["decision"] == "blocked_kill_switch"
+        assert smart["execution_blocked"] is True
+        assert smart["kill_switch_level"] == "halt"
+        assert smart["max_drift"] == 0.22  # diagnostics preserved
+        gen.conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Signals JSON — alternative data

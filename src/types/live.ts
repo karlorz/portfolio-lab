@@ -651,6 +651,13 @@ export interface SmartRebalanceData {
   ytd_cost_bps: number;
   remaining_budget_pct: number;
   remaining_budget_ratio?: number;
+  /** Kill authority blocks actionable rebalance (mirrors order_router). */
+  execution_blocked?: boolean;
+  kill_switch_enabled?: boolean;
+  kill_switch_level?: string | null;
+  kill_switch_reason?: string | null;
+  kill_switch_incident_id?: string | null;
+  kill_switch_message?: string | null;
   status: {
     ytd_cost_bps: number;
     ytd_cost_pct: number;
