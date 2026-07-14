@@ -247,7 +247,8 @@ data:
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
-	echo "Data pipeline done ($$STATUS, $${DUR}s)"
+	echo "Data pipeline done ($$STATUS, $${DUR}s)"; \
+	exit $$EXIT
 
 .PHONY: data-quality
 data-quality:
@@ -269,7 +270,8 @@ dashboard:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Strategy Evaluator ───────────────────────────────────────────────
 
@@ -285,7 +287,8 @@ eval:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-eval $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-eval $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Research Agent ───────────────────────────────────────────────────
 
@@ -301,7 +304,8 @@ research:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-research $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-research $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Wiki Sync ────────────────────────────────────────────────────────
 
@@ -317,7 +321,8 @@ wiki-sync:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── App Build ────────────────────────────────────────────────────────
 
@@ -334,7 +339,8 @@ build:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-build $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-build $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Position Sync ────────────────────────────────────────────────────
 
@@ -350,7 +356,8 @@ sync:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Overlay Pipeline ──────────────────────────────────────────────────
 
@@ -376,7 +383,8 @@ overlay-signals:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR; \
+	exit $$EXIT
 
 .PHONY: overlay-dashboard
 overlay-dashboard:
@@ -390,8 +398,13 @@ overlay-dashboard:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR; \
+	exit $$EXIT
 
+# Health / cron exit contract (Nagios-style + tasker):
+#   0 = ok, 124 = timeout, 137 = oom, other non-zero = error.
+# Recipes record STATUS via cron_update then `exit $$EXIT` so `make health`
+# (and sibling cron targets) surface non-zero to tasker — never swallow.
 .PHONY: health
 health:
 	@echo "=== Health Monitor: $$(date) ==="; \
@@ -404,7 +417,8 @@ health:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR; \
+	exit $$EXIT
 
 .PHONY: rebalance-health
 rebalance-health:
@@ -418,7 +432,8 @@ rebalance-health:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-rebalance-health $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-rebalance-health $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── GARCH-CVaR Risk Metrics ────────────────────────────────────────────
 
@@ -435,7 +450,8 @@ garch-risk:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Mark-to-Market ──────────────────────────────────────────────────
 
@@ -451,7 +467,8 @@ mark-to-market:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-mark-to-market $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-mark-to-market $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Daily P&L Capture ────────────────────────────────────────────────
 
@@ -467,7 +484,8 @@ daily-pnl: mark-to-market
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Performance Attribution ────────────────────────────────────────────
 
@@ -482,7 +500,9 @@ attribution:
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ] && [ $$EXIT2 -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution $$STATUS $$DUR; \
+	if [ $$EXIT -ne 0 ]; then exit $$EXIT; fi; \
+	exit $$EXIT2
 
 # ── Unified Dashboard ────────────────────────────────────────────────
 
@@ -498,7 +518,8 @@ unified-dashboard:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Daily Brief ──────────────────────────────────────────────────────
 
@@ -534,7 +555,8 @@ prune-logs:
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs $$STATUS $$DUR; \
+	exit $$EXIT
 
 .PHONY: prune-logs-dry-run
 prune-logs-dry-run:
