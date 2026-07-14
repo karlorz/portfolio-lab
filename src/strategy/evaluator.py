@@ -821,20 +821,21 @@ def _deduplicate_to_daily(history: List[Dict]) -> List[Dict]:
 
 
 def check_graduation_criteria(portfolio: Portfolio):
-    """Check if paper trading performance warrants live promotion.
+    """Assess paper→live readiness; promote writes owned by GraduationChecklist.
 
-    Uses trading-day-level data (deduplicates intra-day snapshots) and
-    includes sanity validation to prevent false positives from near-zero
-    standard deviation in intra-day return data.
+    Computes advisory portfolio-history metrics for operator logs, then
+    delegates ``.promote_to_live`` candidacy solely to
+    ``GraduationChecklist.write_promote_to_live_if_ready`` (multi-criteria SSOT).
+    Metric-only gates here never write the promote marker.
     """
-    # Refuse promote writes while authority kill is enabled (incident HALT, etc.)
+    # Refuse even advisory promote attempts while authority kill is enabled
     blocked, payload = _authority_kill_blocks_paper_actions(DATA_DIR)
     if blocked:
         level = (payload or {}).get("level") if isinstance(payload, dict) else None
         reason = (payload or {}).get("reason") if isinstance(payload, dict) else None
         logger.info(
             "GRADUATION BLOCKED by kill authority: level=%s reason=%s — "
-            "skipping .promote_to_live write",
+            "skipping checklist promote path",
             level,
             reason,
         )
@@ -846,30 +847,30 @@ def check_graduation_criteria(portfolio: Portfolio):
     MIN_WIN_RATE = float(os.environ.get("GRADUATION_MIN_WIN_RATE", "0.45"))
     MAX_REALISTIC_SHARPE = float(os.environ.get("GRADUATION_MAX_REALISTIC_SHARPE", "3.0"))
     MIN_DSR = float(os.environ.get("GRADUATION_MIN_DSR", "0.50"))
-    
+
     if len(portfolio.history) < MIN_DAYS:
         return
-    
+
     # Deduplicate intra-day snapshots to trading-day-level data
     daily_history = _deduplicate_to_daily(portfolio.history)
-    
+
     # Need at least MIN_DAYS trading days after dedup
     if len(daily_history) < MIN_DAYS:
         logger.info("GRADUATION DEFERRED: Only %d unique trading days (need %d), "
                      "skipping intra-day snapshots", len(daily_history), MIN_DAYS)
         return
-    
+
     recent = daily_history[-MIN_DAYS:]
     returns = [h["daily_return"] for h in recent]
-    
-    # Calculate metrics
+
+    # Advisory metrics (logging only — not promote authority)
     total_return = (recent[-1]["total_value"] - recent[0]["total_value"]) / recent[0]["total_value"]
-    
+
     # Volatility floor: prevent division-by-near-zero when intra-day return
     # data has been recorded but shows zero variation within each day
     daily_std = max(np.std(returns), 0.0001)
     sharpe = np.mean(returns) / daily_std * np.sqrt(252) if daily_std > 0 else 0
-    
+
     peak = recent[0]["total_value"]
     max_dd = 0
     for h in recent:
@@ -878,20 +879,16 @@ def check_graduation_criteria(portfolio: Portfolio):
         dd = (peak - h["total_value"]) / peak
         if dd > max_dd:
             max_dd = dd
-    
+
     win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0
-    
-    # Sanity validation: reject unrealistic metrics before writing trigger
+
+    # Sanity validation: reject unrealistic metrics before promote path
     if sharpe > MAX_REALISTIC_SHARPE:
         logger.warning("Sharpe %.2f exceeds realistic maximum %.1f — likely intra-day "
-                        "snapshot contamination. Skipping promotion.", sharpe, MAX_REALISTIC_SHARPE)
+                        "snapshot contamination. Skipping promotion path.", sharpe, MAX_REALISTIC_SHARPE)
         return
-    
-    # Check criteria
-    # DSR validation: confirm Sharpe survives multiple-testing correction
-    # With 94 grid-search configs, DSR > 0.95 means the Sharpe is statistically
-    # significant, not just the best of many trials
-    # (MIN_DSR is now externalized via GRADUATION_MIN_DSR env var, set above)
+
+    # Advisory DSR / metric gates (logs only)
     try:
         from src.backtest.metrics import compute_deflated_sharpe_ratio
         dsr = compute_deflated_sharpe_ratio(
@@ -901,47 +898,58 @@ def check_graduation_criteria(portfolio: Portfolio):
         dsr = 0.0  # If DSR can't be computed, fail closed
 
     if sharpe > MIN_SHARPE and max_dd < MAX_DD and win_rate > MIN_WIN_RATE and dsr >= MIN_DSR:
-        logger.info("GRADUATION CANDIDATE: Sharpe=%.2f, DD=%.2f%%, "
-                     "WinRate=%.2f%%, DSR=%.2f", sharpe, max_dd * 100, win_rate * 100, dsr)
+        logger.info(
+            "GRADUATION CANDIDATE (evaluator advisory metrics): Sharpe=%.2f, DD=%.2f%%, "
+            "WinRate=%.2f%%, DSR=%.2f, total_return=%.4f — promote write deferred to "
+            "GraduationChecklist SSOT",
+            sharpe, max_dd * 100, win_rate * 100, dsr, total_return,
+        )
 
-        # Create promotion trigger
-        trigger = {
-            "action": "promote_to_live",
-            "metrics": {
-                "sharpe": round(sharpe, 2),
-                "max_drawdown": round(max_dd, 4),
-                "win_rate": round(win_rate, 4),
-                "total_return": round(total_return, 6),
-                "dsr": round(dsr, 4),
-            },
-            "timestamp": datetime.now().isoformat(),
-            "requires_approval": True
-        }
-        
-        trigger_path = DATA_DIR / ".promote_to_live"
-        save_results_json(trigger, output_path=str(trigger_path))
+    # Sole promote writer: multi-criteria checklist (not metric-only gates above)
+    try:
+        from src.strategy.graduation_checklist import GraduationChecklist
 
-        try:
-            from src.monitor.decision_registry import record_backtest_experiment
+        checklist = GraduationChecklist()
+        results = checklist.check()
+        promote_path = checklist.write_promote_to_live_if_ready(results, data_dir=DATA_DIR)
+        if promote_path:
+            logger.info("Promotion trigger written by checklist SSOT: %s", promote_path)
+            try:
+                from src.monitor.decision_registry import record_backtest_experiment
 
-            record_backtest_experiment(
-                {
-                    "metrics": trigger["metrics"],
-                    "sharpe": sharpe,
-                    "max_drawdown_pct": round(max_dd * 100, 4),
-                    "win_rate": win_rate,
-                    "dsr": dsr,
-                },
-                experiment_id=f"paper-graduation-{datetime.now().strftime('%Y%m%d')}",
-                output_path=trigger_path,
-                name="paper_trading_graduation",
-                hypothesis="paper_mode_graduation_criteria_met",
-                tags=["evaluator", "graduation", "shadow"],
+                record_backtest_experiment(
+                    {
+                        "metrics": {
+                            "sharpe": round(sharpe, 2),
+                            "max_drawdown": round(max_dd, 4),
+                            "win_rate": round(win_rate, 4),
+                            "total_return": round(total_return, 6),
+                            "dsr": round(dsr, 4),
+                        },
+                        "sharpe": sharpe,
+                        "max_drawdown_pct": round(max_dd * 100, 4),
+                        "win_rate": win_rate,
+                        "dsr": dsr,
+                    },
+                    experiment_id=f"paper-graduation-{datetime.now().strftime('%Y%m%d')}",
+                    output_path=promote_path,
+                    name="paper_trading_graduation",
+                    hypothesis="paper_mode_graduation_checklist_ready",
+                    tags=["evaluator", "graduation", "checklist_ssot", "shadow"],
+                )
+            except (ImportError, ValueError, OSError, TypeError) as e:
+                logger.warning("Graduation experiment registry skipped: %s", e)
+        elif not checklist.is_graduation_ready(results):
+            logger.info(
+                "Checklist not ready (score=%.1f%%) — no .promote_to_live write "
+                "(evaluator advisory metrics are non-authoritative)",
+                checklist.readiness_score(results),
             )
-        except (ImportError, ValueError, OSError, TypeError) as e:
-            logger.warning("Graduation experiment registry skipped: %s", e)
+    except (ImportError, OSError, TypeError, ValueError) as e:
+        logger.warning(
+            "GraduationChecklist unavailable — refusing promote write (fail closed): %s", e
+        )
 
-        logger.info("Created promotion trigger: %s", trigger_path)
 
 if __name__ == "__main__":
     main()

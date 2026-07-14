@@ -407,45 +407,113 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
         return implications.get(regime, implications['normal'])
     
     def _graduation_status(self, total_return: float, sharpe: float, max_dd: float, days: int) -> str:
-        """Generate graduation status text (markdown, for regime analysis page)."""
+        """Generate graduation status text (markdown, for regime analysis page).
+
+        Narrative uses advisory performance metrics for readability. When the
+        GraduationChecklist SSOT disagrees with an advisory candidacy claim,
+        append a conflict note so operators do not treat wiki prose as promote
+        authority.
+        """
         MIN_DAYS = 63
         MIN_SHARPE = 0.5
         MAX_DD = 0.15
 
         if days < MIN_DAYS:
-            return f"Not Ready — Need {MIN_DAYS - days} more days of history"
-
-        checks = []
-        if sharpe >= MIN_SHARPE:
-            checks.append(f"Sharpe {sharpe:.2f} >= {MIN_SHARPE}")
+            base = f"Not Ready — Need {MIN_DAYS - days} more days of history"
         else:
-            checks.append(f"Sharpe {sharpe:.2f} < {MIN_SHARPE}")
+            checks = []
+            if sharpe >= MIN_SHARPE:
+                checks.append(f"Sharpe {sharpe:.2f} >= {MIN_SHARPE}")
+            else:
+                checks.append(f"Sharpe {sharpe:.2f} < {MIN_SHARPE}")
 
-        if max_dd <= MAX_DD:
-            checks.append(f"Max DD {max_dd:.1%} <= {MAX_DD:.0%}")
-        else:
-            checks.append(f"Max DD {max_dd:.1%} > {MAX_DD:.0%}")
+            if max_dd <= MAX_DD:
+                checks.append(f"Max DD {max_dd:.1%} <= {MAX_DD:.0%}")
+            else:
+                checks.append(f"Max DD {max_dd:.1%} > {MAX_DD:.0%}")
 
-        if sharpe >= MIN_SHARPE and max_dd <= MAX_DD:
-            return f"GRADUATION CANDIDATE: " + "; ".join(checks)
-        else:
-            return f"Tracking — Not yet meeting graduation criteria: " + "; ".join(checks)
+            if sharpe >= MIN_SHARPE and max_dd <= MAX_DD:
+                base = f"GRADUATION CANDIDATE: " + "; ".join(checks)
+            else:
+                base = f"Tracking — Not yet meeting graduation criteria: " + "; ".join(checks)
+
+        # Annotate when checklist SSOT would block while advisory text claims candidate
+        try:
+            from src.strategy.graduation_checklist import GraduationChecklist
+
+            checklist = GraduationChecklist()
+            results = checklist.check()
+            if (
+                "GRADUATION CANDIDATE" in base
+                and not checklist.is_graduation_ready(results)
+            ):
+                return (
+                    f"{base} — BLOCKED by checklist SSOT "
+                    f"(readiness={checklist.readiness_score(results)}%; "
+                    f"graduation_conflict=true; promote marker not authoritative)"
+                )
+        except (ImportError, OSError, TypeError, ValueError):
+            pass
+        return base
 
     def _graduation_status_dict(self, total_return: float, sharpe: float, max_dd: float, days: int) -> dict:
-        """Generate graduation status as dict (for JSON output)."""
+        """Generate graduation status as dict (for JSON output).
+
+        ``sharpe_met`` / candidacy follow GraduationChecklist when available so
+        performance files cannot claim candidate while checklist fails.
+        """
         MIN_DAYS = 63
         MIN_SHARPE = 0.5
         MAX_DD = 0.15
+        advisory_sharpe_met = sharpe >= MIN_SHARPE
+        advisory_max_dd_met = max_dd <= MAX_DD
+        advisory_ready = days >= MIN_DAYS and advisory_sharpe_met and advisory_max_dd_met
 
-        ready = days >= MIN_DAYS and sharpe >= MIN_SHARPE and max_dd <= MAX_DD
+        checklist_ready = None
+        readiness_score = None
+        graduation_conflict = False
+        try:
+            from src.strategy.graduation_checklist import GraduationChecklist
+
+            checklist = GraduationChecklist()
+            results = checklist.check()
+            checklist_ready = checklist.is_graduation_ready(results)
+            readiness_score = checklist.readiness_score(results)
+            graduation_conflict = bool(advisory_ready and not checklist_ready)
+        except (ImportError, OSError, TypeError, ValueError):
+            checklist_ready = None
+
+        # Authoritative candidacy = checklist when available; never claim
+        # candidate from advisory metrics alone.
+        if checklist_ready is True:
+            status = "candidate"
+            sharpe_met = True
+            max_dd_met = True
+        elif checklist_ready is False:
+            status = "tracking"
+            sharpe_met = False
+            max_dd_met = False
+        else:
+            # Checklist unavailable: fail closed — tracking only
+            status = "tracking"
+            sharpe_met = False
+            max_dd_met = False
+
         return {
-            "status": "candidate" if ready else "tracking",
+            "status": status,
             "days_tracked": days,
             "min_days_required": MIN_DAYS,
-            "sharpe_met": sharpe >= MIN_SHARPE,
-            "max_dd_met": max_dd <= MAX_DD,
+            "sharpe_met": sharpe_met,
+            "max_dd_met": max_dd_met,
             "sharpe": sharpe,
             "max_drawdown": max_dd,
+            "source": "graduation_checklist" if checklist_ready is not None else "advisory_metrics_fail_closed",
+            "checklist_ready": checklist_ready,
+            "readiness_score": readiness_score,
+            "graduation_conflict": graduation_conflict,
+            "advisory_sharpe_met": advisory_sharpe_met,
+            "advisory_max_dd_met": advisory_max_dd_met,
+            "advisory_ready": advisory_ready,
         }
     
     def run(self):

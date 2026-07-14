@@ -35,7 +35,13 @@ ORDER_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_ORDER_LOG_TAIL_LINES", "10
 REGIME_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_REGIME_LOG_TAIL_LINES", "1000"))
 
 
-__all__ = ['CheckResult', 'GraduationChecklist', 'run_check_and_exit', 'run_report_and_exit', 'run_progress_and_exit']
+__all__ = [
+    'CheckResult',
+    'GraduationChecklist',
+    'run_check_and_exit',
+    'run_report_and_exit',
+    'run_progress_and_exit',
+]
 
 class CheckResult(NamedTuple):
     """Result of a single graduation criterion check."""
@@ -237,6 +243,101 @@ class GraduationChecklist:
         path.parent.mkdir(parents=True, exist_ok=True)
         save_results_json(report, output_path=str(path))
         return path
+
+    def write_promote_to_live_if_ready(
+        self,
+        results: Optional[Dict[str, CheckResult]] = None,
+        *,
+        data_dir: Optional[Path] = None,
+        force: bool = False,
+    ) -> Optional[Path]:
+        """Sole writer for ``.promote_to_live`` candidacy (SSOT).
+
+        Only writes when the multi-criteria checklist is ready. Never writes
+        under authority kill halt. Returns path written, or None if skipped.
+
+        Manual approval remains a separate human gate; this marker means
+        *checklist-ready candidate*, not auto-live.
+        """
+        root = Path(data_dir) if data_dir is not None else DATA_DIR
+        if results is None:
+            results = self.check()
+
+        # Kill authority blocks promote writes (same SSOT as evaluator / order_router)
+        try:
+            from src.dashboard.kill_authority import (
+                is_kill_execution_blocked,
+                load_kill_switch_payload,
+            )
+
+            if is_kill_execution_blocked(load_kill_switch_payload(root)):
+                logger.info(
+                    "Promote write blocked by kill authority — skipping .promote_to_live"
+                )
+                return None
+        except ImportError:
+            kill_file = root / "kill_switch.json"
+            if kill_file.exists():
+                try:
+                    payload = json.loads(kill_file.read_text(encoding="utf-8"))
+                    if isinstance(payload, dict) and payload.get("enabled"):
+                        logger.info(
+                            "Promote write blocked by kill authority — skipping .promote_to_live"
+                        )
+                        return None
+                except (OSError, json.JSONDecodeError, TypeError):
+                    logger.warning("Kill switch unreadable — fail-closed, skip promote write")
+                    return None
+
+        ready = self.is_graduation_ready(results)
+        if not ready and not force:
+            # Fail-closed: remove stale promote markers that disagree with checklist
+            stale = root / ".promote_to_live"
+            if stale.exists():
+                conflict = {
+                    "graduation_conflict": True,
+                    "action": "promote_blocked_checklist",
+                    "reason": "checklist_not_ready",
+                    "is_graduation_ready": False,
+                    "readiness_score": self.readiness_score(results),
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "graduation_checklist",
+                }
+                conflict_path = root / ".graduation_conflict.json"
+                save_results_json(conflict, output_path=str(conflict_path))
+                logger.info(
+                    "Checklist not ready — wrote graduation_conflict and left promote "
+                    "decision to human (stale marker not auto-deleted)"
+                )
+            return None
+
+        metrics = {
+            "sharpe": float(results["min_sharpe"].value) if "min_sharpe" in results else None,
+            "max_drawdown": float(results["max_drawdown"].value) if "max_drawdown" in results else None,
+            "win_rate": float(results["min_win_rate"].value) if "min_win_rate" in results else None,
+            "dsr": float(results["min_dsr"].value) if "min_dsr" in results else None,
+            "readiness_score": self.readiness_score(results),
+        }
+        trigger = {
+            "action": "promote_to_live",
+            "metrics": metrics,
+            "timestamp": datetime.now().isoformat(),
+            "requires_approval": True,
+            "source": "graduation_checklist",
+            "graduation_conflict": False,
+            "is_graduation_ready": True,
+        }
+        trigger_path = root / ".promote_to_live"
+        save_results_json(trigger, output_path=str(trigger_path))
+        # Clear prior conflict flag if any
+        conflict_path = root / ".graduation_conflict.json"
+        if conflict_path.exists():
+            try:
+                conflict_path.unlink()
+            except OSError:
+                pass
+        logger.info("Created promotion trigger (checklist SSOT): %s", trigger_path)
+        return trigger_path
 
     def progress_summary(self, results: Dict[str, CheckResult]) -> Dict:
         """Human-readable progress summary."""
@@ -861,6 +962,9 @@ def run_check_and_exit():
     # Save report
     report_path = checklist.save_report(results)
     logger.info(f"  Report saved: {report_path}")
+    promote_path = checklist.write_promote_to_live_if_ready(results)
+    if promote_path:
+        logger.info(f"  Promote marker written: {promote_path}")
     
     return 0 if checklist.is_graduation_ready(results) else 1
 
