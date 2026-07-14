@@ -254,7 +254,7 @@ data:
 data-quality:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
 	echo "=== Public Data Quality Audit: $$(date) ==="; \
-	$(PYTHON_RUNTIME) scripts/check_public_data_quality.py --app-dir $(PROJECT_DIR) $(DATA_QUALITY_ARGS)
+	$(PYTHON_RUNTIME) scripts/check_public_data_quality.py --app-dir $(PROJECT_DIR) --allow-repo-public-data $(DATA_QUALITY_ARGS)
 
 # ── Dashboard ────────────────────────────────────────────────────────
 

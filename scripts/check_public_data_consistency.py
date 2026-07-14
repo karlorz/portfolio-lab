@@ -508,12 +508,35 @@ def _check_kill_and_graduation_alerts(
                 )
 
 
-def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
-    """Return deploy-blocking public data consistency errors for an app checkout."""
+def check_public_data_consistency(
+    app_dir: str | Path,
+    *,
+    public_dir: str | Path | None = None,
+    allow_repo_public_data: bool = False,
+    env: dict[str, str] | None = None,
+    live_public_data_dir: str | Path | None = None,
+) -> ConsistencyResult:
+    """Return deploy-blocking public data consistency errors for an app checkout.
+
+    When ``public_dir`` is unset and live WWW public data exists, requires
+    ``PUBLIC_DATA_DIR`` / ``--public-dir`` (or ``allow_repo_public_data``) so
+    agents do not audit a multi-day-stale repo ``public/data`` tree.
+    """
+    from src.paths import resolve_ops_public_data_dir
+
     root = Path(app_dir)
     errors: list[str] = []
     warnings: list[str] = []
-    public_data = root / "public" / "data"
+    try:
+        public_data = resolve_ops_public_data_dir(
+            root,
+            public_dir,
+            env=env,
+            live_public_data_dir=live_public_data_dir,
+            allow_repo_public_data=allow_repo_public_data,
+        )
+    except ValueError as exc:
+        return ConsistencyResult(ok=False, errors=[str(exc)], warnings=[])
 
     source_manifest_path = public_data / "source_manifest.json"
     source_manifest = _load_json(source_manifest_path, errors)
@@ -524,8 +547,15 @@ def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
     _check_present_index_entries_resolve(public_data, public_index, errors)
     _check_source_manifest_quality_artifacts_are_indexed(source_manifest, public_index, errors)
     _check_public_json_artifacts_are_indexed(public_data, public_index, errors)
-    _check_dist_matches_public(root, errors)
-    _check_compact_prices_match_market_db(root, errors)
+    # dist/ vs public/ only applies when auditing the checkout public tree
+    repo_public = (root / "public" / "data").resolve()
+    try:
+        auditing_repo_tree = public_data.resolve() == repo_public
+    except OSError:
+        auditing_repo_tree = False
+    if auditing_repo_tree:
+        _check_dist_matches_public(root, errors)
+        _check_compact_prices_match_market_db(root, errors)
     _check_critical_health_has_slo_alert(public_data, health, errors)
     _check_kill_and_graduation_alerts(root, public_data, errors)
 
@@ -535,9 +565,24 @@ def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app-dir", type=Path, default=Path.cwd(), help="Portfolio Lab checkout directory")
+    parser.add_argument(
+        "--public-dir",
+        type=Path,
+        default=None,
+        help="Public data tree to audit (default: PUBLIC_DATA_DIR or app-dir/public/data)",
+    )
+    parser.add_argument(
+        "--allow-repo-public-data",
+        action="store_true",
+        help="Allow auditing app-dir/public/data even when live WWW public data exists",
+    )
     args = parser.parse_args(argv)
 
-    result = check_public_data_consistency(args.app_dir)
+    result = check_public_data_consistency(
+        args.app_dir,
+        public_dir=args.public_dir,
+        allow_repo_public_data=args.allow_repo_public_data,
+    )
     for warning in result.warnings:
         print(f"WARN: {warning}", file=sys.stderr)
     if result.ok:

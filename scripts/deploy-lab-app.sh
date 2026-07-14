@@ -270,7 +270,10 @@ check_public_data_consistency() {
   if [ "$SKIP_DATA" = "1" ]; then
     warn "--skip-data set; validating existing public/data and dist/data artifacts"
   fi
-  run_app_cmd ./scripts/python_runtime.sh scripts/check_public_data_consistency.py --app-dir "$APP_DIR"
+  # Checkout public/data is intentional here (pre-publish). Live WWW SSOT is
+  # separate; ops audits must set PUBLIC_DATA_DIR or --public-dir.
+  run_app_cmd ./scripts/python_runtime.sh scripts/check_public_data_consistency.py \
+    --app-dir "$APP_DIR" --allow-repo-public-data
 }
 
 publish_dist() {

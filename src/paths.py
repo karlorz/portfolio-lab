@@ -23,7 +23,25 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Primary data directories
 DATA_DIR = PROJECT_ROOT / "data"
-PUBLIC_DATA_DIR = Path(os.environ.get("PUBLIC_DATA_DIR", str(PROJECT_ROOT / "public" / "data"))).expanduser()
+
+# Public dashboard artifacts.
+#
+# SSOT under tasker / live ops:
+#   PUBLIC_DATA_DIR=/var/www/portfolio-lab/data  (systemd portfolio-lab-tasker.service)
+# Repo checkout tree:
+#   PROJECT_ROOT/public/data  (deploy source / offline fixtures)
+#
+# Cron jobs run under tasker with the env set. Agent shells and bare `make`
+# without that env default to the repo tree — which can lag multi-day while
+# WWW is fresh. Ops auditors (check_public_data_*) fail closed when the live
+# WWW tree exists and neither PUBLIC_DATA_DIR nor --public-dir is set.
+DEFAULT_PUBLIC_DATA_DIR = PROJECT_ROOT / "public" / "data"
+DEFAULT_LIVE_PUBLIC_DATA_DIR = Path(
+    os.environ.get("PORTFOLIO_LAB_LIVE_PUBLIC_DATA_DIR", "/var/www/portfolio-lab/data")
+).expanduser()
+PUBLIC_DATA_DIR = Path(
+    os.environ.get("PUBLIC_DATA_DIR", str(DEFAULT_PUBLIC_DATA_DIR))
+).expanduser()
 # Common database paths
 MARKET_DB = DATA_DIR / "market.db"
 TASKER_DB = DATA_DIR / "tasker.db"
@@ -48,6 +66,76 @@ ATTRIBUTION_DIR = DATA_DIR / "attribution"
 
 # External directories (user home-based, configurable via env vars)
 HOME = Path.home()
+
+
+def resolve_ops_public_data_dir(
+    app_dir: Union[str, Path],
+    public_dir: Optional[Union[str, Path]] = None,
+    *,
+    env: Optional[Dict[str, str]] = None,
+    live_public_data_dir: Optional[Union[str, Path]] = None,
+    allow_repo_public_data: bool = False,
+) -> Path:
+    """Resolve which public/data tree ops auditors should read.
+
+    Priority:
+      1. explicit ``public_dir`` argument (CLI ``--public-dir``)
+      2. ``PUBLIC_DATA_DIR`` environment variable
+      3. ``app_dir/public/data`` when safe (no competing live WWW tree, or
+         ``allow_repo_public_data=True`` for deploy/CI/fixtures)
+
+    Raises:
+      ValueError: when the live WWW tree exists, env/flag unset, and
+      ``allow_repo_public_data`` is false — refuse false multi-day staleness
+      reports against the lagging repo tree.
+    """
+    root = Path(app_dir).expanduser().resolve()
+    env_map = os.environ if env is None else env
+    live_root = Path(
+        live_public_data_dir
+        if live_public_data_dir is not None
+        else env_map.get(
+            "PORTFOLIO_LAB_LIVE_PUBLIC_DATA_DIR",
+            str(DEFAULT_LIVE_PUBLIC_DATA_DIR),
+        )
+    ).expanduser()
+
+    if public_dir is not None:
+        return Path(public_dir).expanduser().resolve()
+
+    env_public = env_map.get("PUBLIC_DATA_DIR")
+    if env_public:
+        return Path(env_public).expanduser().resolve()
+
+    repo_public = (root / "public" / "data").resolve()
+    try:
+        live_exists = live_root.is_dir()
+    except OSError:
+        live_exists = False
+
+    if live_exists and not allow_repo_public_data:
+        try:
+            same_tree = live_root.resolve() == repo_public
+        except OSError:
+            same_tree = False
+        try:
+            # Only refuse when auditing this lab checkout's public/data while a
+            # distinct live WWW tree is the operator SSOT (tasker). Fixture
+            # tmpdirs and other app_dir roots remain allowed for tests/deploy
+            # of alternate checkouts.
+            auditing_this_checkout = root.resolve() == PROJECT_ROOT.resolve()
+        except OSError:
+            auditing_this_checkout = False
+        if not same_tree and auditing_this_checkout:
+            raise ValueError(
+                "PUBLIC_DATA_DIR is unset while live public data exists at "
+                f"{live_root}. Refusing to audit repo tree {repo_public} "
+                "(often multi-day stale vs tasker WWW SSOT). Set "
+                "PUBLIC_DATA_DIR to the operator tree, pass --public-dir, or "
+                "pass --allow-repo-public-data for intentional checkout audits."
+            )
+
+    return repo_public
 
 
 def _parse_skillwiki_path_output(stdout: str) -> Optional[Path]:
