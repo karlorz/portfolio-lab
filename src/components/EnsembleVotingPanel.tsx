@@ -39,10 +39,14 @@ interface ConfiguredSourceStatus {
 
 export interface AllocationSurfaceRole {
   label: string;
-  role: 'execution_routed' | 'advisory_non_routed';
+  role: 'execution_routed' | 'advisory_non_routed' | 'execution_blocked';
   routed: boolean;
   routed_by: string | null;
   description: string;
+  live_authoritative?: boolean;
+  execution_blocked?: boolean;
+  kill_switch_enabled?: boolean;
+  kill_switch_level?: string | null;
 }
 
 type NormalizedSourceVote = Omit<SourceVote, 'direction'> & {

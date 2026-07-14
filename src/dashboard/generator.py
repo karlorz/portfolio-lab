@@ -34,6 +34,15 @@ from src.dashboard.health_report import (
 )
 from src.dashboard.data_pipeline_slo_section import build_data_pipeline_slo_section
 from src.dashboard.health_slo_alerts import build_health_slo_alerts
+from src.dashboard.kill_authority import (
+    allocation_roles_under_kill,
+    build_kill_switch_alert,
+    elevate_system_status_for_kill,
+    load_kill_switch_payload,
+    load_open_incidents_summary,
+    project_compact_kill_fields,
+    project_kill_switch_fields,
+)
 from src.dashboard.signal_health_section import (
     build_fred_readiness_section,
     build_signal_health_section,
@@ -282,6 +291,10 @@ def _compact_health_summary(report: Dict) -> Dict:
             top_cause = runbook.get("top_cause")
             if isinstance(top_cause, dict) and top_cause.get("code"):
                 summary["top_slo_cause_code"] = top_cause.get("code")
+
+    # Project kill/incident halt into compact summary so signals.health
+    # matches signals.broker.kill_switch without requiring broker-only reads.
+    summary.update(project_compact_kill_fields(report))
 
     return summary
 
@@ -945,13 +958,17 @@ class DashboardGenerator:
         return disclosure if isinstance(disclosure, dict) else {}
 
     @staticmethod
-    def _build_allocation_surface_roles() -> Dict[str, Any]:
-        """Describe the current live-routing role of allocation-like signals surfaces."""
+    def _build_allocation_surface_roles(data_dir: Path | None = None) -> Dict[str, Any]:
+        """Describe the current live-routing role of allocation-like signals surfaces.
+
+        When the kill switch is enabled, target_allocations remains the routing
+        surface but is disclosed as execution-blocked (not live_authoritative).
+        """
         advisory_description = (
             "Published for advisory diagnostics; current order routing uses "
             "target_allocations."
         )
-        return {
+        roles: Dict[str, Any] = {
             "schema_version": "allocation-surface-roles/v1",
             "routed_surface": "target_allocations",
             "routed_by": "src.broker.order_router",
@@ -996,6 +1013,15 @@ class DashboardGenerator:
                 },
             },
         }
+        root = Path(data_dir) if data_dir is not None else DATA_DIR
+        kill = project_kill_switch_fields(load_kill_switch_payload(root))
+        if kill.get("enabled"):
+            roles = allocation_roles_under_kill(
+                roles,
+                kill_enabled=True,
+                kill_level=kill.get("level"),
+            )
+        return roles
 
     @staticmethod
     def _build_advisory_allocation_artifact_role(
@@ -2550,21 +2576,11 @@ class DashboardGenerator:
         if promote_alert is not None:
             alerts.append(promote_alert)
 
-        # Check for kill switch
-        kill_file = DATA_DIR / "kill_switch.json"
-        if kill_file.exists():
-            with open(kill_file) as f:
-                data = json.load(f)
-                if data.get("enabled"):
-                    mode = data.get("mode", "unknown")
-                    alerts.append({
-                        "level": "error",
-                        "type": "kill_switch",
-                        "title": f"{mode.upper()} Kill Switch Triggered",
-                        "message": data.get("reason"),
-                        "timestamp": data.get("timestamp"),
-                        "requires_action": True
-                    })
+        # Check for kill switch (SSOT: data/kill_switch.json)
+        kill_payload = load_kill_switch_payload(DATA_DIR)
+        kill_alert = build_kill_switch_alert(kill_payload) if kill_payload else None
+        if kill_alert is not None:
+            alerts.append(kill_alert)
         
         # Check for regime trigger
         regime_file = DATA_DIR / ".regime_trigger"
@@ -2614,6 +2630,57 @@ class DashboardGenerator:
         
         out_path = PUBLIC_DIR / "alerts.json"
         save_results_json(output, output_path=str(out_path))
+
+        # Post-write integrity: on-disk kill row must match data/kill_switch.json identity.
+        # Concurrent/stale writers previously left LIVE/position_limit rows without incident_id.
+        if kill_payload and kill_payload.get("enabled") and kill_alert is not None:
+            try:
+                on_disk = json.loads(out_path.read_text(encoding="utf-8"))
+                disk_alerts = on_disk.get("alerts") if isinstance(on_disk, dict) else None
+                disk_kills = [
+                    a for a in (disk_alerts or [])
+                    if isinstance(a, dict) and a.get("type") == "kill_switch"
+                ]
+                expected_id = kill_payload.get("incident_id")
+                expected_reason = kill_payload.get("reason")
+                expected_level = kill_payload.get("level")
+                ok = False
+                if disk_kills:
+                    row = disk_kills[0]
+                    ok = (
+                        (expected_id is None or row.get("incident_id") == expected_id)
+                        and (expected_reason is None or row.get("reason") == expected_reason)
+                        and (
+                            expected_level is None
+                            or str(row.get("kill_switch_level") or "").lower()
+                            == str(expected_level).lower()
+                        )
+                    )
+                if not ok:
+                    logger.error(
+                        "alerts.json kill identity drift after write; rewriting from SSOT "
+                        "(expected incident_id=%r reason=%r level=%r)",
+                        expected_id,
+                        expected_reason,
+                        expected_level,
+                    )
+                    # Force SSOT kill row as sole kill_switch entry and rewrite.
+                    rebuilt = [
+                        a for a in output["alerts"]
+                        if not (isinstance(a, dict) and a.get("type") == "kill_switch")
+                    ]
+                    rebuilt.insert(0, kill_alert)
+                    output = {
+                        "alerts": rebuilt,
+                        "count": len(rebuilt),
+                        "generated_at": datetime.now().isoformat(),
+                    }
+                    out_path.write_text(
+                        json.dumps(output, indent=2, sort_keys=False) + "\n",
+                        encoding="utf-8",
+                    )
+            except (OSError, json.JSONDecodeError, TypeError) as verify_exc:
+                logger.error("alerts.json post-write kill verify failed: %s", verify_exc)
         
         return out_path
 
@@ -2688,6 +2755,12 @@ class DashboardGenerator:
             log_error=_log_signal_error,
         )
 
+        # Kill authority + open incidents (same SSOT as data/health monitor)
+        kill_fields = project_kill_switch_fields(load_kill_switch_payload(DATA_DIR))
+        open_incidents = load_open_incidents_summary(DATA_DIR)
+        health_data["kill_switch"] = kill_fields
+        health_data["open_incidents"] = open_incidents
+
         # Overall system health
         stale_count = summarize_stale_symbol_count(health_data["data_freshness"])
         failed_jobs = sum(1 for j in health_data["cron_jobs"] if j.get("status") == "error")
@@ -2705,6 +2778,11 @@ class DashboardGenerator:
             slo_status=slo_status,
             failed_jobs=failed_jobs,
             stale_count=stale_count,
+        )
+        health_data["system_status"] = elevate_system_status_for_kill(
+            health_data["system_status"],
+            kill_fields,
+            open_incidents,
         )
         
         out_path = PUBLIC_DIR / "health.json"

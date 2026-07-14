@@ -67,7 +67,22 @@ const normalizeRunbookAction = (
   };
 };
 
-export function summarizeHealthOperations(health: HealthData): HealthOperationsSummary {
+export interface HealthOperationsKillContext {
+  /** alerts.json rows — kill_switch type elevates ops summary when health omits kill block */
+  alerts?: Array<{ type?: string; kill_switch_level?: string | null; level?: string; title?: string; message?: string | null }>;
+  /** signals.broker kill fields when health.kill_switch absent */
+  broker?: {
+    kill_switch?: boolean;
+    kill_switch_level?: string | null;
+    kill_switch_incident_id?: string | null;
+    kill_switch_reason?: string | null;
+  } | null;
+}
+
+export function summarizeHealthOperations(
+  health: HealthData,
+  context?: HealthOperationsKillContext,
+): HealthOperationsSummary {
   const freshnessEntries = Object.entries(health.data_freshness || {});
   const fresh = freshnessEntries.filter(([, d]) => d.status === 'fresh').length;
   const stale = freshnessEntries.filter(([, d]) => d.status === 'stale').length;
@@ -107,7 +122,36 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
   const sloLabel = slo
     ? `Data pipeline SLO ${slo.status}${slo.top_dimension ? `: ${slo.top_dimension}` : ''}`
     : '';
-  const primaryCause = sloStatus && sloStatus !== 'ok'
+  // Kill/halt may appear on health.kill_switch, alerts kill_switch rows, or broker.
+  // Prefer health SSOT projection; fall back so ops bar still discloses HALT.
+  const healthKill = health.kill_switch;
+  const alertKill = (context?.alerts ?? []).find((a) => a?.type === 'kill_switch');
+  const broker = context?.broker;
+  const brokerKillEnabled = Boolean(broker?.kill_switch);
+  const killEnabled = Boolean(healthKill?.enabled) || Boolean(alertKill) || brokerKillEnabled;
+  const killLevel = (
+    healthKill?.level
+    ?? alertKill?.kill_switch_level
+    ?? broker?.kill_switch_level
+    ?? ''
+  ).toString().toLowerCase();
+  const killStatus = (healthKill?.status ?? '').toString().toLowerCase();
+  const killIncidentId = healthKill?.incident_id
+    ?? broker?.kill_switch_incident_id
+    ?? undefined;
+  const openIncidentsCritical = (health.open_incidents?.status ?? '').toString().toLowerCase() === 'critical';
+  const titleLooksHalt = Boolean(alertKill?.title && /halt|kill/i.test(alertKill.title));
+  const killHalt =
+    (killEnabled && (killLevel === 'halt' || killStatus === 'critical'))
+    || openIncidentsCritical
+    || (Boolean(alertKill) && (killLevel === 'halt' || titleLooksHalt || !killLevel));
+  const killActive = killEnabled || openIncidentsCritical;
+
+  const primaryCause = killHalt
+    ? 'kill/halt active'
+    : killActive
+    ? 'kill switch active'
+    : sloStatus && sloStatus !== 'ok'
     ? `data pipeline ${sloTopDimension ?? sloStatus}`
     : dataStatus === 'critical'
     ? 'data freshness critical'
@@ -130,7 +174,14 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
       const lagLabel = data.market_lag_days === undefined ? 'stale' : 'market lag';
       return `${symbol} ${lagLabel} ${lagDays}d (last update ${data.last_update})`;
     });
-  const topCauses = runbookTopCause
+  const killCause = killHalt
+    ? [`kill/halt${killLevel ? ` level=${killLevel}` : ''}${killIncidentId ? ` incident=${killIncidentId}` : ''}`]
+    : killActive
+      ? [`kill switch active${killLevel ? ` level=${killLevel}` : ''}`]
+      : [];
+  const topCauses = killCause.length > 0
+    ? [...killCause, ...(runbookTopCause ? [runbookTopCause.label] : sloFailingDimensions.length > 0 ? sloFailingDimensions : freshnessCauses)].slice(0, 5)
+    : runbookTopCause
     ? [runbookTopCause.label]
     : sloFailingDimensions.length > 0
       ? sloFailingDimensions

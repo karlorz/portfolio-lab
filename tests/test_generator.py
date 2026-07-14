@@ -831,18 +831,19 @@ class TestSignalStalenessNormalization:
 class TestEnsemblePostDecayMetrics:
     """Ensemble post-decay metrics should share one signed source contract."""
 
-    def test_allocation_surface_roles_disclose_current_live_routing(self):
-        roles = DashboardGenerator._build_allocation_surface_roles()
+    def test_allocation_surface_roles_disclose_current_live_routing(self, tmp_path):
+        roles = DashboardGenerator._build_allocation_surface_roles(data_dir=tmp_path)
 
         assert roles["schema_version"] == "allocation-surface-roles/v1"
         assert roles["routed_surface"] == "target_allocations"
         assert roles["surfaces"]["target_allocations"]["routed"] is True
         assert roles["surfaces"]["target_allocations"]["routed_by"] == "src.broker.order_router"
+        assert roles["surfaces"]["target_allocations"]["live_authoritative"] is True
         assert roles["surfaces"]["ensemble_voting"]["routed"] is False
         assert roles["surfaces"]["ensemble_voting"]["role"] == "advisory_non_routed"
 
-    def test_allocation_surface_roles_include_standalone_advisory_artifacts(self):
-        roles = DashboardGenerator._build_allocation_surface_roles()
+    def test_allocation_surface_roles_include_standalone_advisory_artifacts(self, tmp_path):
+        roles = DashboardGenerator._build_allocation_surface_roles(data_dir=tmp_path)
 
         for surface in ("adaptive_sizing", "black_litterman"):
             role = roles["surfaces"][surface]

@@ -119,9 +119,16 @@ interface LiveDashboardProps {
 }
 
 function formatAllocationSurfaceRoute(role: AllocationSurfaceRole): string {
+  if (role.execution_blocked || role.role === 'execution_blocked' || role.kill_switch_enabled) {
+    const level = role.kill_switch_level ? ` (${role.kill_switch_level})` : '';
+    const via = role.routed_by ? ` via ${role.routed_by}` : '';
+    return `Blocked/halt${level}${via}`;
+  }
   const status = role.routed ? 'Order-routed' : 'Not order-routed';
   return role.routed_by ? `${status} via ${role.routed_by}` : status;
 }
+
+export { formatAllocationSurfaceRoute };
 
 function isBehavioralSentimentData(value: unknown): value is BehavioralSentimentData {
   if (!value || typeof value !== 'object') return false;
@@ -432,7 +439,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     ? signals.behavioral_sentiment
     : null;
 
-  const healthOperationsSummary = health ? summarizeHealthOperations(health) : null;
+  const healthOperationsSummary = health
+    ? summarizeHealthOperations(health, {
+      alerts: alerts?.alerts,
+      broker: signals?.broker ?? null,
+    })
+    : null;
   const dashboardIncidents = useMemo(
     () => buildDashboardIncidents({ alerts, signals, health, incidentSummary }),
     [alerts, signals, health, incidentSummary],

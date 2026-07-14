@@ -1622,7 +1622,10 @@ class TestKillSwitchAlerts:
         from src.dashboard import generator as gen_mod
         from src.dashboard.generator import DashboardGenerator
 
+        public = tmp_path / "public"
+        public.mkdir()
         monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(gen_mod, "PUBLIC_DIR", public)
         monkeypatch.setattr(gen_mod, "DB_PATH", str(tmp_path / "market.db"))
         # Create minimal DB for DashboardGenerator init
         import sqlite3

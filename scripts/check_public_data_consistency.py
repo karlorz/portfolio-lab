@@ -299,7 +299,12 @@ def _check_critical_health_has_slo_alert(
     health: dict[str, Any] | None,
     errors: list[str],
 ) -> None:
-    """Critical health/SLO must project into alerts.json (or alerts must exist)."""
+    """Critical health/SLO must project into alerts.json (or alerts must exist).
+
+    Kill-driven critical system_status is covered by type=kill_switch alerts
+    (enforced separately). health_slo is required when data_pipeline_slo is
+    critical, or when system_status is critical without an active kill block.
+    """
     if health is None:
         return
     try:
@@ -310,6 +315,14 @@ def _check_critical_health_has_slo_alert(
     except ImportError:
         return
     if not critical_health_requires_alert(health):
+        return
+
+    slo = health.get("data_pipeline_slo") if isinstance(health.get("data_pipeline_slo"), dict) else {}
+    slo_status = str(slo.get("status") or "").lower()
+    kill = health.get("kill_switch") if isinstance(health.get("kill_switch"), dict) else {}
+    kill_enabled = bool(kill.get("enabled"))
+    # Kill-only critical: kill_switch alert is the operator projection.
+    if slo_status != "critical" and kill_enabled:
         return
 
     alerts_path = public_data / "alerts.json"
@@ -328,13 +341,171 @@ def _check_critical_health_has_slo_alert(
     )
     if not has_health_slo:
         system_status = health.get("system_status")
-        slo = health.get("data_pipeline_slo") if isinstance(health.get("data_pipeline_slo"), dict) else {}
-        slo_status = slo.get("status")
         errors.append(
             "public/data/health.json is critical "
             f"(system_status={system_status!r}, data_pipeline_slo.status={slo_status!r}) "
             f"but public/data/alerts.json has no type={HEALTH_SLO_ALERT_TYPE!r} alert"
         )
+
+
+def _alert_rows(public_data: Path, errors: list[str]) -> list[dict[str, Any]]:
+    alerts_path = public_data / "alerts.json"
+    if not alerts_path.exists():
+        return []
+    payload = _load_json(alerts_path, errors)
+    if payload is None:
+        return []
+    raw = payload.get("alerts")
+    return [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
+
+
+def _check_kill_and_graduation_alerts(
+    app_dir: Path,
+    public_data: Path,
+    errors: list[str],
+) -> None:
+    """Require kill_switch / graduation_candidate alerts when authority files demand them."""
+    data_dir = app_dir / "data"
+    kill_path = data_dir / "kill_switch.json"
+    promote_path = data_dir / ".promote_to_live"
+
+    kill_enabled = False
+    kill_identity: dict[str, Any] | None = None
+    if kill_path.exists():
+        kill_payload = _load_json(kill_path, errors)
+        if isinstance(kill_payload, dict) and kill_payload.get("enabled"):
+            kill_enabled = True
+            kill_identity = kill_payload
+
+    promote_present = promote_path.exists()
+
+    if not kill_enabled and not promote_present:
+        return
+
+    alerts = _alert_rows(public_data, errors)
+    types = {a.get("type") for a in alerts}
+
+    if kill_enabled:
+        kill_alerts = [a for a in alerts if a.get("type") == "kill_switch"]
+        if not kill_alerts:
+            if not (public_data / "alerts.json").exists():
+                errors.append(
+                    "data/kill_switch.json is enabled but public/data/alerts.json is missing"
+                )
+            else:
+                errors.append(
+                    "data/kill_switch.json is enabled but public/data/alerts.json has no type='kill_switch' alert"
+                )
+        elif kill_identity is not None:
+            # Multi-surface identity: alert must carry and match authority fields.
+            # Missing identity fields are failures (stale reason-only alerts).
+            alert = kill_alerts[0]
+            auth_incident = kill_identity.get("incident_id")
+            auth_level = kill_identity.get("level")
+            auth_reason = kill_identity.get("reason")
+            auth_mode = kill_identity.get("mode")
+
+            alert_incident = alert.get("incident_id")
+            if auth_incident is not None:
+                if alert_incident is None:
+                    errors.append(
+                        "public/data/alerts.json kill_switch is missing incident_id "
+                        f"required by data/kill_switch.json incident_id={auth_incident!r}"
+                    )
+                elif alert_incident != auth_incident:
+                    errors.append(
+                        "public/data/alerts.json kill_switch incident_id diverges from data/kill_switch.json "
+                        f"(alert={alert_incident!r}, authority={auth_incident!r})"
+                    )
+
+            alert_level = alert.get("kill_switch_level")
+            if auth_level is not None:
+                if alert_level is None:
+                    errors.append(
+                        "public/data/alerts.json kill_switch is missing kill_switch_level "
+                        f"required by data/kill_switch.json level={auth_level!r}"
+                    )
+                elif str(alert_level).lower() != str(auth_level).lower():
+                    errors.append(
+                        "public/data/alerts.json kill_switch level diverges from data/kill_switch.json "
+                        f"(alert={alert_level!r}, authority={auth_level!r})"
+                    )
+
+            alert_reason = alert.get("reason")
+            if auth_reason is not None:
+                if alert_reason is None:
+                    errors.append(
+                        "public/data/alerts.json kill_switch is missing reason "
+                        f"required by data/kill_switch.json reason={auth_reason!r}"
+                    )
+                elif alert_reason != auth_reason:
+                    errors.append(
+                        "public/data/alerts.json kill_switch reason diverges from data/kill_switch.json "
+                        f"(alert={alert_reason!r}, authority={auth_reason!r})"
+                    )
+
+            if auth_mode is not None:
+                title = str(alert.get("title") or "")
+                if str(auth_mode).upper() not in title.upper():
+                    errors.append(
+                        "public/data/alerts.json kill_switch title mode does not match "
+                        f"data/kill_switch.json mode={auth_mode!r}"
+                    )
+
+        # Public health must project kill_switch when authority kill is enabled.
+        health_path = public_data / "health.json"
+        health = _load_json(health_path, errors) if health_path.exists() else None
+        if health is None:
+            # _load_json already recorded missing/invalid when path exists; if absent
+            # and not already required by REQUIRED_DATA_FILES path, still require projection.
+            if not health_path.exists():
+                errors.append(
+                    "data/kill_switch.json is enabled but public/data/health.json is missing kill_switch projection"
+                )
+        elif kill_identity is not None:
+            pub_kill = health.get("kill_switch")
+            if not isinstance(pub_kill, dict):
+                errors.append(
+                    "data/kill_switch.json is enabled but public/data/health.json is missing kill_switch block"
+                )
+            else:
+                for field in ("incident_id", "level", "reason", "mode", "enabled"):
+                    auth_val = kill_identity.get(field)
+                    if field == "enabled":
+                        auth_val = True
+                    pub_val = pub_kill.get(field)
+                    if auth_val is None:
+                        continue
+                    if pub_val is None:
+                        errors.append(
+                            f"public/data/health.json kill_switch is missing {field} "
+                            f"required by data/kill_switch.json {field}={auth_val!r}"
+                        )
+                    elif field == "level" and str(pub_val).lower() != str(auth_val).lower():
+                        errors.append(
+                            "public/data/health.json kill_switch.level diverges from data/kill_switch.json "
+                            f"(public={pub_val!r}, authority={auth_val!r})"
+                        )
+                    elif field == "enabled" and bool(pub_val) is not True:
+                        errors.append(
+                            "public/data/health.json kill_switch.enabled must be true when data/kill_switch.json is enabled"
+                        )
+                    elif field not in {"level", "enabled"} and pub_val != auth_val:
+                        errors.append(
+                            f"public/data/health.json kill_switch.{field} diverges from data/kill_switch.json "
+                            f"(public={pub_val!r}, authority={auth_val!r})"
+                        )
+
+    if promote_present:
+        if "graduation_candidate" not in types:
+            if not (public_data / "alerts.json").exists():
+                errors.append(
+                    "data/.promote_to_live is present but public/data/alerts.json is missing"
+                )
+            else:
+                errors.append(
+                    "data/.promote_to_live is present but public/data/alerts.json has no type='graduation_candidate' alert"
+                )
 
 
 def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
@@ -356,6 +527,7 @@ def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
     _check_dist_matches_public(root, errors)
     _check_compact_prices_match_market_db(root, errors)
     _check_critical_health_has_slo_alert(public_data, health, errors)
+    _check_kill_and_graduation_alerts(root, public_data, errors)
 
     return ConsistencyResult(ok=not errors, errors=errors, warnings=warnings)
 

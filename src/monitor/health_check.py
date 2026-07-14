@@ -420,11 +420,27 @@ def run_health_check() -> dict:
         "scope": "operational_readiness",
     }
 
-    # Write to disk
+    # Always persist full checks (including kill_switch / open_incidents) so
+    # on-disk data/health.json matches live run_health_check() output.
     HEALTH_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
         with open(HEALTH_PATH, "w") as f:
             json.dump(report, f, indent=2)
+            f.flush()
+        # Post-write integrity: re-read and confirm kill dimension survived.
+        try:
+            on_disk = json.loads(HEALTH_PATH.read_text(encoding="utf-8"))
+            disk_checks = on_disk.get("checks") if isinstance(on_disk, dict) else None
+            if not isinstance(disk_checks, dict) or "kill_switch" not in disk_checks:
+                logger.error(
+                    "Health check write missing kill_switch checks at %s", HEALTH_PATH
+                )
+            elif kill_switch.get("enabled") and not disk_checks.get("kill_switch", {}).get("enabled"):
+                logger.error(
+                    "Health check write lost kill_switch.enabled at %s", HEALTH_PATH
+                )
+        except (OSError, json.JSONDecodeError) as verify_exc:
+            logger.error("Health check post-write verify failed: %s", verify_exc)
         logger.info("Health check: %s (written to %s)", system_status, HEALTH_PATH)
     except OSError as e:
         logger.error("Failed to write health check: %s", e)

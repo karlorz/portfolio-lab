@@ -389,6 +389,25 @@ export interface AssetStat {
   current: number;
 }
 
+export interface KillSwitchHealth {
+  status?: string;
+  enabled?: boolean;
+  level?: string | null;
+  reason?: string | null;
+  source?: string | null;
+  message?: string | null;
+  timestamp?: string | null;
+  incident_id?: string | null;
+  mode?: string | null;
+  channel?: string | null;
+}
+
+export interface OpenIncidentsHealth {
+  status?: string;
+  open_count?: number;
+  incidents?: Array<Record<string, unknown>>;
+}
+
 export interface HealthData {
   cron_jobs: CronJobStatus[];
   data_freshness: Record<string, DataFreshness>;
@@ -396,6 +415,8 @@ export interface HealthData {
   generated_at: string;
   scheduler_status?: SchedulerStatus;
   data_pipeline_slo?: DataPipelineSlo;
+  kill_switch?: KillSwitchHealth;
+  open_incidents?: OpenIncidentsHealth;
   error?: string;
 }
 
