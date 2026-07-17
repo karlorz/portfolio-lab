@@ -1484,6 +1484,28 @@ describe('GraduationDataSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts dual-shape producer numeric criterion values', () => {
+    const data = {
+      ...validGrad(),
+      criteria: [
+        {
+          id: 'min_sharpe',
+          label: 'Rolling Sharpe ratio >= 0.50',
+          passed: false,
+          value: 0.0,
+          threshold: '0.5',
+          name: 'min_sharpe',
+          required: 0.5,
+          description: 'Rolling Sharpe ratio >= 0.50',
+        },
+      ],
+      readiness_score: 18.2,
+      is_graduation_ready: false,
+    };
+    const result = GraduationDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
   it('accepts multiple criteria', () => {
     const data = {
       ...validGrad(),

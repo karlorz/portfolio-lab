@@ -3541,10 +3541,36 @@ class TestGenerateGraduationJSON:
                 "days_tracked": 49,
                 "sharpe": 3.3769,
                 "max_drawdown": 0.0627,
+                "start_value": 100000.0,
+                "current_value": 101500.0,
             },
             "daily_returns_distribution": {
                 "win_rate": 0.2041,
             },
+        }))
+        (tmp_path / "portfolio_paper.json").write_text(json.dumps({
+            "cash": 0.0,
+            "positions": {},
+            "history": [
+                {
+                    "timestamp": "2026-05-01T10:00:00",
+                    "total_value": 100000.0,
+                    "cash": 0.0,
+                    "daily_return": 0.0,
+                    "positions_count": 0,
+                    "mode": "paper",
+                },
+                {
+                    "timestamp": "2026-06-28T10:00:00",
+                    "total_value": 101500.0,
+                    "cash": 0.0,
+                    "daily_return": 0.001,
+                    "positions_count": 0,
+                    "mode": "paper",
+                },
+            ],
+            "updated": "2026-06-28T10:00:00",
+            "mode": "paper",
         }))
 
         gen, _ = _make_generator(tmp_path)
@@ -3570,6 +3596,18 @@ class TestGenerateGraduationJSON:
         assert data["trading_days"] == 49
         assert criteria["min_sharpe"]["value"] == 0.0
         assert criteria["min_sharpe"]["passed"] is False
+        # Frontend dual-shape aliases (GraduationDataSchema / panel)
+        assert data["readiness_pct"] == expected_score
+        assert data["eligible"] is expected_ready
+        assert data["paper_trading"]["start_date"] == "2026-05-01"
+        assert data["paper_trading"]["initial_capital"] == 100000.0
+        assert data["paper_trading"]["current_value"] == 101500.0
+        assert data["paper_trading"]["days_elapsed"] == 49
+        assert data["paper_trading"]["days_required"] == data["min_trading_days"]
+        for item in data["criteria"]:
+            assert item["id"] == item["name"]
+            assert isinstance(item["label"], str) and item["label"]
+            assert "threshold" in item
         gen.conn.close()
 
 

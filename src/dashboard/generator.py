@@ -3970,11 +3970,125 @@ class DashboardGenerator:
             _log_signal_error("cross_asset_rv", e)
             return None
 
+    @staticmethod
+    def _graduation_display_value(value: Any) -> str:
+        """Format checklist numeric/bool values for the dashboard criterion table."""
+        if isinstance(value, bool):
+            return "yes" if value else "no"
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        if isinstance(value, float):
+            if value == 0.0:
+                return "0"
+            if abs(value) >= 100:
+                return f"{value:.1f}"
+            if abs(value) >= 1:
+                return f"{value:.2f}"
+            return f"{value:.4f}".rstrip("0").rstrip(".")
+        return str(value)
+
+    @staticmethod
+    def _paper_trading_summary_for_dashboard(
+        state: Dict[str, Any],
+        *,
+        days_elapsed: Any,
+        days_required: Any,
+    ) -> Dict[str, Any]:
+        """Build frontend paper_trading block from checklist-loaded state.
+
+        Dual-shape: dashboard GraduationDataSchema requires start_date /
+        initial_capital / current_value / days_elapsed / days_required while
+        the producer keeps trading_days / min_trading_days at the top level.
+        """
+        portfolio = state.get("portfolio") if isinstance(state.get("portfolio"), dict) else {}
+        summary = (
+            state.get("paper_trading_summary")
+            if isinstance(state.get("paper_trading_summary"), dict)
+            else {}
+        )
+        history = portfolio.get("history") if isinstance(portfolio.get("history"), list) else []
+
+        start_date = ""
+        if history and isinstance(history[0], dict):
+            ts = history[0].get("timestamp")
+            if isinstance(ts, str) and ts:
+                start_date = ts[:10]
+        if not start_date:
+            date_hint = summary.get("date")
+            if isinstance(date_hint, str) and date_hint:
+                start_date = date_hint[:10]
+
+        initial_capital = 100_000.0
+        current_value: Optional[float] = None
+
+        if history and isinstance(history[0], dict):
+            start_val = history[0].get("total_value")
+            if isinstance(start_val, (int, float)):
+                initial_capital = float(start_val)
+        if history and isinstance(history[-1], dict):
+            end_val = history[-1].get("total_value")
+            if isinstance(end_val, (int, float)):
+                current_value = float(end_val)
+
+        # Prefer authoritative paper-trading-performance metrics when present.
+        start_value_files = sorted(DATA_DIR.glob("paper-trading-performance-*.json"))
+        if start_value_files:
+            try:
+                with open(start_value_files[-1]) as f:
+                    perf_raw = json.load(f)
+                if isinstance(perf_raw, dict):
+                    if not start_date and isinstance(perf_raw.get("date"), str):
+                        start_date = perf_raw["date"][:10]
+                    perf = perf_raw.get("performance")
+                    if isinstance(perf, dict):
+                        sv = perf.get("start_value")
+                        if isinstance(sv, (int, float)):
+                            initial_capital = float(sv)
+                        cv = perf.get("current_value")
+                        if isinstance(cv, (int, float)):
+                            current_value = float(cv)
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+        if current_value is None:
+            cash = portfolio.get("cash")
+            positions = portfolio.get("positions")
+            if isinstance(cash, (int, float)) and isinstance(positions, dict):
+                pos_sum = 0.0
+                for pos in positions.values():
+                    if isinstance(pos, dict) and isinstance(pos.get("value"), (int, float)):
+                        pos_sum += float(pos["value"])
+                current_value = float(cash) + pos_sum
+        if current_value is None:
+            current_value = initial_capital
+
+        try:
+            days_elapsed_n = int(days_elapsed) if days_elapsed is not None else 0
+        except (TypeError, ValueError):
+            days_elapsed_n = 0
+        try:
+            days_required_n = int(days_required) if days_required is not None else 0
+        except (TypeError, ValueError):
+            days_required_n = 0
+
+        if not start_date:
+            start_date = datetime.now().date().isoformat()
+
+        return {
+            "start_date": start_date,
+            "initial_capital": round(initial_capital, 2),
+            "current_value": round(float(current_value), 2),
+            "days_elapsed": days_elapsed_n,
+            "days_required": days_required_n,
+        }
+
     def generate_graduation_json(self) -> Optional[Path]:
         """Generate graduation readiness progress for dashboard.
 
-        Reads from .graduation_report.json (generated by graduation_checklist)
-        and provides structured progress data for the dashboard UI.
+        Emits a dual-shape payload:
+        - Producer fields: readiness_score, is_graduation_ready, criteria name/required
+        - Frontend schema aliases: readiness_pct, eligible, paper_trading, and
+          criteria id/label/threshold (panel String()-coerces numeric value)
         """
         try:
             from src.strategy.graduation_checklist import GraduationChecklist
@@ -3985,15 +4099,20 @@ class DashboardGenerator:
             score = checklist.readiness_score(results)
             is_ready = checklist.is_graduation_ready(results)
 
-            # Build progress data for dashboard
+            # Build progress data for dashboard (dual-shape per criterion)
             criteria_progress = []
             for name, result in results.items():
                 criteria_progress.append({
+                    # Producer fields (existing consumers / Python tests)
                     "name": name,
                     "passed": result.passed,
                     "value": result.value,
                     "required": result.required,
                     "description": result.description,
+                    # Frontend GraduationChecklistPanel fields
+                    "id": name,
+                    "label": result.description or name,
+                    "threshold": self._graduation_display_value(result.required),
                 })
 
             trading_days_result = results.get("min_trading_days")
@@ -4004,8 +4123,14 @@ class DashboardGenerator:
                 else checklist.criteria["min_trading_days"]["value"]
             )
             manual_approval = results.get("manual_approval")
+            paper_trading = self._paper_trading_summary_for_dashboard(
+                state,
+                days_elapsed=n_days,
+                days_required=min_trading_days,
+            )
 
             graduation_data = {
+                # Producer / ops fields
                 "readiness_score": score,
                 "is_graduation_ready": is_ready,
                 "manual_approval_required": True,
@@ -4016,6 +4141,10 @@ class DashboardGenerator:
                 "criteria_total": sum(1 for n in results if n != "manual_approval"),
                 "criteria": criteria_progress,
                 "generated_at": datetime.now().isoformat(),
+                # Frontend GraduationDataSchema / panel aliases
+                "readiness_pct": score,
+                "eligible": is_ready,
+                "paper_trading": paper_trading,
             }
 
             out_path = PUBLIC_DIR / "graduation.json"

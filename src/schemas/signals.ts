@@ -1643,8 +1643,10 @@ export const GraduationDataSchema = z.object({
     id: z.string(),
     label: z.string(),
     passed: z.boolean(),
-    value: z.string(),
-    threshold: z.string(),
+    // Producer emits numeric value/required; panel String()-coerces for display.
+    // Accept both so dual-shape graduation.json validates without fallback.
+    value: z.union([z.string(), z.number()]),
+    threshold: z.union([z.string(), z.number()]),
   })),
   paper_trading: z.object({
     start_date: z.string(),
