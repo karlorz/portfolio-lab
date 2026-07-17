@@ -2674,9 +2674,32 @@ class DashboardGenerator:
         return not blockers, blockers
 
     @staticmethod
+    def _is_active_promote_candidacy(data: Dict[str, Any]) -> bool:
+        """True only for live promote candidacy, not tombstones.
+
+        GraduationChecklist rewrites ``.promote_to_live`` with
+        ``action: promote_blocked_*`` when kill or checklist blocks.
+        Those are not candidates — alerts must ignore them.
+        """
+        action = data.get("action")
+        if action is None:
+            # Legacy markers omit action; treat as candidacy.
+            return True
+        if not isinstance(action, str):
+            return False
+        if action == "promote_to_live":
+            return True
+        if action.startswith("promote_blocked"):
+            return False
+        # Unknown action strings are not live candidacy claims.
+        return False
+
+    @staticmethod
     def _graduation_candidate_alert(data_dir: Path) -> Optional[Dict[str, Any]]:
         data = DashboardGenerator._load_json_file(data_dir / ".promote_to_live")
         if not data:
+            return None
+        if not DashboardGenerator._is_active_promote_candidacy(data):
             return None
 
         allowed, blockers = DashboardGenerator._promotion_gate_status(data_dir)

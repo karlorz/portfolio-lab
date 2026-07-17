@@ -1687,6 +1687,57 @@ class TestAlertsJSON:
         ]
         gen.conn.close()
 
+    def test_promote_blocked_tombstone_emits_no_graduation_candidate_alert(self, tmp_path):
+        """promote_blocked_* tombstones are not candidacy — no graduation_candidate alert."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / ".promote_to_live").write_text(json.dumps({
+            "graduation_conflict": True,
+            "action": "promote_blocked_checklist",
+            "reason": "checklist_not_ready",
+            "is_graduation_ready": False,
+            "timestamp": "2026-07-18T04:35:03",
+            "source": "graduation_checklist",
+            "readiness_score": 18.2,
+            "prior_metrics": {"sharpe": 0.86},
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        assert not [
+            alert for alert in data["alerts"]
+            if alert["type"] == "graduation_candidate"
+        ]
+        gen.conn.close()
+
+    def test_promote_blocked_kill_tombstone_emits_no_candidate_alert(self, tmp_path):
+        """Kill tombstones must not surface as blocked graduation candidates."""
+        gen, _ = _make_generator(tmp_path)
+        (tmp_path / ".promote_to_live").write_text(json.dumps({
+            "action": "promote_blocked_kill",
+            "reason": "kill_authority",
+            "kill_level": "halt",
+            "timestamp": "2026-07-18T04:00:00",
+        }))
+        (tmp_path / "kill_switch.json").write_text(json.dumps({
+            "enabled": True,
+            "level": "halt",
+            "reason": "test",
+        }))
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path), \
+             patch("src.dashboard.generator.DATA_DIR", tmp_path):
+            path = gen.generate_alerts_json()
+
+        data = json.loads(path.read_text())
+        assert not [
+            alert for alert in data["alerts"]
+            if alert["type"] == "graduation_candidate"
+        ]
+        gen.conn.close()
+
     def test_critical_health_slo_projects_into_alerts(self, tmp_path):
         """Critical health payload must surface as health_slo in alerts.json."""
         from src.dashboard.health_slo_alerts import HEALTH_SLO_ALERT_TYPE
