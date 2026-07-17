@@ -1,61 +1,63 @@
-# Portfolio-Lab Crontab — dual-mode (Hermes + system cron) as of 2026-06-08
-# Hermes is the scheduler source-of-truth for overlapping jobs.
-# System cron is disabled for jobs that Hermes owns.
-# System cron remains active for jobs that Hermes does NOT own (unified-dashboard,
-# overlay-signals, overlay-dashboard, attribution, daily-pnl, garch-risk).
+# Portfolio-Lab Crontab — tasker-era fallback (2026-07-18)
+# Tasker is the scheduler source-of-truth for all portfolio-lab jobs on sg01.
+# System cron entries below are DISABLED (commented) to avoid dual fire.
+# Keep commented lines so `make verify-cron-sync` still sees Makefile target
+# coverage for emergency restore.
 #
-# To fully switch TO system cron (emergency fallback):
-#   1. hermes cron pause <job_id>  (for each portfolio-lab job)
+# Emergency fallback TO system cron (only if tasker is down):
+#   1. Pause/disable overlapping tasker schedules
+#   2. Uncomment the needed lines below
+#   3. crontab /root/projects/portfolio-lab/crontab
+#
+# Return to tasker-only:
+#   1. Re-comment active lines (or reinstall this file)
 #   2. crontab /root/projects/portfolio-lab/crontab
-#
-# To switch back to Hermes:
-#   1. crontab -r
-#   2. hermes cron resume <job_id>  (for each portfolio-lab job)
+#   3. Confirm tasker schedules are enabled
 #
 # All jobs call the Makefile, which updates data/cron_status.json
 # for the dashboard health panel.
 
-# Data pipeline — hourly at :05 (DISABLED: owned by Hermes portfolio-lab-data)
+# Data pipeline — hourly at :05 (DISABLED: owned by tasker portfolio-lab-data)
 # 5 * * * * export PATH="$HOME/.bun/bin:$PATH" && CRON_BACKEND=crontab make -C /root/projects/portfolio-lab data >> /root/projects/portfolio-lab/data/cron.log 2>&1
 
-# Dashboard — every 30 minutes at :07 and :37 (DISABLED: owned by Hermes portfolio-lab-dashboard)
+# Dashboard — every 30 minutes at :07 and :37 (DISABLED: owned by tasker portfolio-lab-dashboard)
 # 7,37 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab dashboard >> /root/projects/portfolio-lab/data/dashboard.log 2>&1
 
-# Health monitor — every 15 minutes at :07 (DISABLED: owned by Hermes portfolio-lab-health)
+# Health monitor — every 15 minutes at :07 (DISABLED: owned by tasker portfolio-lab-health)
 # 7,22,37,52 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab health >> /root/projects/portfolio-lab/data/health.log 2>&1
 
-# Unified dashboard — every 15 minutes at :10 (after health and overlay-dashboard)
-10,25,40,55 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab unified-dashboard >> /root/projects/portfolio-lab/data/unified_dashboard.log 2>&1
+# Unified dashboard — every 15 minutes (DISABLED: owned by tasker portfolio-lab-unified-dashboard)
+# 10,25,40,55 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab unified-dashboard >> /root/projects/portfolio-lab/data/unified_dashboard.log 2>&1
 
-# Strategy evaluator — every 30 minutes at :13 (DISABLED: owned by Hermes portfolio-lab-eval)
+# Strategy evaluator — every 30 minutes at :13 (DISABLED: owned by tasker portfolio-lab-eval)
 # 13,43 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab eval >> /root/projects/portfolio-lab/data/eval.log 2>&1
 
-# Research agent — every 30 minutes at :19 (DISABLED: owned by Hermes portfolio-lab-research)
+# Research agent — every 30 minutes at :19 (DISABLED: owned by tasker portfolio-lab-research)
 # 19,49 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab research >> /root/projects/portfolio-lab/data/research.log 2>&1
 
-# Wiki sync — every 30 minutes at :27 (DISABLED: owned by Hermes portfolio-lab-wiki-sync)
+# Wiki sync — every 30 minutes at :27 (DISABLED: owned by tasker portfolio-lab-wiki-sync)
 # 27,57 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab wiki-sync >> /root/projects/portfolio-lab/data/wiki_sync.log 2>&1
 
 # App build — DISABLED: no web server consumers found (2026-05-17 audit)
 # 31 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab build >> /root/projects/portfolio-lab/data/build.log 2>&1
 
-# Position sync — hourly at :41 (DISABLED: owned by Hermes portfolio-lab-position-sync)
+# Position sync — hourly at :41 (DISABLED: owned by tasker portfolio-lab-position-sync)
 # 41 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab sync >> /root/projects/portfolio-lab/data/position_sync.log 2>&1
 
-# Overlay signals — every 20 minutes at :03, :23, :43 (crontab-only, no Hermes equivalent)
-3,23,43 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab overlay-signals >> /root/projects/portfolio-lab/data/overlay_signals.log 2>&1
+# Overlay signals — every 20 minutes (DISABLED: owned by tasker portfolio-lab-overlay-signals)
+# 3,23,43 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab overlay-signals >> /root/projects/portfolio-lab/data/overlay_signals.log 2>&1
 
-# Overlay dashboard — every 15 minutes at :11, :26, :41, :56 (crontab-only)
-11,26,41,56 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab overlay-dashboard >> /root/projects/portfolio-lab/data/overlay_dashboard.log 2>&1
+# Overlay dashboard — every 15 minutes (DISABLED: owned by tasker portfolio-lab-overlay-dashboard)
+# 11,26,41,56 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab overlay-dashboard >> /root/projects/portfolio-lab/data/overlay_dashboard.log 2>&1
 
-# Performance attribution — hourly at :47 (crontab-only)
-47 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab attribution >> /root/projects/portfolio-lab/data/attribution.log 2>&1
+# Performance attribution — hourly at :47 (DISABLED: owned by tasker portfolio-lab-attribution)
+# 47 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab attribution >> /root/projects/portfolio-lab/data/attribution.log 2>&1
 
-# Daily P&L capture — every 30 minutes at :17 (crontab-only)
-17,47 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab daily-pnl >> /root/projects/portfolio-lab/data/daily_pnl.log 2>&1
+# Daily P&L capture — every 30 minutes (DISABLED: owned by tasker portfolio-lab-daily-pnl)
+# 17,47 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab daily-pnl >> /root/projects/portfolio-lab/data/daily_pnl.log 2>&1
 
-# GARCH-CVaR risk — hourly at :51 (crontab-only)
-51 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab garch-risk >> /root/projects/portfolio-lab/data/garch.log 2>&1
+# GARCH-CVaR risk — hourly at :51 (DISABLED: owned by tasker portfolio-lab-garch-risk)
+# 51 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab garch-risk >> /root/projects/portfolio-lab/data/garch.log 2>&1
 
 # Log pruning — daily at 03:03 (DISABLED: owned by tasker portfolio-lab-prune-logs)
 # 3 3 * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab prune-logs >> /root/projects/portfolio-lab/data/prune_logs.log 2>&1
