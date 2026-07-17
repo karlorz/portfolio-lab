@@ -87,7 +87,8 @@ class TestSendAlert:
 
     @patch("src.monitor.alerting.urllib.request.urlopen")
     @patch("src.monitor.alerting.ALERT_WEBHOOK_URL", "https://hooks.example.com/test")
-    def test_dedup_suppressed_alert_still_updates_incident(self, mock_urlopen, tmp_path):
+    def test_dedup_suppressed_alert_skips_incident_update(self, mock_urlopen, tmp_path):
+        """Lifecycle must honor the same min-interval as webhook delivery."""
         from src.monitor.incident_manager import IncidentManager
 
         mock_resp = MagicMock()
@@ -99,6 +100,8 @@ class TestSendAlert:
         manager = IncidentManager(
             log_path=tmp_path / "incidents.jsonl",
             summary_path=tmp_path / "incidents.json",
+            kill_switch_path=tmp_path / "kill_switch.json",
+            escalation_cycles=1,
         )
 
         with patch("src.monitor.alerting.get_incident_manager", return_value=manager):
@@ -107,8 +110,92 @@ class TestSendAlert:
 
         assert mock_urlopen.call_count == 1
         events = [json.loads(line) for line in (tmp_path / "incidents.jsonl").read_text().splitlines()]
+        assert [event["event"] for event in events] == ["opened"]
+        assert events[0]["alert_count"] == 1
+
+    def test_repeated_warn_without_webhook_does_not_ratchet_alert_count(self, tmp_path):
+        """Dashboard-only mode still applies lifecycle dedup."""
+        from src.monitor.incident_manager import IncidentManager
+
+        manager = IncidentManager(
+            log_path=tmp_path / "incidents.jsonl",
+            summary_path=tmp_path / "incidents.json",
+            kill_switch_path=tmp_path / "kill_switch.json",
+            escalation_cycles=1,
+        )
+        _last_alert_time.clear()
+
+        with patch("src.monitor.alerting.ALERT_WEBHOOK_URL", ""), \
+             patch("src.monitor.alerting.get_incident_manager", return_value=manager):
+            for i in range(5):
+                assert send_alert(
+                    AlertChannel.SIGNAL_STALENESS,
+                    AlertLevel.WARN,
+                    f"optional unavailable refresh {i}",
+                ) is True
+
+        events = [json.loads(line) for line in (tmp_path / "incidents.jsonl").read_text().splitlines()]
+        assert [event["event"] for event in events] == ["opened"]
+        assert events[0]["alert_count"] == 1
+        open_incidents = manager.open_incidents()
+        assert len(open_incidents) == 1
+        assert open_incidents[0].alert_count == 1
+
+    def test_pass_always_resolves_even_within_dedup_window(self, tmp_path):
+        from src.monitor.incident_manager import IncidentManager
+
+        manager = IncidentManager(
+            log_path=tmp_path / "incidents.jsonl",
+            summary_path=tmp_path / "incidents.json",
+        )
+        _last_alert_time.clear()
+
+        with patch("src.monitor.alerting.ALERT_WEBHOOK_URL", ""), \
+             patch("src.monitor.alerting.get_incident_manager", return_value=manager):
+            assert send_alert(AlertChannel.PORTFOLIO_DRIFT, AlertLevel.WARN, "drift") is True
+            assert send_alert(AlertChannel.PORTFOLIO_DRIFT, AlertLevel.PASS, "ok") is True
+
+        events = [json.loads(line) for line in (tmp_path / "incidents.jsonl").read_text().splitlines()]
+        assert [event["event"] for event in events] == ["opened", "resolved"]
+        assert manager.open_incidents() == []
+
+    def test_warn_after_pass_reopens_despite_prior_warn_interval(self, tmp_path):
+        """PASS clears channel dedup so a fresh WARN can open again."""
+        from src.monitor.incident_manager import IncidentManager
+
+        manager = IncidentManager(
+            log_path=tmp_path / "incidents.jsonl",
+            summary_path=tmp_path / "incidents.json",
+        )
+        _last_alert_time.clear()
+
+        with patch("src.monitor.alerting.ALERT_WEBHOOK_URL", ""), \
+             patch("src.monitor.alerting.get_incident_manager", return_value=manager):
+            assert send_alert(AlertChannel.SIGNAL_STALENESS, AlertLevel.WARN, "a") is True
+            assert send_alert(AlertChannel.SIGNAL_STALENESS, AlertLevel.PASS, "clear") is True
+            assert send_alert(AlertChannel.SIGNAL_STALENESS, AlertLevel.WARN, "b") is True
+
+        events = [json.loads(line) for line in (tmp_path / "incidents.jsonl").read_text().splitlines()]
+        assert [event["event"] for event in events] == ["opened", "resolved", "opened"]
+
+    def test_level_transition_warn_to_halt_records_immediately(self, tmp_path):
+        from src.monitor.incident_manager import IncidentManager
+
+        manager = IncidentManager(
+            log_path=tmp_path / "incidents.jsonl",
+            summary_path=tmp_path / "incidents.json",
+        )
+        _last_alert_time.clear()
+
+        with patch("src.monitor.alerting.ALERT_WEBHOOK_URL", ""), \
+             patch("src.monitor.alerting.get_incident_manager", return_value=manager):
+            assert send_alert(AlertChannel.SIGNAL_STALENESS, AlertLevel.WARN, "optional") is True
+            assert send_alert(AlertChannel.SIGNAL_STALENESS, AlertLevel.HALT, "required") is True
+
+        events = [json.loads(line) for line in (tmp_path / "incidents.jsonl").read_text().splitlines()]
         assert [event["event"] for event in events] == ["opened", "updated"]
-        assert events[1]["message"] == "IC warning updated"
+        assert events[1]["severity"] == "p0"
+        assert events[1]["alert_count"] == 2
 
     @patch("src.monitor.alerting.urllib.request.urlopen")
     @patch("src.monitor.alerting.ALERT_WEBHOOK_URL", "https://hooks.example.com/test")

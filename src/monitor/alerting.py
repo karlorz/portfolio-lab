@@ -88,8 +88,15 @@ def _should_suppress(key: str) -> bool:
 
 
 def _record_alert(key: str) -> None:
-    """Record that an alert was just sent for this key."""
+    """Record that an alert was just processed for this key (lifecycle + webhook)."""
     _last_alert_time[key] = datetime.now(timezone.utc)
+
+
+def _clear_channel_dedup(channel: AlertChannel) -> None:
+    """Drop all dedup keys for a channel so a fresh open can fire after PASS."""
+    prefix = f"{channel.value}:"
+    for key in [k for k in _last_alert_time if k.startswith(prefix)]:
+        del _last_alert_time[key]
 
 
 def send_alert(
@@ -109,18 +116,42 @@ def send_alert(
     Returns:
         True if alert was sent (or alerting is disabled), False on send failure.
     """
-    _record_incident_transition(channel, level, message, details)
+    # PASS always resolves lifecycle and clears channel dedup so a later
+    # WARN/HALT can open a new incident immediately.
+    if level == AlertLevel.PASS:
+        _record_incident_transition(channel, level, message, details)
+        _clear_channel_dedup(channel)
+        if not ALERT_WEBHOOK_URL:
+            logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
+            return True
+        # PASS notifications are not deduped; still best-effort webhook.
+        return _post_webhook(channel, level, message, details)
 
-    if not ALERT_WEBHOOK_URL:
-        logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
-        return True
-
-    # Dedup: suppress repeated alerts within min interval
+    # Dedup applies to both lifecycle and webhook for non-PASS levels so
+    # dashboard regen cannot ratchet alert_count while notifications are
+    # suppressed (default ALERT_MIN_INTERVAL_SECONDS).
     dedup_key = f"{channel.value}:{level.value}"
     if _should_suppress(dedup_key):
         logger.debug("Alert suppressed (dedup): %s", dedup_key)
         return True
 
+    _record_incident_transition(channel, level, message, details)
+    _record_alert(dedup_key)
+
+    if not ALERT_WEBHOOK_URL:
+        logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
+        return True
+
+    return _post_webhook(channel, level, message, details)
+
+
+def _post_webhook(
+    channel: AlertChannel,
+    level: AlertLevel,
+    message: str,
+    details: Optional[Dict],
+) -> bool:
+    """POST webhook payload; returns False on transport/HTTP failure."""
     payload = {
         "channel": channel.value,
         "level": level.value,
@@ -142,7 +173,6 @@ def send_alert(
             if resp.status >= 400:
                 logger.warning("Alert webhook returned HTTP %d", resp.status)
                 return False
-        _record_alert(dedup_key)
         logger.info("Alert sent: [%s] %s — %s", level.value, channel.value, message)
         return True
     except urllib.error.URLError as e:
