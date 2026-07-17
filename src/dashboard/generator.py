@@ -106,7 +106,74 @@ def project_alternative_data_signal(alt_data_raw: Dict[str, Any]) -> Dict[str, A
         "z_score": raw.get("z_score"),
         "sources_count": raw.get("sources_count"),
         "data_freshness_hours": raw.get("data_freshness_hours"),
+        "producer_path": "data/signals/alternative_data_latest.json",
     }
+
+
+def load_alternative_data_producer_timestamp(
+    data_dir: Path | None = None,
+) -> str | None:
+    """Return producer alternative_data_latest.json timestamp when readable."""
+    root = Path(data_dir) if data_dir is not None else DATA_DIR
+    path = root / "signals" / "alternative_data_latest.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    ts = payload.get("timestamp") or payload.get("generated_at")
+    return ts if isinstance(ts, str) and ts.strip() else None
+
+
+def refresh_public_alternative_data_projection(
+    *,
+    data_dir: Path | None = None,
+    public_dir: Path | None = None,
+) -> bool:
+    """Bounded refresh: rewrite alternative_data section in public signals.json.
+
+    Called after producer save so operators do not wait for the next full
+    dashboard cron when only alt-data was updated. Returns True when the
+    public artifact was updated.
+    """
+    root = Path(data_dir) if data_dir is not None else DATA_DIR
+    public = Path(public_dir) if public_dir is not None else PUBLIC_DIR
+    producer = root / "signals" / "alternative_data_latest.json"
+    signals_path = public / "signals.json"
+    if not producer.exists() or not signals_path.exists():
+        return False
+    try:
+        alt_raw = json.loads(producer.read_text(encoding="utf-8"))
+        signals = json.loads(signals_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning("Alt-data projection refresh skipped (read failed): %s", exc)
+        return False
+    if not isinstance(signals, dict) or not isinstance(alt_raw, dict):
+        return False
+
+    projected = project_alternative_data_signal(alt_raw)
+    signals["alternative_data"] = projected
+    # Recompute only alt-related staleness hints on the embedded block is hard
+    # without full generator; stamp lag metadata for operators.
+    signals["alternative_data_projection"] = {
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        "producer_timestamp": projected.get("timestamp"),
+        "source": "bounded_alt_data_refresh",
+    }
+    try:
+        save_results_json(signals, output_path=str(signals_path))
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning("Alt-data projection refresh write failed: %s", exc)
+        return False
+    logger.info(
+        "Refreshed public alternative_data projection at %s (producer_ts=%s)",
+        signals_path,
+        projected.get("timestamp"),
+    )
+    return True
 
 # Map ensemble signal source names to staleness check keys
 _ENSEMBLE_STALENESS_MAP = {
@@ -3572,10 +3639,57 @@ class DashboardGenerator:
                 signal_age_hours[signal_key] = None
                 staleness_decay[signal_key] = 0.0
 
+        # Producer-aware override for alternative_data: do not escalate kill on
+        # projection lag when alternative_data_latest.json is still fresh.
+        projection_lag_signals: list[str] = []
+        producer_ts = load_alternative_data_producer_timestamp(DATA_DIR)
+        if producer_ts and "alternative_data" in timestamped_signals:
+            try:
+                pts = datetime.fromisoformat(producer_ts.replace("Z", "+00:00"))
+                if pts.tzinfo is None:
+                    pts = pts.replace(tzinfo=timezone.utc)
+                else:
+                    pts = pts.astimezone(timezone.utc)
+                producer_age_hours = max((now - pts).total_seconds(), 0.0) / 3600.0
+                producer_fresh = producer_age_hours * 3600.0 <= ttl_seconds
+                projected_ts = signal_timestamps.get("alternative_data")
+                projected_stale = "alternative_data" in stale_signals
+                producer_ahead = False
+                if projected_ts:
+                    try:
+                        ets = datetime.fromisoformat(str(projected_ts).replace("Z", "+00:00"))
+                        if ets.tzinfo is None:
+                            ets = ets.replace(tzinfo=timezone.utc)
+                        else:
+                            ets = ets.astimezone(timezone.utc)
+                        producer_ahead = pts > ets
+                    except (ValueError, TypeError):
+                        producer_ahead = True
+                else:
+                    producer_ahead = True
+
+                if producer_fresh and (projected_stale or producer_ahead):
+                    if projected_stale and "alternative_data" in stale_signals:
+                        stale_signals = [s for s in stale_signals if s != "alternative_data"]
+                    if producer_ahead:
+                        projection_lag_signals.append("alternative_data")
+                    # Prefer producer timestamp / age for operator honesty
+                    signal_timestamps["alternative_data"] = producer_ts
+                    signal_age_hours["alternative_data"] = round(producer_age_hours, 2)
+                    decay = (
+                        _math.exp(-producer_age_hours / tau_hours) if tau_hours > 0 else 1.0
+                    )
+                    staleness_decay["alternative_data"] = round(
+                        min(max(decay, 0.0), 1.0), 4
+                    )
+            except (ValueError, TypeError):
+                pass
+
         healthy_count = len(timestamped_signals) - len(stale_signals) - len(unavailable_signals)
         return {
             "stale_signals": stale_signals,
             "unavailable_signals": unavailable_signals,
+            "projection_lag_signals": projection_lag_signals,
             "signal_timestamps": signal_timestamps,
             "signal_age_hours": signal_age_hours,
             "staleness_decay": staleness_decay,

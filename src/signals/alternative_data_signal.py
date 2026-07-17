@@ -19,6 +19,7 @@ which reads data/signals/alternative_data_latest.json.
 import json
 import logging
 import math
+import os
 import statistics
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -560,6 +561,17 @@ class AlternativeDataSignalGenerator:
         }
         state_file = self.state_dir / "alternative_data_state.json"
         save_results_json(state, output_path=str(state_file))
+
+        # Bounded public projection refresh so operators do not wait for the
+        # next full dashboard cron after a producer write.
+        auto_project = os.environ.get("PORTFOLIO_LAB_ALT_DATA_AUTO_PROJECT", "1")
+        if str(auto_project).strip().lower() not in {"0", "false", "no", "off"}:
+            try:
+                from src.dashboard.generator import refresh_public_alternative_data_projection
+
+                refresh_public_alternative_data_projection()
+            except Exception as exc:  # noqa: BLE001 — never fail producer on projection
+                logger.warning("Public alt-data projection refresh failed: %s", exc)
 
     def load_latest_signal(self) -> Optional[EnsembleSignal]:
         """Load most recent signal from disk."""

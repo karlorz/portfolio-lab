@@ -219,8 +219,27 @@ def classify_signal_staleness(
     }
     if unavailable_signals:
         details["unavailable_signals"] = unavailable_signals
+    projection_lag_raw = staleness_data.get("projection_lag_signals") or []
+    projection_lag_signals = (
+        [str(x) for x in projection_lag_raw] if isinstance(projection_lag_raw, list) else []
+    )
+    if projection_lag_signals:
+        details["projection_lag_signals"] = projection_lag_signals
+        details["policy_note"] = (
+            "projection_lag: producer fresher than embedded signals; "
+            "not treated as producer-stale for kill escalation"
+        )
 
     if not stale_signals and unavailable_count == 0:
+        if projection_lag_signals:
+            return (
+                AlertLevel.PASS,
+                (
+                    f"All {total_count} signals producer-fresh "
+                    f"({len(projection_lag_signals)} projection lag)"
+                ),
+                details,
+            )
         return (
             AlertLevel.PASS,
             f"All {total_count} signals fresh",

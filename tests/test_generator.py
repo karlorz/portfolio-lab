@@ -371,6 +371,80 @@ class TestSignalStalenessNormalization:
             assert result["staleness_decay"][signal_key] > 0.0
         assert result["healthy_count"] == result["required_count"]
 
+    def test_producer_fresh_alt_data_not_stale_when_projected_lags(self, tmp_path, monkeypatch):
+        """Producer latest fresh + projected stale → projection_lag, not stale."""
+        from src.dashboard import generator as gen_mod
+
+        gen, _ = _make_generator(tmp_path)
+        producer_ts = datetime.now(timezone.utc).isoformat()
+        projected_stale = (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat()
+        signals_dir = tmp_path / "signals"
+        signals_dir.mkdir(parents=True)
+        (signals_dir / "alternative_data_latest.json").write_text(
+            json.dumps(
+                {
+                    "source": "alternative_data",
+                    "regime": "bull",
+                    "timestamp": producer_ts,
+                    "confidence": 0.6,
+                    "raw_data": {"composite_score": 0.1},
+                }
+            )
+        )
+        monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": producer_ts},
+            "alternative_data": {"timestamp": projected_stale},
+            "garch_cvar": {"timestamp": producer_ts},
+            "smart_rebalance": {"generated_at": producer_ts},
+            "rebalance_health": {"generated": producer_ts},
+        })
+
+        assert "alternative_data" not in result["stale_signals"]
+        assert "alternative_data" in result["projection_lag_signals"]
+        assert result["signal_timestamps"]["alternative_data"] == producer_ts
+
+    def test_refresh_public_alternative_data_projection_updates_signals(self, tmp_path):
+        from src.dashboard.generator import refresh_public_alternative_data_projection
+
+        data_dir = tmp_path / "data"
+        public_dir = tmp_path / "public"
+        (data_dir / "signals").mkdir(parents=True)
+        public_dir.mkdir()
+        producer_ts = "2026-07-18T12:00:00+00:00"
+        (data_dir / "signals" / "alternative_data_latest.json").write_text(
+            json.dumps(
+                {
+                    "source": "alternative_data",
+                    "regime": "bull",
+                    "timestamp": producer_ts,
+                    "confidence": 0.7,
+                    "raw_data": {
+                        "composite_score": 0.2,
+                        "components": {"treasury": 0.1},
+                        "component_confidences": {"treasury": 0.5},
+                        "weights": {"treasury": 1.0},
+                    },
+                }
+            )
+        )
+        (public_dir / "signals.json").write_text(
+            json.dumps(
+                {
+                    "generated_at": "2026-07-12T00:00:00+00:00",
+                    "alternative_data": {"timestamp": "2026-07-12T00:00:00+00:00"},
+                }
+            )
+        )
+
+        assert refresh_public_alternative_data_projection(
+            data_dir=data_dir, public_dir=public_dir
+        )
+        out = json.loads((public_dir / "signals.json").read_text())
+        assert out["alternative_data"]["timestamp"] == producer_ts
+        assert out["alternative_data_projection"]["source"] == "bounded_alt_data_refresh"
+
     def test_required_stale_signal_remains_stale(self, tmp_path):
         gen, _ = _make_generator(tmp_path)
         fresh = datetime.now(timezone.utc).isoformat()
