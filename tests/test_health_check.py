@@ -69,7 +69,8 @@ class TestCheckDataFreshness:
             "jobs": [
                 {
                     "id": "bad-job",
-                    "name": "portfolio-lab-health",
+                    # Non-self job: health self-errors are excluded from rollup.
+                    "name": "portfolio-lab-eval",
                     "last_status": "error",
                     "last_error": "Script exited with code 1",
                     "state": "scheduled",
@@ -86,6 +87,79 @@ class TestCheckDataFreshness:
         assert freshness["cron"]["backends"]["hermes"]["failed_jobs"] == 1
         assert freshness["cron"]["jobs"][0]["backend"] == "local"
         assert freshness["cron"]["jobs"][1]["backend"] == "hermes"
+
+    def test_health_self_job_error_does_not_sticky_degrade(self, tmp_path, monkeypatch):
+        """Prior portfolio-lab-health error must not fail the next health rollup.
+
+        Tasker/cron_update stamp the health job's own exit into cron_status.json.
+        Counting that row as failed_jobs made make health exit 1 forever.
+        """
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "backend": "tasker",
+            "jobs": [
+                {
+                    "name": "portfolio-lab-health",
+                    "status": "error",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "manual_only": False,
+                    "last_run": "2026-07-17T20:30:02.962012+00:00",
+                    "backend": "tasker",
+                },
+                {
+                    "name": "portfolio-lab-data",
+                    "status": "ok",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "manual_only": False,
+                    "backend": "tasker",
+                },
+            ],
+        }))
+
+        freshness = _check_data_freshness()
+
+        assert freshness["cron"]["failed_jobs"] == 0
+        assert freshness["cron"]["status"] == "ok"
+        assert freshness["cron"]["backends"]["tasker"]["status"] == "ok"
+        assert freshness["cron"]["backends"]["tasker"]["failed_jobs"] == 0
+        # Raw row still visible for operators.
+        health_row = next(
+            j for j in freshness["cron"]["jobs"] if j["name"] == "portfolio-lab-health"
+        )
+        assert health_row["status"] == "error"
+
+    def test_non_self_job_error_still_degrades_cron(self, tmp_path, monkeypatch):
+        """Sibling job errors continue to degrade the cron rollup."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "backend": "tasker",
+            "jobs": [
+                {
+                    "name": "portfolio-lab-health",
+                    "status": "error",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "backend": "tasker",
+                },
+                {
+                    "name": "portfolio-lab-data",
+                    "status": "error",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "backend": "tasker",
+                },
+            ],
+        }))
+
+        freshness = _check_data_freshness()
+
+        assert freshness["cron"]["failed_jobs"] == 1
+        assert freshness["cron"]["status"] == "degraded"
+        assert freshness["cron"]["backends"]["tasker"]["failed_jobs"] == 1
 
     def test_missing_hermes_cron_state_warns(self, tmp_path, monkeypatch):
         """Missing configured Hermes state should be a warning, not a crash."""

@@ -40,6 +40,11 @@ __all__ = ["run_health_check", "check_scheduler_drift", "publish_ops_health_surf
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
 _DEFAULT_DATA_DIR = DATA_DIR
 SCHEDULER_DRIFT_THRESHOLD = 2
+# The health cron job records its own exit into cron_status.json (via make health →
+# cron_update and tasker mirrors). Counting that row as a "failed job" makes the
+# next health run exit non-zero forever (sticky self-degradation). Exclude it from
+# rollup failure counts / backend status while still listing the raw job row.
+HEALTH_SELF_JOB_NAME = "portfolio-lab-health"
 
 
 def health_ops_path() -> Path:
@@ -258,6 +263,51 @@ def check_scheduler_drift(
     return details
 
 
+def _is_health_self_job(job: dict[str, Any]) -> bool:
+    """True when the row is the health job reporting on itself."""
+    return str(job.get("name") or "") == HEALTH_SELF_JOB_NAME
+
+
+def _rollup_failed_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Failed jobs that should affect health exit / rollup (excludes self-job)."""
+    return [
+        job
+        for job in jobs
+        if job.get("status") == "error" and not _is_health_self_job(job)
+    ]
+
+
+def _backend_summary_excluding_health_self(
+    backend: dict[str, Any],
+    jobs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Recompute backend failed_jobs/status ignoring portfolio-lab-health errors.
+
+    Keeps unavailable/error/reason backends untouched. Unknown active jobs still
+    degrade. Only demotes degraded→ok when the sole failure was the self job.
+    """
+    backend_name = str(backend.get("backend") or "")
+    adjusted = dict(backend)
+    backend_jobs = [job for job in jobs if str(job.get("backend") or "") == backend_name]
+    failed_jobs = sum(
+        1
+        for job in backend_jobs
+        if job.get("status") == "error" and not _is_health_self_job(job)
+    )
+    adjusted["failed_jobs"] = failed_jobs
+    # Preserve explicit unavailable/error set by loaders (missing file, parse fail).
+    if adjusted.get("status") in {"unavailable", "error", "missing"}:
+        return adjusted
+    if adjusted.get("reason"):
+        return adjusted
+    active_unknown = int(adjusted.get("unknown_active_jobs") or 0)
+    if failed_jobs or active_unknown:
+        adjusted["status"] = "degraded"
+    else:
+        adjusted["status"] = "ok"
+    return adjusted
+
+
 def _check_data_freshness() -> dict:
     """Check how fresh the price data and signal data are."""
     checks = {}
@@ -292,7 +342,6 @@ def _check_data_freshness() -> dict:
     # Cron status
     cron_path = DATA_DIR / "cron_status.json"
     local_jobs, local_backend = load_local_cron_jobs(cron_path)
-    scheduler_backends = {str(local_backend.get("backend", "local")): local_backend}
     jobs = list(local_jobs)
 
     hermes_path = None
@@ -301,20 +350,36 @@ def _check_data_freshness() -> dict:
             current_data_dir=DATA_DIR,
             default_data_dir=_DEFAULT_DATA_DIR,
         )
+    hermes_backend: dict[str, Any] | None = None
     if hermes_path is not None:
         hermes_jobs, hermes_backend = load_hermes_portfolio_cron_jobs(hermes_path)
-        scheduler_backends["hermes"] = hermes_backend
         jobs.extend(hermes_jobs)
+
+    # Rebuild backend summaries with self-job failures excluded from rollup.
+    scheduler_backends: dict[str, dict[str, Any]] = {
+        str(local_backend.get("backend", "local")): _backend_summary_excluding_health_self(
+            local_backend, jobs
+        ),
+    }
+    if hermes_backend is not None:
+        scheduler_backends["hermes"] = _backend_summary_excluding_health_self(
+            hermes_backend, jobs
+        )
 
     scheduler_status = combine_scheduler_backends(scheduler_backends)
     scheduler_drift = check_scheduler_drift(scheduler_status["backends"])
-    failed = [job for job in jobs if job.get("status") == "error"]
-    backend_error = any(backend.get("status") == "error" for backend in scheduler_backends.values())
+    failed = _rollup_failed_jobs(jobs)
+    backend_error = any(
+        backend.get("status") == "error" for backend in scheduler_backends.values()
+    )
+    adjusted_local = scheduler_backends.get(
+        str(local_backend.get("backend", "local")), local_backend
+    )
     if scheduler_drift["status"] == "critical":
         cron_status = "error"
     elif backend_error:
         cron_status = "error"
-    elif local_backend.get("status") == "unavailable" and len(scheduler_backends) == 1:
+    elif adjusted_local.get("status") == "unavailable" and len(scheduler_backends) == 1:
         cron_status = "missing"
     elif scheduler_status["status"] in {"unavailable", "warning"}:
         cron_status = "warning"
