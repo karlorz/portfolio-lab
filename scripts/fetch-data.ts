@@ -28,9 +28,11 @@ import {
 } from '../src/data/price_quality';
 import { dirname, join, resolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from 'fs';
+import { execFileSync } from 'child_process';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const PYTHON_RUNTIME = join(PROJECT_ROOT, 'scripts', 'python_runtime.sh');
+const CRON_UPDATE_SCRIPT = join(PROJECT_ROOT, 'scripts', 'cron_update.py');
 const FRED_CACHE_PATH = join(PROJECT_ROOT, 'data', 'fred_series_cache.json');
 const START_DATE = '2005-01-01';
 const END_DATE = new Date().toISOString().split('T')[0];
@@ -279,20 +281,69 @@ export function shouldWriteLastGoodRetentionManifest(error: unknown): boolean {
 }
 
 async function runPythonModule(moduleName: string): Promise<void> {
-  const { execFileSync } = await import('child_process');
   execFileSync(PYTHON_RUNTIME, ['-m', moduleName], {
     cwd: PROJECT_ROOT,
     stdio: 'inherit',
   });
 }
 
+/**
+ * Record that dashboard artifacts were regenerated (any entrypoint).
+ *
+ * Data pipeline side-effects generator without running the dedicated
+ * portfolio-lab-dashboard job; operators still need last_run honesty.
+ */
+export function recordDashboardCronStatus(options?: {
+  status?: string;
+  durationSeconds?: number;
+  backend?: string;
+  triggeredBy?: string;
+  runUpdate?: (args: string[]) => void;
+}): void {
+  const status = options?.status ?? 'ok';
+  const durationSeconds = options?.durationSeconds ?? 0;
+  const backend =
+    options?.backend ?? process.env.CRON_BACKEND ?? process.env.PORTFOLIO_LAB_CRON_BACKEND ?? 'tasker';
+  const triggeredBy = options?.triggeredBy ?? 'fetch_data';
+  const runUpdate =
+    options?.runUpdate ??
+    ((args: string[]) => {
+      execFileSync(PYTHON_RUNTIME, args, {
+        cwd: PROJECT_ROOT,
+        stdio: 'inherit',
+      });
+    });
+
+  runUpdate([
+    CRON_UPDATE_SCRIPT,
+    'portfolio-lab-dashboard',
+    status,
+    String(durationSeconds),
+    backend,
+    `triggered_by=${triggeredBy}`,
+  ]);
+}
+
 export async function runDashboardGeneration(
   runModule: (moduleName: string) => Promise<void> = runPythonModule,
+  recordStatus: typeof recordDashboardCronStatus = recordDashboardCronStatus,
 ): Promise<void> {
+  const started = Date.now();
   try {
     await runModule('src.dashboard.generator');
   } catch (error) {
     throw new DashboardGenerationError(error);
+  }
+  const durationSeconds = Math.max(0, (Date.now() - started) / 1000);
+  try {
+    recordStatus({
+      status: 'ok',
+      durationSeconds,
+      triggeredBy: 'fetch_data',
+    });
+  } catch (error) {
+    // Status honesty must not fail a successful artifact write, but surface noise.
+    console.error('Failed to update portfolio-lab-dashboard cron status:', error);
   }
 }
 
