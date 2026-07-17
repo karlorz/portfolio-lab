@@ -452,7 +452,8 @@ def test_slo_warns_on_stale_required_signals_and_counts_unavailable() -> None:
         public_index={"entries": []},
         signal_staleness={
             "stale_signals": ["garch_cvar"],
-            "unavailable_signals": ["two_stage_regime"],
+            # collar is actionable (not a FRED/ML intentional gap)
+            "unavailable_signals": ["collar"],
         },
     )
 
@@ -460,6 +461,7 @@ def test_slo_warns_on_stale_required_signals_and_counts_unavailable() -> None:
     assert slo["top_dimension"] == "signal"
     assert slo["dimensions"]["signal"]["stale_count"] == 1
     assert slo["dimensions"]["signal"]["unavailable_count"] == 1
+    assert slo["dimensions"]["signal"]["actionable_unavailable_count"] == 1
     assert "stale" in slo["dimensions"]["signal"]["message"]
     assert "unavailable" in slo["dimensions"]["signal"]["message"]
 
@@ -488,6 +490,53 @@ def test_slo_signal_dim_warns_on_unavailable_without_stale() -> None:
     assert "unavailable" in signal["message"]
     assert "required signals fresh" not in signal["message"]
     assert "collar" in signal.get("unavailable_signals", [])
+
+
+def test_slo_signal_dim_ok_when_only_intentional_fred_lab_gaps(
+    monkeypatch,
+) -> None:
+    """FRED-unconfigured gaps must not keep signal SLO as top warning forever."""
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={
+            "stale_signals": [],
+            "unavailable_signals": [
+                "two_stage_regime",
+                "regime_transition",
+                "fred_macro",
+            ],
+            "unavailable_ownership": [
+                {
+                    "signal": "two_stage_regime",
+                    "intentional_lab_gap": True,
+                    "intentional_when_fred_unconfigured": True,
+                },
+                {
+                    "signal": "regime_transition",
+                    "intentional_lab_gap": True,
+                    "intentional_when_fred_unconfigured": True,
+                },
+                {
+                    "signal": "fred_macro",
+                    "intentional_lab_gap": True,
+                    "intentional_when_fred_unconfigured": True,
+                },
+            ],
+            "recovery": {"actionable_unavailable_count": 0, "intentional_lab_gap_count": 3},
+        },
+    )
+
+    signal = slo["dimensions"]["signal"]
+    assert signal["status"] == "ok"
+    assert signal["unavailable_count"] == 3
+    assert signal["actionable_unavailable_count"] == 0
+    assert signal["intentional_lab_gap_count"] == 3
+    assert signal.get("intentional_lab_gaps_only") is True
+    assert "intentional lab gaps" in signal["message"]
+    assert slo["top_dimension"] != "signal"
 
 
 def test_slo_distinguishes_provider_reconciliation_divergence_from_outage() -> None:

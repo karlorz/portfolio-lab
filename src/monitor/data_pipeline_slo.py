@@ -337,36 +337,93 @@ def _artifact_dimension(
     }
 
 
+def _actionable_unavailable_signals(
+    signal_staleness: Mapping[str, Any],
+    unavailable_signals: list[str],
+) -> tuple[list[str], int]:
+    """Split unavailable signals into actionable vs intentional lab gaps.
+
+    Matches ``classify_signal_staleness``: FRED-unconfigured / ML-off gaps must
+    not keep the signal SLO dimension in permanent warning.
+    """
+    ownership = signal_staleness.get("unavailable_ownership")
+    if not (isinstance(ownership, list) and ownership):
+        try:
+            from src.monitor.signal_ownership import annotate_unavailable_signals
+
+            ownership = annotate_unavailable_signals(unavailable_signals)
+        except ImportError:
+            ownership = []
+
+    if isinstance(ownership, list) and ownership:
+        actionable = [
+            str(row.get("signal"))
+            for row in ownership
+            if isinstance(row, Mapping)
+            and not (
+                row.get("intentional_lab_gap")
+                or row.get("intentional_when_ml_off")
+            )
+        ]
+        intentional_count = max(0, len(unavailable_signals) - len(actionable))
+        return actionable, intentional_count
+
+    # No ownership metadata: treat full list as actionable (fail-closed).
+    return list(unavailable_signals), 0
+
+
 def _signal_dimension(signal_staleness: Mapping[str, Any] | None) -> dict[str, Any]:
     stale = signal_staleness.get("stale_signals") if isinstance(signal_staleness, Mapping) else None
     unavailable = signal_staleness.get("unavailable_signals") if isinstance(signal_staleness, Mapping) else None
     stale_signals = [str(item) for item in stale] if isinstance(stale, list) else []
     unavailable_signals = [str(item) for item in unavailable] if isinstance(unavailable, list) else []
-    # Align with classify_signal_staleness / kill lifecycle: non-empty unavailable
-    # is not "fresh" — empty stale alone must not report OK while panels are down.
-    if stale_signals or unavailable_signals:
+
+    actionable_unavailable: list[str] = []
+    intentional_lab_gap_count = 0
+    if unavailable_signals and isinstance(signal_staleness, Mapping):
+        actionable_unavailable, intentional_lab_gap_count = _actionable_unavailable_signals(
+            signal_staleness, unavailable_signals
+        )
+    elif unavailable_signals:
+        actionable_unavailable = list(unavailable_signals)
+
+    # Stale or actionable unavailable → warning. Intentional lab gaps alone → ok.
+    if stale_signals or actionable_unavailable:
         status = "warning"
     else:
         status = "ok"
-    if stale_signals and unavailable_signals:
+
+    if stale_signals and actionable_unavailable:
         message = (
             f"{len(stale_signals)} stale signal(s); "
-            f"{len(unavailable_signals)} unavailable signal(s)"
+            f"{len(actionable_unavailable)} unavailable signal(s)"
         )
     elif stale_signals:
         message = f"{len(stale_signals)} stale required signal(s)"
-    elif unavailable_signals:
-        message = f"{len(unavailable_signals)} unavailable signal(s) (not all-fresh)"
+    elif actionable_unavailable:
+        message = f"{len(actionable_unavailable)} unavailable signal(s) (not all-fresh)"
+    elif intentional_lab_gap_count:
+        message = (
+            f"required signals fresh "
+            f"({intentional_lab_gap_count} intentional lab gaps skipped)"
+        )
     else:
         message = "required signals fresh"
-    return {
+
+    payload: dict[str, Any] = {
         "status": status,
         "stale_count": len(stale_signals),
         "unavailable_count": len(unavailable_signals),
+        "actionable_unavailable_count": len(actionable_unavailable),
+        "intentional_lab_gap_count": intentional_lab_gap_count,
         "stale_signals": stale_signals[:10],
         "unavailable_signals": unavailable_signals[:10],
+        "actionable_unavailable_signals": actionable_unavailable[:10],
         "message": message,
     }
+    if intentional_lab_gap_count and not actionable_unavailable and not stale_signals:
+        payload["intentional_lab_gaps_only"] = True
+    return payload
 
 
 def _price_manifest_rows(source_manifest: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
