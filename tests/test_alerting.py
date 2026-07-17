@@ -402,6 +402,74 @@ class TestCheckDriftAndAlert:
         assert mock_send.call_args[0][1] == AlertLevel.WARN
 
 
+class TestClassifySignalStalenessIntentionalGaps:
+    def test_intentional_lab_gaps_only_pass(self):
+        from src.monitor.alerting import classify_signal_staleness, AlertLevel
+
+        result = classify_signal_staleness(
+            {
+                "stale_signals": [],
+                "unavailable_signals": [
+                    "behavioral_sentiment",
+                    "stacking_ensemble",
+                    "fred_macro",
+                ],
+                "healthy_count": 20,
+                "total_count": 23,
+                "unavailable_ownership": [
+                    {
+                        "signal": "behavioral_sentiment",
+                        "intentional_when_ml_off": True,
+                        "intentional_lab_gap": True,
+                    },
+                    {
+                        "signal": "stacking_ensemble",
+                        "intentional_when_ml_off": True,
+                        "intentional_lab_gap": True,
+                    },
+                    {
+                        "signal": "fred_macro",
+                        "intentional_when_fred_unconfigured": True,
+                        "intentional_lab_gap": True,
+                    },
+                ],
+            }
+        )
+        assert result is not None
+        level, message, details = result
+        assert level == AlertLevel.PASS
+        assert details.get("policy") == "intentional_lab_gaps_only_pass"
+        assert "lab gaps" in message.lower() or "fresh" in message.lower()
+
+    def test_actionable_unavailable_still_warns(self):
+        from src.monitor.alerting import classify_signal_staleness, AlertLevel
+
+        result = classify_signal_staleness(
+            {
+                "stale_signals": [],
+                "unavailable_signals": ["risk_decomposition", "behavioral_sentiment"],
+                "healthy_count": 20,
+                "total_count": 23,
+                "unavailable_ownership": [
+                    {
+                        "signal": "risk_decomposition",
+                        "intentional_lab_gap": False,
+                    },
+                    {
+                        "signal": "behavioral_sentiment",
+                        "intentional_when_ml_off": True,
+                        "intentional_lab_gap": True,
+                    },
+                ],
+            }
+        )
+        assert result is not None
+        level, message, _details = result
+        assert level == AlertLevel.WARN
+        assert "risk_decomposition" in message
+        assert "behavioral_sentiment" not in message
+
+
 class TestCheckIcDecayAndAlert:
     @patch("src.monitor.alerting.send_alert")
     def test_all_healthy_sends_pass(self, mock_send):

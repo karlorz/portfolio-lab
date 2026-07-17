@@ -121,7 +121,9 @@ SIGNAL_OWNERSHIP: dict[str, dict[str, Any]] = {
         "job": "portfolio-lab-dashboard",
         "make_target": "dashboard",
         "module": "src.dashboard.generator",
-        "recovery": "make dashboard",
+        # Depends on FRED-MD series; lab without key cannot produce this.
+        "intentional_when_fred_unconfigured": True,
+        "recovery": "Set FRED_API_KEY then make data && make dashboard",
     },
     "bocd_regime": {
         "job": "portfolio-lab-dashboard",
@@ -133,7 +135,8 @@ SIGNAL_OWNERSHIP: dict[str, dict[str, Any]] = {
         "job": "portfolio-lab-dashboard",
         "make_target": "dashboard",
         "module": "src.dashboard.generator",
-        "recovery": "make dashboard",
+        "intentional_when_fred_unconfigured": True,
+        "recovery": "Set FRED_API_KEY then make data && make dashboard",
     },
     "hedge_selector": {
         "job": "portfolio-lab-dashboard",
@@ -145,7 +148,9 @@ SIGNAL_OWNERSHIP: dict[str, dict[str, Any]] = {
         "job": "portfolio-lab-data",
         "make_target": "data",
         "module": "src.signals",
-        "recovery": "make data && make dashboard",
+        # Lab mode without FRED_API_KEY is expected; do not block all-fresh PASS.
+        "intentional_when_fred_unconfigured": True,
+        "recovery": "Set FRED_API_KEY then make data && make dashboard",
     },
 }
 
@@ -154,13 +159,22 @@ def annotate_unavailable_signals(
     unavailable: list[str] | None,
     *,
     ml_enabled: bool = False,
+    fred_configured: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Return ownership rows for unavailable signal keys."""
+    if fred_configured is None:
+        import os
+
+        fred_configured = bool(os.environ.get("FRED_API_KEY", "").strip())
     rows: list[dict[str, Any]] = []
     for name in unavailable or []:
         key = str(name)
         owner = SIGNAL_OWNERSHIP.get(key, {})
-        intentional = bool(owner.get("intentional_when_ml_off")) and not ml_enabled
+        intentional_ml = bool(owner.get("intentional_when_ml_off")) and not ml_enabled
+        intentional_fred = (
+            bool(owner.get("intentional_when_fred_unconfigured")) and not fred_configured
+        )
+        intentional = intentional_ml or intentional_fred
         rows.append(
             {
                 "signal": key,
@@ -169,22 +183,32 @@ def annotate_unavailable_signals(
                 "module": owner.get("module"),
                 "recovery": owner.get("recovery")
                 or "make ops-regen  # inspect producer then dashboard",
-                "intentional_when_ml_off": intentional,
+                "intentional_when_ml_off": intentional_ml,
+                "intentional_when_fred_unconfigured": intentional_fred,
+                "intentional_lab_gap": intentional,
             }
         )
     return rows
 
 
 def recovery_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate jobs to re-run for recovery (excluding intentional ML-off)."""
-    actionable = [r for r in rows if not r.get("intentional_when_ml_off")]
+    """Aggregate jobs to re-run for recovery (excluding intentional lab gaps)."""
+    actionable = [
+        r
+        for r in rows
+        if not (r.get("intentional_lab_gap") or r.get("intentional_when_ml_off"))
+    ]
     jobs = sorted({str(r.get("job")) for r in actionable if r.get("job") != "unknown"})
     targets = sorted(
         {str(r.get("make_target")) for r in actionable if r.get("make_target") != "unknown"}
     )
+    intentional_count = len(rows) - len(actionable)
     return {
         "actionable_unavailable_count": len(actionable),
-        "intentional_ml_off_count": len(rows) - len(actionable),
+        "intentional_ml_off_count": sum(
+            1 for r in rows if r.get("intentional_when_ml_off")
+        ),
+        "intentional_lab_gap_count": intentional_count,
         "jobs_to_rerun": jobs,
         "make_targets": targets,
         "suggested_commands": [

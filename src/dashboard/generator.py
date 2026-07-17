@@ -1544,6 +1544,7 @@ class DashboardGenerator:
             signal = sig_gen.get_signal(snapshot)
             status = sig_gen.get_status()
 
+            now_ts = datetime.now(timezone.utc).isoformat()
             behavioral_sentiment_data = {
                 "active": True,
                 "composite_score": signal.composite_score,
@@ -1574,6 +1575,8 @@ class DashboardGenerator:
                     "VIX-proxy contrarian signals degrade Sharpe by -0.216 (2021-2026). "
                     "Real-time SKEW/PCR data needed for behavioral alpha."
                 ),
+                "timestamp": now_ts,
+                "generated_at": now_ts,
             }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("behavioral_sentiment", e)
@@ -1669,6 +1672,9 @@ class DashboardGenerator:
             "entropy": entropy_data,
             "bond_momentum": overlay_data.get("bond_momentum", {}),
             "hedge_selector": validate_signal("hedge_selector", hedge_selector_signal),
+            # Sidecar JSON is generated later in the same cycle; embed prior or
+            # freshly computed snapshot so optional staleness sees a section.
+            "risk_decomposition": self._load_risk_decomposition_signal_section(),
         }
 
     @staticmethod
@@ -1714,6 +1720,7 @@ class DashboardGenerator:
     @staticmethod
     def _build_stacking_no_model_dashboard(integrator: Any) -> Dict[str, Any]:
         """Build the explicit dormant stacking artifact when no model is loaded."""
+        now_ts = datetime.now(timezone.utc).isoformat()
         return {
             "active": False,
             "stacking_available": False,
@@ -1743,11 +1750,14 @@ class DashboardGenerator:
                 "Stacking ensemble is research/dormant, not live-authoritative, "
                 "and not order-routed."
             ),
+            "timestamp": now_ts,
+            "generated_at": now_ts,
         }
 
     @staticmethod
     def _build_stacking_model_dashboard(integrator: Any, prediction: Any) -> Dict[str, Any]:
         """Build the model-backed stacking dashboard artifact."""
+        now_ts = datetime.now(timezone.utc).isoformat()
         return {
             "active": True,
             "stacking_available": True,
@@ -1778,6 +1788,8 @@ class DashboardGenerator:
                 "+11% accuracy produces negligible Sharpe gain (2021-2026). "
                 "Signal frequency and shift magnitude are binding constraints."
             ),
+            "timestamp": now_ts,
+            "generated_at": now_ts,
         }
 
     def _build_optional_signal_sections(
@@ -4093,6 +4105,44 @@ class DashboardGenerator:
 
         except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
             logger.warning("Failed to generate explainability data: %s", e)
+            return None
+
+    def _load_risk_decomposition_signal_section(self) -> Optional[Dict[str, Any]]:
+        """Embed risk decomposition into signals.json for optional staleness TTL.
+
+        Prefer computing live; fall back to the public sidecar when present so
+        the section is not left missing (None → optional unavailable forever).
+        """
+        now_ts = datetime.now(timezone.utc).isoformat()
+
+        def _stamp(payload: Dict[str, Any]) -> Dict[str, Any]:
+            payload.setdefault("generated_at", now_ts)
+            payload.setdefault("timestamp", payload.get("generated_at") or now_ts)
+            return payload
+
+        try:
+            from src.monitor.risk_decomposition import decompose_portfolio
+
+            result = decompose_portfolio(weights=BASE_ALLOCATION)
+            return _stamp(result.to_dict())
+        except Exception as exc:  # noqa: BLE001 — optional section
+            logger.debug("Live risk_decomposition embed skipped: %s", exc)
+
+        path = PUBLIC_DIR / "risk_decomposition.json"
+        if not path.exists():
+            return None
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return None
+            # Explicit unavailable/error sidecars stay unavailable for operators.
+            if data.get("status") in {"unavailable", "error"} or "error" in data:
+                return _stamp(data)
+            # Successful decompose payloads should not look unavailable.
+            data.pop("status", None)
+            return _stamp(data)
+        except (OSError, json.JSONDecodeError, TypeError):
             return None
 
     def generate_risk_decomposition_json(self) -> Path:

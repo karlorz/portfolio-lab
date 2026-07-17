@@ -132,6 +132,21 @@ def test_factor_rotation_ownership_points_at_dashboard_not_overlay() -> None:
     assert "overlay" not in own["make_target"]
 
 
+def test_fred_gaps_intentional_when_unconfigured() -> None:
+    rows = annotate_unavailable_signals(
+        ["fred_macro", "two_stage_regime", "collar"],
+        ml_enabled=False,
+        fred_configured=False,
+    )
+    by = {r["signal"]: r for r in rows}
+    assert by["fred_macro"]["intentional_lab_gap"] is True
+    assert by["two_stage_regime"]["intentional_lab_gap"] is True
+    assert by["collar"]["intentional_lab_gap"] is False
+    summary = recovery_summary(rows)
+    assert summary["actionable_unavailable_count"] == 1
+    assert "collar" in str(summary) or summary["actionable_unavailable_count"] == 1
+
+
 def test_sustained_unavailability_skips_warning_level_kill(tmp_path, monkeypatch) -> None:
     """SIGNAL_RECOVERY itself writes WARN→p2 kill; must not re-fire under that warning."""
     from src.monitor import alerting as al

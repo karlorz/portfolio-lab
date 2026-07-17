@@ -248,15 +248,48 @@ def classify_signal_staleness(
         )
 
     if not stale_signals and unavailable_count > 0:
-        names = ", ".join(unavailable_signals[:8])
+        # Intentional lab gaps (ML-off research, FRED key absent) must not block
+        # all-fresh PASS / sticky warning kill. Prefer ownership annotation when
+        # present; otherwise treat full unavailable list as actionable.
+        ownership = staleness_data.get("unavailable_ownership")
+        actionable_unavailable = unavailable_signals
+        intentional_count = 0
+        if isinstance(ownership, list) and ownership:
+            actionable_unavailable = [
+                str(r.get("signal"))
+                for r in ownership
+                if isinstance(r, dict)
+                and not (
+                    r.get("intentional_lab_gap")
+                    or r.get("intentional_when_ml_off")
+                )
+            ]
+            intentional_count = max(0, unavailable_count - len(actionable_unavailable))
+            details["actionable_unavailable"] = actionable_unavailable
+            details["intentional_lab_gap_count"] = intentional_count
+
+        if not actionable_unavailable:
+            details["policy"] = "intentional_lab_gaps_only_pass"
+            return (
+                AlertLevel.PASS,
+                (
+                    f"All required signals fresh "
+                    f"({intentional_count} intentional lab gaps skipped)"
+                    if intentional_count
+                    else f"All {total_count} signals fresh"
+                ),
+                details,
+            )
+
+        names = ", ".join(actionable_unavailable[:8])
         suffix = f": {names}" if names else ""
-        if len(unavailable_signals) > 8:
-            suffix += f" (+{len(unavailable_signals) - 8} more)"
+        if len(actionable_unavailable) > 8:
+            suffix += f" (+{len(actionable_unavailable) - 8} more)"
         details["policy"] = "unavailable_signals_nonempty_blocks_all_fresh_pass"
         return (
             AlertLevel.WARN,
             (
-                f"{unavailable_count}/{total_count} signals unavailable "
+                f"{len(actionable_unavailable)}/{total_count} signals unavailable "
                 f"(partial availability; not all-fresh){suffix}"
             ),
             details,
@@ -373,7 +406,8 @@ def check_sustained_unavailability_and_alert(
     actionable = [
         r
         for r in (ownership or [])
-        if isinstance(r, dict) and not r.get("intentional_when_ml_off")
+        if isinstance(r, dict)
+        and not (r.get("intentional_lab_gap") or r.get("intentional_when_ml_off"))
     ]
     if len(actionable) < threshold:
         return False
