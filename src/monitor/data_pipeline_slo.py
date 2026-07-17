@@ -680,8 +680,33 @@ def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> d
 
 
 def _market_data_consistency_dimension(market_data_consistency: Mapping[str, Any]) -> dict[str, Any]:
+    """Map broker/local consistency into SLO severity.
+
+    ``alpaca_not_configured`` is an intentional lab gap on research hosts without
+    broker credentials (same posture as missing feed entitlement). Live mode
+    still fails closed as warning/unavailable so promotion cannot ignore it.
+    """
     consistency_status = str(market_data_consistency.get("status", "unknown"))
-    if consistency_status in {"critical", "error", "failed"}:
+    reason = market_data_consistency.get("reason")
+    safe_reason = _safe_reason(reason)
+
+    try:
+        from src.monitor.fred_readiness import resolve_fred_operating_mode
+
+        operating_mode = resolve_fred_operating_mode()
+    except ImportError:
+        operating_mode = "local"
+
+    _LAB_GAP_MODES = {"local", "test", "lab", "paper", "staging", "dev", "development"}
+    intentional_lab_gap = (
+        safe_reason == "alpaca_not_configured"
+        and operating_mode in _LAB_GAP_MODES
+        and consistency_status in {"unavailable", "warning", "degraded"}
+    )
+
+    if intentional_lab_gap:
+        status = "ok"
+    elif consistency_status in {"critical", "error", "failed"}:
         status = "critical"
     elif consistency_status in {"warning", "degraded", "unavailable"}:
         status = "warning"
@@ -694,21 +719,34 @@ def _market_data_consistency_dimension(market_data_consistency: Mapping[str, Any
     warning_rows = [str(item) for item in warnings] if isinstance(warnings, list) else []
     rows = market_data_consistency.get("rows")
     checked_rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
-    reason = market_data_consistency.get("reason")
-    safe_reason = _safe_reason(reason)
-    return {
+
+    if intentional_lab_gap:
+        message = (
+            f"broker consistency check skipped ({safe_reason}) in {operating_mode} mode; "
+            "configure Alpaca before live broker/local parity checks"
+        )
+    elif status == "ok":
+        message = "broker/local market data consistency ok"
+    else:
+        message = (
+            f"broker/local market data consistency {consistency_status}: "
+            f"{safe_reason or 'review required'}"
+        )
+
+    payload: dict[str, Any] = {
         "status": status,
         "consistency_status": consistency_status,
         "reason": safe_reason,
         "checked_at": market_data_consistency.get("checked_at"),
         "row_count": len(checked_rows),
         "warning_count": len(warning_rows),
-        "message": (
-            "broker/local market data consistency ok"
-            if status == "ok"
-            else f"broker/local market data consistency {consistency_status}: {safe_reason or 'review required'}"
-        ),
+        "operating_mode": operating_mode,
+        "message": message,
     }
+    if intentional_lab_gap:
+        payload["intentional_lab_gap"] = True
+        payload["blocking"] = False
+    return payload
 
 
 def _overall_status(dimensions: Mapping[str, Mapping[str, Any]]) -> str:

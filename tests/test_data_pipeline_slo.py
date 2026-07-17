@@ -687,7 +687,11 @@ def test_slo_missing_alpaca_entitlement_is_warning_in_local_lab(
     assert slo["status"] in {"ok", "warning", "degraded", "unknown"}
 
 
-def test_slo_warns_on_unavailable_market_data_consistency() -> None:
+def test_slo_warns_on_unavailable_market_data_consistency_in_live_mode(
+    monkeypatch,
+) -> None:
+    """Live mode still fails closed when broker consistency is unavailable."""
+    monkeypatch.setenv("PORTFOLIO_LAB_MODE", "live")
     slo = build_data_pipeline_slo(
         health_data=_health(),
         source_manifest=_source_manifest(),
@@ -707,6 +711,35 @@ def test_slo_warns_on_unavailable_market_data_consistency() -> None:
     assert slo["dimensions"]["market_data_consistency"]["status"] == "warning"
     assert slo["dimensions"]["market_data_consistency"]["reason"] == "alpaca_not_configured"
     assert slo["runbook"]["top_cause"]["code"] == "market_data_consistency_unavailable"
+
+
+def test_slo_alpaca_not_configured_consistency_is_lab_gap_ok(
+    monkeypatch,
+) -> None:
+    """Research hosts without Alpaca must not top SLO on broker consistency."""
+    monkeypatch.setenv("PORTFOLIO_LAB_MODE", "local")
+    monkeypatch.delenv("CRON_BACKEND", raising=False)
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        market_data_consistency={
+            "status": "unavailable",
+            "reason": "alpaca_not_configured",
+            "checked_at": "2026-06-12T08:43:07.177011+00:00",
+            "rows": [],
+            "warnings": [],
+        },
+    )
+
+    dim = slo["dimensions"]["market_data_consistency"]
+    assert dim["status"] == "ok"
+    assert dim["intentional_lab_gap"] is True
+    assert dim["blocking"] is False
+    assert dim["reason"] == "alpaca_not_configured"
+    assert dim["consistency_status"] == "unavailable"
+    assert slo["top_dimension"] != "market_data_consistency"
 
 
 def test_slo_accepts_live_diagnostics_ok_cases() -> None:
