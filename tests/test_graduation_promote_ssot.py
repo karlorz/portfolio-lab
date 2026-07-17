@@ -67,6 +67,11 @@ def test_no_promote_when_checklist_not_ready(tmp_path: Path) -> None:
     assert conflict.exists()
     body = json.loads(conflict.read_text())
     assert body["graduation_conflict"] is True
+    # Stale candidacy must be tombstoned — no live promote_to_live action
+    promote = json.loads(stale.read_text())
+    assert promote["action"] == "promote_blocked_checklist"
+    assert promote["graduation_conflict"] is True
+    assert promote["action"] != "promote_to_live"
 
 
 def test_no_promote_under_kill_halt(tmp_path: Path) -> None:
@@ -85,6 +90,46 @@ def test_no_promote_under_kill_halt(tmp_path: Path) -> None:
     path = checklist.write_promote_to_live_if_ready(results, data_dir=tmp_path)
     assert path is None
     assert not (tmp_path / ".promote_to_live").exists()
+
+
+def test_stale_promote_invalidated_under_kill_halt(tmp_path: Path) -> None:
+    """Existing candidacy must not survive kill halt as action promote_to_live."""
+    (tmp_path / "kill_switch.json").write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "level": "halt",
+                "reason": "unresolved_incident:signal_staleness",
+                "source": "incident_lifecycle",
+                "incident_id": "inc-1",
+                "mode": "paper",
+            }
+        )
+    )
+    stale = tmp_path / ".promote_to_live"
+    stale.write_text(
+        json.dumps(
+            {
+                "action": "promote_to_live",
+                "source": "graduation_checklist",
+                "requires_approval": True,
+                "metrics": {"sharpe": 0.86},
+                "timestamp": "2026-07-15T02:31:12",
+            }
+        )
+    )
+    checklist = GraduationChecklist()
+    path = checklist.write_promote_to_live_if_ready(_results(ready=True), data_dir=tmp_path)
+    assert path is None
+    promote = json.loads(stale.read_text())
+    assert promote["action"] == "promote_blocked_kill"
+    assert promote["graduation_conflict"] is True
+    assert "halt" in str(promote.get("kill_level") or promote.get("reason") or "").lower() or (
+        promote.get("reason") == "kill_authority"
+    )
+    conflict = tmp_path / ".graduation_conflict.json"
+    assert conflict.exists()
+    assert json.loads(conflict.read_text())["action"] == "promote_blocked_kill"
 
 
 def test_evaluator_does_not_write_promote_from_metric_only_gates(

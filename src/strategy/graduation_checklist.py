@@ -20,7 +20,7 @@ import sys
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, NamedTuple
+from typing import Any, Dict, Optional, NamedTuple
 
 import numpy as np
 
@@ -244,6 +244,50 @@ class GraduationChecklist:
         save_results_json(report, output_path=str(path))
         return path
 
+    def _tombstone_stale_promote(
+        self,
+        root: Path,
+        *,
+        action: str,
+        reason: str,
+        extra: Optional[Dict[str, Any]] = None,
+        readiness_score: Optional[float] = None,
+    ) -> None:
+        """Rewrite candidacy marker so no file claims action promote_to_live.
+
+        Writes the same tombstone to ``.promote_to_live`` (when present or
+        always for kill) and ``.graduation_conflict.json`` for operator SSOT.
+        """
+        tombstone: Dict[str, Any] = {
+            "graduation_conflict": True,
+            "action": action,
+            "reason": reason,
+            "is_graduation_ready": False,
+            "timestamp": datetime.now().isoformat(),
+            "source": "graduation_checklist",
+            "requires_approval": True,
+        }
+        if readiness_score is not None:
+            tombstone["readiness_score"] = readiness_score
+        if extra:
+            tombstone.update(extra)
+
+        promote_path = root / ".promote_to_live"
+        # Always rewrite if a candidacy file exists, or under kill block even if
+        # missing (no-op create only when prior candidacy existed — kill path
+        # only tombstones when file present so we do not invent markers).
+        if promote_path.exists():
+            try:
+                prior = json.loads(promote_path.read_text(encoding="utf-8"))
+                if isinstance(prior, dict) and prior.get("metrics") is not None:
+                    tombstone.setdefault("prior_metrics", prior.get("metrics"))
+            except (OSError, json.JSONDecodeError, TypeError, UnicodeDecodeError):
+                pass
+            save_results_json(tombstone, output_path=str(promote_path))
+
+        conflict_path = root / ".graduation_conflict.json"
+        save_results_json(tombstone, output_path=str(conflict_path))
+
     def write_promote_to_live_if_ready(
         self,
         results: Optional[Dict[str, CheckResult]] = None,
@@ -258,21 +302,51 @@ class GraduationChecklist:
 
         Manual approval remains a separate human gate; this marker means
         *checklist-ready candidate*, not auto-live.
+
+        When blocked (kill or checklist fail), any existing ``action:
+        promote_to_live`` candidacy is tombstoned so operators never see a
+        live promote claim under halt / not-ready.
         """
         root = Path(data_dir) if data_dir is not None else DATA_DIR
         if results is None:
             results = self.check()
 
         # Kill authority blocks promote writes (same SSOT as evaluator / order_router)
+        kill_payload: Optional[Dict[str, Any]] = None
         try:
             from src.dashboard.kill_authority import (
                 is_kill_execution_blocked,
                 load_kill_switch_payload,
             )
 
-            if is_kill_execution_blocked(load_kill_switch_payload(root)):
+            kill_payload = load_kill_switch_payload(root)
+            if is_kill_execution_blocked(kill_payload):
+                level = None
+                if isinstance(kill_payload, dict):
+                    level = kill_payload.get("level")
+                self._tombstone_stale_promote(
+                    root,
+                    action="promote_blocked_kill",
+                    reason="kill_authority",
+                    extra={
+                        "kill_level": level,
+                        "kill_reason": (
+                            kill_payload.get("reason")
+                            if isinstance(kill_payload, dict)
+                            else None
+                        ),
+                        "kill_incident_id": (
+                            kill_payload.get("incident_id")
+                            if isinstance(kill_payload, dict)
+                            else None
+                        ),
+                    },
+                    readiness_score=self.readiness_score(results),
+                )
                 logger.info(
-                    "Promote write blocked by kill authority — skipping .promote_to_live"
+                    "Promote blocked by kill authority — tombstoned stale candidacy "
+                    "(level=%s)",
+                    level,
                 )
                 return None
         except ImportError:
@@ -281,8 +355,18 @@ class GraduationChecklist:
                 try:
                     payload = json.loads(kill_file.read_text(encoding="utf-8"))
                     if isinstance(payload, dict) and payload.get("enabled"):
+                        self._tombstone_stale_promote(
+                            root,
+                            action="promote_blocked_kill",
+                            reason="kill_authority",
+                            extra={
+                                "kill_level": payload.get("level"),
+                                "kill_reason": payload.get("reason"),
+                            },
+                            readiness_score=self.readiness_score(results),
+                        )
                         logger.info(
-                            "Promote write blocked by kill authority — skipping .promote_to_live"
+                            "Promote blocked by kill authority — tombstoned stale candidacy"
                         )
                         return None
                 except (OSError, json.JSONDecodeError, TypeError):
@@ -291,23 +375,18 @@ class GraduationChecklist:
 
         ready = self.is_graduation_ready(results)
         if not ready and not force:
-            # Fail-closed: remove stale promote markers that disagree with checklist
+            # Fail-closed: tombstone stale promote markers that disagree with checklist
             stale = root / ".promote_to_live"
             if stale.exists():
-                conflict = {
-                    "graduation_conflict": True,
-                    "action": "promote_blocked_checklist",
-                    "reason": "checklist_not_ready",
-                    "is_graduation_ready": False,
-                    "readiness_score": self.readiness_score(results),
-                    "timestamp": datetime.now().isoformat(),
-                    "source": "graduation_checklist",
-                }
-                conflict_path = root / ".graduation_conflict.json"
-                save_results_json(conflict, output_path=str(conflict_path))
+                self._tombstone_stale_promote(
+                    root,
+                    action="promote_blocked_checklist",
+                    reason="checklist_not_ready",
+                    readiness_score=self.readiness_score(results),
+                )
                 logger.info(
-                    "Checklist not ready — wrote graduation_conflict and left promote "
-                    "decision to human (stale marker not auto-deleted)"
+                    "Checklist not ready — tombstoned stale promote candidacy "
+                    "(action=promote_blocked_checklist)"
                 )
             return None
 
