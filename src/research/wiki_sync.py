@@ -370,6 +370,14 @@ Based on recent regime patterns:
         # Write to app-level DATA_DIR, not wiki vault
         page_path = DATA_DIR / f"paper-trading-performance-{timestamp}.json"
 
+        generator_git_sha = None
+        try:
+            from src.monitor.decision_registry import _git_sha_short
+
+            generator_git_sha = _git_sha_short()
+        except Exception:
+            generator_git_sha = None
+
         summary = {
             "date": timestamp,
             "performance": {
@@ -391,6 +399,8 @@ Based on recent regime patterns:
             ),
             "raw_entries_count": len(entries),
             "phantom_cash_days_dropped": phantom_days_dropped,
+            "generator_git_sha": generator_git_sha,
+            "schema_version": "paper-trading-performance/v2",
         }
 
         save_results_json(summary, output_path=str(page_path))

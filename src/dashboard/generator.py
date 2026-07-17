@@ -220,12 +220,25 @@ def _attach_signal_metadata(output: Dict, *, generated_at: str | None = None) ->
     return enriched
 
 
+def _generator_git_sha_short() -> str | None:
+    """Short HEAD for operator lag detection (code vs projected artifact)."""
+    try:
+        from src.monitor.decision_registry import _git_sha_short
+
+        return _git_sha_short()
+    except Exception:
+        return None
+
+
 def _finalize_signal_metadata(output: Dict, *, finalized_at: str | None = None) -> Dict:
     """Stamp final artifact metadata after all signal sections are assembled."""
     timestamp = finalized_at or datetime.now(timezone.utc).isoformat()
     finalized = dict(output)
     finalized["generated_at"] = timestamp
     finalized["timestamp"] = timestamp
+    sha = _generator_git_sha_short()
+    if sha:
+        finalized["generator_git_sha"] = sha
     return finalized
 
 

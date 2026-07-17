@@ -1,3 +1,4 @@
+from pathlib import Path
 from src.dashboard.generator import _attach_signal_metadata, _compact_health_summary
 
 
@@ -52,3 +53,25 @@ def test_compact_health_summary_preserves_error_without_full_payload():
         "status": "error",
         "error": "health subsystem unavailable",
     }
+
+def test_finalize_signal_metadata_stamps_generator_git_sha(monkeypatch):
+    from src.dashboard import generator as gen
+
+    monkeypatch.setattr(gen, "_generator_git_sha_short", lambda: "abc1234dead")
+    out = gen._finalize_signal_metadata({"target_allocations": {"SPY": 0.46}})
+    assert out["generator_git_sha"] == "abc1234dead"
+    assert "generated_at" in out
+    assert "timestamp" in out
+
+
+def test_ops_regen_makefile_target_exists():
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+    assert "ops-regen:" in makefile
+    assert "make ops-regen" in makefile or "ops-regen" in makefile
+    assert "wiki-sync" in makefile
+    # target should invoke dashboard, wiki-sync, health
+    assert "ops-regen" in makefile
+    body = makefile.split("ops-regen:")[1].split("# ──")[0]
+    assert "dashboard" in body
+    assert "wiki-sync" in body
+    assert "health" in body

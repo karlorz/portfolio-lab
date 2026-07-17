@@ -50,6 +50,7 @@ help:
 	@echo "  make dashboard    Regenerate dashboard JSON files"
 	@echo "  make health       Generate public/data/health.json system health monitor"
 	@echo "  make rebalance-health  Generate public/data/rebalance_health.json diagnostics"
+	@echo "  make ops-regen    Post-merge operator refresh: dashboard + wiki-sync + health"
 	@echo "  make eval         Run strategy evaluator (paper trading)"
 	@echo "  make research     Run research agent + regime analysis"
 	@echo "  make wiki-sync    Sync research findings to wiki vault"
@@ -323,6 +324,24 @@ wiki-sync:
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR; \
 	exit $$EXIT
+
+# ── Post-merge operator artifact regen ────────────────────────────────
+# After kill-authority / dashboard projection / graduation / wiki-sync code
+# lands, scheduled crons can lag 15–120m. Run this before treating the fix
+# as live on WWW/operators:
+#   make ops-regen
+# Paths that need regen:
+#   - src/dashboard/**, kill projection → dashboard (+ health)
+#   - src/research/wiki_sync.py, graduation SSOT → wiki-sync
+#   - src/monitor/health_check.py → health
+.PHONY: ops-regen
+ops-regen:
+	@echo "=== Ops regen (post-merge operator surfaces): $$(date) ==="
+	@$(MAKE) --no-print-directory dashboard
+	@$(MAKE) --no-print-directory wiki-sync
+	@$(MAKE) --no-print-directory health
+	@echo "=== Ops regen complete: $$(date) ==="
+	@echo "Verify: PUBLIC_DATA_DIR signals.json generator_git_sha matches git rev-parse --short HEAD"
 
 # ── App Build ────────────────────────────────────────────────────────
 
