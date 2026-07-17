@@ -11,7 +11,10 @@ Usage::
 Environment variables
 ---------------------
 HEALTH_CHECK_PATH : str
-    Output path for health.json (default: DATA_DIR/health.json)
+    Output path for monitor health.json (default: DATA_DIR/health.json)
+HEALTH_OPS_PATH : str
+    Optional explicit path for PUBLIC health_ops.json (default:
+    PUBLIC_DATA_DIR/health_ops.json)
 """
 
 import json
@@ -32,11 +35,111 @@ from src.monitor.hermes_cron import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_health_check", "check_scheduler_drift"]
+__all__ = ["run_health_check", "check_scheduler_drift", "publish_ops_health_surfaces"]
 
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
 _DEFAULT_DATA_DIR = DATA_DIR
 SCHEDULER_DRIFT_THRESHOLD = 2
+
+
+def health_ops_path() -> Path:
+    """Operator-facing monitor health under PUBLIC_DATA_DIR (dual-doc SSOT)."""
+    override = os.environ.get("HEALTH_OPS_PATH")
+    if override and override.strip():
+        return Path(override.strip())
+    return Path(PUBLIC_DATA_DIR) / "health_ops.json"
+
+
+def _project_public_kill_fields(report: dict[str, Any]) -> dict[str, Any]:
+    """Map monitor report kill/open-incident checks into dashboard-shaped fields."""
+    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
+    kill = checks.get("kill_switch") if isinstance(checks.get("kill_switch"), dict) else {}
+    open_inc = (
+        checks.get("open_incidents")
+        if isinstance(checks.get("open_incidents"), dict)
+        else {}
+    )
+    status = str(report.get("status") or "ok")
+    return {
+        "kill_switch": kill,
+        "open_incidents": open_inc,
+        "ops_health_status": status,
+        "ops_health_timestamp": report.get("timestamp"),
+        "ops_health_scope": report.get("scope") or "operational_readiness",
+    }
+
+
+def _elevate_public_system_status(current: Any, ops_status: str) -> str:
+    """Raise dashboard system_status when ops monitor is more severe."""
+    rank = {
+        "healthy": 0,
+        "ok": 0,
+        "warning": 1,
+        "degraded": 2,
+        "critical": 3,
+        "error": 3,
+    }
+    cur = str(current or "healthy")
+    target = max(rank.get(cur, 0), rank.get(ops_status, 0))
+    for name, value in rank.items():
+        if value == target and name not in {"ok", "error"}:
+            return name
+    if target >= 3:
+        return "critical"
+    if target >= 2:
+        return "degraded"
+    if target >= 1:
+        return "warning"
+    return cur if cur else "healthy"
+
+
+def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
+    """Write monitor health to PUBLIC_DATA_DIR and merge kill into public health.json.
+
+    Dual-path honesty:
+    - Always write ``health_ops.json`` (monitor schema) under PUBLIC_DATA_DIR.
+    - If dashboard ``health.json`` already exists, merge kill_switch /
+      open_incidents / elevated system_status so operators see halt without
+      waiting for the dashboard generator cycle.
+    """
+    projected = _project_public_kill_fields(report)
+    ops_path = health_ops_path()
+    try:
+        ops_path.parent.mkdir(parents=True, exist_ok=True)
+        ops_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        logger.info("Ops health written to %s", ops_path)
+    except OSError as exc:
+        logger.warning("Failed to write ops health at %s: %s", ops_path, exc)
+
+    public_health = Path(PUBLIC_DATA_DIR) / "health.json"
+    if not public_health.exists():
+        return
+    try:
+        payload = json.loads(public_health.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning("Public health.json unreadable; skip merge: %s", exc)
+        return
+    if not isinstance(payload, dict):
+        return
+
+    # Do not replace full dashboard schema; merge authority dimensions only.
+    if isinstance(projected.get("kill_switch"), dict) and projected["kill_switch"]:
+        payload["kill_switch"] = projected["kill_switch"]
+    if isinstance(projected.get("open_incidents"), dict) and projected["open_incidents"]:
+        payload["open_incidents"] = projected["open_incidents"]
+    ops_status = str(projected.get("ops_health_status") or report.get("status") or "ok")
+    if "system_status" in payload:
+        payload["system_status"] = _elevate_public_system_status(
+            payload.get("system_status"), ops_status
+        )
+    payload["ops_health_status"] = ops_status
+    payload["ops_health_timestamp"] = projected.get("ops_health_timestamp")
+    payload["ops_health_source"] = "monitor.health_check"
+    try:
+        public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.info("Merged ops kill authority into %s", public_health)
+    except OSError as exc:
+        logger.warning("Failed to merge ops health into %s: %s", public_health, exc)
 
 
 def _should_include_hermes_audit(local_backend: dict) -> bool:
@@ -444,6 +547,13 @@ def run_health_check() -> dict:
         logger.info("Health check: %s (written to %s)", system_status, HEALTH_PATH)
     except OSError as e:
         logger.error("Failed to write health check: %s", e)
+
+    # Dual-path: also publish to PUBLIC_DATA_DIR so operator WWW is not stuck on
+    # a stale dashboard health.json timestamp for kill authority.
+    try:
+        publish_ops_health_surfaces(report)
+    except Exception as exc:  # noqa: BLE001 — never fail health job on public side publish
+        logger.warning("Ops health surface publish failed: %s", exc)
 
     return report
 

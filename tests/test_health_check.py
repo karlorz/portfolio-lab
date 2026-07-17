@@ -382,6 +382,7 @@ class TestRunHealthCheck:
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
         health_path = tmp_path / "health.json"
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", health_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path / "public")
 
         (tmp_path / "prices.json").write_text("{}")
         (tmp_path / "signals.json").write_text("{}")
@@ -391,6 +392,86 @@ class TestRunHealthCheck:
         assert health_path.exists()
         data = json.loads(health_path.read_text())
         assert "status" in data
+
+    def test_publishes_health_ops_under_public_data_dir(self, tmp_path, monkeypatch):
+        """Monitor report is dual-written to PUBLIC_DATA_DIR/health_ops.json."""
+        public = tmp_path / "public"
+        public.mkdir()
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
+        monkeypatch.setattr(
+            "src.monitor.health_check._check_fred_md_cache",
+            lambda: {"status": "ok", "row_count": 1, "latest_fetched_at": "2026-06-11T00:00:00+00:00"},
+        )
+        (tmp_path / "prices.json").write_text("{}")
+        (tmp_path / "signals.json").write_text("{}")
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+        (tmp_path / "kill_switch.json").write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "level": "halt",
+                    "reason": "unresolved_incident:signal_staleness",
+                    "source": "incident_lifecycle",
+                    "message": "optional unavailable",
+                }
+            )
+        )
+
+        run_health_check()
+        ops = public / "health_ops.json"
+        assert ops.exists()
+        body = json.loads(ops.read_text())
+        assert body["checks"]["kill_switch"]["enabled"] is True
+        assert body["scope"] == "operational_readiness"
+
+    def test_merges_kill_into_existing_public_dashboard_health(self, tmp_path, monkeypatch):
+        """Dashboard health.json must reflect kill halt after health cron."""
+        public = tmp_path / "public"
+        public.mkdir()
+        (public / "health.json").write_text(
+            json.dumps(
+                {
+                    "system_status": "healthy",
+                    "generated_at": "2026-07-01T00:00:00",
+                    "kill_switch": {"enabled": False, "status": "ok"},
+                    "cron_jobs": [],
+                }
+            )
+        )
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
+        monkeypatch.setattr(
+            "src.monitor.health_check._check_fred_md_cache",
+            lambda: {"status": "ok", "row_count": 1, "latest_fetched_at": "2026-06-11T00:00:00+00:00"},
+        )
+        (tmp_path / "prices.json").write_text("{}")
+        (tmp_path / "signals.json").write_text("{}")
+        (tmp_path / "cron_status.json").write_text('{"jobs": []}')
+        (tmp_path / "kill_switch.json").write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "level": "halt",
+                    "reason": "unresolved_incident:signal_staleness",
+                    "source": "incident_lifecycle",
+                    "incident_id": "inc-1",
+                    "message": "halt active",
+                }
+            )
+        )
+
+        run_health_check()
+        public_health = json.loads((public / "health.json").read_text())
+        assert public_health["kill_switch"]["enabled"] is True
+        assert public_health["kill_switch"]["level"] == "halt"
+        assert public_health["system_status"] == "critical"
+        assert public_health["ops_health_source"] == "monitor.health_check"
+        # Dashboard-only fields preserved
+        assert public_health["cron_jobs"] == []
+        assert "generated_at" in public_health
 
     def test_fred_readiness_reports_live_failure_without_leaking_secret(self, tmp_path, monkeypatch):
         """Live health should fail readiness when FRED is synthetic without exposing key values."""
