@@ -175,6 +175,72 @@ def _clear_price_cache():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Live performance.jsonl hermeticity (paper-trading host safety)
+# ═══════════════════════════════════════════════════════════════════════════
+# Evaluator PERFORMANCE_LOG / ORDERS_LOG resolve from evaluator.DATA_DIR at use
+# time. Tests that forget to patch DATA_DIR would still append phantom cash
+# rows to the live paper journal on this host. Isolate by default + guard hash.
+
+from pathlib import Path
+import hashlib
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_LIVE_PERFORMANCE_JSONL = _PROJECT_ROOT / "data" / "performance.jsonl"
+
+
+def _fingerprint_file(path: Path):
+    """Return (sha256, size, mtime_ns) or None if missing."""
+    if not path.exists():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    stat = path.stat()
+    return (digest.hexdigest(), stat.st_size, stat.st_mtime_ns)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _guard_live_performance_jsonl():
+    """Fail the session if live data/performance.jsonl is modified by tests."""
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PERF_WRITES", "0") == "1":
+        yield
+        return
+    before = _fingerprint_file(_LIVE_PERFORMANCE_JSONL)
+    yield
+    after = _fingerprint_file(_LIVE_PERFORMANCE_JSONL)
+    if before != after:
+        pytest.fail(
+            f"Live {_LIVE_PERFORMANCE_JSONL} changed during pytest "
+            f"(before={before}, after={after}). Isolate "
+            "src.strategy.evaluator.DATA_DIR (autouse) or mark tests "
+            "allow_live_data only when intentional. Set "
+            "PORTFOLIO_LAB_ALLOW_LIVE_PERF_WRITES=1 to bypass."
+        )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_evaluator_data_dir(request, tmp_path, monkeypatch):
+    """Point evaluator DATA_DIR at tmp so PERFORMANCE_LOG/ORDERS_LOG stay hermetic.
+
+    Opt out with @pytest.mark.allow_live_data when a test must touch live paths.
+    """
+    if request.node.get_closest_marker("allow_live_data"):
+        yield
+        return
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PERF_WRITES", "0") == "1":
+        yield
+        return
+    try:
+        import src.strategy.evaluator as ev
+    except Exception:
+        yield
+        return
+    monkeypatch.setattr(ev, "DATA_DIR", tmp_path, raising=False)
+    yield
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # pytest hooks
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -204,6 +270,11 @@ def pytest_configure(config):
         "markers",
         "ml_extract: safe-mode tests for extracted pure ML-adjacent kernels; "
         "must run with PORTFOLIO_LAB_ENABLE_ML=0 and without heavy ML imports",
+    )
+    config.addinivalue_line(
+        "markers",
+        "allow_live_data: allow test to use live repo data/ paths "
+        "(disables evaluator DATA_DIR isolation)",
     )
 
 

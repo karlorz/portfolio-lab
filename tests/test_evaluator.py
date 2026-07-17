@@ -621,18 +621,22 @@ class TestDeduplicateToDaily:
 class TestConstantsExtended:
 
     def test_orders_log_path(self):
-        from src.paths import DATA_DIR
-        assert ORDERS_LOG == DATA_DIR / "orders.jsonl"
+        import src.strategy.evaluator as ev
+
+        # Resolve against evaluator.DATA_DIR (may be tmp under suite isolation).
+        assert ORDERS_LOG == Path(ev.DATA_DIR) / "orders.jsonl"
 
     def test_performance_log_path(self):
-        from src.paths import DATA_DIR
-        assert PERFORMANCE_LOG == DATA_DIR / "performance.jsonl"
+        import src.strategy.evaluator as ev
+
+        assert PERFORMANCE_LOG == Path(ev.DATA_DIR) / "performance.jsonl"
 
     def test_performance_log_follows_data_dir_patch(self, tmp_path):
         """Patching DATA_DIR alone must redirect log appends (no live contamination)."""
         import src.strategy.evaluator as ev
+        from src.paths import DATA_DIR as LIVE_DATA_DIR
 
-        live_log = Path(ev.DATA_DIR) / "performance.jsonl"
+        live_log = Path(LIVE_DATA_DIR) / "performance.jsonl"
         before = live_log.read_bytes() if live_log.exists() else None
         before_mtime = live_log.stat().st_mtime_ns if live_log.exists() else None
 
