@@ -60,8 +60,51 @@ def _resolve_target_allocation(regime: str | None) -> Dict[str, float]:
 
 # Config
 DB_PATH = MARKET_DB
-ORDERS_LOG = DATA_DIR / "orders.jsonl"
-PERFORMANCE_LOG = DATA_DIR / "performance.jsonl"
+
+
+class _DataDirLogPath:
+    """Path-like log location resolved from live ``DATA_DIR`` at use time.
+
+    Import-time ``DATA_DIR / "performance.jsonl"`` freezes the path, so tests
+    that only patch ``DATA_DIR`` still append to live ``data/performance.jsonl``
+    (phantom cash-only rows). This proxy always re-derives from ``DATA_DIR``.
+    """
+
+    __slots__ = ("_name",)
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def _path(self) -> Path:
+        return Path(DATA_DIR) / self._name
+
+    def __fspath__(self) -> str:
+        return str(self._path())
+
+    def __str__(self) -> str:
+        return str(self._path())
+
+    def __repr__(self) -> str:
+        return f"_DataDirLogPath({self._name!r} -> {self._path()!s})"
+
+    def __eq__(self, other: object) -> bool:
+        try:
+            return self._path() == Path(other)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._name)
+
+    def exists(self) -> bool:
+        return self._path().exists()
+
+    def open(self, *args, **kwargs):
+        return self._path().open(*args, **kwargs)
+
+
+ORDERS_LOG = _DataDirLogPath("orders.jsonl")
+PERFORMANCE_LOG = _DataDirLogPath("performance.jsonl")
 
 # Max entries retained in performance log (~80 trading days at ~62/day).
 # Well above the 63-day graduation window (2× headroom).

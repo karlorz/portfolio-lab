@@ -628,6 +628,28 @@ class TestConstantsExtended:
         from src.paths import DATA_DIR
         assert PERFORMANCE_LOG == DATA_DIR / "performance.jsonl"
 
+    def test_performance_log_follows_data_dir_patch(self, tmp_path):
+        """Patching DATA_DIR alone must redirect log appends (no live contamination)."""
+        import src.strategy.evaluator as ev
+
+        live_log = Path(ev.DATA_DIR) / "performance.jsonl"
+        before = live_log.read_bytes() if live_log.exists() else None
+        before_mtime = live_log.stat().st_mtime_ns if live_log.exists() else None
+
+        with patch.object(ev, "DATA_DIR", tmp_path):
+            assert ev.PERFORMANCE_LOG == tmp_path / "performance.jsonl"
+            assert ev.ORDERS_LOG == tmp_path / "orders.jsonl"
+            with open(ev.PERFORMANCE_LOG, "a") as f:
+                f.write('{"total_value": 100000, "positions": 0, "test": true}\n')
+            assert (tmp_path / "performance.jsonl").exists()
+            assert b"test" in (tmp_path / "performance.jsonl").read_bytes()
+
+        if before is None:
+            assert not live_log.exists() or live_log.stat().st_size == 0
+        else:
+            assert live_log.read_bytes() == before
+            assert live_log.stat().st_mtime_ns == before_mtime
+
     def test_paper_config_bounds(self):
         assert 50000 <= PAPER_CONFIG["initial_capital"] <= 500000
         assert 0 < PAPER_CONFIG["max_position_pct"] <= 1.0
