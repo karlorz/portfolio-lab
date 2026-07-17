@@ -169,8 +169,8 @@ class TestCheckDataFreshness:
     def test_scheduler_drift_single_mismatch_warns_without_alert(self, tmp_path):
         """One backend disagreement should persist drift state without paging yet."""
         backends = {
-            "tasker": {"status": "ok", "backend": "tasker"},
-            "hermes": {"status": "error", "backend": "hermes"},
+            "tasker": {"status": "ok", "backend": "tasker", "total_jobs": 10},
+            "hermes": {"status": "error", "backend": "hermes", "total_jobs": 2},
         }
 
         with patch("src.monitor.health_check.send_alert") as mock_send:
@@ -190,8 +190,8 @@ class TestCheckDataFreshness:
         """Two consecutive backend disagreements should fire a CRON_FAILURE HALT."""
         state_path = tmp_path / "scheduler_drift_state.json"
         backends = {
-            "tasker": {"status": "ok", "backend": "tasker"},
-            "hermes": {"status": "degraded", "backend": "hermes"},
+            "tasker": {"status": "ok", "backend": "tasker", "total_jobs": 10},
+            "hermes": {"status": "degraded", "backend": "hermes", "total_jobs": 2},
         }
 
         check_scheduler_drift(backends, state_path=state_path)
@@ -214,12 +214,12 @@ class TestCheckDataFreshness:
         """Resolved backend disagreement should reset count and close the incident."""
         state_path = tmp_path / "scheduler_drift_state.json"
         mismatch = {
-            "tasker": {"status": "ok", "backend": "tasker"},
-            "hermes": {"status": "error", "backend": "hermes"},
+            "tasker": {"status": "ok", "backend": "tasker", "total_jobs": 10},
+            "hermes": {"status": "error", "backend": "hermes", "total_jobs": 3},
         }
         recovered = {
-            "tasker": {"status": "ok", "backend": "tasker"},
-            "hermes": {"status": "ok", "backend": "hermes"},
+            "tasker": {"status": "ok", "backend": "tasker", "total_jobs": 10},
+            "hermes": {"status": "ok", "backend": "hermes", "total_jobs": 3},
         }
 
         check_scheduler_drift(mismatch, state_path=state_path)
@@ -233,6 +233,34 @@ class TestCheckDataFreshness:
         assert mock_send.call_args.args[0] == AlertChannel.CRON_FAILURE
         assert mock_send.call_args.args[1] == AlertLevel.PASS
         assert "Scheduler backends agree" in mock_send.call_args.args[2]
+
+    def test_scheduler_drift_ignores_empty_idle_backend(self, tmp_path):
+        """tasker=degraded + hermes=ok with zero jobs is not dual-backend drift."""
+        backends = {
+            "tasker": {
+                "status": "degraded",
+                "backend": "tasker",
+                "total_jobs": 16,
+                "failed_jobs": 3,
+            },
+            "hermes": {
+                "status": "ok",
+                "backend": "hermes",
+                "total_jobs": 0,
+                "failed_jobs": 0,
+            },
+        }
+        state_path = tmp_path / "scheduler_drift_state.json"
+        with patch("src.monitor.health_check.send_alert") as mock_send:
+            first = check_scheduler_drift(backends, state_path=state_path)
+            second = check_scheduler_drift(backends, state_path=state_path)
+
+        assert first["mismatch"] is False
+        assert first["status"] == "ok"
+        assert second["status"] == "ok"
+        assert second["consecutive_mismatches"] == 0
+        assert first["compared_backend_statuses"] == {"tasker": "degraded"}
+        mock_send.assert_not_called()
 
     def test_data_freshness_includes_scheduler_drift_summary(self, tmp_path, monkeypatch):
         """Cron health output should expose scheduler drift metadata for dashboards."""

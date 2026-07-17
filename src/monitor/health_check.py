@@ -179,6 +179,25 @@ def _save_scheduler_drift_state(path: Path, state: dict[str, Any]) -> None:
         logger.warning("Failed to write scheduler drift state: %s", exc)
 
 
+def _backend_participates_in_drift(backend: dict[str, Any]) -> bool:
+    """Return True when a backend should count toward multi-backend drift.
+
+    Idle empty schedulers (e.g. Hermes with zero portfolio-lab jobs after
+    migration to tasker) report status=ok while the active backend may be
+    degraded due to failed jobs. That is job-health noise, not dual-backend
+    schedule drift — exclude zero-job backends from the comparison set.
+    """
+    try:
+        total_jobs = int(backend.get("total_jobs") or 0)
+    except (TypeError, ValueError):
+        total_jobs = 0
+    if total_jobs > 0:
+        return True
+    # Non-empty backends with explicit error still participate (misconfig).
+    status = str(backend.get("status", "unknown")).lower()
+    return status in {"error", "unavailable"} and bool(backend.get("reason"))
+
+
 def check_scheduler_drift(
     backends: dict[str, dict[str, Any]],
     *,
@@ -192,7 +211,13 @@ def check_scheduler_drift(
         for name, backend in backends.items()
         if isinstance(backend, dict)
     }
-    mismatch = len(backend_statuses) >= 2 and len(set(backend_statuses.values())) > 1
+    compared_statuses = {
+        str(name): str(backend.get("status", "unknown"))
+        for name, backend in backends.items()
+        if isinstance(backend, dict) and _backend_participates_in_drift(backend)
+    }
+    # Drift requires ≥2 active/participating backends with disagreeing status.
+    mismatch = len(compared_statuses) >= 2 and len(set(compared_statuses.values())) > 1
     previous_state = _load_scheduler_drift_state(path)
     previous_count = int(previous_state.get("consecutive_mismatches") or 0)
     consecutive_mismatches = previous_count + 1 if mismatch else 0
@@ -203,6 +228,7 @@ def check_scheduler_drift(
         "consecutive_mismatches": consecutive_mismatches,
         "threshold": threshold,
         "backend_statuses": backend_statuses,
+        "compared_backend_statuses": compared_statuses,
     }
 
     if mismatch and consecutive_mismatches >= threshold:
