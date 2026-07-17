@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
 /**
  * Fetch market data from Yahoo Finance + FRED.
- * Saves prices.json, prices_compact.json, and yields.json to public/data/.
+ * Saves prices.json, prices_compact.json, and yields.json under PUBLIC_DATA_DIR
+ * (default: repo public/data; tasker sets /var/www/portfolio-lab/data).
  *
  * Usage: bun run fetch-data
+ *        PUBLIC_DATA_DIR=/var/www/portfolio-lab/data bun run fetch-data
  */
 
 import {
@@ -24,16 +26,40 @@ import {
   buildPriceDataQualityReport,
   type PriceDataQualityReport,
 } from '../src/data/price_quality';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from 'fs';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
-const DATA_DIR = join(import.meta.dir, '..', 'public', 'data');
 const PYTHON_RUNTIME = join(PROJECT_ROOT, 'scripts', 'python_runtime.sh');
 const FRED_CACHE_PATH = join(PROJECT_ROOT, 'data', 'fred_series_cache.json');
 const START_DATE = '2005-01-01';
 const END_DATE = new Date().toISOString().split('T')[0];
 let atomicWriteCounter = 0;
+
+/**
+ * Resolve the public data write/read root for the data job.
+ *
+ * Tasker / live ops set PUBLIC_DATA_DIR=/var/www/portfolio-lab/data.
+ * Offline and bare `bun scripts/fetch-data.ts` default to repo public/data.
+ *
+ * Inject `env` / `projectRoot` in tests; production uses process.env + PROJECT_ROOT.
+ * `path.resolve(projectRoot, configured)` already returns absolute configured paths as-is.
+ */
+export function resolvePublicDataDir(options?: {
+  env?: Record<string, string | undefined>;
+  projectRoot?: string;
+}): string {
+  const env = options?.env ?? process.env;
+  const projectRoot = options?.projectRoot ?? PROJECT_ROOT;
+  const configured = env.PUBLIC_DATA_DIR?.trim();
+  if (configured) {
+    return resolve(projectRoot, configured);
+  }
+  return join(projectRoot, 'public', 'data');
+}
+
+/** Mutable for tests; production main() uses resolvePublicDataDir() once. */
+export let DATA_DIR = resolvePublicDataDir();
 
 export async function writeJsonAtomic(path: string, payload: unknown): Promise<void> {
   const tmpPath = `${path}.${process.pid}.${Date.now()}.${atomicWriteCounter++}.tmp`;
@@ -272,6 +298,10 @@ export async function runDashboardGeneration(
 
 export async function main() {
   console.log('=== Portfolio-Lab Data Fetcher ===\n');
+
+  // Re-resolve at entry so tasker/env changes after import still apply.
+  DATA_DIR = resolvePublicDataDir();
+  console.log(`Public data dir: ${DATA_DIR}`);
 
   if (!existsSync(DATA_DIR)) {
     mkdirSync(DATA_DIR, { recursive: true });
