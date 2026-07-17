@@ -123,8 +123,11 @@ def test_slo_advisory_only_data_quality_warn_is_ok_not_top() -> None:
     assert dim["top_issue"] == "internal_gaps"
     assert dim["affected_issue_count"] == 1
     assert slo["top_dimension"] != "data_quality"
-    # Runbook still documents the advisory.
-    assert slo["runbook"]["top_cause"]["code"] == "price_quality_internal_gaps"
+    # Advisory hints stay in actions but must not be top_cause when severity is ok.
+    assert slo["runbook"]["top_cause"] is None
+    assert any(
+        a.get("code") == "price_quality_internal_gaps" for a in (slo["runbook"].get("actions") or [])
+    )
 
 
 def test_slo_warns_on_data_quality_anomalous_returns_with_blocking_context() -> None:
@@ -180,17 +183,18 @@ def test_slo_warns_when_data_quality_report_is_missing() -> None:
 
 
 @pytest.mark.parametrize(
-    ("issue_counts", "expected_code", "expected_action"),
+    ("issue_counts", "expected_code", "expected_action", "expect_top"),
     [
-        ({"stale_latest_dates": 2}, "price_quality_stale_cross_section", "stale cross-section"),
-        ({"internal_gaps": 3}, "price_quality_internal_gaps", "missing trading dates"),
-        ({"extreme_returns": 1}, "price_quality_anomalous_returns", "split-like or extreme return"),
+        ({"stale_latest_dates": 2}, "price_quality_stale_cross_section", "stale cross-section", True),
+        ({"internal_gaps": 3}, "price_quality_internal_gaps", "missing trading dates", False),
+        ({"extreme_returns": 1}, "price_quality_anomalous_returns", "split-like or extreme return", False),
     ],
 )
 def test_slo_runbook_maps_data_quality_issue_actions(
     issue_counts: dict[str, int],
     expected_code: str,
     expected_action: str,
+    expect_top: bool,
 ) -> None:
     slo = build_data_pipeline_slo(
         health_data=_health(),
@@ -201,8 +205,15 @@ def test_slo_runbook_maps_data_quality_issue_actions(
         signal_staleness={"stale_signals": [], "unavailable_signals": []},
     )
 
-    assert slo["runbook"]["top_cause"]["code"] == expected_code
-    assert expected_action in slo["runbook"]["top_cause"]["action"]
+    actions = slo["runbook"].get("actions") or []
+    match = next((a for a in actions if a.get("code") == expected_code), None)
+    assert match is not None
+    assert expected_action in match["action"]
+    if expect_top:
+        assert slo["runbook"]["top_cause"]["code"] == expected_code
+    else:
+        # Advisory-only issues stay in actions but do not own top_cause.
+        assert slo["runbook"]["top_cause"] is None
 
 
 def test_slo_ignores_live_price_quality_warn_only_for_provider_dimension() -> None:
@@ -684,10 +695,10 @@ def test_slo_classifies_rejected_alpaca_feed_entitlement_as_critical(
     assert "entitlement" in slo["runbook"]["top_cause"]["action"]
 
 
-def test_slo_missing_alpaca_entitlement_is_warning_in_local_lab(
+def test_slo_missing_alpaca_entitlement_is_lab_gap_ok_in_local(
     monkeypatch,
 ) -> None:
-    """Research hosts without ALPACA_FEED_ENTITLEMENT must not critical the SLO."""
+    """Research hosts without ALPACA_FEED_ENTITLEMENT: ok + lab gap, not top warning."""
     monkeypatch.setenv("PORTFOLIO_LAB_MODE", "local")
     monkeypatch.delenv("CRON_BACKEND", raising=False)
     slo = build_data_pipeline_slo(
@@ -707,13 +718,17 @@ def test_slo_missing_alpaca_entitlement_is_warning_in_local_lab(
     )
 
     dim = slo["dimensions"]["alpaca_feed_entitlement"]
-    assert dim["status"] == "warning"
+    assert dim["status"] == "ok"
     assert dim["intentional_lab_gap"] is True
     assert dim["blocking"] is False
     assert dim["reason"] == "missing_entitlement"
-    # Overall must not be critical solely due to this lab gap.
-    assert slo["status"] != "critical"
-    assert slo["status"] in {"ok", "warning", "degraded", "unknown"}
+    assert slo["top_dimension"] != "alpaca_feed_entitlement"
+    assert slo["status"] == "ok"
+    assert any(
+        a.get("code") == "alpaca_feed_entitlement_lab_gap"
+        for a in (slo["runbook"].get("actions") or [])
+    )
+    assert slo["runbook"]["top_cause"] is None
 
 
 def test_slo_warns_on_unavailable_market_data_consistency_in_live_mode(
@@ -865,8 +880,13 @@ def test_slo_runbook_maps_synthetic_fred_fallback() -> None:
         signal_staleness={"stale_signals": [], "unavailable_signals": []},
     )
 
-    assert slo["runbook"]["top_cause"]["code"] == "fred_synthetic_fallback"
-    assert "synthetic" in slo["runbook"]["top_cause"]["action"]
+    actions = slo["runbook"].get("actions") or []
+    fred = next((a for a in actions if a.get("code") == "fred_synthetic_fallback"), None)
+    assert fred is not None
+    assert "synthetic" in fred["action"]
+    # Lab-gap FRED yields do not own top_cause; missing price quality may still warn.
+    if slo["runbook"]["top_cause"] is not None:
+        assert slo["runbook"]["top_cause"]["code"] != "fred_synthetic_fallback"
 
 
 def test_slo_runbook_maps_stale_quote_artifact() -> None:

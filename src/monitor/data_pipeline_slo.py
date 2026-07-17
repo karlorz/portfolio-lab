@@ -663,8 +663,9 @@ def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> d
     """Map feed entitlement into an SLO dimension.
 
     ``missing_entitlement`` is an intentional lab gap in local/lab/paper modes
-    (same posture as missing FRED_API_KEY): warn, do not fail the overall SLO
-    as critical. Live mode and delayed/insufficient feeds stay fail-closed.
+    (same posture as missing FRED_API_KEY / alpaca_not_configured consistency):
+    dimension status ok + intentional_lab_gap. Live mode and delayed/insufficient
+    feeds stay fail-closed.
     """
     policy_decision = str(feed_entitlement.get("policy_decision", "unknown"))
     acceptable_for_live = feed_entitlement.get("acceptable_for_live")
@@ -692,7 +693,7 @@ def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> d
         and not delayed
     ):
         # IEX configured without ALPACA_FEED_ENTITLEMENT — expected on research hosts.
-        status = "warning"
+        status = "ok"
         intentional_lab_gap = True
     elif policy_decision == "reject" or acceptable_for_live is False or delayed:
         status = "critical"
@@ -701,13 +702,13 @@ def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> d
     else:
         status = "unknown"
 
-    if status == "ok":
-        message = "Alpaca feed entitlement acceptable for live operation"
-    elif intentional_lab_gap:
+    if intentional_lab_gap:
         message = (
             f"Alpaca feed entitlement not declared for {operating_mode} mode "
             f"({safe_reason}); set ALPACA_FEED_ENTITLEMENT before live operation"
         )
+    elif status == "ok":
+        message = "Alpaca feed entitlement acceptable for live operation"
     else:
         message = (
             f"Alpaca feed entitlement {policy_decision}: "
@@ -1072,35 +1073,69 @@ def _fred_readiness_runbook_entries(fred_dimension: Mapping[str, Any]) -> list[d
 
 def _alpaca_feed_entitlement_runbook_entries(feed_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(feed_dimension.get("status", "unknown"))
-    if severity == "ok":
+    lab_gap = bool(feed_dimension.get("intentional_lab_gap"))
+    if severity == "ok" and not lab_gap:
         return []
-    return [_runbook_entry(
+    entry = _runbook_entry(
         dimension="alpaca_feed_entitlement",
-        code="alpaca_feed_entitlement_rejected",
-        severity=severity,
-        action="Verify Alpaca market-data feed entitlement, confirm delayed feeds are not used for live order sizing, and rerun rebalance health before trading.",
+        code=(
+            "alpaca_feed_entitlement_lab_gap"
+            if lab_gap
+            else "alpaca_feed_entitlement_rejected"
+        ),
+        severity="warning" if lab_gap and severity == "ok" else severity,
+        action=(
+            "Research host: set ALPACA_FEED_ENTITLEMENT before live order sizing; "
+            "IEX without declared entitlement is expected in local/lab mode."
+            if lab_gap
+            else (
+                "Verify Alpaca market-data feed entitlement, confirm delayed feeds "
+                "are not used for live order sizing, and rerun rebalance health before trading."
+            )
+        ),
         provider="Alpaca",
         reason=feed_dimension.get("reason") or feed_dimension.get("policy_decision"),
-    )]
+    )
+    if lab_gap:
+        entry["lab_gap"] = True
+        entry["advisory"] = True
+    return [entry]
 
 
 def _market_data_consistency_runbook_entries(consistency_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(consistency_dimension.get("status", "unknown"))
-    if severity == "ok":
+    lab_gap = bool(consistency_dimension.get("intentional_lab_gap"))
+    if severity == "ok" and not lab_gap:
         return []
     code = (
-        "market_data_consistency_unavailable"
-        if consistency_dimension.get("consistency_status") == "unavailable"
-        else "market_data_consistency_degraded"
+        "market_data_consistency_lab_gap"
+        if lab_gap
+        else (
+            "market_data_consistency_unavailable"
+            if consistency_dimension.get("consistency_status") == "unavailable"
+            else "market_data_consistency_degraded"
+        )
     )
-    return [_runbook_entry(
+    entry = _runbook_entry(
         dimension="market_data_consistency",
         code=code,
-        severity=severity,
-        action="Run rebalance health after broker data access is configured; compare broker quotes against local market data before live order sizing.",
+        severity="warning" if lab_gap and severity == "ok" else severity,
+        action=(
+            "Research host without Alpaca credentials: broker/local parity checks are skipped; "
+            "configure Alpaca before live order sizing."
+            if lab_gap
+            else (
+                "Run rebalance health after broker data access is configured; "
+                "compare broker quotes against local market data before live order sizing."
+            )
+        ),
         provider="Alpaca",
         reason=consistency_dimension.get("reason") or consistency_dimension.get("consistency_status"),
-    )]
+    )
+    if lab_gap:
+        entry["lab_gap"] = True
+        entry["advisory"] = True
+    return [entry]
 
 
 def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -1157,7 +1192,7 @@ def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> 
         action = "Inspect data_quality.json issue_counts, repair the public price artifact, and rerun the market-data fetch before promotion."
         reason = quality_status or top_issue
 
-    return [_runbook_entry(
+    entry = _runbook_entry(
         dimension="data_quality",
         code=code,
         severity=runbook_severity,
@@ -1165,7 +1200,10 @@ def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> 
         artifact=artifact,
         provider="Yahoo Finance",
         reason=reason,
-    )]
+    )
+    if advisory_only:
+        entry["advisory"] = True
+    return [entry]
 
 
 def _build_runbook(dimensions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
@@ -1193,10 +1231,24 @@ def _build_runbook(dimensions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any
         actions.extend(_market_data_consistency_runbook_entries(market_consistency))
 
     active_actions = [action for action in actions if action.get("severity") not in {"ok", None}]
+    # top_cause must reflect real SLO severity, not advisory/lab-gap hints that
+    # keep status=ok on the dimension (otherwise overall ok still looks "top=warn").
+    failing_dims = {
+        name
+        for name, row in dimensions.items()
+        if isinstance(row, Mapping) and row.get("status") not in {"ok", None}
+    }
+    ranked_actions = [
+        action
+        for action in active_actions
+        if action.get("dimension") in failing_dims
+        and not action.get("advisory")
+        and not action.get("lab_gap")
+    ]
     top_cause = None
-    if active_actions:
+    if ranked_actions:
         top_cause = sorted(
-            active_actions,
+            ranked_actions,
             key=lambda action: _STATUS_RANK.get(str(action.get("severity", "unknown")), 1),
             reverse=True,
         )[0]
