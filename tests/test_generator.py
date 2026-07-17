@@ -1910,7 +1910,11 @@ class TestHealthJSON:
             data = json.load(f)
 
         assert data["fred_readiness"]["reason"] == "missing_fred_api_key"
-        assert data["data_pipeline_slo"]["dimensions"]["fred_readiness"]["status"] == "warning"
+        # Non-blocking lab gap: SLO severity ok + intentional_lab_gap (payload still warn).
+        fred_dim = data["data_pipeline_slo"]["dimensions"]["fred_readiness"]
+        assert fred_dim["status"] == "ok"
+        assert fred_dim["intentional_lab_gap"] is True
+        assert fred_dim["reason"] == "missing_fred_api_key"
         gen.conn.close()
 
     def test_rebalance_live_diagnostics_populate_health_slo(self, tmp_path, monkeypatch):

@@ -629,9 +629,42 @@ def _provider_reconciliation_dimension(provider_reconciliation: Mapping[str, Any
 
 
 def _fred_readiness_dimension(fred_readiness: Mapping[str, Any]) -> dict[str, Any]:
+    """Map FRED credential readiness into SLO severity.
+
+    Non-blocking lab/paper gaps (``ready=True``, ``blocking=False``) — e.g.
+    missing_fred_api_key under lab/local modes — are intentional research-host
+    posture. Keep dimension ok + intentional_lab_gap so they do not pin
+    top_dimension/system_status warning. Live fail (blocking) stays critical.
+    """
     readiness_status = str(fred_readiness.get("status", "unknown"))
     readiness = str(fred_readiness.get("readiness", "unknown"))
-    if readiness == "fail":
+    ready = fred_readiness.get("ready")
+    blocking = fred_readiness.get("blocking")
+    reason = fred_readiness.get("reason")
+    safe_reason = _safe_reason(reason)
+
+    # Intentional lab gap: assess_fred_readiness marks non-live modes ready and
+    # non-blocking while still surfacing status/readiness warn for operators.
+    intentional_lab_gap = (
+        ready is True
+        and blocking is False
+        and readiness in {"pass", "warn"}
+        and safe_reason in {
+            "missing_fred_api_key",
+            "invalid_fred_api_key",
+            "fred_data_unavailable",
+            None,
+        }
+        and readiness != "fail"
+    )
+    # Missing key is always a lab gap when non-blocking; other reasons only when
+    # explicitly non-blocking ready.
+    if ready is True and blocking is False and safe_reason == "missing_fred_api_key":
+        intentional_lab_gap = True
+
+    if intentional_lab_gap:
+        status = "ok"
+    elif readiness == "fail" or blocking is True:
         status = "critical"
     elif readiness == "warn":
         status = "warning"
@@ -647,16 +680,20 @@ def _fred_readiness_dimension(fred_readiness: Mapping[str, Any]) -> dict[str, An
         status = "unknown"
 
     message = fred_readiness.get("remediation") or fred_readiness.get("message") or "FRED readiness unavailable"
-    return {
+    payload: dict[str, Any] = {
         "status": status,
         "readiness": fred_readiness.get("readiness"),
         "mode": fred_readiness.get("mode"),
-        "ready": fred_readiness.get("ready"),
-        "blocking": fred_readiness.get("blocking"),
-        "reason": fred_readiness.get("reason"),
+        "ready": ready,
+        "blocking": blocking,
+        "reason": safe_reason,
         "source_mode": fred_readiness.get("source_mode"),
         "message": str(message),
     }
+    if intentional_lab_gap:
+        payload["intentional_lab_gap"] = True
+        payload["blocking"] = False
+    return payload
 
 
 def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> dict[str, Any]:
@@ -1060,21 +1097,36 @@ def _provider_reconciliation_runbook_entries(reconciliation_dimension: Mapping[s
 
 def _fred_readiness_runbook_entries(fred_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(fred_dimension.get("status", "unknown"))
+    lab_gap = bool(fred_dimension.get("intentional_lab_gap"))
+    if severity == "ok" and not lab_gap:
+        return []
     reason = fred_dimension.get("reason")
     if reason == "missing_fred_api_key":
         code = "fred_missing_api_key"
-        action = "Set FRED_API_KEY in the deployment environment, rerun the data fetch, and confirm FRED readiness returns pass before paper or live operation."
+        action = (
+            "Research host: set FRED_API_KEY before paper/live; missing key is expected "
+            "in local/lab modes and does not block operational readiness."
+            if lab_gap
+            else (
+                "Set FRED_API_KEY in the deployment environment, rerun the data fetch, "
+                "and confirm FRED readiness returns pass before paper or live operation."
+            )
+        )
     else:
         code = "fred_readiness_failure"
         action = "Verify fredapi availability, FRED_API_KEY validity, and the local FRED cache before relying on macro or yield signals."
-    return [_runbook_entry(
+    entry = _runbook_entry(
         dimension="fred_readiness",
         code=code,
-        severity=severity,
+        severity="warning" if lab_gap and severity == "ok" else severity,
         action=action,
         provider="FRED",
         reason=reason,
-    )]
+    )
+    if lab_gap:
+        entry["lab_gap"] = True
+        entry["advisory"] = True
+    return [entry]
 
 
 def _alpaca_feed_entitlement_runbook_entries(feed_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:

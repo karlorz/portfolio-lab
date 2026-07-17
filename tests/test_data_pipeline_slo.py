@@ -631,11 +631,15 @@ def test_slo_classifies_provider_reconciliation_outage_as_critical() -> None:
     assert slo["dimensions"]["provider_reconciliation"]["outage_provider"] == "Yahoo Fixture"
 
 
-def test_slo_surfaces_fred_readiness_warning_from_health_data() -> None:
+def test_slo_nonblocking_fred_lab_gap_is_ok_not_top() -> None:
+    """Lab/paper missing FRED key (ready, non-blocking) must not elevate SLO."""
     health = _health()
     health["data_freshness"]["fred_readiness"] = {
         "status": "warning",
         "readiness": "warn",
+        "ready": True,
+        "blocking": False,
+        "mode": "lab",
         "reason": "missing_fred_api_key",
         "remediation": "Set FRED_API_KEY for lab/paper/live operation.",
     }
@@ -647,10 +651,19 @@ def test_slo_surfaces_fred_readiness_warning_from_health_data() -> None:
         signal_staleness={"stale_signals": [], "unavailable_signals": []},
     )
 
-    assert slo["status"] == "warning"
-    assert slo["top_dimension"] == "fred_readiness"
-    assert slo["dimensions"]["fred_readiness"]["reason"] == "missing_fred_api_key"
-    assert "FRED_API_KEY" in slo["dimensions"]["fred_readiness"]["message"]
+    dim = slo["dimensions"]["fred_readiness"]
+    assert dim["status"] == "ok"
+    assert dim["intentional_lab_gap"] is True
+    assert dim["blocking"] is False
+    assert dim["reason"] == "missing_fred_api_key"
+    assert "FRED_API_KEY" in dim["message"]
+    assert slo["top_dimension"] != "fred_readiness"
+    assert slo["status"] == "ok"
+    assert any(
+        a.get("code") == "fred_missing_api_key" and a.get("lab_gap")
+        for a in (slo["runbook"].get("actions") or [])
+    )
+    assert slo["runbook"]["top_cause"] is None
 
 
 def test_slo_classifies_live_fred_readiness_failure_as_critical() -> None:
@@ -662,6 +675,8 @@ def test_slo_classifies_live_fred_readiness_failure_as_critical() -> None:
         fred_readiness={
             "status": "critical",
             "readiness": "fail",
+            "ready": False,
+            "blocking": True,
             "reason": "missing_fred_api_key",
             "remediation": "Set FRED_API_KEY before live operation.",
         },
