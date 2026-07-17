@@ -186,8 +186,78 @@ def test_wiki_sync_dict_fail_closed_without_claiming_sharpe_met(tmp_path: Path) 
     ):
         # WikiSync may need construction args — use minimal mock if needed
         sync = object.__new__(WikiSync)
-        out = WikiSync._graduation_status_dict(sync, 0.1, 0.9, 0.05, 100)
+        out = WikiSync._graduation_status_dict(
+            sync, 0.1, 0.9, 0.05, 100, data_dir=tmp_path
+        )
     assert out["status"] == "tracking"
     assert out["sharpe_met"] is False
     assert out["graduation_conflict"] is True
     assert out["advisory_sharpe_met"] is True
+    assert out["kill_blocked"] is False
+
+
+def test_wiki_sync_dict_never_candidate_under_kill_halt(tmp_path: Path) -> None:
+    from src.research.wiki_sync import WikiSync
+
+    (tmp_path / "kill_switch.json").write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "level": "halt",
+                "reason": "unresolved_incident:signal_staleness",
+                "source": "incident_lifecycle",
+            }
+        )
+    )
+    with patch(
+        "src.strategy.graduation_checklist.GraduationChecklist.is_graduation_ready",
+        return_value=True,
+    ), patch(
+        "src.strategy.graduation_checklist.GraduationChecklist.check",
+        return_value=_results(ready=True),
+    ), patch(
+        "src.strategy.graduation_checklist.GraduationChecklist.readiness_score",
+        return_value=100.0,
+    ):
+        sync = object.__new__(WikiSync)
+        out = WikiSync._graduation_status_dict(
+            sync, 0.1, 0.9, 0.05, 100, data_dir=tmp_path
+        )
+    assert out["status"] == "tracking"
+    assert out["kill_blocked"] is True
+    assert out["sharpe_met"] is False
+    assert out["kill_level"] == "halt"
+
+
+def test_filter_phantom_cash_days_strips_trailing_empty_portfolio() -> None:
+    from src.research.wiki_sync import WikiSync
+
+    days = [
+        {"timestamp": "2026-07-13", "total_value": 95655, "positions_count": 3},
+        {"timestamp": "2026-07-14", "total_value": 95655, "positions_count": 3},
+        {"timestamp": "2026-07-15", "total_value": 100000, "positions_count": 0},
+    ]
+    trimmed = WikiSync._filter_phantom_cash_days(days)
+    assert len(trimmed) == 2
+    assert trimmed[-1]["total_value"] == 95655
+
+
+def test_portfolio_paper_mark_preferred_when_positions_exist(tmp_path: Path) -> None:
+    from src.research.wiki_sync import WikiSync
+
+    (tmp_path / "portfolio_paper.json").write_text(
+        json.dumps(
+            {
+                "cash": 0.0,
+                "positions": {
+                    "SPY": {"shares": 10, "current_price": 100.0, "value": 1000.0},
+                    "GLD": {"shares": 5, "current_price": 200.0, "value": 1000.0},
+                    "TLT": {"shares": 20, "current_price": 90.0, "value": 1800.0},
+                },
+            }
+        )
+    )
+    mark = WikiSync._portfolio_paper_mark(tmp_path)
+    assert mark is not None
+    assert mark["positions_count"] == 3
+    assert mark["total_value"] == 3800.0

@@ -181,6 +181,113 @@ Based on recent regime patterns:
         
         return page_path
     
+    @staticmethod
+    def _filter_phantom_cash_days(daily_entries: List[dict]) -> List[dict]:
+        """Drop trailing cash-only days after a history that already held positions.
+
+        Phantom rows (positions_count==0, initial capital) from test isolation
+        leaks must not become last-of-day equity for graduation summaries.
+        """
+        if not daily_entries:
+            return daily_entries
+
+        def positions_count(entry: dict) -> int | None:
+            if "positions_count" in entry and entry.get("positions_count") is not None:
+                try:
+                    return int(entry.get("positions_count"))
+                except (TypeError, ValueError):
+                    return None
+            positions = entry.get("positions")
+            if isinstance(positions, dict):
+                return len(positions)
+            if isinstance(positions, list):
+                return len(positions)
+            return None
+
+        ever_held = False
+        for entry in daily_entries:
+            n = positions_count(entry)
+            if n is not None and n > 0:
+                ever_held = True
+                break
+        if not ever_held:
+            return daily_entries
+
+        trimmed = list(daily_entries)
+        while trimmed:
+            n = positions_count(trimmed[-1])
+            # Only strip clear empty-portfolio tails (missing count stays).
+            if n == 0:
+                trimmed.pop()
+                continue
+            break
+        return trimmed or daily_entries
+
+    @staticmethod
+    def _portfolio_paper_mark(data_dir: Path | None = None) -> Optional[dict]:
+        """Load portfolio_paper mark when positions exist."""
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        path = root / "portfolio_paper.json"
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        positions = payload.get("positions") or {}
+        if not isinstance(positions, dict) or not positions:
+            return None
+        cash = float(payload.get("cash") or 0.0)
+        position_value = 0.0
+        for pos in positions.values():
+            if not isinstance(pos, dict):
+                continue
+            if pos.get("value") is not None:
+                try:
+                    position_value += float(pos.get("value") or 0.0)
+                    continue
+                except (TypeError, ValueError):
+                    pass
+            try:
+                shares = float(pos.get("shares") or 0.0)
+                price = float(pos.get("current_price") or pos.get("avg_price") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            position_value += shares * price
+        total = cash + position_value
+        return {
+            "total_value": round(total, 2),
+            "positions_count": len(positions),
+            "cash": cash,
+            "source": "portfolio_paper",
+        }
+
+    @staticmethod
+    def _kill_blocks_graduation(data_dir: Path | None = None) -> tuple[bool, Optional[dict]]:
+        """Return (blocked, payload) when kill authority blocks candidacy."""
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        try:
+            from src.dashboard.kill_authority import (
+                is_kill_execution_blocked,
+                load_kill_switch_payload,
+            )
+
+            payload = load_kill_switch_payload(root)
+            return is_kill_execution_blocked(payload), payload
+        except ImportError:
+            kill_file = root / "kill_switch.json"
+            if not kill_file.exists():
+                return False, None
+            try:
+                payload = json.loads(kill_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                return True, None
+            if isinstance(payload, dict) and payload.get("enabled"):
+                return True, payload
+            return False, None
+
     def sync_performance_summary(self) -> Optional[Path]:
         """Sync paper trading performance to app-level data directory.
 
@@ -217,15 +324,24 @@ Based on recent regime patterns:
                 date_key = f"__no_ts_{idx}__"
             daily_map[date_key] = entry
         daily_entries = [daily_map[d] for d in sorted(daily_map)]
+        filtered_entries = self._filter_phantom_cash_days(daily_entries)
+        phantom_days_dropped = max(0, len(daily_entries) - len(filtered_entries))
 
         # Calculate metrics from deduplicated daily entries
-        values = [e.get("total_value", 0) for e in daily_entries if e.get("total_value")]
-        returns = [e.get("daily_return", 0) for e in daily_entries if e.get("daily_return") is not None]
+        values = [e.get("total_value", 0) for e in filtered_entries if e.get("total_value")]
+        returns = [e.get("daily_return", 0) for e in filtered_entries if e.get("daily_return") is not None]
 
         if not values or len(values) < 5:
             return None
 
-        total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else 0
+        paper_mark = self._portfolio_paper_mark(DATA_DIR)
+        current_value = values[-1]
+        current_value_source = "performance_jsonl"
+        if paper_mark is not None:
+            current_value = paper_mark["total_value"]
+            current_value_source = "portfolio_paper"
+
+        total_return = (current_value - values[0]) / values[0] if values[0] > 0 else 0
 
         # Sharpe ratio calculation with variance check to avoid division by zero
         if returns and len(returns) > 1:
@@ -240,10 +356,13 @@ Based on recent regime patterns:
             sharpe = 0
         max_dd = 0
         peak = values[0]
-        for v in values:
+        series_for_dd = list(values)
+        if paper_mark is not None:
+            series_for_dd = list(values[:-1]) + [current_value] if values else [current_value]
+        for v in series_for_dd:
             if v > peak:
                 peak = v
-            dd = (peak - v) / peak
+            dd = (peak - v) / peak if peak else 0
             if dd > max_dd:
                 max_dd = dd
 
@@ -259,15 +378,19 @@ Based on recent regime patterns:
                 "max_drawdown": max_dd,
                 "days_tracked": len(values),
                 "start_value": values[0],
-                "current_value": values[-1],
+                "current_value": current_value,
+                "current_value_source": current_value_source,
             },
             "daily_returns_distribution": {
                 "positive_days": sum(1 for r in returns if r > 0),
                 "negative_days": sum(1 for r in returns if r < 0),
                 "win_rate": sum(1 for r in returns if r > 0) / len(returns) if returns else 0,
             },
-            "graduation": self._graduation_status_dict(total_return, sharpe, max_dd, len(values)),
+            "graduation": self._graduation_status_dict(
+                total_return, sharpe, max_dd, len(values), data_dir=DATA_DIR
+            ),
             "raw_entries_count": len(entries),
+            "phantom_cash_days_dropped": phantom_days_dropped,
         }
 
         save_results_json(summary, output_path=str(page_path))
@@ -456,11 +579,20 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
             pass
         return base
 
-    def _graduation_status_dict(self, total_return: float, sharpe: float, max_dd: float, days: int) -> dict:
+    def _graduation_status_dict(
+        self,
+        total_return: float,
+        sharpe: float,
+        max_dd: float,
+        days: int,
+        *,
+        data_dir: Path | None = None,
+    ) -> dict:
         """Generate graduation status as dict (for JSON output).
 
         ``sharpe_met`` / candidacy follow GraduationChecklist when available so
         performance files cannot claim candidate while checklist fails.
+        Kill halt always forces tracking (never candidate).
         """
         MIN_DAYS = 63
         MIN_SHARPE = 0.5
@@ -468,6 +600,13 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
         advisory_sharpe_met = sharpe >= MIN_SHARPE
         advisory_max_dd_met = max_dd <= MAX_DD
         advisory_ready = days >= MIN_DAYS and advisory_sharpe_met and advisory_max_dd_met
+
+        kill_blocked, kill_payload = self._kill_blocks_graduation(data_dir)
+        kill_level = None
+        kill_reason = None
+        if isinstance(kill_payload, dict):
+            kill_level = kill_payload.get("level")
+            kill_reason = kill_payload.get("reason")
 
         checklist_ready = None
         readiness_score = None
@@ -484,8 +623,13 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
             checklist_ready = None
 
         # Authoritative candidacy = checklist when available; never claim
-        # candidate from advisory metrics alone.
-        if checklist_ready is True:
+        # candidate from advisory metrics alone; never under kill halt.
+        if kill_blocked:
+            status = "tracking"
+            sharpe_met = False
+            max_dd_met = False
+            graduation_conflict = bool(graduation_conflict or advisory_ready or checklist_ready)
+        elif checklist_ready is True:
             status = "candidate"
             sharpe_met = True
             max_dd_met = True
@@ -514,6 +658,9 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
             "advisory_sharpe_met": advisory_sharpe_met,
             "advisory_max_dd_met": advisory_max_dd_met,
             "advisory_ready": advisory_ready,
+            "kill_blocked": kill_blocked,
+            "kill_level": kill_level,
+            "kill_reason": kill_reason,
         }
     
     def run(self):
