@@ -14,23 +14,48 @@ Usage:
 """
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, DEFAULT_PUBLIC_DATA_DIR
 
-PRICES_FILE = PROJECT_ROOT / "public" / "data" / "prices.json"
 INITIAL_CAPITAL = 100000  # Default from evaluator PAPER_CONFIG
 
 
-def load_prices() -> Dict[str, float]:
-    """Load latest closing prices from prices.json."""
-    with open(PRICES_FILE) as f:
+def get_prices_file() -> Path:
+    """Resolve prices.json SSOT from live PUBLIC_DATA_DIR env (tasker WWW).
+
+    Matches ``src.paths.PRICES_JSON`` semantics but re-reads the env at call
+    time so cron/tasker and tests are not stuck on an import-time project
+    ``public/data`` hardcode.
+    """
+    public = Path(
+        os.environ.get("PUBLIC_DATA_DIR", str(DEFAULT_PUBLIC_DATA_DIR))
+    ).expanduser()
+    return public / "prices.json"
+
+
+# Back-compat name: prefer get_prices_file() / load_prices() at call sites.
+PRICES_FILE = get_prices_file()
+
+
+def load_prices(
+    prices_file: Optional[Union[str, Path]] = None,
+) -> Dict[str, float]:
+    """Load latest closing prices from the operator prices SSOT.
+
+    Args:
+        prices_file: Optional explicit path. When omitted, uses
+            ``PUBLIC_DATA_DIR/prices.json`` (same contract as ``PRICES_JSON``).
+    """
+    path = Path(prices_file) if prices_file is not None else get_prices_file()
+    with open(path) as f:
         data = json.load(f)
 
     prices: Dict[str, float] = {}
@@ -135,13 +160,20 @@ def main():
     parser = argparse.ArgumentParser(description="Mark portfolio to market")
     parser.add_argument("--mode", default="paper", choices=["paper", "live"],
                         help="Portfolio mode")
+    parser.add_argument(
+        "--prices",
+        default=None,
+        help="Optional prices.json path (default: PUBLIC_DATA_DIR/prices.json)",
+    )
     args = parser.parse_args()
 
     print(f"Mark-to-Market — {datetime.now().isoformat()}")
     print(f"  Mode: {args.mode}")
+    prices_path = Path(args.prices) if args.prices else get_prices_file()
+    print(f"  Prices SSOT: {prices_path}")
 
     # Load prices
-    prices = load_prices()
+    prices = load_prices(prices_file=prices_path)
     print(f"  Prices loaded: {len(prices)} symbols")
 
     # Show latest prices for key assets
