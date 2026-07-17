@@ -334,17 +334,28 @@ class TestCheckStalenessAndAlert:
             "total_count": 23,
         }
         check_staleness_and_alert(staleness)
-        mock_send.assert_called_once()
-        call_args = mock_send.call_args
+        # Primary channel is SIGNAL_STALENESS WARN; optional second call is
+        # SIGNAL_RECOVERY when live kill_switch is already sustained halt.
+        assert mock_send.call_count >= 1
+        call_args = mock_send.call_args_list[0]
         assert call_args[0][0] == AlertChannel.SIGNAL_STALENESS
         assert call_args[0][1] == AlertLevel.WARN
         message = call_args[0][2]
         assert "All 23 signals fresh" not in message
         assert "unavailable" in message.lower()
-        details = call_args.kwargs.get("details")
+        details = call_args.kwargs.get("details") or (
+            call_args[1].get("details") if len(call_args) > 1 else None
+        )
+        if details is None and call_args[0][3:]:
+            details = call_args[0][3]
+        # kwargs path used by send_alert(..., details=)
+        if details is None:
+            details = call_args.kwargs.get("details")
         assert details is not None
         assert details.get("unavailable_count") == 12
         assert details.get("unavailable_signals") == unavailable
+        assert "unavailable_ownership" in details
+        assert details.get("recovery", {}).get("actionable_unavailable_count", 0) >= 1
 
     @patch("src.monitor.alerting.send_alert")
     def test_stale_and_unavailable_mentions_both(self, mock_send):

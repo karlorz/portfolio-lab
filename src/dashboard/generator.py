@@ -1947,9 +1947,26 @@ class DashboardGenerator:
         except Exception as e:
             output["health"] = _compact_health_summary({"status": "error", "error": str(e)})
 
-        # Fire external alerts on staleness state transitions
+        # Fire external alerts on staleness state transitions (+ recovery ownership)
         try:
             from src.monitor.alerting import check_staleness_and_alert
+            from src.monitor.signal_ownership import (
+                annotate_unavailable_signals,
+                recovery_summary,
+            )
+
+            staleness = output.get("staleness")
+            if isinstance(staleness, dict):
+                ml_on = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+                ownership = annotate_unavailable_signals(
+                    staleness.get("unavailable_signals") or [],
+                    ml_enabled=ml_on,
+                )
+                if ownership:
+                    staleness = dict(staleness)
+                    staleness["unavailable_ownership"] = ownership
+                    staleness["recovery"] = recovery_summary(ownership)
+                    output["staleness"] = staleness
             check_staleness_and_alert(output["staleness"])
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("alerting", e)
