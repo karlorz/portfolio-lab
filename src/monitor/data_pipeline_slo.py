@@ -38,6 +38,14 @@ _DATA_QUALITY_ISSUE_PRIORITY = (
     "extreme_returns",
     "split_like_returns",
 )
+# Align with price_quality.ts updateStatus: internal calendar gaps and
+# split-like/extreme return anomalies are advisory (overall_status=warn only).
+# They must not keep data_pipeline_slo top_dimension stuck on data_quality.
+_ADVISORY_DATA_QUALITY_ISSUES = frozenset({
+    "internal_gaps",
+    "extreme_returns",
+    "split_like_returns",
+})
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -502,6 +510,26 @@ def _manifest_symbol_count(row: Mapping[str, Any] | None) -> int:
     return 0
 
 
+def _is_advisory_only_quality_warn(quality_status: str, issue_counts: Mapping[str, int]) -> bool:
+    """True when overall_status is warn and only advisory issue counters are set.
+
+    Mirrors price_quality.ts: internal_gaps + return anomalies (split-like /
+    extreme) yield overall_status=warn without failing the data job. Those must
+    not elevate data_pipeline_slo severity above ok (runbook still lists them).
+    """
+    if quality_status not in {"warn", "warning"}:
+        return False
+    positive = {
+        key: count
+        for key, count in issue_counts.items()
+        if key != "total" and isinstance(count, int) and count > 0
+    }
+    if not positive:
+        # warn with empty counts still advisory (e.g. nested status only)
+        return True
+    return all(key in _ADVISORY_DATA_QUALITY_ISSUES for key in positive)
+
+
 def _data_quality_dimension(
     source_manifest: Mapping[str, Any] | None,
     data_quality_report: Mapping[str, Any] | None = None,
@@ -512,11 +540,25 @@ def _data_quality_dimension(
         if isinstance(quality, Mapping)
         else "missing"
     )
-    status = _data_quality_status(quality_status)
-    issue_counts = _data_quality_issue_counts(quality.get("issue_counts") if isinstance(quality, Mapping) else None)
+    issue_counts = _data_quality_issue_counts(
+        quality.get("issue_counts") if isinstance(quality, Mapping) else None
+    )
     top_issue = _top_data_quality_issue(issue_counts)
     affected_issue_count = issue_counts.get(top_issue, 0) if top_issue else 0
-    affected_symbol_count = _manifest_symbol_count(row) if status != "ok" else 0
+    advisory_only = _is_advisory_only_quality_warn(quality_status, issue_counts)
+
+    if advisory_only:
+        # Keep quality_status=warn for operators; SLO severity stays ok so
+        # top_dimension can surface real outages / missing reports instead.
+        status = "ok"
+    else:
+        status = _data_quality_status(quality_status)
+
+    affected_symbol_count = (
+        _manifest_symbol_count(row)
+        if status != "ok" or advisory_only
+        else 0
+    )
     artifact = quality.get("artifact") if isinstance(quality, Mapping) else None
     artifact_name = str(artifact or "data_quality.json")
     source_artifact = row.get("artifact") if isinstance(row, Mapping) else None
@@ -525,6 +567,13 @@ def _data_quality_dimension(
         message = f"price data quality report missing for {affected_symbol_count} tracked symbol(s)"
     elif quality_status == "unavailable":
         message = f"price data quality report unavailable for {affected_symbol_count} tracked symbol(s)"
+    elif advisory_only and top_issue:
+        message = (
+            f"price data quality advisory ({quality_status}): {top_issue}="
+            f"{affected_issue_count} across {affected_symbol_count} tracked symbol(s)"
+        )
+    elif advisory_only:
+        message = f"price data quality advisory ({quality_status})"
     elif status == "ok":
         message = "price data quality ok"
     elif top_issue:
@@ -535,7 +584,7 @@ def _data_quality_dimension(
     else:
         message = f"price data quality {quality_status}"
 
-    return {
+    payload: dict[str, Any] = {
         "status": status,
         "quality_status": quality_status,
         "artifact": artifact_name,
@@ -548,6 +597,10 @@ def _data_quality_dimension(
         "affected_symbol_count": affected_symbol_count,
         "message": message,
     }
+    if advisory_only:
+        payload["advisory_only"] = True
+        payload["blocking"] = False
+    return payload
 
 
 def _provider_reconciliation_dimension(provider_reconciliation: Mapping[str, Any]) -> dict[str, Any]:
@@ -1052,8 +1105,11 @@ def _market_data_consistency_runbook_entries(consistency_dimension: Mapping[str,
 
 def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(data_quality_dimension.get("status", "unknown"))
-    if severity == "ok":
+    advisory_only = bool(data_quality_dimension.get("advisory_only"))
+    # Advisory-only warn is status=ok but still needs operator runbook hints.
+    if severity == "ok" and not advisory_only:
         return []
+    runbook_severity = "warning" if advisory_only and severity == "ok" else severity
 
     top_issue = data_quality_dimension.get("top_issue")
     quality_status = data_quality_dimension.get("quality_status")
@@ -1075,7 +1131,11 @@ def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> 
         reason = top_issue
     elif top_issue == "internal_gaps":
         code = "price_quality_internal_gaps"
-        action = f"Inspect missing trading dates against the reference calendar, refill or document source gaps, and rerun the quality audit ({issue_count} gap issue(s))."
+        action = (
+            f"Inspect missing trading dates against the reference calendar "
+            f"(sparse indexes like ^VIX3M may legitimately omit SPY days); "
+            f"document or refill source gaps ({issue_count} gap issue(s))."
+        )
         reason = top_issue
     elif top_issue in {"extreme_returns", "split_like_returns"}:
         code = "price_quality_anomalous_returns"
@@ -1100,7 +1160,7 @@ def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> 
     return [_runbook_entry(
         dimension="data_quality",
         code=code,
-        severity=severity,
+        severity=runbook_severity,
         action=action,
         artifact=artifact,
         provider="Yahoo Finance",

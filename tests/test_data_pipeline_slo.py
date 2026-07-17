@@ -100,11 +100,40 @@ def test_slo_includes_data_quality_ok_dimension() -> None:
     assert slo["dimensions"]["data_quality"]["issue_counts"]["total"] == 0
 
 
-def test_slo_warns_on_data_quality_anomalous_returns() -> None:
+def test_slo_advisory_only_data_quality_warn_is_ok_not_top() -> None:
+    """internal_gaps / split-like warn must not keep top_dimension=data_quality."""
     slo = build_data_pipeline_slo(
         health_data=_health(),
         source_manifest=_source_manifest(
-            data_quality=_quality_summary("warn", split_like_returns=2),
+            data_quality=_quality_summary(
+                "warn",
+                internal_gaps=1,
+                split_like_returns=4,
+            ),
+        ),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    dim = slo["dimensions"]["data_quality"]
+    assert dim["status"] == "ok"
+    assert dim["advisory_only"] is True
+    assert dim["blocking"] is False
+    assert dim["quality_status"] == "warn"
+    assert dim["top_issue"] == "internal_gaps"
+    assert dim["affected_issue_count"] == 1
+    assert slo["top_dimension"] != "data_quality"
+    # Runbook still documents the advisory.
+    assert slo["runbook"]["top_cause"]["code"] == "price_quality_internal_gaps"
+
+
+def test_slo_warns_on_data_quality_anomalous_returns_with_blocking_context() -> None:
+    """Non-advisory issues mixed with warn still elevate data_quality."""
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(
+            # stale_latest_dates is blocking-class for SLO severity
+            data_quality=_quality_summary("warn", stale_latest_dates=2, split_like_returns=1),
         ),
         public_index={"entries": []},
         signal_staleness={"stale_signals": [], "unavailable_signals": []},
@@ -112,11 +141,9 @@ def test_slo_warns_on_data_quality_anomalous_returns() -> None:
 
     assert slo["status"] == "warning"
     assert slo["top_dimension"] == "data_quality"
-    assert slo["dimensions"]["data_quality"]["top_issue"] == "split_like_returns"
-    assert slo["dimensions"]["data_quality"]["affected_issue_count"] == 2
-    assert slo["dimensions"]["data_quality"]["affected_symbol_count"] == 3
-    assert slo["runbook"]["top_cause"]["code"] == "price_quality_anomalous_returns"
-    assert "split-like or extreme return" in slo["runbook"]["top_cause"]["action"]
+    assert slo["dimensions"]["data_quality"]["top_issue"] == "stale_latest_dates"
+    assert slo["dimensions"]["data_quality"]["status"] == "warning"
+    assert slo["runbook"]["top_cause"]["code"] == "price_quality_stale_cross_section"
 
 
 def test_slo_classifies_data_quality_duplicate_dates_as_critical() -> None:
@@ -226,7 +253,9 @@ def test_slo_ignores_live_price_quality_warn_only_for_provider_dimension() -> No
         "prices.json",
         "prices_compact.json",
     }
-    assert slo["dimensions"]["data_quality"]["status"] == "warning"
+    # Advisory-only quality warn is ok for SLO severity (still quality_status=warn).
+    assert slo["dimensions"]["data_quality"]["status"] == "ok"
+    assert slo["dimensions"]["data_quality"]["advisory_only"] is True
     assert slo["top_dimension"] != "provider"
 
 
