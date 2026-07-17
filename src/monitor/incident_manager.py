@@ -234,7 +234,9 @@ class IncidentManager:
                 created_at=timestamp,
                 updated_at=timestamp,
             )
-            incident.kill_switch_level = self._kill_switch_level_for_count(incident.alert_count)
+            incident.kill_switch_level = self._kill_switch_level_for_count(
+                incident.alert_count, severity=severity
+            )
             self._append_event("opened", incident)
             return incident
 
@@ -249,7 +251,9 @@ class IncidentManager:
             updated_at=timestamp,
             alert_count=existing.alert_count + 1,
         )
-        incident.kill_switch_level = self._kill_switch_level_for_count(incident.alert_count)
+        incident.kill_switch_level = self._kill_switch_level_for_count(
+            incident.alert_count, severity=severity
+        )
         self._append_event("updated", incident)
         return incident
 
@@ -279,12 +283,23 @@ class IncidentManager:
         self._append_event("resolved", incident)
         return incident
 
-    def _kill_switch_level_for_count(self, alert_count: int) -> str | None:
+    def _kill_switch_level_for_count(
+        self, alert_count: int, *, severity: str | None = None
+    ) -> str | None:
+        """Map alert_count to kill stage, capped by incident severity.
+
+        p0 (classifier HALT) may escalate warning → restrict → halt.
+        Lower severities (e.g. p2 WARN) max out at ``warning`` so sustained
+        optional/sheddable alerts cannot ratchet paper trading into halt.
+        """
         if not self.escalation_enabled:
             return None
         if alert_count < self.escalation_cycles:
             return None
         stage = min(alert_count // self.escalation_cycles, 3)
+        # Only p0 may progress past advisory warning.
+        if severity != "p0":
+            stage = min(stage, 1)
         return {
             1: "warning",
             2: "restrict",
