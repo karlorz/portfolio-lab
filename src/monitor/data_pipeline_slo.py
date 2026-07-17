@@ -471,12 +471,40 @@ def _fred_readiness_dimension(fred_readiness: Mapping[str, Any]) -> dict[str, An
 
 
 def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> dict[str, Any]:
+    """Map feed entitlement into an SLO dimension.
+
+    ``missing_entitlement`` is an intentional lab gap in local/lab/paper modes
+    (same posture as missing FRED_API_KEY): warn, do not fail the overall SLO
+    as critical. Live mode and delayed/insufficient feeds stay fail-closed.
+    """
     policy_decision = str(feed_entitlement.get("policy_decision", "unknown"))
     acceptable_for_live = feed_entitlement.get("acceptable_for_live")
     delayed = bool(feed_entitlement.get("delayed", False))
     reason = feed_entitlement.get("reason")
-    if policy_decision == "accept" or acceptable_for_live is True:
+    safe_reason = _safe_reason(reason)
+
+    # Shared portfolio operating-mode resolver (FRED readiness uses the same keys).
+    try:
+        from src.monitor.fred_readiness import resolve_fred_operating_mode
+
+        operating_mode = resolve_fred_operating_mode()
+    except ImportError:
+        operating_mode = "local"
+
+    # Modes where live broker feed entitlement is not a hard gate.
+    _LAB_GAP_MODES = {"local", "test", "lab", "paper", "staging", "dev", "development"}
+    intentional_lab_gap = False
+
+    if policy_decision in {"accept", "allow"} or acceptable_for_live is True:
         status = "ok"
+    elif (
+        safe_reason == "missing_entitlement"
+        and operating_mode in _LAB_GAP_MODES
+        and not delayed
+    ):
+        # IEX configured without ALPACA_FEED_ENTITLEMENT — expected on research hosts.
+        status = "warning"
+        intentional_lab_gap = True
     elif policy_decision == "reject" or acceptable_for_live is False or delayed:
         status = "critical"
     elif policy_decision in {"warn", "warning"}:
@@ -484,8 +512,20 @@ def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> d
     else:
         status = "unknown"
 
-    safe_reason = _safe_reason(reason)
-    return {
+    if status == "ok":
+        message = "Alpaca feed entitlement acceptable for live operation"
+    elif intentional_lab_gap:
+        message = (
+            f"Alpaca feed entitlement not declared for {operating_mode} mode "
+            f"({safe_reason}); set ALPACA_FEED_ENTITLEMENT before live operation"
+        )
+    else:
+        message = (
+            f"Alpaca feed entitlement {policy_decision}: "
+            f"{safe_reason or 'review required'}"
+        )
+
+    payload: dict[str, Any] = {
         "status": status,
         "configured_feed": feed_entitlement.get("configured_feed"),
         "effective_feed": feed_entitlement.get("effective_feed"),
@@ -494,12 +534,13 @@ def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> d
         "acceptable_for_live": acceptable_for_live,
         "policy_decision": policy_decision,
         "reason": safe_reason,
-        "message": (
-            "Alpaca feed entitlement acceptable for live operation"
-            if status == "ok"
-            else f"Alpaca feed entitlement {policy_decision}: {safe_reason or 'review required'}"
-        ),
+        "operating_mode": operating_mode,
+        "message": message,
     }
+    if intentional_lab_gap:
+        payload["intentional_lab_gap"] = True
+        payload["blocking"] = False
+    return payload
 
 
 def _market_data_consistency_dimension(market_data_consistency: Mapping[str, Any]) -> dict[str, Any]:

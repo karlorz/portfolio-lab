@@ -492,7 +492,11 @@ def test_slo_classifies_live_fred_readiness_failure_as_critical() -> None:
     assert slo["dimensions"]["fred_readiness"]["status"] == "critical"
 
 
-def test_slo_classifies_rejected_alpaca_feed_entitlement_as_critical() -> None:
+def test_slo_classifies_rejected_alpaca_feed_entitlement_as_critical(
+    monkeypatch,
+) -> None:
+    """Live mode still fail-closes on missing Alpaca feed entitlement."""
+    monkeypatch.setenv("PORTFOLIO_LAB_MODE", "live")
     slo = build_data_pipeline_slo(
         health_data=_health(),
         source_manifest=_source_manifest(),
@@ -515,6 +519,38 @@ def test_slo_classifies_rejected_alpaca_feed_entitlement_as_critical() -> None:
     assert slo["dimensions"]["alpaca_feed_entitlement"]["reason"] == "missing_entitlement"
     assert slo["runbook"]["top_cause"]["code"] == "alpaca_feed_entitlement_rejected"
     assert "entitlement" in slo["runbook"]["top_cause"]["action"]
+
+
+def test_slo_missing_alpaca_entitlement_is_warning_in_local_lab(
+    monkeypatch,
+) -> None:
+    """Research hosts without ALPACA_FEED_ENTITLEMENT must not critical the SLO."""
+    monkeypatch.setenv("PORTFOLIO_LAB_MODE", "local")
+    monkeypatch.delenv("CRON_BACKEND", raising=False)
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        alpaca_feed_entitlement={
+            "configured_feed": "iex",
+            "effective_feed": "iex",
+            "entitlement": "unknown",
+            "delayed": False,
+            "acceptable_for_live": False,
+            "policy_decision": "reject",
+            "reason": "missing_entitlement",
+        },
+    )
+
+    dim = slo["dimensions"]["alpaca_feed_entitlement"]
+    assert dim["status"] == "warning"
+    assert dim["intentional_lab_gap"] is True
+    assert dim["blocking"] is False
+    assert dim["reason"] == "missing_entitlement"
+    # Overall must not be critical solely due to this lab gap.
+    assert slo["status"] != "critical"
+    assert slo["status"] in {"ok", "warning", "degraded", "unknown"}
 
 
 def test_slo_warns_on_unavailable_market_data_consistency() -> None:
