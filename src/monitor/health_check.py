@@ -472,6 +472,24 @@ def _check_open_incidents(data_dir: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _status_for_system_rollup(name: str, check: dict) -> str:
+    """Map a component status into the overall rollup severity ladder.
+
+    Nested report fields keep their raw status for operators. For rollup /
+    process exit, non-blocking lab FRED advisories (ready, not blocking, or
+    empty cache without a key) must not force overall ``warning`` — that made
+    ``make health`` exit 1 every cycle and sticky tasker ``error`` rows.
+    """
+    status = str(check.get("status", "unknown"))
+    if name == "fred_readiness":
+        if check.get("ready") is True and check.get("blocking") is False:
+            return "ok"
+    if name == "fred_md_cache":
+        if status == "empty" and not check.get("api_key_configured"):
+            return "ok"
+    return status
+
+
 def _compute_system_status(checks: dict, circuit: dict) -> str:
     """Derive overall system status from component checks.
 
@@ -481,9 +499,9 @@ def _compute_system_status(checks: dict, circuit: dict) -> str:
     """
     statuses = []
 
-    for _name, check in checks.items():
+    for name, check in checks.items():
         if isinstance(check, dict):
-            statuses.append(str(check.get("status", "unknown")))
+            statuses.append(_status_for_system_rollup(str(name), check))
 
     if isinstance(circuit, dict):
         statuses.append(str(circuit.get("status", "unknown")))

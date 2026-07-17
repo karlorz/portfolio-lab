@@ -352,12 +352,42 @@ class TestComputeSystemStatus:
         circuit = {"status": "ok"}
         assert _compute_system_status(checks, circuit) == "warning"
 
-    def test_empty_cache_component_warns(self):
-        """Empty cache components should produce warning system status."""
+    def test_empty_cache_without_fred_key_is_non_blocking(self):
+        """Empty FRED cache with no API key is a lab advisory, not overall warning."""
         checks = {
             "prices": {"status": "ok"},
             "signals": {"status": "ok"},
-            "fred_md_cache": {"status": "empty"},
+            "fred_md_cache": {"status": "empty", "api_key_configured": False},
+            "fred_readiness": {
+                "status": "warning",
+                "ready": True,
+                "blocking": False,
+                "reason": "missing_fred_api_key",
+            },
+        }
+        circuit = {"status": "ok"}
+        assert _compute_system_status(checks, circuit) == "ok"
+
+    def test_empty_cache_with_key_configured_still_warns(self):
+        """Empty cache despite a configured key remains an operator warning."""
+        checks = {
+            "prices": {"status": "ok"},
+            "signals": {"status": "ok"},
+            "fred_md_cache": {"status": "empty", "api_key_configured": True},
+        }
+        circuit = {"status": "ok"}
+        assert _compute_system_status(checks, circuit) == "warning"
+
+    def test_blocking_fred_readiness_warns(self):
+        checks = {
+            "prices": {"status": "ok"},
+            "signals": {"status": "ok"},
+            "fred_readiness": {
+                "status": "warning",
+                "ready": False,
+                "blocking": True,
+                "reason": "invalid_fred_api_key",
+            },
         }
         circuit = {"status": "ok"}
         assert _compute_system_status(checks, circuit) == "warning"
