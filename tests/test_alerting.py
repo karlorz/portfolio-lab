@@ -449,6 +449,26 @@ class TestCheckIcDecayAndAlert:
         mock_send.assert_not_called()
 
     @patch("src.monitor.alerting.send_alert")
+    def test_all_insufficient_data_sends_pass_not_halt(self, mock_send):
+        """Warm-up IC history must PASS (clear false HALT) not escalate kill."""
+        check_ic_decay_and_alert({
+            "ensemble_duration": {
+                "status": "insufficient_data",
+                "ic_rolling": -0.48,
+                "observations": 6,
+            },
+            "behavioral_sentiment": {
+                "status": "insufficient_data",
+                "ic_rolling": -0.71,
+                "observations": 6,
+            },
+        })
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][0] == AlertChannel.IC_DECAY
+        assert mock_send.call_args[0][1] == AlertLevel.PASS
+        assert "warming up" in mock_send.call_args[0][2].lower()
+
+    @patch("src.monitor.alerting.send_alert")
     def test_mixed_warning_and_critical_sends_halt(self, mock_send):
         """When both warning and critical signals exist, alert is HALT."""
         ic_decay = {

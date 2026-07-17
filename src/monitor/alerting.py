@@ -483,8 +483,11 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
     warning_signals = []
     critical_signals = []
     healthy_count = 0
+    insufficient_count = 0
 
     for signal_name, data in ic_decay_data.items():
+        if not isinstance(data, dict):
+            continue
         status = data.get("status", "unknown")
         if status == "critical":
             critical_signals.append(signal_name)
@@ -492,17 +495,38 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
             warning_signals.append(signal_name)
         elif status == "healthy":
             healthy_count += 1
+        elif status == "insufficient_data":
+            insufficient_count += 1
 
     total = len(ic_decay_data)
     if total == 0:
         return
 
     if not warning_signals and not critical_signals:
-        send_alert(
-            AlertChannel.IC_DECAY,
-            AlertLevel.PASS,
-            f"All {total} signals have healthy IC",
-        )
+        # PASS clears prior false HALT from thin-history critical misclassification.
+        # Warm-up (all insufficient_data) is not an operational failure.
+        if healthy_count == 0 and insufficient_count > 0:
+            send_alert(
+                AlertChannel.IC_DECAY,
+                AlertLevel.PASS,
+                (
+                    f"IC monitor warming up: {insufficient_count} signal(s) below "
+                    f"min observations for status (no kill escalation)"
+                ),
+                details={
+                    "insufficient_count": insufficient_count,
+                    "policy": "thin_history_no_kill",
+                },
+            )
+        elif healthy_count > 0:
+            send_alert(
+                AlertChannel.IC_DECAY,
+                AlertLevel.PASS,
+                f"All {healthy_count} resolved signals have healthy IC"
+                + (f" ({insufficient_count} warming up)" if insufficient_count else ""),
+            )
+        else:
+            return
     elif critical_signals:
         send_alert(
             AlertChannel.IC_DECAY,

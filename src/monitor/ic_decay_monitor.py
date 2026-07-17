@@ -52,6 +52,8 @@ IC_WINDOW_SIZE = int(os.environ.get("IC_MONITOR_WINDOW", "60"))
 IC_DECAY_THRESHOLD = float(os.environ.get("IC_DECAY_THRESHOLD", "0.05"))
 IC_STABLE_MIN = float(os.environ.get("IC_STABLE_MIN", "0.10"))
 IC_TREND_WINDOW = int(os.environ.get("IC_TREND_WINDOW", "20"))
+# Spearman IC with n≈5–10 is extremely noisy; do not escalate kill on thin history.
+IC_MIN_OBS_FOR_STATUS = int(os.environ.get("IC_MIN_OBS_FOR_STATUS", "20"))
 IC_STATE_PATH = DATA_DIR / "ic_monitor_state.json"
 
 
@@ -118,11 +120,13 @@ class ICMonitor:
         window_size: int = IC_WINDOW_SIZE,
         decay_threshold: float = IC_DECAY_THRESHOLD,
         stable_min: float = IC_STABLE_MIN,
+        min_obs_for_status: int = IC_MIN_OBS_FOR_STATUS,
         trend_window: int = IC_TREND_WINDOW,
     ):
         self.window_size = window_size
         self.decay_threshold = decay_threshold
         self.stable_min = stable_min
+        self.min_obs_for_status = max(5, int(min_obs_for_status))
         self.trend_window = trend_window
 
         # Per-signal data: deque of (prediction, actual_return)
@@ -263,7 +267,9 @@ class ICMonitor:
             trend = self.compute_ic_trend(signal_name)
             n_obs = len(self._data[signal_name])
 
-            if ic is None:
+            # Thin resolved history produces unstable Spearman IC; do not escalate
+            # warning/critical (and thus kill HALT) until min_obs_for_status.
+            if ic is None or n_obs < self.min_obs_for_status:
                 status = "insufficient_data"
             elif ic < self.decay_threshold:
                 status = "critical"
@@ -277,6 +283,7 @@ class ICMonitor:
                 "ic_trend": trend,
                 "observations": n_obs,
                 "status": status,
+                "min_obs_for_status": self.min_obs_for_status,
             }
 
         return report

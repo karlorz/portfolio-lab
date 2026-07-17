@@ -150,15 +150,15 @@ class TestICMonitor:
 
     def test_decay_report_status_healthy(self):
         """High IC signal should get 'healthy' status."""
-        monitor = ICMonitor(window_size=30, stable_min=0.05)
+        monitor = ICMonitor(window_size=30, stable_min=0.05, min_obs_for_status=10)
         for i in range(15):
             monitor.record("healthy_sig", float(i), float(i) * 0.01)
         report = monitor.compute_decay_report()
         assert report["healthy_sig"]["status"] == "healthy"
 
     def test_decay_report_status_critical(self):
-        """Very low IC should get 'critical' status."""
-        monitor = ICMonitor(window_size=30, decay_threshold=0.5)
+        """Very low IC should get 'critical' status once min_obs is met."""
+        monitor = ICMonitor(window_size=30, decay_threshold=0.5, min_obs_for_status=10)
         # Random predictions — low correlation
         import random
         random.seed(123)
@@ -166,6 +166,17 @@ class TestICMonitor:
             monitor.record("weak_sig", random.random(), random.random())
         report = monitor.compute_decay_report()
         assert report["weak_sig"]["status"] in ("critical", "warning")
+
+    def test_thin_history_is_insufficient_not_critical(self):
+        """n≈6 resolved pairs must not escalate critical (noisy Spearman)."""
+        monitor = ICMonitor(window_size=30, decay_threshold=0.05, min_obs_for_status=20)
+        # Strongly anti-correlated but thin — would be critical if allowed.
+        for i in range(6):
+            monitor.record("thin_sig", float(i), -float(i) * 0.01)
+        report = monitor.compute_decay_report()
+        assert report["thin_sig"]["status"] == "insufficient_data"
+        assert report["thin_sig"]["observations"] == 6
+        assert report["thin_sig"]["ic_rolling"] is not None
 
     def test_get_signals_needing_attention(self):
         """Should return only signals with warning/critical status."""
