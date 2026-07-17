@@ -134,6 +134,62 @@ def _prune_performance_log() -> None:
         logger.warning("Failed to prune performance log: %s", e)
 
 
+def _recent_performance_had_positions(lookback: int = 20) -> bool:
+    """True when a recent performance.jsonl row reported open positions."""
+    try:
+        logfile = Path(PERFORMANCE_LOG)
+        if not logfile.exists():
+            return False
+        with open(logfile) as f:
+            lines = f.readlines()
+        for line in reversed(lines[-max(1, lookback):]):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if int(row.get("positions_count") or 0) > 0:
+                return True
+    except (OSError, TypeError, ValueError):
+        return False
+    return False
+
+
+def _is_phantom_cash_only_performance(
+    perf: dict,
+    portfolio: "Portfolio",
+    *,
+    initial_capital: float | None = None,
+) -> bool:
+    """Detect empty initial-capital snapshots that disagree with live positions.
+
+    Dual writers / failed state loads previously appended 100k/0-pos rows while
+    portfolio_paper still held SPY/GLD/TLT — contaminating graduation metrics.
+    """
+    if not isinstance(perf, dict):
+        return False
+    if int(perf.get("positions_count") or 0) != 0:
+        return False
+    if getattr(portfolio, "positions", None) and len(portfolio.positions) > 0:
+        # Perf says empty but portfolio object has positions — always phantom.
+        return True
+    capital = float(
+        initial_capital
+        if initial_capital is not None
+        else PAPER_CONFIG.get("initial_capital", 100_000)
+    )
+    total = float(perf.get("total_value") or 0.0)
+    cash = float(perf.get("cash") or 0.0)
+    near_initial = capital > 0 and abs(total - capital) <= max(1.0, capital * 0.001)
+    cash_only = capital > 0 and abs(cash - capital) <= max(1.0, capital * 0.001)
+    if not (near_initial or cash_only):
+        return False
+    # Quarantine only when journal history recently had positions (no liquidate).
+    return _recent_performance_had_positions()
+
+
 # Paper trading config (defaults — override via env vars)
 PAPER_CONFIG = {
     "initial_capital": int(os.environ.get("PAPER_INITIAL_CAPITAL", "100000")),
@@ -839,14 +895,22 @@ def main() -> int:
 
     # Update and save state
     perf = calculate_performance(portfolio, prices)
-    portfolio.history.append(perf)
-    portfolio.save_state()
-    
-    # Log performance
-    with open(PERFORMANCE_LOG, 'a') as f:
-        f.write(json.dumps(perf) + '\n')
+    if _is_phantom_cash_only_performance(perf, portfolio):
+        logger.warning(
+            "Skipping phantom cash-only performance append "
+            "(total_value=%s positions_count=%s); journal recently had positions",
+            perf.get("total_value"),
+            perf.get("positions_count"),
+        )
+    else:
+        portfolio.history.append(perf)
+        portfolio.save_state()
 
-    _prune_performance_log()
+        # Log performance
+        with open(PERFORMANCE_LOG, 'a') as f:
+            f.write(json.dumps(perf) + '\n')
+
+        _prune_performance_log()
     
     # Check graduation criteria (paper mode only)
     if mode == "paper":

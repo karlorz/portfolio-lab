@@ -654,6 +654,49 @@ class TestConstantsExtended:
             assert live_log.read_bytes() == before
             assert live_log.stat().st_mtime_ns == before_mtime
 
+    def test_phantom_cash_only_detected_after_positions_history(self, tmp_path):
+        """100k/0-pos rows after recent positions are phantom and must be skipped."""
+        import src.strategy.evaluator as ev
+
+        with patch.object(ev, "DATA_DIR", tmp_path):
+            log = tmp_path / "performance.jsonl"
+            log.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-15T02:20:00",
+                        "total_value": 95655.0,
+                        "cash": 100.0,
+                        "positions_count": 3,
+                        "mode": "paper",
+                    }
+                )
+                + "\n"
+            )
+            p = _make_portfolio(tmp_path, cash=100000, positions=[])
+            phantom = {
+                "timestamp": "2026-07-15T02:25:00",
+                "total_value": 100000.0,
+                "cash": 100000.0,
+                "positions_count": 0,
+                "mode": "paper",
+            }
+            assert ev._is_phantom_cash_only_performance(phantom, p) is True
+
+    def test_empty_start_portfolio_not_phantom_without_history(self, tmp_path):
+        """First-day empty portfolio near initial capital is allowed."""
+        import src.strategy.evaluator as ev
+
+        with patch.object(ev, "DATA_DIR", tmp_path):
+            p = _make_portfolio(tmp_path, cash=100000, positions=[])
+            first = {
+                "timestamp": "2026-07-15T02:25:00",
+                "total_value": 100000.0,
+                "cash": 100000.0,
+                "positions_count": 0,
+                "mode": "paper",
+            }
+            assert ev._is_phantom_cash_only_performance(first, p) is False
+
     def test_paper_config_bounds(self):
         assert 50000 <= PAPER_CONFIG["initial_capital"] <= 500000
         assert 0 < PAPER_CONFIG["max_position_pct"] <= 1.0
