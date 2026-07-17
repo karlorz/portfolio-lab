@@ -1839,6 +1839,36 @@ class TestHealthJSON:
         assert "generated_at" in data
         gen.conn.close()
 
+    def test_generate_health_json_preserves_ops_health_from_monitor(self, tmp_path):
+        """Dashboard regen must re-stamp ops_health_* from monitor report.
+
+        make health merges ops_health_status into PUBLIC health.json; a later
+        generate_health_json must not wipe those dual-SSOT fields.
+        """
+        gen, _ = _make_generator(tmp_path)
+        data_dir = tmp_path / "data"
+        public_dir = tmp_path / "public"
+        data_dir.mkdir()
+        public_dir.mkdir()
+        (data_dir / "health.json").write_text(json.dumps({
+            "status": "ok",
+            "timestamp": "2026-07-18T05:00:00+00:00",
+            "scope": "operational_readiness",
+            "checks": {
+                "kill_switch": {"status": "ok", "enabled": False},
+                "open_incidents": {"status": "ok", "open_count": 0, "incidents": []},
+            },
+            "service": "portfolio-lab",
+        }))
+        with patch("src.dashboard.generator.PUBLIC_DIR", public_dir):
+            with patch("src.dashboard.generator.DATA_DIR", data_dir):
+                path = gen.generate_health_json()
+        data = json.loads(path.read_text())
+        assert data.get("ops_health_status") == "ok"
+        assert data.get("ops_health_source") == "monitor.health_check"
+        assert data.get("ops_health_timestamp") == "2026-07-18T05:00:00+00:00"
+        gen.conn.close()
+
     def test_data_freshness_populated(self, tmp_path):
         """Data freshness contains symbols from DB."""
         gen, _ = _make_generator(tmp_path)
@@ -1883,8 +1913,10 @@ class TestHealthJSON:
         assert data["data_pipeline_slo"]["dimensions"]["fred_readiness"]["status"] == "warning"
         gen.conn.close()
 
-    def test_rebalance_live_diagnostics_populate_health_slo(self, tmp_path):
+    def test_rebalance_live_diagnostics_populate_health_slo(self, tmp_path, monkeypatch):
         """Rebalance live diagnostics should be included in dashboard health SLO output."""
+        # Live mode: missing entitlement / alpaca_not_configured stay fail-closed.
+        monkeypatch.setenv("PORTFOLIO_LAB_MODE", "live")
         gen, _ = _make_generator(tmp_path)
         (tmp_path / "rebalance_health.json").write_text(json.dumps({
             "generated": "2026-06-12T16:43:07.176691",
@@ -1912,9 +1944,13 @@ class TestHealthJSON:
         with open(path) as f:
             data = json.load(f)
 
-        assert data["data_pipeline_slo"]["top_dimension"] == "alpaca_feed_entitlement"
-        assert data["data_pipeline_slo"]["dimensions"]["alpaca_feed_entitlement"]["status"] == "critical"
-        assert data["data_pipeline_slo"]["dimensions"]["market_data_consistency"]["status"] == "warning"
+        dims = data["data_pipeline_slo"]["dimensions"]
+        assert dims["alpaca_feed_entitlement"]["status"] == "critical"
+        assert dims["alpaca_feed_entitlement"]["reason"] == "missing_entitlement"
+        assert dims["market_data_consistency"]["status"] == "warning"
+        assert dims["market_data_consistency"]["reason"] == "alpaca_not_configured"
+        # Multiple dimensions may be elevated in live mode (e.g. FRED); top is rank-first.
+        assert data["data_pipeline_slo"]["status"] == "critical"
         gen.conn.close()
 
     def test_provider_latest_date_symbols_are_fresh_even_with_calendar_lag(self, tmp_path):

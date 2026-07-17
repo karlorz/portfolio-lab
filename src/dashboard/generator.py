@@ -3005,7 +3005,21 @@ class DashboardGenerator:
             kill_fields,
             open_incidents,
         )
-        
+
+        # Dual-SSOT: re-stamp ops_health_* from the monitor report so dashboard
+        # regeneration does not wipe fields merged by make health /
+        # publish_ops_health_surfaces (ops_health_status/source/timestamp).
+        try:
+            from src.monitor.health_check import apply_ops_monitor_to_dashboard_health
+
+            apply_ops_monitor_to_dashboard_health(
+                health_data,
+                data_dir=DATA_DIR,
+                public_dir=PUBLIC_DIR,
+            )
+        except Exception as exc:  # noqa: BLE001 — never block health.json write
+            logger.warning("ops monitor merge into dashboard health failed: %s", exc)
+
         out_path = PUBLIC_DIR / "health.json"
         save_results_json(health_data, output_path=str(out_path))
         

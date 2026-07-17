@@ -38,7 +38,13 @@ from src.monitor.hermes_cron import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_health_check", "check_scheduler_drift", "publish_ops_health_surfaces"]
+__all__ = [
+    "run_health_check",
+    "check_scheduler_drift",
+    "publish_ops_health_surfaces",
+    "load_ops_monitor_report",
+    "apply_ops_monitor_to_dashboard_health",
+]
 
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
 _DEFAULT_DATA_DIR = DATA_DIR
@@ -96,6 +102,84 @@ def _elevate_public_system_status(current: Any, ops_status: str) -> str:
     return cur if cur else "healthy"
 
 
+def _is_monitor_health_report(payload: dict[str, Any]) -> bool:
+    """True for monitor schema (status + checks), not dashboard system_status JSON."""
+    if not isinstance(payload.get("checks"), dict):
+        return False
+    # Dashboard schema uses system_status and cron_jobs without checks.
+    if "system_status" in payload and "status" not in payload:
+        return False
+    return True
+
+
+def load_ops_monitor_report(
+    *,
+    data_dir: Path | None = None,
+    public_dir: Path | None = None,
+) -> dict[str, Any] | None:
+    """Load the newest monitor-schema health report from DATA or PUBLIC ops path.
+
+    Prefer the fresher of DATA_DIR/health.json and PUBLIC_DATA_DIR/health_ops.json
+    when both exist and look like monitor reports.
+    """
+    root_data = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    root_public = Path(public_dir) if public_dir is not None else Path(PUBLIC_DATA_DIR)
+    candidates = [root_data / "health.json", root_public / "health_ops.json"]
+
+    best: dict[str, Any] | None = None
+    best_ts = ""
+    for path in candidates:
+        try:
+            if not path.exists():
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            continue
+        if not isinstance(payload, dict) or not _is_monitor_health_report(payload):
+            continue
+        ts = str(payload.get("timestamp") or payload.get("generated_at") or "")
+        if best is None or ts >= best_ts:
+            best = payload
+            best_ts = ts
+    return best
+
+
+def apply_ops_monitor_to_dashboard_health(
+    health_data: dict[str, Any],
+    ops_report: dict[str, Any] | None = None,
+    *,
+    data_dir: Path | None = None,
+    public_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Stamp ops_health_* and elevate system_status from the monitor report.
+
+    Called by ``generate_health_json`` so dashboard regeneration does not wipe
+    the dual-SSOT fields that ``publish_ops_health_surfaces`` merges after
+    ``make health``.
+    """
+    report = ops_report if isinstance(ops_report, dict) else load_ops_monitor_report(
+        data_dir=data_dir, public_dir=public_dir
+    )
+    if not report:
+        return health_data
+
+    projected = _project_public_kill_fields(report)
+    ops_status = str(projected.get("ops_health_status") or report.get("status") or "ok")
+    health_data["ops_health_status"] = ops_status
+    health_data["ops_health_timestamp"] = projected.get("ops_health_timestamp")
+    health_data["ops_health_source"] = "monitor.health_check"
+    # Prefer monitor kill/incidents when present (same authority SSOT as make health).
+    if isinstance(projected.get("kill_switch"), dict) and projected["kill_switch"]:
+        health_data["kill_switch"] = projected["kill_switch"]
+    if isinstance(projected.get("open_incidents"), dict) and projected["open_incidents"]:
+        health_data["open_incidents"] = projected["open_incidents"]
+    if "system_status" in health_data:
+        health_data["system_status"] = _elevate_public_system_status(
+            health_data.get("system_status"), ops_status
+        )
+    return health_data
+
+
 def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
     """Write monitor health to PUBLIC_DATA_DIR and merge kill into public health.json.
 
@@ -125,19 +209,7 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         return
 
-    # Do not replace full dashboard schema; merge authority dimensions only.
-    if isinstance(projected.get("kill_switch"), dict) and projected["kill_switch"]:
-        payload["kill_switch"] = projected["kill_switch"]
-    if isinstance(projected.get("open_incidents"), dict) and projected["open_incidents"]:
-        payload["open_incidents"] = projected["open_incidents"]
-    ops_status = str(projected.get("ops_health_status") or report.get("status") or "ok")
-    if "system_status" in payload:
-        payload["system_status"] = _elevate_public_system_status(
-            payload.get("system_status"), ops_status
-        )
-    payload["ops_health_status"] = ops_status
-    payload["ops_health_timestamp"] = projected.get("ops_health_timestamp")
-    payload["ops_health_source"] = "monitor.health_check"
+    apply_ops_monitor_to_dashboard_health(payload, report)
     try:
         public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         logger.info("Merged ops kill authority into %s", public_health)
