@@ -23,22 +23,18 @@ from typing import Any, Dict, Optional, Union
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.paths import DATA_DIR, DEFAULT_PUBLIC_DATA_DIR
+from src.paths import DATA_DIR, resolve_runtime_public_data_dir
 
 INITIAL_CAPITAL = 100000  # Default from evaluator PAPER_CONFIG
 
 
 def get_prices_file() -> Path:
-    """Resolve prices.json SSOT from live PUBLIC_DATA_DIR env (tasker WWW).
+    """Resolve prices.json SSOT from live PUBLIC_DATA_DIR / operator WWW.
 
-    Matches ``src.paths.PRICES_JSON`` semantics but re-reads the env at call
-    time so cron/tasker and tests are not stuck on an import-time project
-    ``public/data`` hardcode.
+    Matches ``src.paths.resolve_runtime_public_data_dir`` so unset env on a
+    host with tasker WWW does not silently mark from stale repo public/data.
     """
-    public = Path(
-        os.environ.get("PUBLIC_DATA_DIR", str(DEFAULT_PUBLIC_DATA_DIR))
-    ).expanduser()
-    return public / "prices.json"
+    return resolve_runtime_public_data_dir() / "prices.json"
 
 
 # Back-compat name: prefer get_prices_file() / load_prices() at call sites.

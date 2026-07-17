@@ -39,9 +39,79 @@ DEFAULT_PUBLIC_DATA_DIR = PROJECT_ROOT / "public" / "data"
 DEFAULT_LIVE_PUBLIC_DATA_DIR = Path(
     os.environ.get("PORTFOLIO_LAB_LIVE_PUBLIC_DATA_DIR", "/var/www/portfolio-lab/data")
 ).expanduser()
-PUBLIC_DATA_DIR = Path(
-    os.environ.get("PUBLIC_DATA_DIR", str(DEFAULT_PUBLIC_DATA_DIR))
-).expanduser()
+
+
+def resolve_runtime_public_data_dir(
+    *,
+    env: Optional[Dict[str, str]] = None,
+    live_public_data_dir: Optional[Union[str, Path]] = None,
+    project_root: Optional[Union[str, Path]] = None,
+    emit_log: bool = False,
+) -> Path:
+    """Resolve public/data SSOT for runtime producers/consumers.
+
+    Priority:
+      1. ``PUBLIC_DATA_DIR`` environment variable
+      2. Live WWW tree when it exists and is distinct from repo public/data
+         (unless ``PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA`` is truthy)
+      3. Repo ``public/data`` (offline / fixture / CI default)
+
+    Unlike ``resolve_ops_public_data_dir`` (auditors fail-closed), runtime
+    prefers the live operator tree so agent shells and bare ``make`` do not
+    silently read multi-day-stale checkout prices while tasker WWW is SSOT.
+    """
+    env_map = os.environ if env is None else env
+    root = Path(project_root if project_root is not None else PROJECT_ROOT).expanduser()
+    live_root = Path(
+        live_public_data_dir
+        if live_public_data_dir is not None
+        else env_map.get(
+            "PORTFOLIO_LAB_LIVE_PUBLIC_DATA_DIR",
+            str(DEFAULT_LIVE_PUBLIC_DATA_DIR),
+        )
+    ).expanduser()
+
+    env_public = env_map.get("PUBLIC_DATA_DIR")
+    if env_public and str(env_public).strip():
+        return Path(str(env_public).strip()).expanduser()
+
+    allow_repo = str(env_map.get("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    repo_public = (root / "public" / "data")
+
+    try:
+        live_exists = live_root.is_dir()
+    except OSError:
+        live_exists = False
+
+    if live_exists and not allow_repo:
+        try:
+            same_tree = live_root.resolve() == repo_public.resolve()
+        except OSError:
+            same_tree = False
+        if not same_tree:
+            if emit_log:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "PUBLIC_DATA_DIR unset; using live operator tree %s "
+                    "(set PUBLIC_DATA_DIR or PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1 "
+                    "to override; repo default would be %s)",
+                    live_root,
+                    repo_public,
+                )
+            return live_root
+
+    return repo_public
+
+
+# Module-level binding used by most imports. Prefer resolve_runtime_public_data_dir
+# in new call sites when env may change after import.
+PUBLIC_DATA_DIR = resolve_runtime_public_data_dir(emit_log=True)
 # Common database paths
 MARKET_DB = DATA_DIR / "market.db"
 TASKER_DB = DATA_DIR / "tasker.db"

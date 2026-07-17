@@ -50,6 +50,7 @@ let atomicWriteCounter = 0;
 export function resolvePublicDataDir(options?: {
   env?: Record<string, string | undefined>;
   projectRoot?: string;
+  livePublicDataDir?: string;
 }): string {
   const env = options?.env ?? process.env;
   const projectRoot = options?.projectRoot ?? PROJECT_ROOT;
@@ -57,7 +58,24 @@ export function resolvePublicDataDir(options?: {
   if (configured) {
     return resolve(projectRoot, configured);
   }
-  return join(projectRoot, 'public', 'data');
+
+  // Match Python resolve_runtime_public_data_dir: when live WWW exists and is
+  // distinct from repo public/data, prefer the operator tree so data jobs do
+  // not refresh checkout prices while WWW signals lag on stale WWW prices.
+  const allowRepo = ['1', 'true', 'yes', 'on'].includes(
+    (env.PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA ?? '').trim().toLowerCase(),
+  );
+  const liveRoot = resolve(
+    projectRoot,
+    options?.livePublicDataDir
+      ?? env.PORTFOLIO_LAB_LIVE_PUBLIC_DATA_DIR?.trim()
+      ?? '/var/www/portfolio-lab/data',
+  );
+  const repoPublic = join(projectRoot, 'public', 'data');
+  if (!allowRepo && existsSync(liveRoot) && resolve(liveRoot) !== resolve(repoPublic)) {
+    return liveRoot;
+  }
+  return repoPublic;
 }
 
 /** Mutable for tests; production main() uses resolvePublicDataDir() once. */

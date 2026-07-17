@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.paths import PROJECT_ROOT, resolve_ops_public_data_dir
+from src.paths import PROJECT_ROOT, resolve_ops_public_data_dir, resolve_runtime_public_data_dir
 from scripts.check_public_data_consistency import check_public_data_consistency, main as consistency_main
 
 
@@ -114,6 +114,51 @@ def test_consistency_cli_exits_1_when_live_ssot_unspecified(
     assert code == 1
     err = capsys.readouterr().err
     assert "PUBLIC_DATA_DIR is unset" in err
+
+
+def test_runtime_prefers_live_www_when_public_data_dir_unset(tmp_path: Path) -> None:
+    live = tmp_path / "www-data"
+    live.mkdir()
+    got = resolve_runtime_public_data_dir(
+        env={},
+        live_public_data_dir=live,
+        project_root=PROJECT_ROOT,
+    )
+    assert got == live
+
+
+def test_runtime_explicit_env_wins_over_live(tmp_path: Path) -> None:
+    live = tmp_path / "www-data"
+    live.mkdir()
+    custom = tmp_path / "custom"
+    custom.mkdir()
+    got = resolve_runtime_public_data_dir(
+        env={"PUBLIC_DATA_DIR": str(custom)},
+        live_public_data_dir=live,
+        project_root=PROJECT_ROOT,
+    )
+    assert got == custom
+
+
+def test_runtime_allow_repo_flag_keeps_checkout_public(tmp_path: Path) -> None:
+    live = tmp_path / "www-data"
+    live.mkdir()
+    got = resolve_runtime_public_data_dir(
+        env={"PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA": "1"},
+        live_public_data_dir=live,
+        project_root=PROJECT_ROOT,
+    )
+    assert got == PROJECT_ROOT / "public" / "data"
+
+
+def test_runtime_defaults_to_repo_when_no_live_tree(tmp_path: Path) -> None:
+    missing = tmp_path / "no-www"
+    got = resolve_runtime_public_data_dir(
+        env={},
+        live_public_data_dir=missing,
+        project_root=PROJECT_ROOT,
+    )
+    assert got == PROJECT_ROOT / "public" / "data"
 
 
 def test_consistency_cli_allow_repo_public_data(
