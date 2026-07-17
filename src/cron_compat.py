@@ -52,7 +52,7 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-research": 300,  # 5 min — research loops
     "portfolio-lab-wiki-sync": 120, # 2 min — git operations
     "portfolio-lab-position-sync": 60,   # 1 min — placeholder/no-op
-    "portfolio-lab-overlay-signals": 600,  # 10 min — 5 sequential modules
+    "portfolio-lab-overlay-signals": 600,  # 10 min — 6 sequential modules (+ alternative_data)
     "portfolio-lab-overlay-dashboard": 120,  # 2 min — JSON serialization
     "portfolio-lab-garch-risk": 120,  # 2 min — GARCH-CVaR computation
     "portfolio-lab-mark-to-market": 15,   # 15 sec — price update from prices.json

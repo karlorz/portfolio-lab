@@ -394,6 +394,7 @@ overlay-signals:
 		"$$PYTHON_RUNTIME" -m src.signals.crypto_momentum --save 2>&1 | tail -1 && \
 		"$$PYTHON_RUNTIME" -m src.signals.bond_duration_signal --save 2>&1 | tail -1 && \
 		"$$PYTHON_RUNTIME" -m src.regime.kurtosis_regime --save 2>&1 | tail -1 && \
+		"$$PYTHON_RUNTIME" -m src.signals.alternative_data_signal --generate 2>&1 | tail -1 && \
 		"$$PYTHON_RUNTIME" -m src.monitor.rebalance_health 2>&1 | tail -1'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \

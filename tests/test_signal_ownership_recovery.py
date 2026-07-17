@@ -33,6 +33,24 @@ def test_ownership_covers_common_unavailable_keys() -> None:
         assert SIGNAL_OWNERSHIP[key]["job"].startswith("portfolio-lab-")
 
 
+def test_overlay_signals_makefile_runs_alternative_data_producer() -> None:
+    """Kill HALT was driven by alternative_data staleness while overlay-signals
+    reported success — the job never invoked the producer it claims to own.
+    """
+    makefile = Path(__file__).resolve().parents[1] / "Makefile"
+    text = makefile.read_text(encoding="utf-8")
+    start = text.index("overlay-signals:")
+    # Slice until the next top-level target after overlay-signals body.
+    rest = text[start:]
+    end_rel = rest.find("\n.PHONY:", 1)
+    body = rest if end_rel < 0 else rest[:end_rel]
+    assert "src.signals.alternative_data_signal" in body
+    assert "--generate" in body
+    # Ownership recovery still points operators at this make target.
+    assert SIGNAL_OWNERSHIP["alternative_data"]["make_target"] == "overlay-signals"
+    assert "alternative_data_signal" in SIGNAL_OWNERSHIP["alternative_data"]["module"]
+
+
 def test_annotate_marks_ml_off_intentional() -> None:
     rows = annotate_unavailable_signals(
         ["behavioral_sentiment", "collar"],
