@@ -360,7 +360,7 @@ def test_slo_warns_without_crashing_on_malformed_index_timestamps() -> None:
     assert slo["runbook"]["top_cause"]["code"] == "public_data_timestamp_unparseable"
 
 
-def test_slo_warns_on_stale_required_signals_without_penalizing_unavailable_optional() -> None:
+def test_slo_warns_on_stale_required_signals_and_counts_unavailable() -> None:
     slo = build_data_pipeline_slo(
         health_data=_health(),
         source_manifest=_source_manifest(),
@@ -375,6 +375,34 @@ def test_slo_warns_on_stale_required_signals_without_penalizing_unavailable_opti
     assert slo["top_dimension"] == "signal"
     assert slo["dimensions"]["signal"]["stale_count"] == 1
     assert slo["dimensions"]["signal"]["unavailable_count"] == 1
+    assert "stale" in slo["dimensions"]["signal"]["message"]
+    assert "unavailable" in slo["dimensions"]["signal"]["message"]
+
+
+def test_slo_signal_dim_warns_on_unavailable_without_stale() -> None:
+    """Unavailable-only must not report OK / 'required signals fresh'."""
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={
+            "stale_signals": [],
+            "unavailable_signals": [
+                "collar",
+                "bond_momentum",
+                "kurtosis_regime",
+                "calendar_seasonality",
+            ],
+        },
+    )
+
+    signal = slo["dimensions"]["signal"]
+    assert signal["status"] == "warning"
+    assert signal["unavailable_count"] == 4
+    assert signal["stale_count"] == 0
+    assert "unavailable" in signal["message"]
+    assert "required signals fresh" not in signal["message"]
+    assert "collar" in signal.get("unavailable_signals", [])
 
 
 def test_slo_distinguishes_provider_reconciliation_divergence_from_outage() -> None:

@@ -263,17 +263,30 @@ def _signal_dimension(signal_staleness: Mapping[str, Any] | None) -> dict[str, A
     unavailable = signal_staleness.get("unavailable_signals") if isinstance(signal_staleness, Mapping) else None
     stale_signals = [str(item) for item in stale] if isinstance(stale, list) else []
     unavailable_signals = [str(item) for item in unavailable] if isinstance(unavailable, list) else []
-    status = "warning" if stale_signals else "ok"
+    # Align with classify_signal_staleness / kill lifecycle: non-empty unavailable
+    # is not "fresh" — empty stale alone must not report OK while panels are down.
+    if stale_signals or unavailable_signals:
+        status = "warning"
+    else:
+        status = "ok"
+    if stale_signals and unavailable_signals:
+        message = (
+            f"{len(stale_signals)} stale signal(s); "
+            f"{len(unavailable_signals)} unavailable signal(s)"
+        )
+    elif stale_signals:
+        message = f"{len(stale_signals)} stale required signal(s)"
+    elif unavailable_signals:
+        message = f"{len(unavailable_signals)} unavailable signal(s) (not all-fresh)"
+    else:
+        message = "required signals fresh"
     return {
         "status": status,
         "stale_count": len(stale_signals),
         "unavailable_count": len(unavailable_signals),
         "stale_signals": stale_signals[:10],
-        "message": (
-            f"{len(stale_signals)} stale required signal(s)"
-            if stale_signals
-            else "required signals fresh"
-        ),
+        "unavailable_signals": unavailable_signals[:10],
+        "message": message,
     }
 
 
