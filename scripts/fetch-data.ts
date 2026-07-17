@@ -146,6 +146,16 @@ export function buildPriceSourceRows(
     ? priceSummary.circuit_breaker.reason
     : firstFailureReason(priceSummary.failure_counts);
   const dataQuality = qualityReport === undefined ? undefined : priceQualitySourceSummary(qualityReport);
+  const qualityStatus = qualityReport?.overall_status;
+  const rowStatus = priceManifestStatusFromQuality(priceSummary.status, qualityStatus);
+  const qualityNotes: string[] = [];
+  if (qualityStatus === 'fail') {
+    qualityNotes.push(
+      `Price data quality overall_status=fail; manifest status forced to failed (was provider status ${priceSummary.status}).`,
+    );
+  } else if (qualityStatus === 'warn' && priceSummary.status === 'success') {
+    qualityNotes.push('Price data quality overall_status=warn; manifest status degraded.');
+  }
   return ['prices.json', 'prices_compact.json'].map((artifact) => ({
     artifact,
     provider: priceSummary.provider,
@@ -154,16 +164,19 @@ export function buildPriceSourceRows(
     primary_provider: priceSummary.primary_provider,
     fallback_provider: priceSummary.fallback_provider,
     source_mode: priceSummary.source_mode,
-    status: priceSummary.status,
+    status: rowStatus,
     fetched_at: fetchedAt,
     latest_observation: latestObservation,
     row_count: rowCount,
     symbols,
-    failure_reason: failureReason,
+    failure_reason: failureReason ?? (qualityStatus === 'fail' ? 'price_data_quality_fail' : null),
     ...(dataQuality === undefined ? {} : { data_quality: dataQuality }),
-    notes: priceSummary.circuit_breaker.opened
-      ? [`Skipped symbols after provider circuit breaker opened: ${priceSummary.circuit_breaker.skipped_symbols.join(', ')}`]
-      : [],
+    notes: [
+      ...(priceSummary.circuit_breaker.opened
+        ? [`Skipped symbols after provider circuit breaker opened: ${priceSummary.circuit_breaker.skipped_symbols.join(', ')}`]
+        : []),
+      ...qualityNotes,
+    ],
   }));
 }
 
@@ -294,8 +307,61 @@ export class DashboardGenerationError extends Error {
   }
 }
 
+/**
+ * Raised when prices were written but data_quality overall_status is fail.
+ * Artifacts remain on disk for operators; the data job must not exit 0.
+ */
+export class PriceDataQualityGateError extends Error {
+  readonly qualityStatus: string;
+  readonly issueCounts: PriceDataQualityReport['issue_counts'];
+
+  constructor(report: PriceDataQualityReport) {
+    const failSymbols = (report.symbols || [])
+      .filter((s) => s.status === 'fail')
+      .map((s) => s.symbol)
+      .slice(0, 8);
+    const symbolHint = failSymbols.length
+      ? ` failing symbols: ${failSymbols.join(', ')}${report.symbols.filter((s) => s.status === 'fail').length > 8 ? '…' : ''}`
+      : '';
+    super(
+      `Price data quality gate failed (overall_status=${report.overall_status}).` +
+        ` issue_counts=${JSON.stringify(report.issue_counts)}.${symbolHint}` +
+        ` Artifacts written; job must not report success.`,
+    );
+    this.name = 'PriceDataQualityGateError';
+    this.qualityStatus = report.overall_status;
+    this.issueCounts = report.issue_counts;
+  }
+}
+
 export function shouldWriteLastGoodRetentionManifest(error: unknown): boolean {
-  return !(error instanceof DashboardGenerationError);
+  // Quality-gate failures already wrote live prices/quality; do not overwrite
+  // with last-good retention. Dashboard gen failures also preserve current tree.
+  return !(
+    error instanceof DashboardGenerationError
+    || error instanceof PriceDataQualityGateError
+  );
+}
+
+/** Fail-closed gate used by the data job after writing data_quality.json. */
+export function assertPriceQualityAllowsSuccess(report: PriceDataQualityReport): void {
+  if (report.overall_status === 'fail') {
+    throw new PriceDataQualityGateError(report);
+  }
+}
+
+/** Couple source_manifest price row status to nested data_quality.status. */
+export function priceManifestStatusFromQuality(
+  providerStatus: MarketDataSourceRow['status'],
+  qualityStatus: PriceDataQualityReport['overall_status'] | undefined,
+): MarketDataSourceRow['status'] {
+  if (qualityStatus === 'fail') {
+    return 'failed';
+  }
+  if (qualityStatus === 'warn' && providerStatus === 'success') {
+    return 'degraded';
+  }
+  return providerStatus;
 }
 
 async function runPythonModule(moduleName: string): Promise<void> {
@@ -402,7 +468,9 @@ export async function main() {
   await writeJsonAtomic(priceQualityPath, priceQualityReport);
   console.log(`\nSaved ${Object.keys(compact).length} symbols (${totalDays} total data points) → ${pricesPath}`);
   console.log(`Saved compact price mirror → ${pricesCompactPath}`);
-  console.log(`Saved price data quality audit → ${priceQualityPath}`);
+  console.log(
+    `Saved price data quality audit → ${priceQualityPath} (overall_status=${priceQualityReport.overall_status})`,
+  );
 
   // 2. Sync fetched prices into canonical SQLite store for dashboard freshness checks
   console.log('\nSyncing fetched prices into market.db...');
@@ -432,6 +500,10 @@ export async function main() {
   ], manifestGeneratedAt);
   await writeJsonAtomic(manifestPath, manifest);
   console.log(`Saved market data source manifest → ${manifestPath}`);
+
+  // Fail-closed quality gate after artifacts are written (operators can inspect
+  // data_quality.json / source_manifest) but before claiming job success.
+  assertPriceQualityAllowsSuccess(priceQualityReport);
 
   // 5. Regenerate dashboard JSON
   console.log('\nRegenerating dashboard JSON...');
