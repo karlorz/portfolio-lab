@@ -2177,9 +2177,10 @@ class TestIncidentKillBlocksPaperControlLoop:
             mock_portfolio.execute_orders = MagicMock(return_value=[{"symbol": "SPY"}])
             MockPortfolio.return_value = mock_portfolio
 
-            main()
+            rc = main()
 
             mock_portfolio.execute_orders.assert_not_called()
+            assert rc == 2, "authority kill must exit non-zero so make eval STATUS != ok"
 
         assert kill_file.exists(), "incident kill must be preserved"
         assert not (tmp_path / ".promote_to_live").exists()
@@ -2187,6 +2188,34 @@ class TestIncidentKillBlocksPaperControlLoop:
         orders_log = tmp_path / "orders.jsonl"
         if orders_log.exists():
             assert orders_log.read_text().strip() == ""
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0, "GLD": 180.0, "TLT": 90.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_risk_kill_path_exits_nonzero(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path,
+    ):
+        """Risk-limit kill must not report green cron success either."""
+        from src.strategy.evaluator import main
+        import src.strategy.evaluator as ev
+
+        with (
+            patch.object(ev, "DATA_DIR", tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch.object(ev, "Portfolio") as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = "max_drawdown_-25.0%"
+            mock_portfolio.total_value.return_value = 75000
+            mock_portfolio.current_weights.return_value = {}
+            MockPortfolio.return_value = mock_portfolio
+
+            rc = main()
+
+        assert rc == 2
+        assert (tmp_path / "kill_switch.json").exists()
 
     @patch('src.strategy.evaluator.sqlite_connect')
     @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0, "GLD": 180.0, "TLT": 90.0})
@@ -2235,6 +2264,7 @@ class TestIncidentKillBlocksPaperControlLoop:
             }])
             MockPortfolio.return_value = mock_portfolio
 
-            main()
+            rc = main()
 
             mock_portfolio.execute_orders.assert_called_once()
+            assert rc == 0

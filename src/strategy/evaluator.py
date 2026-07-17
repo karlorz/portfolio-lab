@@ -654,8 +654,19 @@ def _authority_kill_blocks_paper_actions(data_dir: Path | None = None) -> tuple[
     return is_kill_execution_blocked(payload), payload
 
 
-def main():
-    """Main evaluation loop."""
+# Exit codes for make eval / tasker STATUS mapping (nonzero → error, not ok).
+EXIT_OK = 0
+EXIT_BLOCKED = 2  # control loop intentionally skipped (kill / authority)
+
+
+def main() -> int:
+    """Main evaluation loop.
+
+    Returns:
+        0 on normal paper cycle completion.
+        2 when the control loop is blocked by risk-limit kill or authority kill
+        so cron STATUS is not reported as unqualified success.
+    """
     logger.info("Strategy Evaluator Starting")
 
     # Determine mode from environment
@@ -706,7 +717,7 @@ def main():
             "position_reduction": _kill_level_reduction(kill_level),
             "source": "evaluator_risk",
         }, output_path=str(DATA_DIR / "kill_switch.json"))
-        return
+        return EXIT_BLOCKED
 
     # Clear stale kill switch if risk limits are no longer breached
     kill_file = DATA_DIR / "kill_switch.json"
@@ -739,7 +750,7 @@ def main():
             )
         except (ImportError, ValueError, OSError, TypeError) as e:
             logger.warning("Evaluator decision registry (authority kill) skipped: %s", e)
-        return
+        return EXIT_BLOCKED
 
     # Determine target allocation
     target_alloc = _resolve_target_allocation(regime)
@@ -799,6 +810,7 @@ def main():
         check_graduation_criteria(portfolio)
     
     logger.info("Evaluation complete")
+    return EXIT_OK
 
 def _deduplicate_to_daily(history: List[Dict]) -> List[Dict]:
     """Filter history to keep only the last entry per trading day.
@@ -952,4 +964,6 @@ def check_graduation_criteria(portfolio: Portfolio):
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    sys.exit(main())
