@@ -1,7 +1,8 @@
 // Yahoo Finance v8 chart API fetcher
+import { yahooChartPeriodBounds } from './fetcher';
+
 export async function fetchYahooData(symbol: string, start: string, end: string) {
-  const period1 = Math.floor(new Date(start).getTime() / 1000);
-  const period2 = Math.floor(new Date(end).getTime() / 1000);
+  const { period1, period2 } = yahooChartPeriodBounds(start, end);
 
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`;
 

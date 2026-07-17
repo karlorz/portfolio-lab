@@ -180,6 +180,28 @@ describe('market data fetcher source provenance', () => {
     ]);
   });
 
+  it('treats endDate as an inclusive calendar day in Yahoo period2', async () => {
+    // Yahoo chart period2 is exclusive of bars at/after the boundary. Requesting
+    // endDate at UTC midnight drops same-day session bars (notably ^VIX3M).
+    let requestedUrl = '';
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify(yahooPayload(100)), { status: 200 });
+    };
+
+    await fetchYahooV8('^VIX3M', '2005-01-01', '2026-07-17', {
+      fetchImpl,
+      maxAttempts: 1,
+      backoffMs: 0,
+    });
+
+    const period2 = Number(new URL(requestedUrl).searchParams.get('period2'));
+    const endMidnightUtc = Math.floor(Date.parse('2026-07-17T00:00:00.000Z') / 1000);
+    expect(Number.isFinite(period2)).toBe(true);
+    // Must request through end of endDate UTC day (exclusive next midnight).
+    expect(period2).toBeGreaterThanOrEqual(endMidnightUtc + 86_400);
+  });
+
   it('classifies malformed Yahoo payloads without live network calls', async () => {
     const fetchImpl = async () => new Response('not-json', { status: 200 });
 
