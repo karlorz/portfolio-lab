@@ -542,6 +542,35 @@ class TestSignalStalenessNormalization:
         assert result["signal_timestamps"]["collar"] is None
         assert result["signal_timestamps"]["bond_momentum"] is None
 
+    def test_optional_overlay_sections_with_generated_at_are_fresh(self, tmp_path):
+        """Overlay dashboard must stamp generated_at or healthy producers look unavailable."""
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": fresh},
+            "collar": {"active": True, "generated_at": fresh, "status_text": "ok"},
+            "bond_momentum": {"active": True, "generated_at": fresh, "status_text": "ok"},
+            "calendar_seasonality": {"active": False, "generated_at": fresh},
+            "crypto_allocation": {"active": True, "generated_at": fresh},
+            "kurtosis_regime": {"active": True, "generated_at": fresh},
+        })
+
+        for key in (
+            "collar",
+            "bond_momentum",
+            "calendar_seasonality",
+            "crypto_allocation",
+            "kurtosis_regime",
+        ):
+            assert key not in result["unavailable_signals"]
+            assert key not in result["stale_signals"]
+            assert result["signal_timestamps"][key] is not None
+
     def test_future_naive_timestamp_is_bounded_to_fresh_age_and_decay(self, tmp_path):
         gen, _ = _make_generator(tmp_path)
         fresh = datetime.now(timezone.utc).isoformat()

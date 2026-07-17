@@ -86,12 +86,26 @@ class OverlayDashboardGenerator:
     def _ensure_dirs(self):
         self.OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _stamp_freshness(block: Dict[str, Any], produced_at: str | None = None) -> Dict[str, Any]:
+        """Ensure overlay sections carry generated_at for signal-staleness TTL.
+
+        signals.json maps these blocks into collar/crypto_allocation/etc. and
+        marks optional sections without a freshness field as unavailable, which
+        blocks all-fresh PASS and keeps sticky kill incidents alive even when
+        producers just ran successfully.
+        """
+        ts = produced_at or datetime.now().isoformat()
+        block.setdefault("timestamp", ts)
+        block.setdefault("generated_at", ts)
+        return block
+
     def _get_collar_data(self) -> Dict[str, Any]:
         """Collect collar overlay data."""
         try:
             from src.signals.collar_signal import generate_collar_signal
             signal = generate_collar_signal(spot=550.0, vix=16.0)
-            return {
+            return self._stamp_freshness({
                 "active": signal.is_valid,
                 "regime": signal.regime,
                 "call_strike": signal.call_strike,
@@ -105,7 +119,7 @@ class OverlayDashboardGenerator:
                 "status_text": f"Collar: {signal.regime}, "
                                f"call ${signal.call_strike:.0f}, "
                                f"put ${signal.put_strike:.0f}",
-            }
+            }, getattr(signal, "timestamp", None))
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
@@ -114,7 +128,7 @@ class OverlayDashboardGenerator:
         try:
             from src.signals.crypto_momentum import generate_crypto_signal
             signal = generate_crypto_signal()
-            return {
+            return self._stamp_freshness({
                 "active": signal.is_valid,
                 "btc_weight": signal.btc_signal.target_weight,
                 "eth_weight": signal.eth_signal.target_weight,
@@ -126,7 +140,7 @@ class OverlayDashboardGenerator:
                 "confidence": signal.confidence,
                 "status_text": f"Crypto: {signal.composite_weight:.1%}, "
                                f"BTC {signal.btc_signal.momentum_6m:+.1%} 6m",
-            }
+            }, getattr(signal, "timestamp", None))
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
@@ -135,7 +149,7 @@ class OverlayDashboardGenerator:
         try:
             from src.signals.bond_duration_signal import generate_bond_duration_signal
             signal = generate_bond_duration_signal()
-            return {
+            return self._stamp_freshness({
                 "active": signal.is_valid,
                 "yield_10y": signal.yield_10y,
                 "yield_2y": signal.yield_2y,
@@ -151,7 +165,7 @@ class OverlayDashboardGenerator:
                 "status_text": f"Bonds: {signal.position} "
                                f"({signal.curve_regime}/{signal.rate_direction}), "
                                f"dur {signal.effective_duration:.0f}yr",
-            }
+            }, getattr(signal, "timestamp", None))
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
@@ -160,7 +174,11 @@ class OverlayDashboardGenerator:
         try:
             from src.signals.calendar_seasonality import check_calendar
             signal = check_calendar()
-            return {
+            # Calendar is day-scoped; prefer assessment_date when present.
+            produced = getattr(signal, "assessment_date", None)
+            if produced and "T" not in str(produced):
+                produced = f"{produced}T00:00:00"
+            return self._stamp_freshness({
                 "active": signal.is_trading_day,
                 "modifier": signal.urgency_modifier,
                 "active_windows": signal.active_windows,
@@ -170,7 +188,7 @@ class OverlayDashboardGenerator:
                 "effect": signal.effect,
                 "status_text": f"Calendar: {signal.urgency_modifier:.2f}x, "
                                f"{len(signal.active_windows)} windows active",
-            }
+            }, produced)
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
@@ -179,7 +197,7 @@ class OverlayDashboardGenerator:
         try:
             from src.regime.kurtosis_regime import detect_kurtosis_regime
             signal = detect_kurtosis_regime()
-            return {
+            return self._stamp_freshness({
                 "active": True,
                 "kurtosis_20d": signal.kurtosis_20d,
                 "kurtosis_60d": signal.kurtosis_60d,
@@ -192,7 +210,7 @@ class OverlayDashboardGenerator:
                 "fat_tail_risk": signal.fat_tail_risk,
                 "status_text": f"Kurtosis: {signal.regime} "
                                f"(k={signal.kurtosis_60d:.1f}, KER={signal.ker_ratio:.2f})",
-            }
+            }, getattr(signal, "timestamp", None))
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 

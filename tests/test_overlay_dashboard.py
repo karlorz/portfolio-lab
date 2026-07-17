@@ -59,6 +59,18 @@ class TestOverlayDashboardGenerator:
         dashboard = gen.generate()
         assert "active" in dashboard.collar or "error" in dashboard.collar
 
+    def test_overlay_sections_include_freshness_timestamps(self, gen):
+        """Freshness stamps prevent optional sections looking unavailable in signals.json."""
+        dashboard = gen.generate()
+        for section_name in ("collar", "crypto", "bond_duration", "calendar", "kurtosis"):
+            section = getattr(dashboard, section_name)
+            assert isinstance(section, dict)
+            if section.get("error"):
+                continue
+            assert section.get("generated_at") or section.get("timestamp"), (
+                f"{section_name} missing generated_at/timestamp"
+            )
+
     def test_crypto_data_collected(self, gen):
         dashboard = gen.generate()
         assert "active" in dashboard.crypto or "error" in dashboard.crypto
