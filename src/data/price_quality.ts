@@ -280,9 +280,11 @@ function updateStatus(
   summary: PriceSymbolQualitySummary,
   hasCriticalReturnAnomaly = summary.return_anomalies.some((issue) => issue.severity === 'critical'),
 ): void {
+  // Reference-calendar internal gaps are advisory: sparse index series such as
+  // ^VIX3M legitimately omit SPY trading days while still being current at the
+  // latest bar. Do not fail the data job for mid-history holes alone.
   const hasBlockingIssues = (
     summary.duplicate_date_count > 0
-    || summary.internal_gaps.length > 0
     || summary.invalid_dates.length > 0
     || summary.invalid_prices.length > 0
     || summary.missing_required_keys.length > 0
@@ -296,7 +298,11 @@ function updateStatus(
     summary.status = 'fail';
     return;
   }
-  summary.status = summary.return_anomalies.length > 0 ? 'warn' : 'ok';
+  const hasAdvisoryIssues = (
+    summary.return_anomalies.length > 0
+    || summary.internal_gaps.length > 0
+  );
+  summary.status = hasAdvisoryIssues ? 'warn' : 'ok';
 }
 
 function uniqueSortedDates(dates: string[]): string[] {
@@ -380,10 +386,10 @@ function applyReturnAnomalyChecks(
 }
 
 function hasBlockingIssueCounts(counts: PriceIssueCounts): boolean {
+  // internal_gaps / split_like_returns are counted but advisory (overall warn).
   return counts.duplicate_dates > 0
     || counts.empty_symbols > 0
     || counts.extreme_returns > 0
-    || counts.internal_gaps > 0
     || counts.invalid_dates > 0
     || counts.invalid_prices > 0
     || counts.missing_required_keys > 0

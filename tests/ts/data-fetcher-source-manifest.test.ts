@@ -460,7 +460,7 @@ describe('market data fetcher source provenance', () => {
     });
   });
 
-  it('flags bounded samples of internal reference-calendar gaps', () => {
+  it('flags bounded samples of internal reference-calendar gaps as advisory warn', () => {
     const report = buildPriceDataQualityReport(
       internalGapCompactPrices(),
       '2026-06-13T00:00:00Z',
@@ -468,10 +468,12 @@ describe('market data fetcher source provenance', () => {
     );
 
     const tlt = report.symbols.find((symbol) => symbol.symbol === 'TLT');
-    expect(report.overall_status).toBe('fail');
+    // Sparse / lagging mid-history holes must not fail-close the data job when
+    // the series is otherwise valid (see ^VIX3M vs SPY calendar).
+    expect(report.overall_status).toBe('warn');
     expect(report.issue_counts.internal_gaps).toBe(1);
     expect(tlt).toMatchObject({
-      status: 'fail',
+      status: 'warn',
       internal_gaps: [
         {
           missing_count: 1,
@@ -479,6 +481,39 @@ describe('market data fetcher source provenance', () => {
         },
       ],
     });
+  });
+
+  it('keeps sparse index series current when latest matches SPY despite mid-history holes', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-07-10', p: 740 },
+          { d: '2026-07-13', p: 742 },
+          { d: '2026-07-14', p: 743 },
+          { d: '2026-07-15', p: 744 },
+          { d: '2026-07-16', p: 750 },
+          { d: '2026-07-17', p: 743 },
+        ],
+        '^VIX3M': [
+          { d: '2026-07-10', p: 18.57 },
+          // Yahoo often omits mid-week bars for VIX indices while still publishing
+          // the latest session — not a staleness failure once latest matches SPY.
+          { d: '2026-07-17', p: 20.35 },
+        ],
+      },
+      '2026-07-18T00:00:00Z',
+    );
+
+    const vix = report.symbols.find((symbol) => symbol.symbol === '^VIX3M');
+    expect(report.issue_counts.stale_latest_dates).toBe(0);
+    expect(report.overall_status).not.toBe('fail');
+    expect(vix).toMatchObject({
+      latest_date: '2026-07-17',
+      latest_lag_days: 0,
+      stale_latest_date: null,
+    });
+    expect(vix?.internal_gaps.length ?? 0).toBeGreaterThan(0);
+    expect(vix?.status).toBe('warn');
   });
 
   it('flags invalid prices, non-monotonic rows, missing keys, duplicate dates, and bad dates', () => {
