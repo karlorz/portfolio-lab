@@ -178,6 +178,58 @@ def test_slo_runbook_maps_data_quality_issue_actions(
     assert expected_action in slo["runbook"]["top_cause"]["action"]
 
 
+def test_slo_ignores_live_price_quality_warn_only_for_provider_dimension() -> None:
+    """Live Yahoo success + quality warn must not top the SLO as provider degrade.
+
+    Nested data_quality already surfaces the advisory; double-counting as
+    provider degraded keeps top_dimension=provider forever on research hosts.
+    """
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest={
+            "artifacts": [
+                {
+                    "artifact": "prices.json",
+                    "provider": "Yahoo Finance",
+                    "source_mode": "live",
+                    "status": "degraded",
+                    "failure_reason": None,
+                    "fallback_reason": None,
+                    "data_quality": {
+                        "artifact": "data_quality.json",
+                        "status": "warn",
+                        "issue_counts": _quality_counts(internal_gaps=1, total=1),
+                    },
+                },
+                {
+                    "artifact": "prices_compact.json",
+                    "provider": "Yahoo Finance",
+                    "source_mode": "live",
+                    "status": "degraded",
+                    "failure_reason": None,
+                    "data_quality": {"status": "warn"},
+                },
+            ]
+        },
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+        data_quality_report={
+            "overall_status": "warn",
+            "issue_counts": _quality_counts(internal_gaps=1, total=1),
+        },
+    )
+
+    provider = slo["dimensions"]["provider"]
+    assert provider["status"] == "ok"
+    assert provider["degraded_artifacts"] == []
+    assert set(provider.get("quality_warn_only_artifacts") or []) == {
+        "prices.json",
+        "prices_compact.json",
+    }
+    assert slo["dimensions"]["data_quality"]["status"] == "warning"
+    assert slo["top_dimension"] != "provider"
+
+
 def test_slo_warns_on_provider_fallback() -> None:
     slo = build_data_pipeline_slo(
         health_data=_health(),

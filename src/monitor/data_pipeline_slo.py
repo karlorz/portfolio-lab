@@ -121,6 +121,44 @@ def _scheduler_dimension(health_data: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_price_quality_warn_only_row(row: Mapping[str, Any]) -> bool:
+    """True when live fetch succeeded and only nested price-quality is warn.
+
+    fetch-data marks prices.json / prices_compact.json status=degraded when
+    overall_status=warn. That is an advisory quality signal already covered by
+    the data_quality SLO dimension — not a provider outage/fallback.
+    """
+    if str(row.get("source_mode") or "") != "live":
+        return False
+    if str(row.get("status") or "") not in {"degraded", "warning", "warn"}:
+        return False
+    if row.get("failure_reason") not in (None, "", "null"):
+        return False
+    if row.get("fallback_reason") not in (None, "", "null"):
+        return False
+    quality = row.get("data_quality")
+    if not isinstance(quality, Mapping):
+        return False
+    return str(quality.get("status") or "").lower() in {"warn", "warning"}
+
+
+def _is_intentional_lab_provider_gap_row(row: Mapping[str, Any]) -> bool:
+    """True for known non-outage lab gaps that have their own SLO dimensions.
+
+    - Live prices degraded solely from quality warn → data_quality dimension
+    - yields.json synthetic + missing_api_key → fred_readiness / FRED lab gap
+    """
+    if _is_price_quality_warn_only_row(row):
+        return True
+    artifact = str(row.get("artifact") or "")
+    if artifact != "yields.json":
+        return False
+    if str(row.get("source_mode") or "") != "synthetic":
+        return False
+    reason = str(row.get("failure_reason") or row.get("fallback_reason") or "")
+    return reason in {"missing_api_key", "missing_fred_api_key"}
+
+
 def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, Any]:
     artifacts = source_manifest.get("artifacts") if isinstance(source_manifest, Mapping) else None
     rows = [row for row in artifacts if isinstance(row, Mapping)] if isinstance(artifacts, list) else []
@@ -136,8 +174,20 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
             "message": "source manifest stale" if manifest_degraded else "source manifest missing or empty",
         }
     degraded_rows = [
-        row for row in rows
-        if row.get("status") != "success" or row.get("source_mode") != "live"
+        row
+        for row in rows
+        if (row.get("status") != "success" or row.get("source_mode") != "live")
+        and not _is_intentional_lab_provider_gap_row(row)
+    ]
+    quality_warn_only = [
+        str(row.get("artifact"))
+        for row in rows
+        if _is_price_quality_warn_only_row(row)
+    ]
+    lab_gap_artifacts = [
+        str(row.get("artifact"))
+        for row in rows
+        if _is_intentional_lab_provider_gap_row(row)
     ]
     degraded = [str(row.get("artifact")) for row in degraded_rows]
     degraded_reasons = {
@@ -154,7 +204,7 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
         for artifact, details in degraded_reasons.items()
     ]
     status = "warning" if degraded or manifest_degraded else "ok"
-    return {
+    payload: dict[str, Any] = {
         "status": status,
         "manifest_status": manifest_status,
         "manifest_failure_reason": manifest_failure_reason,
@@ -169,6 +219,11 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
             else "providers live"
         ),
     }
+    if quality_warn_only:
+        payload["quality_warn_only_artifacts"] = quality_warn_only
+    if lab_gap_artifacts:
+        payload["intentional_lab_gap_artifacts"] = lab_gap_artifacts
+    return payload
 
 
 def _parse_generated_at(value: Any) -> datetime | None:
@@ -674,6 +729,40 @@ def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dic
             artifact="source_manifest.json",
             reason=provider_dimension.get("manifest_failure_reason") or provider_dimension.get("manifest_status"),
         ))
+
+    # Intentional lab gaps are excluded from degraded_artifacts / provider status
+    # but still need operator runbook hints (e.g. synthetic FRED without key).
+    lab_gaps = provider_dimension.get("intentional_lab_gap_artifacts")
+    if isinstance(lab_gaps, list):
+        for artifact in lab_gaps:
+            artifact_name = str(artifact)
+            if artifact_name == "yields.json":
+                entries.append(_runbook_entry(
+                    dimension="provider",
+                    code="fred_synthetic_fallback",
+                    severity="warning",
+                    action=(
+                        "Set or verify FRED_API_KEY, rerun the data fetch, and treat "
+                        "yield data as synthetic until FRED returns live or cached "
+                        "observations."
+                    ),
+                    artifact=artifact_name,
+                    provider="FRED",
+                    reason="missing_api_key",
+                ))
+            elif artifact_name.startswith("prices"):
+                entries.append(_runbook_entry(
+                    dimension="data_quality",
+                    code="price_quality_advisory",
+                    severity="warning",
+                    action=(
+                        "Review data_quality.json advisory issues (internal gaps / "
+                        "split-like returns); provider fetch is live — no Yahoo outage."
+                    ),
+                    artifact=artifact_name,
+                    provider="Yahoo Finance",
+                    reason="price_quality_warn",
+                ))
 
     degraded_reasons = provider_dimension.get("degraded_reasons")
     if not isinstance(degraded_reasons, Mapping):
