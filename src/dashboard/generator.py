@@ -1328,11 +1328,15 @@ class DashboardGenerator:
             engine = FactorMomentumEngine()
             factor_rotation_result = engine.evaluate()
             if factor_rotation_result and "error" not in factor_rotation_result:
+                now_ts = datetime.now(timezone.utc).isoformat()
                 factor_rotation_signal = {
                     "selected_factors": factor_rotation_result.get("selected_factors", []),
                     "allocation": factor_rotation_result.get("allocation", {}),
                     "signal_strength": factor_rotation_result.get("signal_strength", 0.0),
                     "recommendation": factor_rotation_result.get("recommendation", {}),
+                    # Staleness TTL requires generated_at; missing field → optional unavailable.
+                    "generated_at": now_ts,
+                    "timestamp": now_ts,
                 }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("factor_rotation", e)
@@ -1598,6 +1602,7 @@ class DashboardGenerator:
 
             if factor_rotation_result is not None and "error" not in factor_rotation_result:
                 allocations = factor_rotation_result.get("allocation", {})
+                now_ts = datetime.now(timezone.utc).isoformat()
                 factor_rotation_dashboard = {
                     "active": True,
                     "selected_factors": factor_rotation_result.get("selected_factors", []),
@@ -1607,6 +1612,8 @@ class DashboardGenerator:
                         "Factor rotation reduces MaxDD by 5.8pp (2021-2026). "
                         "Defensive tool — best in high-vol regimes (Sharpe 1.474)."
                     ),
+                    "generated_at": now_ts,
+                    "timestamp": now_ts,
                 }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("factor_rotation_dashboard", e)

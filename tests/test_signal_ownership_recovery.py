@@ -124,6 +124,53 @@ def test_sustained_unavailability_fires_under_old_kill(tmp_path, monkeypatch) ->
     assert details["actionable_unavailable_count"] >= 5
 
 
+def test_factor_rotation_ownership_points_at_dashboard_not_overlay() -> None:
+    """Factor rotation is produced by FactorMomentumEngine in dashboard generate."""
+    own = SIGNAL_OWNERSHIP["factor_rotation"]
+    assert own["make_target"] == "dashboard"
+    assert "factor_rotation" in own["module"]
+    assert "overlay" not in own["make_target"]
+
+
+def test_sustained_unavailability_skips_warning_level_kill(tmp_path, monkeypatch) -> None:
+    """SIGNAL_RECOVERY itself writes WARN→p2 kill; must not re-fire under that warning."""
+    from src.monitor import alerting as al
+
+    old = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+    (tmp_path / "kill_switch.json").write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "level": "warning",
+                "reason": "unresolved_incident:signal_recovery",
+                "timestamp": old,
+            }
+        )
+    )
+    sent = []
+    monkeypatch.setattr(al, "send_alert", lambda *a, **k: sent.append(a) or True)
+    fired = check_sustained_unavailability_and_alert(
+        {
+            "unavailable_signals": [
+                "collar",
+                "bond_momentum",
+                "kurtosis_regime",
+                "calendar_seasonality",
+                "crypto_allocation",
+                "factor_rotation",
+            ],
+            "stale_signals": [],
+            "total_count": 23,
+            "healthy_count": 10,
+        },
+        data_dir=tmp_path,
+        min_unavailable=5,
+        min_hours=2.0,
+    )
+    assert fired is False
+    assert sent == []
+
+
 def test_sustained_unavailability_skips_without_kill(tmp_path, monkeypatch) -> None:
     from src.monitor import alerting as al
 

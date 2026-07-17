@@ -50,10 +50,11 @@ SIGNAL_OWNERSHIP: dict[str, dict[str, Any]] = {
         "recovery": "make overlay-signals",
     },
     "factor_rotation": {
-        "job": "portfolio-lab-overlay-signals",
-        "make_target": "overlay-signals",
-        "module": "src.signals.sector_rotation",  # best-effort
-        "recovery": "make overlay-signals",
+        # Produced in dashboard generator via FactorMomentumEngine (not overlay job).
+        "job": "portfolio-lab-dashboard",
+        "make_target": "dashboard",
+        "module": "src.strategy.factor_rotation",
+        "recovery": "make dashboard",
     },
     "stacking_ensemble": {
         "job": "portfolio-lab-research",

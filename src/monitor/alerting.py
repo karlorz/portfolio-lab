@@ -405,6 +405,12 @@ def check_sustained_unavailability_and_alert(
 
     if not kill_enabled:
         return False
+    # Only under execution-blocking kill levels. WARNING-level kill often comes
+    # from this same SIGNAL_RECOVERY channel (WARN→p2→kill warning), which would
+    # re-fire forever under its own advisory authority.
+    level_norm = str(kill_level or "").strip().lower()
+    if level_norm not in {"halt", "restrict"}:
+        return False
     if kill_age_hours is not None and kill_age_hours < hours_needed:
         return False
     # If no kill timestamp, still fire when threshold met (fail-visible)

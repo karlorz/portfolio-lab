@@ -558,6 +558,11 @@ class TestSignalStalenessNormalization:
             "calendar_seasonality": {"active": False, "generated_at": fresh},
             "crypto_allocation": {"active": True, "generated_at": fresh},
             "kurtosis_regime": {"active": True, "generated_at": fresh},
+            "factor_rotation": {
+                "selected_factors": ["VLUE"],
+                "signal_strength": 0.5,
+                "generated_at": fresh,
+            },
         })
 
         for key in (
@@ -566,6 +571,7 @@ class TestSignalStalenessNormalization:
             "calendar_seasonality",
             "crypto_allocation",
             "kurtosis_regime",
+            "factor_rotation",
         ):
             assert key not in result["unavailable_signals"]
             assert key not in result["stale_signals"]
