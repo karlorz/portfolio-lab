@@ -27,10 +27,13 @@ from typing import Any
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.monitor.alerting import AlertChannel, AlertLevel, send_alert
 from src.monitor.hermes_cron import (
+    HEALTH_SELF_JOB_NAME,
     combine_scheduler_backends,
+    is_health_self_job,
     load_hermes_portfolio_cron_jobs,
     load_local_cron_jobs,
     resolve_hermes_cron_jobs_path,
+    rollup_failed_cron_jobs,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,11 +43,6 @@ __all__ = ["run_health_check", "check_scheduler_drift", "publish_ops_health_surf
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
 _DEFAULT_DATA_DIR = DATA_DIR
 SCHEDULER_DRIFT_THRESHOLD = 2
-# The health cron job records its own exit into cron_status.json (via make health →
-# cron_update and tasker mirrors). Counting that row as a "failed job" makes the
-# next health run exit non-zero forever (sticky self-degradation). Exclude it from
-# rollup failure counts / backend status while still listing the raw job row.
-HEALTH_SELF_JOB_NAME = "portfolio-lab-health"
 
 
 def health_ops_path() -> Path:
@@ -263,20 +261,6 @@ def check_scheduler_drift(
     return details
 
 
-def _is_health_self_job(job: dict[str, Any]) -> bool:
-    """True when the row is the health job reporting on itself."""
-    return str(job.get("name") or "") == HEALTH_SELF_JOB_NAME
-
-
-def _rollup_failed_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Failed jobs that should affect health exit / rollup (excludes self-job)."""
-    return [
-        job
-        for job in jobs
-        if job.get("status") == "error" and not _is_health_self_job(job)
-    ]
-
-
 def _backend_summary_excluding_health_self(
     backend: dict[str, Any],
     jobs: list[dict[str, Any]],
@@ -292,7 +276,7 @@ def _backend_summary_excluding_health_self(
     failed_jobs = sum(
         1
         for job in backend_jobs
-        if job.get("status") == "error" and not _is_health_self_job(job)
+        if job.get("status") == "error" and not is_health_self_job(job)
     )
     adjusted["failed_jobs"] = failed_jobs
     # Preserve explicit unavailable/error set by loaders (missing file, parse fail).
@@ -368,7 +352,7 @@ def _check_data_freshness() -> dict:
 
     scheduler_status = combine_scheduler_backends(scheduler_backends)
     scheduler_drift = check_scheduler_drift(scheduler_status["backends"])
-    failed = _rollup_failed_jobs(jobs)
+    failed = rollup_failed_cron_jobs(jobs)
     backend_error = any(
         backend.get("status") == "error" for backend in scheduler_backends.values()
     )

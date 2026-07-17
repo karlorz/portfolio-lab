@@ -11,6 +11,32 @@ from src.paths import PROJECT_ROOT
 
 CRON_FIELD_PREVIEW_CHARS = int(os.environ.get("CRON_FIELD_PREVIEW_CHARS", "4096"))
 
+# The health cron job records its own exit into cron_status.json (make health →
+# cron_update + tasker mirrors). Counting that row as a "failed job" makes the
+# next health/dashboard SLO run self-degrade forever. Exclude from rollups only.
+HEALTH_SELF_JOB_NAME = "portfolio-lab-health"
+
+
+def is_health_self_job(job: Any) -> bool:
+    """True when the row is the health job reporting on itself."""
+    if not isinstance(job, dict):
+        return False
+    return str(job.get("name") or "") == HEALTH_SELF_JOB_NAME
+
+
+def rollup_failed_cron_jobs(jobs: list[Any]) -> list[dict[str, Any]]:
+    """Failed jobs that should affect health/SLO exit (excludes health self-job)."""
+    failed: list[dict[str, Any]] = []
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        if job.get("status") != "error":
+            continue
+        if is_health_self_job(job):
+            continue
+        failed.append(job)
+    return failed
+
 
 def normalize_cron_status(value: Any) -> str:
     """Map scheduler-specific status strings to dashboard status values."""

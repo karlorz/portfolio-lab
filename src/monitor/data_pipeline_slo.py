@@ -72,27 +72,51 @@ def load_rebalance_health(public_dir: Path) -> dict[str, Any]:
 
 
 def _scheduler_dimension(health_data: Mapping[str, Any]) -> dict[str, Any]:
+    from src.monitor.hermes_cron import is_health_self_job, rollup_failed_cron_jobs
+
     scheduler = health_data.get("scheduler_status")
     scheduler_status = scheduler.get("status") if isinstance(scheduler, Mapping) else "unknown"
     cron_jobs = health_data.get("cron_jobs")
     jobs = cron_jobs if isinstance(cron_jobs, list) else []
-    failed_jobs = [job for job in jobs if isinstance(job, Mapping) and job.get("status") == "error"]
+    # Exclude portfolio-lab-health self-errors (sticky tasker mirror of prior exits).
+    failed_jobs = rollup_failed_cron_jobs(jobs)
+
+    # If scheduler_status is degraded solely because of the self-job, treat as ok
+    # for the dimension severity when no other failures remain.
+    self_only_error = (
+        not failed_jobs
+        and any(
+            isinstance(job, Mapping)
+            and job.get("status") == "error"
+            and is_health_self_job(job)
+            for job in jobs
+        )
+    )
+    effective_scheduler_status = scheduler_status
+    if self_only_error and scheduler_status in {"degraded", "warning"}:
+        effective_scheduler_status = "ok"
+
     if len(failed_jobs) > 2:
         status = "critical"
-    elif failed_jobs or scheduler_status in {"degraded", "error", "warning", "unavailable"}:
+    elif failed_jobs or effective_scheduler_status in {
+        "degraded",
+        "error",
+        "warning",
+        "unavailable",
+    }:
         status = "warning"
-    elif scheduler_status == "unknown":
+    elif effective_scheduler_status == "unknown":
         status = "unknown"
     else:
         status = "ok"
     return {
         "status": status,
-        "scheduler_status": scheduler_status,
+        "scheduler_status": effective_scheduler_status,
         "failed_jobs": len(failed_jobs),
         "message": (
             f"{len(failed_jobs)} scheduler job(s) failed"
             if failed_jobs
-            else f"scheduler {scheduler_status}"
+            else f"scheduler {effective_scheduler_status}"
         ),
     }
 

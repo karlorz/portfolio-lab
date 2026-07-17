@@ -227,7 +227,7 @@ def test_slo_surfaces_fred_source_manifest_failure_reasons() -> None:
 
 def test_slo_reports_scheduler_failure_as_top_dimension() -> None:
     health = _health()
-    health["cron_jobs"] = [{"id": "data", "status": "error"}]
+    health["cron_jobs"] = [{"id": "data", "name": "portfolio-lab-data", "status": "error"}]
 
     slo = build_data_pipeline_slo(
         health_data=health,
@@ -238,6 +238,39 @@ def test_slo_reports_scheduler_failure_as_top_dimension() -> None:
 
     assert slo["status"] == "warning"
     assert slo["top_dimension"] == "scheduler"
+
+
+def test_slo_ignores_health_self_job_error_in_scheduler_dimension() -> None:
+    """Sticky portfolio-lab-health errors must not keep scheduler SLO degraded."""
+    health = _health()
+    health["cron_jobs"] = [
+        {
+            "id": "tasker:portfolio-lab-health",
+            "name": "portfolio-lab-health",
+            "status": "error",
+            "backend": "tasker",
+        },
+        {
+            "id": "tasker:portfolio-lab-data",
+            "name": "portfolio-lab-data",
+            "status": "ok",
+            "backend": "tasker",
+        },
+    ]
+    health["scheduler_status"] = {"status": "degraded", "backends": {}}
+
+    slo = build_data_pipeline_slo(
+        health_data=health,
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    sched = slo["dimensions"]["scheduler"]
+    assert sched["failed_jobs"] == 0
+    assert sched["status"] == "ok"
+    assert sched["scheduler_status"] == "ok"
+    assert slo["top_dimension"] != "scheduler"
 
 
 def test_slo_warns_on_artifact_staleness() -> None:

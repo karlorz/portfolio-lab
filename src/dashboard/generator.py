@@ -343,10 +343,10 @@ def _compact_health_summary(report: Dict) -> Dict:
 
     cron_jobs = report.get("cron_jobs")
     if isinstance(cron_jobs, list):
+        from src.monitor.hermes_cron import rollup_failed_cron_jobs
+
         summary["cron_job_count"] = len(cron_jobs)
-        summary["failed_cron_jobs"] = sum(
-            1 for job in cron_jobs if isinstance(job, dict) and job.get("status") == "error"
-        )
+        summary["failed_cron_jobs"] = len(rollup_failed_cron_jobs(cron_jobs))
 
     data_freshness = report.get("data_freshness")
     if isinstance(data_freshness, dict):
@@ -2979,8 +2979,12 @@ class DashboardGenerator:
         health_data["open_incidents"] = open_incidents
 
         # Overall system health
+        # Exclude portfolio-lab-health self-errors so sticky tasker mirrors of
+        # prior health exits cannot degrade dashboard system_status forever.
+        from src.monitor.hermes_cron import rollup_failed_cron_jobs
+
         stale_count = summarize_stale_symbol_count(health_data["data_freshness"])
-        failed_jobs = sum(1 for j in health_data["cron_jobs"] if j.get("status") == "error")
+        failed_jobs = len(rollup_failed_cron_jobs(health_data["cron_jobs"]))
         scheduler_status = health_data.get("scheduler_status", {}).get("status")
         slo_status = health_data.get("data_pipeline_slo", {}).get("status")
         backend_error = any(
