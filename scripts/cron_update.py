@@ -55,6 +55,14 @@ def main():
     else:
         data = {"jobs": []}
 
+    # Prefer the file-level SSOT backend (tasker) when an ad-hoc CLI invocation
+    # omits an explicit backend and would otherwise stamp "manual"/hermes and
+    # scramble dual-ownership bookkeeping.
+    file_backend = str(data.get("backend") or "").strip().lower()
+    backend_explicit = len(sys.argv) > 4 and "=" not in sys.argv[4]
+    if not backend_explicit and file_backend in {"tasker", "crontab", "hermes"}:
+        backend = file_backend
+
     now = datetime.now().isoformat()
     found = False
     for job in data["jobs"]:
@@ -62,7 +70,10 @@ def main():
             job["status"] = status
             job["last_run"] = now
             job["duration_seconds"] = duration
-            job["backend"] = backend
+            # Keep the job's established backend unless the caller explicitly
+            # passed a fourth positional backend arg.
+            if backend_explicit or not job.get("backend"):
+                job["backend"] = backend
             job.update(metadata)
             found = True
             break
@@ -78,8 +89,12 @@ def main():
         row.update(metadata)
         data["jobs"].append(row)
 
+    data.setdefault("backend", backend if backend_explicit else (file_backend or backend))
+    data["timestamp"] = now
+
     with open(status_file, "w") as f:
         json.dump(data, f, indent=2)
+        f.write("\n")
 
 if __name__ == "__main__":
     main()

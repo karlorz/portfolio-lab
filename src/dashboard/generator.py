@@ -1183,6 +1183,23 @@ class DashboardGenerator:
         }
 
     @staticmethod
+    def _flatten_advisory_authority(authority: Dict[str, Any]) -> Dict[str, Any]:
+        """Top-level authority fields for operator greps (vixy_hedge pattern).
+
+        Nested ``authority`` remains the schema contract for AdaptiveSizingPanel;
+        top-level mirrors make ``runtime_role`` / ``routed`` visible without
+        digging into the nested block.
+        """
+        return {
+            "runtime_role": authority.get("runtime_role"),
+            "live_authoritative": authority.get("live_authoritative"),
+            "routed": authority.get("routed"),
+            "routed_by": authority.get("routed_by"),
+            "canonical_controller": authority.get("canonical_controller"),
+            "routed_surface": authority.get("routed_surface"),
+        }
+
+    @staticmethod
     def _canonicalize_public_weights(
         weights: Dict[str, Any],
         canonical_assets: tuple[str, ...] = ("SPY", "GLD", "TLT"),
@@ -3029,6 +3046,10 @@ class DashboardGenerator:
             sizer = AdaptiveSizer()
             decision = sizer.compute_allocation()
 
+            authority = self._build_advisory_allocation_artifact_role(
+                surface="adaptive_sizing",
+                allocation_field="adjusted_allocation",
+            )
             sizing_data = {
                 "base_allocation": decision.base_allocation,
                 "adjusted_allocation": decision.adjusted_allocation,
@@ -3038,10 +3059,8 @@ class DashboardGenerator:
                 "signal_adjustment": decision.signal_adjustment,
                 "drawdown_adjustment": decision.drawdown_adjustment,
                 "factors": asdict(decision.factors) if hasattr(decision.factors, '__dataclass_fields__') else {},
-                "authority": self._build_advisory_allocation_artifact_role(
-                    surface="adaptive_sizing",
-                    allocation_field="adjusted_allocation",
-                ),
+                "authority": authority,
+                **self._flatten_advisory_authority(authority),
                 "generated_at": datetime.now().isoformat(),
             }
 
@@ -3155,6 +3174,10 @@ class DashboardGenerator:
                         "expected_return_delta": round(ret, 6),
                     })
 
+            authority = self._build_advisory_allocation_artifact_role(
+                surface="black_litterman",
+                allocation_field="posterior_weights",
+            )
             bl_data = {
                 "prior_weights": prior_public["weights"],
                 "posterior_weights": posterior_public["weights"],
@@ -3172,10 +3195,8 @@ class DashboardGenerator:
                     prior_public["zero_weight_assets"]
                     + posterior_public["zero_weight_assets"]
                 )),
-                "authority": self._build_advisory_allocation_artifact_role(
-                    surface="black_litterman",
-                    allocation_field="posterior_weights",
-                ),
+                "authority": authority,
+                **self._flatten_advisory_authority(authority),
                 "health_scores": bl_input.get("health_scores_used", {}),
                 "biases": {
                     "equity": round(bl_input.get("equity_bias", 0.0), 3),
