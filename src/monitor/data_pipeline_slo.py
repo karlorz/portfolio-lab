@@ -881,12 +881,13 @@ def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dic
 
     # Intentional lab gaps are excluded from degraded_artifacts / provider status
     # but still need operator runbook hints (e.g. synthetic FRED without key).
+    # Tag advisory/lab_gap so runbook top_cause ranking ignores them.
     lab_gaps = provider_dimension.get("intentional_lab_gap_artifacts")
     if isinstance(lab_gaps, list):
         for artifact in lab_gaps:
             artifact_name = str(artifact)
             if artifact_name == "yields.json":
-                entries.append(_runbook_entry(
+                entry = _runbook_entry(
                     dimension="provider",
                     code="fred_synthetic_fallback",
                     severity="warning",
@@ -898,9 +899,12 @@ def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dic
                     artifact=artifact_name,
                     provider="FRED",
                     reason="missing_api_key",
-                ))
+                )
+                entry["lab_gap"] = True
+                entry["advisory"] = True
+                entries.append(entry)
             elif artifact_name.startswith("prices"):
-                entries.append(_runbook_entry(
+                entry = _runbook_entry(
                     dimension="data_quality",
                     code="price_quality_advisory",
                     severity="warning",
@@ -911,7 +915,9 @@ def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dic
                     artifact=artifact_name,
                     provider="Yahoo Finance",
                     reason="price_quality_warn",
-                ))
+                )
+                entry["advisory"] = True
+                entries.append(entry)
 
     degraded_reasons = provider_dimension.get("degraded_reasons")
     if not isinstance(degraded_reasons, Mapping):

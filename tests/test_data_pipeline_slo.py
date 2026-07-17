@@ -268,6 +268,12 @@ def test_slo_ignores_live_price_quality_warn_only_for_provider_dimension() -> No
     assert slo["dimensions"]["data_quality"]["status"] == "ok"
     assert slo["dimensions"]["data_quality"]["advisory_only"] is True
     assert slo["top_dimension"] != "provider"
+    # Provider-emitted price_quality_advisory hints are flagged advisory.
+    assert all(
+        a.get("advisory") is True
+        for a in (slo["runbook"].get("actions") or [])
+        if a.get("code") == "price_quality_advisory"
+    )
 
 
 def test_slo_warns_on_provider_fallback() -> None:
@@ -884,9 +890,10 @@ def test_slo_runbook_maps_synthetic_fred_fallback() -> None:
     fred = next((a for a in actions if a.get("code") == "fred_synthetic_fallback"), None)
     assert fred is not None
     assert "synthetic" in fred["action"]
-    # Lab-gap FRED yields do not own top_cause; missing price quality may still warn.
-    if slo["runbook"]["top_cause"] is not None:
-        assert slo["runbook"]["top_cause"]["code"] != "fred_synthetic_fallback"
+    assert fred.get("lab_gap") is True
+    assert fred.get("advisory") is True
+    # Lab-gap FRED yields must not own top_cause.
+    assert slo["runbook"]["top_cause"] is None or slo["runbook"]["top_cause"]["code"] != "fred_synthetic_fallback"
 
 
 def test_slo_runbook_maps_stale_quote_artifact() -> None:
