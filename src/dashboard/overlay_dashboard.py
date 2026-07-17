@@ -21,8 +21,11 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Dict, List, Any, Tuple
 
+from pathlib import Path
+
 from src.paths import DATA_DIR
 from src.backtest.metrics import save_results_json
+from src.dashboard.kill_authority import load_kill_switch_payload
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +77,10 @@ class OverlayDashboardGenerator:
 
     OUTPUT_PATH = DATA_DIR / "dashboard" / "overlay_dashboard.json"
 
-    def __init__(self):
+    def __init__(self, data_dir: Path | str | None = None):
+        # Authority artifacts (kill_switch.json) live under data_dir.
+        # Injectable for tests so live halt cannot pollute pure overlay scoring.
+        self.data_dir = Path(data_dir) if data_dir is not None else DATA_DIR
         self._ensure_dirs()
 
     def _ensure_dirs(self):
@@ -222,6 +228,26 @@ class OverlayDashboardGenerator:
         """Assess overall portfolio risk level and generate alerts."""
         alerts = []
         risk_score = 0
+
+        # Kill authority (multi-surface honesty): never claim normal under halt.
+        kill = load_kill_switch_payload(self.data_dir)
+        if isinstance(kill, dict) and kill.get("enabled"):
+            level = str(kill.get("level") or "unknown").lower()
+            reason = kill.get("reason")
+            message = kill.get("message")
+            human = (
+                message
+                if isinstance(message, str) and message.strip()
+                else (str(reason) if reason is not None else "kill switch enabled")
+            )
+            alerts.append(f"Kill switch {level}: {human}")
+            if level == "halt":
+                risk_score += 5
+            elif level in {"restrict", "liquidate"}:
+                risk_score += 4
+            else:
+                # warning / advisory enabled kill
+                risk_score += 3
 
         # Collar risk
         collar = data.get("collar", {})

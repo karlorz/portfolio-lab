@@ -16,6 +16,12 @@ from src.dashboard.overlay_dashboard import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_overlay_data_dir(tmp_path, monkeypatch):
+    """Keep pure risk scoring free of live data/kill_switch.json halt."""
+    monkeypatch.setattr("src.dashboard.overlay_dashboard.DATA_DIR", tmp_path)
+
+
 class TestOverlayDashboardData:
     """Test dashboard data dataclass."""
 
@@ -100,8 +106,9 @@ class TestRiskAssessment:
     """Test risk assessment logic."""
 
     @pytest.fixture
-    def gen(self):
-        return OverlayDashboardGenerator()
+    def gen(self, tmp_path):
+        # Isolate from live data/kill_switch.json so overlay-only scoring is pure.
+        return OverlayDashboardGenerator(data_dir=tmp_path)
 
     def test_low_risk_when_normal(self, gen):
         data = {
@@ -137,12 +144,69 @@ class TestRiskAssessment:
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk in ("elevated", "moderate")
 
+    def test_kill_halt_forces_high_risk_and_alert(self, tmp_path):
+        """Enabled halt kill must never look like all-systems-normal."""
+        (tmp_path / "kill_switch.json").write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "level": "halt",
+                    "reason": "unresolved_incident:signal_staleness",
+                    "message": "1/23 signals stale: alternative_data; 12 unavailable",
+                    "mode": "paper",
+                    "source": "incident_lifecycle",
+                }
+            ),
+            encoding="utf-8",
+        )
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
+        data = {
+            "collar": {"vix_level": 15.0},
+            "crypto": {"btc_vol_regime": "normal"},
+            "kurtosis": {"fat_tail_risk": 0.1},
+            "bond_duration": {"curve_regime": "normal"},
+            "unified": {"conflict_count": 0},
+        }
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "high"
+        assert alerts
+        joined = " ".join(alerts).lower()
+        assert "halt" in joined
+        assert "kill" in joined
+        assert "signal_staleness" in joined or "unavailable" in joined
+
+    def test_kill_warning_elevates_risk_with_alert(self, tmp_path):
+        (tmp_path / "kill_switch.json").write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "level": "warning",
+                    "reason": "unresolved_incident:ic_decay",
+                    "message": "IC decay elevated",
+                    "mode": "paper",
+                }
+            ),
+            encoding="utf-8",
+        )
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
+        risk, alerts = gen._assess_portfolio_risk(
+            {
+                "collar": {"vix_level": 15.0},
+                "crypto": {"btc_vol_regime": "normal"},
+                "kurtosis": {"fat_tail_risk": 0.1},
+                "bond_duration": {"curve_regime": "normal"},
+                "unified": {"conflict_count": 0},
+            }
+        )
+        assert risk in ("elevated", "high")
+        assert any("kill" in a.lower() for a in alerts)
+
 
 class TestEdgeCases:
     """Edge cases for dashboard."""
 
-    def test_empty_data_handled(self):
-        gen = OverlayDashboardGenerator()
+    def test_empty_data_handled(self, tmp_path):
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
         data = {
             "collar": {}, "crypto": {}, "bond_duration": {},
             "calendar": {}, "kurtosis": {}, "unified": {},
@@ -150,8 +214,8 @@ class TestEdgeCases:
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk == "low"
 
-    def test_missing_keys_handled(self):
-        gen = OverlayDashboardGenerator()
+    def test_missing_keys_handled(self, tmp_path):
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
         data = {}
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk == "low"
@@ -161,8 +225,8 @@ class TestRiskAssessmentExtended:
     """Additional edge cases for risk assessment."""
 
     @pytest.fixture
-    def gen(self):
-        return OverlayDashboardGenerator()
+    def gen(self, tmp_path):
+        return OverlayDashboardGenerator(data_dir=tmp_path)
 
     def test_moderate_risk_with_single_factor(self, gen):
         """Single risk factor (VIX 26) -> moderate."""
