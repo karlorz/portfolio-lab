@@ -516,6 +516,69 @@ describe('market data fetcher source provenance', () => {
     expect(vix?.status).toBe('warn');
   });
 
+  it('treats sparse-index latest lag as advisory when Yahoo null-pads after last real bar', () => {
+    // Live Yahoo chart returns calendar timestamps through SPY's latest day with
+    // null closes for ^VIX3M after 2026-07-10; fetcher keeps last non-null bar.
+    // That lag must not fail-closed the whole data job / SLO.
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-07-10', p: 740 },
+          { d: '2026-07-13', p: 742 },
+          { d: '2026-07-14', p: 743 },
+          { d: '2026-07-15', p: 744 },
+          { d: '2026-07-16', p: 750 },
+          { d: '2026-07-17', p: 743 },
+        ],
+        '^VIX3M': [
+          { d: '2026-07-08', p: 19.46 },
+          { d: '2026-07-09', p: 18.99 },
+          { d: '2026-07-10', p: 18.57 },
+        ],
+      },
+      '2026-07-18T00:00:00Z',
+    );
+
+    const vix = report.symbols.find((symbol) => symbol.symbol === '^VIX3M');
+    expect(vix).toMatchObject({
+      latest_date: '2026-07-10',
+      latest_lag_days: 5,
+    });
+    // Visibility retained, but not a blocking stale_latest_dates count.
+    expect(vix?.stale_latest_date).toEqual({
+      reference_date: '2026-07-17',
+      latest_date: '2026-07-10',
+    });
+    expect(report.issue_counts.stale_latest_dates).toBe(0);
+    expect(report.overall_status).toBe('warn');
+    expect(vix?.status).toBe('warn');
+  });
+
+  it('still fails equity symbols that lag the reference calendar', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-07-15', p: 744 },
+          { d: '2026-07-16', p: 750 },
+          { d: '2026-07-17', p: 743 },
+        ],
+        GLD: [
+          { d: '2026-07-15', p: 220 },
+        ],
+      },
+      '2026-07-18T00:00:00Z',
+    );
+
+    const gld = report.symbols.find((symbol) => symbol.symbol === 'GLD');
+    expect(report.issue_counts.stale_latest_dates).toBe(1);
+    expect(report.overall_status).toBe('fail');
+    expect(gld?.status).toBe('fail');
+    expect(gld?.stale_latest_date).toEqual({
+      reference_date: '2026-07-17',
+      latest_date: '2026-07-15',
+    });
+  });
+
   it('flags invalid prices, non-monotonic rows, missing keys, duplicate dates, and bad dates', () => {
     const report = buildPriceDataQualityReport(
       {

@@ -94,6 +94,12 @@ export interface PriceDataQualityOptions {
   maxMissingDateSamples?: number;
   maxReturnAnomalySamples?: number;
   splitLikeReturnPct?: number;
+  /**
+   * Symbols whose latest-bar lag vs the reference calendar is advisory only.
+   * Yahoo often null-pads sparse VIX-family indices after the last real print
+   * while SPY keeps advancing; blocking the whole data job for that lag is wrong.
+   */
+  sparseIndexSymbols?: readonly string[];
 }
 
 const EMPTY_ISSUE_COUNTS: PriceIssueCounts = {
@@ -131,6 +137,25 @@ type EnvHost = typeof globalThis & {
 const DEFAULT_CRITICAL_RETURN_PCT = 90;
 const DEFAULT_MAX_RETURN_ANOMALY_SAMPLES = 5;
 const DEFAULT_SPLIT_LIKE_RETURN_PCT = 40;
+
+/** Yahoo-sparse indexes: lag vs SPY is advisory, not a data-job hard fail. */
+const DEFAULT_SPARSE_INDEX_SYMBOLS: readonly string[] = [
+  '^VIX3M',
+  '^VIX',
+  '^VIX6M',
+  'VIX3M',
+  'VIX',
+  'VIX6M',
+];
+
+function isSparseIndexSymbol(
+  symbol: string,
+  options: PriceDataQualityOptions,
+): boolean {
+  const configured = options.sparseIndexSymbols ?? DEFAULT_SPARSE_INDEX_SYMBOLS;
+  const normalized = symbol.trim().toUpperCase();
+  return configured.some((candidate) => candidate.trim().toUpperCase() === normalized);
+}
 
 function readEnvNumber(name: string): number | undefined {
   const host = globalThis as EnvHost;
@@ -279,10 +304,16 @@ function summarizeSymbol(
 function updateStatus(
   summary: PriceSymbolQualitySummary,
   hasCriticalReturnAnomaly = summary.return_anomalies.some((issue) => issue.severity === 'critical'),
+  options: PriceDataQualityOptions = {},
 ): void {
   // Reference-calendar internal gaps are advisory: sparse index series such as
   // ^VIX3M legitimately omit SPY trading days while still being current at the
   // latest bar. Do not fail the data job for mid-history holes alone.
+  // Sparse-index latest lag (Yahoo null-pad after last real bar) is also advisory.
+  const sparseIndexStaleIsAdvisory = summary.stale_latest_date !== null
+    && isSparseIndexSymbol(summary.symbol, options);
+  const staleIsBlocking = summary.stale_latest_date !== null
+    && !sparseIndexStaleIsAdvisory;
   const hasBlockingIssues = (
     summary.duplicate_date_count > 0
     || summary.invalid_dates.length > 0
@@ -290,7 +321,7 @@ function updateStatus(
     || summary.missing_required_keys.length > 0
     || summary.non_monotonic_rows.length > 0
     || summary.non_object_records.length > 0
-    || summary.stale_latest_date !== null
+    || staleIsBlocking
     || summary.row_count === 0
     || hasCriticalReturnAnomaly
   );
@@ -301,6 +332,7 @@ function updateStatus(
   const hasAdvisoryIssues = (
     summary.return_anomalies.length > 0
     || summary.internal_gaps.length > 0
+    || sparseIndexStaleIsAdvisory
   );
   summary.status = hasAdvisoryIssues ? 'warn' : 'ok';
 }
@@ -316,7 +348,7 @@ function computeReturnPct(previousPrice: number, currentPrice: number): number {
 function applyReturnAnomalyChecks(
   audits: SymbolAudit[],
   counts: PriceIssueCounts,
-  options: PriceDataQualityOptions,
+  options: PriceDataQualityOptions = {},
 ): void {
   const criticalReturnPct = positiveOption(
     options.criticalReturnPct,
@@ -381,7 +413,7 @@ function applyReturnAnomalyChecks(
     const hasCriticalReturnAnomaly = anomalies.some((issue) => issue.severity === 'critical');
     audit.summary.return_anomaly_count = anomalies.length;
     audit.summary.return_anomalies = anomalies.slice(0, maxReturnAnomalySamples);
-    updateStatus(audit.summary, hasCriticalReturnAnomaly);
+    updateStatus(audit.summary, hasCriticalReturnAnomaly, options);
   }
 }
 
@@ -443,15 +475,23 @@ function applyReferenceCalendarChecks(
     }
 
     summary.latest_lag_days = referenceDates.filter((date) => date > latestDate).length;
+    const sparseIndex = isSparseIndexSymbol(summary.symbol, options);
     if (summary.latest_lag_days > maxLatestLagDays) {
       summary.stale_latest_date = {
         reference_date: referenceLatestDate,
         latest_date: summary.latest_date,
       };
-      increment(counts, 'stale_latest_dates');
+      // Keep visibility on the symbol row, but do not increment the blocking
+      // stale_latest_dates counter for known sparse indexes (Yahoo null-pad lag).
+      // Still bump total so overall_status becomes warn (not silent ok).
+      if (!sparseIndex) {
+        increment(counts, 'stale_latest_dates');
+      } else {
+        counts.total += 1;
+      }
     }
 
-    updateStatus(summary);
+    updateStatus(summary, undefined, options);
   }
 }
 
