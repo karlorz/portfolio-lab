@@ -3912,8 +3912,30 @@ class DashboardGenerator:
         # Persist state for next process invocation
         monitor.save_state()
 
+        # status must reflect flags — never hardcode ok when flagged_signals
+        # is non-empty (operators gate on spc.status without re-parsing flags).
+        spc_status = "ok"
+        if flags:
+            max_breaches = max(
+                (int(f.get("consecutive_breaches") or 0) for f in flags),
+                default=0,
+            )
+            limit = int(monitor.consecutive_breach_limit or 3)
+            # Severe when well past the consecutive threshold; else alert.
+            if max_breaches >= max(limit * 3, limit + 10):
+                spc_status = "breach"
+            else:
+                spc_status = "alert"
+        else:
+            # Any is_flagged in signal_status without list entry (defensive).
+            if any(
+                isinstance(s, dict) and s.get("is_flagged")
+                for s in (all_status or {}).values()
+            ):
+                spc_status = "alert"
+
         return {
-            "status": "ok",
+            "status": spc_status,
             "flagged_signals": flags,
             "signal_status": all_status,
             "window_size": monitor.window_size,

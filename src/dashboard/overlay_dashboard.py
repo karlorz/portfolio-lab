@@ -174,11 +174,11 @@ class OverlayDashboardGenerator:
         try:
             from src.signals.calendar_seasonality import check_calendar
             signal = check_calendar()
-            # Calendar is day-scoped; prefer assessment_date when present.
-            produced = getattr(signal, "assessment_date", None)
-            if produced and "T" not in str(produced):
-                produced = f"{produced}T00:00:00"
-            return self._stamp_freshness({
+            # Production freshness must be wall-clock time of this generate(),
+            # not assessment_date midnight — midnight stamps false-stale by
+            # mid-afternoon and re-arm signal_staleness kills every day-roll.
+            assessment = getattr(signal, "assessment_date", None)
+            block = {
                 "active": signal.is_trading_day,
                 "modifier": signal.urgency_modifier,
                 "active_windows": signal.active_windows,
@@ -188,7 +188,11 @@ class OverlayDashboardGenerator:
                 "effect": signal.effect,
                 "status_text": f"Calendar: {signal.urgency_modifier:.2f}x, "
                                f"{len(signal.active_windows)} windows active",
-            }, produced)
+            }
+            if assessment is not None:
+                block["assessment_date"] = assessment
+            # Wall-clock production stamp (default in _stamp_freshness).
+            return self._stamp_freshness(block)
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 

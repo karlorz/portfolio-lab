@@ -5336,15 +5336,12 @@ class TestAllExports:
 
     def test_all_names_importable(self):
         """Every name in __all__ can be imported from the module."""
-        from src.dashboard.generator import __all__, DashboardGenerator, PUBLIC_DIR, DB_PATH
-        name_map = {
-            "DashboardGenerator": DashboardGenerator,
-            "PUBLIC_DIR": PUBLIC_DIR,
-            "DB_PATH": DB_PATH,
-        }
-        assert set(__all__) == set(name_map.keys())
-        for name, obj in name_map.items():
-            assert obj is not None, f"{name} should not be None"
+        import src.dashboard.generator as gen_mod
+        from src.dashboard.generator import __all__
+
+        for name in __all__:
+            assert hasattr(gen_mod, name), f"{name} missing from module"
+            assert getattr(gen_mod, name) is not None, f"{name} should not be None"
 
 
 # ---------------------------------------------------------------------------

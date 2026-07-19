@@ -140,7 +140,8 @@ def test_build_data_pipeline_slo_section_accepts_current_overall_status_shape(tm
     )
 
     data_quality = out["dimensions"]["data_quality"]
-    assert data_quality["status"] == "warning"
+    # split-like-only overall_status=warn is advisory (not a pipeline fail).
+    assert data_quality["status"] == "ok"
     assert data_quality["quality_status"] == "warn"
     assert data_quality["generated_at"] == "2026-07-06T11:05:20.437Z"
     assert data_quality["issue_counts"]["split_like_returns"] == 4

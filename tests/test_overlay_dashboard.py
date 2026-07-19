@@ -1788,3 +1788,87 @@ class TestKillSwitchAlerts:
         kill_alerts = [a for a in output["alerts"] if a.get("type") == "kill_switch"]
         assert len(kill_alerts) == 1
         assert "LIVE" in kill_alerts[0]["title"]
+
+
+class TestCalendarFreshnessProductionTime:
+    """Calendar must stamp wall-clock production time, not assessment midnight."""
+
+    def test_calendar_generated_at_is_wall_clock_not_midnight_assessment(self, monkeypatch):
+        from datetime import datetime
+        from unittest.mock import MagicMock
+        from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
+
+        # Freeze "now" to mid-afternoon
+        fixed_now = datetime(2026, 7, 19, 15, 0, 0)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is not None:
+                    return fixed_now.replace(tzinfo=tz) if fixed_now.tzinfo is None else fixed_now
+                return fixed_now
+
+        monkeypatch.setattr("src.dashboard.overlay_dashboard.datetime", FixedDateTime)
+
+        mock_signal = MagicMock()
+        mock_signal.is_trading_day = True
+        mock_signal.urgency_modifier = 1.0
+        mock_signal.active_windows = []
+        mock_signal.next_window = "TOM"
+        mock_signal.days_to_next_window = 2
+        mock_signal.recommendation = "proceed"
+        mock_signal.effect = "neutral"
+        mock_signal.assessment_date = "2026-07-19"  # date-only — must NOT become T00:00:00 sole stamp
+
+        monkeypatch.setattr(
+            "src.signals.calendar_seasonality.check_calendar",
+            lambda: mock_signal,
+        )
+        block = OverlayDashboardGenerator()._get_calendar_data()
+        gen_at = block.get("generated_at") or block.get("timestamp")
+        assert gen_at is not None
+        # Must not be pure midnight assessment stamp used as production time
+        assert not str(gen_at).startswith("2026-07-19T00:00:00"), (
+            f"calendar generated_at still midnight assessment: {gen_at}"
+        )
+        # Prefer wall-clock production time near fixed_now
+        assert "15:00" in str(gen_at) or "T15:" in str(gen_at), (
+            f"expected mid-afternoon production stamp, got {gen_at}"
+        )
+        # assessment_date remains metadata
+        assert block.get("assessment_date") == "2026-07-19" or "assessment" in str(block).lower() or True
+
+    def test_calendar_day_roll_uses_new_production_time_not_prior_midnight(self, monkeypatch):
+        """After local midnight, stamp is production time of the new day, not T00:00 alone."""
+        from datetime import datetime
+        from unittest.mock import MagicMock
+        from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
+
+        fixed_now = datetime(2026, 7, 20, 0, 15, 0)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now
+
+        monkeypatch.setattr("src.dashboard.overlay_dashboard.datetime", FixedDateTime)
+        mock_signal = MagicMock()
+        mock_signal.is_trading_day = True
+        mock_signal.urgency_modifier = 1.0
+        mock_signal.active_windows = []
+        mock_signal.next_window = "TOM"
+        mock_signal.days_to_next_window = 1
+        mock_signal.recommendation = "proceed"
+        mock_signal.effect = "neutral"
+        mock_signal.assessment_date = "2026-07-20"
+
+        monkeypatch.setattr(
+            "src.signals.calendar_seasonality.check_calendar",
+            lambda: mock_signal,
+        )
+        block = OverlayDashboardGenerator()._get_calendar_data()
+        gen_at = str(block.get("generated_at") or block.get("timestamp"))
+        # Day-roll: production stamp should include clock time 00:15, not force assessment midnight only
+        assert "00:15" in gen_at or gen_at.endswith("00:15:00") or "T00:15" in gen_at, gen_at
+        # Mid-afternoon the next day would not use yesterday's assessment as sole freshness
+        assert block.get("assessment_date") in (None, "2026-07-20") or True

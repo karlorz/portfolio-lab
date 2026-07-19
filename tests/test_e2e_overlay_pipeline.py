@@ -107,11 +107,15 @@ class TestDashboardPipeline:
         assert dashboard.crypto is not None
         assert dashboard.kurtosis is not None
 
-    def test_dashboard_risk_assessment(self):
-        """Risk assessment should classify correctly."""
+    def test_dashboard_risk_assessment(self, tmp_path):
+        """Risk assessment should classify correctly.
+
+        Use isolated data_dir so live kill_switch.json cannot elevate a low-risk
+        fixture score (kill authority is intentional; this test is overlay-only).
+        """
         from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
 
-        gen = OverlayDashboardGenerator()
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
         risk, alerts = gen._assess_portfolio_risk({
             "collar": {"vix_level": 15.0},
             "crypto": {"btc_vol_regime": "normal"},

@@ -112,6 +112,26 @@ def test_build_kill_switch_alert_prefers_human_message():
     assert "PAPER" in alert["title"]
 
 
+def test_build_kill_switch_alert_maps_payload_level_to_alert_level():
+    """Alert row level must follow kill payload level (not always error)."""
+    warn = build_kill_switch_alert(_kill_payload(level="warning"))
+    assert warn is not None
+    assert warn["level"] in {"warning", "warn"}
+    assert warn["kill_switch_level"] == "warning"
+    assert warn["requires_action"] is True
+
+    restrict = build_kill_switch_alert(_kill_payload(level="restrict"))
+    assert restrict is not None
+    assert restrict["level"] == "error"
+    assert restrict["kill_switch_level"] == "restrict"
+
+    halt = build_kill_switch_alert(_kill_payload(level="halt"))
+    assert halt is not None
+    assert halt["level"] in {"critical", "error"}
+    assert halt["kill_switch_level"] == "halt"
+    assert halt["requires_action"] is True
+
+
 def test_build_kill_switch_alert_falls_back_to_reason():
     alert = build_kill_switch_alert(
         _kill_payload(message=None)
@@ -243,6 +263,97 @@ def test_generate_health_json_includes_kill_and_elevates(tmp_path, monkeypatch):
     assert health["kill_switch"]["incident_id"] == INCIDENT_ID
     assert health["system_status"] == "critical"
     assert health["open_incidents"]["status"] == "critical"
+    gen.conn.close()
+
+
+def test_generate_health_json_cleared_kill_not_reintroduced_by_stale_ops_monitor(
+    tmp_path, monkeypatch
+):
+    """Disk SSOT cleared kill must win over lagging monitor report kill fields.
+
+    Reproduces: resolve clears kill_switch.json + open incidents, but data/health.json
+    still embeds pre-resolve enabled kill; generate_health_json must not resurrect it.
+    """
+    import sqlite3
+    from src.dashboard import generator as gen_mod
+    from src.monitor.health_check import apply_ops_monitor_to_dashboard_health
+    from src.dashboard.kill_authority import (
+        load_kill_switch_payload,
+        load_open_incidents_summary,
+        project_kill_switch_fields,
+    )
+
+    data_dir = tmp_path / "data"
+    public_dir = tmp_path / "public"
+    data_dir.mkdir()
+    public_dir.mkdir()
+
+    # SSOT cleared: no kill file, zero open incidents
+    (data_dir / "incidents.json").write_text(
+        json.dumps({"open_count": 0, "incidents": []})
+    )
+    # Stale monitor report still projects enabled kill
+    (data_dir / "health.json").write_text(
+        json.dumps(
+            {
+                "status": "critical",
+                "timestamp": "2026-07-19T08:00:00+00:00",
+                "scope": "operational_readiness",
+                "checks": {
+                    "kill_switch": {
+                        "status": "critical",
+                        "enabled": True,
+                        "level": "halt",
+                        "reason": "stale_pre_resolve",
+                        "incident_id": INCIDENT_ID,
+                        "message": "should not reappear",
+                    },
+                    "open_incidents": {
+                        "status": "critical",
+                        "open_count": 1,
+                        "incidents": [
+                            {
+                                "incident_id": INCIDENT_ID,
+                                "state": "open",
+                                "kill_switch_level": "halt",
+                            }
+                        ],
+                    },
+                },
+                "service": "portfolio-lab",
+            }
+        )
+    )
+
+    # Unit path: apply_ops_monitor must not overwrite cleared SSOT projection
+    health_data = {
+        "system_status": "healthy",
+        "kill_switch": project_kill_switch_fields(load_kill_switch_payload(data_dir)),
+        "open_incidents": load_open_incidents_summary(data_dir),
+    }
+    apply_ops_monitor_to_dashboard_health(
+        health_data, data_dir=data_dir, public_dir=public_dir
+    )
+    assert health_data["kill_switch"]["enabled"] is False
+    assert health_data["open_incidents"]["open_count"] == 0
+    assert health_data.get("ops_health_source") == "monitor.health_check"
+
+    # Full generate_health_json path
+    db = tmp_path / "t.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(gen_mod, "DATA_DIR", data_dir)
+    monkeypatch.setattr(gen_mod, "PUBLIC_DIR", public_dir)
+    gen = DashboardGenerator.__new__(DashboardGenerator)
+    gen.conn = sqlite3.connect(str(db))
+    gen.conn.row_factory = sqlite3.Row
+    path = gen.generate_health_json()
+    health = json.loads(path.read_text())
+    assert health["kill_switch"]["enabled"] is False
+    assert health["open_incidents"]["open_count"] == 0
+    assert health.get("ops_health_status") == "critical"  # ops stamp still recorded
     gen.conn.close()
 
 
@@ -550,3 +661,65 @@ def test_generate_alerts_json_rewrites_stale_public_kill_row(tmp_path, monkeypat
     disk = json.loads((public / "alerts.json").read_text())
     disk_kills = [a for a in disk["alerts"] if a.get("type") == "kill_switch"]
     assert disk_kills[0]["incident_id"] == INCIDENT_ID
+
+
+def test_publish_ops_health_refreshes_signals_health_kill_fields(tmp_path, monkeypatch):
+    """make health / publish_ops must clear stale signals.health kill without full dashboard.
+
+    SSOT: kill_switch.json absent + open_count 0 → signals.health kill_switch_enabled false.
+    """
+    from src.monitor import health_check as hc
+    from src.paths import PUBLIC_DATA_DIR  # noqa: F401 — path constants patched below
+
+    data_dir = tmp_path / "data"
+    public_dir = tmp_path / "public"
+    data_dir.mkdir()
+    public_dir.mkdir()
+
+    # Stale signals embed still claims kill enabled
+    (public_dir / "signals.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-07-19T08:00:00+00:00",
+                "health": {
+                    "status": "critical",
+                    "kill_switch_enabled": True,
+                    "kill_switch_level": "halt",
+                    "kill_switch_incident_id": INCIDENT_ID,
+                    "open_incidents_count": 1,
+                    "open_incidents_status": "critical",
+                },
+                "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            }
+        )
+    )
+    (data_dir / "incidents.json").write_text(
+        json.dumps({"open_count": 0, "incidents": []})
+    )
+    # No kill_switch.json (cleared)
+
+    monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+    monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public_dir)
+    monkeypatch.setattr(hc, "HEALTH_PATH", data_dir / "health.json")
+
+    report = {
+        "status": "ok",
+        "timestamp": "2026-07-19T12:00:00+00:00",
+        "scope": "operational_readiness",
+        "checks": {
+            "kill_switch": {
+                "status": "ok",
+                "enabled": False,
+                "level": None,
+                "reason": None,
+            },
+            "open_incidents": {"status": "ok", "open_count": 0, "incidents": []},
+        },
+        "service": "portfolio-lab",
+    }
+    hc.publish_ops_health_surfaces(report)
+
+    signals = json.loads((public_dir / "signals.json").read_text())
+    health = signals.get("health") or {}
+    assert health.get("kill_switch_enabled") is False
+    assert health.get("open_incidents_count", 0) == 0

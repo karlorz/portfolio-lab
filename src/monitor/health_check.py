@@ -42,6 +42,7 @@ __all__ = [
     "run_health_check",
     "check_scheduler_drift",
     "publish_ops_health_surfaces",
+    "refresh_signals_health_kill_fields",
     "load_ops_monitor_report",
     "apply_ops_monitor_to_dashboard_health",
 ]
@@ -144,6 +145,27 @@ def load_ops_monitor_report(
     return best
 
 
+def _disk_kill_ssot_is_clear(data_dir: Path | None) -> bool:
+    """True when kill_switch.json is absent/disabled and open incidents are zero.
+
+    Used so a lagging monitor report cannot re-introduce a cleared kill into
+    dashboard health after resolve.
+    """
+    root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    try:
+        from src.dashboard.kill_authority import (
+            load_kill_switch_payload,
+            load_open_incidents_summary,
+        )
+    except ImportError:
+        return False
+    payload = load_kill_switch_payload(root)
+    if payload is not None and bool(payload.get("enabled")):
+        return False
+    open_inc = load_open_incidents_summary(root)
+    return int(open_inc.get("open_count") or 0) == 0
+
+
 def apply_ops_monitor_to_dashboard_health(
     health_data: dict[str, Any],
     ops_report: dict[str, Any] | None = None,
@@ -156,6 +178,10 @@ def apply_ops_monitor_to_dashboard_health(
     Called by ``generate_health_json`` so dashboard regeneration does not wipe
     the dual-SSOT fields that ``publish_ops_health_surfaces`` merges after
     ``make health``.
+
+    Disk kill SSOT wins: when kill_switch.json is absent/disabled and
+    incidents open_count is 0, do not overwrite dashboard kill/open_incidents
+    with lagging monitor report fields (stale enabled kill resurrection).
     """
     report = ops_report if isinstance(ops_report, dict) else load_ops_monitor_report(
         data_dir=data_dir, public_dir=public_dir
@@ -168,16 +194,102 @@ def apply_ops_monitor_to_dashboard_health(
     health_data["ops_health_status"] = ops_status
     health_data["ops_health_timestamp"] = projected.get("ops_health_timestamp")
     health_data["ops_health_source"] = "monitor.health_check"
-    # Prefer monitor kill/incidents when present (same authority SSOT as make health).
-    if isinstance(projected.get("kill_switch"), dict) and projected["kill_switch"]:
-        health_data["kill_switch"] = projected["kill_switch"]
-    if isinstance(projected.get("open_incidents"), dict) and projected["open_incidents"]:
-        health_data["open_incidents"] = projected["open_incidents"]
-    if "system_status" in health_data:
+
+    # Disk SSOT for kill/incidents: never let a lagging monitor snapshot
+    # rehydrate a kill that resolve already cleared on disk.
+    ssot_clear = _disk_kill_ssot_is_clear(data_dir)
+    if not ssot_clear:
+        if isinstance(projected.get("kill_switch"), dict) and projected["kill_switch"]:
+            health_data["kill_switch"] = projected["kill_switch"]
+        if isinstance(projected.get("open_incidents"), dict) and projected["open_incidents"]:
+            health_data["open_incidents"] = projected["open_incidents"]
+    # When SSOT is clear, keep health_data kill/open_incidents as projected
+    # from disk (already set by generate_health_json). Still stamp ops_health_*.
+
+    if "system_status" in health_data and not ssot_clear:
         health_data["system_status"] = _elevate_public_system_status(
             health_data.get("system_status"), ops_status
         )
     return health_data
+
+
+def refresh_signals_health_kill_fields(
+    report: dict[str, Any],
+    *,
+    public_dir: Path | None = None,
+) -> None:
+    """Patch signals.json#health compact kill fields from monitor / disk SSOT.
+
+    Operators reading signals.health must not wait for a full dashboard cycle
+    after kill clear. SSOT order: kill_switch.json projection via monitor
+    report (already disk-backed in run_health_check) → signals embeds.
+    """
+    root_public = Path(public_dir) if public_dir is not None else Path(PUBLIC_DATA_DIR)
+    signals_path = root_public / "signals.json"
+    if not signals_path.exists():
+        return
+    try:
+        payload = json.loads(signals_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning("signals.json unreadable; skip health kill refresh: %s", exc)
+        return
+    if not isinstance(payload, dict):
+        return
+
+    try:
+        from src.dashboard.generator import _compact_health_summary
+        from src.dashboard.kill_authority import project_compact_kill_fields
+    except ImportError as exc:
+        logger.warning("Cannot import kill projectors for signals refresh: %s", exc)
+        return
+
+    # Prefer compact fields from monitor report (checks.*); fall back to
+    # top-level projection shape.
+    compact = project_compact_kill_fields(report)
+    if not compact:
+        compact = project_compact_kill_fields(
+            {
+                "kill_switch": (report.get("checks") or {}).get("kill_switch"),
+                "open_incidents": (report.get("checks") or {}).get("open_incidents"),
+            }
+        )
+
+    health = payload.get("health")
+    if not isinstance(health, dict):
+        health = _compact_health_summary(report) if report else {"status": "unknown"}
+    else:
+        health = dict(health)
+
+    # Always apply compact kill keys (including enabled:false clears).
+    for key, value in compact.items():
+        health[key] = value
+    # When kill is disabled/absent, force clear sticky enabled flag.
+    kill_check = (report.get("checks") or {}).get("kill_switch") if isinstance(
+        report.get("checks"), dict
+    ) else report.get("kill_switch")
+    if isinstance(kill_check, dict) and not kill_check.get("enabled"):
+        health["kill_switch_enabled"] = False
+        if "kill_switch_level" in health and kill_check.get("level") is None:
+            health["kill_switch_level"] = None
+    open_check = (report.get("checks") or {}).get("open_incidents") if isinstance(
+        report.get("checks"), dict
+    ) else report.get("open_incidents")
+    if isinstance(open_check, dict) and int(open_check.get("open_count") or 0) == 0:
+        health["open_incidents_count"] = 0
+        if open_check.get("status"):
+            health["open_incidents_status"] = open_check.get("status")
+
+    if report.get("status") is not None:
+        health.setdefault("status", report.get("status"))
+    if report.get("timestamp") is not None:
+        health["generated_at"] = report.get("timestamp")
+
+    payload["health"] = health
+    try:
+        signals_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.info("Refreshed signals.health kill fields at %s", signals_path)
+    except OSError as exc:
+        logger.warning("Failed to write signals health kill refresh: %s", exc)
 
 
 def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
@@ -188,8 +300,9 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
     - If dashboard ``health.json`` already exists, merge kill_switch /
       open_incidents / elevated system_status so operators see halt without
       waiting for the dashboard generator cycle.
+    - Also refresh ``signals.json#health`` compact kill fields so post-resolve
+      kill clear is visible within one health cron (not only full dashboard).
     """
-    projected = _project_public_kill_fields(report)
     ops_path = health_ops_path()
     try:
         ops_path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,22 +312,24 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
         logger.warning("Failed to write ops health at %s: %s", ops_path, exc)
 
     public_health = Path(PUBLIC_DATA_DIR) / "health.json"
-    if not public_health.exists():
-        return
-    try:
-        payload = json.loads(public_health.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        logger.warning("Public health.json unreadable; skip merge: %s", exc)
-        return
-    if not isinstance(payload, dict):
-        return
+    if public_health.exists():
+        try:
+            payload = json.loads(public_health.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Public health.json unreadable; skip merge: %s", exc)
+            payload = None
+        if isinstance(payload, dict):
+            apply_ops_monitor_to_dashboard_health(payload, report)
+            try:
+                public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                logger.info("Merged ops kill authority into %s", public_health)
+            except OSError as exc:
+                logger.warning("Failed to merge ops health into %s: %s", public_health, exc)
 
-    apply_ops_monitor_to_dashboard_health(payload, report)
     try:
-        public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        logger.info("Merged ops kill authority into %s", public_health)
-    except OSError as exc:
-        logger.warning("Failed to merge ops health into %s: %s", public_health, exc)
+        refresh_signals_health_kill_fields(report)
+    except Exception as exc:  # noqa: BLE001 — never fail health job on signals patch
+        logger.warning("signals.health kill refresh failed: %s", exc)
 
 
 def _should_include_hermes_audit(local_backend: dict) -> bool:

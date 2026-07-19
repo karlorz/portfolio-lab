@@ -176,3 +176,42 @@ class TestSPCMonitorEdgeCases:
             monitor.record("test", -100.0)
         flags = monitor.check_flags()
         assert len(flags) == 1
+
+
+def test_run_spc_monitor_status_not_ok_when_flags_present(tmp_path, monkeypatch):
+    """Dashboard SPC block must surface non-ok status when flagged_signals non-empty."""
+    import sqlite3
+    from src.dashboard.generator import DashboardGenerator
+    from src.monitor.spc_monitor import SPCMonitor
+
+    # Build a monitor that already has a flagged signal
+    mon = SPCMonitor(consecutive_breach_limit=3)
+    # seed window + force breach count
+    for i in range(10):
+        mon.record("_ensemble_consensus", 0.5)
+    mon._breach_counts["_ensemble_consensus"] = 55
+    mon._limits["_ensemble_consensus"] = {
+        "mean": 0.5, "std": 0.01, "ucl": 0.53, "lcl": 0.47
+    }
+
+    DashboardGenerator._spc_monitor = mon
+    # Avoid save_state writing to real paths
+    mon.save_state = lambda: None  # type: ignore
+    mon.load_state = lambda: None  # type: ignore
+
+    gen = DashboardGenerator.__new__(DashboardGenerator)
+    out = gen._run_spc_monitor({"ensemble_voting": {"weighted_consensus": 0.9, "source_breakdown": []}})
+    assert out.get("flagged_signals"), "expected flags from seeded monitor"
+    assert out.get("status") != "ok", (
+        f"spc.status must not stay ok with flags; got {out.get('status')}"
+    )
+    assert out.get("status") in {"alert", "warning", "breach", "critical", "degraded"}
+
+    # Empty flags → ok
+    mon2 = SPCMonitor(consecutive_breach_limit=3)
+    mon2.save_state = lambda: None  # type: ignore
+    DashboardGenerator._spc_monitor = mon2
+    out_ok = gen._run_spc_monitor({"ensemble_voting": {"source_breakdown": []}})
+    assert out_ok.get("status") == "ok"
+    assert out_ok.get("flagged_signals") == []
+    DashboardGenerator._spc_monitor = None

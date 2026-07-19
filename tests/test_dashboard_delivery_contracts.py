@@ -37,7 +37,9 @@ def test_compact_health_summary_drops_unbounded_sections_and_counts_statuses():
         "status": "critical",
         "generated_at": "2026-06-11T12:00:00",
         "cron_job_count": 2,
-        "failed_cron_jobs": 1,
+        # portfolio-lab-health self-errors are excluded from failed rollup so
+        # sticky tasker mirrors of prior health exits cannot inflate counts.
+        "failed_cron_jobs": 0,
         "stale_data_count": 2,
         "scheduler_status": "degraded",
         "data_pipeline_slo_status": "critical",

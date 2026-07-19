@@ -217,6 +217,22 @@ def elevate_system_status_for_kill(
     return status
 
 
+def _alert_level_for_kill_payload(payload: dict[str, Any]) -> str:
+    """Map kill payload level to alerts.json severity (not always error).
+
+    warning → warning (pager soft); restrict → error; halt → critical.
+    Unknown/empty levels default to error (fail-closed for operators).
+    """
+    level = str(payload.get("level") or "").lower().strip()
+    if level in {"warning", "warn"}:
+        return "warning"
+    if level in {"restrict", "reduce"}:
+        return "error"
+    if level in {"halt", "liquidate", "critical"}:
+        return "critical"
+    return "error"
+
+
 def build_kill_switch_alert(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Build alerts.json kill row preferring human message over opaque reason."""
     if not payload or not payload.get("enabled"):
@@ -226,12 +242,14 @@ def build_kill_switch_alert(payload: dict[str, Any]) -> dict[str, Any] | None:
     message = payload.get("message")
     human = message if isinstance(message, str) and message.strip() else None
     display = human or (str(reason) if reason is not None else "Kill switch enabled")
+    alert_level = _alert_level_for_kill_payload(payload)
     alert: dict[str, Any] = {
-        "level": "error",
+        "level": alert_level,
         "type": "kill_switch",
         "title": f"{mode.upper()} Kill Switch Triggered",
         "message": display,
         "timestamp": payload.get("timestamp"),
+        # All enabled kill levels require operator attention; halt is urgent.
         "requires_action": True,
     }
     if reason is not None:
