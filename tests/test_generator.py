@@ -6132,5 +6132,155 @@ class TestCliMain:
         assert found_guard, "No __name__ == '__main__' guard found"
 
 
+class TestZeroDTEClosingAuctionHonesty:
+    """Dead overlay surfaces must not publish silent empty {}."""
+
+    def test_unavailable_zero_dte_payload_has_schema_fields(self):
+        payload = DashboardGenerator._unavailable_zero_dte_payload()
+        assert payload["positions"] == []
+        assert payload["config"] is None
+        assert payload["weekly_trades_used"] == 0
+        assert payload["status"] == "unavailable"
+        assert payload["runtime_status"] == "unavailable_no_producer"
+        assert payload["live_authoritative"] is False
+        assert payload["active"] is False
+        assert "generated_at" in payload
+
+    def test_unavailable_closing_auction_payload_has_schema_fields(self):
+        payload = DashboardGenerator._unavailable_closing_auction_payload()
+        assert payload["signals"] == []
+        assert payload["last_update"] is None
+        assert payload["market_open"] is False
+        assert payload["status"] == "unavailable"
+        assert payload["runtime_status"] == "unavailable_no_producer"
+        assert payload["live_authoritative"] is False
+
+    def test_empty_dict_not_populated(self):
+        assert DashboardGenerator._is_populated_overlay_section({}) is False
+        assert DashboardGenerator._is_populated_overlay_section(None) is False
+        assert DashboardGenerator._is_populated_overlay_section(
+            DashboardGenerator._unavailable_zero_dte_payload()
+        ) is False
+
+    def test_real_producer_payload_is_populated(self):
+        assert DashboardGenerator._is_populated_overlay_section(
+            {"positions": [{"id": "x"}], "active": True}
+        ) is True
+        assert DashboardGenerator._is_populated_overlay_section(
+            {"signals": [{"should_trade": False}], "market_open": True}
+        ) is True
+
+    def test_get_overlay_data_never_returns_silent_empty_surfaces(self, monkeypatch):
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+
+        class FakeOverlay:
+            def generate(self):
+                return self
+
+            def to_dict(self):
+                # No zero_dte / closing_auction keys — historical producer gap
+                return {
+                    "collar": {"active": False},
+                    "crypto": {},
+                    "calendar": {},
+                    "kurtosis": {},
+                    "bond_duration": {},
+                    "unified": {},
+                }
+
+        monkeypatch.setattr(
+            "src.dashboard.overlay_dashboard.OverlayDashboardGenerator",
+            FakeOverlay,
+            raising=False,
+        )
+
+        # Avoid real VIX generator / file IO
+        class FakeVixGen:
+            def generate_signal(self):
+                class S:
+                    def to_dict(self_inner):
+                        return {"regime": "contango", "vix_spot": 18.0}
+
+                return S()
+
+        import sys
+        import types
+
+        monkeypatch.setitem(
+            sys.modules,
+            "src.signals.vix_term_structure",
+            types.SimpleNamespace(VIXTermStructureSignalGenerator=FakeVixGen),
+        )
+
+        with patch("src.dashboard.generator.DATA_DIR", Path("/tmp/no-vix-overlay-state")):
+            data = gen._get_overlay_data()
+
+        assert data["zero_dte"]["runtime_status"] == "unavailable_no_producer"
+        assert data["zero_dte"] != {}
+        assert data["closing_auction"]["runtime_status"] == "unavailable_no_producer"
+        assert data["closing_auction"] != {}
+        assert data["zero_dte"]["positions"] == []
+        assert data["closing_auction"]["signals"] == []
+
+    def test_get_overlay_data_passes_through_real_producer(self, monkeypatch):
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+
+        class FakeOverlay:
+            def generate(self):
+                return self
+
+            def to_dict(self):
+                return {
+                    "collar": {},
+                    "crypto": {},
+                    "calendar": {},
+                    "kurtosis": {},
+                    "bond_duration": {},
+                    "unified": {},
+                    "zero_dte": {
+                        "positions": [{"id": "p1"}],
+                        "config": None,
+                        "weekly_trades_used": 1,
+                        "total_premium_collected_mtd": 10.0,
+                        "active": True,
+                    },
+                    "closing_auction": {
+                        "signals": [{"should_trade": True}],
+                        "last_update": "2026-07-20T12:00:00",
+                        "market_open": True,
+                    },
+                }
+
+        monkeypatch.setattr(
+            "src.dashboard.overlay_dashboard.OverlayDashboardGenerator",
+            FakeOverlay,
+            raising=False,
+        )
+
+        class FakeVixGen:
+            def generate_signal(self):
+                class S:
+                    def to_dict(self_inner):
+                        return {}
+
+                return S()
+
+        import sys
+        import types
+
+        monkeypatch.setitem(
+            sys.modules,
+            "src.signals.vix_term_structure",
+            types.SimpleNamespace(VIXTermStructureSignalGenerator=FakeVixGen),
+        )
+
+        with patch("src.dashboard.generator.DATA_DIR", Path("/tmp/no-vix-overlay-state")):
+            data = gen._get_overlay_data()
+
+        assert data["zero_dte"]["positions"][0]["id"] == "p1"
+        assert data["closing_auction"]["market_open"] is True
+        assert data["zero_dte"].get("runtime_status") != "unavailable_no_producer"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

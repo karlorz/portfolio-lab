@@ -594,6 +594,77 @@ class DashboardGenerator:
 
         return out_path
 
+    @staticmethod
+    def _unavailable_zero_dte_payload() -> Dict[str, Any]:
+        """Schema-compatible zero_dte panel when no producer is wired.
+
+        LiveDashboard expects positions/config fields; never publish silent {}.
+        Not live order-routing authority.
+        """
+        now_ts = datetime.now().isoformat()
+        return {
+            "positions": [],
+            "config": None,
+            "weekly_trades_used": 0,
+            "total_premium_collected_mtd": 0.0,
+            "status": "unavailable",
+            "runtime_status": "unavailable_no_producer",
+            "active": False,
+            "live_authoritative": False,
+            "reason": "zero_dte producer not wired into overlay merge",
+            "generated_at": now_ts,
+            "timestamp": now_ts,
+        }
+
+    @staticmethod
+    def _unavailable_closing_auction_payload() -> Dict[str, Any]:
+        """Schema-compatible closing_auction panel when no producer is wired."""
+        now_ts = datetime.now().isoformat()
+        return {
+            "signals": [],
+            "last_update": None,
+            "market_open": False,
+            "status": "unavailable",
+            "runtime_status": "unavailable_no_producer",
+            "active": False,
+            "live_authoritative": False,
+            "reason": "closing_auction producer not wired into overlay merge",
+            "generated_at": now_ts,
+            "timestamp": now_ts,
+        }
+
+    @staticmethod
+    def _is_populated_overlay_section(value: Any) -> bool:
+        """True when overlay merge produced a non-empty, non-placeholder section."""
+        if not isinstance(value, dict) or not value:
+            return False
+        status = str(value.get("status") or value.get("runtime_status") or "").lower()
+        if status in {"unavailable", "unavailable_no_producer"}:
+            return False
+        # Real producers set active/positions/signals or domain fields
+        if value.get("positions") or value.get("signals"):
+            return True
+        if value.get("active") is True:
+            return True
+        # Any domain payload beyond honesty metadata counts as populated
+        meta_keys = {
+            "status",
+            "runtime_status",
+            "active",
+            "live_authoritative",
+            "reason",
+            "generated_at",
+            "timestamp",
+            "last_update",
+            "market_open",
+            "config",
+            "weekly_trades_used",
+            "total_premium_collected_mtd",
+            "positions",
+            "signals",
+        }
+        return any(k not in meta_keys for k in value.keys())
+
     def _get_overlay_data(self) -> Dict:
         """Merge overlay dashboard data (collar, crypto, calendar, kurtosis, etc.)
 
@@ -617,6 +688,11 @@ class DashboardGenerator:
                 "bond_momentum": data.get("bond_duration", {}),
                 "unified": data.get("unified", {}),
             })
+            # Pass through producers if overlay ever ships them
+            if isinstance(data.get("zero_dte"), dict):
+                result["zero_dte"] = data["zero_dte"]
+            if isinstance(data.get("closing_auction"), dict):
+                result["closing_auction"] = data["closing_auction"]
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("overlay_dashboard", e)
 
@@ -633,6 +709,12 @@ class DashboardGenerator:
                     result["vix_overlay"] = json.load(f)
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("vix_term_structure", e)
+
+        # Dead schema surfaces: never publish silent {} without honesty fields
+        if not self._is_populated_overlay_section(result.get("zero_dte")):
+            result["zero_dte"] = self._unavailable_zero_dte_payload()
+        if not self._is_populated_overlay_section(result.get("closing_auction")):
+            result["closing_auction"] = self._unavailable_closing_auction_payload()
 
         return result
 
@@ -1679,8 +1761,16 @@ class DashboardGenerator:
             "calendar_seasonality": overlay_data.get("calendar", {}),
             "kurtosis_regime": overlay_data.get("kurtosis", {}),
             "vix_term_structure": overlay_data.get("vix_term_structure", {}),
-            "zero_dte": overlay_data.get("zero_dte", {}),
-            "closing_auction": overlay_data.get("closing_auction", {}),
+            "zero_dte": (
+                overlay_data.get("zero_dte")
+                if self._is_populated_overlay_section(overlay_data.get("zero_dte"))
+                else self._unavailable_zero_dte_payload()
+            ),
+            "closing_auction": (
+                overlay_data.get("closing_auction")
+                if self._is_populated_overlay_section(overlay_data.get("closing_auction"))
+                else self._unavailable_closing_auction_payload()
+            ),
             "stacking_ensemble": stacking_ensemble_dashboard,
             "factor_rotation_dashboard": factor_rotation_dashboard,
             "smart_rebalance": validate_signal("smart_rebalance", smart_rebalance_data),
