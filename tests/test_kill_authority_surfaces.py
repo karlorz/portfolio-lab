@@ -544,6 +544,37 @@ def test_consistency_requires_graduation_candidate_when_promote_present(tmp_path
     assert any("graduation_candidate" in e for e in result.errors)
 
 
+def test_consistency_skips_graduation_alert_for_promote_blocked_tombstone(
+    tmp_path: Path,
+) -> None:
+    """promote_blocked_* is not active candidacy — no graduation_candidate required."""
+    _write_consistent_public_data_set(tmp_path)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / ".promote_to_live").write_text(
+        json.dumps(
+            {
+                "graduation_conflict": True,
+                "action": "promote_blocked_checklist",
+                "reason": "checklist_not_ready",
+                "is_graduation_ready": False,
+            }
+        )
+    )
+    public_data = tmp_path / "public" / "data"
+    (public_data / "alerts.json").write_text(json.dumps({"alerts": [], "count": 0}))
+    index_path = public_data / "index.json"
+    index = json.loads(index_path.read_text())
+    index["entries"].append(
+        {"filename": "alerts.json", "path": "alerts.json", "status": "present"}
+    )
+    index_path.write_text(json.dumps(index, sort_keys=True))
+    shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
+
+    result = check_public_data_consistency(tmp_path)
+    assert result.ok is True, result.errors
+
+
 def test_consistency_accepts_matching_kill_identity(tmp_path: Path) -> None:
     _write_consistent_public_data_set(tmp_path)
     data_dir = tmp_path / "data"

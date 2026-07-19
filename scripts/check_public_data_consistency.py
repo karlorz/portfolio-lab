@@ -377,9 +377,27 @@ def _check_kill_and_graduation_alerts(
             kill_enabled = True
             kill_identity = kill_payload
 
-    promote_present = promote_path.exists()
+    # Active candidacy only — match DashboardGenerator._is_active_promote_candidacy:
+    # promote_blocked_* tombstones must not require graduation_candidate alerts.
+    promote_requires_alert = False
+    if promote_path.exists():
+        promote_payload = _load_json(promote_path, errors)
+        if isinstance(promote_payload, dict):
+            action = promote_payload.get("action")
+            if action is None:
+                # Legacy markers omit action; treat as candidacy.
+                promote_requires_alert = True
+            elif isinstance(action, str) and action == "promote_to_live":
+                promote_requires_alert = True
+            elif isinstance(action, str) and action.startswith("promote_blocked"):
+                promote_requires_alert = False
+            else:
+                promote_requires_alert = False
+        else:
+            # Unreadable/non-dict file still present: fail closed for candidacy gate.
+            promote_requires_alert = True
 
-    if not kill_enabled and not promote_present:
+    if not kill_enabled and not promote_requires_alert:
         return
 
     alerts = _alert_rows(public_data, errors)
@@ -496,7 +514,7 @@ def _check_kill_and_graduation_alerts(
                             f"(public={pub_val!r}, authority={auth_val!r})"
                         )
 
-    if promote_present:
+    if promote_requires_alert:
         if "graduation_candidate" not in types:
             if not (public_data / "alerts.json").exists():
                 errors.append(
