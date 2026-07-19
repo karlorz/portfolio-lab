@@ -468,9 +468,15 @@ class VIXTermStructureSignalGenerator:
             vix_spot = db_levels.get("vix_spot")
             if vix_spot is None:
                 vix_spot = file_last.get("vix_spot")
-            if vix_spot is None and db_levels.get("front_month") is not None:
-                # Last resort: cannot form slope without spot; mark invalid upstream
-                vix_spot = 0.0
+            # Require a real spot for a usable slope; do not invent 0.0
+            if vix_spot is None or float(vix_spot) <= 0:
+                return None, None, {
+                    "source": "none",
+                    "as_of": None,
+                    "file_as_of": file_as_of,
+                    "db_as_of": db_as_of,
+                    "reason": "market.db missing usable ^VIX spot",
+                }
             levels = {
                 "date": db_levels["as_of"],
                 "vix_spot": vix_spot,
@@ -518,10 +524,32 @@ class VIXTermStructureSignalGenerator:
         }
 
     def _persist_file_row(self, historical_data: Dict, levels: Dict) -> None:
-        """Write/refresh a JSON history row so the file does not stay frozen."""
+        """Write/refresh a JSON history row so the file does not stay frozen.
+
+        Only writes under ``self.DATA_DIR`` (never invents paths like
+        ``/nonexistent/...`` from tests).
+        """
         as_of = levels.get("as_of") or levels.get("date")
         if not as_of:
             return
+        try:
+            target = Path(self.VIX_DATA_PATH)
+            data_root = Path(self.DATA_DIR).resolve()
+            # Allow write only when target lives under DATA_DIR
+            try:
+                target.resolve().relative_to(data_root)
+            except (ValueError, OSError):
+                # If path does not exist yet, check parent prefix without resolve
+                if data_root not in target.parents and target.parent != data_root:
+                    logger.debug(
+                        "Skip VIX file refresh outside DATA_DIR: %s (DATA_DIR=%s)",
+                        target,
+                        data_root,
+                    )
+                    return
+        except (OSError, RuntimeError):
+            return
+
         row = {
             "date": as_of,
             "vix_spot": levels.get("vix_spot"),
