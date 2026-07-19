@@ -264,26 +264,38 @@ class OrderRouter:
                 "timestamp": datetime.now().isoformat(),
             }
         
-        # Check kill switch if enabled
+        # Check kill switch if enabled (fail-closed when file missing/unreadable)
         if kill_switch_check and not dry_run:
             kill_switch_path = os.path.join(self.data_dir, "kill_switch.json")
-            if os.path.exists(kill_switch_path):
-                try:
-                    with open(kill_switch_path, "r") as f:
-                        ks = json.load(f)
-                    if ks.get("enabled", False):
-                        return {
-                            "status": "blocked",
-                            "message": "Kill switch is enabled - execution blocked",
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                except (OSError, json.JSONDecodeError) as e:
-                    logger.warning("Kill switch file corrupt/unreadable, blocking orders for safety: %s", e)
+            if not os.path.exists(kill_switch_path):
+                logger.warning(
+                    "Kill switch file missing at %s — blocking orders (fail-closed)",
+                    kill_switch_path,
+                )
+                return {
+                    "status": "blocked",
+                    "message": (
+                        "Kill switch file missing - execution blocked for safety "
+                        "(expected kill_switch.json with enabled true/false)"
+                    ),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            try:
+                with open(kill_switch_path, "r") as f:
+                    ks = json.load(f)
+                if ks.get("enabled", False):
                     return {
                         "status": "blocked",
-                        "message": f"Kill switch file unreadable - execution blocked for safety: {e}",
+                        "message": "Kill switch is enabled - execution blocked",
                         "timestamp": datetime.now().isoformat(),
                     }
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning("Kill switch file corrupt/unreadable, blocking orders for safety: %s", e)
+                return {
+                    "status": "blocked",
+                    "message": f"Kill switch file unreadable - execution blocked for safety: {e}",
+                    "timestamp": datetime.now().isoformat(),
+                }
 
         market_session: Optional[Dict[str, Any]] = None
         if not dry_run:

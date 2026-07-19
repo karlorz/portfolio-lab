@@ -838,12 +838,22 @@ class TestKillSwitchGate:
             assert "unreadable" in result["message"].lower()
 
     @patch.object(OrderRouter, 'is_ready', return_value=True)
-    def test_kill_switch_not_present_allows_orders(self, mock_ready):
-        """No kill_switch.json file -> orders proceed (no kill switch check hit)."""
+    def test_kill_switch_missing_blocks_live_execution(self, mock_ready):
+        """No kill_switch.json with kill_switch_check=True must fail-closed (block)."""
         with tempfile.TemporaryDirectory() as d:
             router = OrderRouter(data_dir=d, paper=True)
             orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
-            # No kill_switch.json exists -- check is skipped, execute proceeds
+            # No kill_switch.json — production expects the file present (enabled true/false)
+            result = router.execute_orders(orders, dry_run=False)
+            assert result["status"] == "blocked"
+            assert "missing" in result["message"].lower() or "kill switch" in result["message"].lower()
+
+    @patch.object(OrderRouter, 'is_ready', return_value=True)
+    def test_kill_switch_not_checked_in_dry_run_even_when_missing(self, mock_ready):
+        """dry_run=True skips kill-switch gate entirely (missing file does not block)."""
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            orders = [OrderPlan("SPY", "BUY", 10, "MARKET", 5000, "test")]
             result = router.execute_orders(orders, dry_run=True)
             assert result["status"] != "blocked"
 

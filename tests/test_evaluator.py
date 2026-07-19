@@ -2104,24 +2104,17 @@ class TestOrderRouterKillSwitch:
             assert result["status"] == "blocked"
 
     def test_order_router_fail_closed_on_missing_json(self, tmp_path):
-        """When kill_switch.json does not exist, router should allow orders (no kill switch active)."""
+        """When kill_switch.json is missing, router must block (fail-closed)."""
         from src.broker.order_router import OrderRouter, OrderPlan
 
         # Ensure no kill_switch.json exists
         assert not (tmp_path / "kill_switch.json").exists()
 
-        # Mock submit_order to return an object with .id and .status attributes
-        mock_fill = MagicMock()
-        mock_fill.id = "test-123"
-        mock_fill.status = "filled"
-
         with (
             patch("src.broker.order_router.AlpacaClient") as mock_client_cls,
             patch("src.broker.order_router.PaperTradingManager") as mock_mgr_cls,
-            patch("src.broker.order_router.time"),
         ):
             mock_client_cls.return_value.is_ready.return_value = True
-            mock_client_cls.return_value.submit_order.return_value = mock_fill
             mock_mgr_cls.return_value = MagicMock()
             router = OrderRouter(data_dir=str(tmp_path), paper=True)
 
@@ -2130,8 +2123,8 @@ class TestOrderRouterKillSwitch:
                 estimated_value=500, reason="rebalance",
             )]
             result = router.execute_orders(plans, dry_run=False, kill_switch_check=True)
-            # Should NOT be blocked — missing kill_switch.json means no active kill switch
-            assert result["status"] != "blocked"
+            assert result["status"] == "blocked"
+            assert "missing" in result["message"].lower()
 
 
 # ---------------------------------------------------------------------------
