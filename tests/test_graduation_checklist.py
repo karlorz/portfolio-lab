@@ -1427,6 +1427,32 @@ class TestJsonlTailReads:
         assert result.passed is True
         assert result.value == 2
 
+    def test_regime_coverage_reads_regime_state_history(self, tmp_path):
+        """Graduation counts distinct regimes from regime_state.json history."""
+        state = {
+            "regime": "NORMAL",
+            "confidence": 0.7,
+            "history": [
+                {"regime": "NORMAL", "confidence": 0.7},
+                {"regime": "HIGH_VOL", "confidence": 0.8},
+            ],
+        }
+        (tmp_path / "regime_state.json").write_text(json.dumps(state))
+
+        with patch("src.strategy.graduation_checklist.DATA_DIR", Path(tmp_path)):
+            result = GraduationChecklist()._check_regime_coverage({})
+
+        assert result.passed is True
+        assert result.value == 2
+
+    def test_regime_coverage_missing_producer_discloses_in_description(self, tmp_path):
+        with patch("src.strategy.graduation_checklist.DATA_DIR", Path(tmp_path)):
+            result = GraduationChecklist()._check_regime_coverage({})
+
+        assert result.passed is False
+        assert result.value == 0
+        assert "no producer" in result.description.lower()
+
     def test_signal_diversity_uses_bounded_tail(self, tmp_path):
         with open(tmp_path / "orders.jsonl", "w") as f:
             for i in range(5):

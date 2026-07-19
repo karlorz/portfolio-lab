@@ -840,9 +840,10 @@ class GraduationChecklist:
         """
         required = self.criteria["regime_coverage"]["value"]
 
-        # Count distinct regimes from regime state history
+        # Count distinct regimes from regime state history + log SSOT
         regime_file = DATA_DIR / "regime_state.json"
         regimes_seen = set()
+        sources_used: list[str] = []
 
         if regime_file.exists():
             try:
@@ -851,7 +852,11 @@ class GraduationChecklist:
                 current = data.get("regime", "")
                 if current:
                     regimes_seen.add(current)
-            except (OSError, ValueError, KeyError):
+                for entry in data.get("history") or []:
+                    if isinstance(entry, dict) and entry.get("regime"):
+                        regimes_seen.add(entry["regime"])
+                sources_used.append("regime_state.json")
+            except (OSError, ValueError, KeyError, TypeError):
                 pass
 
         # Also check portfolio history for regime snapshots
@@ -861,6 +866,8 @@ class GraduationChecklist:
             regime = entry.get("regime", "")
             if regime:
                 regimes_seen.add(regime)
+        if history:
+            sources_used.append("portfolio.history")
 
         # Check regime log if available
         regime_log = DATA_DIR / "regime_log.json"
@@ -874,17 +881,24 @@ class GraduationChecklist:
                     regime = entry.get("regime", "")
                     if regime:
                         regimes_seen.add(regime)
+                sources_used.append("regime_log.json")
             except (OSError, ValueError):
                 pass
 
         n_regimes = len(regimes_seen)
+        desc = self.criteria["regime_coverage"]["description"]
+        if n_regimes == 0 and not sources_used:
+            desc = (
+                f"{desc} — no producer artifacts "
+                "(regime_state.json / regime_log.json / portfolio.history empty)"
+            )
 
         return CheckResult(
             name="regime_coverage",
             passed=n_regimes >= required,
             value=n_regimes,
             required=required,
-            description=self.criteria["regime_coverage"]["description"],
+            description=desc,
         )
 
     def _check_signal_diversity(self, state: Dict) -> CheckResult:

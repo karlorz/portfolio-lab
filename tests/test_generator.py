@@ -3050,6 +3050,98 @@ class TestSignalsJSONEdgeCases:
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data["active_signals"] == ["cross_asset_rv", "alt_data", "unified_overlay"]
         assert len(data["active_signals"]) == len(set(data["active_signals"]))
+        # Producer must write regime_state.json SSOT (even when defaulting)
+        state_path = tmp_path / "regime_state.json"
+        assert state_path.exists()
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert "regime" in state
+        assert "confidence" in state
+        assert "source" in state
+        assert data.get("confidence_source") == state["source"]
+
+    def test_generate_regime_gate_json_writes_regime_state_from_ensemble(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """When ensemble_voting is published, regime_state SSOT matches it."""
+
+        class FakeRegimeGate:
+            min_dwell_days = 2
+
+            def get_gate_summary(self):
+                return {"alt_data": set()}
+
+            def get_active_signal_names(self, signal_names, regime_name):
+                return list(signal_names)
+
+        monkeypatch.setitem(
+            sys.modules,
+            "src.signals.regime_gate",
+            types.SimpleNamespace(RegimeGate=FakeRegimeGate),
+        )
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        gen.conn = None
+        monkeypatch.setattr(gen, "_load_price_data", lambda: None, raising=False)
+
+        signals = {
+            "ensemble_voting": {
+                "regime": "normal",
+                "regime_confidence": 0.755,
+            }
+        }
+        (tmp_path / "signals.json").write_text(json.dumps(signals), encoding="utf-8")
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_regime_gate_json()
+
+        gate = json.loads(path.read_text(encoding="utf-8"))
+        assert gate["current_regime"] == "NORMAL"
+        assert abs(gate["regime_confidence"] - 0.755) < 1e-9
+        assert gate["confidence_source"] == "ensemble_voting"
+
+        state = json.loads((tmp_path / "regime_state.json").read_text(encoding="utf-8"))
+        assert state["regime"] == "NORMAL"
+        assert abs(state["confidence"] - 0.755) < 1e-9
+        assert state["source"] == "ensemble_voting"
+        assert isinstance(state.get("history"), list) and len(state["history"]) >= 1
+
+    def test_generate_regime_gate_json_discloses_default_missing_state(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """No live sources → default NORMAL/0.5 with confidence_source disclosure."""
+
+        class FakeRegimeGate:
+            min_dwell_days = 2
+
+            def get_gate_summary(self):
+                return {}
+
+            def get_active_signal_names(self, signal_names, regime_name):
+                return list(signal_names)
+
+        monkeypatch.setitem(
+            sys.modules,
+            "src.signals.regime_gate",
+            types.SimpleNamespace(RegimeGate=FakeRegimeGate),
+        )
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        gen.conn = None
+        monkeypatch.setattr(gen, "_load_price_data", lambda: None, raising=False)
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_regime_gate_json()
+
+        gate = json.loads(path.read_text(encoding="utf-8"))
+        assert gate["current_regime"] == "NORMAL"
+        assert gate["regime_confidence"] == 0.5
+        assert gate["confidence_source"] == "default_missing_state"
+        state = json.loads((tmp_path / "regime_state.json").read_text(encoding="utf-8"))
+        assert state["source"] == "default_missing_state"
 
     def test_missing_vix_handled(self, tmp_path):
         """Missing VIX symbol defaults vix to None and falls back to trend."""
