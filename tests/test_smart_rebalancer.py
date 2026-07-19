@@ -296,6 +296,60 @@ class TestOptimalWindow:
         at_end = datetime(2026, 5, 14, 14, 0)
         assert ctrl._in_optimal_window(at_end) is False
 
+    def test_default_clock_uses_america_new_york_not_host_local(self, monkeypatch):
+        """When now is omitted, window membership follows America/New_York wall clock."""
+        from zoneinfo import ZoneInfo
+        from datetime import timezone
+
+        ctrl = SmartRebalancingController()
+        et = ZoneInfo("America/New_York")
+
+        # 12:00 ET is inside 11–14 ET window
+        fixed_et_noon = datetime(2026, 5, 14, 12, 0, tzinfo=et)
+
+        class _FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    # Host local would be wrong if we used naive UTC 16:00 as "now"
+                    return datetime(2026, 5, 14, 16, 0)  # naive host-local decoy
+                return fixed_et_noon.astimezone(tz)
+
+        monkeypatch.setattr("src.rebalancing.smart_rebalancer.datetime", _FixedDateTime)
+        assert ctrl._in_optimal_window() is True
+
+        # 08:00 ET is outside window (UTC 12:00 during EDT)
+        fixed_et_morning = datetime(2026, 5, 14, 8, 0, tzinfo=et)
+
+        class _FixedMorning(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return datetime(2026, 5, 14, 12, 0)  # decoy "local" hour in-window
+                return fixed_et_morning.astimezone(tz)
+
+        monkeypatch.setattr("src.rebalancing.smart_rebalancer.datetime", _FixedMorning)
+        assert ctrl._in_optimal_window() is False
+
+    def test_aware_utc_converted_to_et_for_window(self):
+        """Timezone-aware UTC timestamps convert to ET before hour check."""
+        from zoneinfo import ZoneInfo
+        from datetime import timezone
+
+        ctrl = SmartRebalancingController()
+        # 16:00 UTC on 2026-05-14 == 12:00 EDT → in window
+        utc_noon_et = datetime(2026, 5, 14, 16, 0, tzinfo=timezone.utc)
+        assert ctrl._in_optimal_window(utc_noon_et) is True
+        # 12:00 UTC == 08:00 EDT → outside
+        utc_morning_et = datetime(2026, 5, 14, 12, 0, tzinfo=timezone.utc)
+        assert ctrl._in_optimal_window(utc_morning_et) is False
+
+    def test_naive_datetime_treated_as_et_wall_clock(self):
+        """Naive datetimes are interpreted as ET wall clock (documented contract)."""
+        ctrl = SmartRebalancingController()
+        assert ctrl._in_optimal_window(datetime(2026, 5, 14, 12, 0)) is True
+        assert ctrl._in_optimal_window(datetime(2026, 5, 14, 8, 0)) is False
+
 
 # ---------------------------------------------------------------------------
 # SmartRebalancingController — should_rebalance decision engine

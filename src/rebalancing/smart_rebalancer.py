@@ -21,6 +21,10 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from enum import Enum
+from zoneinfo import ZoneInfo
+
+# Optimal timing window is defined in America/New_York wall clock (not host local).
+_ET = ZoneInfo("America/New_York")
 
 
 class RebalanceDecision(Enum):
@@ -226,12 +230,11 @@ class SmartRebalancingController:
         vpin_mult = max(1.0, 1.0 + (vpin - 0.30) * 2.0)
         vpin_mult = min(vpin_mult, 2.0)
 
-        # Time multiplier: outside optimal window = higher cost
+        # Time multiplier: outside optimal window = higher cost (ET wall clock)
         if in_optimal_window:
             time_mult = 1.0
         else:
-            now = datetime.now()
-            hour = now.hour
+            hour = self._et_now().hour
             if hour < 10:
                 time_mult = 1.25   # Opening volatility
             elif hour >= 15.5:
@@ -261,12 +264,11 @@ class SmartRebalancingController:
         vpin_mult = max(1.0, 1.0 + (vpin - 0.30) * 2.0)
         vpin_mult = min(vpin_mult, 2.0)
 
-        # Time multiplier (same logic as estimate_cost_bps)
+        # Time multiplier (same logic as estimate_cost_bps; ET wall clock)
         if in_optimal_window:
             time_mult = 1.0
         else:
-            now = datetime.now()
-            hour = now.hour
+            hour = self._et_now().hour
             if hour < 10:
                 time_mult = 1.25
             elif hour >= 15.5:
@@ -300,11 +302,24 @@ class SmartRebalancingController:
                 total += symbol_cost * drift
         return round(total, 2)
 
+    @staticmethod
+    def _et_now(now: Optional[datetime] = None) -> datetime:
+        """Resolve clock to America/New_York wall time for timing gates.
+
+        - ``now is None`` → current time in ET (not host-local).
+        - aware datetimes → converted to ET.
+        - naive datetimes → treated as ET wall clock (documented contract).
+        """
+        if now is None:
+            return datetime.now(_ET)
+        if now.tzinfo is None:
+            return now.replace(tzinfo=_ET)
+        return now.astimezone(_ET)
+
     def _in_optimal_window(self, now: Optional[datetime] = None) -> bool:
         """Check if current time is in optimal execution window (11am-2pm ET)."""
-        if now is None:
-            now = datetime.now()
-        hour = now.hour
+        et_now = self._et_now(now)
+        hour = et_now.hour
         start = self.config['timing']['optimal_start']
         end = self.config['timing']['optimal_end']
         return start <= hour < end
@@ -332,8 +347,7 @@ class SmartRebalancingController:
                      'crisis'). When provided, overrides drift_threshold with
                      the regime-specific value from drift_threshold_by_regime.
         """
-        if now is None:
-            now = datetime.now()
+        now = self._et_now(now)
 
         # Resolve regime-adaptive drift threshold
         regime_thresholds = self.config.get('drift_threshold_by_regime', {})
