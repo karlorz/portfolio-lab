@@ -196,20 +196,59 @@ def apply_ops_monitor_to_dashboard_health(
     health_data["ops_health_source"] = "monitor.health_check"
 
     # Disk SSOT for kill/incidents: never let a lagging monitor snapshot
-    # rehydrate a kill that resolve already cleared on disk.
+    # rehydrate a kill that resolve already cleared on disk. When SSOT is
+    # clear, actively re-project disk onto the payload so sticky public
+    # health.json (pre-resolve enabled kill) is cleared on make health —
+    # not only when generate_health_json pre-seeds the block.
     ssot_clear = _disk_kill_ssot_is_clear(data_dir)
-    if not ssot_clear:
+    sticky_kill = isinstance(health_data.get("kill_switch"), dict) and bool(
+        health_data["kill_switch"].get("enabled")
+    )
+    sticky_open = (
+        isinstance(health_data.get("open_incidents"), dict)
+        and int(health_data["open_incidents"].get("open_count") or 0) > 0
+    )
+    if ssot_clear:
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        try:
+            from src.dashboard.kill_authority import (
+                load_kill_switch_payload,
+                load_open_incidents_summary,
+                project_kill_switch_fields,
+            )
+        except ImportError:
+            disk_kill = {
+                "status": "ok",
+                "enabled": False,
+                "level": None,
+                "reason": None,
+                "source": None,
+                "message": None,
+                "timestamp": None,
+                "incident_id": None,
+                "mode": None,
+                "channel": None,
+            }
+            disk_open = {"status": "ok", "open_count": 0, "incidents": []}
+        else:
+            disk_kill = project_kill_switch_fields(load_kill_switch_payload(root))
+            disk_open = load_open_incidents_summary(root)
+        health_data["kill_switch"] = disk_kill
+        health_data["open_incidents"] = disk_open
+        # Demote system_status only when payload still carried enabled kill /
+        # open incidents (sticky public health). Do not wipe SLO-derived
+        # critical from generate_health_json when kill fields were already clear.
+        if "system_status" in health_data and (sticky_kill or sticky_open):
+            health_data["system_status"] = "healthy"
+    else:
         if isinstance(projected.get("kill_switch"), dict) and projected["kill_switch"]:
             health_data["kill_switch"] = projected["kill_switch"]
         if isinstance(projected.get("open_incidents"), dict) and projected["open_incidents"]:
             health_data["open_incidents"] = projected["open_incidents"]
-    # When SSOT is clear, keep health_data kill/open_incidents as projected
-    # from disk (already set by generate_health_json). Still stamp ops_health_*.
-
-    if "system_status" in health_data and not ssot_clear:
-        health_data["system_status"] = _elevate_public_system_status(
-            health_data.get("system_status"), ops_status
-        )
+        if "system_status" in health_data:
+            health_data["system_status"] = _elevate_public_system_status(
+                health_data.get("system_status"), ops_status
+            )
     return health_data
 
 
@@ -319,7 +358,12 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
             logger.warning("Public health.json unreadable; skip merge: %s", exc)
             payload = None
         if isinstance(payload, dict):
-            apply_ops_monitor_to_dashboard_health(payload, report)
+            apply_ops_monitor_to_dashboard_health(
+                payload,
+                report,
+                data_dir=DATA_DIR,
+                public_dir=PUBLIC_DATA_DIR,
+            )
             try:
                 public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
                 logger.info("Merged ops kill authority into %s", public_health)

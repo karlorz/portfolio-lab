@@ -357,6 +357,85 @@ def test_generate_health_json_cleared_kill_not_reintroduced_by_stale_ops_monitor
     gen.conn.close()
 
 
+def test_publish_ops_health_surfaces_clears_sticky_public_kill_after_resolve(
+    tmp_path, monkeypatch
+):
+    """Live dual-path: make health after resolve must clear public/health.json kill.
+
+    Pre-resolve public health still has enabled kill; disk SSOT is clear; publish
+    must re-project disk (not leave sticky kill until full dashboard).
+    """
+    from src.monitor import health_check as hc
+
+    data_dir = tmp_path / "data"
+    public_dir = tmp_path / "public"
+    data_dir.mkdir()
+    public_dir.mkdir()
+
+    # Disk SSOT cleared
+    (data_dir / "incidents.json").write_text(
+        json.dumps({"open_count": 0, "incidents": []})
+    )
+    # Sticky pre-resolve operator WWW health
+    (public_dir / "health.json").write_text(
+        json.dumps(
+            {
+                "system_status": "critical",
+                "generated_at": "2026-07-19T08:00:00+00:00",
+                "kill_switch": {
+                    "status": "critical",
+                    "enabled": True,
+                    "level": "halt",
+                    "reason": "stale_pre_resolve",
+                    "incident_id": INCIDENT_ID,
+                    "message": "should clear on publish",
+                },
+                "open_incidents": {
+                    "status": "critical",
+                    "open_count": 1,
+                    "incidents": [
+                        {
+                            "incident_id": INCIDENT_ID,
+                            "state": "open",
+                            "kill_switch_level": "halt",
+                        }
+                    ],
+                },
+            }
+        )
+    )
+
+    monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+    monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public_dir)
+    monkeypatch.setattr(hc, "HEALTH_PATH", data_dir / "health.json")
+    monkeypatch.setattr(hc, "health_ops_path", lambda: public_dir / "health_ops.json")
+
+    # Honest post-resolve monitor report (disk-backed)
+    report = {
+        "status": "ok",
+        "timestamp": "2026-07-19T12:00:00+00:00",
+        "scope": "operational_readiness",
+        "checks": {
+            "kill_switch": {
+                "status": "ok",
+                "enabled": False,
+                "level": None,
+                "reason": None,
+            },
+            "open_incidents": {"status": "ok", "open_count": 0, "incidents": []},
+        },
+        "service": "portfolio-lab",
+    }
+    hc.publish_ops_health_surfaces(report)
+
+    public = json.loads((public_dir / "health.json").read_text())
+    assert public["kill_switch"]["enabled"] is False, public["kill_switch"]
+    assert public["open_incidents"]["open_count"] == 0, public["open_incidents"]
+    # Kill-driven critical must not stick after clear
+    assert public["system_status"] not in {"critical"}, public.get("system_status")
+    assert public.get("ops_health_source") == "monitor.health_check"
+
+
 def test_run_health_check_persists_kill_fields(tmp_path, monkeypatch):
     from src.monitor import health_check as hc
 
