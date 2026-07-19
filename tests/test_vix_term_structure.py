@@ -394,15 +394,16 @@ class TestVIXSignalGenerator:
         assert signal.regime == 'contango'
     
     @patch('src.signals.vix_term_structure.VIXTermStructureSignalGenerator.load_vix_data')
-    def test_generate_signal_no_data(self, mock_load_data):
+    def test_generate_signal_no_data(self, mock_load_data, tmp_path):
         """Test signal generation with no data available."""
         mock_load_data.return_value = {}
         
-        generator = VIXTermStructureSignalGenerator()
+        # Isolate from host market.db so empty file truly means no levels
+        generator = VIXTermStructureSignalGenerator(db_path=tmp_path / "missing.db")
         signal = generator.generate_signal('2026-05-15')
         
         assert not signal.is_valid
-        assert signal.reason == 'No VIX data available'
+        assert signal.reason.startswith('No VIX data available')
     
     @patch('src.signals.vix_term_structure.VIXTermStructureSignalGenerator.load_vix_data')
     def test_generate_signal_confidence_calculation(self, mock_load_data, mock_vix_data):
@@ -458,6 +459,128 @@ class TestVIXSignalGenerator:
         
         # Should generate signals for each date
         assert len(signals) <= 3
+
+
+class TestVIXTermStructureFreshnessSSOT:
+    """JSON history must not freeze when market.db has fresher VIX/VIX3M."""
+
+    def _write_file(self, path: Path, rows: dict) -> None:
+        path.write_text(json.dumps(rows), encoding="utf-8")
+
+    def _write_db(self, db_path: Path, rows: list[tuple[str, str, float]]) -> None:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)"
+        )
+        conn.executemany(
+            "INSERT INTO prices (symbol, date, close) VALUES (?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+
+    def test_stale_file_prefers_market_db_levels(self, tmp_path):
+        """Stale May JSON + July DB → signal as_of tracks DB."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        vix_file = data_dir / "vix_term_structure.json"
+        self._write_file(
+            vix_file,
+            {
+                "2026-05-22": {
+                    "date": "2026-05-22",
+                    "vix_spot": 16.76,
+                    "front_month": 20.03,
+                    "third_month": None,
+                }
+            },
+        )
+        db_path = tmp_path / "market.db"
+        self._write_db(
+            db_path,
+            [
+                ("^VIX", "2026-07-17", 18.5),
+                ("^VIX3M", "2026-07-17", 20.54),
+            ],
+        )
+
+        gen = VIXTermStructureSignalGenerator(data_dir=data_dir, db_path=db_path)
+        signal = gen.generate_signal()  # live/latest
+
+        assert signal.is_valid
+        assert abs(signal.vix_spot - 18.5) < 1e-6
+        assert abs(signal.vix3m - 20.54) < 1e-6
+        assert "source=market.db" in signal.reason
+        assert "as_of=2026-07-17" in signal.reason
+        freshness = getattr(signal, "_freshness", {})
+        assert freshness.get("source") == "market.db"
+        assert freshness.get("as_of") == "2026-07-17"
+
+        # File row refreshed so history is no longer frozen at May
+        refreshed = json.loads(vix_file.read_text(encoding="utf-8"))
+        assert "2026-07-17" in refreshed
+        assert abs(refreshed["2026-07-17"]["vix_spot"] - 18.5) < 1e-6
+
+    def test_fresh_file_still_used_when_db_not_newer(self, tmp_path):
+        """When file as_of is within FILE_STALE_DAYS of DB, keep file."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        vix_file = data_dir / "vix_term_structure.json"
+        self._write_file(
+            vix_file,
+            {
+                "2026-07-16": {
+                    "date": "2026-07-16",
+                    "vix_spot": 17.0,
+                    "front_month": 19.0,
+                    "third_month": 20.0,
+                }
+            },
+        )
+        db_path = tmp_path / "market.db"
+        self._write_db(
+            db_path,
+            [
+                ("^VIX", "2026-07-17", 99.0),  # would dominate if wrongly preferred
+                ("^VIX3M", "2026-07-17", 99.0),
+            ],
+        )
+
+        gen = VIXTermStructureSignalGenerator(data_dir=data_dir, db_path=db_path)
+        # 1 day lag < FILE_STALE_DAYS=3 → file wins
+        signal = gen.generate_signal()
+        assert signal.is_valid
+        assert abs(signal.vix_spot - 17.0) < 1e-6
+        assert "source=vix_term_structure.json" in signal.reason
+
+    def test_explicit_historical_date_ignores_db_freshness(self, tmp_path):
+        """Backtest date in file is not replaced by live DB levels."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        self._write_file(
+            data_dir / "vix_term_structure.json",
+            {
+                "2026-05-12": {
+                    "date": "2026-05-12",
+                    "vix_spot": 25.0,
+                    "front_month": 22.0,
+                    "third_month": 21.0,
+                }
+            },
+        )
+        db_path = tmp_path / "market.db"
+        self._write_db(
+            db_path,
+            [("^VIX", "2026-07-17", 18.5), ("^VIX3M", "2026-07-17", 20.54)],
+        )
+
+        gen = VIXTermStructureSignalGenerator(data_dir=data_dir, db_path=db_path)
+        signal = gen.generate_signal("2026-05-12")
+        assert signal.is_valid
+        assert abs(signal.vix_spot - 25.0) < 1e-6
+        assert "source=vix_term_structure.json" in signal.reason
 
 
 class TestVIXRegimeEnum:
@@ -1029,11 +1152,11 @@ class TestVIXExtendedCoverage:
         assert signals == []
 
     @patch("src.signals.vix_term_structure.VIXTermStructureSignalGenerator.load_vix_data")
-    def test_fetch_current_vix_empty_data(self, mock_load_data):
+    def test_fetch_current_vix_empty_data(self, mock_load_data, tmp_path):
         """Test fetch_current_vix with no data returns None."""
         mock_load_data.return_value = {}
 
-        generator = VIXTermStructureSignalGenerator()
+        generator = VIXTermStructureSignalGenerator(db_path=tmp_path / "missing.db")
         result = generator.fetch_current_vix()
 
         assert result is None
@@ -1569,20 +1692,20 @@ class TestGeneratorEdgeCases:
     """Additional generator edge case tests."""
 
     @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
-    def test_generate_signal_nonexistent_date_uses_latest(self, mock_load_data):
+    def test_generate_signal_nonexistent_date_uses_latest(self, mock_load_data, tmp_path):
         """Test generate_signal with a date not in data fetches current."""
         mock_load_data.return_value = {
             "2026-05-10": {"vix_spot": 18.0, "front_month": 20.0, "third_month": 22.0},
             "2026-05-11": {"vix_spot": 19.0, "front_month": 21.0, "third_month": 23.0},
         }
-        generator = VIXTermStructureSignalGenerator()
-        # Date '2026-05-15' not in data -> tries fetch_current_vix -> returns latest
+        generator = VIXTermStructureSignalGenerator(db_path=tmp_path / "missing.db")
+        # Date '2026-05-15' not in data -> falls back to latest file row
         signal = generator.generate_signal("2026-05-15")
         assert signal.is_valid
         assert signal.vix_spot == 19.0  # latest is 2026-05-11
 
     @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
-    def test_generate_signal_missing_vix_spot_key(self, mock_load_data):
+    def test_generate_signal_missing_vix_spot_key(self, mock_load_data, tmp_path):
         """Test generate_signal when vix_spot key is missing (defaults to 0)."""
         mock_load_data.return_value = {
             "2026-05-15": {
@@ -1591,7 +1714,7 @@ class TestGeneratorEdgeCases:
                 "third_month": 22.0,
             }
         }
-        generator = VIXTermStructureSignalGenerator()
+        generator = VIXTermStructureSignalGenerator(db_path=tmp_path / "missing.db")
         signal = generator.generate_signal("2026-05-15")
         assert signal.is_valid
         assert signal.vix_spot == 0.0  # default from .get("vix_spot", 0)
@@ -1613,16 +1736,17 @@ class TestGeneratorEdgeCases:
             generator.generate_signal("2026-05-15")
 
     @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
-    def test_fetch_current_vix_returns_latest(self, mock_load_data):
-        """Test fetch_current_vix returns latest entry from data."""
+    def test_fetch_current_vix_returns_latest(self, mock_load_data, tmp_path):
+        """Test fetch_current_vix returns latest entry from data when DB absent."""
         mock_load_data.return_value = {
             "2026-05-10": {"vix_spot": 18.0},
             "2026-05-11": {"vix_spot": 19.0},
             "2026-05-12": {"vix_spot": 20.0},
         }
-        generator = VIXTermStructureSignalGenerator()
+        generator = VIXTermStructureSignalGenerator(db_path=tmp_path / "missing.db")
         result = generator.fetch_current_vix()
-        assert result == {"vix_spot": 20.0}
+        assert result is not None
+        assert result.get("vix_spot") == 20.0
 
     @patch.object(VIXTermStructureSignalGenerator, "load_vix_data")
     def test_save_signal_exception_handling(self, mock_load_data):
@@ -1668,13 +1792,13 @@ class TestGeneratorEdgeCases:
         result = generator.load_vix_data()
         assert result == {}
 
-    def test_generate_signal_empty_data_dict(self):
+    def test_generate_signal_empty_data_dict(self, tmp_path):
         """Test generate_signal with empty data dict returns invalid signal."""
-        generator = VIXTermStructureSignalGenerator()
+        generator = VIXTermStructureSignalGenerator(db_path=tmp_path / "missing.db")
         with patch.object(generator, "load_vix_data", return_value={}):
             signal = generator.generate_signal("2026-05-15")
             assert not signal.is_valid
-            assert signal.reason == "No VIX data available"
+            assert signal.reason.startswith("No VIX data available")
 
 
 class TestCompositeSignalFallback:
