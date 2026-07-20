@@ -1318,3 +1318,27 @@ class TestSignalCalculationEdgeCases:
         z = mock_generator._compute_z_score(0.0)
         assert z == 0.0
 
+
+
+def test_project_alternative_data_marks_regime_advisory():
+    from src.dashboard.generator import project_alternative_data_signal
+
+    projected = project_alternative_data_signal(
+        {
+            "regime": "bull",
+            "probability": 0.82,
+            "confidence": 0.7,
+            "timestamp": "2026-07-20T00:00:00+00:00",
+            "raw_data": {
+                "composite_score": 0.27,
+                "components": {"news": 0.1},
+                "component_confidences": {"news": 0.5},
+                "weights": {"news": 1.0},
+            },
+        }
+    )
+    assert projected["regime"] == "bull"
+    assert projected["alt_regime"] == "bull"
+    assert projected["role"] == "advisory_shadow"
+    assert projected["live_authoritative"] is False
+    assert "regime_authority" in projected["canonical_controller"] or "regime" in projected["canonical_controller"]

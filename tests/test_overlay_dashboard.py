@@ -1901,3 +1901,31 @@ class TestCalendarFreshnessProductionTime:
         assert "00:15" in gen_at or gen_at.endswith("00:15:00") or "T00:15" in gen_at, gen_at
         # Mid-afternoon the next day would not use yesterday's assessment as sole freshness
         assert block.get("assessment_date") in (None, "2026-07-20") or True
+
+
+def test_crypto_status_text_eth_only_leads_with_eth():
+    from src.dashboard.overlay_dashboard import _crypto_status_text
+
+    text = _crypto_status_text(
+        composite=0.0028,
+        btc_pf=0.0,
+        eth_pf=0.0028,
+        btc_mom=-0.0055,
+        eth_mom=0.1509,
+    )
+    assert "ETH" in text
+    assert "BTC" not in text
+    assert "0.3%" in text or "0.28%" in text or "Crypto:" in text
+
+
+def test_crypto_status_text_both_assets():
+    from src.dashboard.overlay_dashboard import _crypto_status_text
+
+    text = _crypto_status_text(
+        composite=0.03,
+        btc_pf=0.018,
+        eth_pf=0.012,
+        btc_mom=0.1,
+        eth_mom=0.2,
+    )
+    assert "BTC" in text and "ETH" in text

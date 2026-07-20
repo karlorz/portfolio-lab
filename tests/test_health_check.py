@@ -787,3 +787,59 @@ class TestFredReadiness:
         assert readiness["status"] == "ok"
         assert readiness["ready"] is True
         assert "super-secret-fred-key" not in json.dumps(readiness)
+
+
+class TestGraduationCircuitBreakerProducer:
+    """consecutive_ok producer for graduation circuit_breaker_confidence."""
+
+    def test_healthy_closed_increments_streak(self, tmp_path):
+        from src.monitor.health_check import update_graduation_circuit_breaker_state
+
+        p1 = update_graduation_circuit_breaker_state(
+            system_status="healthy",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+        )
+        assert p1["consecutive_ok"] == 1
+        assert p1["status"] == "green"
+        path = tmp_path / ".circuit_breaker.json"
+        assert path.exists()
+
+        p2 = update_graduation_circuit_breaker_state(
+            system_status="ok",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+        )
+        assert p2["consecutive_ok"] == 2
+
+    def test_open_broker_resets_streak(self, tmp_path):
+        from src.monitor.health_check import update_graduation_circuit_breaker_state
+
+        update_graduation_circuit_breaker_state(
+            system_status="healthy",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+        )
+        update_graduation_circuit_breaker_state(
+            system_status="healthy",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+        )
+        bad = update_graduation_circuit_breaker_state(
+            system_status="healthy",
+            broker_circuit={"state": "open", "fail_count": 3},
+            data_dir=tmp_path,
+        )
+        assert bad["consecutive_ok"] == 0
+        assert bad["status"] == "red"
+
+    def test_missing_file_starts_at_one_when_green(self, tmp_path):
+        from src.monitor.health_check import update_graduation_circuit_breaker_state
+
+        assert not (tmp_path / ".circuit_breaker.json").exists()
+        p = update_graduation_circuit_breaker_state(
+            system_status="healthy",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+        )
+        assert p["consecutive_ok"] == 1

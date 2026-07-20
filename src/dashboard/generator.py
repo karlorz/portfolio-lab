@@ -96,8 +96,15 @@ def project_alternative_data_signal(alt_data_raw: Dict[str, Any]) -> Dict[str, A
                 "weight": weights_src.get(name),
             }
 
+    alt_regime = alt_data_raw.get("regime")
     return {
-        "regime": alt_data_raw.get("regime"),
+        # Keep ``regime`` for backward compat but mark as advisory shadow so it
+        # cannot be read as peer-level live regime_authority (VIX classify).
+        "regime": alt_regime,
+        "alt_regime": alt_regime,
+        "role": "advisory_shadow",
+        "live_authoritative": False,
+        "canonical_controller": "signals.json.regime / regime_authority",
         "probability": alt_data_raw.get("probability"),
         "confidence": alt_data_raw.get("confidence"),
         "timestamp": alt_data_raw.get("timestamp"),

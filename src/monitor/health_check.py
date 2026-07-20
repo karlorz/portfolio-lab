@@ -46,6 +46,7 @@ __all__ = [
     "load_ops_monitor_report",
     "apply_ops_monitor_to_dashboard_health",
     "reconcile_monitor_health_with_disk_ssot",
+    "update_graduation_circuit_breaker_state",
 ]
 
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
@@ -753,6 +754,82 @@ def _check_circuit_breaker() -> dict:
         return {"status": "unavailable", "state": None, "fail_count": None, "reset_timeout": None}
 
 
+def update_graduation_circuit_breaker_state(
+    *,
+    system_status: str,
+    broker_circuit: dict | None = None,
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Persist ``DATA_DIR/.circuit_breaker.json`` consecutive_ok for graduation.
+
+    Graduation's circuit_breaker_confidence gate needs a producer that increments
+    ``consecutive_ok`` when ops are green and the broker CB is closed. Without
+    this file the gate stays failed forever even when health looks healthy.
+
+    - Healthy + broker closed → consecutive_ok += 1 (capped at 30)
+    - Otherwise → consecutive_ok reset to 0, status reflects ops/broker
+    """
+    root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    path = root / ".circuit_breaker.json"
+    broker = broker_circuit if isinstance(broker_circuit, dict) else {}
+    broker_state = str(broker.get("state") or "").lower()
+    broker_fail = int(broker.get("fail_count") or 0)
+    status_l = str(system_status or "").lower()
+    ops_ok = status_l in {"ok", "healthy", "green"}
+    broker_ok = broker_state in {"closed", "ok", "green", ""} and broker_fail == 0
+    # Empty broker_state (unavailable import) still allows ops-only streak so
+    # labs without pybreaker can graduate paper CB; open/half-open block.
+    if broker_state in {"open", "half-open", "half_open"}:
+        broker_ok = False
+
+    prev: dict[str, Any] = {}
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                prev = raw
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to read graduation CB state %s: %s", path, exc)
+
+    prev_ok = int(prev.get("consecutive_ok") or 0)
+    if ops_ok and broker_ok:
+        consecutive_ok = min(prev_ok + 1, 30)
+        status = "green"
+        trips = 0
+    else:
+        consecutive_ok = 0
+        status = "red" if not broker_ok and broker_state in {"open", "half-open", "half_open"} else "yellow"
+        trips = int(prev.get("trips") or 0)
+        if not broker_ok and broker_state in {"open", "half-open", "half_open"}:
+            trips = trips + 1
+
+    payload: dict[str, Any] = {
+        "schema_version": "graduation-circuit-breaker/v1",
+        "status": status,
+        "consecutive_ok": consecutive_ok,
+        "trips": trips,
+        "broker_state": broker_state or None,
+        "broker_fail_count": broker_fail,
+        "system_status": status_l or None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "producer": "src.monitor.health_check.update_graduation_circuit_breaker_state",
+    }
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        logger.info(
+            "Graduation CB state: consecutive_ok=%s status=%s → %s",
+            consecutive_ok,
+            status,
+            path,
+        )
+    except OSError as exc:
+        logger.warning("Failed to write graduation CB state %s: %s", path, exc)
+    return payload
+
+
 def _check_fred_md_cache() -> dict:
     """Check FRED-MD cache availability without making live provider calls."""
     try:
@@ -960,6 +1037,17 @@ def run_health_check() -> dict:
     }
     system_status = _compute_system_status(rollup_checks, circuit)
 
+    # Persist graduation consecutive_ok producer (SSOT for circuit_breaker_confidence)
+    try:
+        grad_cb = update_graduation_circuit_breaker_state(
+            system_status=system_status,
+            broker_circuit=circuit,
+            data_dir=DATA_DIR,
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail health job on CB producer
+        logger.warning("Graduation CB consecutive_ok producer failed: %s", exc)
+        grad_cb = None
+
     report = {
         "status": system_status,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -972,6 +1060,12 @@ def run_health_check() -> dict:
         "service": "portfolio-lab",
         "scope": "operational_readiness",
     }
+    if isinstance(grad_cb, dict):
+        report["graduation_circuit_breaker"] = {
+            "consecutive_ok": grad_cb.get("consecutive_ok"),
+            "status": grad_cb.get("status"),
+            "updated_at": grad_cb.get("updated_at"),
+        }
 
     # Always persist full checks (including kill_switch / open_incidents) so
     # on-disk data/health.json matches live run_health_check() output.

@@ -30,6 +30,33 @@ from src.dashboard.kill_authority import load_kill_switch_payload
 logger = logging.getLogger(__name__)
 
 
+def _crypto_status_text(
+    *,
+    composite: float,
+    btc_pf: float,
+    eth_pf: float,
+    btc_mom: float,
+    eth_mom: float,
+) -> str:
+    """Build status_text that headlines the active sleeve asset(s).
+
+    When portfolio notional is ETH-only (btc_pf≈0), do not lead with BTC
+    momentum — that misleads operators reading the crypto panel.
+    """
+    head = f"Crypto: {composite:.1%}"
+    eps = 1e-9
+    btc_on = btc_pf > eps
+    eth_on = eth_pf > eps
+    if btc_on and eth_on:
+        return f"{head}, BTC {btc_mom:+.1%} 6m / ETH {eth_mom:+.1%} 6m"
+    if eth_on and not btc_on:
+        return f"{head}, ETH {eth_mom:+.1%} 6m"
+    if btc_on and not eth_on:
+        return f"{head}, BTC {btc_mom:+.1%} 6m"
+    # Flat sleeve — still show both for context
+    return f"{head}, BTC {btc_mom:+.1%} 6m / ETH {eth_mom:+.1%} 6m"
+
+
 @dataclass
 class OverlayDashboardData:
     """Complete overlay dashboard data ready for frontend consumption."""
@@ -225,8 +252,13 @@ class OverlayDashboardGenerator:
                 "btc_vol_regime": signal.btc_signal.vol_regime,
                 "eth_vol_regime": signal.eth_signal.vol_regime,
                 "confidence": signal.confidence,
-                "status_text": f"Crypto: {signal.composite_weight:.1%}, "
-                               f"BTC {signal.btc_signal.momentum_6m:+.1%} 6m",
+                "status_text": _crypto_status_text(
+                    composite=composite,
+                    btc_pf=btc_pf,
+                    eth_pf=eth_pf,
+                    btc_mom=float(signal.btc_signal.momentum_6m or 0),
+                    eth_mom=float(signal.eth_signal.momentum_6m or 0),
+                ),
             }, getattr(signal, "timestamp", None))
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
