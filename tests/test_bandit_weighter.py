@@ -16,17 +16,21 @@ class TestBanditWeighter:
         result = bw.get_weights("NORMAL")
         assert result is None  # No data yet
 
-    def test_select_exploit_mode_returns_best(self):
+    def test_select_exploit_mode_returns_best(self, monkeypatch):
         bw = BanditWeighter(["sig_a", "sig_b"])
-        # Deterministic gap: sig_a always positive, sig_b always negative
-        # (avoids flaky Sharpe inversion under RNG noise)
-        for _ in range(100):
+        # Need n>=2 so select takes the Thompson path (not cold-start fallback)
+        for _ in range(30):
             bw.update("sig_a", "NORMAL", 0.002)
             bw.update("sig_b", "NORMAL", -0.001)
-        # With enough data and epsilon = 0 (force exploit), picks sig_a
-        bw.epsilon = 0.0
-        selected = bw.select("NORMAL")
-        assert selected == "sig_a"
+        bw.epsilon = 0.0  # disable epsilon random explore
+
+        # select() ranks by sampled posterior Sharpe; pin samples so the
+        # better arm wins deterministically (Thompson sampling is stochastic).
+        def _fake_sample(sig: str, regime: str) -> float:
+            return 2.0 if sig == "sig_a" else -1.0
+
+        monkeypatch.setattr(bw, "_sample_sharpe", _fake_sample)
+        assert bw.select("NORMAL") == "sig_a"
 
     def test_select_explore_mode_can_pick_any(self):
         bw = BanditWeighter(["sig_a", "sig_b"])
