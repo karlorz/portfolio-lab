@@ -485,6 +485,11 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
                 data_dir=DATA_DIR,
                 public_dir=PUBLIC_DATA_DIR,
             )
+            # Partial merge must advance content timestamp (not only kill fields)
+            now_utc = datetime.now(timezone.utc).isoformat()
+            payload["generated_at"] = now_utc
+            payload["content_patched_at"] = now_utc
+            payload["content_patch_source"] = "ops_health_merge"
             try:
                 public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
                 logger.info("Merged ops kill authority into %s", public_health)
@@ -1008,7 +1013,12 @@ def main():
     configure_logging()
     report = run_health_check()
     logger.info("Health check: %s", json.dumps(report, indent=2))
-    return 0 if report["status"] == "ok" else 1
+    # warning is a valid ops state (open advisory incidents, etc.). Mapping it
+    # to exit 1 made tasker status=error and sticky failed_cron noise.
+    status = str(report.get("status") or "ok").lower()
+    if status in {"ok", "warning", "healthy"}:
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

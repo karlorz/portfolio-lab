@@ -332,6 +332,61 @@ class ICMonitor:
             logger.warning("Failed to load IC monitor state: %s", e)
 
 
+
+def _signal_prediction_backlog(db_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Row-level pending backlog from SignalHealthTracker table (not staged IC window).
+
+    pending_predictions in the IC report is staged-date count; pending_rows is the
+    full unlabeled prediction history operators confuse with near-green pending=6.
+    """
+    from src.paths import MARKET_DB, sqlite_connect
+
+    path = Path(db_path) if db_path is not None else MARKET_DB
+    empty = {
+        "pending_rows": 0,
+        "pending_dates": 0,
+        "oldest_unresolved_date": None,
+        "total_predictions": 0,
+        "resolved_predictions": 0,
+        "pending_semantics": "signal_predictions.actual_direction IS NULL",
+    }
+    if not path.exists():
+        return empty
+    try:
+        with sqlite_connect(path) as conn:
+            cur = conn.cursor()
+            total = int(cur.execute("SELECT COUNT(*) FROM signal_predictions").fetchone()[0])
+            resolved = int(
+                cur.execute(
+                    "SELECT COUNT(*) FROM signal_predictions WHERE actual_direction IS NOT NULL"
+                ).fetchone()[0]
+            )
+            pending_rows = max(0, total - resolved)
+            row = cur.execute(
+                """
+                SELECT COUNT(DISTINCT prediction_date), MIN(prediction_date)
+                FROM signal_predictions
+                WHERE actual_direction IS NULL
+                """
+            ).fetchone()
+            pending_dates = int(row[0] or 0) if row else 0
+            oldest = row[1] if row else None
+        return {
+            "pending_rows": pending_rows,
+            "pending_dates": pending_dates,
+            "oldest_unresolved_date": oldest,
+            "total_predictions": total,
+            "resolved_predictions": resolved,
+            "pending_semantics": (
+                "pending_predictions=IC staged window; "
+                "pending_rows=signal_predictions unlabeled rows"
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001 — optional enrichment
+        logger.debug("signal prediction backlog unavailable: %s", exc)
+        return empty
+
+
 def compute_ic_decay_report() -> Dict[str, Any]:
     """Convenience function: compute IC decay report from saved state.
 
@@ -356,11 +411,18 @@ def compute_ic_decay_report() -> Dict[str, Any]:
         status = "waiting_for_forward_returns"
     else:
         status = "no_data"
+    backlog = _signal_prediction_backlog()
     return {
         "status": status,
         "signals": signals,
         "resolved_signal_count": len(signals),
         "pending_predictions": pending,
+        "pending_rows": backlog.get("pending_rows", 0),
+        "pending_dates": backlog.get("pending_dates", 0),
+        "oldest_unresolved_date": backlog.get("oldest_unresolved_date"),
+        "total_predictions": backlog.get("total_predictions", 0),
+        "resolved_predictions": backlog.get("resolved_predictions", 0),
+        "pending_semantics": backlog.get("pending_semantics"),
         "staged_date": monitor.get_staged_date(),
         "label_horizon": "SPY close-to-close forward return from staged market-data date to latest available SPY row",
     }

@@ -324,11 +324,20 @@ def compute_signal_wfe_report() -> Dict[str, Any]:
         monitor.load_state()
         pending = monitor.get_staged_prediction_count()
         if pending:
+            try:
+                from src.monitor.ic_decay_monitor import _signal_prediction_backlog
+                backlog = _signal_prediction_backlog()
+            except Exception:  # noqa: BLE001
+                backlog = {}
             return {
                 "status": "waiting_for_forward_returns",
                 "signals": {},
                 "resolved_signal_count": 0,
                 "pending_predictions": pending,
+                "pending_rows": backlog.get("pending_rows", 0),
+                "pending_dates": backlog.get("pending_dates", 0),
+                "oldest_unresolved_date": backlog.get("oldest_unresolved_date"),
+                "pending_semantics": backlog.get("pending_semantics"),
                 "staged_date": monitor.get_staged_date(),
                 "label_horizon": "Uses resolved IC prediction/forward-return pairs; pending until forward returns exist.",
             }
