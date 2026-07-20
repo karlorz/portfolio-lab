@@ -1218,7 +1218,10 @@ class TestEnsemblePostDecayMetrics:
 
         status = DashboardGenerator._generate_marl_status()
 
-        assert status["available"] is True
+        # Without checkpoint, available is false; module is still importable
+        assert status["available"] is False
+        assert status.get("module_importable") is True
+        assert status.get("reason") == "checkpoint_not_loaded"
         assert status["schema_version"] == "marl-runtime-status/v1"
         assert status["runtime"]["version"] == "2.51.0"
         assert status["runtime"]["agents_loaded"] == controller_status["agents_loaded"]
@@ -1228,6 +1231,30 @@ class TestEnsemblePostDecayMetrics:
         assert status["execution_role"]["role"] == "research_shadow_non_routed"
         assert status["execution_role"]["routed_by"] is None
         assert "target_allocations" in status["execution_role"]["description"]
+
+    def test_marl_status_available_when_checkpoint_loaded(self, monkeypatch):
+        controller_status = {
+            "version": "2.51.0",
+            "device": "cpu",
+            "agents_loaded": ["analyst"],
+            "signal_integrator_connected": False,
+            "checkpoint_loaded": True,
+            "inference_count": 3,
+            "current_allocation": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "CASH": 0.0},
+            "graph_metrics": {},
+        }
+
+        class FakeAIController:
+            def __init__(self, *args, **kwargs):
+                pass
+            def get_status(self):
+                return controller_status
+
+        monkeypatch.setattr("src.agents.ai_controller.AIController", FakeAIController)
+        status = DashboardGenerator._generate_marl_status()
+        assert status["available"] is True
+        assert status.get("module_importable") is True
+        assert status["runtime"]["checkpoint_loaded"] is True
 
     def test_staleness_decay_recomputes_consensus_and_agreement(self, tmp_path):
         """Post-decay consensus and agreement derive from decayed source rows."""

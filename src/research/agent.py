@@ -343,30 +343,46 @@ Work item: {work_file}
         logger.info("Created Claude prompt: %s", prompt_file)
     
     def run_daily_summary(self) -> Dict:
-        """Run daily summary analysis."""
+        """Run daily summary analysis.
+
+        avg_return is mean simple return (close/lag-1), not mean price level.
+        peak/trough remain SPY close levels over the window.
+        """
         cursor = self.conn.cursor()
-        
-        # Get performance summary
+
+        # True daily returns via lag; peak/trough are price levels (documented).
         cursor.execute("""
-            SELECT COUNT(*) as days,
-                   AVG(daily_return) as avg_return,
-                   MAX(total_value) as peak,
-                   MIN(total_value) as trough
+            SELECT
+                COUNT(*) AS days,
+                AVG(daily_return) AS avg_return,
+                MAX(close) AS peak,
+                MIN(close) AS trough
             FROM (
-                SELECT date, close as daily_return, close as total_value
-                FROM prices WHERE symbol = 'SPY' 
-                AND date >= date('now', '-30 days')
+                SELECT
+                    date,
+                    close,
+                    (close / LAG(close) OVER (ORDER BY date) - 1.0) AS daily_return
+                FROM prices
+                WHERE symbol = 'SPY'
+                  AND date >= date('now', '-30 days')
+                ORDER BY date
             )
+            WHERE daily_return IS NOT NULL
         """)
-        
+
         row = cursor.fetchone()
+        days = int(row[0] or 0) if row is not None else 0
+        avg_return = row[1] if row is not None else None
+        peak = row[2] if row is not None else None
+        trough = row[3] if row is not None else None
         summary = {
-            "days": row[0],
-            "avg_return": row[1],
-            "peak": row[2],
-            "trough": row[3]
+            "days": days,
+            "avg_return": avg_return,
+            "peak": peak,
+            "trough": trough,
+            "return_metric": "simple_close_to_close",
         }
-        
+
         logger.info("Daily summary: %s", summary)
 
         self.close()

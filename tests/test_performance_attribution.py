@@ -589,7 +589,7 @@ class TestComputeSourceAttributionExtended:
         daily_returns = {"2026-05-15": {"daily_return": 0.01}}
         attrib = attributor._compute_source_attribution(signals, daily_returns)
         assert attrib.active_days == 0
-        assert attrib.hit_rate == 0.0
+        assert attrib.hit_rate is None  # no_data: no joined return days
 
     def test_none_daily_return_skipped(self, attributor):
         """daily_return=None should be skipped."""
@@ -2003,3 +2003,21 @@ class TestSourceAttributionMetrics:
         expected = 0.75 * 4.0 / 100
         assert sa.efficiency_ratio == expected
 
+
+
+class TestAttributionNoDataHonesty:
+    def test_vacuous_report_status_no_data(self, tmp_path):
+        """When no source joins returns (active_days=0), status is no_data and hit rates null."""
+        from src.monitor.performance_attribution import PerformanceAttribution, AttributionReport
+
+        attrib = PerformanceAttribution(data_dir=tmp_path)
+        # Force empty history / empty returns path
+        report = attrib.generate_report(days=30)
+        assert isinstance(report, AttributionReport)
+        # Empty ensemble DB → no sources or all zero active
+        if report.total_sources_tracked == 0 or all(
+            (s.active_days if hasattr(s, "active_days") else report.sources[s].active_days) == 0
+            for s in (report.sources if isinstance(report.sources, dict) else [])
+        ):
+            assert report.status == "no_data"
+            assert report.avg_hit_rate is None

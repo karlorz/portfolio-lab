@@ -466,3 +466,35 @@ class TestEdgeCases:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestRunDailySummaryReturnSemantics:
+    def test_avg_return_is_not_price_level(self, tmp_path):
+        """avg_return must be dimensionless return, not mean SPY close."""
+        import sqlite3
+        from datetime import datetime, timedelta
+        import src.research.agent as agent_module
+        from src.research.agent import ResearchAgent
+
+        agent = _make_agent(tmp_path)
+        db = agent_module.DB_PATH
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE IF NOT EXISTS prices (symbol TEXT, date TEXT, close REAL)")
+        # Two days: 100 -> 101 => return 0.01
+        d0 = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+        d1 = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        conn.execute("DELETE FROM prices WHERE symbol='SPY'")
+        conn.execute("INSERT INTO prices VALUES (?,?,?)", ("SPY", d0, 100.0))
+        conn.execute("INSERT INTO prices VALUES (?,?,?)", ("SPY", d1, 101.0))
+        conn.commit()
+        conn.close()
+
+        agent.conn = sqlite3.connect(db)
+        agent.conn.row_factory = sqlite3.Row
+        summary = agent.run_daily_summary()
+        assert summary["days"] >= 1
+        assert summary["avg_return"] is not None
+        assert abs(float(summary["avg_return"]) - 0.01) < 1e-9
+        assert abs(float(summary["avg_return"])) < 0.2
+        # peak/trough are price levels
+        assert float(summary["peak"]) >= 100.0

@@ -64,8 +64,8 @@ class SourceAttribution:
     active_days: int
 
     # Directional accuracy
-    hit_rate: float          # % of times signal direction matched subsequent return
-    win_rate: float          # % of times signal produced positive return contribution
+    hit_rate: Optional[float]  # None when active_days==0 (no_data); else directional hit rate
+    win_rate: Optional[float]  # None when active_days==0; else positive-return rate contribution
     avg_return_bps: float    # Average daily return contribution (bps)
     total_return_bps: float  # Cumulative return contribution (bps)
 
@@ -88,7 +88,7 @@ class SourceAttribution:
         """Return per-unit-of-risk efficiency."""
         if self.avg_return_bps == 0:
             return 0.0
-        return self.hit_rate * abs(self.avg_return_bps) / 100
+        return 0.0 if self.hit_rate is None else self.hit_rate * abs(self.avg_return_bps) / 100
 
 
 @dataclass
@@ -105,7 +105,7 @@ class AttributionReport:
     # Aggregate
     best_source: Optional[str]
     worst_source: Optional[str]
-    avg_hit_rate: float
+    avg_hit_rate: Optional[float]  # None when no source has active_days > 0
     avg_correlation: float
 
     # Signal diversity
@@ -115,6 +115,7 @@ class AttributionReport:
     # Special flags
     degradation_signals: List[str]  # Sources degrading performance
     top_performers: List[str]       # Sources adding most value
+    status: str = "ok"  # ok | no_data
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -261,8 +262,8 @@ class PerformanceAttribution:
                 category="unknown",
                 total_readings=0,
                 active_days=0,
-                hit_rate=0.0,
-                win_rate=0.0,
+                hit_rate=None,
+                win_rate=None,
                 avg_return_bps=0.0,
                 total_return_bps=0.0,
                 sharpe_contribution=0.0,
@@ -334,8 +335,12 @@ class PerformanceAttribution:
                 contribution_bps = ret * 10000 * weight * 2  # Scaled by weight
             daily_contributions.append(contribution_bps)
 
-        hit_rate = hits / max(total, 1)
-        win_rate = wins / max(total, 1)
+        if total == 0:
+            hit_rate = None
+            win_rate = None
+        else:
+            hit_rate = hits / total
+            win_rate = wins / total
         avg_return_bps = np.mean(daily_contributions) if daily_contributions else 0.0
         total_return_bps = np.sum(daily_contributions) if daily_contributions else 0.0
 
@@ -357,8 +362,8 @@ class PerformanceAttribution:
             category=meta.get("category", "other"),
             total_readings=len(source_signals),
             active_days=total,
-            hit_rate=round(hit_rate, 4),
-            win_rate=round(win_rate, 4),
+            hit_rate=None if hit_rate is None else round(hit_rate, 4),
+            win_rate=None if win_rate is None else round(win_rate, 4),
             avg_return_bps=round(avg_return_bps, 2),
             total_return_bps=round(total_return_bps, 2),
             sharpe_contribution=round(sharpe_contribution, 4),
@@ -463,7 +468,7 @@ class PerformanceAttribution:
         # Identify degradation signals (negative sharpe or hit rate < 0.4)
         degradation_signals = [
             s.source for s in valid_sources
-            if s.sharpe_contribution < -0.1 or (s.hit_rate < 0.4 and s.total_readings > 5)
+            if s.sharpe_contribution < -0.1 or (s.hit_rate is not None and s.hit_rate < 0.4 and s.total_readings > 5)
         ]
 
         top_performers = [
@@ -471,7 +476,14 @@ class PerformanceAttribution:
             if s.sharpe_contribution > 0.5
         ]
 
-        avg_hit_rate = float(np.mean([s.hit_rate for s in valid_sources])) if valid_sources else 0.0
+        sources_with_days = [s for s in source_list if getattr(s, "active_days", 0) > 0]
+        if sources_with_days:
+            rates = [s.hit_rate for s in sources_with_days if s.hit_rate is not None]
+            avg_hit_rate = float(np.mean(rates)) if rates else None
+            report_status = "ok"
+        else:
+            avg_hit_rate = None
+            report_status = "no_data"
         avg_corr = float(np.mean([s.avg_correlation for s in valid_sources])) if valid_sources else 0.0
 
         # Count average active sources per day
@@ -493,8 +505,9 @@ class PerformanceAttribution:
             sources=sources,
             best_source=best_source,
             worst_source=worst_source,
-            avg_hit_rate=round(avg_hit_rate, 4),
+            avg_hit_rate=None if avg_hit_rate is None else round(avg_hit_rate, 4),
             avg_correlation=round(avg_corr, 4),
+            status=report_status,
             avg_active_sources_per_day=avg_active,
             total_sources_tracked=len(sources),
             degradation_signals=degradation_signals,
@@ -552,7 +565,7 @@ def print_report(report: AttributionReport):
     for s in sorted_sources:
         logger.info(
             f"  {s.display_name:30}"
-            f" {s.hit_rate:>8.1%}"
+            f" {("n/a" if s.hit_rate is None else f"{s.hit_rate:>8.1%}")}"
             f" {s.win_rate:>8.1%}"
             f" {s.avg_return_bps:>8.2f}"
             f" {s.sharpe_contribution:>8.2f}"
@@ -566,7 +579,7 @@ def print_report(report: AttributionReport):
         for sig in report.degradation_signals:
             src = report.sources.get(sig)
             if src:
-                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
+                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={'n/a' if src.hit_rate is None else f'{src.hit_rate:.1%}'}")
         logger.info("")
 
     if report.top_performers:
@@ -574,7 +587,7 @@ def print_report(report: AttributionReport):
         for sig in report.top_performers:
             src = report.sources.get(sig)
             if src:
-                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
+                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={'n/a' if src.hit_rate is None else f'{src.hit_rate:.1%}'}")
         logger.info("")
 
     if report.best_source and report.best_source in report.sources:
@@ -585,7 +598,7 @@ def print_report(report: AttributionReport):
         worst = report.sources[report.worst_source]
         logger.info(f"  Worst source: {worst.display_name} (Sharpe {worst.sharpe_contribution:+.2f})")
 
-    logger.info(f"\n  Average hit rate: {report.avg_hit_rate:.1%}")
+    logger.info(f"\n  Average hit rate: {'n/a' if report.avg_hit_rate is None else f'{report.avg_hit_rate:.1%}'} (status={getattr(report, "status", "ok")})")
     logger.info(f"  Average signal correlation: {report.avg_correlation:.2f}")
     logger.info("=" * 72)
     logger.info("")

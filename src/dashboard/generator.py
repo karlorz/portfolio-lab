@@ -2618,10 +2618,16 @@ class DashboardGenerator:
 
     @staticmethod
     def _generate_marl_status() -> Dict[str, Any]:
-        """Expose AIController runtime status without implying live routing authority."""
+        """Expose AIController runtime status without implying live routing authority.
+
+        ``available`` means checkpoint-backed runtime readiness for shadow use,
+        not merely that the MARL module imported. Controllers without a loaded
+        checkpoint report available=false with reason, plus module_importable.
+        """
         status = {
             "schema_version": "marl-runtime-status/v1",
             "available": False,
+            "module_importable": False,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "runtime": DashboardGenerator._default_marl_runtime_status(),
             "execution_role": DashboardGenerator._marl_execution_role(),
@@ -2633,14 +2639,22 @@ class DashboardGenerator:
             controller = AIController(use_signal_integrator=False)
             runtime_status = controller.get_status()
             if isinstance(runtime_status, dict):
-                status["available"] = True
+                status["module_importable"] = True
                 status["runtime"] = {
                     **DashboardGenerator._default_marl_runtime_status(),
                     **runtime_status,
                 }
+                checkpoint_loaded = bool(runtime_status.get("checkpoint_loaded"))
+                # available = ready for shadow inference path (checkpoint present)
+                status["available"] = checkpoint_loaded
+                if not checkpoint_loaded:
+                    status["reason"] = "checkpoint_not_loaded"
+                else:
+                    status["reason"] = "checkpoint_loaded"
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("marl_status", e)
             status["error"] = str(e)
+            status["reason"] = "controller_import_or_init_failed"
 
         return status
     
