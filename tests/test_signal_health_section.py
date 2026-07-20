@@ -46,12 +46,16 @@ def test_build_signal_health_section_success() -> None:
             "max_days": 30,
         }
         out = build_signal_health_section()
-    tracker.resolve_pending_labels.assert_called_once()
+    # Newest-first + oldest-first catch-up batches
+    assert tracker.resolve_pending_labels.call_count == 2
     assert out["overall_health"] == "degraded"
     assert out["status"] == "degraded"
     assert out["label_horizon"] == "SPY actual direction resolved by prediction date"
     assert out["scores"]["msm"] == 0.55
-    assert out["label_resolve"]["predictions_updated"] == 5
+    # Sum of both resolve batches (mock returns 5 each)
+    assert out["label_resolve"]["predictions_updated"] == 10
+    assert "newest_first" in out["label_resolve"]
+    assert "oldest_first" in out["label_resolve"]
 
 
 def test_build_signal_health_section_can_skip_resolve() -> None:

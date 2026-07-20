@@ -43,7 +43,97 @@ def load_portfolio(mode: str = "paper") -> Optional[Dict[str, Any]]:
         return json.load(f)
 
 
-def compute_pnl_snapshot(portfolio: Dict[str, Any]) -> Dict[str, Any]:
+def _prev_total_value_from_jsonl(
+    append_path: Path,
+    *,
+    before_date: str,
+) -> Optional[float]:
+    """Latest prior-day total_value from daily_pnl.jsonl (excludes ``before_date``)."""
+    if not append_path.exists():
+        return None
+    best_date = ""
+    best_value: Optional[float] = None
+    try:
+        with open(append_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                d = str(entry.get("date") or "")[:10]
+                if not d or d >= before_date:
+                    continue
+                try:
+                    tv = float(entry.get("total_value"))
+                except (TypeError, ValueError):
+                    continue
+                if d >= best_date:
+                    best_date = d
+                    best_value = tv
+    except OSError:
+        return None
+    return best_value
+
+
+def compute_daily_return(
+    total_value: float,
+    portfolio: Dict[str, Any],
+    *,
+    date: str,
+    append_path: Optional[Path] = None,
+) -> float:
+    """Day-over-day NAV return for the capture job.
+
+    Priority:
+    1. Prior calendar day ``total_value`` from daily_pnl.jsonl (SSOT across runs)
+    2. Prior distinct total_value from portfolio.history
+    3. Last history row's ``daily_return`` field (legacy)
+    """
+    if total_value is None:
+        return 0.0
+    try:
+        tv = float(total_value)
+    except (TypeError, ValueError):
+        return 0.0
+
+    # 1) JSONL prior day
+    if append_path is not None:
+        prev = _prev_total_value_from_jsonl(append_path, before_date=date)
+        if prev is not None and prev > 0:
+            return (tv / prev) - 1.0
+
+    # 2) History NAV chain (last entry with different total_value)
+    history = portfolio.get("history") or []
+    if isinstance(history, list):
+        for h in reversed(history):
+            if not isinstance(h, dict):
+                continue
+            try:
+                hv = float(h.get("total_value"))
+            except (TypeError, ValueError):
+                continue
+            if hv > 0 and abs(hv - tv) > 1e-9:
+                return (tv / hv) - 1.0
+        # 3) Legacy explicit daily_return on last history row
+        if history and isinstance(history[-1], dict):
+            try:
+                return float(history[-1].get("daily_return", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def compute_pnl_snapshot(
+    portfolio: Dict[str, Any],
+    *,
+    append_path: Optional[Path] = None,
+    as_of_date: Optional[str] = None,
+) -> Dict[str, Any]:
     """Compute P&L snapshot from portfolio state."""
     positions = portfolio.get("positions", {})
     cash = portfolio.get("cash", 0)
@@ -69,12 +159,14 @@ def compute_pnl_snapshot(portfolio: Dict[str, Any]) -> Dict[str, Any]:
             "unrealized_pnl": round(unrealized, 2),
         }
 
-    # Compute daily return from portfolio history
+    date = as_of_date or datetime.now().strftime("%Y-%m-%d")
     history = portfolio.get("history", [])
-    daily_return = 0.0
-    if history:
-        last = history[-1]
-        daily_return = last.get("daily_return", 0.0)
+    daily_return = compute_daily_return(
+        total_value,
+        portfolio,
+        date=date,
+        append_path=append_path,
+    )
 
     # Compute cumulative P&L
     initial_capital = INITIAL_CAPITAL
@@ -84,20 +176,26 @@ def compute_pnl_snapshot(portfolio: Dict[str, Any]) -> Dict[str, Any]:
     # Drawdown calculation
     max_value = initial_capital
     for h in history:
-        v = h.get("total_value", 0)
+        if not isinstance(h, dict):
+            continue
+        v = h.get("total_value", 0) or 0
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
         if v > max_value:
             max_value = v
     drawdown = (total_value - max_value) / max_value if max_value > 0 else 0
 
     return {
-        "date": datetime.now().strftime("%Y-%m-%d"),
+        "date": date,
         "timestamp": datetime.now().isoformat(),
         "mode": mode,
         "total_value": round(total_value, 2),
         "cash": round(cash, 2),
         "total_pnl": round(total_pnl, 2),
         "total_pnl_pct": round(total_pnl_pct, 6),
-        "daily_return": round(daily_return, 6),
+        "daily_return": round(float(daily_return), 6),
         "drawdown": round(drawdown, 6),
         "positions_count": len(positions),
         "positions": position_pnl,
@@ -197,10 +295,10 @@ def main():
         logger.error("No portfolio_%s.json found", args.mode)
         sys.exit(1)
 
-    snapshot = compute_pnl_snapshot(portfolio)
-
     append_path = DATA_DIR / "daily_pnl.jsonl"
     latest_path = DATA_DIR / "daily_pnl_latest.json"
+
+    snapshot = compute_pnl_snapshot(portfolio, append_path=append_path)
 
     save_snapshot(snapshot, append_path, latest_path)
     append_performance_jsonl(snapshot)

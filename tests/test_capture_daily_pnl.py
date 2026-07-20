@@ -104,12 +104,30 @@ class TestComputePnlSnapshot:
         assert snap["total_pnl"] == -65600.0
         assert snap["total_pnl_pct"] == pytest.approx(-0.656)
 
-    def test_daily_return_from_history(self):
+    def test_daily_return_from_history_nav(self):
+        """Prefer NAV day-over-day from history total_value (not stale daily_return)."""
         pf = _make_portfolio(history=[
             {"total_value": 90000, "daily_return": 0.015},
         ])
         snap = compute_pnl_snapshot(pf)
-        assert snap["daily_return"] == 0.015
+        # portfolio total = 34400, prior history NAV = 90000
+        assert snap["daily_return"] == pytest.approx((34400 / 90000) - 1.0, abs=1e-6)
+
+    def test_daily_return_from_jsonl_prior_day(self, tmp_path):
+        jsonl = tmp_path / "daily_pnl.jsonl"
+        jsonl.write_text(
+            '{"date":"2026-07-19","total_value":100000}\n'
+            '{"date":"2026-07-18","total_value":99000}\n',
+            encoding="utf-8",
+        )
+        pf = _make_portfolio(history=[])
+        # force total_value via cash+empty positions
+        pf["positions"] = {}
+        pf["cash"] = 101000
+        snap = compute_pnl_snapshot(
+            pf, append_path=jsonl, as_of_date="2026-07-20"
+        )
+        assert snap["daily_return"] == pytest.approx(0.01, abs=1e-6)
 
     def test_daily_return_default_no_history(self):
         pf = _make_portfolio(history=[])
@@ -252,12 +270,12 @@ class TestComputePnlSnapshotEdgeCases:
         expected = (34400 - 100000) / 100000
         assert snap["drawdown"] == pytest.approx(expected, abs=0.001)
 
-    def test_daily_return_defaults_to_zero_when_key_missing(self):
+    def test_daily_return_from_history_nav_when_key_missing(self):
         pf = _make_portfolio(history=[
-            {"total_value": 90000},  # no daily_return key
+            {"total_value": 90000},  # no daily_return key — still use NAV
         ])
         snap = compute_pnl_snapshot(pf)
-        assert snap["daily_return"] == 0.0
+        assert snap["daily_return"] == pytest.approx((34400 / 90000) - 1.0, abs=1e-6)
 
     def test_daily_return_defaults_to_zero_when_history_has_no_dicts(self):
         pf = _make_portfolio(history=[{}])

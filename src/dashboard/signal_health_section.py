@@ -72,7 +72,23 @@ def build_signal_health_section(
                 else int(resolve_max_days)
             )
             try:
-                label_resolve = tracker.resolve_pending_labels(max_days=max_days)
+                # Newest-first keeps IC staging window fresh; then a small
+                # oldest-first batch drains residual backlog without a new cron.
+                catchup_days = max(1, min(5, max_days // 3 or 1))
+                newest = tracker.resolve_pending_labels(
+                    max_days=max_days, oldest_first=False
+                )
+                oldest = tracker.resolve_pending_labels(
+                    max_days=catchup_days, oldest_first=True
+                )
+                label_resolve = {
+                    "newest_first": newest,
+                    "oldest_first": oldest,
+                    "predictions_updated": int(newest.get("predictions_updated") or 0)
+                    + int(oldest.get("predictions_updated") or 0),
+                    "dates_resolved": int(newest.get("dates_resolved") or 0)
+                    + int(oldest.get("dates_resolved") or 0),
+                }
             except SIGNAL_HEALTH_EXCEPTIONS as resolve_exc:
                 # Never block health report on resolve failures
                 logger.warning("signal_health label resolve skipped: %s", resolve_exc)
