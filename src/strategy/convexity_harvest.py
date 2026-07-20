@@ -373,8 +373,38 @@ class ConvexityHarvestStrategy:
             payload["contango_pct"] = None
             payload["expected_roll_yield"] = None
         else:
-            payload["status"] = "ok"
             payload.update(self._last_resolve_meta)
+            # Stale futures-cache fallback is not a live "ok" reading.
+            # asof << requested_date (or last_available source) → degraded.
+            asof = payload.get("asof")
+            requested = payload.get("requested_date") or today
+            vix_source = payload.get("vix_source") or ""
+            lag_days = None
+            if asof and requested and str(asof) != str(requested):
+                try:
+                    d_asof = datetime.strptime(str(asof)[:10], "%Y-%m-%d")
+                    d_req = datetime.strptime(str(requested)[:10], "%Y-%m-%d")
+                    lag_days = (d_req - d_asof).days
+                except ValueError:
+                    lag_days = None
+            stale_fallback = (
+                vix_source == "futures_cache_last_available"
+                or (lag_days is not None and lag_days > 0)
+            )
+            if stale_fallback:
+                payload["status"] = "degraded"
+                payload["runtime_status"] = "stale_futures_cache"
+                payload["freshness_status"] = "stale"
+                if lag_days is not None:
+                    payload["asof_lag_days"] = lag_days
+                payload["status_reason"] = (
+                    f"VIX futures cache asof={asof} for requested={requested}"
+                    + (f" ({lag_days}d lag)" if lag_days is not None else "")
+                    + "; not a same-day live contango reading"
+                )
+            else:
+                payload["status"] = "ok"
+                payload["freshness_status"] = "fresh"
         return payload
 
 
