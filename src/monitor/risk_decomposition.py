@@ -30,7 +30,7 @@ import logging
 from src.paths import BASE_ALLOCATION as DEFAULT_WEIGHTS
 from src.utils import safe_get
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -705,7 +705,7 @@ class RiskDecomposer:
             factor_corr = None
 
         return PortfolioRiskDecomposition(
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             portfolio_weights=norm_weights,
             total_portfolio_variance=total_portfolio_var,
             total_portfolio_volatility=annualized_vol,

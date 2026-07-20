@@ -631,7 +631,7 @@ def _get_risk_history_section() -> Dict[str, Any]:
 
 def generate_unified_dashboard() -> Dict[str, Any]:
     """Generate the complete unified dashboard by reading all state files."""
-    return {
+    payload: Dict[str, Any] = {
         "dashboard_version": "v6.08",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_at_local": datetime.now().isoformat(),
@@ -646,6 +646,14 @@ def generate_unified_dashboard() -> Dict[str, Any]:
         "adaptive_weights": _get_adaptive_weights_section(),
         "cron": _get_cron_section(),
     }
+    # Operator lag detection (parity with stats/analytics/graduation stamps)
+    try:
+        from src.dashboard.generator import _stamp_generator_git_sha
+
+        payload = _stamp_generator_git_sha(payload)
+    except Exception:  # noqa: BLE001 — never block unified generate on stamp
+        pass
+    return payload
 
 
 # ─────────────────────────────────────────────

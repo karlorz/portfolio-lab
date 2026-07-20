@@ -3750,7 +3750,7 @@ class DashboardGenerator:
                 surface="adaptive_sizing",
                 allocation_field="adjusted_allocation",
             )
-            sizing_data = {
+            sizing_data = _stamp_generator_git_sha({
                 "base_allocation": decision.base_allocation,
                 "adjusted_allocation": decision.adjusted_allocation,
                 "adjustments": decision.adjustments,
@@ -3762,7 +3762,7 @@ class DashboardGenerator:
                 "authority": authority,
                 **self._flatten_advisory_authority(authority),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            })
 
             out_path = PUBLIC_DIR / "adaptive_sizing.json"
             save_results_json(sizing_data, output_path=str(out_path))
@@ -5216,27 +5216,28 @@ class DashboardGenerator:
 
             result = decompose_portfolio(weights=BASE_ALLOCATION)
             data = result.to_dict()
-            data["generated_at"] = datetime.now().isoformat()
+            data["generated_at"] = datetime.now(timezone.utc).isoformat()
+            data = _stamp_generator_git_sha(data)
             save_results_json(data, output_path=str(output_path))
             return output_path
 
         except ImportError:
             logger.warning("scipy not available — skipping risk decomposition")
-            fallback = {
+            fallback = _stamp_generator_git_sha({
                 "status": "unavailable",
                 "reason": "scipy not installed",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            })
             save_results_json(fallback, output_path=str(output_path))
             return output_path
 
         except (OSError, ValueError, TypeError, RuntimeError) as e:
             logger.warning("Risk decomposition failed: %s", e)
-            fallback = {
+            fallback = _stamp_generator_git_sha({
                 "status": "error",
                 "reason": str(e),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            })
             save_results_json(fallback, output_path=str(output_path))
             return output_path
 
