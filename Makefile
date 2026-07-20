@@ -248,6 +248,7 @@ data:
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
+	$(PYTHON_RUNTIME) -c "from src.dashboard.cron_scheduler_section import refresh_public_health_cron_section; refresh_public_health_cron_section()" 2>/dev/null || true; \
 	echo "Data pipeline done ($$STATUS, $${DUR}s)"; \
 	exit $$EXIT
 

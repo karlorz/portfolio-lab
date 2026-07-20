@@ -354,7 +354,64 @@ def test_generate_health_json_cleared_kill_not_reintroduced_by_stale_ops_monitor
     assert health["kill_switch"]["enabled"] is False
     assert health["open_incidents"]["open_count"] == 0
     assert health.get("ops_health_status") == "critical"  # ops stamp still recorded
+    # Dashboard regen must also clear sticky monitor data/health.json open_count
+    monitor = json.loads((data_dir / "health.json").read_text())
+    assert monitor["checks"]["open_incidents"]["open_count"] == 0
+    assert monitor["checks"]["kill_switch"].get("enabled") is False
+    assert monitor.get("ssot_reconcile_source") == "disk_incidents_kill"
     gen.conn.close()
+
+
+def test_reconcile_monitor_health_with_disk_ssot_clears_sticky_open_incidents(
+    tmp_path, monkeypatch
+):
+    """Monitor health open_count=1 must clear when incidents.json open_count=0."""
+    from src.monitor import health_check as hc
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "incidents.json").write_text(
+        json.dumps({"open_count": 0, "incidents": [], "generated_at": "2026-07-20T14:15:00+00:00"})
+    )
+    (data_dir / "health.json").write_text(
+        json.dumps(
+            {
+                "status": "warning",
+                "timestamp": "2026-07-20T14:00:05+00:00",
+                "scope": "operational_readiness",
+                "checks": {
+                    "circuit_breaker": {"status": "ok", "state": "closed"},
+                    "kill_switch": {
+                        "status": "ok",
+                        "enabled": False,
+                        "level": None,
+                    },
+                    "open_incidents": {
+                        "status": "warning",
+                        "open_count": 1,
+                        "incidents": [
+                            {
+                                "incident_id": INCIDENT_ID,
+                                "channel": "signal_staleness",
+                                "severity": "p2",
+                                "state": "firing",
+                                "message": "stale sticky open",
+                            }
+                        ],
+                    },
+                },
+                "service": "portfolio-lab",
+            }
+        )
+    )
+    monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+    wrote = hc.reconcile_monitor_health_with_disk_ssot(data_dir=data_dir)
+    assert wrote is True
+    on_disk = json.loads((data_dir / "health.json").read_text())
+    assert on_disk["checks"]["open_incidents"]["open_count"] == 0
+    assert on_disk["checks"]["open_incidents"]["status"] == "ok"
+    assert on_disk["status"] == "ok"
+    assert on_disk.get("ssot_reconcile_source") == "disk_incidents_kill"
 
 
 def test_publish_ops_health_surfaces_clears_sticky_public_kill_after_resolve(

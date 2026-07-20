@@ -119,8 +119,19 @@ def summarize_backend(
     status: str | None = None,
     reason: str | None = None,
 ) -> dict[str, Any]:
-    """Build backend-level scheduler health metadata."""
-    failed_jobs = sum(1 for job in jobs if job.get("status") == "error")
+    """Build backend-level scheduler health metadata.
+
+    ``failed_jobs`` excludes the portfolio-lab-health self-job so dashboard
+    ``scheduler_status.backends.*.failed_jobs`` matches ``rollup_failed_cron_jobs``
+    / signals.health ``failed_cron_jobs``. Counting the health job's own exit
+    as a scheduler failure creates a sticky degraded loop after a single
+    non-ok health run.
+    """
+    failed_jobs = sum(
+        1
+        for job in jobs
+        if job.get("status") == "error" and not is_health_self_job(job)
+    )
     active_unknown_jobs = sum(
         1
         for job in jobs

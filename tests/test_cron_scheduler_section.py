@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
 from src.dashboard.cron_scheduler_section import (
     build_cron_scheduler_section,
     cron_scheduler_unavailable_payload,
+    refresh_public_health_cron_section,
 )
 
 
@@ -80,3 +82,69 @@ def test_build_cron_scheduler_section_log_error_invoked(tmp_path: Path) -> None:
     assert len(calls) == 1
     assert calls[0][0] == "cron_scheduler"
     assert isinstance(calls[0][1], OSError)
+
+
+def test_refresh_public_health_cron_section_updates_stale_data_last_run(tmp_path: Path) -> None:
+    """Post-stamp refresh must pull portfolio-lab-data last_run after cron_update."""
+    data_dir = tmp_path / "data"
+    public_dir = tmp_path / "public"
+    data_dir.mkdir()
+    public_dir.mkdir()
+    (data_dir / "cron_status.json").write_text(
+        json.dumps(
+            {
+                "backend": "tasker",
+                "jobs": [
+                    {
+                        "name": "portfolio-lab-data",
+                        "status": "success",
+                        "last_run": "2026-07-20T14:06:24+00:00",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                    {
+                        "name": "portfolio-lab-health",
+                        "status": "error",
+                        "last_run": "2026-07-20T14:00:06+00:00",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                ],
+            }
+        )
+    )
+    health_path = public_dir / "health.json"
+    health_path.write_text(
+        json.dumps(
+            {
+                "system_status": "warning",
+                "cron_jobs": [
+                    {
+                        "name": "portfolio-lab-data",
+                        "status": "ok",
+                        "last_run": "2026-07-20T13:06:29+00:00",
+                    }
+                ],
+                "scheduler_status": {
+                    "status": "degraded",
+                    "backends": {
+                        "local": {"status": "degraded", "failed_jobs": 1},
+                    },
+                },
+                "data_freshness": {},
+            }
+        )
+    )
+
+    wrote = refresh_public_health_cron_section(
+        public_health_path=health_path,
+        cron_status_file=data_dir / "cron_status.json",
+    )
+    assert wrote is True
+    health = json.loads(health_path.read_text())
+    data_row = next(j for j in health["cron_jobs"] if j["name"] == "portfolio-lab-data")
+    assert data_row["last_run"] == "2026-07-20T14:06:24+00:00"
+    # Health self-job error must not inflate backend failed_jobs.
+    assert health["scheduler_status"]["backends"]["local"]["failed_jobs"] == 0
+    assert health["scheduler_status"]["status"] == "ok"
+    assert health.get("cron_section_refreshed_at")

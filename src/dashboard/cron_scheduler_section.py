@@ -13,6 +13,7 @@ __all__ = [
     "CRON_SCHEDULER_EXCEPTIONS",
     "build_cron_scheduler_section",
     "cron_scheduler_unavailable_payload",
+    "refresh_public_health_cron_section",
 ]
 
 CRON_SCHEDULER_EXCEPTIONS = (
@@ -78,3 +79,99 @@ def build_cron_scheduler_section(
         else:
             logger.warning("Cron scheduler section not available: %s", exc)
         return cron_scheduler_unavailable_payload(exc)
+
+
+def refresh_public_health_cron_section(
+    *,
+    public_health_path: Path | None = None,
+    cron_status_file: Path | None = None,
+    resolve_hermes_path: Callable[[], Path | None] | None = None,
+) -> bool:
+    """Re-read cron_status into existing public health.json after cron_update stamps.
+
+    Data pipeline writes dashboard health *before* Makefile stamps
+    portfolio-lab-data success into cron_status.json. Without a post-stamp
+    refresh, health.cron_jobs keeps the previous hour's data last_run even
+    though the data job just finished successfully.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    try:
+        from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+    except ImportError:
+        return False
+
+    health_path = Path(public_health_path) if public_health_path else Path(PUBLIC_DATA_DIR) / "health.json"
+    status_file = Path(cron_status_file) if cron_status_file else Path(DATA_DIR) / "cron_status.json"
+    if not health_path.exists():
+        return False
+
+    try:
+        payload = json.loads(health_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+
+    section = build_cron_scheduler_section(
+        cron_status_file=status_file,
+        resolve_hermes_path=resolve_hermes_path,
+    )
+    payload["cron_jobs"] = section.get("cron_jobs") or []
+    payload["scheduler_status"] = section.get("scheduler_status") or {}
+
+    # Keep compact failed_cron consistency with rollup (excludes health self-job).
+    try:
+        from src.monitor.hermes_cron import rollup_failed_cron_jobs
+
+        failed = len(rollup_failed_cron_jobs(payload["cron_jobs"]))
+        # Compact fields sometimes live only on signals.health; keep top-level
+        # failed_cron_jobs if already present for consumers that peek health.json.
+        if "failed_cron_jobs" in payload:
+            payload["failed_cron_jobs"] = failed
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Re-derive system_status when only self-job errors remain (scheduler ok).
+    try:
+        from src.dashboard.health_report import derive_system_status
+        from src.monitor.hermes_cron import rollup_failed_cron_jobs
+
+        stale_count = 0
+        freshness = payload.get("data_freshness")
+        if isinstance(freshness, dict):
+            stale_count = sum(
+                1
+                for item in freshness.values()
+                if isinstance(item, dict) and item.get("status") not in {"fresh", "ok"}
+            )
+        failed_jobs = len(rollup_failed_cron_jobs(payload.get("cron_jobs") or []))
+        scheduler_status = (payload.get("scheduler_status") or {}).get("status")
+        slo_status = None
+        slo = payload.get("data_pipeline_slo")
+        if isinstance(slo, dict):
+            slo_status = slo.get("status")
+        backend_error = any(
+            isinstance(b, dict) and b.get("status") == "error"
+            for b in (payload.get("scheduler_status") or {}).get("backends", {}).values()
+        )
+        payload["system_status"] = derive_system_status(
+            current="healthy",
+            backend_error=backend_error,
+            scheduler_status=scheduler_status,
+            slo_status=slo_status,
+            failed_jobs=failed_jobs,
+            stale_count=stale_count,
+        )
+    except Exception:  # noqa: BLE001 — leave prior system_status
+        pass
+
+    payload["cron_section_refreshed_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        health_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Failed to refresh public health cron section: %s", exc)
+        return False
+    logger.info("Refreshed public health cron section at %s", health_path)
+    return True
