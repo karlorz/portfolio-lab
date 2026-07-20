@@ -174,4 +174,32 @@ def refresh_public_health_cron_section(
         logger.warning("Failed to refresh public health cron section: %s", exc)
         return False
     logger.info("Refreshed public health cron section at %s", health_path)
+
+    # Compact signals.health must not keep sticky scheduler_status=degraded /
+    # failed_cron mismatch after post-stamp health refresh.
+    try:
+        from src.monitor.hermes_cron import rollup_failed_cron_jobs
+
+        signals_path = Path(PUBLIC_DATA_DIR) / "signals.json"
+        if signals_path.exists():
+            signals = json.loads(signals_path.read_text(encoding="utf-8"))
+            if isinstance(signals, dict):
+                health = signals.get("health")
+                if not isinstance(health, dict):
+                    health = {}
+                    signals["health"] = health
+                failed = len(rollup_failed_cron_jobs(payload.get("cron_jobs") or []))
+                health["failed_cron_jobs"] = failed
+                health["cron_job_count"] = len(payload.get("cron_jobs") or [])
+                sched = payload.get("scheduler_status") or {}
+                if isinstance(sched, dict) and sched.get("status"):
+                    health["scheduler_status"] = sched.get("status")
+                if payload.get("system_status"):
+                    health["status"] = payload.get("system_status")
+                health["cron_section_refreshed_at"] = payload["cron_section_refreshed_at"]
+                signals_path.write_text(json.dumps(signals, indent=2) + "\n", encoding="utf-8")
+                logger.info("Refreshed signals.health cron compact fields at %s", signals_path)
+    except Exception as exc:  # noqa: BLE001 — never fail health refresh on signals patch
+        logger.warning("signals.health cron compact refresh failed: %s", exc)
+
     return True
