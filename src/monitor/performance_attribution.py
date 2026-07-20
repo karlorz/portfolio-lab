@@ -543,6 +543,16 @@ class PerformanceAttribution:
             return None
 
 
+def _fmt_rate(value: Optional[float], *, width: int = 8) -> str:
+    """Format optional hit/win rate for console; None → n/a (no_data sources)."""
+    if value is None:
+        return f"{'n/a':>{width}}"
+    try:
+        return f"{float(value):>{width}.1%}"
+    except (TypeError, ValueError):
+        return f"{'n/a':>{width}}"
+
+
 def print_report(report: AttributionReport):
     """Pretty-print attribution report to console."""
     logger.info("\n" + "=" * 72)
@@ -556,21 +566,25 @@ def print_report(report: AttributionReport):
     # Sort sources by sharpe contribution
     sorted_sources = sorted(
         report.sources.values(),
-        key=lambda s: s.sharpe_contribution,
+        key=lambda s: s.sharpe_contribution if s.sharpe_contribution is not None else float("-inf"),
         reverse=True,
     )
 
     logger.info(f"  {'Source':30} {'HitRate':>9} {'WinRate':>9} {'AvgRet':>9} {'Sharpe':>9} {'Corr':>7} {'Active':>7}")
     logger.info("  " + "-" * 80)
     for s in sorted_sources:
+        avg_ret = 0.0 if s.avg_return_bps is None else float(s.avg_return_bps)
+        sharpe = 0.0 if s.sharpe_contribution is None else float(s.sharpe_contribution)
+        corr = 0.0 if s.avg_correlation is None else float(s.avg_correlation)
+        active = 0 if s.active_days is None else int(s.active_days)
         logger.info(
             f"  {s.display_name:30}"
-            f" {("n/a" if s.hit_rate is None else f"{s.hit_rate:>8.1%}")}"
-            f" {s.win_rate:>8.1%}"
-            f" {s.avg_return_bps:>8.2f}"
-            f" {s.sharpe_contribution:>8.2f}"
-            f" {s.avg_correlation:>6.2f}"
-            f" {s.active_days:>6d}"
+            f" {_fmt_rate(s.hit_rate)}"
+            f" {_fmt_rate(s.win_rate)}"
+            f" {avg_ret:>8.2f}"
+            f" {sharpe:>8.2f}"
+            f" {corr:>6.2f}"
+            f" {active:>6d}"
         )
     logger.info("")
 
@@ -658,9 +672,12 @@ def main():
 
     if args.command == "report":
         report = attributor.generate_report(days=args.days)
-        print_report(report)
+        # Persist before console print so a display bug never blocks artifact SSOT
+        # (cron stamps error if print_report raises after a good compute).
         if args.save:
             attributor.save_report(report)
+        print_report(report)
+        return 0
 
     elif args.command == "dashboard":
         report = attributor.load_latest_report()
@@ -668,16 +685,19 @@ def main():
             print_report(report)
         else:
             logger.warning("No saved reports found. Run 'report' first.")
+        return 0
 
     elif args.command == "patch":
         patch_save_vote()
         logger.info("EnsembleVoter patched. Run ensemble_voter vote to populate source_readings.")
+        return 0
 
     else:
         parser.print_help()
+        return 0
 
 
 if __name__ == "__main__":
     from src.utils.log_config import configure_logging
     configure_logging()
-    main()
+    raise SystemExit(main() or 0)

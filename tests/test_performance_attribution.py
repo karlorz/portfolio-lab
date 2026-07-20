@@ -446,6 +446,43 @@ class TestPrintReport:
             print_report(report)
         assert "PERFORMANCE ATTRIBUTION REPORT" in caplog.text
 
+    def test_print_report_none_win_rate_no_data_source(self, caplog):
+        """Sources with active_days=0 use win_rate=None — must not TypeError."""
+        src = SourceAttribution(
+            source="stale_src",
+            display_name="Stale Source",
+            category="other",
+            total_readings=3,
+            active_days=0,
+            hit_rate=None,
+            win_rate=None,
+            avg_return_bps=0.0,
+            total_return_bps=0.0,
+            sharpe_contribution=0.0,
+            max_consecutive_losses=0,
+            avg_correlation=0.0,
+            avg_weight=0.0,
+        )
+        report = AttributionReport(
+            timestamp="2026-07-20T00:00:00",
+            start_date="2026-04-21",
+            end_date="2026-07-20",
+            analysis_days=90,
+            sources={"stale_src": src},
+            best_source=None,
+            worst_source=None,
+            avg_hit_rate=None,
+            avg_correlation=0.0,
+            avg_active_sources_per_day=0.0,
+            total_sources_tracked=1,
+            degradation_signals=[],
+            top_performers=[],
+        )
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "Stale Source" in caplog.text
+        assert "n/a" in caplog.text
+
     def test_print_report_with_data(self, caplog):
         src = SourceAttribution(
             source="vp_macd", display_name="VP-MACD", category="momentum",
