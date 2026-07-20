@@ -100,6 +100,12 @@ export interface PriceDataQualityOptions {
    * while SPY keeps advancing; blocking the whole data job for that lag is wrong.
    */
   sparseIndexSymbols?: readonly string[];
+  /**
+   * Wall-clock as-of (ISO string or Date). Used to detect universe-wide freeze
+   * when all symbols share the same latest bar (peer calendar lag stays 0).
+   * Defaults to generatedAt of the report when not set.
+   */
+  asOfDate?: string | Date;
 }
 
 const EMPTY_ISSUE_COUNTS: PriceIssueCounts = {
@@ -430,6 +436,39 @@ function hasBlockingIssueCounts(counts: PriceIssueCounts): boolean {
     || counts.stale_latest_dates > 0;
 }
 
+
+/** YYYY-MM-DD in UTC from Date or ISO string. */
+export function toUtcDateString(value: string | Date): string {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) {
+    return '';
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+/** Count weekdays (Mon–Fri) strictly after startDate up to and including endDate (both YYYY-MM-DD). */
+export function countWeekdaysBetween(startDate: string, endDate: string): number {
+  if (!startDate || !endDate || endDate <= startDate) {
+    return 0;
+  }
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return 0;
+  }
+  let count = 0;
+  const cur = new Date(start);
+  cur.setUTCDate(cur.getUTCDate() + 1);
+  while (cur <= end) {
+    const dow = cur.getUTCDay(); // 0 Sun .. 6 Sat
+    if (dow !== 0 && dow !== 6) {
+      count += 1;
+    }
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return count;
+}
+
 function applyReferenceCalendarChecks(
   audits: SymbolAudit[],
   counts: PriceIssueCounts,
@@ -474,11 +513,24 @@ function applyReferenceCalendarChecks(
       increment(counts, 'internal_gaps');
     }
 
-    summary.latest_lag_days = referenceDates.filter((date) => date > latestDate).length;
+    const peerLagDays = referenceDates.filter((date) => date > latestDate).length;
+    // Wall-clock trading lag: when the whole universe freezes together, peer lag
+    // stays 0; compare latest bar to as-of weekday calendar instead.
+    const asOfRaw = options.asOfDate;
+    const asOfStr = asOfRaw
+      ? toUtcDateString(asOfRaw)
+      : '';
+    const wallClockLagDays = asOfStr
+      ? countWeekdaysBetween(latestDate, asOfStr)
+      : 0;
+    summary.latest_lag_days = Math.max(peerLagDays, wallClockLagDays);
     const sparseIndex = isSparseIndexSymbol(summary.symbol, options);
     if (summary.latest_lag_days > maxLatestLagDays) {
+      const refDate = wallClockLagDays > peerLagDays && asOfStr
+        ? asOfStr
+        : referenceLatestDate;
       summary.stale_latest_date = {
-        reference_date: referenceLatestDate,
+        reference_date: refDate,
         latest_date: summary.latest_date,
       };
       // Keep visibility on the symbol row, but do not increment the blocking
@@ -513,7 +565,11 @@ export function buildPriceDataQualityReport(
       counts,
       options,
     ));
-  applyReferenceCalendarChecks(audits, counts, options);
+  const asOfOptions: PriceDataQualityOptions = {
+    ...options,
+    asOfDate: options.asOfDate ?? generatedAt,
+  };
+  applyReferenceCalendarChecks(audits, counts, asOfOptions);
   applyReturnAnomalyChecks(audits, counts, options);
 
   return {

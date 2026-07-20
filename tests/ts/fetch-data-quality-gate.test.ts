@@ -143,3 +143,36 @@ describe('fetch-data price quality fail-closed gate', () => {
     expect(dashIdx).toBeGreaterThan(gateIdx);
   });
 });
+
+describe('price quality wall-clock trading lag', () => {
+  it('flags universe freeze when Fri bars and Mon asOf (peer lag 0)', () => {
+    // All symbols share latest Fri 2026-07-17; asOf Mon 2026-07-20 → weekday lag 1
+    const payload = {
+      SPY: [
+        { d: '2026-07-15', p: 100 },
+        { d: '2026-07-16', p: 101 },
+        { d: '2026-07-17', p: 102 },
+      ],
+      GLD: [
+        { d: '2026-07-15', p: 200 },
+        { d: '2026-07-16', p: 201 },
+        { d: '2026-07-17', p: 202 },
+      ],
+    };
+    const report = buildPriceDataQualityReport(
+      payload,
+      '2026-07-20T12:00:00.000Z',
+      { maxLatestLagDays: 0 },
+    );
+    const spy = report.symbols.find((s) => s.symbol === 'SPY');
+    expect(spy).toBeDefined();
+    expect(spy!.latest_lag_days).toBeGreaterThan(0);
+    expect(report.issue_counts.stale_latest_dates).toBeGreaterThan(0);
+  });
+
+  it('countWeekdaysBetween Fri to Mon is 1', async () => {
+    const { countWeekdaysBetween } = await import('../../src/data/price_quality');
+    expect(countWeekdaysBetween('2026-07-17', '2026-07-20')).toBe(1);
+    expect(countWeekdaysBetween('2026-07-17', '2026-07-17')).toBe(0);
+  });
+});

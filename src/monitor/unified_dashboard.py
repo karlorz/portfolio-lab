@@ -36,6 +36,24 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 
+
+def _normalize_overlay_allocation_pct(value: Any) -> Optional[float]:
+    """Return allocation in percent points for display/storage.
+
+    Accepts fraction (0.03 → 3.0) or percent points (3.0 → 3.0). Values with
+    abs >= 1 are treated as already percent (VIXY hedge state historical shape).
+    """
+    if value is None:
+        return None
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    if abs(x) < 1.0:
+        return x * 100.0
+    return x
+
+
 def _read_json(path: str) -> Optional[Any]:
     """Safely read a JSON file, returning None on failure."""
     full_path = DATA_DIR / path
@@ -248,19 +266,24 @@ def _get_overlays_section() -> Dict[str, Any]:
     """All tactical overlay states."""
     overlays: Dict[str, Any] = {}
 
-    # VIX term structure overlay — read from VIXY hedge state
-    vixy = _read_json("vixy_hedge_state.json")
+    # VIX term structure overlay — prefer public diagnostic, fall back to state file
+    vixy = _read_json("vixy_hedge.json") or _read_json("vixy_hedge_state.json")
     if vixy:
-        raw_alloc = vixy.get("current_allocation", 0)
-        # allocation can be a scalar or a dict; either is "active" when nonzero
+        # Prefer explicit *_pct keys (public diagnostic schema)
+        raw_alloc = vixy.get("current_allocation_pct", vixy.get("current_allocation", 0))
         if isinstance(raw_alloc, dict):
-            is_active = any(v > 0 for v in raw_alloc.values())
+            is_active = any(float(v or 0) > 0 for v in raw_alloc.values())
+            alloc_pct = {
+                k: _normalize_overlay_allocation_pct(v) for k, v in raw_alloc.items()
+            }
         else:
-            is_active = raw_alloc > 0
+            alloc_pct = _normalize_overlay_allocation_pct(raw_alloc) or 0.0
+            is_active = float(alloc_pct or 0) > 0
         overlays["vix_term_structure"] = {
             "active": is_active,
-            "allocation": raw_alloc,
-            "last_shift_date": vixy.get("last_signal_date"),
+            "allocation": alloc_pct,  # percent points (e.g. 3.0 = 3%)
+            "allocation_unit": "percent",
+            "last_shift_date": vixy.get("last_signal_date") or vixy.get("last_rebalance"),
             "regime": vixy.get("regime"),
         }
     else:
@@ -597,10 +620,11 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
         detail = ""
         if name == "vix_term_structure" and active:
             alloc = data.get("allocation", 0)
+            # allocation is already percent points after normalize
             if isinstance(alloc, dict):
-                detail = f" SPY={_fmt_pct(alloc.get('SPY', 0) * 100)} GLD={_fmt_pct(alloc.get('GLD', 0) * 100)}"
+                detail = f" SPY={_fmt_pct(alloc.get('SPY', 0))} GLD={_fmt_pct(alloc.get('GLD', 0))}"
             else:
-                detail = f" alloc={_fmt_pct(alloc * 100)}"
+                detail = f" alloc={_fmt_pct(alloc)}"
         logger.info(f"       {badge} {name:<20} {status_text}{detail}")
 
     logger.info("")
