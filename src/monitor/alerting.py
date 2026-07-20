@@ -262,6 +262,7 @@ def classify_signal_staleness(
                 and not (
                     r.get("intentional_lab_gap")
                     or r.get("intentional_when_ml_off")
+                    or r.get("intentional_when_fred_unconfigured")
                 )
             ]
             intentional_count = max(0, unavailable_count - len(actionable_unavailable))
@@ -407,7 +408,11 @@ def check_sustained_unavailability_and_alert(
         r
         for r in (ownership or [])
         if isinstance(r, dict)
-        and not (r.get("intentional_lab_gap") or r.get("intentional_when_ml_off"))
+        and not (
+            r.get("intentional_lab_gap")
+            or r.get("intentional_when_ml_off")
+            or r.get("intentional_when_fred_unconfigured")
+        )
     ]
     if len(actionable) < threshold:
         return False

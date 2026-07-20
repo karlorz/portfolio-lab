@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -196,19 +196,37 @@ class IncidentManager:
         }
 
     def write_summary(self) -> dict[str, Any]:
-        """Write current open incidents and metrics to incidents.json."""
+        """Write current open incidents and metrics to incidents.json.
+
+        Dual-writes to ``PUBLIC_DATA_DIR/incidents.json`` when that tree is
+        distinct from the private summary path so operators never see open_count
+        split-brain (private firing vs public zero) after PASS resolve without
+        a full dashboard cycle.
+        """
         incidents = sorted(
             self.open_incidents(),
             key=lambda incident: (incident.created_at, incident.incident_id),
         )
         summary = {
+            "schema_version": "incident-lifecycle/v1",
             "generated_at": _iso(_utc_now()),
             "open_count": len(incidents),
             "incidents": [incident.to_dict() for incident in incidents],
             "metrics": self.metrics(),
         }
+        body = json.dumps(summary, indent=2)
         self.summary_path.parent.mkdir(parents=True, exist_ok=True)
-        self.summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        self.summary_path.write_text(body, encoding="utf-8")
+        # Atomic dual-write to live WWW SSOT when configured
+        try:
+            public_summary = Path(PUBLIC_DATA_DIR) / "incidents.json"
+            if public_summary.resolve() != self.summary_path.resolve():
+                public_summary.parent.mkdir(parents=True, exist_ok=True)
+                tmp = public_summary.with_suffix(".json.tmp")
+                tmp.write_text(body, encoding="utf-8")
+                tmp.replace(public_summary)
+        except OSError as exc:
+            logger.warning("Public incidents dual-write failed: %s", exc)
         return summary
 
     def _open_or_update(

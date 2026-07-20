@@ -470,3 +470,41 @@ def test_disabled_incident_escalation_does_not_write_kill_switch(tmp_path):
 
     assert incident is not None
     assert not (tmp_path / "kill_switch.json").exists()
+
+
+def test_write_summary_dual_writes_public_incidents(tmp_path, monkeypatch):
+    """PASS resolve must dual-write PUBLIC_DATA_DIR so operators never see split-brain."""
+    from src.monitor import incident_manager as im
+
+    public = tmp_path / "www"
+    public.mkdir()
+    monkeypatch.setattr(im, "PUBLIC_DATA_DIR", public)
+
+    private = tmp_path / "private"
+    private.mkdir()
+    manager = im.IncidentManager(
+        log_path=private / "incidents.jsonl",
+        summary_path=private / "incidents.json",
+        kill_switch_path=private / "kill_switch.json",
+        escalation_enabled=False,
+    )
+    manager.record_alert(
+        channel="signal_staleness",
+        level="warn",
+        message="13/23 signals unavailable",
+        now=datetime(2026, 7, 20, 17, 40, tzinfo=timezone.utc),
+    )
+    assert (private / "incidents.json").exists()
+    assert (public / "incidents.json").exists()
+    assert json.loads((public / "incidents.json").read_text())["open_count"] == 1
+
+    manager.record_alert(
+        channel="signal_staleness",
+        level="pass",
+        message="All required signals fresh",
+        now=datetime(2026, 7, 20, 17, 50, tzinfo=timezone.utc),
+    )
+    priv = json.loads((private / "incidents.json").read_text())
+    pub = json.loads((public / "incidents.json").read_text())
+    assert priv["open_count"] == 0
+    assert pub["open_count"] == 0
