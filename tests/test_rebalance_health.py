@@ -291,6 +291,34 @@ class TestGenerateExtended:
             rh.DATA_DIR = original_data_dir
         assert result["next_rebalance"]["date"] == "2026-06-09"
         assert result["next_rebalance"]["frequency"] == "monthly (~30 days)"
+        # Last rebalance May 10 → next Jun 9 is in the past vs 2026-07 wall clock
+        assert result["next_rebalance"]["days_until"] < 0
+        assert result["next_rebalance"]["status"] == "overdue"
+        assert result["next_rebalance"]["overdue"] is True
+        assert result["next_rebalance"].get("status_reason")
+
+    def test_next_rebalance_discloses_overdue_when_past(self):
+        """Negative days_until must not look like a future schedule."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        original_data_dir = rh.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                data_dir = Path(d)
+                rh.DATA_DIR = data_dir
+                rh.ORDERS_DIR = data_dir / "historical_orders"
+                rh.ORDERS_DIR.mkdir()
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                # Last exec ~60 days before "today" (2026-07-20 era)
+                _make_order_file(rh.ORDERS_DIR, "order_history_20260501_120000_aaa", orders)
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+            rh.DATA_DIR = original_data_dir
+        nr = result["next_rebalance"]
+        assert nr["days_until"] < 0
+        assert nr["status"] == "overdue"
+        assert nr["overdue"] is True
 
     def test_root_daily_order_history_is_canonical_when_newer(self):
         """Root order-history daily summaries should advance rebalance freshness."""

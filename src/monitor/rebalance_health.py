@@ -203,6 +203,21 @@ def generate() -> dict[str, Any]:
         last_ts = now - timedelta(days=30)
 
     next_rebalance = last_ts + timedelta(days=30)
+    days_until = (next_rebalance - now).days
+    # Negative days_until means the projected monthly slot is already past —
+    # disclose overdue rather than looking like a future schedule.
+    if days_until < 0:
+        next_status = "overdue"
+        next_status_reason = (
+            f"projected next rebalance {next_rebalance.strftime('%Y-%m-%d')} "
+            f"is {abs(days_until)} day(s) past (last execution + 30d)"
+        )
+    elif days_until == 0:
+        next_status = "due_today"
+        next_status_reason = "projected next rebalance is today"
+    else:
+        next_status = "scheduled"
+        next_status_reason = None
 
     # Schedule compliance
     on_time = 0
@@ -235,8 +250,11 @@ def generate() -> dict[str, Any]:
         "generated": now.isoformat(),
         "next_rebalance": {
             "date": next_rebalance.strftime("%Y-%m-%d"),
-            "days_until": (next_rebalance - now).days,
+            "days_until": days_until,
             "frequency": "monthly (~30 days)",
+            "status": next_status,
+            "status_reason": next_status_reason,
+            "overdue": next_status == "overdue",
         },
         "schedule_compliance": {
             "on_time": on_time,
