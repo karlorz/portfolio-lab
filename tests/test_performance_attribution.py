@@ -1071,6 +1071,37 @@ class TestGetPaperTradingReturnsExtended:
         finally:
             pa.DATA_DIR = original_data_dir
 
+    def test_fallback_performance_jsonl(self, tmpdir):
+        """When paper_trading.db missing, use performance.jsonl SSOT."""
+        data_dir = Path(tmpdir) / "data"
+        data_dir.mkdir()
+        (data_dir / "performance.jsonl").write_text(
+            '{"timestamp":"2026-07-18T10:00:00","daily_return":0.001}\n'
+            '{"date":"2026-07-19","daily_return":-0.0005}\n'
+            '{"date":"2026-07-20","daily_return":0.0,"source":"capture_daily_pnl"}\n',
+            encoding="utf-8",
+        )
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        returns = attributor._get_paper_trading_returns(days=30)
+        assert "2026-07-19" in returns
+        assert abs(returns["2026-07-19"]["daily_return"] - (-0.0005)) < 1e-12
+        assert "2026-07-18" in returns
+
+    def test_daily_pnl_preferred_over_performance_jsonl(self, tmpdir):
+        data_dir = Path(tmpdir) / "data"
+        data_dir.mkdir()
+        (data_dir / "daily_pnl.jsonl").write_text(
+            '{"date":"2026-07-20","daily_return":-0.0002}\n',
+            encoding="utf-8",
+        )
+        (data_dir / "performance.jsonl").write_text(
+            '{"date":"2026-07-20","daily_return":-3e-8}\n',
+            encoding="utf-8",
+        )
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        returns = attributor._get_paper_trading_returns(days=30)
+        assert abs(returns["2026-07-20"]["daily_return"] - (-0.0002)) < 1e-12
+
     def test_corrupt_json_performance_file(self, tmpdir):
         """Corrupt JSON file should be handled gracefully."""
         data_dir = Path(tmpdir) / "data"

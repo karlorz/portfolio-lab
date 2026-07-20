@@ -26,7 +26,7 @@ from src.paths import sqlite_connect
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import numpy as np
 
 
@@ -134,24 +134,57 @@ class PerformanceAttribution:
         self.attribution_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_signal_history(self, days: int = 90) -> List[Dict]:
-        """Extract signal reading history from ensemble database."""
+        """Extract signal reading history from ensemble database.
+
+        Live ``source_readings`` has thousands of rows per day. A tight
+        ``LIMIT days * n_sources * 2`` only returned the latest calendar day
+        (~1k rows), so attribution always looked like no_data when joined to
+        multi-day returns. Prefer one latest reading per (source, date).
+        """
         if not self.ensemble_db.exists():
             logger.warning("Ensemble DB not found: %s", self.ensemble_db)
             return []
 
         history = []
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         try:
             with sqlite_connect(self.ensemble_db) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
-                # Get source readings from the source_readings table
-                cursor.execute("""
-                    SELECT timestamp, source, value, confidence, weight, regime_fit, explanation
-                    FROM source_readings
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                """, (days * len(SIGNAL_SOURCE_META) * 2,))
+                # One row per source per calendar day (latest timestamp wins).
+                # Window functions require SQLite 3.25+ (available on prod).
+                try:
+                    cursor.execute(
+                        """
+                        SELECT timestamp, source, value, confidence, weight, regime_fit, explanation
+                        FROM (
+                            SELECT
+                                timestamp, source, value, confidence, weight, regime_fit, explanation,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY source, substr(timestamp, 1, 10)
+                                    ORDER BY timestamp DESC
+                                ) AS rn
+                            FROM source_readings
+                            WHERE substr(timestamp, 1, 10) >= ?
+                        ) ranked
+                        WHERE rn = 1
+                        ORDER BY timestamp DESC
+                        """,
+                        (cutoff,),
+                    )
+                except sqlite3.OperationalError:
+                    # Fallback: larger raw limit if window functions unavailable
+                    cursor.execute(
+                        """
+                        SELECT timestamp, source, value, confidence, weight, regime_fit, explanation
+                        FROM source_readings
+                        WHERE substr(timestamp, 1, 10) >= ?
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                        """,
+                        (cutoff, max(days * 50, 5000)),
+                    )
 
                 for row in cursor.fetchall():
                     history.append({
@@ -165,13 +198,17 @@ class PerformanceAttribution:
                     })
 
                 # Also get ensemble votes to cross-reference
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT timestamp, regime, consensus, agreement_ratio, equity_bias,
                            duration_bias, gold_bias, action, confidence, reasoning
                     FROM ensemble_votes
+                    WHERE substr(timestamp, 1, 10) >= ?
                     ORDER BY timestamp DESC
                     LIMIT ?
-                """, (days,))
+                    """,
+                    (cutoff, days * 4),
+                )
 
                 for row in cursor.fetchall():
                     history.append({
@@ -193,9 +230,80 @@ class PerformanceAttribution:
 
         return history
 
+    def _ingest_return_row(
+        self,
+        daily_returns: Dict[str, Dict],
+        date_str: Optional[str],
+        daily_return: Any,
+        cumulative_return: Any = None,
+        *,
+        overwrite: bool = True,
+    ) -> None:
+        """Insert one day into the returns map when date/return are parseable."""
+        if not date_str or not isinstance(date_str, str):
+            return
+        day = date_str[:10]
+        if len(day) < 10:
+            return
+        try:
+            ret = float(daily_return)
+        except (TypeError, ValueError):
+            return
+        if day in daily_returns and not overwrite:
+            return
+        entry = daily_returns.get(day, {})
+        entry["daily_return"] = ret
+        if cumulative_return is not None:
+            try:
+                entry["cumulative_return"] = float(cumulative_return)
+            except (TypeError, ValueError):
+                pass
+        daily_returns[day] = entry
+
+    def _load_returns_from_jsonl(self, path: Path, *, days: int) -> Dict[str, Dict]:
+        """Parse performance.jsonl / daily_pnl.jsonl into date → return map."""
+        out: Dict[str, Dict] = {}
+        if not path.exists():
+            return out
+        try:
+            # Tail-ish read for large performance.jsonl
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            logger.warning("Could not read %s: %s", path, exc)
+            return out
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        # Prefer last occurrences (later lines overwrite earlier same date)
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict) or "daily_return" not in row:
+                continue
+            date_str = row.get("date") or row.get("timestamp")
+            self._ingest_return_row(
+                out,
+                str(date_str) if date_str is not None else None,
+                row.get("daily_return"),
+                row.get("cumulative_return") or row.get("total_pnl_pct"),
+                overwrite=True,
+            )
+        if days > 0 and out:
+            # Keep the newest ``days`` calendar dates only
+            keep = sorted(out.keys(), reverse=True)[:days]
+            out = {k: out[k] for k in keep}
+        return out
+
     def _get_paper_trading_returns(self, days: int = 90) -> Dict[str, Dict]:
-        """Get daily returns from paper trading simulation."""
-        daily_returns = {}
+        """Get daily returns from paper trading simulation.
+
+        SSOT order:
+        1. ``paper_trading.db`` daily_snapshots (legacy)
+        2. ``daily_pnl.jsonl`` / ``daily_pnl_latest.json`` (capture_daily_pnl)
+        3. ``performance.jsonl`` (eval / paper journal)
+        4. ``logs/performance_summary_*.json`` (legacy summaries)
+        """
+        daily_returns: Dict[str, Dict] = {}
         paper_db = self.data_dir / "paper_trading.db"
 
         if paper_db.exists():
@@ -210,29 +318,57 @@ class PerformanceAttribution:
                         LIMIT ?
                     """, (days,))
                     for row in cursor.fetchall():
-                        daily_returns[row["date"]] = {
-                            "daily_return": row["daily_return"],
-                            "cumulative_return": row["cumulative_return"],
-                        }
+                        self._ingest_return_row(
+                            daily_returns,
+                            row["date"],
+                            row["daily_return"],
+                            row["cumulative_return"],
+                        )
             except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, sqlite3.Error) as e:
                 logger.warning("Could not read paper trading DB: %s", e)
 
+        # Live paper SSOT: daily_pnl + performance journals (paper_trading.db often absent)
+        if not daily_returns:
+            for name in ("daily_pnl.jsonl", "performance.jsonl"):
+                loaded = self._load_returns_from_jsonl(
+                    self.data_dir / name, days=max(days, 120)
+                )
+                for day, payload in loaded.items():
+                    # Prefer earlier sources (daily_pnl over performance when both set)
+                    self._ingest_return_row(
+                        daily_returns,
+                        day,
+                        payload.get("daily_return"),
+                        payload.get("cumulative_return"),
+                        overwrite=False,
+                    )
+            # Cap to newest ``days`` after merge
+            if days > 0 and daily_returns:
+                keep = sorted(daily_returns.keys(), reverse=True)[:days]
+                daily_returns = {k: daily_returns[k] for k in keep}
+
         # Fallback: check json reports
         if not daily_returns:
-            perf_file = max(
-                (DATA_DIR / "logs").glob("performance_summary_*.json"),
-                default=None,
-            )
+            logs_root = self.data_dir / "logs"
+            perf_file = max(logs_root.glob("performance_summary_*.json"), default=None) if logs_root.exists() else None
+            if perf_file is None:
+                # Legacy global DATA_DIR path used by older tests
+                perf_file = max(
+                    (DATA_DIR / "logs").glob("performance_summary_*.json"),
+                    default=None,
+                )
             if perf_file and perf_file.exists():
                 try:
                     with open(perf_file) as f:
                         data = json.load(f)
                     if "daily_returns" in data:
                         for dr in data["daily_returns"]:
-                            daily_returns[dr["date"]] = {
-                                "daily_return": dr["return"],
-                                "cumulative_return": dr["cumulative"],
-                            }
+                            self._ingest_return_row(
+                                daily_returns,
+                                dr.get("date"),
+                                dr.get("return"),
+                                dr.get("cumulative"),
+                            )
                 except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                     logger.warning("Could not read performance file: %s", e)
 
