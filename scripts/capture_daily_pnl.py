@@ -135,6 +135,50 @@ def save_snapshot(snapshot: Dict[str, Any], append_path: Path, latest_path: Path
     return True
 
 
+def append_performance_jsonl(snapshot: Dict[str, Any], performance_path: Optional[Path] = None) -> bool:
+    """Append deduped performance.jsonl row for bandit/stats consumers.
+
+    Same calendar day replaces the last same-date entry (idempotent with daily_pnl).
+    Does not replace evaluator intra-day rows from other timestamps on other days.
+    """
+    path = performance_path or (DATA_DIR / "performance.jsonl")
+    date = snapshot.get("date") or datetime.now().strftime("%Y-%m-%d")
+    row = {
+        "timestamp": snapshot.get("timestamp") or datetime.now().isoformat(),
+        "date": date,
+        "total_value": snapshot.get("total_value"),
+        "cash": snapshot.get("cash"),
+        "daily_return": snapshot.get("daily_return"),
+        "positions_count": snapshot.get("positions_count"),
+        "mode": snapshot.get("mode", "paper"),
+        "source": "capture_daily_pnl",
+    }
+
+    lines: list[str] = []
+    if path.exists():
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    lines.append(line)
+                    continue
+                entry_date = entry.get("date")
+                if not entry_date and isinstance(entry.get("timestamp"), str):
+                    entry_date = entry["timestamp"][:10]
+                if entry_date == date:
+                    continue
+                lines.append(json.dumps(entry, default=str))
+
+    lines.append(json.dumps(row, default=str))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    return True
+
 def main():
     import argparse
 
@@ -159,6 +203,7 @@ def main():
     latest_path = DATA_DIR / "daily_pnl_latest.json"
 
     save_snapshot(snapshot, append_path, latest_path)
+    append_performance_jsonl(snapshot)
 
     logger.info("Date: %s | Value: $%.2f | P&L: $%.2f (%.2f%%) | Daily: %.4f%% | DD: %.2f%% | Positions: %d",
                 snapshot['date'], snapshot['total_value'], snapshot['total_pnl'],

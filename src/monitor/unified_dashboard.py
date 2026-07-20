@@ -145,25 +145,98 @@ def _get_portfolio_section() -> Dict[str, Any]:
     }
 
 
-def _get_risk_section() -> Dict[str, Any]:
-    """Risk metrics from risk_metrics.json."""
-    metrics = _read_json("risk_metrics.json")
-    if not metrics:
-        return {"available": False}
-
+def _normalize_risk_payload(metrics: Dict[str, Any], *, source: str) -> Dict[str, Any]:
+    """Map risk_metrics.json or GARCH .health_report.json into unified risk section."""
+    # health_report uses var_95/cvar_95; risk_metrics uses var_95_daily/cvar_95_daily
+    var_daily = metrics.get("var_95_daily", metrics.get("var_95"))
+    cvar_daily = metrics.get("cvar_95_daily", metrics.get("cvar_95"))
+    garch_active = metrics.get("garch_active")
+    if garch_active is None:
+        garch_active = bool(metrics.get("filter_active", False))
+    garch_filtered = metrics.get("garch_filtered")
+    if garch_filtered is None:
+        garch_filtered = bool(garch_active)
     return {
         "available": True,
         "timestamp": metrics.get("timestamp"),
-        "var_95_daily": metrics.get("var_95_daily"),
-        "cvar_95_daily": metrics.get("cvar_95_daily"),
+        "var_95_daily": var_daily,
+        "cvar_95_daily": cvar_daily,
         "cvar_ratio": metrics.get("cvar_ratio"),
         "tail_severity": metrics.get("tail_severity"),
         "max_drawdown": metrics.get("max_drawdown"),
         "current_drawdown": metrics.get("current_drawdown"),
         "volatility_annual": metrics.get("volatility_annual"),
-        "garch_active": metrics.get("garch_active", False),
-        "garch_filtered": metrics.get("garch_filtered", False),
+        "garch_active": garch_active,
+        "garch_filtered": garch_filtered,
+        "source": source,
     }
+
+
+def _payload_has_risk_metrics(
+    metrics: Optional[Dict[str, Any]],
+    *,
+    require_var_fields: bool = False,
+) -> bool:
+    """True when payload can drive a risk section.
+
+    Legacy risk_metrics.json may only carry flags/timestamp; GARCH health
+    reports should have VaR/CVaR fields when preferred over orphans.
+    """
+    if not isinstance(metrics, dict) or not metrics:
+        return False
+    if not require_var_fields:
+        return True
+    return any(
+        metrics.get(k) is not None
+        for k in ("var_95_daily", "cvar_95_daily", "var_95", "cvar_95", "cvar_ratio")
+    )
+
+
+def _parse_ts(value: Any) -> Optional[datetime]:
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    return dt
+
+
+def _get_risk_section() -> Dict[str, Any]:
+    """Risk metrics: prefer fresher GARCH .health_report over orphan risk_metrics.json."""
+    metrics = _read_json("risk_metrics.json")
+    health = _read_json(".health_report.json")
+
+    candidates: list[tuple[str, Dict[str, Any], Optional[datetime]]] = []
+    if _payload_has_risk_metrics(health, require_var_fields=True):
+        candidates.append(("health_report", health, _parse_ts(health.get("timestamp"))))
+    if _payload_has_risk_metrics(metrics, require_var_fields=False):
+        candidates.append(("risk_metrics", metrics, _parse_ts(metrics.get("timestamp"))))
+
+    if not candidates:
+        return {"available": False}
+
+    # Prefer newer timestamp; on tie prefer health_report (garch job SSOT)
+    def sort_key(item: tuple[str, Dict[str, Any], Optional[datetime]]):
+        source, _payload, ts = item
+        # missing ts sorts last
+        ts_ord = ts or datetime.min
+        source_rank = 0 if source == "health_report" else 1
+        return (ts_ord, -source_rank)
+
+    # max by timestamp, then health_report
+    best = max(
+        candidates,
+        key=lambda it: (
+            it[2] or datetime.min,
+            1 if it[0] == "health_report" else 0,
+        ),
+    )
+    source, payload, _ts = best
+    return _normalize_risk_payload(payload, source=source)
 
 
 def _get_tca_section() -> Dict[str, Any]:

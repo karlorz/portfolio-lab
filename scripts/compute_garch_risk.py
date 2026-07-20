@@ -151,6 +151,25 @@ def main():
     with open(report_path, 'w') as f:
         json.dump(report, f, indent=2, default=str)
 
+    # Dual-write risk_metrics.json for unified / cvar_metrics consumers
+    # (field names match historical risk_metrics schema).
+    risk_metrics_path = DATA_DIR / "risk_metrics.json"
+    risk_payload = {
+        "timestamp": report.get("timestamp") or datetime.now().isoformat(),
+        "var_95_daily": report.get("var_95"),
+        "cvar_95_daily": report.get("cvar_95"),
+        "cvar_ratio": report.get("cvar_ratio"),
+        "tail_severity": report.get("tail_severity"),
+        "max_drawdown": report.get("max_drawdown"),
+        "current_drawdown": report.get("current_drawdown"),
+        "volatility_annual": report.get("volatility_annual"),
+        "garch_filtered": bool(report.get("garch_filtered", report.get("filter_active", False))),
+        "garch_active": bool(report.get("filter_active", False)),
+        "source": "compute_garch_risk",
+    }
+    with open(risk_metrics_path, "w") as f:
+        json.dump(risk_payload, f, indent=2, default=str)
+
     print(f"  VaR 95%:      {metrics.var_95:.2f}%")
     print(f"  CVaR 95%:     {metrics.cvar_95:.2f}%")
     print(f"  CVaR Ratio:   {metrics.cvar_ratio:.2f}")
