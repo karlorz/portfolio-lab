@@ -318,7 +318,9 @@ def test_publish_decision_registry_json(tmp_path: Path) -> None:
     assert path.exists()
     payload = json.loads(path.read_text())
     assert payload["schema_version"] == DECISION_REGISTRY_SCHEMA_VERSION
-    assert payload["counts"]["decisions"] == 1
+    assert payload["counts"]["decisions"] == 1  # ledger total
+    assert payload["counts"]["decisions_window"] == 1
+    assert payload["counts"]["counts_scope"] == "ledger_total"
     assert payload["replay_summaries"]
     assert payload["projection_freshness"]["status"] == "current"
     assert payload["projection_freshness"]["ledger_head"]["decision_id"] == "dec-1"
@@ -455,7 +457,12 @@ def test_build_snapshot_limits(tmp_path: Path) -> None:
     for i in range(3):
         reg.record_decision(_sample_decision(f"dec-{i}"))
     snap = build_decision_registry_snapshot(reg, decision_limit=2)
-    assert snap["counts"]["decisions"] == 2
+    # Ledger total vs projection window
+    assert snap["counts"]["decisions"] == 3
+    assert snap["counts"]["decisions_window"] == 2
+    assert snap["counts"]["decision_limit"] == 2
+    assert len(snap["recent_decisions"]) == 2
+    assert snap["counts"]["counts_scope"] == "ledger_total"
 
 
 def test_snapshot_publishes_shadow_evidence_summary(tmp_path: Path) -> None:

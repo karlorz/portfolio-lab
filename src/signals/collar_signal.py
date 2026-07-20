@@ -362,17 +362,35 @@ class CollarSignalGenerator:
         if vix is None:
             vix = self._fetch_vix_level()
 
-        if spot <= 0:
+        # Fail closed: never invent textbook SPY=550 / VIX=16 as live market
+        if spot is None or spot <= 0:
+            vix_val = float(vix) if vix is not None and float(vix) > 0 else 0.0
             return CollarSignal(
                 timestamp=datetime.now().isoformat(),
                 signal_state="error", call_strike=0, put_strike=0,
                 underlying_price=0, expected_monthly_yield=0,
-                max_upside_pct=0, max_downside_pct=0, vix_level=vix,
+                max_upside_pct=0, max_downside_pct=0, vix_level=vix_val,
                 regime="unknown",
-                strikes=CollarStrikes(spot, 0, 0, 0, 0, 0, 0, 0, vix, "unknown", days_to_expiry, False, 0),
+                strikes=CollarStrikes(0, 0, 0, 0, 0, 0, 0, 0, vix_val, "unknown", days_to_expiry, False, 0),
                 collar_notional_pct=0, spy_shift=0, confidence=0,
-                is_valid=False, reason="Invalid spot price",
+                is_valid=False,
+                reason="unavailable: no live SPY spot (refusing silent 550 fallback)",
             )
+        if vix is None or float(vix) <= 0:
+            # Spot OK but VIX missing — still refuse fake 16 for strike sizing
+            return CollarSignal(
+                timestamp=datetime.now().isoformat(),
+                signal_state="error", call_strike=0, put_strike=0,
+                underlying_price=float(spot), expected_monthly_yield=0,
+                max_upside_pct=0, max_downside_pct=0, vix_level=0.0,
+                regime="unknown",
+                strikes=CollarStrikes(float(spot), 0, 0, 0, 0, 0, 0, 0, 0.0, "unknown", days_to_expiry, False, 0),
+                collar_notional_pct=0, spy_shift=0, confidence=0,
+                is_valid=False,
+                reason="unavailable: no live VIX (refusing silent 16.0 fallback)",
+            )
+        vix = float(vix)
+        spot = float(spot)
 
         regime = self.classify_regime(vix)
         strikes = self.calculate_strikes(spot, vix, days_to_expiry)
@@ -420,30 +438,41 @@ class CollarSignalGenerator:
             reason=reason,
         )
 
-    def _fetch_price(self, symbol: str, fallback: float) -> float:
-        """Fetch latest close price for a symbol from the market DB."""
+    def _fetch_price(self, symbol: str, fallback: Optional[float] = None) -> Optional[float]:
+        """Fetch latest close price for a symbol from the market DB.
+
+        Never invent textbook levels (legacy SPY 550 / VIX 16). Missing data
+        returns ``fallback`` (usually None) so callers fail closed.
+        """
         db_path = MARKET_DB
         if db_path.exists():
             try:
                 with sqlite_connect(str(db_path)) as conn:
                     cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT 1",
-                        (symbol,),
-                    )
-                    row = cursor.fetchone()
-                if row:
-                    return float(row[0])
+                    # Prefer exact symbol; also try common VIX aliases
+                    candidates = [symbol]
+                    if symbol.upper() == "VIX":
+                        candidates = ["VIX", "^VIX", "VIXY"]
+                    for cand in candidates:
+                        cursor.execute(
+                            "SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT 1",
+                            (cand,),
+                        )
+                        row = cursor.fetchone()
+                        if row and row[0] is not None:
+                            val = float(row[0])
+                            if val > 0:
+                                return val
             except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to fetch %s price from DB: %s", symbol, e)
         return fallback
 
-    def _fetch_spot_price(self) -> float:
-        """Fetch current SPY price from market data."""
-        return self._fetch_price("SPY", 550.0)
+    def _fetch_spot_price(self) -> Optional[float]:
+        """Fetch current SPY price from market data (no silent 550 fallback)."""
+        return self._fetch_price("SPY", None)
 
-    def _fetch_vix_level(self) -> float:
-        """Fetch current VIX level."""
+    def _fetch_vix_level(self) -> Optional[float]:
+        """Fetch current VIX level (no silent 16.0 when completely missing)."""
         vix = self._fetch_price("VIX", None)
         if vix is not None:
             return vix
@@ -454,12 +483,20 @@ class CollarSignalGenerator:
             try:
                 with open(vix_path) as f:
                     data = json.load(f)
-                if data:
+                if isinstance(data, dict) and data:
                     latest = max(data.keys())
-                    return data[latest].get("vix_spot", 16.0)
+                    entry = data[latest]
+                    if isinstance(entry, dict):
+                        spot = entry.get("vix_spot")
+                        if spot is not None and float(spot) > 0:
+                            return float(spot)
+                elif isinstance(data, list) and data:
+                    last = data[-1]
+                    if isinstance(last, dict) and last.get("vix_spot"):
+                        return float(last["vix_spot"])
             except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to parse VIX term structure file: %s", e)
-        return 16.0
+        return None
 
     def get_signal_snapshot(self, tickers=None, date=None):
         """Generate a SignalSnapshot for ensemble voter consumption."""

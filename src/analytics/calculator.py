@@ -388,9 +388,127 @@ class AnalyticsCalculator:
         }
         if sharpe_reason:
             portfolio_block["sharpe_reason"] = sharpe_reason
-        result = {"portfolio": portfolio_block}
-        
+        result: Dict[str, Dict] = {"portfolio": portfolio_block}
+
+        # SPY buy-hold peer over the same calendar window (true "benchmark")
+        spy_block = self._spy_buy_hold_block(
+            start_date=str(start_date)[:10],
+            end_date=str(end_date)[:10],
+            start_value=float(start_value or 0),
+            db_path=db_path,
+        )
+        if spy_block:
+            result["spy"] = spy_block
+            # Relative return vs SPY when both available
+            try:
+                port_ret = float(portfolio_block["total_return"])
+                spy_ret = float(spy_block.get("total_return") or 0)
+                spy_block["relative_return"] = round(port_ret - spy_ret, 2)
+                portfolio_block["relative_return_vs_spy"] = spy_block["relative_return"]
+            except (TypeError, ValueError):
+                pass
+
         return result
+
+    def _spy_buy_hold_block(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        start_value: float,
+        db_path: str | None = None,
+    ) -> Optional[Dict]:
+        """SPY buy-hold total return over [start_date, end_date] for peer comparison."""
+        try:
+            from src.paths import MARKET_DB, sqlite_connect
+        except ImportError:
+            return None
+        path = Path(db_path) if db_path else MARKET_DB
+        if not path.exists():
+            return {
+                "status": "unavailable",
+                "reason": "market_db_missing",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        try:
+            with sqlite_connect(str(path)) as conn:
+                row0 = conn.execute(
+                    """
+                    SELECT date(date), close FROM prices
+                    WHERE symbol = 'SPY' AND date(date) >= date(?)
+                    ORDER BY date(date) ASC LIMIT 1
+                    """,
+                    (start_date,),
+                ).fetchone()
+                row1 = conn.execute(
+                    """
+                    SELECT date(date), close FROM prices
+                    WHERE symbol = 'SPY' AND date(date) <= date(?)
+                    ORDER BY date(date) DESC LIMIT 1
+                    """,
+                    (end_date,),
+                ).fetchone()
+                # Daily closes for vol/sharpe in window
+                rows = conn.execute(
+                    """
+                    SELECT close FROM prices
+                    WHERE symbol = 'SPY'
+                      AND date(date) >= date(?)
+                      AND date(date) <= date(?)
+                    ORDER BY date(date) ASC
+                    """,
+                    (start_date, end_date),
+                ).fetchall()
+        except (OSError, Exception) as exc:  # noqa: BLE001
+            logger.warning("SPY benchmark query failed: %s", exc)
+            return {
+                "status": "unavailable",
+                "reason": "query_failed",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        if not row0 or not row1:
+            return {
+                "status": "unavailable",
+                "reason": "insufficient_spy_bars",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        p0 = float(row0[1])
+        p1 = float(row1[1])
+        if p0 <= 0:
+            return {
+                "status": "unavailable",
+                "reason": "invalid_spy_price",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        total_return = (p1 / p0 - 1.0) * 100
+        spy_returns = []
+        closes = [float(r[0]) for r in rows if r and r[0] is not None]
+        for i in range(1, len(closes)):
+            if closes[i - 1] > 0:
+                spy_returns.append((closes[i] / closes[i - 1]) - 1.0)
+        spy_vol = float(np.std(spy_returns) * np.sqrt(252) * 100) if spy_returns else 0.0
+        spy_sharpe = None
+        if len(spy_returns) >= 5 and np.std(spy_returns) > 1e-12:
+            spy_sharpe = float(np.mean(spy_returns) / np.std(spy_returns) * np.sqrt(252))
+        end_value_scaled = start_value * (p1 / p0) if start_value > 0 else p1
+        return {
+            "status": "ok",
+            "symbol": "SPY",
+            "start_date": str(row0[0]),
+            "end_date": str(row1[0]),
+            "start_price": round(p0, 4),
+            "end_price": round(p1, 4),
+            "start_value": round(start_value, 2) if start_value > 0 else None,
+            "end_value": round(end_value_scaled, 2) if start_value > 0 else None,
+            "total_return": round(total_return, 2),
+            "volatility": round(spy_vol, 2),
+            "sharpe": round(spy_sharpe, 2) if spy_sharpe is not None else None,
+            "role": "benchmark",
+        }
     
     def generate_analytics_report(self) -> Dict:
         """Generate complete analytics report."""

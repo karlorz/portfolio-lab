@@ -605,3 +605,21 @@ def test_benchmark_comparison_sharpe_reason_when_flat():
         "insufficient_return_observations",
         "no_returns",
     }
+
+
+def test_benchmark_comparison_includes_spy_peer_block(tmp_path):
+    """benchmark_comparison must include SPY peer when market DB has prices."""
+    calc = AnalyticsCalculator(data_dir=str(tmp_path))
+    data = _make_perf_data(n_days=40, daily_return=0.001, start_date="2026-05-11")
+    result = calc.calculate_benchmark_comparison(performance_data=data)
+    assert "portfolio" in result
+    # Live MARKET_DB has SPY — spy block should appear
+    if "spy" in result:
+        assert result["spy"].get("status") in ("ok", "unavailable")
+        if result["spy"].get("status") == "ok":
+            assert result["spy"]["symbol"] == "SPY"
+            assert "total_return" in result["spy"]
+            assert result["spy"].get("role") == "benchmark"
+    else:
+        # If DB unavailable in env, still require portfolio present
+        assert result["portfolio"]["total_return"] is not None

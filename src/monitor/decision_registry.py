@@ -621,6 +621,15 @@ def build_decision_registry_snapshot(
         if str(row.get("experiment_id")) not in evaluated_experiment_ids
     ]
 
+    ledger = reg.decision_head()
+    ledger_total = int(ledger.get("count") or 0)
+    # Experiment ledger total (window vs full)
+    try:
+        with closing(sqlite_connect(reg.db_path)) as conn:
+            experiment_total = int(conn.execute("SELECT COUNT(*) FROM experiments").fetchone()[0])
+    except Exception:  # noqa: BLE001
+        experiment_total = len(experiments)
+
     return {
         "schema_version": DECISION_REGISTRY_SCHEMA_VERSION,
         "generated_at": generated_at or _now_iso(),
@@ -642,8 +651,14 @@ def build_decision_registry_snapshot(
         },
         "shadow_evidence": _build_shadow_evidence_summary(decisions),
         "counts": {
-            "decisions": len(decisions),
-            "experiments": len(experiments),
+            # Ledger totals (fleet cardinality) — not projection window length
+            "decisions": ledger_total,
+            "experiments": experiment_total,
+            "decisions_window": len(decisions),
+            "experiments_window": len(experiments),
+            "decision_limit": int(decision_limit),
+            "experiment_limit": int(experiment_limit),
+            "counts_scope": "ledger_total",
         },
     }
 

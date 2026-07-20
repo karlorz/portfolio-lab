@@ -1525,3 +1525,31 @@ class TestCollarSignalGeneratorConstruction:
             assert nested_path.exists()
         finally:
             gen.OUTPUT_PATH = original
+
+
+def test_fetch_spot_refuses_silent_550_when_db_empty(tmp_path, monkeypatch):
+    """Missing market data must not invent textbook SPY=550."""
+    from src.signals.collar_signal import CollarSignalGenerator
+    import src.signals.collar_signal as mod
+
+    monkeypatch.setattr(mod, "MARKET_DB", tmp_path / "missing.db")
+    gen = CollarSignalGenerator()
+    assert gen._fetch_spot_price() is None
+    sig = gen.generate_signal()
+    assert sig.is_valid is False
+    assert "550" not in (sig.reason or "") or "refusing" in (sig.reason or "").lower()
+    assert sig.underlying_price == 0 or sig.call_strike == 0
+
+
+def test_generate_with_live_spot_scales_strikes(monkeypatch):
+    from src.signals.collar_signal import CollarSignalGenerator
+
+    gen = CollarSignalGenerator()
+    sig = gen.generate_signal(spot=743.0, vix=16.76)
+    assert sig.is_valid is True
+    assert sig.underlying_price == 743.0
+    # OTM call should be above spot
+    assert sig.call_strike > 743.0
+    assert sig.put_strike < 743.0
+    # Not the legacy 550-band strikes
+    assert abs(sig.call_strike - 566.78) > 50
