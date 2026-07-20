@@ -22,8 +22,9 @@ Usage:
 import json
 import logging
 
-from src.paths import BASE_ALLOCATION
+from src.paths import BASE_ALLOCATION, DATA_DIR
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
 
@@ -67,8 +68,19 @@ class SmartRebalanceGate:
     should execute now or be deferred.
     """
 
-    def __init__(self, config_path: Optional[str] = None):
-        self.controller = SmartRebalancingController(config_path)
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        state_path: Optional[str | Path] = None,
+        data_dir: Optional[str | Path] = None,
+        load_state: bool = True,
+    ):
+        self.controller = SmartRebalancingController(
+            config_path,
+            state_path=state_path,
+            data_dir=data_dir if data_dir is not None else DATA_DIR,
+            load_state=load_state,
+        )
         self._vpin_cache: Dict[str, float] = {}
         self._regime: Optional[str] = None
         self._vpin_engine = VPINEngine(symbols=['SPY', 'GLD', 'TLT']) if _VPIN_AVAILABLE else None

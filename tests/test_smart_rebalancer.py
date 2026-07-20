@@ -5,12 +5,14 @@ classification, cost estimation, rebalance decision engine, cost budget tracking
 and status reporting.
 """
 
-import pytest
+import json
+import logging
+import inspect
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
-import inspect
-import logging
+import pytest
 
 from src.rebalancing.smart_rebalancer import (
     RebalanceDecision,
@@ -22,6 +24,23 @@ from src.rebalancing.smart_rebalancer import (
     SmartRebalancingController,
     create_sample_portfolio,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_smart_rebalance_data_dir(tmp_path, monkeypatch):
+    """Keep default SmartRebalancingController() from loading/writing host DATA_DIR."""
+    monkeypatch.setattr(
+        "src.rebalancing.smart_rebalancer.DATA_DIR",
+        tmp_path,
+        raising=False,
+    )
+    # Also isolate integration gate default data_dir if imported in-process
+    monkeypatch.setattr(
+        "src.rebalancing.integration.DATA_DIR",
+        tmp_path,
+        raising=False,
+    )
+    yield
 
 
 # ---------------------------------------------------------------------------
@@ -446,25 +465,71 @@ class TestShouldRebalance:
 
 class TestRecordAndStatus:
 
-    def test_record_rebalance(self):
-        ctrl = SmartRebalancingController()
+    def test_record_rebalance(self, tmp_path):
+        ctrl = SmartRebalancingController(
+            state_path=tmp_path / "s.json", data_dir=tmp_path, load_state=False
+        )
         ctrl.record_rebalance(5.0, "2026-05-14", ["SPY", "GLD"])
         assert ctrl.cost_tracker.ytd_total_bps == 5.0
         assert ctrl.last_rebalance is not None
 
-    def test_get_status(self):
-        ctrl = SmartRebalancingController()
+    def test_get_status(self, tmp_path):
+        ctrl = SmartRebalancingController(
+            state_path=tmp_path / "s.json", data_dir=tmp_path, load_state=False
+        )
         status = ctrl.get_status()
         assert 'ytd_cost_bps' in status
         assert 'remaining_budget_pct' in status
         assert 'config' in status
         assert status['is_over_budget'] is False
 
-    def test_status_after_costs(self):
-        ctrl = SmartRebalancingController()
+    def test_status_after_costs(self, tmp_path):
+        ctrl = SmartRebalancingController(
+            state_path=tmp_path / "s.json", data_dir=tmp_path, load_state=False
+        )
         ctrl.record_rebalance(10.0, "2026-05-14", ["SPY"])
         status = ctrl.get_status()
         assert status['ytd_cost_bps'] == 10.0
+
+    def test_record_rebalance_persists_state(self, tmp_path):
+        """record_rebalance writes durable state so cold start restores costs."""
+        state_path = tmp_path / "smart_rebalance_state.json"
+        ctrl = SmartRebalancingController(
+            state_path=state_path, data_dir=tmp_path, load_state=False
+        )
+        ctrl.record_rebalance(7.5, "2026-07-15", ["SPY", "GLD"])
+        assert state_path.exists()
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+        assert raw["ytd_costs"]
+        assert abs(raw["ytd_costs"][0]["cost_bps"] - 7.5) < 1e-9
+        assert raw["last_rebalance"] is not None
+
+    def test_cold_start_loads_persisted_state(self, tmp_path):
+        """Fresh controller with same state_path restores ytd cost + last_rebalance."""
+        state_path = tmp_path / "smart_rebalance_state.json"
+        first = SmartRebalancingController(
+            state_path=state_path, data_dir=tmp_path, load_state=False
+        )
+        first.record_rebalance(12.0, "2026-07-10", ["SPY"])
+        first.record_rebalance(3.0, "2026-07-12", ["TLT"])
+
+        second = SmartRebalancingController(
+            state_path=state_path, data_dir=tmp_path, load_state=True
+        )
+        assert abs(second.cost_tracker.ytd_total_bps - 15.0) < 1e-9
+        assert second.last_rebalance is not None
+        status = second.get_status()
+        assert status["ytd_cost_bps"] == 15.0
+        assert status["last_rebalance"] is not None
+
+    def test_missing_state_file_starts_clean(self, tmp_path):
+        ctrl = SmartRebalancingController(
+            state_path=tmp_path / "missing.json",
+            data_dir=tmp_path,
+            load_state=True,
+        )
+        assert ctrl.cost_tracker.ytd_total_bps == 0
+        assert ctrl.last_rebalance is None
 
 
 # ---------------------------------------------------------------------------

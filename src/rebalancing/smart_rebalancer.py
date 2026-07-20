@@ -14,14 +14,19 @@ Target: 40%+ cost reduction vs calendar rebalancing.
 
 import json
 import logging
+import os
+import tempfile
 import yaml
-from src.paths import BASE_ALLOCATION
+from src.paths import BASE_ALLOCATION, DATA_DIR
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from enum import Enum
 from zoneinfo import ZoneInfo
+
+# Durable controller state (YTD costs + last_rebalance) across process restarts.
+SMART_REBALANCE_STATE_FILENAME = "smart_rebalance_state.json"
 
 # Optimal timing window is defined in America/New_York wall clock (not host local).
 _ET = ZoneInfo("America/New_York")
@@ -163,7 +168,13 @@ class SmartRebalancingController:
         },
     }
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        state_path: Optional[str | Path] = None,
+        data_dir: Optional[str | Path] = None,
+        load_state: bool = True,
+    ):
         self.config = self._load_config(config_path)
         self.cost_tracker = CostBudgetTracker(
             annual_limit_pct=self.config['cost_budget']['annual_limit'],
@@ -171,6 +182,13 @@ class SmartRebalancingController:
         )
         self.deferred_until: Optional[datetime] = None
         self.last_rebalance: Optional[datetime] = None
+        self.data_dir = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        if state_path is not None:
+            self.state_path = Path(state_path)
+        else:
+            self.state_path = self.data_dir / SMART_REBALANCE_STATE_FILENAME
+        if load_state:
+            self.load_state()
 
     def _load_config(self, config_path: Optional[str]) -> Dict:
         """Load config from YAML file or use defaults."""
@@ -472,10 +490,109 @@ class SmartRebalancingController:
         )
 
     def record_rebalance(self, cost_bps: float, date: str, symbols: List[str]):
-        """Record a completed rebalance for budget tracking."""
+        """Record a completed rebalance for budget tracking and persist state."""
         self.cost_tracker.add_cost(cost_bps, date, symbols)
         self.last_rebalance = datetime.fromisoformat(date) if 'T' in date else datetime.strptime(date, '%Y-%m-%d')
         self.deferred_until = None
+        self.save_state()
+
+    def state_to_dict(self) -> Dict[str, Any]:
+        """Serialize durable controller fields for disk."""
+        return {
+            "schema_version": "smart-rebalance-state/v1",
+            "ytd_costs": list(self.cost_tracker.ytd_costs),
+            "last_rebalance": (
+                self.last_rebalance.isoformat() if self.last_rebalance else None
+            ),
+            "deferred_until": (
+                self.deferred_until.isoformat() if self.deferred_until else None
+            ),
+            "updated_at": datetime.now().isoformat(),
+        }
+
+    def load_state(self, path: Optional[str | Path] = None) -> bool:
+        """Load YTD costs and last_rebalance from JSON. Returns True if loaded."""
+        state_file = Path(path) if path is not None else self.state_path
+        if not state_file.exists():
+            return False
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("smart_rebalance state load failed (%s): %s", state_file, exc)
+            return False
+
+        if not isinstance(data, dict):
+            return False
+
+        costs = data.get("ytd_costs")
+        if isinstance(costs, list):
+            # Keep only well-formed entries
+            cleaned = []
+            for entry in costs:
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    cleaned.append(
+                        {
+                            "cost_bps": float(entry.get("cost_bps", 0)),
+                            "date": str(entry.get("date", "")),
+                            "symbols": list(entry.get("symbols") or []),
+                        }
+                    )
+                except (TypeError, ValueError):
+                    continue
+            self.cost_tracker.ytd_costs = cleaned
+
+        lr = data.get("last_rebalance")
+        if lr:
+            try:
+                self.last_rebalance = (
+                    datetime.fromisoformat(lr)
+                    if "T" in str(lr)
+                    else datetime.strptime(str(lr)[:10], "%Y-%m-%d")
+                )
+            except (TypeError, ValueError):
+                self.last_rebalance = None
+
+        du = data.get("deferred_until")
+        if du:
+            try:
+                self.deferred_until = datetime.fromisoformat(str(du))
+            except (TypeError, ValueError):
+                self.deferred_until = None
+
+        return True
+
+    def save_state(self, path: Optional[str | Path] = None) -> bool:
+        """Atomically persist controller state to JSON. Returns True on success."""
+        state_file = Path(path) if path is not None else self.state_path
+        payload = self.state_to_dict()
+        try:
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=".smart_rebalance_state.",
+                suffix=".tmp",
+                dir=str(state_file.parent),
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+                    json.dump(payload, tmp, indent=2)
+                    tmp.write("\n")
+                os.replace(tmp_name, state_file)
+            except Exception as write_exc:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                # Surface unexpected errors; serialize/IO failures stay soft
+                if isinstance(write_exc, (OSError, TypeError, ValueError, AttributeError)):
+                    raise write_exc
+                raise
+            return True
+        except (OSError, TypeError, ValueError, AttributeError) as exc:
+            logger.warning("smart_rebalance state save failed (%s): %s", state_file, exc)
+            return False
 
     def get_status(self) -> Dict[str, Any]:
         """Get current controller status for dashboard/monitoring."""
@@ -512,8 +629,10 @@ def create_sample_portfolio() -> PortfolioSnapshot:
 
 
 def demo():
-    """Demonstrate the smart rebalancing controller."""
-    controller = SmartRebalancingController()
+    """Demonstrate the smart rebalancing controller (no durable state I/O)."""
+    controller = SmartRebalancingController(load_state=False)
+    # Avoid writing into shared DATA_DIR during CLI demos
+    controller.state_path = Path(os.devnull)
 
     # Scenario 1: No drift — skip
     portfolio = create_sample_portfolio()
