@@ -278,8 +278,9 @@ def main():
 
     # Mirror demote + measured honesty onto private .health_report so unified
     # consumers that prefer health_report do not re-promote garch_active.
+    # Always stamp garch_active (bool) — never leave null when filter_active is set.
+    report["garch_active"] = bool(risk_payload.get("garch_active", False))
     for key in (
-        "garch_active",
         "garch_active_reason",
         "runtime_role",
         "coverage_diagnostics",
@@ -292,8 +293,16 @@ def main():
         "drawdown_field_semantics",
         "current_drawdown",
     ):
-        if key in risk_payload:
+        if key in risk_payload and risk_payload[key] is not None:
             report[key] = risk_payload[key]
+    # When coverage demote did not fire, still label filter state explicitly
+    if "garch_active_reason" not in report and report["garch_active"]:
+        report["garch_active_reason"] = "filter_active=true and coverage_pass not failed"
+    elif "garch_active_reason" not in report and not report["garch_active"]:
+        report["garch_active_reason"] = (
+            risk_payload.get("garch_active_reason")
+            or "garch_active=false (filter inactive or coverage demote)"
+        )
     # Ensure measured NAV DD is primary; policy stays in limit fields only
     if report.get("measured_max_drawdown") is not None:
         report.pop("max_drawdown", None)

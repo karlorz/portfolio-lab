@@ -18,9 +18,10 @@ import json
 import logging
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.utils import safe_get
 from src.backtest.metrics import save_results_json
 
@@ -886,13 +887,36 @@ def generate_status_text() -> str:
 # ─────────────────────────────────────────────
 
 
+def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
+    """Write private DATA_DIR and dual-write PUBLIC_DATA_DIR (operator WWW SSOT)."""
+    written: list = []
+    private_path = Path(DATA_DIR) / "unified_dashboard.json"
+    save_results_json(dashboard, output_path=str(private_path))
+    written.append(private_path)
+    logger.info("Saved unified dashboard to %s", private_path)
+    try:
+        public_root = Path(PUBLIC_DATA_DIR)
+        public_root.mkdir(parents=True, exist_ok=True)
+        public_path = public_root / "unified_dashboard.json"
+        # Atomic write so readers never see partial JSON
+        tmp_path = public_path.with_suffix(".json.tmp")
+        tmp_path.write_text(
+            json.dumps(dashboard, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+        tmp_path.replace(public_path)
+        written.append(public_path)
+        logger.info("Public dual-write unified dashboard to %s", public_path)
+    except OSError as exc:
+        logger.warning("Public unified_dashboard dual-write failed: %s", exc)
+    return written
+
+
 def main():
     dashboard = generate_unified_dashboard()
 
     if "--json" in sys.argv or "--save" in sys.argv:
-        out_path = DATA_DIR / "unified_dashboard.json"
-        save_results_json(dashboard, output_path=str(out_path))
-        logger.info("Saved unified dashboard to %s", out_path)
+        _save_unified_dashboard(dashboard)
 
     if "--status-text" in sys.argv:
         logger.info(generate_status_text())

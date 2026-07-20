@@ -98,15 +98,32 @@ class SPCMonitor:
         # Compute control limits from reference
         if ref is not None:
             mean, std = ref
-            ucl = mean + self.sigma_threshold * std
-            lcl = mean - self.sigma_threshold * std
-            self._limits[signal_name] = {
-                "mean": round(mean, 6),
-                "std": round(std, 6),
-                "ucl": round(ucl, 6),
-                "lcl": round(lcl, 6),
-            }
-            if std > 0:
+            # Zero-variance honesty: UCL==LCL==mean is not a valid Shewhart chart.
+            # Mark limits unavailable and skip breach counting until std > 0.
+            if std <= 0:
+                self._limits[signal_name] = {
+                    "mean": round(mean, 6),
+                    "std": 0.0,
+                    "ucl": None,
+                    "lcl": None,
+                    "limits_status": "unavailable_zero_variance",
+                    "limits_reason": (
+                        "reference std is 0; control limits not defined "
+                        "(would collapse to mean and look like calibrated SPC)"
+                    ),
+                }
+                # Do not accumulate breach counts on undefined limits
+                self._breach_counts[signal_name] = 0
+            else:
+                ucl = mean + self.sigma_threshold * std
+                lcl = mean - self.sigma_threshold * std
+                self._limits[signal_name] = {
+                    "mean": round(mean, 6),
+                    "std": round(std, 6),
+                    "ucl": round(ucl, 6),
+                    "lcl": round(lcl, 6),
+                    "limits_status": "ok",
+                }
                 is_breach = value > ucl or value < lcl
                 if is_breach:
                     self._breach_counts[signal_name] += 1
@@ -156,7 +173,7 @@ class SPCMonitor:
         limits = self._limits.get(signal_name, {})
         count = self._breach_counts.get(signal_name, 0)
 
-        return {
+        status = {
             "signal": signal_name,
             "sample_count": len(window),
             "consecutive_breaches": count,
@@ -167,6 +184,11 @@ class SPCMonitor:
             "lcl": limits.get("lcl"),
             "last_value": round(window[-1], 6) if window else None,
         }
+        if limits.get("limits_status"):
+            status["limits_status"] = limits.get("limits_status")
+        if limits.get("limits_reason"):
+            status["limits_reason"] = limits.get("limits_reason")
+        return status
 
     def get_all_status(self) -> Dict[str, Dict]:
         """Get SPC status for all tracked signals."""

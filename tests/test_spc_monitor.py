@@ -140,6 +140,12 @@ class TestSPCMonitorEdgeCases:
             monitor.record("constant", 1.0)
         flags = monitor.check_flags()
         assert flags == []  # no breach when std=0
+        status = monitor.get_signal_status("constant")
+        # Zero-variance: limits unavailable (not UCL=LCL=mean fake chart)
+        assert status["std"] == 0.0
+        assert status.get("ucl") is None
+        assert status.get("lcl") is None
+        assert status.get("limits_status") == "unavailable_zero_variance"
 
     def test_negative_values(self):
         monitor = SPCMonitor()
@@ -186,13 +192,15 @@ def test_run_spc_monitor_status_not_ok_when_flags_present(tmp_path, monkeypatch)
 
     # Build a monitor that already has a flagged signal
     mon = SPCMonitor(consecutive_breach_limit=3)
-    # seed window + force breach count
-    for i in range(10):
-        mon.record("_ensemble_consensus", 0.5)
+    # seed window with variance (std>0) so later record() does not zero-var-reset
+    for v in [0.48, 0.50, 0.52, 0.49, 0.51, 0.47, 0.53, 0.50, 0.51, 0.49]:
+        mon.record("_ensemble_consensus", v)
     mon._breach_counts["_ensemble_consensus"] = 55
     mon._limits["_ensemble_consensus"] = {
-        "mean": 0.5, "std": 0.01, "ucl": 0.53, "lcl": 0.47
+        "mean": 0.5, "std": 0.01, "ucl": 0.53, "lcl": 0.47, "limits_status": "ok"
     }
+    # Freeze reference with non-zero std so record() keeps Shewhart limits
+    mon._reference["_ensemble_consensus"] = (0.5, 0.01)
 
     DashboardGenerator._spc_monitor = mon
     # Avoid save_state writing to real paths
