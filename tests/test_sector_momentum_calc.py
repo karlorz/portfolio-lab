@@ -783,7 +783,7 @@ class TestGenerateSectorSignalsEdgeCases:
         assert result is None
 
     def test_generate_sector_signals_with_zero_vix(self, tmp_path):
-        """vix=0 should work and produce an allocation."""
+        """Measured vix=0 is valid and should publish as 0 (not coerced from None)."""
         import json
         data = _make_historical_data(["XLK", "XLV"])
         path = tmp_path / "historical.json"
@@ -792,6 +792,19 @@ class TestGenerateSectorSignalsEdgeCases:
         result = generate_sector_signals(path, vix=0, regime="neutral")
         assert isinstance(result, dict)
         assert result["vix"] == 0
+        assert result.get("vix_source") == "provided"
+
+    def test_generate_sector_signals_with_none_vix(self, tmp_path):
+        """Unknown VIX publishes null + unavailable source — not silent 0.0."""
+        import json
+        data = _make_historical_data(["XLK", "XLV"])
+        path = tmp_path / "historical.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+        result = generate_sector_signals(path, vix=None, regime="neutral")
+        assert isinstance(result, dict)
+        assert result["vix"] is None
+        assert result.get("vix_source") == "unavailable"
 
     def test_generate_sector_signals_with_regime_applied(self, tmp_path):
         """When regime is provided and non-neutral, adjustment should be applied."""

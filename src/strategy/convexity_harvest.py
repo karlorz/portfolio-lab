@@ -27,9 +27,9 @@ class ConvexityPosition:
     date: str
     allocation_pct: float        # Portfolio allocation (0-5%)
     position_type: str           # 'short_vix', 'long_vix', 'flat'
-    vix_level: float
-    contango_pct: float
-    expected_roll_yield: float
+    vix_level: Optional[float]   # None when VIX feed unavailable (not 0.0)
+    contango_pct: Optional[float]
+    expected_roll_yield: Optional[float]
     risk_score: float            # 0-1 risk assessment
     exit_triggered: bool
     exit_reason: Optional[str]
@@ -190,14 +190,15 @@ class ConvexityHarvestStrategy:
         } if signal_data else {}
         
         if not signal_data:
-            # Truly unavailable — do not publish silent zeros as live VIX
+            # Truly unavailable — null levels (not 0.0) so dashboards cannot
+            # mistake missing futures cache for a measured flat VIX reading.
             return ConvexityPosition(
                 date=date,
                 allocation_pct=0.0,
                 position_type='flat',
-                vix_level=0.0,
-                contango_pct=0.0,
-                expected_roll_yield=0.0,
+                vix_level=None,
+                contango_pct=None,
+                expected_roll_yield=None,
                 risk_score=1.0,
                 exit_triggered=False,
                 exit_reason='unavailable: no VIX futures cache'
@@ -289,9 +290,10 @@ class ConvexityHarvestStrategy:
             
             # Simplified P&L calculation
             # In reality, this would use actual VIX futures prices
-            if position.allocation_pct > 0 and position.expected_roll_yield > 0:
+            roll = position.expected_roll_yield
+            if position.allocation_pct > 0 and roll is not None and roll > 0:
                 # Assume capturing ~1/12 of annualized roll yield per month
-                monthly_yield = position.expected_roll_yield / 12
+                monthly_yield = roll / 12
                 daily_return = monthly_yield / 21  # ~21 trading days
                 
                 # Apply some random noise and occasional VIX spikes
@@ -365,6 +367,11 @@ class ConvexityHarvestStrategy:
         if position.exit_reason and str(position.exit_reason).startswith("unavailable"):
             payload["status"] = "unavailable"
             payload["runtime_status"] = "unavailable"
+            payload["vix_source"] = "unavailable"
+            # Honesty: missing futures → null levels, never silent 0.0
+            payload["vix_level"] = None
+            payload["contango_pct"] = None
+            payload["expected_roll_yield"] = None
         else:
             payload["status"] = "ok"
             payload.update(self._last_resolve_meta)
@@ -414,10 +421,13 @@ def main():
         for date in test_dates:
             pos = strategy.generate_signal(date)
             logger.info("\n%s: %s", date, pos.position_type.upper())
-            logger.info("  VIX: %.2f", pos.vix_level)
-            logger.info("  Contango: %.2f%%", pos.contango_pct)
+            vix_s = "n/a" if pos.vix_level is None else f"{pos.vix_level:.2f}"
+            ctg_s = "n/a" if pos.contango_pct is None else f"{pos.contango_pct:.2f}%"
+            roll_s = "n/a" if pos.expected_roll_yield is None else f"{pos.expected_roll_yield:.1f}%"
+            logger.info("  VIX: %s", vix_s)
+            logger.info("  Contango: %s", ctg_s)
             logger.info("  Allocation: %.1f%%", pos.allocation_pct)
-            logger.info("  Expected Roll Yield: %.1f%%", pos.expected_roll_yield)
+            logger.info("  Expected Roll Yield: %s", roll_s)
             if pos.exit_triggered:
                 logger.info("  EXIT TRIGGERED: %s", pos.exit_reason)
 

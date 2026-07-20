@@ -861,7 +861,7 @@ class TestGenerateSignalEdgeCases:
         return ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
 
     def test_generate_signal_contango_no_data(self):
-        """Contango regime but no signal data returns flat."""
+        """Contango regime but no signal data returns flat with null VIX (not 0.0)."""
         from src.strategy.convexity_harvest import ConvexityHarvestStrategy
         mock_mgr = MagicMock()
         mock_mgr.get_contango_signal.return_value = None
@@ -872,6 +872,15 @@ class TestGenerateSignalEdgeCases:
         assert pos.risk_score == 1.0
         assert pos.exit_reason is not None
         assert "unavailable" in pos.exit_reason
+        # Residual honesty: unknown levels are null, not silent zeros
+        assert pos.vix_level is None
+        assert pos.contango_pct is None
+        assert pos.expected_roll_yield is None
+        payload = strategy.get_current_signal()
+        assert payload["status"] == "unavailable"
+        assert payload["vix_level"] is None
+        assert payload["contango_pct"] is None
+        assert payload.get("vix_source") == "unavailable"
 
     def test_generate_signal_falls_back_to_last_cache_day(self):
         """Today missing → last futures cache day supplies VIX (not zeros)."""

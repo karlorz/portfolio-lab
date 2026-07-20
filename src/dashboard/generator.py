@@ -3421,10 +3421,9 @@ class DashboardGenerator:
 
             historical_path = PUBLIC_DIR.parent / "data" / "historical.json"
 
-            # Use provided VIX level (avoid re-querying DB)
-            vix = vix_level if vix_level is not None else 0
-
-            signals = generate_sector_signals(historical_path, vix=vix)
+            # Pass through None when VIX is unknown — do not coerce to 0.0
+            # (zero VIX looks like ultra-calm and misleads regime/threshold gates).
+            signals = generate_sector_signals(historical_path, vix=vix_level)
             return signals
 
         except SIGNAL_EXCEPTIONS as e:

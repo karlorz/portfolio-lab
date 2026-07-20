@@ -4253,34 +4253,39 @@ class TestSectorMomentumSignals:
         assert kwargs.get("vix") == 18.5
         gen.conn.close()
 
-    def test_vix_fetch_failure_defaults_zero(self, tmp_path):
-        """When vix_level is None (no VIX data), vix parameter defaults to 0."""
+    def test_vix_fetch_failure_passes_none(self, tmp_path):
+        """When vix_level is None (no VIX data), pass None — never fake 0.0."""
         gen, db_path = _make_generator(tmp_path)
-        mock_signals = {"SPY": {"momentum": 0.5}}
+        mock_signals = {"SPY": {"momentum": 0.5}, "vix": None, "vix_source": "unavailable"}
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 with patch("src.strategy.sector_momentum_calc.generate_sector_signals",
                           return_value=mock_signals) as mock_gen:
                     result = gen._generate_sector_momentum_signals(vix_level=None)
         assert result == mock_signals
-        _, kwargs = mock_gen.call_args
-        assert kwargs.get("vix") == 0
+        args, kwargs = mock_gen.call_args
+        # Positional or keyword — value must be None, not 0
+        passed_vix = kwargs.get("vix") if "vix" in kwargs else (args[1] if len(args) > 1 else "MISSING")
+        assert passed_vix is None
         gen.conn.close()
 
     def test_none_when_no_vix_row(self, tmp_path):
-        """No VIX row in DB still calls generate with vix=0 and returns result."""
+        """No VIX row still calls generate with vix=None (honest unknown)."""
         gen, db_path = _make_generator(tmp_path)
         conn = sqlite3.connect(str(db_path))
         conn.execute("DELETE FROM prices WHERE symbol = '^VIX'")
         conn.commit()
         conn.close()
-        mock_signals = {"SPY": {"momentum": 0.5}}
+        mock_signals = {"SPY": {"momentum": 0.5}, "vix": None}
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 with patch("src.strategy.sector_momentum_calc.generate_sector_signals",
                           return_value=mock_signals) as mock_gen:
                     result = gen._generate_sector_momentum_signals()
         assert result == mock_signals
+        args, kwargs = mock_gen.call_args
+        passed_vix = kwargs.get("vix") if "vix" in kwargs else (args[1] if len(args) > 1 else "MISSING")
+        assert passed_vix is None
         gen.conn.close()
 
 
