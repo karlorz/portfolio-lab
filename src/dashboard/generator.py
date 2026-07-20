@@ -158,11 +158,16 @@ def refresh_public_alternative_data_projection(
     signals["alternative_data"] = projected
     # Recompute only alt-related staleness hints on the embedded block is hard
     # without full generator; stamp lag metadata for operators.
+    now_utc = datetime.now(timezone.utc).isoformat()
     signals["alternative_data_projection"] = {
-        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        "refreshed_at": now_utc,
         "producer_timestamp": projected.get("timestamp"),
         "source": "bounded_alt_data_refresh",
     }
+    # Partial rewrite must advance top-level generated_at (mtime honesty)
+    signals["generated_at"] = now_utc
+    signals["content_patched_at"] = now_utc
+    signals["content_patch_source"] = "bounded_alt_data_refresh"
     try:
         save_results_json(signals, output_path=str(signals_path))
     except (OSError, TypeError, ValueError) as exc:
@@ -2696,12 +2701,44 @@ class DashboardGenerator:
                 if entry.get("spread2s10s") is not None:
                     spread_history.append(entry["spread2s10s"])
             
+            asof = latest.get("date")
+            # Wall-clock weekday lag vs today (UTC) for freeze detection
+            lag_weekdays = 0
+            status = "ok"
+            reason = None
+            if isinstance(asof, str) and len(asof) >= 10:
+                try:
+                    from datetime import date as _date
+                    asof_d = _date.fromisoformat(asof[:10])
+                    today = datetime.now(timezone.utc).date()
+                    # Count Mon-Fri strictly after asof through today
+                    cur = asof_d
+                    from datetime import timedelta as _td
+                    cur = cur + _td(days=1)
+                    while cur <= today:
+                        if cur.weekday() < 5:
+                            lag_weekdays += 1
+                        cur = cur + _td(days=1)
+                except ValueError:
+                    lag_weekdays = 0
+            max_lag = int(os.environ.get("YIELD_CURVE_MAX_STALE_WEEKDAYS", "5"))
+            if lag_weekdays > max_lag:
+                status = "stale"
+                reason = f"asof_lag_weekdays_{lag_weekdays}_gt_{max_lag}"
+
             result["yield_curve"] = {
                 "spread2s10s": spread,
                 "dgs2": latest.get("dgs2"),
                 "dgs10": latest.get("dgs10"),
                 "duration_regime": regime,
                 "spread_history": spread_history,
+                "asof": asof,
+                "asof_lag_weekdays": lag_weekdays,
+                "status": status,
+                **({"reason": reason} if reason else {}),
+                **({
+                    "runtime_status": "stale",
+                } if status == "stale" else {}),
                 **{
                     key: value
                     for key, value in _yield_source_provenance(PUBLIC_DIR).items()
@@ -3237,6 +3274,16 @@ class DashboardGenerator:
             )
         except Exception as exc:  # noqa: BLE001 — never block health.json write
             logger.warning("ops monitor merge into dashboard health failed: %s", exc)
+
+        # When dashboard regenerates from cleared incidents.json / kill SSOT,
+        # also patch lagging monitor data/health.json so operators do not see
+        # open_count=1 on the monitor report while incidents.json is 0.
+        try:
+            from src.monitor.health_check import reconcile_monitor_health_with_disk_ssot
+
+            reconcile_monitor_health_with_disk_ssot(data_dir=DATA_DIR)
+        except Exception as exc:  # noqa: BLE001 — never block public health write
+            logger.warning("monitor health SSOT reconcile failed: %s", exc)
 
         out_path = PUBLIC_DIR / "health.json"
         save_results_json(health_data, output_path=str(out_path))

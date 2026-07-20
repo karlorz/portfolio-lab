@@ -45,6 +45,7 @@ __all__ = [
     "refresh_signals_health_kill_fields",
     "load_ops_monitor_report",
     "apply_ops_monitor_to_dashboard_health",
+    "reconcile_monitor_health_with_disk_ssot",
 ]
 
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
@@ -143,6 +144,120 @@ def load_ops_monitor_report(
             best = payload
             best_ts = ts
     return best
+
+
+def reconcile_monitor_health_with_disk_ssot(
+    *,
+    data_dir: Path | None = None,
+    health_path: Path | None = None,
+) -> bool:
+    """Patch monitor-schema data/health.json kill/open fields to match disk SSOT.
+
+    Dashboard regeneration (data job) writes public health + incidents.json from
+    disk lifecycle SSOT, but monitor ``data/health.json`` is only rewritten by
+    the :00/:30 health cron. Between those ticks operators see dual-incident
+    split-brain: ``checks.open_incidents.open_count=1`` on the monitor report
+    while ``incidents.json`` already has open_count=0.
+
+    When disk kill is clear and open incidents are zero, rewrite the sticky
+    kill/open blocks on the monitor report and demote top-level ``status`` if
+    it was elevated solely by those dimensions. Returns True when a write
+    occurred.
+    """
+    root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    path = Path(health_path) if health_path is not None else (root / "health.json")
+    if not path.exists():
+        return False
+    if not _disk_kill_ssot_is_clear(root):
+        return False
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+        return False
+    if not isinstance(payload, dict) or not _is_monitor_health_report(payload):
+        return False
+
+    try:
+        from src.dashboard.kill_authority import (
+            load_kill_switch_payload,
+            load_open_incidents_summary,
+            project_kill_switch_fields,
+        )
+    except ImportError:
+        disk_kill = {
+            "status": "ok",
+            "enabled": False,
+            "level": None,
+            "reason": None,
+            "source": None,
+            "message": None,
+            "timestamp": None,
+            "incident_id": None,
+            "mode": None,
+            "channel": None,
+        }
+        disk_open = {"status": "ok", "open_count": 0, "incidents": []}
+    else:
+        disk_kill = project_kill_switch_fields(load_kill_switch_payload(root))
+        disk_open = load_open_incidents_summary(root)
+
+    checks = payload.get("checks")
+    if not isinstance(checks, dict):
+        checks = {}
+        payload["checks"] = checks
+
+    prev_open = checks.get("open_incidents") if isinstance(checks.get("open_incidents"), dict) else {}
+    prev_kill = checks.get("kill_switch") if isinstance(checks.get("kill_switch"), dict) else {}
+    sticky = (
+        int(prev_open.get("open_count") or 0) > 0
+        or bool(prev_kill.get("enabled"))
+        or str(prev_open.get("status") or "").lower() in {"warning", "critical", "degraded"}
+        or str(prev_kill.get("status") or "").lower() in {"warning", "critical", "degraded"}
+    )
+    if not sticky:
+        # Already aligned — avoid rewriting timestamps for no-op cycles.
+        if (
+            int(prev_open.get("open_count") or 0) == 0
+            and not bool(prev_kill.get("enabled"))
+            and str(prev_open.get("status") or "ok").lower() in {"ok", "healthy", ""}
+        ):
+            return False
+
+    checks["kill_switch"] = disk_kill
+    checks["open_incidents"] = disk_open
+
+    # Demote top-level status when kill/open were the elevators. Preserve
+    # degraded/error from other checks by recomputing from remaining dims.
+    circuit = checks.get("circuit_breaker") if isinstance(checks.get("circuit_breaker"), dict) else {}
+    freshness = checks.get("data_freshness") if isinstance(checks.get("data_freshness"), dict) else {}
+    rollup_checks = {
+        **{k: v for k, v in freshness.items() if isinstance(v, dict) and "status" in v},
+        "kill_switch": disk_kill,
+        "open_incidents": disk_open,
+    }
+    # Include any other top-level check dims (except nested data_freshness blob).
+    for name, check in checks.items():
+        if name in {"data_freshness", "kill_switch", "open_incidents", "circuit_breaker"}:
+            continue
+        if isinstance(check, dict) and "status" in check:
+            rollup_checks[name] = check
+    payload["status"] = _compute_system_status(rollup_checks, circuit)
+    payload["ssot_reconciled_at"] = datetime.now(timezone.utc).isoformat()
+    payload["ssot_reconcile_source"] = "disk_incidents_kill"
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Failed to reconcile monitor health SSOT at %s: %s", path, exc)
+        return False
+    logger.info(
+        "Reconciled monitor health kill/open SSOT at %s (status=%s)",
+        path,
+        payload.get("status"),
+    )
+    return True
 
 
 def _disk_kill_ssot_is_clear(data_dir: Path | None) -> bool:
@@ -324,6 +439,12 @@ def refresh_signals_health_kill_fields(
         health["generated_at"] = report.get("timestamp")
 
     payload["health"] = health
+    # Partial rewrite must advance top-level generated_at (mtime honesty)
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc).isoformat()
+    payload["generated_at"] = now_utc
+    payload["content_patched_at"] = now_utc
+    payload["content_patch_source"] = "health_kill_refresh"
     try:
         signals_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         logger.info("Refreshed signals.health kill fields at %s", signals_path)
