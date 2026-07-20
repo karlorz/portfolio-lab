@@ -373,6 +373,20 @@ def _generator_git_sha_short() -> str | None:
         return None
 
 
+def _stamp_generator_git_sha(
+    payload: Dict[str, Any],
+    *,
+    status: str = "full_generate",
+) -> Dict[str, Any]:
+    """Attach generator_git_sha when available (stats/analytics/graduation/overlay)."""
+    out = dict(payload)
+    sha = _generator_git_sha_short()
+    if sha:
+        out["generator_git_sha"] = sha
+        out["generator_git_sha_status"] = status
+    return out
+
+
 def _finalize_signal_metadata(output: Dict, *, finalized_at: str | None = None) -> Dict:
     """Stamp final artifact metadata after all signal sections are assembled."""
     timestamp = finalized_at or datetime.now(timezone.utc).isoformat()
@@ -658,12 +672,12 @@ class DashboardGenerator:
                 for entry in self._deduplicate_performance_entries_by_date(raw_entries)
             ]
 
-        output = {
+        output = _stamp_generator_git_sha({
             "prices": prices,
             "regimes": regimes,
             "paper_portfolio": paper_perf,
             "generated_at": datetime.now(timezone.utc).isoformat()
-        }
+        })
 
         out_path = PUBLIC_DIR / "dashboard.json"
         save_results_json(output, output_path=str(out_path))
@@ -3243,7 +3257,7 @@ class DashboardGenerator:
                                 "outperformance": round((portfolio_total_return - spy_total_return) * 100, 2)
                             }
         
-        output = {
+        output = _stamp_generator_git_sha({
             "asset_stats": stats,
             "held_asset_stats": held_stats,
             "context_asset_stats": context_stats,
@@ -3251,12 +3265,7 @@ class DashboardGenerator:
             "paper_portfolio": paper_metrics,
             "spy_comparison": spy_comparison,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        # Operator lag detection: same stamp as signals.json full dashboard runs.
-        sha = _generator_git_sha_short()
-        if sha:
-            output["generator_git_sha"] = sha
-            output["generator_git_sha_status"] = "full_generate"
+        })
         
         out_path = PUBLIC_DIR / "stats.json"
         save_results_json(output, output_path=str(out_path))
@@ -3697,18 +3706,19 @@ class DashboardGenerator:
             from src.analytics.calculator import AnalyticsCalculator
             calc = AnalyticsCalculator(data_dir=str(DATA_DIR))
             report = calc.generate_analytics_report()
-            
+            if isinstance(report, dict):
+                report = _stamp_generator_git_sha(report)
             out_path = PUBLIC_DIR / "analytics.json"
             save_results_json(report, output_path=str(out_path))
 
             return out_path
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as e:
             # Fallback: empty analytics
-            report = {
+            report = _stamp_generator_git_sha({
                 "status": "error",
                 "message": str(e),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            })
             out_path = PUBLIC_DIR / "analytics.json"
             save_results_json(report, output_path=str(out_path))
             return out_path
@@ -3721,7 +3731,8 @@ class DashboardGenerator:
             dashboard = gen.generate()
             gen.save(dashboard)
             public_path = PUBLIC_DIR / gen.OUTPUT_PATH.name
-            save_results_json(dashboard.to_dict(), output_path=str(public_path))
+            payload = _stamp_generator_git_sha(dashboard.to_dict())
+            save_results_json(payload, output_path=str(public_path))
             return public_path
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("overlay_dashboard_generate", e)
@@ -5030,7 +5041,7 @@ class DashboardGenerator:
                 days_required=min_trading_days,
             )
 
-            graduation_data = {
+            graduation_data = _stamp_generator_git_sha({
                 # Producer / ops fields
                 "readiness_score": score,
                 "is_graduation_ready": is_ready,
@@ -5046,7 +5057,7 @@ class DashboardGenerator:
                 "readiness_pct": score,
                 "eligible": is_ready,
                 "paper_trading": paper_trading,
-            }
+            })
 
             out_path = PUBLIC_DIR / "graduation.json"
             save_results_json(graduation_data, output_path=str(out_path))

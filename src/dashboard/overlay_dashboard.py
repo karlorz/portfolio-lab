@@ -507,7 +507,24 @@ class OverlayDashboardGenerator:
         )
 
     def save(self, dashboard: OverlayDashboardData):
-        save_results_json(dashboard.to_dict(), output_path=str(self.OUTPUT_PATH))
+        payload = dashboard.to_dict()
+        # Operator lag detection: stamp code tip when available
+        try:
+            from src.dashboard.generator import _stamp_generator_git_sha
+
+            payload = _stamp_generator_git_sha(payload)
+        except Exception:  # noqa: BLE001 — never block overlay save on stamp
+            pass
+        save_results_json(payload, output_path=str(self.OUTPUT_PATH))
+        # Dual-write live PUBLIC SSOT when distinct from private dashboard tree.
+        try:
+            from src.paths import PUBLIC_DATA_DIR
+
+            public_path = PUBLIC_DATA_DIR / "overlay_dashboard.json"
+            if public_path.resolve() != self.OUTPUT_PATH.resolve():
+                save_results_json(payload, output_path=str(public_path))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("overlay public dual-write skipped: %s", e)
         logger.info("Dashboard saved to %s", self.OUTPUT_PATH)
 
 
