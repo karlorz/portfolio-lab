@@ -26,11 +26,16 @@ def test_garch_public_payload_stamps_git_sha():
     assert "garch_cvar.json" in src
 
 
-def test_smart_rebalance_status_discloses_budget_units():
+def test_smart_rebalance_status_discloses_budget_units(tmp_path):
     from src.rebalancing.smart_rebalancer import SmartRebalancingController
 
-    # Minimal controller with default cost tracker
-    ctrl = SmartRebalancingController()
+    # Isolate from host DATA_DIR / smart_rebalance_state.json so YTD costs
+    # from live lab state cannot zero out the fresh annual budget.
+    ctrl = SmartRebalancingController(
+        data_dir=tmp_path,
+        state_path=tmp_path / "smart_rebalance_state.json",
+        load_state=False,
+    )
     status = ctrl.get_status()
     assert status["remaining_budget_pct_unit"] == "percent_of_portfolio"
     assert status["remaining_budget_ratio_unit"] == "portfolio_fraction"

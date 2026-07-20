@@ -189,15 +189,31 @@ _LIVE_PERFORMANCE_JSONL = _PROJECT_ROOT / "data" / "performance.jsonl"
 
 
 def _fingerprint_file(path: Path):
-    """Return (sha256, size, mtime_ns) or None if missing."""
+    """Return (sha256, size, mtime_ns) or None if missing.
+
+    Hash only the first + last 64 KiB so session teardown stays cheap under the
+    make-test 3GB virtual-memory cap (full-file hashing after a long suite can
+    MemoryError when capture/logging has already exhausted the budget).
+    """
     if not path.exists():
         return None
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
     stat = path.stat()
-    return (digest.hexdigest(), stat.st_size, stat.st_mtime_ns)
+    size = stat.st_size
+    digest = hashlib.sha256()
+    sample = 64 * 1024
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(sample)
+            digest.update(head)
+            if size > sample * 2:
+                handle.seek(max(0, size - sample))
+                digest.update(handle.read(sample))
+            elif size > sample:
+                digest.update(handle.read())
+    except MemoryError:
+        # Fall back to metadata-only identity under extreme memory pressure.
+        return ("", size, stat.st_mtime_ns)
+    return (digest.hexdigest(), size, stat.st_mtime_ns)
 
 
 @pytest.fixture(scope="session", autouse=True)
