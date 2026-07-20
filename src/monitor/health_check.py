@@ -446,6 +446,19 @@ def refresh_signals_health_kill_fields(
     payload["generated_at"] = now_utc
     payload["content_patched_at"] = now_utc
     payload["content_patch_source"] = "health_kill_refresh"
+    # Clear sticky full-run git sha — partial ≠ full dashboard generation
+    try:
+        from src.dashboard.generator import _apply_partial_patch_git_sha_honesty
+
+        _apply_partial_patch_git_sha_honesty(
+            payload, patch_source="health_kill_refresh"
+        )
+    except Exception:  # noqa: BLE001 — never fail kill refresh on import
+        prior = payload.get("generator_git_sha")
+        if prior:
+            payload.setdefault("last_full_generator_git_sha", prior)
+        payload["generator_git_sha"] = None
+        payload["generator_git_sha_status"] = "partial_patch"
     try:
         signals_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         logger.info("Refreshed signals.health kill fields at %s", signals_path)

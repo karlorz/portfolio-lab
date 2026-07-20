@@ -135,6 +135,30 @@ def load_alternative_data_producer_timestamp(
     return ts if isinstance(ts, str) and ts.strip() else None
 
 
+def _apply_partial_patch_git_sha_honesty(
+    payload: Dict[str, Any],
+    *,
+    patch_source: str,
+) -> None:
+    """Clear sticky full-generation git sha on partial section rewrites.
+
+    Partial writers advance ``generated_at`` / ``content_patched_at`` but leave
+    ``generator_git_sha`` from the last full dashboard run. Operators then
+    attribute a partial patch to a wrong code tip. Keep the prior full-run sha
+    under ``last_full_generator_git_sha`` for lag forensics; null the live stamp
+    and disclose ``generator_git_sha_status=partial_patch``.
+    """
+    prior = payload.get("generator_git_sha")
+    if prior is not None and prior != "":
+        payload.setdefault("last_full_generator_git_sha", prior)
+    payload["generator_git_sha"] = None
+    payload["generator_git_sha_status"] = "partial_patch"
+    payload["generator_git_sha_reason"] = (
+        f"cleared by partial rewrite ({patch_source}); "
+        "not a full dashboard generation"
+    )
+
+
 def refresh_public_alternative_data_projection(
     *,
     data_dir: Path | None = None,
@@ -172,9 +196,11 @@ def refresh_public_alternative_data_projection(
         "source": "bounded_alt_data_refresh",
     }
     # Partial rewrite must advance top-level generated_at (mtime honesty)
+    # and clear sticky full-generation git sha (partial ≠ full dashboard run).
     signals["generated_at"] = now_utc
     signals["content_patched_at"] = now_utc
     signals["content_patch_source"] = "bounded_alt_data_refresh"
+    _apply_partial_patch_git_sha_honesty(signals, patch_source="bounded_alt_data_refresh")
     try:
         save_results_json(signals, output_path=str(signals_path))
     except (OSError, TypeError, ValueError) as exc:
