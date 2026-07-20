@@ -212,7 +212,7 @@ class OverlayDashboardGenerator:
             from src.signals.bond_duration_signal import generate_bond_duration_signal
             signal = generate_bond_duration_signal()
             return self._stamp_freshness({
-                "active": signal.is_valid,
+                "active": signal.is_valid and not getattr(signal, "using_defaults", False),
                 "yield_10y": signal.yield_10y,
                 "yield_2y": signal.yield_2y,
                 "spread": signal.spread_10y2y,
@@ -224,6 +224,9 @@ class OverlayDashboardGenerator:
                 "effective_duration": signal.effective_duration,
                 "position": signal.position,
                 "confidence": signal.confidence,
+                "using_defaults": bool(getattr(signal, "using_defaults", False)),
+                "source_mode": getattr(signal, "source_mode", "live"),
+                "source_status": getattr(signal, "source_status", "ok"),
                 "status_text": f"Bonds: {signal.position} "
                                f"({signal.curve_regime}/{signal.rate_direction}), "
                                f"dur {signal.effective_duration:.0f}yr",

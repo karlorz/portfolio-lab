@@ -5,6 +5,7 @@ regime-gated suppression, and contrarian allocation signals.
 """
 
 from src.paths import sqlite_connect
+import json
 import sqlite3
 import logging
 from datetime import datetime, timedelta
@@ -175,8 +176,57 @@ class BehavioralSentimentSignal:
         except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to record zscore: %s", e)
 
-    def _regime_check(self, vix: float) -> Tuple[bool, str]:
-        """Check if current regime should suppress behavioral signals"""
+    def _resolve_named_regime(self) -> Optional[str]:
+        """Load named market regime from regime_state SSOT (NORMAL/HIGH_VOL/…)."""
+        try:
+            from src.paths import DATA_DIR
+            path = DATA_DIR / "regime_state.json"
+            if not path.exists():
+                return None
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if not isinstance(payload, dict):
+                return None
+            regime = payload.get("regime") or payload.get("current_regime")
+            if regime is None:
+                return None
+            return str(regime).upper()
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            logger.warning("Failed to resolve named regime for behavioral gate: %s", e)
+            return None
+
+    def _regime_check(
+        self,
+        vix: float,
+        named_regime: Optional[str] = ...,  # type: ignore[assignment]
+    ) -> Tuple[bool, str]:
+        """Check if current regime should suppress behavioral signals.
+
+        Prefer RegimeGate (named regime SSOT) so signals.behavioral_sentiment.active
+        agrees with regime_gate.json. Fall back to VIX thresholds when named
+        regime is unavailable.
+
+        Pass ``named_regime=None`` to skip named-regime resolution (VIX-only).
+        Omit the arg to resolve from ``regime_state.json``.
+        """
+        if named_regime is ...:  # type: ignore[comparison-overlap]
+            regime = self._resolve_named_regime()
+        else:
+            regime = named_regime
+        if regime:
+            try:
+                from src.signals.regime_gate import RegimeGate
+
+                gate = RegimeGate()
+                if not gate.is_active("behavioral_sentiment", regime):
+                    return (
+                        True,
+                        f"RegimeGate OFF for behavioral_sentiment in {regime}",
+                    )
+                # Named regime allows signal (e.g. LOW_VOL); still apply VIX crisis/high as extra safety
+            except (ImportError, AttributeError, TypeError, ValueError) as e:
+                logger.warning("RegimeGate check failed, falling back to VIX: %s", e)
+
         if vix >= VIX_CRISIS_THRESHOLD:
             return True, f"VIX {vix:.1f} >= {VIX_CRISIS_THRESHOLD}: crisis regime, signal suppressed"
 

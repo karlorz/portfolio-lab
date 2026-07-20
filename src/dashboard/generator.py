@@ -1721,8 +1721,13 @@ class DashboardGenerator:
             status = sig_gen.get_status()
 
             now_ts = datetime.now(timezone.utc).isoformat()
+            # Align active with RegimeGate + producer regime_suppressed (no dual SSOT)
+            beh_active = (
+                not bool(signal.regime_suppressed)
+                and float(signal.confidence) >= 0.3
+            )
             behavioral_sentiment_data = {
-                "active": True,
+                "active": beh_active,
                 "composite_score": signal.composite_score,
                 "signal_type": signal.signal_type,
                 "confidence": signal.confidence,

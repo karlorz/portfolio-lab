@@ -89,6 +89,11 @@ class BondDurationSignal:
     is_valid: bool
     reason: str
 
+    # Provenance / honesty (defaults must not look like live market)
+    using_defaults: bool = False
+    source_mode: str = "live"  # live | yields_ssot | market_db | defaults
+    source_status: str = "ok"  # ok | degraded
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -262,8 +267,47 @@ class BondDurationSignalGenerator:
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
         SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
 
+    def _fetch_yields_ssot(self) -> Optional[Dict]:
+        """Prefer public yields.json (same SSOT as dashboard yield_curve)."""
+        try:
+            from src.paths import YIELDS_JSON
+        except ImportError:
+            return None
+        path = YIELDS_JSON
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                yields = json.load(f)
+            if not yields:
+                return None
+            latest = yields[-1] if isinstance(yields, list) else yields
+            if not isinstance(latest, dict):
+                return None
+            dgs10 = latest.get("dgs10")
+            dgs2 = latest.get("dgs2")
+            if dgs10 is None or dgs2 is None:
+                return None
+            y10 = float(dgs10)
+            y2 = float(dgs2)
+            # yields.json stores percent levels (e.g. 4.18), not index points
+            return {
+                "yield_10y": y10,
+                "yield_2y": y2,
+                "using_defaults": False,
+                "source_mode": "yields_ssot",
+                "source_status": "ok",
+            }
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            logger.warning("Failed to fetch yields SSOT: %s", e)
+            return None
+
     def _fetch_yield_data(self) -> Dict:
-        """Fetch current yield curve data."""
+        """Fetch current yield curve data (SSOT first, then market DB, then defaults)."""
+        ssot = self._fetch_yields_ssot()
+        if ssot is not None:
+            return ssot
+
         db_path = MARKET_DB
         if db_path.exists():
             try:
@@ -281,15 +325,32 @@ class BondDurationSignalGenerator:
                         if row:
                             yields[sym] = float(row[0])
 
-                # ^TNX is 10Y yield * 10 (e.g., 45 = 4.5%)
-                y10 = yields.get("^TNX", 45) / 10 if yields.get("^TNX", 0) > 1 else yields.get("^TNX", 4.5)
-
-                return {"yield_10y": y10, "yield_2y": yields.get("2Y", y10 - 0.5)}
+                has_tnx = "^TNX" in yields and yields["^TNX"] is not None
+                has_2y = "2Y" in yields and yields["2Y"] is not None
+                if has_tnx:
+                    # ^TNX is 10Y yield * 10 (e.g., 45 = 4.5%)
+                    raw = yields["^TNX"]
+                    y10 = raw / 10 if raw > 1 else raw
+                    y2 = yields["2Y"] if has_2y else y10 - 0.5
+                    using_partial = not has_2y
+                    return {
+                        "yield_10y": y10,
+                        "yield_2y": y2,
+                        "using_defaults": using_partial,
+                        "source_mode": "market_db",
+                        "source_status": "degraded" if using_partial else "ok",
+                    }
             except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
                 logger.warning("Failed to fetch yields from DB: %s", e)
 
-        # Default: current market ~4.5% 10Y, ~4.0% 2Y
-        return {"yield_10y": 4.50, "yield_2y": 4.00}
+        # Textbook defaults — never publish as healthy live without disclosure
+        return {
+            "yield_10y": 4.50,
+            "yield_2y": 4.00,
+            "using_defaults": True,
+            "source_mode": "defaults",
+            "source_status": "degraded",
+        }
 
     def generate_signal(
         self,
@@ -299,10 +360,21 @@ class BondDurationSignalGenerator:
         rate_change_6m: Optional[float] = None,
     ) -> BondDurationSignal:
         """Generate complete bond duration rotation signal."""
+        using_defaults = False
+        source_mode = "live"
+        source_status = "ok"
         if yield_10y is None or yield_2y is None:
             data = self._fetch_yield_data()
-            yield_10y = yield_10y or data["yield_10y"]
-            yield_2y = yield_2y or data["yield_2y"]
+            if yield_10y is None:
+                yield_10y = data["yield_10y"]
+            if yield_2y is None:
+                yield_2y = data["yield_2y"]
+            using_defaults = bool(data.get("using_defaults"))
+            source_mode = str(data.get("source_mode") or "live")
+            source_status = str(data.get("source_status") or "ok")
+            # Partial explicit override still inherits degraded if other leg defaulted
+            if using_defaults and (yield_10y is not None and yield_2y is not None):
+                pass
 
         if real_rate is None:
             # Estimate from 10Y - CPI (assume ~2.5% CPI)
@@ -332,6 +404,18 @@ class BondDurationSignalGenerator:
         else:
             confidence = 70.0
 
+        if using_defaults or source_status == "degraded":
+            confidence = min(confidence, 40.0)
+            source_status = "degraded"
+
+        reason = (
+            f"Curve={curve_regime.value} ({spread:.2f}%), "
+            f"Rate={rate_direction.value} ({rate_change_6m:+.2f}%), "
+            f"Real={real_rate:.1f}% → {position}"
+        )
+        if using_defaults:
+            reason = f"using_defaults=true source={source_mode}; {reason}"
+
         return BondDurationSignal(
             timestamp=datetime.now().isoformat(),
             yield_10y=round(yield_10y, 2),
@@ -349,12 +433,11 @@ class BondDurationSignalGenerator:
             effective_duration=round(effective_dur, 1),
             position=position,
             confidence=confidence,
-            is_valid=True,
-            reason=(
-                f"Curve={curve_regime.value} ({spread:.2f}%), "
-                f"Rate={rate_direction.value} ({rate_change_6m:+.2f}%), "
-                f"Real={real_rate:.1f}% → {position}"
-            ),
+            is_valid=not using_defaults,  # defaults → not healthy active
+            reason=reason,
+            using_defaults=using_defaults,
+            source_mode=source_mode,
+            source_status=source_status,
         )
 
     def get_signal_snapshot(self, tickers=None, date=None):
