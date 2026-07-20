@@ -207,8 +207,46 @@ def _get_overlays_section() -> Dict[str, Any]:
 
 
 def _get_regime_section() -> Dict[str, Any]:
-    """Regime classifier + optimizer states — producers removed v974-v977."""
-    return {"available": False}
+    """Regime SSOT from regime_state.json (advisory; not order-routing authority)."""
+    regime_file = DATA_DIR / "regime_state.json"
+    if not regime_file.exists():
+        return {
+            "available": False,
+            "reason": "regime_state.json_missing",
+            "note": "Not live order-routing authority (see target_allocations).",
+        }
+    try:
+        data = json.loads(regime_file.read_text())
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+        logger.warning("Failed to parse regime_state.json: %s", e)
+        return {
+            "available": False,
+            "reason": "regime_state_unreadable",
+            "error": str(e),
+            "note": "Not live order-routing authority (see target_allocations).",
+        }
+    if not isinstance(data, dict):
+        return {"available": False, "reason": "regime_state_invalid"}
+    regime = data.get("regime") or data.get("current_regime")
+    conf = data.get("confidence", data.get("regime_confidence"))
+    if not regime:
+        return {
+            "available": False,
+            "reason": "regime_missing",
+            "note": "Not live order-routing authority (see target_allocations).",
+        }
+    return {
+        "available": True,
+        "regime": regime,
+        "confidence": conf,
+        "source": data.get("source"),
+        "updated_at": data.get("updated_at") or data.get("generated_at"),
+        "previous_regime": data.get("previous_regime"),
+        "note": (
+            "SSOT from regime_state.json for operator dashboard; "
+            "not live order-routing authority (see target_allocations / regime_authority)."
+        ),
+    }
 
 
 def _get_attribution_section() -> Dict[str, Any]:

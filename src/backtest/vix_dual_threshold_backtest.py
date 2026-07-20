@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from pathlib import Path
 import logging
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -43,7 +45,10 @@ __all__ = [
 INITIAL_CAPITAL = 100000.0
 RISK_SYMBOLS = ("SPY", "GLD", "TLT")
 VIX_SYMBOL_CANDIDATES = ("^VIX", "VIX", "^VIX3M")
-HISTORICAL_PRICES_JSON = DATA_DIR / "prices.json"
+# Public prices SSOT by default; optional offline snapshot via env.
+HISTORICAL_PRICES_JSON = Path(
+    os.environ.get("VIX_DUAL_HISTORICAL_PRICES_JSON", str(PRICES_JSON))
+).expanduser()
 EXPERIMENT_ID = "vix-dual-threshold-controller-benchmark"
 ROLLING_LOOKBACK_DAYS = 252
 ROLLING_MIN_OBSERVATIONS = 63

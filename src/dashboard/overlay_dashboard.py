@@ -19,7 +19,7 @@ import json
 import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import Dict, List, Any, Tuple
+from typing import Optional, Dict, List, Any, Tuple
 
 from pathlib import Path
 
@@ -100,11 +100,72 @@ class OverlayDashboardGenerator:
         block.setdefault("generated_at", ts)
         return block
 
-    def _get_collar_data(self) -> Dict[str, Any]:
-        """Collect collar overlay data."""
+    def _load_collar_signal_file(self) -> Optional[Dict[str, Any]]:
+        """Load SIGNALS_DIR/collar_signal.json SSOT when present."""
+        candidates = []
         try:
+            from src.signals.collar_signal import CollarSignalGenerator
+            candidates.append(Path(CollarSignalGenerator.OUTPUT_PATH))
+        except Exception:
+            pass
+        try:
+            from src.paths import SIGNALS_DIR, DATA_DIR
+            candidates.append(Path(SIGNALS_DIR) / "collar_signal.json")
+            candidates.append(Path(DATA_DIR) / "signals" / "collar_signal.json")
+        except Exception:
+            pass
+        seen = set()
+        for path in candidates:
+            try:
+                key = str(path.resolve()) if path.exists() else str(path)
+            except OSError:
+                key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if not path.exists():
+                    continue
+                data = json.loads(path.read_text())
+                if not isinstance(data, dict):
+                    continue
+                if data.get("call_strike") is None and data.get("put_strike") is None:
+                    continue
+                return data
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+        return None
+
+    def _get_collar_data(self) -> Dict[str, Any]:
+        """Collect collar overlay data from SSOT file or live generate (no hardcode spot)."""
+        try:
+            saved = self._load_collar_signal_file()
+            if saved is not None:
+                strikes = saved.get("strikes") if isinstance(saved.get("strikes"), dict) else {}
+                call = saved.get("call_strike", strikes.get("call_strike"))
+                put = saved.get("put_strike", strikes.get("put_strike"))
+                net = strikes.get("net_premium", saved.get("net_premium", 0.0))
+                is_cashless = strikes.get("is_cashless", saved.get("is_cashless", False))
+                regime = saved.get("regime", "unknown")
+                return self._stamp_freshness({
+                    "active": bool(saved.get("is_valid", True)),
+                    "regime": regime,
+                    "call_strike": call,
+                    "put_strike": put,
+                    "net_premium": net,
+                    "is_cashless": is_cashless,
+                    "max_upside_pct": saved.get("max_upside_pct"),
+                    "max_downside_pct": saved.get("max_downside_pct"),
+                    "vix_level": saved.get("vix_level"),
+                    "confidence": saved.get("confidence"),
+                    "underlying_price": saved.get("underlying_price"),
+                    "source": "collar_signal.json",
+                    "status_text": f"Collar: {regime}, call ${float(call):.0f}, put ${float(put):.0f}",
+                }, saved.get("timestamp") or saved.get("generated_at"))
+
             from src.signals.collar_signal import generate_collar_signal
-            signal = generate_collar_signal(spot=550.0, vix=16.0)
+            # Live fetch inside generator — do not hardcode spot=550 / vix=16
+            signal = generate_collar_signal()
             return self._stamp_freshness({
                 "active": signal.is_valid,
                 "regime": signal.regime,
@@ -116,6 +177,7 @@ class OverlayDashboardGenerator:
                 "max_downside_pct": signal.max_downside_pct,
                 "vix_level": signal.vix_level,
                 "confidence": signal.confidence,
+                "source": "generate_collar_signal",
                 "status_text": f"Collar: {signal.regime}, "
                                f"call ${signal.call_strike:.0f}, "
                                f"put ${signal.put_strike:.0f}",
