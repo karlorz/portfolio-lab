@@ -1024,6 +1024,54 @@ class TestResolvePendingLabels:
         assert summary["dates_considered"] == 2
         assert summary["max_days"] == 2
 
+    def test_spy_forward_return_anchors_weekend_to_prior_session(self, tmp_path):
+        """Weekend/holiday prediction dates must use last SPY bar ≤ date."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Fri 7/17 close 100 → Mon 7/20 close 102 (no bar Sat/Sun)
+        self._seed_prices(
+            tracker,
+            [("2026-07-17", 100.0), ("2026-07-20", 102.0)],
+        )
+        # Prediction on Saturday 7/18
+        fwd = tracker._spy_forward_return("2026-07-18")
+        assert fwd is not None
+        assert abs(fwd - 0.02) < 1e-9
+
+    def test_resolve_oldest_first_drains_tail(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        for d in ["2026-05-24", "2026-07-10", "2026-07-12"]:
+            tracker.log_prediction(
+                SignalPrediction(
+                    timestamp=f"{d}T12:00:00",
+                    source="s",
+                    signal_value=0.5,
+                    confidence=0.8,
+                    predicted_direction=1,
+                    metadata={},
+                )
+            )
+        self._seed_prices(
+            tracker,
+            [
+                ("2026-05-22", 90.0),
+                ("2026-05-26", 91.0),
+                ("2026-07-10", 100.0),
+                ("2026-07-11", 101.0),
+                ("2026-07-12", 102.0),
+                ("2026-07-13", 103.0),
+            ],
+        )
+        dates = tracker.list_unresolved_prediction_dates(limit=2, oldest_first=True)
+        assert dates[0] == "2026-05-24"
+        summary = tracker.resolve_pending_labels(max_days=1, oldest_first=True)
+        assert summary["oldest_first"] is True
+        assert summary["predictions_updated"] >= 1
+        # May 24 batch resolved
+        left = tracker.list_unresolved_prediction_dates(limit=10, oldest_first=True)
+        assert "2026-05-24" not in left
+
 
 class TestGetAdjustedWeightsExtended:
     """Extended get_adjusted_weights tests."""

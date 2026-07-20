@@ -275,23 +275,30 @@ class SignalHealthTracker:
         logger.info("Updated %s predictions with actual direction for %s", updated, date)
         return updated
 
-    def list_unresolved_prediction_dates(self, limit: int = 30) -> List[str]:
+    def list_unresolved_prediction_dates(
+        self,
+        limit: int = 30,
+        *,
+        oldest_first: bool = False,
+    ) -> List[str]:
         """Return distinct prediction calendar dates still missing actual_direction.
 
-        Most recent dates first. Bounded so health/cron cycles never scan the
-        full multi-hundred-k pending backlog in one shot.
+        Default is newest-first (IC freshness). Pass ``oldest_first=True`` for
+        catch-up drain of the backlog tail. Bounded so health/cron cycles never
+        scan the full multi-hundred-k pending backlog in one shot.
         """
         limit = max(1, int(limit))
+        order = "ASC" if oldest_first else "DESC"
         with sqlite_connect(self.db_path) as conn:
             cursor = conn.cursor()
             rows = cursor.execute(
-                """
+                f"""
                 SELECT DISTINCT date(timestamp) AS d
                 FROM signal_predictions
                 WHERE actual_direction IS NULL
                   AND timestamp IS NOT NULL
                   AND date(timestamp) IS NOT NULL
-                ORDER BY d DESC
+                ORDER BY d {order}
                 LIMIT ?
                 """,
                 (limit,),
@@ -299,33 +306,41 @@ class SignalHealthTracker:
         return [str(r[0]) for r in rows if r and r[0]]
 
     def _spy_forward_return(self, prediction_date: str) -> Optional[float]:
-        """SPY close-to-close return from prediction_date to the next available bar.
+        """SPY close-to-close forward return for a prediction calendar date.
 
-        Labels predictions made on day T with the subsequent SPY return (T→T+n).
-        Returns None when prices are insufficient.
+        Predictions often land on weekends/holidays (no SPY bar that day).
+        Anchor = last SPY session with ``date <= prediction_date``; label with
+        the next session's return (anchor → next). Returns None when the next
+        bar does not yet exist (e.g. same-day / last-bar predictions).
         """
         try:
             with sqlite_connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                # Last available SPY close on or before the prediction date
                 row0 = cursor.execute(
                     """
-                    SELECT close FROM prices
-                    WHERE symbol = 'SPY' AND date(date) = date(?)
-                    ORDER BY date LIMIT 1
+                    SELECT date(date) AS d, close FROM prices
+                    WHERE symbol = 'SPY' AND date(date) <= date(?)
+                    ORDER BY date(date) DESC
+                    LIMIT 1
                     """,
                     (prediction_date,),
                 ).fetchone()
+                if not row0:
+                    return None
+                anchor_date = row0[0]
+                p0 = float(row0[1])
                 row1 = cursor.execute(
                     """
                     SELECT close FROM prices
                     WHERE symbol = 'SPY' AND date(date) > date(?)
-                    ORDER BY date LIMIT 1
+                    ORDER BY date(date) ASC
+                    LIMIT 1
                     """,
-                    (prediction_date,),
+                    (anchor_date,),
                 ).fetchone()
-            if not row0 or not row1:
+            if not row1:
                 return None
-            p0 = float(row0[0])
             p1 = float(row1[0])
             if p0 <= 0:
                 return None
@@ -334,16 +349,26 @@ class SignalHealthTracker:
             logger.debug("SPY forward return unavailable for %s: %s", prediction_date, exc)
             return None
 
-    def resolve_pending_labels(self, max_days: int = 30) -> Dict[str, Any]:
+    def resolve_pending_labels(
+        self,
+        max_days: int = 30,
+        *,
+        oldest_first: bool = False,
+    ) -> Dict[str, Any]:
         """Production label resolver: apply SPY forward returns to pending predictions.
 
-        Bounded by ``max_days`` distinct unresolved dates (newest first) so a
-        cold start against a large backlog remains cheap per cycle.
+        Bounded by ``max_days`` distinct unresolved dates so a cold start against
+        a large backlog remains cheap per cycle.
+
+        - Health path: ``oldest_first=False`` (newest first) keeps IC window fresh.
+        - Catch-up path: ``oldest_first=True`` drains May→… backlog fairness.
 
         Returns summary: {dates_considered, dates_resolved, predictions_updated, skipped}.
         """
         max_days = max(1, int(max_days))
-        dates = self.list_unresolved_prediction_dates(limit=max_days)
+        dates = self.list_unresolved_prediction_dates(
+            limit=max_days, oldest_first=oldest_first
+        )
         predictions_updated = 0
         dates_resolved = 0
         skipped: List[str] = []
@@ -364,13 +389,15 @@ class SignalHealthTracker:
             "predictions_updated": predictions_updated,
             "skipped_no_spy_return": skipped,
             "max_days": max_days,
+            "oldest_first": bool(oldest_first),
         }
         logger.info(
-            "resolve_pending_labels: considered=%s resolved_dates=%s predictions=%s skipped=%s",
+            "resolve_pending_labels: considered=%s resolved_dates=%s predictions=%s skipped=%s oldest_first=%s",
             summary["dates_considered"],
             summary["dates_resolved"],
             summary["predictions_updated"],
             len(skipped),
+            oldest_first,
         )
         return summary
     
@@ -1083,6 +1110,11 @@ if __name__ == "__main__":
         default=DEFAULT_RESOLVE_MAX_DAYS,
         help=f"Max unresolved dates per --resolve-labels run (default {DEFAULT_RESOLVE_MAX_DAYS})",
     )
+    parser.add_argument(
+        "--resolve-oldest-first",
+        action="store_true",
+        help="Catch-up mode: label oldest unresolved dates first (backlog drain)",
+    )
     parser.add_argument("--source", type=str, help="Specific signal source")
     
     args = parser.parse_args()
@@ -1090,7 +1122,10 @@ if __name__ == "__main__":
     tracker = SignalHealthTracker()
 
     if args.resolve_labels:
-        summary = tracker.resolve_pending_labels(max_days=args.resolve_max_days)
+        summary = tracker.resolve_pending_labels(
+            max_days=args.resolve_max_days,
+            oldest_first=bool(args.resolve_oldest_first),
+        )
         logger.info("resolve_pending_labels: %s", json.dumps(summary))
         if not (args.backfill or args.calculate or args.alerts or args.status):
             # Resolve-only invocation: skip default status dump
