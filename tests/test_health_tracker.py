@@ -964,6 +964,67 @@ class TestUpdateActualDirectionsExtended:
         assert isinstance(updated, int)
 
 
+class TestResolvePendingLabels:
+    """Production bounded label resolution via SPY forward returns."""
+
+    def _seed_prices(self, tracker, dates_closes):
+        import sqlite3
+        with sqlite3.connect(tracker.db_path) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS prices (symbol TEXT, date TEXT, close REAL)"
+            )
+            for d, c in dates_closes:
+                conn.execute(
+                    "INSERT INTO prices (symbol, date, close) VALUES (?, ?, ?)",
+                    ("SPY", d, c),
+                )
+            conn.commit()
+
+    def test_resolve_pending_labels_updates_predictions(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Prediction on 2026-07-10; next SPY bar 2026-07-11 up
+        pred = SignalPrediction(
+            timestamp="2026-07-10T15:00:00",
+            source="test_src",
+            signal_value=0.5,
+            confidence=0.8,
+            predicted_direction=1,
+            metadata={},
+        )
+        tracker.log_prediction(pred)
+        self._seed_prices(
+            tracker,
+            [("2026-07-10", 100.0), ("2026-07-11", 101.0)],
+        )
+
+        before = tracker.get_health_report()["summary"]["resolved_predictions"]
+        summary = tracker.resolve_pending_labels(max_days=10)
+        after = tracker.get_health_report()["summary"]["resolved_predictions"]
+
+        assert summary["predictions_updated"] >= 1
+        assert after > before
+
+    def test_resolve_pending_labels_respects_max_days(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        for i, d in enumerate(["2026-07-01", "2026-07-02", "2026-07-03"]):
+            tracker.log_prediction(
+                SignalPrediction(
+                    timestamp=f"{d}T12:00:00",
+                    source="s",
+                    signal_value=0.5,
+                    confidence=0.8,
+                    predicted_direction=1,
+                    metadata={},
+                )
+            )
+        # No prices → all skipped, but still only considers max_days dates
+        summary = tracker.resolve_pending_labels(max_days=2)
+        assert summary["dates_considered"] == 2
+        assert summary["max_days"] == 2
+
+
 class TestGetAdjustedWeightsExtended:
     """Extended get_adjusted_weights tests."""
 
@@ -1719,7 +1780,7 @@ class TestAllExports:
         expected = {
             'SignalSource', 'SignalHealthStatus', 'SignalPrediction',
             'HealthScore', 'DecayAlert', 'SignalHealthTracker',
-            'backfill_predictions',
+            'backfill_predictions', 'DEFAULT_RESOLVE_MAX_DAYS',
         }
         assert set(__all__) == expected
 

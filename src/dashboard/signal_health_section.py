@@ -49,13 +49,40 @@ def fred_readiness_unavailable_payload(exc: BaseException) -> dict[str, Any]:
 def build_signal_health_section(
     *,
     log_error: Callable[[str, Exception], None] | None = None,
+    resolve_labels: bool = True,
+    resolve_max_days: int | None = None,
 ) -> dict[str, Any]:
-    """Load SignalHealthTracker report for health.json."""
-    try:
-        from src.signals.health_tracker import SignalHealthTracker
+    """Load SignalHealthTracker report for health.json.
 
-        report = SignalHealthTracker().get_health_report()
-        return {
+    By default runs a bounded ``resolve_pending_labels`` pass first so production
+    health cycles actually call ``update_actual_directions`` (label backlog).
+    """
+    try:
+        from src.signals.health_tracker import (
+            DEFAULT_RESOLVE_MAX_DAYS,
+            SignalHealthTracker,
+        )
+
+        tracker = SignalHealthTracker()
+        label_resolve: dict[str, Any] | None = None
+        if resolve_labels:
+            max_days = (
+                DEFAULT_RESOLVE_MAX_DAYS
+                if resolve_max_days is None
+                else int(resolve_max_days)
+            )
+            try:
+                label_resolve = tracker.resolve_pending_labels(max_days=max_days)
+            except SIGNAL_HEALTH_EXCEPTIONS as resolve_exc:
+                # Never block health report on resolve failures
+                logger.warning("signal_health label resolve skipped: %s", resolve_exc)
+                label_resolve = {
+                    "error": str(resolve_exc),
+                    "predictions_updated": 0,
+                }
+
+        report = tracker.get_health_report()
+        out: dict[str, Any] = {
             "timestamp": report.get("timestamp"),
             "summary": report.get("summary", {}),
             "scores": report.get("scores", {}),
@@ -64,6 +91,9 @@ def build_signal_health_section(
             "status": report.get("status", report.get("overall_health", "unknown")),
             "label_horizon": report.get("label_horizon"),
         }
+        if label_resolve is not None:
+            out["label_resolve"] = label_resolve
+        return out
     except SIGNAL_HEALTH_EXCEPTIONS as exc:
         if log_error:
             log_error("signal_health", exc)

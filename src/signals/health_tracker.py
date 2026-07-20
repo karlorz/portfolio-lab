@@ -24,7 +24,19 @@ from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 from src.backtest.metrics import save_results_json
 
 
-__all__ = ['SignalSource', 'SignalHealthStatus', 'SignalPrediction', 'HealthScore', 'DecayAlert', 'SignalHealthTracker', 'backfill_predictions']
+__all__ = [
+    'SignalSource',
+    'SignalHealthStatus',
+    'SignalPrediction',
+    'HealthScore',
+    'DecayAlert',
+    'SignalHealthTracker',
+    'backfill_predictions',
+    'DEFAULT_RESOLVE_MAX_DAYS',
+]
+
+# Max distinct unresolved prediction dates to label per health/cron cycle.
+DEFAULT_RESOLVE_MAX_DAYS = 30
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -262,6 +274,105 @@ class SignalHealthTracker:
         
         logger.info("Updated %s predictions with actual direction for %s", updated, date)
         return updated
+
+    def list_unresolved_prediction_dates(self, limit: int = 30) -> List[str]:
+        """Return distinct prediction calendar dates still missing actual_direction.
+
+        Most recent dates first. Bounded so health/cron cycles never scan the
+        full multi-hundred-k pending backlog in one shot.
+        """
+        limit = max(1, int(limit))
+        with sqlite_connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            rows = cursor.execute(
+                """
+                SELECT DISTINCT date(timestamp) AS d
+                FROM signal_predictions
+                WHERE actual_direction IS NULL
+                  AND timestamp IS NOT NULL
+                  AND date(timestamp) IS NOT NULL
+                ORDER BY d DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [str(r[0]) for r in rows if r and r[0]]
+
+    def _spy_forward_return(self, prediction_date: str) -> Optional[float]:
+        """SPY close-to-close return from prediction_date to the next available bar.
+
+        Labels predictions made on day T with the subsequent SPY return (T→T+n).
+        Returns None when prices are insufficient.
+        """
+        try:
+            with sqlite_connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                row0 = cursor.execute(
+                    """
+                    SELECT close FROM prices
+                    WHERE symbol = 'SPY' AND date(date) = date(?)
+                    ORDER BY date LIMIT 1
+                    """,
+                    (prediction_date,),
+                ).fetchone()
+                row1 = cursor.execute(
+                    """
+                    SELECT close FROM prices
+                    WHERE symbol = 'SPY' AND date(date) > date(?)
+                    ORDER BY date LIMIT 1
+                    """,
+                    (prediction_date,),
+                ).fetchone()
+            if not row0 or not row1:
+                return None
+            p0 = float(row0[0])
+            p1 = float(row1[0])
+            if p0 <= 0:
+                return None
+            return (p1 / p0) - 1.0
+        except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+            logger.debug("SPY forward return unavailable for %s: %s", prediction_date, exc)
+            return None
+
+    def resolve_pending_labels(self, max_days: int = 30) -> Dict[str, Any]:
+        """Production label resolver: apply SPY forward returns to pending predictions.
+
+        Bounded by ``max_days`` distinct unresolved dates (newest first) so a
+        cold start against a large backlog remains cheap per cycle.
+
+        Returns summary: {dates_considered, dates_resolved, predictions_updated, skipped}.
+        """
+        max_days = max(1, int(max_days))
+        dates = self.list_unresolved_prediction_dates(limit=max_days)
+        predictions_updated = 0
+        dates_resolved = 0
+        skipped: List[str] = []
+
+        for d in dates:
+            fwd = self._spy_forward_return(d)
+            if fwd is None:
+                skipped.append(d)
+                continue
+            n = self.update_actual_directions({"SPY": fwd}, d)
+            predictions_updated += int(n or 0)
+            if n:
+                dates_resolved += 1
+
+        summary = {
+            "dates_considered": len(dates),
+            "dates_resolved": dates_resolved,
+            "predictions_updated": predictions_updated,
+            "skipped_no_spy_return": skipped,
+            "max_days": max_days,
+        }
+        logger.info(
+            "resolve_pending_labels: considered=%s resolved_dates=%s predictions=%s skipped=%s",
+            summary["dates_considered"],
+            summary["dates_resolved"],
+            summary["predictions_updated"],
+            len(skipped),
+        )
+        return summary
     
     def calculate_health_score(
         self, 
@@ -961,12 +1072,30 @@ if __name__ == "__main__":
     parser.add_argument("--backfill", action="store_true", help="Backfill historical data")
     parser.add_argument("--calculate", action="store_true", help="Calculate and save health scores")
     parser.add_argument("--alerts", action="store_true", help="Check for decay alerts")
+    parser.add_argument(
+        "--resolve-labels",
+        action="store_true",
+        help="Resolve pending predictions with SPY forward returns (bounded)",
+    )
+    parser.add_argument(
+        "--resolve-max-days",
+        type=int,
+        default=DEFAULT_RESOLVE_MAX_DAYS,
+        help=f"Max unresolved dates per --resolve-labels run (default {DEFAULT_RESOLVE_MAX_DAYS})",
+    )
     parser.add_argument("--source", type=str, help="Specific signal source")
     
     args = parser.parse_args()
     
     tracker = SignalHealthTracker()
-    
+
+    if args.resolve_labels:
+        summary = tracker.resolve_pending_labels(max_days=args.resolve_max_days)
+        logger.info("resolve_pending_labels: %s", json.dumps(summary))
+        if not (args.backfill or args.calculate or args.alerts or args.status):
+            # Resolve-only invocation: skip default status dump
+            raise SystemExit(0)
+
     if args.backfill:
         count = backfill_predictions()
         logger.info("Backfilled %d predictions", count)
