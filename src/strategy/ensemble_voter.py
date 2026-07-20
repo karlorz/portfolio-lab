@@ -667,6 +667,47 @@ class BanditWeighter:
             sharpes[sig] = self._rolling_sharpe(sig, regime)
         return self._softmax(sharpes)
 
+    def get_state(self) -> dict:
+        """Serialize bandit history for durable persistence."""
+        # Copy nested lists so callers cannot mutate internal state
+        history = {
+            regime: {sig: list(returns) for sig, returns in signals.items()}
+            for regime, signals in self._history.items()
+        }
+        return {
+            "schema_version": "bandit-weighter/v1",
+            "signals": list(self.signals),
+            "epsilon": self.epsilon,
+            "window": self.window,
+            "temperature": self.temperature,
+            "history": history,
+        }
+
+    def load_state(self, state: dict) -> None:
+        """Restore bandit history from get_state() payload."""
+        if not isinstance(state, dict):
+            return
+        history = state.get("history")
+        if not isinstance(history, dict):
+            return
+        restored: dict = {}
+        for regime, signals in history.items():
+            if not isinstance(signals, dict):
+                continue
+            restored[str(regime)] = {}
+            for sig, returns in signals.items():
+                if not isinstance(returns, list):
+                    continue
+                cleaned = []
+                for r in returns[-self.window :]:
+                    try:
+                        cleaned.append(float(r))
+                    except (TypeError, ValueError):
+                        continue
+                if cleaned:
+                    restored[str(regime)][str(sig)] = cleaned
+        self._history = restored
+
     def _rolling_sharpe(self, signal: str, regime: str) -> float:
         """Compute rolling Sharpe ratio for a signal in a regime."""
         hist = safe_get(self._history, regime, signal, default=[])
@@ -737,6 +778,8 @@ class EnsembleVoter:
             window=252,
         )
         self.bandit_observations: int = 0
+        self.bandit_state_path = self.data_path / "ensemble_bandit_state.json"
+        self._load_bandit_state()
 
         # Online IC weighter for IC-based ensemble weight learning
         # Gated by ENSEMBLE_USE_IC_WEIGHTS env var (default: off)
@@ -1119,6 +1162,152 @@ class EnsembleVoter:
         """Update bandit with observed return for a signal in a regime."""
         self.bandit.update(signal_value, regime_name, daily_return)
         self.bandit_observations += 1
+
+    def _load_bandit_state(self) -> bool:
+        """Load bandit history + observation count from data_path if present."""
+        path = getattr(self, "bandit_state_path", None) or (
+            self.data_path / "ensemble_bandit_state.json"
+        )
+        if not path.exists():
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                return False
+            bandit_state = state.get("bandit") or state
+            if hasattr(self.bandit, "load_state"):
+                self.bandit.load_state(bandit_state)
+            obs = state.get("observations")
+            if obs is None:
+                # Derive from history length if missing
+                hist = getattr(self.bandit, "_history", {}) or {}
+                obs = sum(
+                    len(returns)
+                    for signals in hist.values()
+                    if isinstance(signals, dict)
+                    for returns in signals.values()
+                    if isinstance(returns, list)
+                )
+            self.bandit_observations = int(obs or 0)
+            logger.info(
+                "Loaded ensemble bandit state from %s (observations=%s)",
+                path,
+                self.bandit_observations,
+            )
+            return True
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to load ensemble bandit state: %s", exc)
+            return False
+
+    def save_bandit_state(self) -> bool:
+        """Persist bandit history + observation count atomically."""
+        path = getattr(self, "bandit_state_path", None) or (
+            self.data_path / "ensemble_bandit_state.json"
+        )
+        payload = {
+            "schema_version": "ensemble-bandit-state/v1",
+            "observations": int(self.bandit_observations),
+            "bandit": self.bandit.get_state() if hasattr(self.bandit, "get_state") else {},
+            "updated_at": datetime.now().isoformat(),
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+                f.write("\n")
+            tmp_path.replace(path)
+            return True
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Failed to save ensemble bandit state: %s", exc)
+            return False
+
+    def apply_daily_bandit_rewards(
+        self,
+        daily_return: float,
+        regime_name: Optional[str] = None,
+        sources: Optional[List[str]] = None,
+        *,
+        persist: bool = True,
+    ) -> Dict[str, Any]:
+        """Apply one day of portfolio return as reward to ensemble bandit sources.
+
+        Production training step: maps paper/portfolio daily return into
+        ``update_bandit`` for each active signal source so observations leave
+        cold_start. Bandit remains advisory (not live target_allocations).
+
+        Returns summary with updates count and observation total.
+        """
+        try:
+            reward = float(daily_return)
+        except (TypeError, ValueError):
+            return {
+                "updates": 0,
+                "observations": int(self.bandit_observations),
+                "skipped": True,
+                "reason": "invalid_daily_return",
+            }
+
+        if regime_name is None:
+            current = getattr(self, "current_regime", Regime.NORMAL)
+            regime_name = current.name if hasattr(current, "name") else str(current)
+        regime_name = str(regime_name).upper()
+
+        if sources is None:
+            sources = [s.value for s in SignalSource]
+        updates = 0
+        for src in sources:
+            self.update_bandit(str(src), regime_name, reward)
+            updates += 1
+
+        if persist:
+            self.save_bandit_state()
+
+        return {
+            "updates": updates,
+            "observations": int(self.bandit_observations),
+            "regime": regime_name,
+            "daily_return": reward,
+            "skipped": False,
+        }
+
+    @staticmethod
+    def load_latest_daily_return_from_performance(
+        performance_path: Optional[Path] = None,
+        *,
+        max_lines: int = 200,
+    ) -> Optional[float]:
+        """Read newest non-null daily_return from performance.jsonl (tail)."""
+        path = Path(performance_path) if performance_path is not None else DATA_DIR / "performance.jsonl"
+        if not path.exists():
+            return None
+        try:
+            # Efficient-ish tail for moderate files
+            with open(path, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                block = min(size, 64 * 1024)
+                f.seek(max(0, size - block))
+                chunk = f.read().decode("utf-8", errors="replace")
+            lines = [ln for ln in chunk.splitlines() if ln.strip()][-max_lines:]
+            for line in reversed(lines):
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                if "daily_return" not in row:
+                    continue
+                try:
+                    return float(row["daily_return"])
+                except (TypeError, ValueError):
+                    continue
+            return None
+        except OSError as exc:
+            logger.debug("performance.jsonl read failed: %s", exc)
+            return None
 
     def apply_goal_risk_budget(self, base_allocation: dict) -> dict:
         """Scale allocation weights based on investment goals from goals.json.

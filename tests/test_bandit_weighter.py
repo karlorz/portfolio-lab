@@ -241,18 +241,59 @@ class TestEnsembleVoterGetBlendedWeights:
 class TestEnsembleVoterUpdateBandit:
     """Tests for EnsembleVoter.update_bandit()."""
 
-    def test_increment_observations(self):
-        voter = EnsembleVoter()
+    def test_increment_observations(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         initial = voter.bandit_observations
         voter.update_bandit("multi_speed_momentum", "NORMAL", 0.001)
         assert voter.bandit_observations == initial + 1
 
-    def test_multiple_updates_increment_count(self):
-        voter = EnsembleVoter()
+    def test_multiple_updates_increment_count(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit("multi_speed_momentum", "NORMAL", 0.001)
         voter.update_bandit("cross_asset_rv", "NORMAL", 0.002)
         voter.update_bandit("international_momentum", "NORMAL", -0.001)
         assert voter.bandit_observations == 3
+
+
+class TestEnsembleBanditDailyRewardPersistence:
+    """Production daily reward path + durable bandit state."""
+
+    def test_apply_daily_bandit_rewards_increments_and_persists(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        assert voter.bandit_observations == 0
+        summary = voter.apply_daily_bandit_rewards(0.001, regime_name="NORMAL", persist=True)
+        assert summary["skipped"] is False
+        assert summary["updates"] >= 1
+        assert summary["observations"] == voter.bandit_observations
+        assert voter.bandit_observations == summary["updates"]
+        assert (tmp_path / "ensemble_bandit_state.json").exists()
+
+        # Cold start reloads observations
+        voter2 = EnsembleVoter(data_path=tmp_path)
+        assert voter2.bandit_observations == voter.bandit_observations
+        status = voter2.get_adaptive_learning_status("NORMAL")
+        # With history, should not stay pure cold_start zero-obs forever
+        assert status["bandit"]["observations"] == voter.bandit_observations
+
+    def test_load_latest_daily_return_from_performance(self, tmp_path):
+        perf = tmp_path / "performance.jsonl"
+        perf.write_text(
+            '{"timestamp":"2026-07-01","daily_return":0.0}\n'
+            '{"timestamp":"2026-07-02","daily_return":0.012}\n',
+            encoding="utf-8",
+        )
+        ret = EnsembleVoter.load_latest_daily_return_from_performance(perf)
+        assert abs(ret - 0.012) < 1e-9
+
+    def test_bandit_get_load_state_roundtrip(self):
+        bw = BanditWeighter(["sig_a", "sig_b"])
+        bw.update("sig_a", "NORMAL", 0.01)
+        bw.update("sig_b", "NORMAL", -0.005)
+        state = bw.get_state()
+        bw2 = BanditWeighter(["sig_a", "sig_b"])
+        bw2.load_state(state)
+        assert len(bw2._history["NORMAL"]["sig_a"]) == 1
+        assert abs(bw2._history["NORMAL"]["sig_a"][0] - 0.01) < 1e-9
 
 
 class TestEnsembleVoterGoalRiskBudget:

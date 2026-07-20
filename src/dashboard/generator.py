@@ -1553,6 +1553,15 @@ class DashboardGenerator:
             from src.strategy.ensemble_voter import EnsembleVoter
 
             ensemble_engine = EnsembleVoter()
+            # Daily reward train (advisory bandit): paper portfolio return → update_bandit
+            # so adaptive_learning leaves permanent cold_start. Failures never block vote.
+            try:
+                daily_ret = EnsembleVoter.load_latest_daily_return_from_performance()
+                if daily_ret is not None:
+                    ensemble_engine.apply_daily_bandit_rewards(daily_ret, persist=True)
+            except SIGNAL_EXCEPTIONS as bandit_exc:
+                logger.debug("ensemble bandit daily reward skipped: %s", bandit_exc)
+
             ensemble_result = ensemble_engine.compute_vote()
             if ensemble_result:
                 source_breakdown = self._build_ensemble_source_breakdown(
