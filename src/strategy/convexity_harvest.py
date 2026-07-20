@@ -66,6 +66,7 @@ class ConvexityHarvestStrategy:
         self.consecutive_backwardation_days = 0
         self.last_vix_level = None
         self.last_allocation = 0.0
+        self._last_resolve_meta: Dict = {}
     
     def calculate_position_size(
         self,
@@ -141,17 +142,55 @@ class ConvexityHarvestStrategy:
 
         return False, None
     
+    def _resolve_contango_signal(self, date: str) -> Optional[Dict]:
+        """Resolve contango/VIX for date, falling back to latest futures cache day.
+
+        Live dashboard often asks for *today* while the futures proxy cache
+        lags (ends weeks/months earlier). Prefer exact date; else last
+        available cache bar so we never publish vix_level=0 while term data
+        exists.
+        """
+        signal_data = self.vix_manager.get_contango_signal(date)
+        if signal_data:
+            signal_data = dict(signal_data)
+            signal_data.setdefault("vix_source", "futures_cache")
+            signal_data.setdefault("asof", date)
+            return signal_data
+
+        try:
+            data_range = self.vix_manager.get_data_range()
+        except Exception:  # noqa: BLE001 — empty/mock managers
+            data_range = None
+        end = None
+        if isinstance(data_range, (list, tuple)) and len(data_range) >= 2:
+            end = data_range[1] or None
+        elif isinstance(data_range, (list, tuple)) and len(data_range) == 1:
+            end = data_range[0] or None
+        if end:
+            fallback = self.vix_manager.get_contango_signal(end)
+            if fallback:
+                out = dict(fallback)
+                out["vix_source"] = "futures_cache_last_available"
+                out["asof"] = end
+                out["requested_date"] = date
+                return out
+        return None
+
     def generate_signal(self, date: str) -> ConvexityPosition:
         """
         Generate convexity harvest signal for a given date.
         
         This is the main entry point for daily signal generation.
         """
-        # Get VIX term structure for date
-        signal_data = self.vix_manager.get_contango_signal(date)
+        signal_data = self._resolve_contango_signal(date)
+        self._last_resolve_meta = {
+            k: signal_data.get(k)
+            for k in ("asof", "vix_source", "requested_date")
+            if signal_data and signal_data.get(k) is not None
+        } if signal_data else {}
         
         if not signal_data:
-            # No data available - flat position
+            # Truly unavailable — do not publish silent zeros as live VIX
             return ConvexityPosition(
                 date=date,
                 allocation_pct=0.0,
@@ -161,7 +200,7 @@ class ConvexityHarvestStrategy:
                 expected_roll_yield=0.0,
                 risk_score=1.0,
                 exit_triggered=False,
-                exit_reason='No VIX data available'
+                exit_reason='unavailable: no VIX futures cache'
             )
         
         vix_level = signal_data['vix_level']
@@ -321,7 +360,15 @@ class ConvexityHarvestStrategy:
         """Get current convexity harvest signal for today's date"""
         today = datetime.now().strftime('%Y-%m-%d')
         position = self.generate_signal(today)
-        return position.to_dict()
+        payload = position.to_dict()
+        # Honesty fields for dashboard consumers
+        if position.exit_reason and str(position.exit_reason).startswith("unavailable"):
+            payload["status"] = "unavailable"
+            payload["runtime_status"] = "unavailable"
+        else:
+            payload["status"] = "ok"
+            payload.update(self._last_resolve_meta)
+        return payload
 
 
 def main():

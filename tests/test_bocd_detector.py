@@ -292,5 +292,40 @@ class TestBOCDIntegration:
         assert bocd_data['n_observations'] == 300
 
 
+class TestBOCDLookbackWindow:
+    """Trailing lookback keeps MAP run length coherent on long histories."""
+
+    def test_default_lookback_truncates_long_series(self):
+        np.random.seed(0)
+        returns = np.random.randn(2500) * 0.01
+        detector = BOCDDetector(hazard_rate=1.0 / 252, max_lookback=1000)
+        detector.fit(returns)
+        sig = detector.get_signal()["bocd_detector"]
+        assert sig["lookback_applied"] is True
+        assert sig["n_observations"] == 1000
+        assert sig["n_observations_full"] == 2500
+        # Stable noise → MAP run length should not be stuck at 0 with CP~hazard
+        assert sig["current_run_length"] > 10
+        assert sig["regime_change_prob"] < 0.1
+
+    def test_unlimited_lookback_opt_in(self):
+        np.random.seed(1)
+        returns = np.random.randn(100) * 0.01
+        detector = BOCDDetector(max_lookback=0)  # 0 → no truncation
+        detector.fit(returns)
+        sig = detector.get_signal()["bocd_detector"]
+        assert sig["lookback_applied"] is False
+        assert sig["n_observations"] == 100
+
+    def test_expected_run_length_present(self):
+        np.random.seed(2)
+        returns = np.random.randn(200) * 0.01
+        detector = BOCDDetector()
+        detector.fit(returns)
+        sig = detector.get_signal()["bocd_detector"]
+        assert "expected_run_length" in sig
+        assert sig["expected_run_length"] >= 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

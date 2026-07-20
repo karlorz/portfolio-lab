@@ -905,7 +905,14 @@ class DashboardGenerator:
         prices = np.array([row[1] for row in rows], dtype=float)
         returns = np.diff(np.log(prices))
 
-        detector = BOCDDetector(hazard_rate=1.0 / 252, threshold=0.5, min_run_length=5)
+        # threshold=0.5 keeps legacy dashboard wiring; max_lookback caps O(n)
+        # collapse on multi-year SPY history (see BOCDDetector.DEFAULT_MAX_LOOKBACK).
+        detector = BOCDDetector(
+            hazard_rate=1.0 / 252,
+            threshold=0.5,
+            min_run_length=5,
+            max_lookback=BOCDDetector.DEFAULT_MAX_LOOKBACK,
+        )
         detector.fit(returns)
 
         signal = detector.get_signal()
@@ -1766,10 +1773,17 @@ class DashboardGenerator:
                     "mention_velocity_7d": round(snapshot.social.mention_velocity_7d, 2),
                     "sentiment_divergence": round(snapshot.social.sentiment_divergence, 3),
                 },
-                "backtest_finding": (
-                    "VIX-proxy contrarian signals degrade Sharpe by -0.216 (2021-2026). "
-                    "Real-time SKEW/PCR data needed for behavioral alpha."
-                ),
+                # Research caveat is non-actionable metadata — not a live alpha narrative
+                "research_caveats": [
+                    {
+                        "kind": "research_caveat",
+                        "role": "non_actionable",
+                        "summary": (
+                            "VIX-proxy contrarian signals degraded Sharpe by -0.216 "
+                            "(2021-2026) in backtests; live SKEW/PCR path required."
+                        ),
+                    }
+                ],
                 "timestamp": now_ts,
                 "generated_at": now_ts,
             }

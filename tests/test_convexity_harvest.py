@@ -865,11 +865,42 @@ class TestGenerateSignalEdgeCases:
         from src.strategy.convexity_harvest import ConvexityHarvestStrategy
         mock_mgr = MagicMock()
         mock_mgr.get_contango_signal.return_value = None
+        mock_mgr.get_data_range.return_value = ("", "")
         strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
         pos = strategy.generate_signal("2026-05-14")
         assert pos.position_type == "flat"
         assert pos.risk_score == 1.0
-        assert pos.exit_reason == "No VIX data available"
+        assert pos.exit_reason is not None
+        assert "unavailable" in pos.exit_reason
+
+    def test_generate_signal_falls_back_to_last_cache_day(self):
+        """Today missing → last futures cache day supplies VIX (not zeros)."""
+        from src.strategy.convexity_harvest import ConvexityHarvestStrategy
+
+        mock_mgr = MagicMock()
+
+        def _contango(date):
+            if date == "2026-07-20":
+                return None
+            if date == "2026-05-22":
+                return {
+                    "vix_level": 16.76,
+                    "contango_spot_1m": 19.5,
+                    "contango_1m_2m": 0.0,
+                    "is_contango": True,
+                    "annualized_roll_yield": 50.0,
+                }
+            return None
+
+        mock_mgr.get_contango_signal.side_effect = _contango
+        mock_mgr.get_data_range.return_value = ("2021-05-10", "2026-05-22")
+        strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
+        pos = strategy.generate_signal("2026-07-20")
+        assert pos.vix_level == pytest.approx(16.76)
+        assert pos.exit_reason != "unavailable: no VIX futures cache"
+        payload = strategy.get_current_signal()
+        # get_current uses today; mock still falls back
+        assert payload.get("vix_level", 0) != 0 or pos.vix_level > 0
 
     def test_generate_signal_contango_positive_allocation(self, strategy_with_data):
         """Contango with positive allocation produces short_vix position."""

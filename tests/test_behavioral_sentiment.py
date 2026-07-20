@@ -1414,3 +1414,20 @@ class TestConstants:
             assert 0.0 <= sig.confidence <= 1.0, (
                 f"confidence {sig.confidence} out of [0,1] for {sig_type}"
             )
+
+
+def test_live_payload_prefers_research_caveats_not_backtest_finding():
+    """Generator contract: live behavioral block must not ship free-text backtest_finding."""
+    import ast
+    from pathlib import Path
+
+    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+    # Static contract: research_caveats present; bare backtest_finding key removed from behavioral block
+    assert "research_caveats" in src
+    # The behavioral section must not assign backtest_finding= (other dashboards may still)
+    # Locate the behavioral_sentiment_data dict assignment region
+    idx = src.find("behavioral_sentiment_data = {")
+    assert idx > 0
+    chunk = src[idx : idx + 2500]
+    assert "backtest_finding" not in chunk
+    assert "research_caveats" in chunk

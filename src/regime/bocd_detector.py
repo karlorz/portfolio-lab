@@ -62,15 +62,24 @@ class BOCDDetector:
         min_run_length: Minimum run length to consider stable (default 5).
     """
     
+    # Full multi-year histories (~5k bars) collapse MAP mass under the
+    # O(n) sufficient-stat path used here (live SPY → run_length=0 while
+    # CP prob stays at hazard). Cap the online window for stable MAP sawtooth.
+    DEFAULT_MAX_LOOKBACK = 1000
+
     def __init__(
         self,
         hazard_rate: float = 1.0 / 252,
         threshold: float = 10.0,
-        min_run_length: int = 5
+        min_run_length: int = 5,
+        max_lookback: Optional[int] = None,
     ):
         self.hazard_rate = hazard_rate
         self.threshold = threshold
         self.min_run_length = min_run_length
+        self.max_lookback = (
+            self.DEFAULT_MAX_LOOKBACK if max_lookback is None else int(max_lookback)
+        )
         
         # State
         self._run_length_probs: Optional[np.ndarray] = None
@@ -78,6 +87,8 @@ class BOCDDetector:
         self._regime_labels: Optional[np.ndarray] = None
         self._map_run_lengths: Optional[np.ndarray] = None
         self.timestamps: Optional[List] = None
+        self._full_n_observations: Optional[int] = None
+        self._lookback_applied: bool = False
         
         # Hyperparameters for Normal prior (conjugate for known variance)
         # We'll estimate variance from data
@@ -115,10 +126,22 @@ class BOCDDetector:
         if returns.ndim != 1:
             raise ValueError("Returns must be 1D array")
         
-        n = len(returns)
-        if n < 2:
+        n_full = len(returns)
+        if n_full < 2:
             raise ValueError("Need at least 2 observations")
-        
+
+        self._full_n_observations = n_full
+        # Truncate to trailing lookback so MAP run length stays well-defined.
+        if self.max_lookback > 0 and n_full > self.max_lookback:
+            start = n_full - self.max_lookback
+            returns = returns[start:]
+            if timestamps is not None:
+                timestamps = timestamps[start:]
+            self._lookback_applied = True
+        else:
+            self._lookback_applied = False
+
+        n = len(returns)
         self.timestamps = timestamps
         self._monitor_stat = monitor_stat
         
@@ -263,16 +286,26 @@ class BOCDDetector:
         # Simplified: changepoint = regime change (CRISIS or HIGH_VOL)
         current_regime = 1 if self._regime_labels[-1] == 1 else 0
         
+        map_run = int(self._map_run_lengths[-1])
+        # Expected run length E[r_t] under the posterior (useful when MAP is 0)
+        rlp = self._run_length_probs[-1, : n + 1]
+        run_idx = np.arange(n + 1)
+        expected_run = float(np.sum(rlp * run_idx)) if np.sum(rlp) > 0 else float(map_run)
+
         return {
             "bocd_detector": {
                 "regime": current_regime,
                 "regime_change_prob": float(regime_change_prob),
                 "changepoint_count": int(changepoint_count),
-                "current_run_length": int(self._map_run_lengths[-1]),
+                "current_run_length": map_run,
+                "expected_run_length": round(expected_run, 2),
                 "hazard_rate": self.hazard_rate,
                 "threshold": self.threshold,
                 "n_observations": n,
-                "description": "Bayesian Online Changepoint Detection regime signal"
+                "n_observations_full": int(self._full_n_observations or n),
+                "lookback_applied": bool(self._lookback_applied),
+                "max_lookback": int(self.max_lookback) if self.max_lookback else None,
+                "description": "Bayesian Online Changepoint Detection regime signal",
             }
         }
     
