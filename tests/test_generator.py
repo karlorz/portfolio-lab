@@ -3144,21 +3144,89 @@ class TestSignalsJSONEdgeCases:
         assert state["source"] == "default_missing_state"
 
     def test_missing_vix_handled(self, tmp_path):
-        """Missing VIX symbol defaults vix to None and falls back to trend."""
+        """Missing VIX symbol defaults vix to None when no fallback surfaces."""
         gen, _ = _make_generator(tmp_path)
         gen.conn.execute("DELETE FROM prices WHERE symbol = '^VIX'")
         gen.conn.commit()
         yields_path = tmp_path / "yields.json"
         yields_path.write_text(json.dumps([{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]))
+        # Force overlay + behavioral without usable VIX so regime.vix stays unavailable
+        gen._get_overlay_data = lambda: {
+            "vix_term_structure": {},
+            "collar": {},
+            "crypto": {},
+            "calendar": {},
+            "kurtosis": {},
+            "zero_dte": DashboardGenerator._unavailable_zero_dte_payload(),
+            "closing_auction": DashboardGenerator._unavailable_closing_auction_payload(),
+        }
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
-                    path = gen.generate_signals_json()
+                    with patch(
+                        "src.signals.behavioral_sentiment.BehavioralSentimentSignal",
+                        side_effect=ImportError("skip behavioral in test"),
+                    ):
+                        path = gen.generate_signals_json()
         with open(path) as f:
             data = json.load(f)
         assert data["regime"]["vix"] is None
+        assert data["regime"].get("vix_source") in (None, "unavailable")
         assert "regime" in data["regime"]
         gen.conn.close()
+
+    def test_regime_vix_falls_back_to_term_structure(self, tmp_path):
+        """When ^VIX missing, regime.vix uses vix_term_structure.vix_spot."""
+        gen, _ = _make_generator(tmp_path)
+        gen.conn.execute("DELETE FROM prices WHERE symbol = '^VIX'")
+        gen.conn.commit()
+        yields_path = tmp_path / "yields.json"
+        yields_path.write_text(json.dumps([{"spread2s10s": 50, "dgs2": 4.0, "dgs10": 4.5} for _ in range(35)]))
+        gen._get_overlay_data = lambda: {
+            "vix_term_structure": {
+                "vix_spot": 16.76,
+                "signal_state": "RISK_ON",
+                "regime": "contango",
+            },
+            "collar": {},
+            "crypto": {},
+            "calendar": {},
+            "kurtosis": {},
+            "zero_dte": DashboardGenerator._unavailable_zero_dte_payload(),
+            "closing_auction": DashboardGenerator._unavailable_closing_auction_payload(),
+        }
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                with patch("src.dashboard.generator.YIELDS_JSON", yields_path):
+                    # Prefer term-structure over live behavioral fetcher
+                    with patch(
+                        "src.signals.behavioral_sentiment.BehavioralSentimentSignal",
+                        side_effect=ImportError("skip behavioral in test"),
+                    ):
+                        path = gen.generate_signals_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert abs(float(data["regime"]["vix"]) - 16.76) < 1e-6
+        assert data["regime"]["vix_source"] == "vix_term_structure"
+        gen.conn.close()
+
+    def test_enrich_regime_vix_prefers_market_db(self):
+        enriched = DashboardGenerator._enrich_regime_vix(
+            {"regime": "normal", "vix": 18.5, "vix_source": "market.db"},
+            vix_term_structure={"vix_spot": 99.0},
+            behavioral_sentiment={"vix": 88.0},
+        )
+        assert abs(enriched["vix"] - 18.5) < 1e-6
+        assert enriched["vix_source"] == "market.db"
+
+    def test_enrich_regime_vix_behavioral_fallback(self):
+        enriched = DashboardGenerator._enrich_regime_vix(
+            {"regime": "normal", "vix": None},
+            vix_term_structure={},
+            behavioral_sentiment={"vix": 18.77},
+        )
+        assert abs(enriched["vix"] - 18.77) < 1e-6
+        assert enriched["vix_source"] == "behavioral_sentiment"
 
     def test_output_structure(self, tmp_path):
         """signals.json contains all expected top-level keys."""

@@ -909,6 +909,68 @@ class DashboardGenerator:
 
         return bocd_data
 
+    @staticmethod
+    def _coerce_vix_level(value: Any) -> Optional[float]:
+        """Parse a positive finite VIX level, else None."""
+        if value is None:
+            return None
+        try:
+            level = float(value)
+        except (TypeError, ValueError):
+            return None
+        if level != level or level <= 0:  # NaN or non-positive
+            return None
+        return level
+
+    @classmethod
+    def _enrich_regime_vix(
+        cls,
+        regime_data: Dict[str, Any],
+        *,
+        vix_term_structure: Any = None,
+        behavioral_sentiment: Any = None,
+    ) -> Dict[str, Any]:
+        """Fill regime.vix from best available surface; disclose vix_source.
+
+        Preference: existing market.db level on regime_data → vix_term_structure
+        → behavioral_sentiment. Does not change live target_allocations authority.
+        """
+        out = dict(regime_data or {})
+        existing = cls._coerce_vix_level(out.get("vix"))
+        if existing is not None:
+            out["vix"] = existing
+            out.setdefault("vix_source", "market.db")
+            return out
+
+        # vix_term_structure payload (dict from VIXTermStructureSignal.to_dict)
+        if isinstance(vix_term_structure, dict):
+            for key in ("vix_spot", "vix", "spot"):
+                level = cls._coerce_vix_level(vix_term_structure.get(key))
+                if level is not None:
+                    out["vix"] = level
+                    out["vix_source"] = "vix_term_structure"
+                    return out
+
+        # behavioral_sentiment may nest vix under top-level or snapshot
+        if isinstance(behavioral_sentiment, dict):
+            candidates = [
+                behavioral_sentiment.get("vix"),
+                behavioral_sentiment.get("vix_level"),
+            ]
+            opts = behavioral_sentiment.get("options")
+            if isinstance(opts, dict):
+                candidates.append(opts.get("vix"))
+            for cand in candidates:
+                level = cls._coerce_vix_level(cand)
+                if level is not None:
+                    out["vix"] = level
+                    out["vix_source"] = "behavioral_sentiment"
+                    return out
+
+        out["vix"] = None
+        out["vix_source"] = "unavailable"
+        return out
+
     def _load_signal_generation_context(self) -> Dict[str, Any]:
         """Load DB, portfolio, and regime context for signals.json."""
         cursor = self.conn.cursor()
@@ -920,7 +982,7 @@ class DashboardGenerator:
             ORDER BY date DESC LIMIT 1
         """)
         vix_row = cursor.fetchone()
-        vix_level = vix_row[0] if vix_row else None
+        vix_level = self._coerce_vix_level(vix_row[0] if vix_row else None)
         
         # Try to get trend signal from regime_log
         cursor.execute("""
@@ -937,6 +999,7 @@ class DashboardGenerator:
         regime_data = {
             "regime": current_regime,
             "vix": vix_level,
+            "vix_source": "market.db" if vix_level is not None else "unavailable",
             "detected": trend_detected
         }
         
@@ -1733,6 +1796,13 @@ class DashboardGenerator:
             )
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("hedge_selector", e)
+
+        # Operator regime card: never leave vix null when another surface has a level
+        regime_data = self._enrich_regime_vix(
+            regime_data,
+            vix_term_structure=overlay_data.get("vix_term_structure"),
+            behavioral_sentiment=behavioral_sentiment_data,
+        )
 
         return {
             "regime": validate_signal("regime", regime_data),
