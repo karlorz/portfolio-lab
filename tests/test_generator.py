@@ -6480,7 +6480,9 @@ class TestTwoStageRegimeUnavailableHonesty:
         assert "two_stage_regime" in result
         ts = result["two_stage_regime"]
         assert ts.get("status") == "unavailable" or ts.get("runtime_status") == "unavailable"
-        assert ts.get("regime") in ("UNKNOWN", "unavailable", None) or ts.get("confidence", 0) == 0.0
+        # Unavailable: null metric slots (not fake 0.0 confidence / UNKNOWN as calibrated)
+        assert ts.get("regime") is None
+        assert ts.get("confidence") is None
 
         assert "regime_transition" in result
         rt = result["regime_transition"]

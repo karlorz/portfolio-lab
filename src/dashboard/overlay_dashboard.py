@@ -18,7 +18,7 @@ Usage:
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any, Tuple
 
 from pathlib import Path
@@ -122,7 +122,7 @@ class OverlayDashboardGenerator:
         blocks all-fresh PASS and keeps sticky kill incidents alive even when
         producers just ran successfully.
         """
-        ts = produced_at or datetime.now().isoformat()
+        ts = produced_at or datetime.now(timezone.utc).isoformat()
         block.setdefault("timestamp", ts)
         block.setdefault("generated_at", ts)
         return block
@@ -470,8 +470,8 @@ class OverlayDashboardGenerator:
         total = len(data)
 
         return OverlayDashboardData(
-            timestamp=datetime.now().isoformat(),
-            generated_at=datetime.now().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            generated_at=datetime.now(timezone.utc).isoformat(),
             collar=data["collar"],
             crypto=data["crypto"],
             bond_duration=data["bond_duration"],

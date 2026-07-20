@@ -318,7 +318,7 @@ _BUG_EXCEPTIONS = (ValueError, TypeError)
 
 def _attach_signal_metadata(output: Dict, *, generated_at: str | None = None) -> Dict:
     """Attach dashboard-level generation timestamps to a signals payload."""
-    timestamp = generated_at or datetime.now().isoformat()
+    timestamp = generated_at or datetime.now(timezone.utc).isoformat()
     enriched = dict(output)
     enriched["generated_at"] = timestamp
     enriched.setdefault("timestamp", timestamp)
@@ -624,7 +624,7 @@ class DashboardGenerator:
             "prices": prices,
             "regimes": regimes,
             "paper_portfolio": paper_perf,
-            "generated_at": datetime.now().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
 
         out_path = PUBLIC_DIR / "dashboard.json"
@@ -1717,6 +1717,17 @@ class DashboardGenerator:
                 macro_texts=[],
             )
             sentiment_signal = sentiment_signal.to_dict()
+            # Honesty: empty news texts → mock/unavailable sentiment, not live NLP
+            empty_inputs = True  # this call path always passes empty lists today
+            sentiment_signal["source_mode"] = "mock_empty_inputs" if empty_inputs else "live"
+            sentiment_signal["live_authoritative"] = False
+            sentiment_signal["role"] = "advisory_shadow"
+            if empty_inputs or float(sentiment_signal.get("sentiment_confidence") or 0) == 0.0:
+                sentiment_signal["sentiment_status"] = "unavailable_no_news_inputs"
+                sentiment_signal["sentiment_status_reason"] = (
+                    "news/earnings/macro texts empty — sentiment_confidence=0 is "
+                    "mock placeholder, not measured market neutral"
+                )
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("llm_sentiment", e)
 
@@ -2299,24 +2310,38 @@ class DashboardGenerator:
             else:
                 # Honesty: do not omit section when generator returns None
                 # (missing FRED-MD / import / insufficient data).
+                # Null metric slots — do not publish 0.0 confidence/crisis as live zeros.
                 output["two_stage_regime"] = {
-                    "regime": "UNKNOWN",
-                    "confidence": 0.0,
+                    "regime": None,
+                    "confidence": None,
+                    "crisis_probability": None,
+                    "probabilities": None,
+                    "n_pca_components": None,
+                    "variance_retained": None,
+                    "n_observations": None,
+                    "n_series": None,
                     "status": "unavailable",
                     "runtime_status": "unavailable",
                     "reason": "generator_returned_none",
                     "method": "oliveira_2025_two_stage_kmeans",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("two_stage_regime", e)
             output["two_stage_regime"] = {
-                "regime": "UNKNOWN",
-                "confidence": 0.0,
+                "regime": None,
+                "confidence": None,
+                "crisis_probability": None,
+                "probabilities": None,
+                "n_pca_components": None,
+                "variance_retained": None,
+                "n_observations": None,
+                "n_series": None,
                 "status": "unavailable",
                 "runtime_status": "unavailable",
                 "error": str(e),
-                "timestamp": datetime.now().isoformat(),
+                "method": "oliveira_2025_two_stage_kmeans",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         # Bayesian Online Changepoint Detection (BOCD) regime signal
@@ -2996,15 +3021,30 @@ class DashboardGenerator:
                 },
             }
             
-            # Calculate duration allocation based on regime
+            # Calculate duration allocation based on regime (advisory sleeve —
+            # never bare weights without provenance; not live order-routing authority)
             regime_allocations = {
                 "steep": {"tlt": 0.70, "ief": 0.25, "shy": 0.05, "bil": 0.00},
                 "normal": {"tlt": 0.50, "ief": 0.35, "shy": 0.15, "bil": 0.00},
                 "flat": {"tlt": 0.30, "ief": 0.40, "shy": 0.25, "bil": 0.05},
                 "inverted": {"tlt": 0.15, "ief": 0.25, "shy": 0.35, "bil": 0.25}
             }
-            
-            result["duration_allocation"] = regime_allocations.get(regime, regime_allocations["normal"])
+            weights = regime_allocations.get(regime, regime_allocations["normal"])
+            result["duration_allocation"] = {
+                "weights": weights,
+                # Flat keys retained for backward-compat consumers
+                **weights,
+                "unit": "portfolio_weight_fraction",
+                "sum": round(sum(weights.values()), 4),
+                "duration_regime": regime,
+                "source": "yield_curve_regime_table",
+                "live_authoritative": False,
+                "role": "advisory_sleeve",
+                "description": (
+                    "Bond duration sleeve from 2s10s regime table; "
+                    "not target_allocations / order-routing authority"
+                ),
+            }
 
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to load yield curve data: %s", e)
@@ -3364,7 +3404,7 @@ class DashboardGenerator:
         output = {
             "alerts": sorted(alerts, key=lambda x: x.get("timestamp", "") or "", reverse=True),
             "count": len(alerts),
-            "generated_at": datetime.now().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
         
         out_path = PUBLIC_DIR / "alerts.json"
@@ -3412,7 +3452,7 @@ class DashboardGenerator:
                     output = {
                         "alerts": rebuilt,
                         "count": len(rebuilt),
-                        "generated_at": datetime.now().isoformat(),
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
                     }
                     out_path.write_text(
                         json.dumps(output, indent=2, sort_keys=False) + "\n",
@@ -3427,7 +3467,7 @@ class DashboardGenerator:
     def _empty_incident_summary() -> Dict[str, Any]:
         return {
             "schema_version": "incident-lifecycle/v1",
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "open_count": 0,
             "incidents": [],
             "metrics": {
@@ -3469,7 +3509,7 @@ class DashboardGenerator:
             "data_freshness": {},
             "system_status": "healthy",
             "signal_health": {},
-            "generated_at": datetime.now().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
         
         # Cron job status from project-local status file and Hermes, when available.
@@ -3590,7 +3630,7 @@ class DashboardGenerator:
             report = {
                 "status": "error",
                 "message": str(e),
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
             out_path = PUBLIC_DIR / "analytics.json"
             save_results_json(report, output_path=str(out_path))
@@ -3633,7 +3673,7 @@ class DashboardGenerator:
                 "factors": asdict(decision.factors) if hasattr(decision.factors, '__dataclass_fields__') else {},
                 "authority": authority,
                 **self._flatten_advisory_authority(authority),
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             out_path = PUBLIC_DIR / "adaptive_sizing.json"
@@ -3654,7 +3694,7 @@ class DashboardGenerator:
 
             hedge_data = {
                 **status,
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 "canonical_controller": "hedge_selector",
                 "runtime_role": "diagnostic_cost_evidence",
                 "live_authoritative": False,
@@ -3775,7 +3815,7 @@ class DashboardGenerator:
                     "duration": round(bl_input.get("duration_bias", 0.0), 3),
                     "gold": round(bl_input.get("gold_bias", 0.0), 3),
                 },
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             out_path = PUBLIC_DIR / "black_litterman.json"
@@ -3813,7 +3853,7 @@ class DashboardGenerator:
                 "schema_version": "turnover-validator/v1",
                 "signals": production_signals,
                 "synthetic_baselines": synthetic_baselines,
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             out_path = PUBLIC_DIR / "turnover_validator.json"
@@ -4034,7 +4074,7 @@ class DashboardGenerator:
                 "active_signals": active_signals,
                 "inactive_signals": inactive_signals,
                 "min_dwell_days": gate.min_dwell_days,
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             # Compute data-driven regime Sharpe matrix (read-only, for monitoring)
@@ -4154,7 +4194,7 @@ class DashboardGenerator:
         """Publish a typed canonical hedge-selector artifact when VIX is unavailable."""
         return {
             "available": False,
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "regime": regime,
             "regime_confidence": 0.0,
             "primary_hedge": "none",
@@ -4204,7 +4244,7 @@ class DashboardGenerator:
             )
             return {
                 "available": True,
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 "regime": rec.regime,
                 "regime_confidence": rec.regime_confidence,
                 "primary_hedge": rec.primary_hedge,
@@ -4698,7 +4738,7 @@ class DashboardGenerator:
                 "overlay_sharpe": 0.93,
                 "health_score": 0.55,
                 "is_gated_off": self._is_msm_gated(),
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             out_path = PUBLIC_DIR / "tsmom.json"
@@ -4743,7 +4783,7 @@ class DashboardGenerator:
                 "is_gated_off": is_gated,
                 "regime_note": "Mean-reversion fails in volatile regimes" if is_gated else "Active — mean-reversion favorable",
                 "weight_in_ensemble": 0.0 if is_gated else 0.13,
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             out_path = PUBLIC_DIR / "cross_asset_rv.json"
@@ -4924,7 +4964,7 @@ class DashboardGenerator:
                 "criteria_met": sum(1 for n, r in results.items() if n != "manual_approval" and r.passed),
                 "criteria_total": sum(1 for n in results if n != "manual_approval"),
                 "criteria": criteria_progress,
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 # Frontend GraduationDataSchema / panel aliases
                 "readiness_pct": score,
                 "eligible": is_ready,
@@ -5097,7 +5137,7 @@ class DashboardGenerator:
             fallback = {
                 "status": "unavailable",
                 "reason": "scipy not installed",
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
             save_results_json(fallback, output_path=str(output_path))
             return output_path
@@ -5107,7 +5147,7 @@ class DashboardGenerator:
             fallback = {
                 "status": "error",
                 "reason": str(e),
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
             save_results_json(fallback, output_path=str(output_path))
             return output_path

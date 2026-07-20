@@ -14,7 +14,7 @@ import sys
 import sqlite3
 import numpy as np
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -89,7 +89,7 @@ def main():
     parser.add_argument("--days", type=int, default=504, help="Days of price data to load")
     args = parser.parse_args()
 
-    print(f"GARCH-CVaR Risk Computation — {datetime.now().isoformat()}")
+    print(f"GARCH-CVaR Risk Computation — {datetime.now(timezone.utc).isoformat()}")
     print(f"  arch library: {'available' if ARCH_AVAILABLE else 'NOT AVAILABLE (will use historical fallback)'}")
 
     # Load returns
@@ -210,7 +210,7 @@ def main():
     risk_metrics_path = DATA_DIR / "risk_metrics.json"
     garch_active = bool(report.get("filter_active", False))
     risk_payload = {
-        "timestamp": report.get("timestamp") or datetime.now().isoformat(),
+        "timestamp": report.get("timestamp") or datetime.now(timezone.utc).isoformat(),
         "var_95_daily": report.get("var_95"),
         "cvar_95_daily": report.get("cvar_95"),
         "cvar_ratio": report.get("cvar_ratio"),
@@ -275,6 +275,30 @@ def main():
 
     with open(risk_metrics_path, "w") as f:
         json.dump(risk_payload, f, indent=2, default=str)
+
+    # Mirror demote + measured honesty onto private .health_report so unified
+    # consumers that prefer health_report do not re-promote garch_active.
+    for key in (
+        "garch_active",
+        "garch_active_reason",
+        "runtime_role",
+        "coverage_diagnostics",
+        "measured_max_drawdown",
+        "measured_max_drawdown_pct",
+        "measured_current_drawdown",
+        "measured_current_drawdown_pct",
+        "max_drawdown_limit",
+        "max_drawdown_limit_pct",
+        "drawdown_field_semantics",
+        "current_drawdown",
+    ):
+        if key in risk_payload:
+            report[key] = risk_payload[key]
+    # Ensure measured NAV DD is primary; policy stays in limit fields only
+    if report.get("measured_max_drawdown") is not None:
+        report.pop("max_drawdown", None)
+    with open(report_path, "w") as f:
+        json.dump(report, f, indent=2, default=str)
 
     # Public dual-write: non-dotfile GARCH-CVaR for WWW / index consumers
     try:

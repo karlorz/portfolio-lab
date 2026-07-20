@@ -164,30 +164,65 @@ def _get_portfolio_section() -> Dict[str, Any]:
 
 
 def _normalize_risk_payload(metrics: Dict[str, Any], *, source: str) -> Dict[str, Any]:
-    """Map risk_metrics.json or GARCH .health_report.json into unified risk section."""
+    """Map risk_metrics.json or GARCH .health_report.json into unified risk section.
+
+    Drawdown honesty: prefer ``measured_max_drawdown`` over policy ``max_drawdown``
+    / ``max_drawdown_limit`` so operators never read −15 policy as live NAV DD.
+    GARCH active: honor explicit demote (``garch_active=false`` + runtime_role)
+    even when ``filter_active`` is still true on the private health report.
+    """
     # health_report uses var_95/cvar_95; risk_metrics uses var_95_daily/cvar_95_daily
     var_daily = metrics.get("var_95_daily", metrics.get("var_95"))
     cvar_daily = metrics.get("cvar_95_daily", metrics.get("cvar_95"))
     garch_active = metrics.get("garch_active")
     if garch_active is None:
         garch_active = bool(metrics.get("filter_active", False))
+    # Explicit demote always wins over filter_active residual true
+    if metrics.get("runtime_role") == "advisory_degraded":
+        garch_active = False
     garch_filtered = metrics.get("garch_filtered")
     if garch_filtered is None:
-        garch_filtered = bool(garch_active)
-    return {
+        garch_filtered = bool(metrics.get("filter_active", garch_active))
+    # Prefer measured NAV peak-to-trough; fall back to max_drawdown only when
+    # it is not the renamed policy limit slot.
+    measured_dd = metrics.get("measured_max_drawdown")
+    policy_limit = metrics.get("max_drawdown_limit")
+    raw_max_dd = metrics.get("max_drawdown")
+    if measured_dd is not None:
+        max_drawdown = measured_dd
+    elif raw_max_dd is not None:
+        max_drawdown = raw_max_dd
+    else:
+        max_drawdown = None
+    measured_cur = metrics.get("measured_current_drawdown")
+    current_dd = (
+        measured_cur if measured_cur is not None else metrics.get("current_drawdown")
+    )
+    out: Dict[str, Any] = {
         "available": True,
         "timestamp": metrics.get("timestamp"),
         "var_95_daily": var_daily,
         "cvar_95_daily": cvar_daily,
         "cvar_ratio": metrics.get("cvar_ratio"),
         "tail_severity": metrics.get("tail_severity"),
-        "max_drawdown": metrics.get("max_drawdown"),
-        "current_drawdown": metrics.get("current_drawdown"),
+        "max_drawdown": max_drawdown,
+        "current_drawdown": current_dd,
         "volatility_annual": metrics.get("volatility_annual"),
-        "garch_active": garch_active,
-        "garch_filtered": garch_filtered,
+        "garch_active": bool(garch_active),
+        "garch_filtered": bool(garch_filtered),
         "source": source,
     }
+    if measured_dd is not None:
+        out["measured_max_drawdown"] = measured_dd
+    if policy_limit is not None:
+        out["max_drawdown_limit"] = policy_limit
+    if metrics.get("drawdown_field_semantics"):
+        out["drawdown_field_semantics"] = metrics.get("drawdown_field_semantics")
+    if metrics.get("garch_active_reason"):
+        out["garch_active_reason"] = metrics.get("garch_active_reason")
+    if metrics.get("runtime_role"):
+        out["runtime_role"] = metrics.get("runtime_role")
+    return out
 
 
 def _payload_has_risk_metrics(
@@ -224,7 +259,13 @@ def _parse_ts(value: Any) -> Optional[datetime]:
 
 
 def _get_risk_section() -> Dict[str, Any]:
-    """Risk metrics: prefer fresher GARCH .health_report over orphan risk_metrics.json."""
+    """Risk metrics: prefer fresher dual-write SSOT; merge demote honesty.
+
+    ``risk_metrics.json`` carries coverage demote + measured DD after Batch AC.
+    Private ``.health_report.json`` may still echo ``filter_active=true`` without
+    demote fields. When timestamps are equal/near, prefer the payload that has
+    explicit ``garch_active`` / measured drawdown honesty.
+    """
     metrics = _read_json("risk_metrics.json")
     health = _read_json(".health_report.json")
 
@@ -237,23 +278,55 @@ def _get_risk_section() -> Dict[str, Any]:
     if not candidates:
         return {"available": False}
 
-    # Prefer newer timestamp; on tie prefer health_report (garch job SSOT)
-    def sort_key(item: tuple[str, Dict[str, Any], Optional[datetime]]):
-        source, _payload, ts = item
-        # missing ts sorts last
-        ts_ord = ts or datetime.min
-        source_rank = 0 if source == "health_report" else 1
-        return (ts_ord, -source_rank)
+    def honesty_rank(payload: Dict[str, Any]) -> int:
+        score = 0
+        if payload.get("measured_max_drawdown") is not None:
+            score += 2
+        if payload.get("garch_active") is not None:
+            score += 2
+        if payload.get("runtime_role") or payload.get("garch_active_reason"):
+            score += 1
+        if payload.get("max_drawdown_limit") is not None:
+            score += 1
+        return score
 
-    # max by timestamp, then health_report
+    # Prefer newer timestamp; on tie prefer higher honesty rank then risk_metrics
+    # (dual-write path carries demote after coverage check).
     best = max(
         candidates,
         key=lambda it: (
             it[2] or datetime.min,
-            1 if it[0] == "health_report" else 0,
+            honesty_rank(it[1]),
+            1 if it[0] == "risk_metrics" else 0,
         ),
     )
     source, payload, _ts = best
+    # Merge demote/measured fields from the sibling payload when missing
+    sibling = metrics if source == "health_report" else health
+    if isinstance(sibling, dict) and sibling:
+        merged = dict(payload)
+        for key in (
+            "measured_max_drawdown",
+            "measured_max_drawdown_pct",
+            "measured_current_drawdown",
+            "max_drawdown_limit",
+            "max_drawdown_limit_pct",
+            "drawdown_field_semantics",
+            "garch_active",
+            "garch_active_reason",
+            "runtime_role",
+            "coverage_diagnostics",
+        ):
+            if merged.get(key) is None and sibling.get(key) is not None:
+                merged[key] = sibling[key]
+        # Explicit false on sibling must demote even if health filter_active true
+        if sibling.get("garch_active") is False:
+            merged["garch_active"] = False
+            if sibling.get("runtime_role"):
+                merged["runtime_role"] = sibling["runtime_role"]
+            if sibling.get("garch_active_reason"):
+                merged["garch_active_reason"] = sibling["garch_active_reason"]
+        payload = merged
     return _normalize_risk_payload(payload, source=source)
 
 
