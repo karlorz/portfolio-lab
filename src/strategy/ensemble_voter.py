@@ -67,6 +67,12 @@ logger = logging.getLogger(__name__)
 # Starts 100% static, shifts to (1-BANDIT_MAX_BLEND)/BANDIT_MAX_BLEND after warmup
 BANDIT_MAX_BLEND: float = float(os.environ.get("ENSEMBLE_BANDIT_MAX_BLEND", "0.7"))
 BANDIT_WARMUP_DAYS: int = int(os.environ.get("ENSEMBLE_BANDIT_WARMUP_DAYS", "252"))
+# Skip apply_daily_bandit_rewards when |daily_return| is below this floor so
+# flat-NAV micro-noise (~1e-8 from performance.jsonl) does not advance
+# observations/reward_days or pollute arm history (sleeping-experts / noise floor).
+BANDIT_REWARD_NOISE_FLOOR: float = float(
+    os.environ.get("ENSEMBLE_BANDIT_REWARD_NOISE_FLOOR", "1e-6")
+)
 
 # Diversity floor — minimum weight for each active signal to prevent
 # weight concentration. Improves N_eff (effective signal count) by ensuring
@@ -1254,12 +1260,18 @@ class EnsembleVoter:
         sources: Optional[List[str]] = None,
         *,
         persist: bool = True,
+        noise_floor: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Apply one day of portfolio return as reward to ensemble bandit sources.
 
         Production training step: maps paper/portfolio daily return into
         ``update_bandit`` for each active signal source so observations leave
         cold_start. Bandit remains advisory (not live target_allocations).
+
+        Near-zero rewards (|r| < noise_floor, default
+        ``ENSEMBLE_BANDIT_REWARD_NOISE_FLOOR`` / 1e-6) are skipped entirely —
+        no arm history append, no observation increment, no reward_days step —
+        so flat paper NAV / floating-point dust cannot ramp blend.
 
         Returns summary with updates count and observation total.
         """
@@ -1269,8 +1281,34 @@ class EnsembleVoter:
             return {
                 "updates": 0,
                 "observations": int(self.bandit_observations),
+                "reward_days": int(getattr(self, "bandit_days", 0) or 0),
                 "skipped": True,
                 "reason": "invalid_daily_return",
+            }
+
+        floor = (
+            float(noise_floor)
+            if noise_floor is not None
+            else float(BANDIT_REWARD_NOISE_FLOOR)
+        )
+        if floor < 0:
+            floor = 0.0
+        if abs(reward) < floor:
+            logger.info(
+                "Skipping bandit reward update: |daily_return|=%.3e < noise_floor=%.3e",
+                abs(reward),
+                floor,
+            )
+            return {
+                "updates": 0,
+                "observations": int(self.bandit_observations),
+                "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                "days": int(getattr(self, "bandit_days", 0) or 0),
+                "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                "daily_return": reward,
+                "noise_floor": floor,
+                "skipped": True,
+                "reason": "reward_below_noise_floor",
             }
 
         if regime_name is None:
@@ -1298,6 +1336,7 @@ class EnsembleVoter:
             "bandit_days": int(self.bandit_days),
             "regime": regime_name,
             "daily_return": reward,
+            "noise_floor": floor,
             "skipped": False,
         }
 
@@ -1306,9 +1345,28 @@ class EnsembleVoter:
         performance_path: Optional[Path] = None,
         *,
         max_lines: int = 200,
+        prefer_daily_pnl: bool = True,
+        data_dir: Optional[Path] = None,
     ) -> Optional[float]:
-        """Read newest non-null daily_return from performance.jsonl (tail)."""
-        path = Path(performance_path) if performance_path is not None else DATA_DIR / "performance.jsonl"
+        """Read newest non-null daily_return for bandit training.
+
+        Prefer ``daily_pnl_latest.json`` (capture_daily_pnl SSOT) when present
+        and |return| is finite — avoids replaying flat-NAV micro-noise rows
+        that historically polluted performance.jsonl. Falls back to
+        performance.jsonl tail.
+        """
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        if prefer_daily_pnl:
+            pnl_path = root / "daily_pnl_latest.json"
+            if pnl_path.exists():
+                try:
+                    payload = json.loads(pnl_path.read_text(encoding="utf-8"))
+                    if isinstance(payload, dict) and "daily_return" in payload:
+                        return float(payload["daily_return"])
+                except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                    logger.debug("daily_pnl_latest read failed: %s", exc)
+
+        path = Path(performance_path) if performance_path is not None else root / "performance.jsonl"
         if not path.exists():
             return None
         try:

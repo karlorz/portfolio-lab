@@ -165,10 +165,47 @@ def main():
         "volatility_annual": report.get("volatility_annual"),
         "garch_filtered": bool(report.get("garch_filtered", report.get("filter_active", False))),
         "garch_active": bool(report.get("filter_active", False)),
+        "garch_params": {
+            "omega": report.get("garch_omega"),
+            "alpha": report.get("garch_alpha"),
+            "beta": report.get("garch_beta"),
+            "persistence": report.get("garch_persistence"),
+        }
+        if report.get("filter_active")
+        else None,
+        "conditional_volatility_current": report.get("conditional_volatility_current"),
         "source": "compute_garch_risk",
     }
     with open(risk_metrics_path, "w") as f:
         json.dump(risk_payload, f, indent=2, default=str)
+
+    # Append sparse history so operators can see GARCH job cadence (keep last 720).
+    history_path = DATA_DIR / "risk_metrics_history.json"
+    try:
+        history = []
+        if history_path.exists():
+            try:
+                loaded = json.loads(history_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, list):
+                    history = loaded
+            except (json.JSONDecodeError, OSError):
+                history = []
+        history.append(
+            {
+                "timestamp": risk_payload["timestamp"],
+                "var_95": risk_payload["var_95_daily"],
+                "cvar_95": risk_payload["cvar_95_daily"],
+                "cvar_ratio": risk_payload["cvar_ratio"],
+                "tail_severity": risk_payload["tail_severity"],
+                "garch_active": risk_payload["garch_active"],
+                "source": "compute_garch_risk",
+            }
+        )
+        history = history[-720:]
+        with open(history_path, "w") as f:
+            json.dump(history, f, indent=2, default=str)
+    except OSError as exc:
+        print(f"  WARNING: failed to append risk_metrics_history: {exc}")
 
     print(f"  VaR 95%:      {metrics.var_95:.2f}%")
     print(f"  CVaR 95%:     {metrics.cvar_95:.2f}%")
@@ -179,6 +216,7 @@ def main():
         print(f"  Persistence:  {metrics.garch_persistence:.4f}")
         print(f"  Cond Vol:     {metrics.conditional_volatility_current:.2f}%")
     print(f"  Report saved: {report_path}")
+    print(f"  Risk metrics: {risk_metrics_path}")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,6 @@
 """Tests for BanditWeighter — epsilon-greedy contextual bandit for ensemble signals."""
+import json
+
 import numpy as np
 import pytest
 from src.strategy.ensemble_voter import BanditWeighter, EnsembleVoter, Regime, SignalSource
@@ -286,7 +288,10 @@ class TestEnsembleBanditDailyRewardPersistence:
             '{"timestamp":"2026-07-02","daily_return":0.012}\n',
             encoding="utf-8",
         )
-        ret = EnsembleVoter.load_latest_daily_return_from_performance(perf)
+        # Isolate from live DATA_DIR/daily_pnl_latest.json
+        ret = EnsembleVoter.load_latest_daily_return_from_performance(
+            perf, prefer_daily_pnl=False, data_dir=tmp_path
+        )
         assert abs(ret - 0.012) < 1e-9
 
     def test_bandit_get_load_state_roundtrip(self):
@@ -360,3 +365,56 @@ class TestBanditWarmupDaySemantics:
         assert voter.bandit_days == 2
         voter2 = EnsembleVoter(data_path=tmp_path)
         assert voter2.bandit_days == 2
+
+
+class TestBanditRewardNoiseFloor:
+    """Near-zero rewards must not advance observations or reward_days."""
+
+    def test_skip_below_default_noise_floor(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        # Historical pollution magnitude from flat paper NAV
+        summary = voter.apply_daily_bandit_rewards(
+            -3.144e-8, regime_name="NORMAL", persist=True
+        )
+        assert summary["skipped"] is True
+        assert summary["reason"] == "reward_below_noise_floor"
+        assert summary["updates"] == 0
+        assert voter.bandit_observations == 0
+        assert voter.bandit_days == 0
+        # No state file write required when skipped; if written, days stay 0
+        if (tmp_path / "ensemble_bandit_state.json").exists():
+            state = json.loads((tmp_path / "ensemble_bandit_state.json").read_text())
+            assert int(state.get("observations") or 0) == 0
+
+    def test_accept_above_noise_floor(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        summary = voter.apply_daily_bandit_rewards(
+            -0.000207, regime_name="NORMAL", persist=True
+        )
+        assert summary["skipped"] is False
+        assert summary["updates"] >= 1
+        assert voter.bandit_days == 1
+        assert voter.bandit_observations == summary["updates"]
+
+    def test_custom_noise_floor_override(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        # 1bp reward below custom 10bp floor
+        summary = voter.apply_daily_bandit_rewards(
+            0.0001, regime_name="NORMAL", persist=False, noise_floor=0.001
+        )
+        assert summary["skipped"] is True
+        assert voter.bandit_observations == 0
+
+    def test_prefer_daily_pnl_latest_over_performance_jsonl(self, tmp_path):
+        (tmp_path / "performance.jsonl").write_text(
+            '{"daily_return": -3.14e-8}\n',
+            encoding="utf-8",
+        )
+        (tmp_path / "daily_pnl_latest.json").write_text(
+            json.dumps({"daily_return": -0.000207, "date": "2026-07-20"}),
+            encoding="utf-8",
+        )
+        ret = EnsembleVoter.load_latest_daily_return_from_performance(
+            data_dir=tmp_path, prefer_daily_pnl=True
+        )
+        assert abs(ret - (-0.000207)) < 1e-12
