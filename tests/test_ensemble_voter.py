@@ -1427,9 +1427,9 @@ class TestBanditWeighter:
 class TestGetBlendedWeights:
     """Tests for EnsembleVoter.get_blended_weights()."""
 
-    def test_cold_start_returns_static(self):
+    def test_cold_start_returns_static(self, tmp_path):
         """No bandit data should return the static REGIME_WEIGHTS unchanged."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         result = voter.get_blended_weights('NORMAL')
         assert isinstance(result, dict)
         # All SignalSource keys
@@ -1446,9 +1446,9 @@ class TestGetBlendedWeights:
         static = REGIME_WEIGHTS[Regime.NORMAL]
         assert result.keys() == static.keys()
 
-    def test_with_bandit_data_blends(self):
+    def test_with_bandit_data_blends(self, tmp_path):
         """Bandit data should produce blended weights."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         # Add bandit observations
         for _ in range(30):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
@@ -1459,9 +1459,9 @@ class TestGetBlendedWeights:
         expected_blend = min(0.7, 30 / 252 * 0.7)
         assert expected_blend > 0.0
 
-    def test_bandit_missing_regime_returns_static(self):
+    def test_bandit_missing_regime_returns_static(self, tmp_path):
         """Bandit data in one regime should not affect blend for another."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for _ in range(30):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
         # CRISIS has no bandit data, should return static
@@ -1478,9 +1478,9 @@ class TestGetBlendedWeights:
             total = sum(result.values())
             assert abs(total - 1.0) < 0.05, f"{regime} blended weights sum to {total:.4f}"
 
-    def test_full_blend_after_252_observations(self):
+    def test_full_blend_after_252_observations(self, tmp_path):
         """After 252 bandit observations, the blend should be at max (70% bandit)."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for i in range(252):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01 + 0.001 * (i % 3))
             voter.update_bandit('cross_asset_rv', 'NORMAL', 0.02 + 0.001 * (i % 2))
@@ -1489,18 +1489,18 @@ class TestGetBlendedWeights:
         assert isinstance(result, dict)
         assert all(isinstance(k, SignalSource) for k in result)
 
-    def test_bandit_with_some_signals_missing(self):
+    def test_bandit_with_some_signals_missing(self, tmp_path):
         """When bandit has data for some but not all signals, all should still appear."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for _ in range(30):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
             voter.update_bandit('cross_asset_rv', 'NORMAL', 0.02)
         result = voter.get_blended_weights('NORMAL')
         assert len(result) == len([s for s in SignalSource])
 
-    def test_blended_weights_differ_by_regime(self):
+    def test_blended_weights_differ_by_regime(self, tmp_path):
         """Different regimes should produce different blended weights."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for _ in range(30):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
             voter.update_bandit('multi_speed_momentum', 'HIGH_VOL', -0.01)
@@ -1580,10 +1580,10 @@ class TestApplyGoalRiskBudget:
 
     @patch('src.config.goals.load_goals')
     @patch('src.config.goals.get_risk_budget_multiplier')
-    def test_risk_mult_0_5_reduces_spy_by_half(self, mock_get_rbm, mock_load_goals):
+    def test_risk_mult_0_5_reduces_spy_by_half(self, tmp_path, mock_get_rbm, mock_load_goals):
         """risk_mult=0.5 should cut SPY weight in half (pre-normalization)."""
         mock_get_rbm.return_value = 0.5
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         base = {'SPY': 1.0}  # Only SPY, no safe assets
         result = voter.apply_goal_risk_budget(base)
         # With only SPY and no safe assets, risky_reduction stays but has nowhere to go
@@ -1598,29 +1598,29 @@ class TestApplyGoalRiskBudget:
 class TestUpdateBandit:
     """Tests for EnsembleVoter.update_bandit()."""
 
-    def test_increments_observation_count(self):
-        voter = EnsembleVoter()
+    def test_increments_observation_count(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         assert voter.bandit_observations == 0
         voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
         assert voter.bandit_observations == 1
 
-    def test_delegates_to_bandit_update(self):
-        voter = EnsembleVoter()
+    def test_delegates_to_bandit_update(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('cross_asset_rv', 'HIGH_VOL', -0.02)
         # Bandit should have the history
         assert 'HIGH_VOL' in voter.bandit._history
         assert 'cross_asset_rv' in voter.bandit._history['HIGH_VOL']
         assert voter.bandit._history['HIGH_VOL']['cross_asset_rv'] == [-0.02]
 
-    def test_multiple_updates_accumulate(self):
-        voter = EnsembleVoter()
+    def test_multiple_updates_accumulate(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         for _ in range(5):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
         assert voter.bandit_observations == 5
         assert len(voter.bandit._history['NORMAL']['multi_speed_momentum']) == 5
 
-    def test_update_different_regimes(self):
-        voter = EnsembleVoter()
+    def test_update_different_regimes(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
         voter.update_bandit('multi_speed_momentum', 'CRISIS', -0.03)
         assert 'NORMAL' in voter.bandit._history
@@ -1830,9 +1830,9 @@ class TestGetBLViewsAdditional:
             assert 'views' in result
             assert result['health_scores_used'] == {}
 
-    def test_get_bl_views_default_prior_equal(self):
+    def test_get_bl_views_default_prior_equal(self, tmp_path):
         """Default prior should be 'equal'."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         result = voter.get_bl_views()
         assert result['prior'] == 'equal'
 
@@ -1844,17 +1844,17 @@ class TestGetBLViewsAdditional:
 class TestUpdateBanditAdditional:
     """Additional update_bandit edge cases."""
 
-    def test_update_bandit_with_nan_return(self):
+    def test_update_bandit_with_nan_return(self, tmp_path):
         """NaN daily_return should be stored (valid data point)."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', float('nan'))
         assert voter.bandit_observations == 1
         hist = voter.bandit._history['NORMAL']['multi_speed_momentum']
         assert np.isnan(hist[0])
 
-    def test_update_bandit_with_negative_returns(self):
+    def test_update_bandit_with_negative_returns(self, tmp_path):
         """Negative daily returns should be stored correctly."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'CRISIS', -0.05)
         voter.update_bandit('multi_speed_momentum', 'CRISIS', -0.03)
         assert len(voter.bandit._history['CRISIS']['multi_speed_momentum']) == 2
@@ -3027,18 +3027,18 @@ class TestGetBlendedWeightsEdgeCases:
         static = REGIME_WEIGHTS[Regime.NORMAL]
         assert result.keys() == static.keys()
 
-    def test_zero_bandit_observations(self):
+    def test_zero_bandit_observations(self, tmp_path):
         """Zero bandit observations should return purely static weights."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         assert voter.bandit_observations == 0
         result = voter.get_blended_weights('NORMAL')
         static = REGIME_WEIGHTS[Regime.NORMAL]
         for k, v in static.items():
             assert result[k] == pytest.approx(v, abs=0.01)
 
-    def test_blend_max_after_many_observations(self):
+    def test_blend_max_after_many_observations(self, tmp_path):
         """Observations exceeding 252 should cap blend at 70%."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for i in range(300):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01 + 0.001 * (i % 5))
         # blend should be capped at 0.7
@@ -3432,28 +3432,28 @@ class TestGetBLViewsEdgeCases:
 class TestUpdateBanditInteraction:
     """Interaction edge cases for update_bandit()."""
 
-    def test_update_bandit_extreme_return(self):
+    def test_update_bandit_extreme_return(self, tmp_path):
         """Extreme daily return (+100%) should not crash."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', 1.0)
         assert voter.bandit_observations == 1
 
-    def test_update_bandit_extreme_negative_return(self):
+    def test_update_bandit_extreme_negative_return(self, tmp_path):
         """Extreme daily return (-100%) should not crash."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', -1.0)
         assert voter.bandit_observations == 1
 
-    def test_update_bandit_inf_return(self):
+    def test_update_bandit_inf_return(self, tmp_path):
         """Inf daily return should be storable (valid float)."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', float('inf'))
         assert voter.bandit_observations == 1
         assert np.isinf(voter.bandit._history['NORMAL']['multi_speed_momentum'][0])
 
-    def test_update_bandit_all_regimes(self):
+    def test_update_bandit_all_regimes(self, tmp_path):
         """update_bandit should work for all five regimes."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for regime_name in ['NORMAL', 'HIGH_VOL', 'CRISIS', 'RECOVERY', 'LOW_VOL']:
             voter.update_bandit('multi_speed_momentum', regime_name, 0.01)
         assert voter.bandit_observations == 5
