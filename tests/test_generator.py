@@ -6520,3 +6520,57 @@ def test_factor_rotation_signal_is_canonical_not_dual_authority():
     assert "research_caveats" in src
     # No silent strength rounding fork on dashboard branch
     assert 'round(factor_rotation_result.get("signal_strength"' not in src
+
+
+def test_configured_source_status_has_effective_and_active_weights():
+    """Stale/missing sources get effective_weight 0; actives renorm to sum≈1."""
+    statuses = DashboardGenerator._build_configured_source_status(
+        regime="normal",
+        source_breakdown=[
+            {"source": "alternative_data", "weight": 0.2},
+            {"source": "cross_asset_rv", "weight": 0.2},
+        ],
+    )
+    # Force google_trends stale-like missing with disclosure
+    by = {r["source"]: r for r in statuses}
+    # At least some configured rows exist
+    assert len(statuses) >= 2
+    for row in statuses:
+        assert "effective_weight" in row
+        assert "active_weight" in row
+        assert "configured_weight" in row
+        if not row.get("contributing"):
+            assert row["effective_weight"] == 0.0
+            assert row["active_weight"] == 0.0
+    rollup = DashboardGenerator._ensemble_active_weights_rollup(statuses)
+    assert "active_weights" in rollup
+    assert "dropped_weight_mass" in rollup
+    if rollup["active_weights"]:
+        assert abs(rollup["active_weights_sum"] - 1.0) < 0.02
+
+
+def test_garch_cvar_demotes_when_coverage_fails(tmp_path, monkeypatch):
+    """coverage_pass false must demote garch_active for primary risk use."""
+    gen, _ = _make_generator(tmp_path)
+    # Seed health report with filter_active true
+    (tmp_path / ".health_report.json").write_text(json.dumps({
+        "garch_filtered": True,
+        "filter_active": True,
+        "cvar_95": -2.0,
+        "var_95": -1.5,
+        "cvar_ratio": 1.3,
+        "conditional_volatility_current": 1.2,
+        "garch_persistence": 0.9,
+    }))
+    with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+        with patch(
+            "src.monitor.conformal_risk.conformal_coverage_diagnostics",
+            return_value={"coverage_pass": False, "kupiec_pass": False},
+        ):
+            with patch("src.monitor.conformal_risk.conformal_cvar", return_value=-0.02):
+                with patch("src.monitor.conformal_risk.conformal_var", return_value=-0.01):
+                    data = gen._load_garch_cvar_data()
+    assert data["garch_active"] is False
+    assert data.get("runtime_role") == "advisory_degraded"
+    assert "coverage" in (data.get("garch_active_reason") or "").lower()
+    gen.conn.close()

@@ -22,7 +22,7 @@ Usage:
 import json
 import logging
 import sqlite3
-from src.paths import sqlite_connect
+from src.paths import sqlite_connect, PUBLIC_DATA_DIR
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -653,12 +653,24 @@ class PerformanceAttribution:
         return report
 
     def save_report(self, report: AttributionReport) -> Path:
-        """Save attribution report to disk."""
+        """Save attribution report to private DATA_DIR and public dual-write."""
         self.attribution_dir.mkdir(parents=True, exist_ok=True)
         filename = f"attribution_{report.timestamp[:10]}.json"
         path = self.attribution_dir / filename
-        save_results_json(report.to_dict(), output_path=str(path))
+        payload = report.to_dict()
+        save_results_json(payload, output_path=str(path))
         logger.info("Saved attribution report: %s", path)
+        # Public latest for dual-tree SSOT / index consumers
+        try:
+            public_dir = Path(PUBLIC_DATA_DIR) / "attribution"
+            public_dir.mkdir(parents=True, exist_ok=True)
+            latest = public_dir / "latest.json"
+            dated = public_dir / filename
+            save_results_json(payload, output_path=str(latest))
+            save_results_json(payload, output_path=str(dated))
+            logger.info("Published attribution to public: %s", latest)
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Public attribution dual-write failed: %s", exc)
         return path
 
     def load_latest_report(self) -> Optional[AttributionReport]:

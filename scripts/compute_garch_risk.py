@@ -20,7 +20,7 @@ from datetime import datetime
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.paths import MARKET_DB, DATA_DIR, BASE_ALLOCATION
+from src.paths import MARKET_DB, DATA_DIR, PUBLIC_DATA_DIR, BASE_ALLOCATION
 from src.monitor.garch_cvar import calculate_garch_cvar, ARCH_AVAILABLE
 
 
@@ -178,6 +178,26 @@ def main():
     }
     with open(risk_metrics_path, "w") as f:
         json.dump(risk_payload, f, indent=2, default=str)
+
+    # Public dual-write: non-dotfile GARCH-CVaR for WWW / index consumers
+    try:
+        public_root = Path(PUBLIC_DATA_DIR)
+        public_root.mkdir(parents=True, exist_ok=True)
+        public_payload = {
+            **risk_payload,
+            "schema_version": "garch-cvar/v1",
+            "private_health_report": str(report_path),
+            "drawdown_field_semantics": (
+                "max_drawdown on private .health_report may be policy limit; "
+                "prefer measured fields when present"
+            ),
+        }
+        public_path = public_root / "garch_cvar.json"
+        with open(public_path, "w") as f:
+            json.dump(public_payload, f, indent=2, default=str)
+        print(f"  Public GARCH: {public_path}")
+    except OSError as exc:
+        print(f"  WARNING: public garch_cvar dual-write failed: {exc}")
 
     # Append sparse history so operators can see GARCH job cadence (keep last 720).
     history_path = DATA_DIR / "risk_metrics_history.json"

@@ -1247,16 +1247,21 @@ class DashboardGenerator:
             if isinstance(row, dict) and row.get("source")
         }
         statuses: List[Dict[str, Any]] = []
+        dropped_weight_mass = 0.0
+        contributing_mass = 0.0
 
         for source, configured_weight in configured_weights.items():
+            cfg_w = float(configured_weight or 0.0)
             row = rows_by_source.get(source)
             collected = row is not None
+            effective_weight = 0.0
             if row is not None:
                 try:
                     row_weight = float(row.get("weight", 0.0))
                 except (TypeError, ValueError):
                     row_weight = 0.0
                 contributing = bool(np.isfinite(row_weight) and row_weight > 0)
+                effective_weight = row_weight if contributing else 0.0
                 status = "active" if contributing else "zero_weight"
                 reason = (
                     "Collected and contributing to the ensemble vote."
@@ -1270,11 +1275,18 @@ class DashboardGenerator:
                 if source == "google_trends":
                     status, reason = DashboardGenerator._google_trends_inactive_disclosure()
 
+            if contributing:
+                contributing_mass += effective_weight
+            else:
+                # Stale/missing/zero: configured mass does not participate in vote
+                dropped_weight_mass += cfg_w
+
             statuses.append({
                 "source": source,
                 "label": DashboardGenerator._format_ensemble_source_label(source),
                 "configured": True,
-                "configured_weight": round(configured_weight, 5),
+                "configured_weight": round(cfg_w, 5),
+                "effective_weight": round(effective_weight, 5),
                 "collected": collected,
                 "active": collected and contributing,
                 "contributing": contributing,
@@ -1282,7 +1294,45 @@ class DashboardGenerator:
                 "reason": reason,
             })
 
+        # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
+        for row in statuses:
+            if contributing_mass > 0 and row.get("contributing"):
+                row["active_weight"] = round(
+                    float(row["effective_weight"]) / contributing_mass, 5
+                )
+            else:
+                row["active_weight"] = 0.0
+
         return statuses
+
+    @staticmethod
+    def _ensemble_active_weights_rollup(
+        configured_source_status: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Rollup renormed active weights + dropped configured mass after stale drop."""
+        active_weights: Dict[str, float] = {}
+        dropped = 0.0
+        active_mass = 0.0
+        for row in configured_source_status or []:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("source") or "")
+            if row.get("contributing"):
+                aw = float(row.get("active_weight") or 0.0)
+                active_weights[name] = aw
+                active_mass += float(row.get("effective_weight") or 0.0)
+            else:
+                dropped += float(row.get("configured_weight") or 0.0)
+        return {
+            "active_weights": active_weights,
+            "dropped_weight_mass": round(dropped, 5),
+            "active_weight_mass": round(active_mass, 5),
+            "active_weights_sum": round(sum(active_weights.values()), 5),
+            "weight_disclosure": (
+                "active_weights renormalized over contributing sources; "
+                "stale/missing configured mass in dropped_weight_mass"
+            ),
+        }
 
     @staticmethod
     def _build_ensemble_adaptive_learning_disclosure(ensemble_result: Any) -> Dict[str, Any]:
@@ -1673,6 +1723,9 @@ class DashboardGenerator:
                     source_breakdown,
                     configured_source_status=configured_source_status,
                 )
+                weight_rollup = self._ensemble_active_weights_rollup(
+                    configured_source_status
+                )
                 ensemble_signal = {
                     "regime": ensemble_result.regime.value,
                     "regime_confidence": ensemble_result.regime_confidence,
@@ -1684,6 +1737,7 @@ class DashboardGenerator:
                     "duration_bias": round(ensemble_result.duration_bias, 3),
                     "gold_bias": round(ensemble_result.gold_bias, 3),
                     **source_counts,
+                    **weight_rollup,
                     "configured_source_status": configured_source_status,
                     "n_eff": round(getattr(ensemble_result, 'n_eff', 0), 2),
                     "weight_entropy": round(getattr(ensemble_result, 'weight_entropy', 0), 4),
@@ -2512,6 +2566,19 @@ class DashboardGenerator:
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Using default values: %s", e)
 
+        # Coverage fail → demote primary GARCH role (still publish diagnostics)
+        cov = garch_cvar.get("coverage_diagnostics")
+        if isinstance(cov, dict):
+            coverage_pass = cov.get("coverage_pass")
+            if coverage_pass is False and garch_cvar.get("garch_active"):
+                garch_cvar["garch_active"] = False
+                garch_cvar["runtime_role"] = "advisory_degraded"
+                garch_cvar["garch_active_reason"] = (
+                    "coverage_pass=false (Kupiec/coverage diagnostics failed); "
+                    "GARCH not primary risk authority"
+                )
+            elif coverage_pass is True:
+                garch_cvar.setdefault("runtime_role", "primary")
         return garch_cvar
 
     def _load_entropy_data(self) -> Dict:
@@ -4485,6 +4552,11 @@ class DashboardGenerator:
                 ensemble["source_breakdown"],
                 configured_source_status=ensemble.get("configured_source_status"),
             ))
+            ensemble.update(
+                self._ensemble_active_weights_rollup(
+                    ensemble.get("configured_source_status") or []
+                )
+            )
 
         return output
 
