@@ -565,15 +565,26 @@ class GraduationChecklist:
             description=self.criteria["min_trading_days"]["description"],
         )
 
+    @staticmethod
+    def _sharpe_plausibility(sharpe: float) -> tuple[bool, Optional[str]]:
+        """Sharpe > 3.0 is treated as implausible (short-sample / artifact).
+
+        Honesty contract: keep the **raw** value for operators; fail the gate.
+        Never coerce to 0.0 (looked like measured zero performance).
+        """
+        if sharpe > 3.0:
+            return False, (
+                f"implausible raw Sharpe {sharpe:.2f} > 3.0 "
+                "(likely short-sample or near-zero vol artifact; gate fails)"
+            )
+        return True, None
+
     def _check_sharpe(self, state: Dict) -> CheckResult:
         """Check rolling Sharpe ratio."""
         # Prefer pre-computed summary
         summary = state.get("paper_trading_summary", {})
         if summary.get("sharpe", 0) > 0:
-            sharpe = summary["sharpe"]
-            # Sanity cap: any Sharpe > 3.0 is unrealistic (intra-day artifact)
-            if sharpe > 3.0:
-                sharpe = 0.0
+            sharpe = float(summary["sharpe"])
         else:
             portfolio = state.get("portfolio", {})
             history = portfolio.get("history", [])
@@ -603,17 +614,18 @@ class GraduationChecklist:
             daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
             sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0
 
-            # Sanity cap: any Sharpe > 3.0 is unrealistic (intra-day artifact)
-            if sharpe > 3.0:
-                sharpe = 0.0
-
         required = float(self.criteria["min_sharpe"]["value"])
+        plausible, note = self._sharpe_plausibility(sharpe)
+        desc = self.criteria["min_sharpe"]["description"]
+        if note:
+            desc = f"{desc} — {note}"
         return CheckResult(
             name="min_sharpe",
-            passed=sharpe >= required,
+            # Implausible high Sharpe fails even if numerically above threshold
+            passed=bool(plausible and sharpe >= required),
             value=round(sharpe, 2),
             required=required,
-            description=self.criteria["min_sharpe"]["description"],
+            description=desc,
         )
 
     def _check_drawdown(self, state: Dict) -> CheckResult:
@@ -821,10 +833,8 @@ class GraduationChecklist:
         # Prefer pre-computed summary for Sharpe
         summary = state.get("paper_trading_summary", {})
         if summary.get("sharpe", 0) > 0:
-            sharpe = summary["sharpe"]
-            n_days = summary.get("days_tracked", 0)
-            if sharpe > 3.0:
-                sharpe = 0.0
+            sharpe = float(summary["sharpe"])
+            n_days = int(summary.get("days_tracked", 0) or 0)
         else:
             # Compute Sharpe from portfolio history (same as _check_sharpe)
             portfolio = state.get("portfolio", {})
@@ -850,8 +860,20 @@ class GraduationChecklist:
             daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
             sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
             n_days = len(recent)
-            if sharpe > 3.0:
-                sharpe = 0.0
+
+        plausible, note = self._sharpe_plausibility(sharpe)
+        desc = self.criteria["min_dsr"]["description"]
+        if not plausible:
+            # Do not feed implausible Sharpe into DSR as if it were real skill
+            if note:
+                desc = f"{desc} — {note}; DSR not computed on implausible input"
+            return CheckResult(
+                name="min_dsr",
+                passed=False,
+                value=0.0,
+                required=required,
+                description=desc,
+            )
 
         try:
             from src.backtest.metrics import compute_deflated_sharpe_ratio
@@ -867,7 +889,7 @@ class GraduationChecklist:
             passed=dsr >= required,
             value=round(dsr, 4),
             required=required,
-            description=self.criteria["min_dsr"]["description"],
+            description=desc,
         )
 
     def _check_regime_coverage(self, state: Dict) -> CheckResult:
@@ -1000,13 +1022,11 @@ class GraduationChecklist:
         """
         required = self.criteria["sharpe_ci_lower"]["value"]
 
-        # Get Sharpe from the same source as _check_sharpe
+        # Get Sharpe from the same source as _check_sharpe (raw, no silent zero)
         summary = state.get("paper_trading_summary", {})
         if summary.get("sharpe", 0) > 0:
-            sharpe = summary["sharpe"]
-            n_days = summary.get("days_tracked", 0)
-            if sharpe > 3.0:
-                sharpe = 0.0
+            sharpe = float(summary["sharpe"])
+            n_days = int(summary.get("days_tracked", 0) or 0)
         else:
             portfolio = state.get("portfolio", {})
             history = portfolio.get("history", [])
@@ -1031,8 +1051,20 @@ class GraduationChecklist:
             daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
             sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
             n_days = len(recent)
-            if sharpe > 3.0:
-                sharpe = 0.0
+
+        desc = self.criteria["sharpe_ci_lower"]["description"]
+        plausible, note = self._sharpe_plausibility(sharpe)
+        if not plausible:
+            if note:
+                desc = f"{desc} — {note}; CI not trusted on implausible point estimate"
+            return CheckResult(
+                name="sharpe_ci_lower",
+                passed=False,
+                # Publish raw point estimate (not zero) so operators see the artifact
+                value=round(sharpe, 4),
+                required=required,
+                description=desc,
+            )
 
         if n_days < 5:
             return CheckResult(
@@ -1040,7 +1072,7 @@ class GraduationChecklist:
                 passed=False,
                 value=0.0,
                 required=required,
-                description=self.criteria["sharpe_ci_lower"]["description"],
+                description=desc,
             )
 
         # Compute 75% CI lower bound
@@ -1055,7 +1087,7 @@ class GraduationChecklist:
             passed=ci_lower >= required,
             value=round(ci_lower, 4),
             required=required,
-            description=self.criteria["sharpe_ci_lower"]["description"],
+            description=desc,
         )
 
 

@@ -174,7 +174,7 @@ class TestSharpeCheck:
         assert result.passed is False, f"Sharpe {result.value} should be below 0.50"
 
     def test_fails_with_unrealistic_sharpe(self):
-        # Sharpe > 3.0 should be treated as failing (intra-day artifact)
+        # Sharpe > 3.0 fails gate but keeps **raw** value (not coerced to 0.0)
         # All identical daily returns cause near-zero std -> unrealistic Sharpe
         history = [
             {"timestamp": f"2026-05-{i+1:02d}T00:00:00", "total_value": 100000, "daily_return": 0.01}
@@ -183,7 +183,9 @@ class TestSharpeCheck:
         state = _make_state_file(None, {"portfolio": {"history": history}})
         checklist = GraduationChecklist()
         result = checklist._check_sharpe(state)
-        assert result.passed is False, f"Sharpe {result.value} should cap at 3.0"
+        assert result.passed is False, f"Sharpe {result.value} should fail implausibility gate"
+        assert result.value > 3.0, f"raw implausible Sharpe must be published, got {result.value}"
+        assert "implausible" in (result.description or "").lower()
 
     def test_insufficient_data(self):
         state = _make_state_file(None, {"portfolio": {"history": _make_daily_history(2)}})
@@ -752,7 +754,7 @@ class TestGraduationChecklistExtended:
     # --- _check_sharpe edge cases ---
 
     def test_sharpe_with_constant_returns_fails(self):
-        """Constant returns produce infinite/undefined Sharpe → capped."""
+        """Constant returns produce inflated Sharpe → fail gate, keep raw value."""
         history = [
             {"timestamp": f"2026-05-{i+1:02d}T00:00:00", "total_value": 100000, "daily_return": 0.01}
             for i in range(63)
@@ -760,7 +762,8 @@ class TestGraduationChecklistExtended:
         state = _make_state_file(None, {"portfolio": {"history": history}})
         checklist = GraduationChecklist()
         result = checklist._check_sharpe(state)
-        assert result.passed is False  # Capped at 3.0 → set to 0.0
+        assert result.passed is False
+        assert result.value > 3.0  # never silent 0.0
 
     def test_sharpe_exactly_at_threshold(self):
         """Sharpe exactly at 0.50 should pass."""
@@ -1273,7 +1276,7 @@ class TestEdgeCasesExtended:
     # --- _check_dsr edge cases ---
 
     def test_dsr_rejects_unrealistic_sharpe(self):
-        """Sharpe > 3.0 → capped to 0.0 → DSR computed on 0 Sharpe."""
+        """Sharpe > 3.0 → DSR gate fails without feeding implausible input as skill."""
         # Build returns with std near 0 to produce inflated Sharpe
         returns = [0.001] * 63  # All same → std ~ 0 → Sharpe → inf
         history = [
@@ -1284,7 +1287,8 @@ class TestEdgeCasesExtended:
         checklist = GraduationChecklist()
         result = checklist._check_dsr(state)
         assert isinstance(result.value, float)
-        # Should not raise
+        assert result.passed is False
+        assert "implausible" in (result.description or "").lower()
 
     # --- _check_trading_days edge cases ---
 

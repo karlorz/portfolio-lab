@@ -51,7 +51,16 @@ class VolParityAllocation:
     rebalance_reason: Optional[str]
     
     def to_dict(self) -> Dict:
-        return asdict(self)
+        out = asdict(self)
+        # Unit honesty: *_pct fields are percent of portfolio (0–100), not fractions
+        out["weight_unit"] = "percent_of_portfolio_0_100"
+        out["live_authoritative"] = False
+        out["role"] = "advisory_research_sleeve"
+        out["description"] = (
+            "Volatility-parity research allocation (percent units); "
+            "not signals.json target_allocations / order-routing authority"
+        )
+        return out
     
     @property
     def total_allocation(self) -> float:
