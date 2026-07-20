@@ -630,6 +630,51 @@ class TestDecomposeAsset:
         total_from_components = ad.systematic_var + ad.idiosyncratic_var
         assert abs(total_from_components - ad.total_var) < 1e-10
 
+    def test_linear_combo_of_factors_high_r_squared(self):
+        """Asset that is a linear combo of factors must get R² near 1 (not clipped 0)."""
+        rng = np.random.default_rng(7)
+        n = 120
+        # Factor proxy prices (correlated random walks)
+        f_eq = 100 * np.exp(np.cumsum(rng.normal(0.0004, 0.01, n)))
+        f_rate = 100 * np.exp(np.cumsum(rng.normal(0.0001, 0.006, n)))
+        f_gold = 100 * np.exp(np.cumsum(rng.normal(0.0002, 0.008, n)))
+        f_fx = 100 * np.exp(np.cumsum(rng.normal(0.0001, 0.007, n)))
+        # Asset return ≈ 0.6*eq + 0.3*rate + 0.1*gold (via price integration)
+        eq_r = np.diff(np.log(f_eq))
+        rate_r = np.diff(np.log(f_rate))
+        gold_r = np.diff(np.log(f_gold))
+        asset_r = 0.6 * eq_r + 0.3 * rate_r + 0.1 * gold_r
+        asset_px = 100 * np.exp(np.concatenate([[0.0], np.cumsum(asset_r)]))
+        prices = {
+            "SPY": f_eq,
+            "SYN": asset_px,
+            "TLT": f_rate,
+            "GLD": f_gold,
+            "EFA": f_fx,
+            "BTC-USD": 100 * np.exp(np.cumsum(rng.normal(0.0, 0.02, n))),
+            "ETH-USD": 100 * np.exp(np.cumsum(rng.normal(0.0, 0.025, n))),
+        }
+        decomposer = RiskDecomposer(window=60, prices_data=prices)
+        ad = decomposer.decompose_asset("SYN", 1.0)
+        assert ad is not None
+        assert ad.r_squared > 0.85, f"expected high R², got {ad.r_squared}"
+        assert ad.systematic_var > 0
+        assert ad.systematic_var + ad.idiosyncratic_var == pytest.approx(ad.total_var, abs=1e-12)
+
+    def test_multivariate_ols_perfect_fit(self):
+        """_ols_multivariate recovers known betas and R²≈1."""
+        from src.monitor.risk_decomposition import _ols_multivariate
+
+        rng = np.random.default_rng(0)
+        n = 80
+        X = rng.normal(size=(n, 3))
+        true_beta = np.array([0.5, -0.2, 0.8])
+        y = X @ true_beta  # no noise
+        beta, r2, resid, t_stats, p_values = _ols_multivariate(X, y)
+        assert np.allclose(beta, true_beta, atol=1e-8)
+        assert r2 > 0.999
+        assert np.allclose(resid, 0.0, atol=1e-8)
+
 
 class TestPortfolioDecomposition:
     def test_default_weights(self, synthetic_prices):
