@@ -3252,6 +3252,11 @@ class DashboardGenerator:
             "spy_comparison": spy_comparison,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+        # Operator lag detection: same stamp as signals.json full dashboard runs.
+        sha = _generator_git_sha_short()
+        if sha:
+            output["generator_git_sha"] = sha
+            output["generator_git_sha_status"] = "full_generate"
         
         out_path = PUBLIC_DIR / "stats.json"
         save_results_json(output, output_path=str(out_path))
