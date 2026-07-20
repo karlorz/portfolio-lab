@@ -1580,8 +1580,9 @@ class TestApplyGoalRiskBudget:
 
     @patch('src.config.goals.load_goals')
     @patch('src.config.goals.get_risk_budget_multiplier')
-    def test_risk_mult_0_5_reduces_spy_by_half(self, tmp_path, mock_get_rbm, mock_load_goals):
+    def test_risk_mult_0_5_reduces_spy_by_half(self, mock_get_rbm, mock_load_goals, tmp_path):
         """risk_mult=0.5 should cut SPY weight in half (pre-normalization)."""
+        # @patch injects mocks bottom-up before fixtures: mock_get_rbm, mock_load_goals, then tmp_path
         mock_get_rbm.return_value = 0.5
         voter = EnsembleVoter(data_path=tmp_path)
         base = {'SPY': 1.0}  # Only SPY, no safe assets
