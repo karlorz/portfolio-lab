@@ -333,16 +333,19 @@ wiki-sync:
 #   make ops-regen
 # Paths that need regen:
 #   - src/dashboard/**, kill projection → dashboard (+ health)
+#   - scripts/compute_garch_risk.py → garch-risk (public garch_cvar.json dual-write)
 #   - src/research/wiki_sync.py, graduation SSOT → wiki-sync
 #   - src/monitor/health_check.py → health
 .PHONY: ops-regen
 ops-regen:
 	@echo "=== Ops regen (post-merge operator surfaces): $$(date) ==="
+	@$(MAKE) --no-print-directory garch-risk
 	@$(MAKE) --no-print-directory dashboard
 	@$(MAKE) --no-print-directory wiki-sync
 	@$(MAKE) --no-print-directory health
 	@echo "=== Ops regen complete: $$(date) ==="
 	@echo "Verify: PUBLIC_DATA_DIR signals.json generator_git_sha matches git rev-parse --short HEAD"
+	@echo "Verify: PUBLIC_DATA_DIR/garch_cvar.json exists; garch_active honest vs coverage_pass"
 
 # ── App Build ────────────────────────────────────────────────────────
 

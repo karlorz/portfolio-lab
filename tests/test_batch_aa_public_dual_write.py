@@ -12,6 +12,23 @@ def test_garch_risk_script_writes_public_path():
     src = Path("scripts/compute_garch_risk.py").read_text(encoding="utf-8")
     assert "garch_cvar.json" in src
     assert "PUBLIC_DATA_DIR" in src
+    # Batch AC: coverage demote + atomic promote
+    assert "coverage_pass" in src
+    assert "advisory_degraded" in src
+    assert "conformal_coverage_diagnostics" in src
+    assert ".replace(" in src or "tmp" in src.lower()
+
+
+def test_ops_regen_includes_garch_risk():
+    """Post-deploy ops-regen must promote garch dual-write, not only dashboard."""
+    mk = Path("Makefile").read_text(encoding="utf-8")
+    # Extract ops-regen recipe block
+    assert "ops-regen:" in mk
+    # garch-risk before or within ops-regen
+    idx = mk.find("ops-regen:")
+    block = mk[idx : idx + 600]
+    assert "garch-risk" in block
+    assert "dashboard" in block
 
 
 def test_attribution_save_report_dual_writes_public(tmp_path, monkeypatch):

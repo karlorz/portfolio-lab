@@ -504,6 +504,17 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
             payload["generated_at"] = now_utc
             payload["content_patched_at"] = now_utc
             payload["content_patch_source"] = "ops_health_merge"
+            # health.json is not full dashboard signals, but still clear sticky
+            # generator_git_sha if present from any shared payload shape.
+            try:
+                from src.dashboard.generator import _apply_partial_patch_git_sha_honesty
+
+                if "generator_git_sha" in payload:
+                    _apply_partial_patch_git_sha_honesty(
+                        payload, patch_source="ops_health_merge"
+                    )
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
                 logger.info("Merged ops kill authority into %s", public_health)

@@ -133,6 +133,7 @@ def main():
             "metrics": {
                 "shannon_entropy": round(shannon, 4),
                 "effective_n": round(effective_n, 2),
+                "max_possible": round(h_max, 4) if n > 1 else None,
                 "normalized_score": round(normalized_score, 1),
                 "hhi_index": round(hhi, 4),
             },
@@ -154,6 +155,7 @@ def main():
     # Dual-write risk_metrics.json for unified / cvar_metrics consumers
     # (field names match historical risk_metrics schema).
     risk_metrics_path = DATA_DIR / "risk_metrics.json"
+    garch_active = bool(report.get("filter_active", False))
     risk_payload = {
         "timestamp": report.get("timestamp") or datetime.now().isoformat(),
         "var_95_daily": report.get("var_95"),
@@ -164,7 +166,7 @@ def main():
         "current_drawdown": report.get("current_drawdown"),
         "volatility_annual": report.get("volatility_annual"),
         "garch_filtered": bool(report.get("garch_filtered", report.get("filter_active", False))),
-        "garch_active": bool(report.get("filter_active", False)),
+        "garch_active": garch_active,
         "garch_params": {
             "omega": report.get("garch_omega"),
             "alpha": report.get("garch_alpha"),
@@ -176,6 +178,41 @@ def main():
         "conditional_volatility_current": report.get("conditional_volatility_current"),
         "source": "compute_garch_risk",
     }
+
+    # Conformal coverage cross-check (same honesty contract as dashboard load):
+    # coverage_pass=false → demote garch_active (still publish diagnostics).
+    coverage_diagnostics = None
+    try:
+        from src.monitor.conformal_risk import (
+            conformal_coverage_diagnostics,
+            conformal_var,
+        )
+
+        if len(returns) >= 22:
+            cvar_thresh = float(conformal_var(returns, alpha=0.05))
+            var_thresholds = np.full_like(returns, cvar_thresh, dtype=float)
+            coverage_diagnostics = conformal_coverage_diagnostics(
+                returns,
+                var_thresholds,
+                alpha=0.05,
+                rolling_window=252,
+            )
+            risk_payload["coverage_diagnostics"] = coverage_diagnostics
+            if (
+                isinstance(coverage_diagnostics, dict)
+                and coverage_diagnostics.get("coverage_pass") is False
+                and garch_active
+            ):
+                risk_payload["garch_active"] = False
+                risk_payload["runtime_role"] = "advisory_degraded"
+                risk_payload["garch_active_reason"] = (
+                    "coverage_pass=false (Kupiec/coverage diagnostics failed); "
+                    "GARCH remains advisory only"
+                )
+                print("  GARCH demoted: coverage_pass=false → advisory_degraded")
+    except Exception as exc:  # noqa: BLE001 — never block dual-write on conformal
+        print(f"  WARNING: conformal coverage check skipped: {exc}")
+
     with open(risk_metrics_path, "w") as f:
         json.dump(risk_payload, f, indent=2, default=str)
 
@@ -187,14 +224,17 @@ def main():
             **risk_payload,
             "schema_version": "garch-cvar/v1",
             "private_health_report": str(report_path),
-            "drawdown_field_semantics": (
-                "max_drawdown on private .health_report may be policy limit; "
-                "prefer measured fields when present"
+            "drawdown_field_semantics": report.get(
+                "drawdown_field_semantics",
+                "max_drawdown_limit=policy; measured_max_drawdown=NAV series",
             ),
         }
         public_path = public_root / "garch_cvar.json"
-        with open(public_path, "w") as f:
+        # Atomic write: temp + rename (same FS) so readers never see partial JSON
+        tmp_path = public_path.with_suffix(".json.tmp")
+        with open(tmp_path, "w") as f:
             json.dump(public_payload, f, indent=2, default=str)
+        tmp_path.replace(public_path)
         print(f"  Public GARCH: {public_path}")
     except OSError as exc:
         print(f"  WARNING: public garch_cvar dual-write failed: {exc}")
