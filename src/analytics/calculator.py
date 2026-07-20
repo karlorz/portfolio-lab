@@ -6,7 +6,7 @@ import logging
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.paths import DATA_DIR
@@ -518,7 +518,7 @@ class AnalyticsCalculator:
             return {
                 "status": "no_data",
                 "message": "No performance data available",
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
         
         # Calculate all metrics
@@ -560,7 +560,7 @@ class AnalyticsCalculator:
 
         return {
             "status": "success",
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "data_points": len(perf_data),
             "date_range": {
                 "start": perf_data[0].get('timestamp', '')[:10] if perf_data else None,

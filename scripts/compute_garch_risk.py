@@ -100,11 +100,35 @@ def main():
         print("  ERROR: Insufficient data (need at least 63 days)")
         sys.exit(1)
 
-    # Compute GARCH-CVaR
+    # Policy drawdown limit (PAPER_CONFIG default) — never publish as measured DD.
+    policy_max_dd = -0.15
+    try:
+        from src.strategy.evaluator import PAPER_CONFIG
+
+        policy_max_dd = -abs(float(PAPER_CONFIG.get("max_drawdown_pct", 0.15)))
+    except Exception:  # noqa: BLE001 — keep hard default
+        policy_max_dd = -0.15
+
+    # Measured peak-to-trough from the same return series fed to GARCH
+    measured_max_dd = None
+    measured_current_dd = None
+    if len(returns) >= 2:
+        nav = 1.0
+        peak = 1.0
+        max_dd = 0.0
+        for r in returns:
+            nav *= 1.0 + float(r)
+            peak = max(peak, nav)
+            if peak > 0:
+                max_dd = min(max_dd, (nav - peak) / peak)
+        measured_max_dd = float(max_dd)
+        measured_current_dd = float((nav - peak) / peak) if peak > 0 else 0.0
+
+    # Compute GARCH-CVaR (policy limit is a risk-engine input, not measured NAV DD)
     metrics = calculate_garch_cvar(
         returns=returns,
-        current_drawdown=0.0,
-        max_drawdown=-0.15,
+        current_drawdown=measured_current_dd if measured_current_dd is not None else 0.0,
+        max_drawdown=policy_max_dd,
         window=args.window,
     )
 
@@ -116,7 +140,36 @@ def main():
     import math
     report = asdict(metrics)
 
-    # Add portfolio entropy metrics
+    # Rename policy input out of the measured-metric slot (Batch AC / Z parity)
+    policy_limit_pct = round(abs(policy_max_dd) * 100, 2)
+    if "max_drawdown" in report:
+        report["max_drawdown_limit"] = report.pop("max_drawdown")
+        report["max_drawdown_limit_pct"] = policy_limit_pct
+    else:
+        report["max_drawdown_limit"] = round(policy_max_dd * 100, 2)
+        report["max_drawdown_limit_pct"] = policy_limit_pct
+    report["measured_max_drawdown"] = (
+        round(measured_max_dd * 100, 2) if measured_max_dd is not None else None
+    )
+    report["measured_max_drawdown_pct"] = (
+        round(abs(measured_max_dd) * 100, 2) if measured_max_dd is not None else None
+    )
+    report["measured_current_drawdown"] = (
+        round(measured_current_dd * 100, 2) if measured_current_dd is not None else None
+    )
+    report["measured_current_drawdown_pct"] = (
+        round(abs(measured_current_dd) * 100, 2)
+        if measured_current_dd is not None
+        else None
+    )
+    if measured_current_dd is not None:
+        report["current_drawdown"] = round(measured_current_dd * 100, 2)
+    report["drawdown_field_semantics"] = (
+        "max_drawdown_limit=policy input to GARCH-CVaR; "
+        "measured_max_drawdown=NAV peak-to-trough on portfolio returns series"
+    )
+
+    # Add portfolio entropy metrics (include max_possible for H_max honesty)
     weights = list(BASE_ALLOCATION.values())
     n = len(weights)
     shannon = -sum(w * math.log(w) for w in weights if w > 0)
@@ -162,8 +215,15 @@ def main():
         "cvar_95_daily": report.get("cvar_95"),
         "cvar_ratio": report.get("cvar_ratio"),
         "tail_severity": report.get("tail_severity"),
-        "max_drawdown": report.get("max_drawdown"),
+        # Prefer measured NAV DD; keep limit as separate field
+        "max_drawdown": report.get("measured_max_drawdown"),
+        "max_drawdown_limit": report.get("max_drawdown_limit"),
+        "max_drawdown_limit_pct": report.get("max_drawdown_limit_pct"),
+        "measured_max_drawdown": report.get("measured_max_drawdown"),
+        "measured_max_drawdown_pct": report.get("measured_max_drawdown_pct"),
+        "measured_current_drawdown": report.get("measured_current_drawdown"),
         "current_drawdown": report.get("current_drawdown"),
+        "drawdown_field_semantics": report.get("drawdown_field_semantics"),
         "volatility_annual": report.get("volatility_annual"),
         "garch_filtered": bool(report.get("garch_filtered", report.get("filter_active", False))),
         "garch_active": garch_active,
