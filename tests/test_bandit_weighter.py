@@ -421,18 +421,16 @@ class TestBanditRewardNoiseFloor:
 
 
 def test_save_bandit_state_updated_at_is_utc_aware(tmp_path):
-    from datetime import datetime
+    from datetime import datetime, timezone
     from src.strategy.ensemble_voter import EnsembleVoter
+    import json
 
     voter = EnsembleVoter(data_path=tmp_path)
     assert voter.save_bandit_state() is True
     path = tmp_path / "ensemble_bandit_state.json"
-    import json
     payload = json.loads(path.read_text())
     ts = payload["updated_at"]
-    # Must be timezone-aware UTC (+00:00 or Z)
-    assert "+" in ts or ts.endswith("Z")
-    assert not (len(ts) == 26 and "T" in ts and ts[-1].isdigit())  # naive local pattern
+    # Must be timezone-aware UTC (+00:00 or Z) — not naive local
     parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     assert parsed.tzinfo is not None
-    assert parsed.utcoffset().total_seconds() == 0
+    assert parsed.utcoffset() == timezone.utc.utcoffset(None)
