@@ -552,11 +552,11 @@ class TestExtendedEdgeCases:
         assert put_pct > 3.0
 
     def test_negative_spot_returns_invalid_signal(self, generator):
-        """Negative spot should produce invalid error signal."""
+        """Negative spot should produce invalid error signal (fail closed, no 550)."""
         signal = generator.generate_signal(spot=-100.0, vix=16.0)
         assert not signal.is_valid
         assert signal.signal_state == "error"
-        assert signal.reason == "Invalid spot price"
+        assert "refusing silent 550 fallback" in signal.reason
 
     def test_spot_one_dollar_edge(self, generator):
         """Spot of $1 should not crash and produce reasonable output."""
@@ -801,11 +801,11 @@ class TestFetchSpotPrice:
         return CollarSignalGenerator()
 
     def test_returns_fallback_when_db_not_exists(self, generator):
-        """Should return 550.0 when MARKET_DB does not exist."""
+        """Should return None when MARKET_DB does not exist (no silent 550)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = False
             result = generator._fetch_spot_price()
-            assert result == 550.0
+            assert result is None
 
     def test_returns_price_from_db(self, generator):
         """Should return SPY price from DB when MARKET_DB exists with data."""
@@ -824,7 +824,7 @@ class TestFetchSpotPrice:
                 assert isinstance(result, float)
 
     def test_returns_fallback_when_no_rows(self, generator):
-        """Should return 550.0 when DB query returns no rows (no SPY data)."""
+        """Should return None when DB query returns no rows (no silent 550)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = True
             with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
@@ -836,16 +836,16 @@ class TestFetchSpotPrice:
 
                 result = generator._fetch_spot_price()
 
-                assert result == 550.0
+                assert result is None
 
     def test_returns_fallback_on_db_exception(self, generator):
-        """Should return 550.0 when DB raises an exception (e.g. connection error)."""
+        """Should return None when DB raises (fail closed, no silent 550)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = True
             with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
                 mock_connect.side_effect = sqlite3.Error("DB connection failed")
                 result = generator._fetch_spot_price()
-                assert result == 550.0
+                assert result is None
 
 
 class TestFetchVixLevel:
@@ -856,7 +856,7 @@ class TestFetchVixLevel:
         return CollarSignalGenerator()
 
     def test_returns_fallback_when_no_sources(self, generator):
-        """Should return 16.0 when neither DB nor term structure file exists."""
+        """Should return None when neither DB nor term structure exists (no silent 16)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = False
             with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
@@ -866,7 +866,7 @@ class TestFetchVixLevel:
 
                 result = generator._fetch_vix_level()
 
-                assert result == 16.0
+                assert result is None
 
     def test_returns_vix_from_db(self, generator):
         """Should return VIX price from DB when MARKET_DB exists with data."""
@@ -885,7 +885,7 @@ class TestFetchVixLevel:
                 assert isinstance(result, float)
 
     def test_returns_fallback_when_db_has_no_vix(self, generator):
-        """Should fall through when DB returns no VIX data and no file exists."""
+        """Should return None when DB has no VIX and no file exists (no silent 16)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = True
             with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
@@ -902,7 +902,7 @@ class TestFetchVixLevel:
 
                     result = generator._fetch_vix_level()
 
-                    assert result == 16.0
+                    assert result is None
 
     def test_returns_vix_from_term_structure_file(self, generator):
         """Should read VIX from vix_term_structure.json file when DB unavailable."""
@@ -922,7 +922,7 @@ class TestFetchVixLevel:
                         assert result == 15.2
 
     def test_returns_fallback_on_db_exception(self, generator):
-        """Should fall through when DB raises and no file exists."""
+        """Should return None when DB raises and no file exists (no silent 16)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = True
             with patch("src.signals.collar_signal.sqlite_connect") as mock_connect:
@@ -934,10 +934,10 @@ class TestFetchVixLevel:
 
                     result = generator._fetch_vix_level()
 
-                    assert result == 16.0
+                    assert result is None
 
     def test_returns_fallback_on_json_exception(self, generator):
-        """Should return 16.0 when term structure file has parse error."""
+        """Should return None when term structure file has parse error (no silent 16)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = False
             with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
@@ -949,7 +949,7 @@ class TestFetchVixLevel:
                     with patch("json.load") as mock_json_load:
                         mock_json_load.side_effect = json.JSONDecodeError("Boom", "", 0)
                         result = generator._fetch_vix_level()
-                        assert result == 16.0
+                        assert result is None
 
 
 class TestCLIEntryPoint:
@@ -1213,12 +1213,11 @@ class TestFetchSpotPriceEdgeCases:
                 mock_connect.assert_called_once_with("/fake/path/market.db")
 
     def test_fallback_type_is_float(self, generator):
-        """Fallback value 550.0 should be a float."""
+        """Missing market data returns None (fail closed), not textbook 550."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = False
             result = generator._fetch_spot_price()
-            assert isinstance(result, float)
-            assert result == 550.0
+            assert result is None
 
 
 class TestFetchVixLevelEdgeCases:
@@ -1266,7 +1265,7 @@ class TestFetchVixLevelEdgeCases:
                         assert result == 16.5
 
     def test_term_structure_empty_dict_returns_fallback(self, generator):
-        """Empty JSON dict should return 16.0."""
+        """Empty JSON dict should return None (no silent 16)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = False
             with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
@@ -1277,10 +1276,10 @@ class TestFetchVixLevelEdgeCases:
                     with patch("json.load") as mock_json_load:
                         mock_json_load.return_value = {}
                         result = generator._fetch_vix_level()
-                        assert result == 16.0
+                        assert result is None
 
     def test_term_structure_missing_vix_spot_returns_fallback(self, generator):
-        """JSON entry without vix_spot key should return 16.0."""
+        """JSON entry without vix_spot key should return None (no silent 16)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = False
             with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
@@ -1293,11 +1292,10 @@ class TestFetchVixLevelEdgeCases:
                             "2025-01-15": {"other_field": 42},
                         }
                         result = generator._fetch_vix_level()
-                        # .get("vix_spot", 16.0) returns 16.0
-                        assert result == 16.0
+                        assert result is None
 
     def test_fallback_returns_float(self, generator):
-        """Ultimate fallback of 16.0 should be a float."""
+        """Ultimate missing-data path returns None (fail closed)."""
         with patch("src.signals.collar_signal.MARKET_DB") as mock_db:
             mock_db.exists.return_value = False
             with patch("src.signals.collar_signal.DATA_DIR") as mock_data_dir:
@@ -1305,8 +1303,7 @@ class TestFetchVixLevelEdgeCases:
                 mock_vix_path.exists.return_value = False
                 mock_data_dir.__truediv__.return_value = mock_vix_path
                 result = generator._fetch_vix_level()
-                assert isinstance(result, float)
-                assert result == 16.0
+                assert result is None
 
 
 class TestPricerGreeks:

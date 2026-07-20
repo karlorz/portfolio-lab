@@ -830,21 +830,26 @@ class TestRunDailySummary:
         agent.conn.close()
 
     def test_with_single_data_point(self, patched_paths):
-        """Single row within 30-day window should produce valid summary."""
+        """Single price row has no lag return; days counts non-null daily_return only."""
         db_path = agent_module.DB_PATH
         conn = sqlite3.connect(db_path)
         conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
-        # Use a recent date within the -30 day window
-        from datetime import timedelta
-        recent = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", recent, 100.0))
+        # Use recent dates within the -30 day window (UTC-safe)
+        from datetime import timedelta, timezone
+        d1 = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
+        d2 = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", d1, 100.0))
+        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", d2, 101.0))
         conn.commit()
         conn.close()
 
         agent = ResearchAgent()
         summary = agent.run_daily_summary()
 
+        # One close-to-close return from two rows
         assert summary["days"] == 1
+        assert summary["avg_return"] is not None
+        assert summary.get("return_metric") == "simple_close_to_close"
         agent.conn.close()
 
 

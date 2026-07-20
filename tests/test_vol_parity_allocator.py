@@ -251,6 +251,8 @@ class TestVolParityAllocationEdgeCases:
             "core_vol_contribution", "vix_short_pct", "vix_tail_pct",
             "vix_vol_contribution", "cash_pct", "expected_portfolio_vol",
             "expected_max_dd", "rebalance_triggered", "rebalance_reason",
+            # honesty provenance fields (Batch AG full to_dict)
+            "weight_unit", "role", "live_authoritative", "description",
         }
         assert set(d.keys()) == expected_keys
 

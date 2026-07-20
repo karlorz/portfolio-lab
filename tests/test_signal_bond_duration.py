@@ -111,6 +111,8 @@ class TestBondDurationSignal:
             "tlt_weight", "ief_weight", "shy_weight",
             "effective_duration", "position", "confidence",
             "is_valid", "reason",
+            # honesty provenance (defaults / source mode)
+            "source_mode", "source_status", "using_defaults",
         }
         assert set(d.keys()) == expected_keys
 

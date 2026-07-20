@@ -8,13 +8,14 @@ import pytest
 def test_prefers_fresher_health_report(tmp_path, monkeypatch):
     import src.monitor.unified_dashboard as ud
     monkeypatch.setattr(ud, "DATA_DIR", tmp_path)
+    # Older risk_metrics lacks explicit garch_active so demote-merge cannot
+    # override fresher health_report filter_active → garch_active.
     (tmp_path / "risk_metrics.json").write_text(json.dumps({
         "timestamp": "2026-05-21T17:22:01",
         "var_95_daily": -1.41,
         "cvar_95_daily": -2.02,
         "cvar_ratio": 1.43,
         "tail_severity": "moderate",
-        "garch_active": False,
         "garch_filtered": False,
     }))
     (tmp_path / ".health_report.json").write_text(json.dumps({

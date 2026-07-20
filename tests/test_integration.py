@@ -30,6 +30,25 @@ from src.rebalancing.smart_rebalancer import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_smart_rebalance_state(tmp_path, monkeypatch):
+    """Do not load host data/smart_rebalance_state.json into unit tests."""
+    # Force empty ephemeral state for every SmartRebalanceGate / controller
+    state = tmp_path / "smart_rebalance_state.json"
+    monkeypatch.setattr(
+        "src.rebalancing.smart_rebalancer.DATA_DIR",
+        tmp_path,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.rebalancing.integration.DATA_DIR",
+        tmp_path,
+        raising=False,
+    )
+    # Also pass load_state via env-less default: empty dir has no state file
+    yield
+
+
 # =========================================================================
 # __all__ export validation
 # =========================================================================

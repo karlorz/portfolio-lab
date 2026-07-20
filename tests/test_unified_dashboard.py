@@ -824,14 +824,15 @@ class TestOverlaysSectionEdgeCases:
             assert section["vix_term_structure"]["regime"] is None
 
     def test_dict_allocation_in_overlay(self, tmp_path):
-        """VIXY allocation can be a dict. Verify it passes through as-is."""
+        """VIXY allocation dict is published in percent units (×100)."""
         alloc_dict = {"SPY": 0.4, "GLD": 0.6}
+        expected_pct = {"SPY": 40.0, "GLD": 60.0}
         vixy = tmp_path / "vixy_hedge_state.json"
         vixy.write_text(json.dumps({"current_allocation": alloc_dict, "last_signal_date": "2026-01-01", "regime": "contango"}))
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             section = _get_overlays_section()
             assert section["vix_term_structure"]["active"] is True
-            assert section["vix_term_structure"]["allocation"] == alloc_dict
+            assert section["vix_term_structure"]["allocation"] == expected_pct
 
 
 # ─────────────────────────────────────────────
@@ -1204,6 +1205,7 @@ class TestDashboardGenerationEdgeCases:
             "dashboard_version", "generated_at", "generated_at_local",
             "health", "portfolio", "risk", "risk_history", "tca",
             "overlays", "regime", "attribution", "adaptive_weights", "cron",
+            "generator_git_sha", "generator_git_sha_status",
         }
         assert set(dashboard.keys()) == expected
 
