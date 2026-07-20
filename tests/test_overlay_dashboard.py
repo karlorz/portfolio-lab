@@ -75,6 +75,25 @@ class TestOverlayDashboardGenerator:
         dashboard = gen.generate()
         assert "active" in dashboard.crypto or "error" in dashboard.crypto
 
+    def test_crypto_weights_are_portfolio_fractions(self, gen):
+        """btc_weight + eth_weight must equal total_crypto (portfolio units)."""
+        data = gen._get_crypto_data()
+        if data.get("error"):
+            return
+        btc = float(data.get("btc_weight") or 0)
+        eth = float(data.get("eth_weight") or 0)
+        total = float(data.get("total_crypto") or 0)
+        assert data.get("weight_unit") == "portfolio_fraction"
+        assert btc >= 0 and eth >= 0
+        if total > 0:
+            assert abs((btc + eth) - total) < 1e-5
+            # Neither portfolio leg can exceed total_crypto
+            assert btc <= total + 1e-9
+            assert eth <= total + 1e-9
+        # Sleeve shares disclosed separately when present
+        if "eth_sleeve_share" in data:
+            assert 0 <= float(data["eth_sleeve_share"]) <= 1.0 + 1e-9
+
     def test_bond_data_collected(self, gen):
         dashboard = gen.generate()
         assert "active" in dashboard.bond_duration or "error" in dashboard.bond_duration
@@ -82,6 +101,16 @@ class TestOverlayDashboardGenerator:
     def test_calendar_data_collected(self, gen):
         dashboard = gen.generate()
         assert "active" in dashboard.calendar
+
+    def test_calendar_discloses_not_applied_to_targets(self, gen):
+        data = gen._get_calendar_data()
+        if data.get("error"):
+            return
+        assert data.get("applies_to_target_allocations") is False
+        assert data.get("role") == "advisory_non_routed"
+        mod = data.get("modifier")
+        if mod is not None and float(mod) != 1.0:
+            assert "not applied" in str(data.get("status_text", "")).lower()
 
     def test_kurtosis_data_collected(self, gen):
         dashboard = gen.generate()

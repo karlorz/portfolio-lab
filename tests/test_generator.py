@@ -954,7 +954,7 @@ class TestEnsemblePostDecayMetrics:
     def test_allocation_surface_roles_include_standalone_advisory_artifacts(self, tmp_path):
         roles = DashboardGenerator._build_allocation_surface_roles(data_dir=tmp_path)
 
-        for surface in ("adaptive_sizing", "black_litterman"):
+        for surface in ("adaptive_sizing", "black_litterman", "calendar_seasonality"):
             role = roles["surfaces"][surface]
             assert role["role"] == "advisory_non_routed"
             assert role["routed"] is False
@@ -962,6 +962,9 @@ class TestEnsemblePostDecayMetrics:
             assert role["live_authoritative"] is False
             assert role["canonical_controller"] == "signals.json.target_allocations"
             assert "target_allocations" in role["description"]
+
+        cal = roles["surfaces"]["calendar_seasonality"]
+        assert cal.get("applies_to_target_allocations") is False
 
     def test_advisory_allocation_artifact_role_block_is_machine_readable(self):
         role = DashboardGenerator._build_advisory_allocation_artifact_role(

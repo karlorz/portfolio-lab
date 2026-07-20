@@ -43,3 +43,22 @@ def test_build_symbol_freshness_entry() -> None:
     )
     assert row["status"] == "stale"
     assert row["market_lag_days"] == 2
+    assert row["status_basis"] == "market_lag"
+    assert row["calendar_age_days"] == 2
+
+
+def test_fresh_status_with_wall_clock_age_disclosed() -> None:
+    """Friday last bar on Monday: market_lag=0 → fresh; calendar age still 3."""
+    row = build_symbol_freshness_entry(
+        last_date="2026-07-17",
+        days_stale=3,
+        market_lag_days=0,
+        latest_available_market_date="2026-07-17",
+    )
+    assert row["status"] == "fresh"
+    assert row["status_basis"] == "market_lag"
+    assert row["days_stale"] == 3
+    assert row["calendar_age_days"] == 3
+    assert row["calendar_note"] is not None
+    assert "calendar_age_days=3" in row["calendar_note"]
+    assert "market_lag" in row["calendar_note"]

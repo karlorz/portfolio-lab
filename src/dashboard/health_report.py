@@ -63,10 +63,24 @@ def build_symbol_freshness_entry(
     market_lag_days: int,
     latest_available_market_date: str | None,
 ) -> dict[str, Any]:
+    """Build per-symbol freshness with explicit dual-clock disclosure.
+
+    ``status`` is **market-relative** (lag vs provider latest bar), not wall-clock.
+    ``days_stale`` / ``calendar_age_days`` is wall-clock age of last_update.
+    """
+    market_status = classify_market_data_freshness(market_lag_days)
     return {
         "last_update": last_date,
         "days_stale": days_stale,
+        "calendar_age_days": days_stale,
         "market_lag_days": market_lag_days,
         "latest_available_market_date": latest_available_market_date,
-        "status": classify_market_data_freshness(market_lag_days),
+        "status": market_status,
+        "status_basis": "market_lag",
+        "calendar_note": (
+            f"calendar_age_days={days_stale} (wall-clock); "
+            f"status={market_status} uses market_lag_days only"
+            if days_stale > market_lag_days
+            else None
+        ),
     }

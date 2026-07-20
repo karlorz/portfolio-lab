@@ -1297,6 +1297,20 @@ class DashboardGenerator:
                     "canonical_controller": "signals.json.target_allocations",
                     "description": advisory_description,
                 },
+                "calendar_seasonality": {
+                    "label": "Calendar Seasonality",
+                    "role": "advisory_non_routed",
+                    "routed": False,
+                    "routed_by": None,
+                    "live_authoritative": False,
+                    "applies_to_target_allocations": False,
+                    "canonical_controller": "signals.json.target_allocations",
+                    "description": (
+                        "Urgency/execution timing advisory only. "
+                        "modifier does not scale target_allocations "
+                        "(paper book stays champion weights)."
+                    ),
+                },
             },
         }
         root = Path(data_dir) if data_dir is not None else DATA_DIR

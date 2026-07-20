@@ -188,13 +188,38 @@ class OverlayDashboardGenerator:
     def _get_crypto_data(self) -> Dict[str, Any]:
         """Collect crypto tactical data."""
         try:
-            from src.signals.crypto_momentum import generate_crypto_signal
+            from src.signals.crypto_momentum import (
+                CryptoMomentumCalculator,
+                generate_crypto_signal,
+            )
             signal = generate_crypto_signal()
+            # target_weight is sleeve share (0–1 within crypto sleeve), not a
+            # portfolio fraction. Scale by BASE then renormalize to composite so
+            # btc_weight + eth_weight == total_crypto.
+            base_w = float(CryptoMomentumCalculator.BASE_CRYPTO_WEIGHT)
+            btc_sleeve = float(signal.btc_signal.target_weight)
+            eth_sleeve = float(signal.eth_signal.target_weight)
+            raw_btc = btc_sleeve * base_w
+            raw_eth = eth_sleeve * base_w
+            raw_sum = raw_btc + raw_eth
+            composite = float(signal.composite_weight)
+            if raw_sum > 0 and composite > 0:
+                scale = composite / raw_sum
+                btc_pf = raw_btc * scale
+                eth_pf = raw_eth * scale
+            else:
+                btc_pf = 0.0
+                eth_pf = 0.0
             return self._stamp_freshness({
                 "active": signal.is_valid,
-                "btc_weight": signal.btc_signal.target_weight,
-                "eth_weight": signal.eth_signal.target_weight,
-                "total_crypto": signal.composite_weight,
+                # Portfolio fractions (sum ≈ total_crypto)
+                "btc_weight": round(btc_pf, 6),
+                "eth_weight": round(eth_pf, 6),
+                "total_crypto": composite,
+                # Sleeve shares preserved for diagnostics
+                "btc_sleeve_share": round(btc_sleeve, 4),
+                "eth_sleeve_share": round(eth_sleeve, 4),
+                "weight_unit": "portfolio_fraction",
                 "btc_momentum_6m": signal.btc_signal.momentum_6m,
                 "eth_momentum_6m": signal.eth_signal.momentum_6m,
                 "btc_vol_regime": signal.btc_signal.vol_regime,
@@ -243,16 +268,25 @@ class OverlayDashboardGenerator:
             # not assessment_date midnight — midnight stamps false-stale by
             # mid-afternoon and re-arm signal_staleness kills every day-roll.
             assessment = getattr(signal, "assessment_date", None)
+            modifier = float(signal.urgency_modifier)
+            applied_to_targets = False  # advisory only — paper targets unscaled
             block = {
                 "active": signal.is_trading_day,
-                "modifier": signal.urgency_modifier,
+                "modifier": modifier,
                 "active_windows": signal.active_windows,
                 "next_window": signal.next_window,
                 "days_to_next": signal.days_to_next_window,
                 "recommendation": signal.recommendation,
                 "effect": signal.effect,
-                "status_text": f"Calendar: {signal.urgency_modifier:.2f}x, "
-                               f"{len(signal.active_windows)} windows active",
+                "applies_to_target_allocations": applied_to_targets,
+                "role": "advisory_non_routed",
+                "status_text": (
+                    f"Calendar: {modifier:.2f}x (not applied to target_allocations), "
+                    f"{len(signal.active_windows)} windows active"
+                    if modifier != 1.0
+                    else f"Calendar: {modifier:.2f}x, "
+                    f"{len(signal.active_windows)} windows active"
+                ),
             }
             if assessment is not None:
                 block["assessment_date"] = assessment
