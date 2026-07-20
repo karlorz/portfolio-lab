@@ -1322,7 +1322,8 @@ class TestDataCollectionWithMocks:
     """Test individual _get_*_data methods with mocked signal modules."""
 
     @patch("src.signals.collar_signal.generate_collar_signal")
-    def test_get_collar_data_success(self, mock_collar):
+    @patch.object(OverlayDashboardGenerator, "_load_collar_signal_file", return_value=None)
+    def test_get_collar_data_success(self, mock_load, mock_collar):
         mock_signal = MagicMock()
         mock_signal.is_valid = True
         mock_signal.regime = "protective"
@@ -1334,6 +1335,7 @@ class TestDataCollectionWithMocks:
         mock_signal.max_downside_pct = -0.03
         mock_signal.vix_level = 16.0
         mock_signal.confidence = 0.8
+        mock_signal.underlying_price = 550.0
         mock_collar.return_value = mock_signal
 
         gen = OverlayDashboardGenerator()
@@ -1342,10 +1344,13 @@ class TestDataCollectionWithMocks:
         assert result["regime"] == "protective"
         assert result["vix_level"] == 16.0
         assert result["net_premium"] == 0.05
+        assert result.get("role") == "advisory_overlay"
+        assert result.get("live_authoritative") is False
 
+    @patch.object(OverlayDashboardGenerator, "_load_collar_signal_file", return_value=None)
     @patch("src.signals.collar_signal.generate_collar_signal",
            side_effect=ValueError("Signal collapsed"))
-    def test_get_collar_data_error(self, mock_collar):
+    def test_get_collar_data_error(self, mock_collar, mock_load):
         gen = OverlayDashboardGenerator()
         result = gen._get_collar_data()
         assert result["active"] is False
@@ -1394,6 +1399,10 @@ class TestDataCollectionWithMocks:
         mock_signal.effective_duration = 6.5
         mock_signal.position = "neutral"
         mock_signal.confidence = 0.75
+        mock_signal.using_defaults = False
+        mock_signal.source_mode = "live"
+        mock_signal.source_status = "ok"
+        mock_signal.timestamp = "2026-07-20T12:00:00+00:00"
         mock_bond.return_value = mock_signal
 
         gen = OverlayDashboardGenerator()
@@ -1401,6 +1410,8 @@ class TestDataCollectionWithMocks:
         assert result["active"] is True
         assert result["curve_regime"] == "normal"
         assert result["effective_duration"] == 6.5
+        assert result.get("role") == "advisory_non_routed"
+        assert result.get("live_authoritative") is False
 
     @patch("src.signals.bond_duration_signal.generate_bond_duration_signal",
            side_effect=ConnectionError("Yield data stale"))

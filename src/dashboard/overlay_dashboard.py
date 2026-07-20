@@ -187,6 +187,8 @@ class OverlayDashboardGenerator:
                     "confidence": saved.get("confidence"),
                     "underlying_price": saved.get("underlying_price"),
                     "source": "collar_signal.json",
+                    "live_authoritative": False,
+                    "role": "advisory_overlay",
                     "status_text": f"Collar: {regime}, call ${float(call):.0f}, put ${float(put):.0f}",
                 }, saved.get("timestamp") or saved.get("generated_at"))
 
@@ -208,6 +210,8 @@ class OverlayDashboardGenerator:
                 "underlying_price": underlying if underlying > 0 else None,
                 "spot_source": "collar_signal_generate",
                 "source": "generate_collar_signal",
+                "live_authoritative": False,
+                "role": "advisory_overlay",
                 "status_text": f"Collar: {signal.regime}, "
                                f"call ${signal.call_strike:.0f}, "
                                f"put ${signal.put_strike:.0f}"
@@ -251,6 +255,8 @@ class OverlayDashboardGenerator:
                 "btc_sleeve_share": round(btc_sleeve, 4),
                 "eth_sleeve_share": round(eth_sleeve, 4),
                 "weight_unit": "portfolio_fraction",
+                "live_authoritative": False,
+                "role": "advisory_non_routed",
                 "btc_momentum_6m": signal.btc_signal.momentum_6m,
                 "eth_momentum_6m": signal.eth_signal.momentum_6m,
                 "btc_vol_regime": signal.btc_signal.vol_regime,
@@ -272,8 +278,11 @@ class OverlayDashboardGenerator:
         try:
             from src.signals.bond_duration_signal import generate_bond_duration_signal
             signal = generate_bond_duration_signal()
+            # MagicMock auto-attrs are truthy; only treat explicit True as defaults.
+            _ud = getattr(signal, "using_defaults", False)
+            using_defaults = _ud is True
             return self._stamp_freshness({
-                "active": signal.is_valid and not getattr(signal, "using_defaults", False),
+                "active": bool(signal.is_valid) and not using_defaults,
                 "yield_10y": signal.yield_10y,
                 "yield_2y": signal.yield_2y,
                 "spread": signal.spread_10y2y,
@@ -282,16 +291,25 @@ class OverlayDashboardGenerator:
                 "tlt_weight": signal.tlt_weight,
                 "ief_weight": signal.ief_weight,
                 "shy_weight": signal.shy_weight,
+                "weight_unit": "sleeve_fraction",
+                "live_authoritative": False,
+                "role": "advisory_non_routed",
                 "effective_duration": signal.effective_duration,
                 "position": signal.position,
                 "confidence": signal.confidence,
-                "using_defaults": bool(getattr(signal, "using_defaults", False)),
-                "source_mode": getattr(signal, "source_mode", "live"),
-                "source_status": getattr(signal, "source_status", "ok"),
+                "using_defaults": using_defaults,
+                "source_mode": getattr(signal, "source_mode", "live")
+                if not isinstance(getattr(signal, "source_mode", None), type(signal))
+                else "live",
+                "source_status": getattr(signal, "source_status", "ok")
+                if isinstance(getattr(signal, "source_status", "ok"), str)
+                else "ok",
                 "status_text": f"Bonds: {signal.position} "
                                f"({signal.curve_regime}/{signal.rate_direction}), "
                                f"dur {signal.effective_duration:.0f}yr",
-            }, getattr(signal, "timestamp", None))
+            }, getattr(signal, "timestamp", None)
+            if isinstance(getattr(signal, "timestamp", None), str)
+            else None)
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}
 
@@ -316,6 +334,7 @@ class OverlayDashboardGenerator:
                 "effect": signal.effect,
                 "applies_to_target_allocations": applied_to_targets,
                 "role": "advisory_non_routed",
+                "live_authoritative": False,
                 "status_text": (
                     f"Calendar: {modifier:.2f}x (not applied to target_allocations), "
                     f"{len(signal.active_windows)} windows active"
@@ -347,6 +366,8 @@ class OverlayDashboardGenerator:
                 "tsom_weight": signal.tsom_weight,
                 "mr_weight": signal.mr_weight,
                 "fat_tail_risk": signal.fat_tail_risk,
+                "live_authoritative": False,
+                "role": "advisory_non_routed",
                 "status_text": f"Kurtosis: {signal.regime} "
                                f"(k={signal.kurtosis_60d:.1f}, KER={signal.ker_ratio:.2f})",
             }, getattr(signal, "timestamp", None))

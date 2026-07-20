@@ -3161,12 +3161,39 @@ class DashboardGenerator:
                     daily_values = [e.get("total_value", 0) for e in daily_entries]
 
                     if daily_returns and daily_values:
+                        std_r = float(np.std(daily_returns))
+                        raw_sharpe = (
+                            float(np.mean(daily_returns) / std_r * np.sqrt(252))
+                            if std_r > 0
+                            else 0.0
+                        )
+                        # Honesty: same implausibility gate as graduation (raw > 3.0).
+                        # Keep raw value; never coerce to 0.0 (looked like zero skill).
+                        implausible = bool(raw_sharpe > 3.0)
                         paper_metrics = {
-                            "sharpe": round(np.mean(daily_returns) / np.std(daily_returns) * np.sqrt(252), 2) if np.std(daily_returns) > 0 else 0,
+                            "sharpe": round(raw_sharpe, 2),
+                            "sharpe_raw": round(raw_sharpe, 4),
+                            "sharpe_implausible": implausible,
+                            "sharpe_plausibility_status": (
+                                "implausible_short_sample"
+                                if implausible
+                                else "ok"
+                            ),
+                            "sharpe_note": (
+                                (
+                                    f"implausible raw Sharpe {raw_sharpe:.2f} > 3.0 "
+                                    f"over {len(daily_values)} daily points "
+                                    "(likely short-sample / low-vol artifact; "
+                                    "not graduation-ready skill)"
+                                )
+                                if implausible
+                                else None
+                            ),
                             "total_return": round((daily_values[-1] - daily_values[0]) / daily_values[0] * 100, 2),
                             "max_value": round(max(daily_values), 2),
                             "min_value": round(min(daily_values), 2),
-                            "days_tracked": len(daily_values)
+                            "days_tracked": len(daily_values),
+                            "return_source": "performance.jsonl_daily_dedup",
                         }
                         
                         # Calculate SPY comparison if we have enough data
