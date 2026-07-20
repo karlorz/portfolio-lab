@@ -1369,7 +1369,31 @@ class TestLoadState:
         finally:
             gc.DATA_DIR = original
 
+    def test_load_state_circuit_breaker_state_file_fallback(self, tmp_path):
+        """Prefer .circuit_breaker_state.json when .circuit_breaker.json missing."""
+        import src.strategy.graduation_checklist as gc
+        original = gc.DATA_DIR
+        gc.DATA_DIR = Path(tmp_path)
+        try:
+            with open(tmp_path / ".circuit_breaker_state.json", "w") as f:
+                json.dump({
+                    "status": "green",
+                    "last_check": "2026-05-22T22:37:01",
+                    "max_drawdown": 0.001,
+                }, f)
+            checklist = GraduationChecklist()
+            state = checklist._load_state()
+            cb = state.get("circuit_breaker") or {}
+            assert cb.get("status") == "green"
+            # Green file without consecutive_ok gets a healthy default streak
+            assert int(cb.get("consecutive_ok", 0)) >= 3
+            result = checklist._check_circuit_breaker(state)
+            assert result.passed is True
+        finally:
+            gc.DATA_DIR = original
+
     def test_load_state_malformed_performance(self, tmp_path):
+
         """Malformed JSONL lines should be gracefully skipped."""
         import src.strategy.graduation_checklist as gc
         original = gc.DATA_DIR

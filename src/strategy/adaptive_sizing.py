@@ -302,15 +302,47 @@ class AdaptiveSizer:
 
         return "unknown", 0.3
 
+    @staticmethod
+    def _normalize_cb_severity(state: dict) -> str:
+        """Normalize paper-risk CB payloads to a severity string.
+
+        Live paper files often use ``status`` (green/yellow/red) while some
+        writers/tests use ``severity``. Map both so sizing does not silently
+        default to ok when the file is green but key name differs.
+        """
+        if not isinstance(state, dict):
+            return "ok"
+        if "severity" in state and state.get("severity") not in (None, ""):
+            return str(state["severity"]).lower()
+        status = state.get("status")
+        if isinstance(status, str) and status.strip():
+            s = status.strip().lower()
+            if s in ("green", "ok", "normal", "closed"):
+                return "ok"
+            if s in ("yellow", "warn", "warning", "elevated"):
+                return "elevated"
+            if s in ("orange", "amber"):
+                return "elevated"
+            if s in ("red", "critical", "halt", "open", "tripped"):
+                return "red"
+            return s
+        return "ok"
+
     def _load_circuit_breaker(self) -> str:
-        """Load circuit breaker severity."""
-        cb_path = self.data_dir / ".circuit_breaker_state.json"
-        try:
-            if cb_path.exists():
+        """Load circuit breaker severity from paper-risk state file(s)."""
+        candidates = [
+            self.data_dir / ".circuit_breaker_state.json",
+            self.data_dir / ".circuit_breaker.json",
+        ]
+        for cb_path in candidates:
+            try:
+                if not cb_path.exists():
+                    continue
                 state = json.loads(cb_path.read_text())
-                return state.get("severity", "ok")
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
-            logger.error("Failed to load circuit breaker state: %s", e)
+                if isinstance(state, dict):
+                    return self._normalize_cb_severity(state)
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+                logger.error("Failed to load circuit breaker state from %s: %s", cb_path, e)
         return "ok"
 
     def _signals_json_candidates(self) -> list:

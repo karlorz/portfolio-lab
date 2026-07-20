@@ -1255,6 +1255,29 @@ class TestLoadCircuitBreaker:
         sizer = AdaptiveSizer(data_dir=data_dir)
         assert sizer._load_circuit_breaker() == "elevated"
 
+    def test_status_green_maps_to_ok_severity(self, tmp_path):
+        """Paper risk CB files use status=green, not severity key."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / ".circuit_breaker_state.json").write_text(json.dumps({
+            "status": "green",
+            "last_check": "2026-05-22T22:37:01",
+            "max_drawdown": 0.001,
+        }))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        assert sizer._load_circuit_breaker() in ("ok", "green")
+
+    def test_status_red_maps_to_elevated_or_red(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / ".circuit_breaker_state.json").write_text(json.dumps({
+            "status": "red",
+            "trips": 2,
+        }))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        sev = sizer._load_circuit_breaker()
+        assert sev in ("red", "elevated", "critical", "halt")
+
 
 class TestLoadEnsembleSignal:
     """Ensemble signal loading tests."""
