@@ -778,6 +778,8 @@ class EnsembleVoter:
             window=252,
         )
         self.bandit_observations: int = 0
+        # Calendar reward steps for warmup blend (not arm×day updates)
+        self.bandit_days: int = 0
         self.bandit_state_path = self.data_path / "ensemble_bandit_state.json"
         self._load_bandit_state()
 
@@ -1039,7 +1041,12 @@ class EnsembleVoter:
             return static  # Cold start: 100% static
 
         # Blend: starts 100% static, shifts to (1-MAX_BLEND)/MAX_BLEND after warmup
-        blend = min(BANDIT_MAX_BLEND, self.bandit_observations / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND)
+        day_steps = int(getattr(self, "bandit_days", 0) or 0)
+        if day_steps <= 0 and int(getattr(self, "bandit_observations", 0) or 0) > 0:
+            # Legacy states without bandit_days: approximate days from arm updates
+            n_sources = max(1, len(list(SignalSource)))
+            day_steps = max(1, int(self.bandit_observations) // n_sources)
+        blend = min(BANDIT_MAX_BLEND, day_steps / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND)
 
         # Convert static keys from SignalSource enum to string values for matching
         static_by_value = {k.value: v for k, v in static.items()}
@@ -1066,11 +1073,17 @@ class EnsembleVoter:
             regime_name = current.name if hasattr(current, "name") else str(current)
 
         observations = int(getattr(self, "bandit_observations", 0) or 0)
+        reward_days = int(getattr(self, "bandit_days", 0) or 0)
+        if reward_days <= 0 and observations > 0:
+            n_sources = max(1, len(list(SignalSource)))
+            reward_days = max(1, observations // n_sources)
         bandit = getattr(self, "bandit", None)
         bandit_status: Dict[str, Any] = {
             "status": "unavailable",
             "enabled": False,
             "observations": observations,
+            "reward_days": reward_days,
+            "days": reward_days,
             "warmup_days": BANDIT_WARMUP_DAYS,
             "max_blend": BANDIT_MAX_BLEND,
             "current_blend": 0.0,
@@ -1088,7 +1101,7 @@ class EnsembleVoter:
                 if bandit_weights is not None:
                     blend = min(
                         BANDIT_MAX_BLEND,
-                        observations / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND,
+                        reward_days / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND,
                     )
                     bandit_status["current_blend"] = round(blend, 4)
                     if blend > 0:
@@ -1190,10 +1203,19 @@ class EnsembleVoter:
                     if isinstance(returns, list)
                 )
             self.bandit_observations = int(obs or 0)
+            days = state.get("reward_days", state.get("bandit_days", state.get("days")))
+            if days is None:
+                if self.bandit_observations > 0:
+                    n_sources = max(1, len(list(SignalSource)))
+                    days = max(1, self.bandit_observations // n_sources)
+                else:
+                    days = 0
+            self.bandit_days = int(days or 0)
             logger.info(
-                "Loaded ensemble bandit state from %s (observations=%s)",
+                "Loaded ensemble bandit state from %s (observations=%s, reward_days=%s)",
                 path,
                 self.bandit_observations,
+                self.bandit_days,
             )
             return True
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -1208,6 +1230,8 @@ class EnsembleVoter:
         payload = {
             "schema_version": "ensemble-bandit-state/v1",
             "observations": int(self.bandit_observations),
+            "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+            "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
             "bandit": self.bandit.get_state() if hasattr(self.bandit, "get_state") else {},
             "updated_at": datetime.now().isoformat(),
         }
@@ -1261,12 +1285,17 @@ class EnsembleVoter:
             self.update_bandit(str(src), regime_name, reward)
             updates += 1
 
+        # One calendar reward day per apply, independent of arm count
+        self.bandit_days = int(getattr(self, "bandit_days", 0) or 0) + 1
+
         if persist:
             self.save_bandit_state()
 
         return {
             "updates": updates,
             "observations": int(self.bandit_observations),
+            "days": int(self.bandit_days),
+            "bandit_days": int(self.bandit_days),
             "regime": regime_name,
             "daily_return": reward,
             "skipped": False,
