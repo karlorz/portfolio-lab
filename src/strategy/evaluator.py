@@ -476,11 +476,70 @@ class Portfolio:
         return None
 
     def _write_garch_health_report(self, metrics) -> None:
-        """Write GARCH-CVaR metrics to .health_report.json for dashboard."""
+        """Write GARCH-CVaR metrics to .health_report.json for dashboard.
+
+        Separates policy max-drawdown **limit** (config input to GARCH-CVaR)
+        from measured paper drawdown so operators do not read −15 as live DD.
+        """
         try:
             from dataclasses import asdict
             report_path = DATA_DIR / ".health_report.json"
             data = asdict(metrics) if hasattr(metrics, '__dataclass_fields__') else {}
+
+            # Policy limit from PAPER_CONFIG (was published as max_drawdown=-15)
+            policy_limit = float(PAPER_CONFIG.get("max_drawdown_pct", 0.15))
+            if "max_drawdown" in data:
+                # Rename policy input out of measured-metric slot
+                data["max_drawdown_limit"] = data.pop("max_drawdown")
+                data["max_drawdown_limit_pct"] = round(
+                    abs(float(data["max_drawdown_limit"])) * 100
+                    if abs(float(data["max_drawdown_limit"])) <= 1
+                    else abs(float(data["max_drawdown_limit"])),
+                    2,
+                )
+            else:
+                data["max_drawdown_limit"] = -policy_limit
+                data["max_drawdown_limit_pct"] = round(policy_limit * 100, 2)
+
+            # Measured paper peak-to-trough (fraction, negative) from history
+            measured_max_dd = None
+            measured_current_dd = None
+            try:
+                values = [
+                    float(h["total_value"])
+                    for h in (self.history or [])
+                    if isinstance(h, dict) and h.get("total_value") is not None
+                ]
+                if len(values) >= 2:
+                    peak = values[0]
+                    max_dd = 0.0
+                    for v in values:
+                        peak = max(peak, v)
+                        if peak > 0:
+                            max_dd = min(max_dd, (v - peak) / peak)
+                    measured_max_dd = float(max_dd)
+                    last = values[-1]
+                    measured_current_dd = float((last - peak) / peak) if peak > 0 else 0.0
+            except (AttributeError, TypeError, ValueError, ZeroDivisionError, KeyError):
+                pass
+
+            data["measured_max_drawdown"] = measured_max_dd
+            data["measured_max_drawdown_pct"] = (
+                round(abs(measured_max_dd) * 100, 2) if measured_max_dd is not None else None
+            )
+            data["measured_current_drawdown"] = measured_current_dd
+            data["measured_current_drawdown_pct"] = (
+                round(abs(measured_current_dd) * 100, 2)
+                if measured_current_dd is not None
+                else None
+            )
+            # Do not leave current_drawdown as a silent 0.0 stub without label
+            if "current_drawdown" in data and measured_current_dd is not None:
+                data["current_drawdown"] = measured_current_dd
+            data["drawdown_field_semantics"] = (
+                "max_drawdown_limit=policy input to GARCH-CVaR; "
+                "measured_max_drawdown=paper NAV peak-to-trough"
+            )
 
             # Add portfolio entropy metrics from current allocation
             data["checks"] = data.get("checks", {})
@@ -532,6 +591,7 @@ class Portfolio:
             "metrics": {
                 "shannon_entropy": round(shannon, 4),
                 "effective_n": round(effective_n, 2),
+                "max_possible": round(h_max, 4) if n > 1 else None,
                 "normalized_score": round(normalized_score, 1),
                 "hhi_index": round(hhi, 4),
             },

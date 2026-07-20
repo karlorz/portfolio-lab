@@ -447,12 +447,18 @@ def compute_ic_decay_report() -> Dict[str, Any]:
         "signals": signals,
         "resolved_signal_count": len(signals),
         "pending_predictions": pending,
+        "pending_scope": "ic_staged_date_window",
         "pending_rows": backlog.get("pending_rows", 0),
+        "pending_rows_scope": "historical_db_unlabeled_rows",
         "pending_dates": backlog.get("pending_dates", 0),
         "oldest_unresolved_date": backlog.get("oldest_unresolved_date"),
         "total_predictions": backlog.get("total_predictions", 0),
         "resolved_predictions": backlog.get("resolved_predictions", 0),
-        "pending_semantics": backlog.get("pending_semantics"),
+        "pending_semantics": backlog.get("pending_semantics")
+        or (
+            "pending_predictions=IC staged-date window; "
+            "pending_rows=signal_predictions unlabeled rows (full history)"
+        ),
         "staged_date": monitor.get_staged_date(),
         "label_horizon": "SPY close-to-close forward return from staged market-data date to latest available SPY row",
     }

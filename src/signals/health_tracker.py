@@ -987,7 +987,16 @@ class SignalHealthTracker:
                 "total_tracked": len(scores),
                 "total_predictions": int(total_predictions),
                 "resolved_predictions": int(resolved_predictions),
+                # Full historical unlabeled row count in signal_predictions
                 "pending_predictions": pending_predictions,
+                "pending_rows": pending_predictions,
+                "pending_scope": "historical_db_unlabeled_rows",
+                "pending_semantics": (
+                    "pending_predictions/pending_rows = COUNT(signal_predictions) "
+                    "WHERE actual_direction IS NULL (full history). "
+                    "Not the same as signals.ic_decay.pending_predictions "
+                    "(IC staged-date window)."
+                ),
             },
             "scores": {s: scores[s].to_dict() for s in scores},
             "ic_metrics": ic_data,

@@ -361,3 +361,31 @@ class TestComputeICDecayReport:
         assert report["staged_date"] == "2026-07-02"
         assert report["signals"] == {}
         assert "__staged__" not in report["signals"]
+
+
+def test_ic_decay_report_tags_pending_scopes(tmp_path, monkeypatch):
+    from src.monitor import ic_decay_monitor as icm
+
+    monkeypatch.setattr(icm, "_signal_prediction_backlog", lambda db_path=None: {
+        "pending_rows": 100,
+        "pending_dates": 5,
+        "oldest_unresolved_date": "2020-01-01",
+        "total_predictions": 200,
+        "resolved_predictions": 100,
+        "pending_semantics": "test",
+    })
+    class FakeMon:
+        def load_state(self):
+            return None
+        def compute_decay_report(self):
+            return {}
+        def get_staged_prediction_count(self):
+            return 6
+        def get_staged_date(self):
+            return "2026-07-20"
+    monkeypatch.setattr(icm, "ICMonitor", FakeMon)
+    report = icm.compute_ic_decay_report()
+    assert report["pending_predictions"] == 6
+    assert report["pending_scope"] == "ic_staged_date_window"
+    assert report["pending_rows"] == 100
+    assert report["pending_rows_scope"] == "historical_db_unlabeled_rows"

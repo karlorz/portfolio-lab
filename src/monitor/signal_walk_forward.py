@@ -334,10 +334,16 @@ def compute_signal_wfe_report() -> Dict[str, Any]:
                 "signals": {},
                 "resolved_signal_count": 0,
                 "pending_predictions": pending,
+                "pending_scope": "ic_staged_date_window",
                 "pending_rows": backlog.get("pending_rows", 0),
+                "pending_rows_scope": "historical_db_unlabeled_rows",
                 "pending_dates": backlog.get("pending_dates", 0),
                 "oldest_unresolved_date": backlog.get("oldest_unresolved_date"),
-                "pending_semantics": backlog.get("pending_semantics"),
+                "pending_semantics": backlog.get("pending_semantics")
+                or (
+                    "pending_predictions=IC staged-date window; "
+                    "pending_rows=signal_predictions unlabeled rows (full history)"
+                ),
                 "staged_date": monitor.get_staged_date(),
                 "label_horizon": "Uses resolved IC prediction/forward-return pairs; pending until forward returns exist.",
             }

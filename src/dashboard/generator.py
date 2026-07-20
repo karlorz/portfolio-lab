@@ -1570,11 +1570,29 @@ class DashboardGenerator:
             factor_rotation_result = engine.evaluate()
             if factor_rotation_result and "error" not in factor_rotation_result:
                 now_ts = datetime.now(timezone.utc).isoformat()
+                strength = float(factor_rotation_result.get("signal_strength", 0.0) or 0.0)
+                allocations = factor_rotation_result.get("allocation", {})
+                # Single canonical payload (no dual top-level weight fork)
                 factor_rotation_signal = {
                     "selected_factors": factor_rotation_result.get("selected_factors", []),
-                    "allocation": factor_rotation_result.get("allocation", {}),
-                    "signal_strength": factor_rotation_result.get("signal_strength", 0.0),
+                    "allocation": allocations,
+                    "factor_allocations": allocations,
+                    "signal_strength": strength,
                     "recommendation": factor_rotation_result.get("recommendation", {}),
+                    "active": True,
+                    "live_authoritative": False,
+                    "role": "advisory_non_routed",
+                    "canonical_controller": "signals.json.target_allocations",
+                    "research_caveats": [
+                        {
+                            "kind": "research_caveat",
+                            "role": "non_actionable",
+                            "summary": (
+                                "Factor rotation reduces MaxDD by 5.8pp (2021-2026) in "
+                                "backtests; advisory sleeve only."
+                            ),
+                        }
+                    ],
                     # Staleness TTL requires generated_at; missing field → optional unavailable.
                     "generated_at": now_ts,
                     "timestamp": now_ts,
@@ -1677,12 +1695,9 @@ class DashboardGenerator:
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("ensemble_voting", e)
 
-        # Add sector rotation momentum signals (v2.40 Phase 5)
+        # Sector rotation is generated later (after overlay merge) so VIX can
+        # fall back to term-structure spot when market.db lacks ^VIX.
         sector_momentum_signal = None
-        try:
-            sector_momentum_signal = self._generate_sector_momentum_signals(vix_level=vix_level)
-        except SIGNAL_EXCEPTIONS as e:
-            _log_signal_error("sector_momentum", e)
 
         # Add smart rebalancing status (v2.90)
         smart_rebalance_data = None
@@ -1861,31 +1876,49 @@ class DashboardGenerator:
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("stacking_ensemble", e)
 
-        # Factor rotation dashboard data (v3.00) — reuses factor_rotation_result from above
+        # Backward-compat alias: nest under factor_rotation (no dual weight SSOT)
         factor_rotation_dashboard = None
-        try:
-            from src.strategy.factor_rotation import FactorMomentumEngine
-
-            if factor_rotation_result is not None and "error" not in factor_rotation_result:
-                allocations = factor_rotation_result.get("allocation", {})
-                now_ts = datetime.now(timezone.utc).isoformat()
-                factor_rotation_dashboard = {
-                    "active": True,
-                    "selected_factors": factor_rotation_result.get("selected_factors", []),
-                    "signal_strength": round(factor_rotation_result.get("signal_strength", 0.0), 2),
-                    "factor_allocations": allocations,
-                    "backtest_finding": (
-                        "Factor rotation reduces MaxDD by 5.8pp (2021-2026). "
-                        "Defensive tool — best in high-vol regimes (Sharpe 1.474)."
-                    ),
-                    "generated_at": now_ts,
-                    "timestamp": now_ts,
-                }
-        except SIGNAL_EXCEPTIONS as e:
-            _log_signal_error("factor_rotation_dashboard", e)
+        if isinstance(factor_rotation_signal, dict):
+            factor_rotation_dashboard = {
+                "alias_of": "factor_rotation",
+                "live_authoritative": False,
+                "role": "advisory_non_routed",
+                "active": factor_rotation_signal.get("active", True),
+                "selected_factors": factor_rotation_signal.get("selected_factors"),
+                # Same strength as canonical (no silent 2-decimal fork)
+                "signal_strength": factor_rotation_signal.get("signal_strength"),
+                "factor_allocations": factor_rotation_signal.get("allocation"),
+                "research_caveats": factor_rotation_signal.get("research_caveats"),
+                "generated_at": factor_rotation_signal.get("generated_at"),
+                "timestamp": factor_rotation_signal.get("timestamp"),
+            }
 
         # Merge overlay dashboard data (collar, crypto, calendar, kurtosis, etc.)
         overlay_data = self._get_overlay_data()
+
+        # Sector rotation — after overlay so missing market.db ^VIX can use
+        # vix_term_structure.vix_spot (same SSOT as regime/collar/hedge).
+        try:
+            sector_vix = self._resolve_hedge_vix_level(
+                vix_level,
+                overlay_data.get("vix_term_structure"),
+            )
+            sector_momentum_signal = self._generate_sector_momentum_signals(
+                vix_level=sector_vix
+            )
+            # Disclose which VIX SSOT fed the high-vol gate when term structure
+            # rescued a missing market.db row.
+            if isinstance(sector_momentum_signal, dict):
+                if sector_vix is not None and vix_level is None:
+                    sector_momentum_signal["vix"] = sector_vix
+                    sector_momentum_signal["vix_source"] = "vix_term_structure"
+                elif sector_momentum_signal.get("vix_source") is None:
+                    sector_momentum_signal["vix_source"] = (
+                        "market.db" if vix_level is not None else "unavailable"
+                    )
+        except SIGNAL_EXCEPTIONS as e:
+            _log_signal_error("sector_momentum", e)
+            sector_momentum_signal = None
 
         # Hedge selector recommendation
         hedge_selector_signal = None
@@ -2518,6 +2551,23 @@ class DashboardGenerator:
                             entropy["normalized_score"] = metrics.get("normalized_score")
                         if metrics.get("hhi_index") is not None:
                             entropy["hhi_index"] = metrics.get("hhi_index")
+                        if metrics.get("max_possible") is not None:
+                            entropy["max_possible"] = metrics.get("max_possible")
+                        # Derive H_max = ln(n) when shannon present but max missing
+                        if (
+                            entropy.get("max_possible") is None
+                            and entropy.get("shannon_entropy") is not None
+                        ):
+                            try:
+                                import math
+
+                                from src.paths import BASE_ALLOCATION
+
+                                n = len(BASE_ALLOCATION)
+                                if n > 1:
+                                    entropy["max_possible"] = round(math.log(n), 4)
+                            except Exception:  # noqa: BLE001 — leave null
+                                pass
                         # Only surface correlation metrics when actually computed
                         if metrics.get("correlation_entropy") is not None:
                             entropy["correlation_entropy"] = metrics.get("correlation_entropy")

@@ -3847,3 +3847,15 @@ class TestGetAdjustedWeightsMinMultiplier:
         # With custom (0.5): src_a = 0.5*0.5=0.25, src_b = 0.5*0.9=0.45
         #   normalized: src_a = 0.25/0.70 ≈ 0.357, src_b = 0.45/0.70 ≈ 0.643
         assert adj_custom["src_a"] > adj_default["src_a"]
+
+
+def test_signal_health_summary_tags_pending_scope(tmp_path):
+    """pending_predictions on health is full-history rows, not IC staged window."""
+    from src.signals.health_tracker import SignalHealthTracker
+
+    tracker = SignalHealthTracker(db_path=tmp_path / "market.db")
+    report = tracker.get_health_report()
+    summary = report["summary"]
+    assert summary.get("pending_scope") == "historical_db_unlabeled_rows"
+    assert "pending_semantics" in summary
+    assert "staged" in summary["pending_semantics"].lower() or "IC" in summary["pending_semantics"]

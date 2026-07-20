@@ -1091,6 +1091,7 @@ class TestPortfolioEntropy:
         metrics = result["metrics"]
         assert "shannon_entropy" in metrics
         assert "effective_n" in metrics
+        assert "max_possible" in metrics
         assert "normalized_score" in metrics
         assert "hhi_index" in metrics
 
@@ -1111,6 +1112,7 @@ class TestPortfolioEntropy:
         assert result["ok"] is True
         assert metrics["shannon_entropy"] == pytest.approx(expected_h, abs=0.001)
         assert metrics["effective_n"] == pytest.approx(expected_eff_n, abs=0.05)
+        assert metrics["max_possible"] == pytest.approx(expected_h_max, abs=0.001)
         assert metrics["normalized_score"] == pytest.approx(expected_norm, abs=0.5)
         assert metrics["hhi_index"] == pytest.approx(expected_hhi, abs=0.001)
 
@@ -2330,3 +2332,37 @@ class TestIncidentKillBlocksPaperControlLoop:
 
             mock_portfolio.execute_orders.assert_called_once()
             assert rc == 0
+
+
+def test_garch_health_report_separates_policy_and_measured_dd(tmp_path, monkeypatch):
+    from src.strategy.evaluator import Portfolio, PAPER_CONFIG, DATA_DIR
+    from types import SimpleNamespace
+    from dataclasses import dataclass
+    import src.strategy.evaluator as ev
+
+    monkeypatch.setattr(ev, "DATA_DIR", tmp_path)
+    state = tmp_path / "paper_state.json"
+    state.write_text('{"cash": 100000, "positions": {}, "history": []}')
+    port = Portfolio(state_file=state)
+    # synthetic measured drawdown path
+    port.history = [
+        {"timestamp": "2026-01-01T00:00:00", "total_value": 100000},
+        {"timestamp": "2026-02-01T00:00:00", "total_value": 94000},  # -6%
+        {"timestamp": "2026-03-01T00:00:00", "total_value": 96000},
+    ]
+
+    @dataclass
+    class FakeMetrics:
+        max_drawdown: float = -0.15
+        current_drawdown: float = 0.0
+        tail_severity: str = "normal"
+        cvar_ratio: float = 1.2
+        filter_active: bool = True
+
+    port._write_garch_health_report(FakeMetrics())
+    report = json.loads((tmp_path / ".health_report.json").read_text())
+    assert "max_drawdown" not in report or report.get("max_drawdown") != -15.0
+    assert report.get("max_drawdown_limit") == -0.15 or report.get("max_drawdown_limit_pct") == 15.0
+    assert report.get("measured_max_drawdown") is not None
+    assert abs(report["measured_max_drawdown"] + 0.06) < 0.01  # ~-6%
+    assert "drawdown_field_semantics" in report

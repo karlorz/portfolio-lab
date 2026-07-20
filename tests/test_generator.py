@@ -2520,6 +2520,9 @@ class TestEntropyData:
         assert data["effective_n"] == 2.1
         assert data["normalized_score"] == 77.0
         assert data["hhi_index"] == 0.45
+        # H_max derived when producer omits max_possible (ln(n) for champion book)
+        assert data["max_possible"] is not None
+        assert data["max_possible"] > 0
         gen.conn.close()
 
     def test_missing_metrics_section(self, tmp_path):
@@ -4268,6 +4271,13 @@ class TestSectorMomentumSignals:
         passed_vix = kwargs.get("vix") if "vix" in kwargs else (args[1] if len(args) > 1 else "MISSING")
         assert passed_vix is None
         gen.conn.close()
+
+    def test_resolve_hedge_vix_falls_back_to_term_structure(self):
+        """market.db missing ^VIX → use vix_term_structure.vix_spot for sector/hedge."""
+        assert DashboardGenerator._resolve_hedge_vix_level(None, {"vix_spot": 16.76}) == 16.76
+        assert DashboardGenerator._resolve_hedge_vix_level(18.5, {"vix_spot": 16.76}) == 18.5
+        assert DashboardGenerator._resolve_hedge_vix_level(None, {}) is None
+        assert DashboardGenerator._resolve_hedge_vix_level(None, None) is None
 
     def test_none_when_no_vix_row(self, tmp_path):
         """No VIX row still calls generate with vix=None (honest unknown)."""
@@ -6500,3 +6510,13 @@ def test_load_entropy_data_no_hardcoded_correlation(tmp_path, monkeypatch):
     assert data.get("correlation_metrics_status") == "unavailable"
     assert data.get("correlation_entropy") != 0.95
     assert data.get("participation_ratio") != 2.5
+
+
+def test_factor_rotation_signal_is_canonical_not_dual_authority():
+    """Canonical factor_rotation carries authority tags; dashboard is alias-only."""
+    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+    assert 'alias_of": "factor_rotation"' in src or "alias_of" in src
+    assert "live_authoritative" in src
+    assert "research_caveats" in src
+    # No silent strength rounding fork on dashboard branch
+    assert 'round(factor_rotation_result.get("signal_strength"' not in src
