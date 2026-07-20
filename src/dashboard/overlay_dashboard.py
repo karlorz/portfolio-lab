@@ -193,6 +193,7 @@ class OverlayDashboardGenerator:
             from src.signals.collar_signal import generate_collar_signal
             # Live fetch inside generator — do not hardcode spot=550 / vix=16
             signal = generate_collar_signal()
+            underlying = float(getattr(signal, "underlying_price", 0) or 0)
             return self._stamp_freshness({
                 "active": signal.is_valid,
                 "regime": signal.regime,
@@ -204,10 +205,13 @@ class OverlayDashboardGenerator:
                 "max_downside_pct": signal.max_downside_pct,
                 "vix_level": signal.vix_level,
                 "confidence": signal.confidence,
+                "underlying_price": underlying if underlying > 0 else None,
+                "spot_source": "collar_signal_generate",
                 "source": "generate_collar_signal",
                 "status_text": f"Collar: {signal.regime}, "
                                f"call ${signal.call_strike:.0f}, "
-                               f"put ${signal.put_strike:.0f}",
+                               f"put ${signal.put_strike:.0f}"
+                               + (f", spot ${underlying:.0f}" if underlying > 0 else ""),
             }, getattr(signal, "timestamp", None))
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, RuntimeError, OSError) as e:
             return {"active": False, "error": str(e)}

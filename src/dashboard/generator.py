@@ -1109,8 +1109,15 @@ class DashboardGenerator:
     def _build_ensemble_source_count_metadata(
         regime: Any,
         source_breakdown: List[Dict[str, Any]],
+        configured_source_status: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """Describe configured, collected, and positive-weight ensemble sources."""
+        """Describe configured, collected, and positive-weight ensemble sources.
+
+        When ``configured_source_status`` is provided, ``inactive_*`` rolls up
+        rows with status in {missing, stale, inactive, zero_weight, unavailable}
+        so headline counters match the detail table (not only zero-weight
+        collected rows).
+        """
         configured_sources = []
         try:
             from src.strategy.ensemble_voter import REGIME_WEIGHTS, Regime, SignalSource
@@ -1136,8 +1143,34 @@ class DashboardGenerator:
             else:
                 inactive_sources.append(source_name)
 
+        # Prefer configured-status rollup when present (includes missing/stale)
+        inactive_statuses = {
+            "missing",
+            "stale",
+            "inactive",
+            "zero_weight",
+            "unavailable",
+        }
+        if configured_source_status:
+            rolled: List[str] = []
+            for row in configured_source_status:
+                if not isinstance(row, dict):
+                    continue
+                status = str(row.get("status") or "").lower()
+                contributing = bool(row.get("contributing"))
+                name = str(row.get("source") or "")
+                if not name:
+                    continue
+                if status in inactive_statuses or (
+                    status != "active" and not contributing
+                ):
+                    rolled.append(name)
+            inactive_sources = rolled
+
         collected_count = len(source_breakdown)
         configured_count = len(set(configured_sources)) if configured_sources else collected_count
+        if configured_source_status:
+            configured_count = max(configured_count, len(configured_source_status))
         return {
             "num_sources": collected_count,
             "configured_source_count": configured_count,
@@ -1600,13 +1633,14 @@ class DashboardGenerator:
                 source_breakdown = self._build_ensemble_source_breakdown(
                     ensemble_result.source_votes
                 )
-                source_counts = self._build_ensemble_source_count_metadata(
-                    ensemble_result.regime,
-                    source_breakdown,
-                )
                 configured_source_status = self._build_configured_source_status(
                     ensemble_result.regime,
                     source_breakdown,
+                )
+                source_counts = self._build_ensemble_source_count_metadata(
+                    ensemble_result.regime,
+                    source_breakdown,
+                    configured_source_status=configured_source_status,
                 )
                 ensemble_signal = {
                     "regime": ensemble_result.regime.value,
@@ -2435,16 +2469,23 @@ class DashboardGenerator:
         return garch_cvar
 
     def _load_entropy_data(self) -> Dict:
-        """Load entropy-based diversification metrics for dashboard (v3.22)."""
-        entropy = {
-            "shannon_entropy": 1.02,
-            "effective_n": 2.77,
-            "max_possible": 1.10,
-            "normalized_score": 92.7,
-            "concentration_risk": "good",
-            "hhi_index": 0.38,
-            "correlation_entropy": 0.95,
-            "participation_ratio": 2.5,
+        """Load entropy-based diversification metrics for dashboard (v3.22).
+
+        Correlation-axis metrics are **not** hard-coded (prior 0.95 / 2.5 defaults
+        looked like live diversification quality). Publish null + status until a
+        real covariance path computes them.
+        """
+        entropy: Dict[str, Any] = {
+            "shannon_entropy": None,
+            "effective_n": None,
+            "max_possible": None,
+            "normalized_score": None,
+            "concentration_risk": "unknown",
+            "hhi_index": None,
+            "correlation_entropy": None,
+            "participation_ratio": None,
+            "correlation_metrics_status": "unavailable",
+            "status": "partial",
         }
         
         try:
@@ -2456,25 +2497,38 @@ class DashboardGenerator:
                     entropy_check = safe_get(health, "checks", "portfolio_entropy", default={})
                     metrics = entropy_check.get("metrics", {})
                     if metrics:
-                        entropy["shannon_entropy"] = metrics.get("shannon_entropy", 1.02)
-                        entropy["effective_n"] = metrics.get("effective_n", 2.77)
-                        entropy["normalized_score"] = metrics.get("normalized_score", 92.7)
-                        entropy["hhi_index"] = metrics.get("hhi_index", 0.38)
+                        if metrics.get("shannon_entropy") is not None:
+                            entropy["shannon_entropy"] = metrics.get("shannon_entropy")
+                        if metrics.get("effective_n") is not None:
+                            entropy["effective_n"] = metrics.get("effective_n")
+                        if metrics.get("normalized_score") is not None:
+                            entropy["normalized_score"] = metrics.get("normalized_score")
+                        if metrics.get("hhi_index") is not None:
+                            entropy["hhi_index"] = metrics.get("hhi_index")
+                        # Only surface correlation metrics when actually computed
+                        if metrics.get("correlation_entropy") is not None:
+                            entropy["correlation_entropy"] = metrics.get("correlation_entropy")
+                            entropy["correlation_metrics_status"] = "ok"
+                        if metrics.get("participation_ratio") is not None:
+                            entropy["participation_ratio"] = metrics.get("participation_ratio")
+                            entropy["correlation_metrics_status"] = "ok"
                         
                         # Determine concentration risk from normalized score
-                        score = entropy["normalized_score"]
-                        if score > 90:
-                            entropy["concentration_risk"] = "good"
-                        elif score > 70:
-                            entropy["concentration_risk"] = "low"
-                        elif score > 50:
-                            entropy["concentration_risk"] = "medium"
-                        elif score > 30:
-                            entropy["concentration_risk"] = "high"
-                        else:
-                            entropy["concentration_risk"] = "critical"
+                        score = entropy.get("normalized_score")
+                        if isinstance(score, (int, float)):
+                            if score > 90:
+                                entropy["concentration_risk"] = "good"
+                            elif score > 70:
+                                entropy["concentration_risk"] = "low"
+                            elif score > 50:
+                                entropy["concentration_risk"] = "medium"
+                            elif score > 30:
+                                entropy["concentration_risk"] = "high"
+                            else:
+                                entropy["concentration_risk"] = "critical"
+                            entropy["status"] = "ok"
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-            logger.warning("Using default values: %s", e)
+            logger.warning("Entropy metrics unavailable: %s", e)
 
         return entropy
 
@@ -4348,14 +4402,15 @@ class DashboardGenerator:
                 ensemble["agreement_ratio"] = round(agreement_weight / total_weight, 4)
                 ensemble["total_weight_after_decay"] = round(total_weight, 4)
 
-            ensemble.update(self._build_ensemble_source_count_metadata(
-                ensemble.get("regime", "normal"),
-                ensemble["source_breakdown"],
-            ))
             ensemble["configured_source_status"] = self._build_configured_source_status(
                 ensemble.get("regime", "normal"),
                 ensemble["source_breakdown"],
             )
+            ensemble.update(self._build_ensemble_source_count_metadata(
+                ensemble.get("regime", "normal"),
+                ensemble["source_breakdown"],
+                configured_source_status=ensemble.get("configured_source_status"),
+            ))
 
         return output
 

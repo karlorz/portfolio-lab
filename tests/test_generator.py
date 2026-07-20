@@ -1160,6 +1160,34 @@ class TestEnsemblePostDecayMetrics:
         assert counts["inactive_sources"] == ["cross_asset_rv", "multi_speed_momentum"]
         assert counts["num_sources"] == counts["collected_source_count"]
 
+
+    def test_inactive_count_uses_configured_source_status_missing_stale(self):
+        """Headline inactive_* must include missing/stale configured rows."""
+        source_breakdown = [
+            {"source": "alternative_data", "weight": 0.24},
+            {"source": "cross_asset_rv", "weight": 0.10},
+        ]
+        configured_status = [
+            {"source": "alternative_data", "status": "active", "contributing": True},
+            {"source": "cross_asset_rv", "status": "active", "contributing": True},
+            {"source": "multi_speed_momentum", "status": "missing", "contributing": False},
+            {"source": "international_momentum", "status": "missing", "contributing": False},
+            {"source": "google_trends", "status": "stale", "contributing": False},
+        ]
+        counts = DashboardGenerator._build_ensemble_source_count_metadata(
+            regime="normal",
+            source_breakdown=source_breakdown,
+            configured_source_status=configured_status,
+        )
+        assert counts["inactive_source_count"] == 3
+        assert set(counts["inactive_sources"]) == {
+            "multi_speed_momentum",
+            "international_momentum",
+            "google_trends",
+        }
+        assert counts["contributing_source_count"] == 2
+        assert counts["collected_source_count"] == 2
+
     def test_configured_source_status_discloses_stale_google_trends(self, monkeypatch):
         """Configured source status explains stale Google Trends omission from source rows."""
         from src.signals.signal_snapshot import SignalSnapshot
@@ -2432,14 +2460,17 @@ class TestEntropyData:
     """Test _load_entropy_data edge cases."""
 
     def test_defaults_no_health_file(self, tmp_path):
-        """Returns expected defaults when no health file exists."""
+        """Without health metrics, correlation axes are null (not fake 0.95/2.5)."""
         gen, _ = _make_generator(tmp_path)
         with patch("src.dashboard.generator.DATA_DIR", tmp_path):
             data = gen._load_entropy_data()
-        assert data["shannon_entropy"] == 1.02
-        assert data["effective_n"] == 2.77
-        assert data["concentration_risk"] == "good"
-        assert data["hhi_index"] == 0.38
+        assert data["shannon_entropy"] is None
+        assert data["effective_n"] is None
+        assert data["concentration_risk"] == "unknown"
+        assert data["hhi_index"] is None
+        assert data["correlation_entropy"] is None
+        assert data["participation_ratio"] is None
+        assert data["correlation_metrics_status"] == "unavailable"
         gen.conn.close()
 
     def test_concentration_risk_all_levels(self, tmp_path):
@@ -2492,7 +2523,7 @@ class TestEntropyData:
         gen.conn.close()
 
     def test_missing_metrics_section(self, tmp_path):
-        """Missing metrics section returns defaults unchanged."""
+        """Missing metrics section stays partial/unavailable (no invented numbers)."""
         gen, _ = _make_generator(tmp_path)
         health_file = tmp_path / ".health_report.json"
         health_file.write_text(json.dumps({
@@ -2502,8 +2533,9 @@ class TestEntropyData:
         }))
         with patch("src.dashboard.generator.DATA_DIR", tmp_path):
             data = gen._load_entropy_data()
-        assert data["shannon_entropy"] == 1.02
-        assert data["effective_n"] == 2.77
+        assert data["shannon_entropy"] is None
+        assert data["effective_n"] is None
+        assert data["correlation_metrics_status"] == "unavailable"
         gen.conn.close()
 
 
@@ -3985,14 +4017,14 @@ class TestEntropyEdgeCases:
         gen.conn.close()
 
     def test_empty_health_file_returns_defaults(self, tmp_path):
-        """Empty JSON health file returns default entropy values."""
+        """Empty JSON health file stays partial/unavailable."""
         gen, _ = _make_generator(tmp_path)
         health_file = tmp_path / ".health_report.json"
         health_file.write_text("{}")
         with patch("src.dashboard.generator.DATA_DIR", tmp_path):
             data = gen._load_entropy_data()
-        assert data["shannon_entropy"] == 1.02
-        assert data["concentration_risk"] == "good"
+        assert data["shannon_entropy"] is None
+        assert data["concentration_risk"] == "unknown"
         gen.conn.close()
 
 
@@ -5717,19 +5749,25 @@ class TestOutputFieldTypes:
         gen.conn.close()
 
     def test_entropy_data_field_types(self, tmp_path):
-        """_load_entropy_data dict has correct field types."""
+        """_load_entropy_data dict has correct field types (nulls allowed when uncomputed)."""
         gen, _ = _make_generator(tmp_path)
         with patch("src.dashboard.generator.DATA_DIR", tmp_path):
             entropy = gen._load_entropy_data()
-        assert isinstance(entropy["shannon_entropy"], (int, float))
-        assert isinstance(entropy["effective_n"], (int, float))
-        assert isinstance(entropy["max_possible"], (int, float))
-        assert isinstance(entropy["normalized_score"], (int, float))
+        for key in (
+            "shannon_entropy",
+            "effective_n",
+            "max_possible",
+            "normalized_score",
+            "hhi_index",
+            "correlation_entropy",
+            "participation_ratio",
+        ):
+            assert entropy[key] is None or isinstance(entropy[key], (int, float))
         assert isinstance(entropy["concentration_risk"], str)
-        assert entropy["concentration_risk"] in ("good", "low", "medium", "high", "critical")
-        assert isinstance(entropy["hhi_index"], (int, float))
-        assert isinstance(entropy["correlation_entropy"], (int, float))
-        assert isinstance(entropy["participation_ratio"], (int, float))
+        assert entropy["concentration_risk"] in (
+            "good", "low", "medium", "high", "critical", "unknown",
+        )
+        assert entropy["correlation_metrics_status"] in ("ok", "unavailable", "partial")
         gen.conn.close()
 
 
@@ -6444,3 +6482,16 @@ def test_asset_stats_tags_non_champion_symbols():
     assert '"role": "held"' in src or "'role': 'held'" in src or 'role": "held"' in src
     assert "benchmark_or_context" in src
     assert "not_in_portfolio" in src
+
+
+def test_load_entropy_data_no_hardcoded_correlation(tmp_path, monkeypatch):
+    """Absent health entropy metrics must not invent 0.95 / 2.5 correlation quality."""
+    from src.dashboard import generator as gen_mod
+    monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+    # no .health_report.json
+    data = DashboardGenerator._load_entropy_data(DashboardGenerator.__new__(DashboardGenerator))
+    assert data.get("correlation_entropy") is None
+    assert data.get("participation_ratio") is None
+    assert data.get("correlation_metrics_status") == "unavailable"
+    assert data.get("correlation_entropy") != 0.95
+    assert data.get("participation_ratio") != 2.5

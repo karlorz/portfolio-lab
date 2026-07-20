@@ -1929,3 +1929,36 @@ def test_crypto_status_text_both_assets():
         eth_mom=0.2,
     )
     assert "BTC" in text and "ETH" in text
+
+
+def test_collar_live_generate_includes_underlying_price(monkeypatch):
+    """Live generate path must publish underlying_price for strike audit."""
+    from types import SimpleNamespace
+    from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
+
+    class FakeStrikes:
+        net_premium = 0.1
+        is_cashless = True
+
+    fake = SimpleNamespace(
+        is_valid=True,
+        regime="normal",
+        call_strike=566.78,
+        put_strike=529.72,
+        strikes=FakeStrikes(),
+        max_upside_pct=3.05,
+        max_downside_pct=3.69,
+        vix_level=16.0,
+        confidence=0.7,
+        underlying_price=743.29,
+        timestamp="2026-07-20T12:00:00+00:00",
+    )
+    gen = OverlayDashboardGenerator()
+    monkeypatch.setattr(gen, "_load_collar_signal_file", lambda: None)
+    monkeypatch.setattr(
+        "src.signals.collar_signal.generate_collar_signal",
+        lambda: fake,
+    )
+    data = gen._get_collar_data()
+    assert data.get("underlying_price") == 743.29
+    assert "underlying_price" in data
