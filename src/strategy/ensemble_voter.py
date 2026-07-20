@@ -38,7 +38,7 @@ import random
 import sqlite3
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1239,7 +1239,7 @@ class EnsembleVoter:
             "reward_days": int(getattr(self, "bandit_days", 0) or 0),
             "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
             "bandit": self.bandit.get_state() if hasattr(self.bandit, "get_state") else {},
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -2305,7 +2305,10 @@ class EnsembleVoter:
         elif equity_bias < -0.3 and agreement > threshold:
             return "decrease_equity", agreement * abs(equity_bias)
         else:
-            return "neutral", 0.5
+            # Neutral hold conviction tracks agreement × regime confidence —
+            # do not hardcode 0.5 (high-agreement hold looked identical to uncertain).
+            conf = float(max(0.0, min(1.0, agreement * regime_confidence)))
+            return "neutral", conf
 
     def _compute_consensus(
         self,

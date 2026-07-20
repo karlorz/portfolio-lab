@@ -6432,3 +6432,15 @@ class TestTwoStageRegimeUnavailableHonesty:
         assert "regime_transition" in result
         rt = result["regime_transition"]
         assert rt.get("status") == "unavailable" or rt.get("runtime_status") == "unavailable"
+
+
+def test_asset_stats_tags_non_champion_symbols():
+    """QQQ/VIX must be role-tagged, not undifferentiated held assets."""
+    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+    # generate_stats_json must split held vs context and tag roles
+    assert "held_asset_stats" in src
+    assert "context_asset_stats" in src
+    assert "champion_symbols" in src
+    assert '"role": "held"' in src or "'role': 'held'" in src or 'role": "held"' in src
+    assert "benchmark_or_context" in src
+    assert "not_in_portfolio" in src

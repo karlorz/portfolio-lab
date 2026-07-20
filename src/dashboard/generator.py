@@ -2806,7 +2806,10 @@ class DashboardGenerator:
         cursor = self.conn.cursor()
 
         # Single batched query for all symbols instead of N+1 per-symbol queries
-        symbols = ['SPY', 'GLD', 'TLT', 'QQQ', 'VIX']
+        # Champion book (live authority / paper) vs context benchmarks
+        champion_symbols = ['SPY', 'GLD', 'TLT']
+        context_symbols = ['QQQ', 'VIX']
+        symbols = champion_symbols + context_symbols
         placeholders = ','.join('?' for _ in symbols)
         cursor.execute(f"""
             SELECT symbol, close FROM prices
@@ -2820,15 +2823,26 @@ class DashboardGenerator:
             symbol_prices.setdefault(sym, []).append(close)
 
         stats = {}
+        held_stats: Dict[str, Any] = {}
+        context_stats: Dict[str, Any] = {}
         for symbol in symbols:
             prices = symbol_prices.get(symbol, [])
             if len(prices) >= 2:
                 returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-                stats[symbol] = {
+                in_portfolio = symbol in champion_symbols
+                entry = {
                     "30d_return": round((prices[-1] - prices[0]) / prices[0] * 100, 2),
                     "volatility": round(np.std(returns) * np.sqrt(252) * 100, 2) if returns else 0,
-                    "current": prices[-1]
+                    "current": prices[-1],
+                    "in_portfolio": in_portfolio,
+                    "not_in_portfolio": not in_portfolio,
+                    "role": "held" if in_portfolio else "benchmark_or_context",
                 }
+                stats[symbol] = entry
+                if in_portfolio:
+                    held_stats[symbol] = entry
+                else:
+                    context_stats[symbol] = entry
         
         # Paper portfolio metrics with SPY comparison
         perf_log = DATA_DIR / "performance.jsonl"
@@ -2909,9 +2923,12 @@ class DashboardGenerator:
         
         output = {
             "asset_stats": stats,
+            "held_asset_stats": held_stats,
+            "context_asset_stats": context_stats,
+            "champion_symbols": list(champion_symbols),
             "paper_portfolio": paper_metrics,
             "spy_comparison": spy_comparison,
-            "generated_at": datetime.now().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         
         out_path = PUBLIC_DIR / "stats.json"

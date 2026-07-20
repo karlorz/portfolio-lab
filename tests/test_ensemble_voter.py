@@ -3926,11 +3926,20 @@ class TestDetermineAction:
     def test_low_agreement_neutral(self):
         action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.5, 0.5, 0.3)
         assert action == "neutral"
-        assert conf == 0.5
+        # conf = agreement * regime_confidence = 0.3 * 0.5
+        assert conf == pytest.approx(0.15)
 
     def test_small_bias_neutral(self):
         action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.5, 0.1, 0.8)
         assert action == "neutral"
+        assert conf == pytest.approx(0.4)
+
+    def test_high_agreement_neutral_not_hardcoded_half(self):
+        """High-agreement hold must not force confidence exactly 0.5."""
+        action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.755, 0.03, 0.9378)
+        assert action == "neutral"
+        assert conf == pytest.approx(0.755 * 0.9378)
+        assert conf > 0.5
 
     def test_uses_consensus_threshold(self):
         """Agreement just below regime threshold should be neutral."""
