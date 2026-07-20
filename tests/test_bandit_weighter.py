@@ -18,11 +18,11 @@ class TestBanditWeighter:
 
     def test_select_exploit_mode_returns_best(self):
         bw = BanditWeighter(["sig_a", "sig_b"])
-        # Feed noisy data where sig_a has higher mean
-        rng = np.random.RandomState(42)
+        # Deterministic gap: sig_a always positive, sig_b always negative
+        # (avoids flaky Sharpe inversion under RNG noise)
         for _ in range(100):
-            bw.update("sig_a", "NORMAL", rng.normal(0.002, 0.01))
-            bw.update("sig_b", "NORMAL", rng.normal(-0.001, 0.01))
+            bw.update("sig_a", "NORMAL", 0.002)
+            bw.update("sig_b", "NORMAL", -0.001)
         # With enough data and epsilon = 0 (force exploit), picks sig_a
         bw.epsilon = 0.0
         selected = bw.select("NORMAL")
@@ -197,15 +197,15 @@ class TestBanditWeighterSoftmax:
 class TestEnsembleVoterGetBlendedWeights:
     """Tests for EnsembleVoter.get_blended_weights()."""
 
-    def test_cold_start_returns_static_weights(self):
-        voter = EnsembleVoter()
+    def test_cold_start_returns_static_weights(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         weights = voter.get_blended_weights("NORMAL")
         assert weights is not None
         total = sum(weights.values())
         assert abs(total - 1.0) < 0.01
 
-    def test_bandit_blend_increases_with_observations(self):
-        voter = EnsembleVoter()
+    def test_bandit_blend_increases_with_observations(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         static = voter.get_blended_weights("NORMAL")
 
         # Feed 252 bandit observations
@@ -221,8 +221,8 @@ class TestEnsembleVoterGetBlendedWeights:
         total = sum(blended.values())
         assert abs(total - 1.0) < 0.01
 
-    def test_blend_zero_observations_is_pure_static(self):
-        voter = EnsembleVoter()
+    def test_blend_zero_observations_is_pure_static(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         weights = voter.get_blended_weights("NORMAL")
         # All weights should be the static regime weights
         from src.strategy.ensemble_voter import REGIME_WEIGHTS
@@ -231,8 +231,8 @@ class TestEnsembleVoterGetBlendedWeights:
             if k in static:
                 assert abs(v - static[k]) < 0.001
 
-    def test_unknown_regime_defaults_to_normal(self):
-        voter = EnsembleVoter()
+    def test_unknown_regime_defaults_to_normal(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         weights = voter.get_blended_weights("NONEXISTENT")
         # Should fallback to NORMAL weights
         assert weights is not None
